@@ -160,7 +160,7 @@ class RetryOpsMixin:
             return True
         return (
             rollback_status == PublishStatus.ONLINE_PUB
-            and self.is_online_release_recorded(publish_id)
+            and self.is_current_online_deployment(publish_id)
         )
 
     async def _retry_via_restart(

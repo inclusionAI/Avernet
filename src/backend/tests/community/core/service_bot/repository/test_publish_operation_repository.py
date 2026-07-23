@@ -182,7 +182,7 @@ def test_publish_operation_kind_deploy_partition():
     """Every PublishOperationKind must be classified as either version-setting
     (a deploy — its completed op marks which version is live on its bot) or
     version-preserving (restart/scale/teardown — leaves the deployed version
-    unchanged). is_online_release_recorded's liveness scan filters on
+    unchanged). is_current_online_deployment's liveness scan filters on
     ``sets_deployed_version``, so an unclassified new kind would be silently
     mistreated; this partition assertion fails CI until the kind is classified in
     models.py (`_KINDS_SET_DEPLOYED_VERSION` / `_KINDS_PRESERVE_DEPLOYED_VERSION`)."""

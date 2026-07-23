@@ -864,21 +864,23 @@ class PublishFlowService(
         """Fetch a publish record by id (``None`` if absent)."""
         return self._publish_service.get_publish_by_id(publish_id)
 
-    def is_online_release_recorded(self, publish_id: int) -> bool:
-        """True when this record's online release is the *live* deployment on its
-        bot — i.e. the latest version-setting op that has landed on the shared
-        online bot belongs to this publish.
+    def is_current_online_deployment(self, publish_id: int) -> bool:
+        """True when this record's online release is the *current live* deployment
+        on its bot — i.e. the latest version-setting op that has landed on the
+        shared online bot belongs to this publish.
 
         Purely ledger-driven (#197): the ledger is the source of truth for what is
         deployed. The question is answered from the bot's op timeline alone, in two
         steps:
 
         1. This record's own online release op (first-release / upgrade) must be
-           ``COMPLETED`` — a completed BaaS deploy that landed a binding + ext.
-           Anything short of that (no op, or an ``ID_RECORDED`` deploy still
-           mid-flight) is *not* recorded: the online_release gate must re-enter so
-           the runner resumes the same op (no second bot), and ``retry`` must re-run
-           the release work rather than restart.
+           ``COMPLETED`` — a landed BaaS deploy whose workflow has not been
+           observed to fail (the progress-sync failure path outcome-corrects the
+           op to ``FAILED`` when its workflow fails). Anything short of that (no
+           op, an ``ID_RECORDED`` deploy still mid-flight, or a failed deploy) is
+           *not* current: the online_release gate must re-enter so the release
+           work re-runs — resuming the in-flight op or opening a fresh attempt —
+           never skipping work that has not actually landed.
         2. That completed release must still be the latest deploy on the bot. A
            ``COMPLETED`` op genuinely completed and is never rewritten; what makes it
            stale is a *later* version-setting op landing on the same bot. Rollback
@@ -889,10 +891,12 @@ class PublishFlowService(
            the bot too but does not set the version (``sets_deployed_version``), so
            it never supersedes a release.
 
-        Consumers: the online_release gate (``tasks.py``) skips the release only
-        when it is the live deployment; ``retry`` chooses BaaS-restart only for a
-        completed, still-live release (a BaaS-side wait failure) and otherwise
-        re-runs the release work."""
+        Sole consumer — the online_release gate (``tasks.py``): skip re-issuing
+        the release only when it is the current live deployment. Do NOT consult
+        this from ``retry`` or any restart path: retry re-drives the release
+        process (which decides run-vs-skip itself via this gate), and a restart
+        must always re-deploy via BaaS even when the release is current — a
+        skip-if-current check there would turn restart into a silent no-op."""
         release_op = self._completed_online_release_op(publish_id)
         if release_op is None or not release_op.bot_uuid:
             return False
