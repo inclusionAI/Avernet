@@ -50,7 +50,7 @@ def _otlp_payload(trace_id: str, start_ns: int) -> dict:
                                     ),
                                     _attr(
                                         "gen_ai.output.messages",
-                                        '{"role":"assistant","content":"hello"}',
+                                        '{"role":"assistant","content":"output-only-marker"}',
                                     ),
                                 ],
                             },
@@ -121,7 +121,15 @@ def test_bot_chat_otel_ingest_query_and_relation_roundtrip(live_backend):
                 {
                     "ref_type": "trace_id",
                     "ref_value": trace_id,
-                }
+                },
+                {
+                    "ref_type": "session_id",
+                    "ref_value": "session-live",
+                },
+                {
+                    "ref_type": "session_key",
+                    "ref_value": "session-key-live",
+                },
             ],
         }
         first_relation = client.post(
@@ -130,9 +138,9 @@ def test_bot_chat_otel_ingest_query_and_relation_roundtrip(live_backend):
         )
         assert first_relation.status_code == 200, first_relation.text
         assert first_relation.json()["data"] == {
-            "inserted": 1,
+            "inserted": 3,
             "updated": 0,
-            "total": 1,
+            "total": 3,
         }
 
         second_relation = client.post(
@@ -142,6 +150,127 @@ def test_bot_chat_otel_ingest_query_and_relation_roundtrip(live_backend):
         assert second_relation.status_code == 200, second_relation.text
         assert second_relation.json()["data"] == {
             "inserted": 0,
-            "updated": 1,
-            "total": 1,
+            "updated": 3,
+            "total": 3,
         }
+
+        task_queries = [
+            {
+                "biz_scene": "singlebox-coverage",
+                "biz_task_id": trace_id,
+            },
+            {
+                "biz_task_id": trace_id,
+            },
+            {
+                "biz_scene": "singlebox-coverage",
+            },
+            {
+                "biz_scene": "singlebox-cover",
+                "biz_task_id": trace_id[:12],
+                "match_mode": "contains",
+            },
+        ]
+        for params in task_queries:
+            task_result = client.get("/api/v1/bot-chats", params=params)
+            assert task_result.status_code == 200, task_result.text
+            task_body = task_result.json()
+            assert task_body["success"] is True
+            assert task_body["data"]["total"] == 1
+            assert task_body["data"]["sessions"][0]["id"] == trace_id
+            assert task_body["data"]["sessions"][0]["match_sources"]
+
+        output_result = client.get(
+            "/api/v1/bot-chats",
+            params={
+                "query": "output-only-marker",
+                "include_output_match": "true",
+            },
+        )
+        assert output_result.status_code == 200, output_result.text
+        output_body = output_result.json()
+        assert output_body["success"] is True
+        assert output_body["data"]["total"] == 1
+        assert output_body["data"]["sessions"][0]["id"] == trace_id
+
+        identifier_queries = [
+            {
+                "session_id": "session-live",
+                "match_mode": "exact",
+            },
+            {
+                "session_key": "key-live",
+                "match_mode": "contains",
+            },
+            {
+                "bot_id": "default",
+                "trace_id": trace_id,
+            },
+        ]
+        for params in identifier_queries:
+            identifier_result = client.get("/api/v1/bot-chats", params=params)
+            assert identifier_result.status_code == 200, identifier_result.text
+            identifier_body = identifier_result.json()
+            assert identifier_body["success"] is True
+            assert identifier_body["data"]["total"] == 1
+
+        empty_group = client.get(
+            "/api/v1/bot-chats",
+            params={"group_id": "missing-group-fixture"},
+        )
+        assert empty_group.status_code == 200, empty_group.text
+        assert empty_group.json()["data"]["total"] == 0
+
+        historical_result = client.get(
+            "/api/v1/bot-chats",
+            params={
+                "trace_id": trace_id,
+                "time_scope": "all",
+            },
+        )
+        assert historical_result.status_code == 200, historical_result.text
+        assert historical_result.json()["data"]["total"] == 1
+
+        invalid_unbounded = client.get(
+            "/api/v1/bot-chats",
+            params={"time_scope": "all"},
+        )
+        assert invalid_unbounded.status_code == 200, invalid_unbounded.text
+        assert invalid_unbounded.json()["error_code"] == 4000
+
+        invalid_fuzzy_range = client.get(
+            "/api/v1/bot-chats",
+            params={
+                "query": "marker",
+                "match_mode": "contains",
+                "from_date": "2025-01-01T00:00:00",
+                "to_date": "2025-04-02T00:00:01",
+            },
+        )
+        assert invalid_fuzzy_range.status_code == 200, invalid_fuzzy_range.text
+        assert invalid_fuzzy_range.json()["error_code"] == 4000
+
+        isolated_relation = client.post(
+            "/api/bot-chat/log-relations",
+            json={
+                "biz_scene": "isolated-scene",
+                "biz_task_id": f"isolated-{trace_id}",
+                "user_id": "different-user-fixture",
+                "refs": [
+                    {
+                        "ref_type": "trace_id",
+                        "ref_value": trace_id,
+                    }
+                ],
+            },
+        )
+        assert isolated_relation.status_code == 200, isolated_relation.text
+        isolated_query = client.get(
+            "/api/v1/bot-chats",
+            params={
+                "biz_scene": "isolated-scene",
+                "biz_task_id": f"isolated-{trace_id}",
+            },
+        )
+        assert isolated_query.status_code == 200, isolated_query.text
+        assert isolated_query.json()["data"]["total"] == 0
