@@ -165,7 +165,16 @@
   - [ ] `pytest tests/community/core/service_bot/` green.
 - **Depends on:** Task 4 (atom); Task 1 (predicate name used in tests)
 
-## Task 7: `[~]` DI-world publish harness — LocalBaas + world fixture + baseline lifecycle
+## Task 7: `[x]` DI-world publish harness — LocalBaas + world fixture + baseline lifecycle
+
+> Implementation note: LocalBaas is installed at the **HTTP seam** (MockSeam
+> ``set_override`` on the BaaS-qualified ``HttpClient``) rather than bound over
+> ``BaasService`` via a module override. Same boundary, strictly more
+> production code exercised (the real ``BaasService`` request/response code
+> runs), and it is the repo's established endpoint-test pattern
+> (``_install_baas``) made stateful. Seeding is reused from
+> ``test_service_bot_publish_flow`` (the durable-pipeline test's import
+> pattern); the zero-delay poll handler swap makes drains deterministic.
 
 - **Goal:** A reusable DI-world harness for publish flows: the real app wiring
   (TEST profile, per-test injector, in-memory SQLite) with **local
