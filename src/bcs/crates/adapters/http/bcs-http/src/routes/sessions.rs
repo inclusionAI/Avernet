@@ -1519,7 +1519,7 @@ pub async fn session_chat(
             Ok(updated) => updated,
             Err(error) => return session_error_to_response(&error),
         };
-        let event = SystemMessageEvent::BotJoined {
+        let event = SystemMessageEvent::HumanJoined {
             group_id: sess.group_id.clone(),
             actor: participant.into(),
         };
