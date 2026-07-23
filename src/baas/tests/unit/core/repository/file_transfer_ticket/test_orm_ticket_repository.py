@@ -352,5 +352,3 @@ class TestListPendingUploads:
         mock_session.query.return_value.filter.return_value.order_by.return_value.limit.assert_called_once_with(
             5
         )
-
-
