@@ -11,6 +11,15 @@ from agentclaw.community.core.skills_pool.repository.protocol import (
 from agentclaw.community.core.skills_pool.rollout_gate import (
     SkillsPoolRolloutGate,
 )
+from agentclaw.community.core.skills_pool.reconcile_service import (
+    SkillsPoolReconcileService,
+)
+from agentclaw.community.core.skills_pool.ports import (
+    SkillsPoolRuntimeProtocol,
+    SkillsPoolSkillRepositoryProtocol,
+)
+from agentclaw.community.plugins.skill_repository import SkillRepository
+from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
 from agentclaw.community.plugins.skills_pool_layout_repository import (
     SkillsPoolLayoutRepository,
 )
@@ -33,5 +42,20 @@ class SkillsPoolModule(Module):
         binder.bind(
             SkillsPoolMigrationClaimService,
             to=SkillsPoolMigrationClaimService,
+            scope=singleton,
+        )
+        binder.bind(
+            SkillsPoolSkillRepositoryProtocol,
+            to=SkillRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            SkillsPoolRuntimeProtocol,
+            to=OpenClawSkillsPoolRuntime,
+            scope=singleton,
+        )
+        binder.bind(
+            SkillsPoolReconcileService,
+            to=SkillsPoolReconcileService,
             scope=singleton,
         )

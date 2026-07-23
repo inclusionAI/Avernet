@@ -100,7 +100,7 @@ class SkillSetMetadataWriter:
                 return Path(rel_path).name
             elif git_path.startswith("local://"):
                 # local://skill-name -> skill-name
-                return git_path[8:]  # Remove "local://"
+                return Path(git_path[8:]).name  # Remove "local://"
             else:
                 # Fallback: treat as path and get basename
                 return Path(git_path).name

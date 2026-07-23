@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.community.core.skills.layout_probe import (
+from engine.community.plugins.openclaw.layout_probe import (
     LAYOUT_CONTRACT_VERSION,
     RuntimeLayoutInspectionStatus,
     inspect_runtime_layout,

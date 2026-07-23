@@ -53,3 +53,60 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
     ) -> bool:
         """在 lease 缺失或过期时，以 CAS 竞争成为新持有者。"""
         ...
+
+    def holds_lease(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+    ) -> bool:
+        """用数据库时钟确认当前 worker 仍持有未过期 lease。"""
+        ...
+
+    def record_ready_probe(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        preparation_id: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """以 generation/lease CAS 记录当前运行时已具备 Pool 能力。"""
+        ...
+
+    def record_cutover_committed(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        preparation_id: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """记录不可逆的数据面切换已经完成。"""
+        ...
+
+    def begin_cutover(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        preparation_id: str,
+    ) -> bool:
+        """在运行时原子切换前持久化 pre-cutover 阶段。"""
+        ...
+
+    def commit_pool_active(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        preparation_id: str,
+        local_locators: dict[int, str],
+    ) -> bool:
+        """在一个事务中更新该 Bot 全部 local locator 并提交 Pool Active。"""
+        ...

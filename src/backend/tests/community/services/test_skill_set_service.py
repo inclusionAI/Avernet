@@ -57,6 +57,32 @@ class TestGetSymlinkMappings:
         assert symlinks[0].source.endswith("/skills-local/cct-zbb-instraction-query")
         assert symlinks[0].target.endswith("/skills/cct-zbb-instraction-query")
 
+    def test_pool_locator_is_used_as_mapping_source_without_legacy_rewrite(
+        self, skill_set_service, mock_skill_set_repo
+    ):
+        pool_source = (
+            "/home/admin/.openclaw/workspace/"
+            "skills-pool/skills-local/handmade"
+        )
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "Pool", "is_default": False}
+        ]
+        mock_skill_set_repo.get_skills_in_set.return_value = [
+            {
+                "id": "1",
+                "name": "handmade",
+                "git_path": f"local://{pool_source}",
+            }
+        ]
+
+        mappings = skill_set_service.get_symlink_mappings(
+            user_id="100015",
+            bolt_id="default",
+        )
+
+        assert mappings[0].source == pool_source
+        assert mappings[0].target.endswith("/openclaw/workspace/skills/handmade")
+
     def test_local_path_with_relative_name(self, skill_set_service, mock_skill_set_repo, mock_skill_repo):
         """测试 local:// 相对名称格式 - 使用新接口的绝对路径软链"""
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [

@@ -68,6 +68,17 @@ class RuntimeLayoutProbeApiResponse(ApiResponse):
     data: RuntimeLayoutProbeResponse
 
 
+class PoolLayoutActivateRequest(BaseModel):
+    migration_generation: str
+    preparation_id: str
+    registered_local_names: list[str]
+    mappings: list[SymlinkItem]
+
+
+class PoolMappingVerifyRequest(BaseModel):
+    mappings: list[SymlinkItem]
+
+
 __all__ = [
     "SymlinkItem",
     "SyncSymlinkRequest",
@@ -81,4 +92,6 @@ __all__ = [
     "RuntimeLayoutProbeRequest",
     "RuntimeLayoutProbeResponse",
     "RuntimeLayoutProbeApiResponse",
+    "PoolLayoutActivateRequest",
+    "PoolMappingVerifyRequest",
 ]

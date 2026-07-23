@@ -25,6 +25,7 @@ description: a test skill
 def _service(local_dir: Path, adapter, fake_fs) -> SkillService:
     repo = MagicMock()
     repo.list_skills.return_value = []  # get_skill_by_path -> None -> create path
+    repo.get_bot_local_by_name.return_value = None
     svc = SkillService(
         skill_repo=repo,
         skill_repo_sync=MagicMock(get_local_skills_root=MagicMock(return_value=None)),

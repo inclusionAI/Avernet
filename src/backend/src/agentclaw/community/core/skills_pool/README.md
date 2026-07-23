@@ -1,8 +1,9 @@
 # skills_pool
 
-Skills Pool 控制面的 Bot 级布局状态与首次迁移认领边界。本模块只建立
-durable state、rollout gate 和 CAS/lease；不负责容器目录准备、运行时
-probe、mapping、locator 切换或完整 Engine Layout Descriptor。
+Skills Pool 控制面的 Bot 级布局状态、首次迁移认领和激活编排边界。
+容器目录暗准备由镜像负责；本模块通过当前 runtime adapter 完成 probe、
+OpenClaw 原子数据面切换与 Pool mapping，并在最后事务性提交 locator 和
+`POOL_ACTIVE`。完整多引擎 Engine Layout Descriptor 仍不在本期范围内。
 
 ## 核心语义
 
@@ -17,6 +18,12 @@ probe、mapping、locator 切换或完整 Engine Layout Descriptor。
   `ac_bot_publish` DRAFT 记录证明。认领入口不接受调用方自报运行形态，
   ONLINE 服务与 Teclaw 不产生认领。
 - lease 的认领、接管和续租都由数据库时钟与 generation fencing 保护。
+- 激活只处理已经认领且由当前 worker 持有 lease 的 OpenClaw Bot；每次执行
+  都重新读取 Bot 和当前 provider binding，并重新 probe marker。
+- 容器内以系统原生原子 exchange 将 Legacy local 切成指向 Pool canonical
+  local 的永久单向 bridge；不支持原子 exchange 时保持 Legacy。
+- 数据面切换后先全量发布并验证 Pool mapping，再在一个 CAS 事务中更新该
+  Bot 全部 local locator 和 `POOL_ACTIVE`。mapping 或事务失败只前滚重试。
 
 ## Context Boundary
 
@@ -26,16 +33,27 @@ provides:
   - "SkillsPoolLayoutRepositoryProtocol"
   - "SkillsPoolRolloutGate"
   - "SkillsPoolMigrationClaimService"
+  - "SkillsPoolReconcileService"
   - "BotSkillLayoutState and migration enums"
 consumes:
   - "BotRepository"
   - "BotPublishRepositoryProtocol"
   - "CommonConfigService and CommonWhiteListService"
   - "DatabasePlugin (through plugins/skills_pool_layout_repository.py)"
+  - "SkillsPoolRuntimeProtocol"
+  - "SkillsPoolSkillRepositoryProtocol"
 internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.common_config
+  - agentclaw.community.core.skill_center
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.base
   - agentclaw.community.plugin_api.database
+  - agentclaw.community.core.skills_pool.ports
 ```
+
+### Change impact
+
+状态机或激活顺序变化会同时影响迁移 Worker、Bot locator 事务和运行时
+mapping/bridge 实现；端口变化还必须同步 Backend runtime、skill
+repository 实现及相应测试。

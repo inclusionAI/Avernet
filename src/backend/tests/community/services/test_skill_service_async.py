@@ -37,6 +37,7 @@ class TestSkillServiceAsyncRouting:
         if mock_repo is None:
             mock_repo = MagicMock()
             mock_repo.list_skills.return_value = []
+            mock_repo.get_bot_local_by_name.return_value = None
             mock_repo.create.side_effect = lambda data: {"id": "1", **data}
             mock_repo.get_by_name_global.return_value = None
 
@@ -68,6 +69,82 @@ class TestSkillServiceAsyncRouting:
         # Verify DeviceFileSystemPlugin was used for file operations
         mock_device_fs.delete_tree.assert_called_once()
         mock_device_fs.write_file.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reupload_uses_existing_pool_locator_without_duplicate(
+        self, tmp_path
+    ):
+        pool_path = (
+            "/home/admin/.openclaw/workspace/"
+            "skills-pool/skills-local/test-skill"
+        )
+        existing = {
+            "id": "41",
+            "name": "test-skill",
+            "user_id": "user1",
+            "git_path": f"local://{pool_path}",
+        }
+        repo = MagicMock()
+        repo.get_bot_local_by_name.return_value = existing
+        repo.update.return_value = existing
+        service, device_fs, _ = self._service(tmp_path, mock_repo=repo)
+
+        result = await service.upload_skill(
+            [
+                {
+                    "filename": "SKILL.md",
+                    "content": (
+                        b"---\nname: test-skill\ndescription: test\n"
+                        b"---\n# Test"
+                    ),
+                    "relative_path": "SKILL.md",
+                }
+            ],
+            user_id="user1",
+            bolt_id="bot1",
+        )
+
+        assert result == existing
+        device_fs.delete_tree.assert_awaited_once_with(pool_path)
+        device_fs.write_file.assert_awaited_once_with(
+            f"{pool_path}/SKILL.md",
+            b"---\nname: test-skill\ndescription: test\n---\n# Test",
+        )
+        repo.update.assert_called_once()
+        repo.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_upload_does_not_overwrite_global_local_skill(
+        self, tmp_path
+    ):
+        repo = MagicMock()
+        repo.get_bot_local_by_name.return_value = None
+        repo.create.side_effect = lambda data: {"id": "52", **data}
+        service, _, _ = self._service(tmp_path, mock_repo=repo)
+
+        result = await service.upload_skill(
+            [
+                {
+                    "filename": "SKILL.md",
+                    "content": (
+                        b"---\nname: shared-name\ndescription: bot copy\n"
+                        b"---\n# Bot copy"
+                    ),
+                    "relative_path": "SKILL.md",
+                }
+            ],
+            user_id="user1",
+            bolt_id="bot1",
+        )
+
+        assert result["id"] == "52"
+        repo.get_bot_local_by_name.assert_called_once_with(
+            bot_id="bot1",
+            name="shared-name",
+            user_id="user1",
+        )
+        repo.update.assert_not_called()
+        repo.create.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_upload_wraps_device_write_failure(self, tmp_path):

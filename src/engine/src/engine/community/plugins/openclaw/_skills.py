@@ -4,6 +4,7 @@ Also contains _SkillsEnsureError (relocated from engines/openclaw/skills.py).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -11,6 +12,13 @@ from typing import Any
 
 from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.plugins.openclaw._file import _convert_path
+from engine.community.plugins.openclaw.layout_activation import (
+    SkillMapping,
+    activate_openclaw_pool,
+    publish_pool_mappings,
+    verify_skill_mappings,
+)
+from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layout
 
 log = logging.getLogger("openclaw-port")
 
@@ -35,6 +43,55 @@ class _SkillsPortMixin:
     _DEFAULT_SKILLS_CENTER_LOCAL_ROOT = str(
         workspace_root() / "skills" / "skills-center"
     )
+
+    @staticmethod
+    def _pool_mappings(params: dict[str, Any]) -> list[SkillMapping]:
+        return [
+            SkillMapping(source=item["source"], target=item["target"])
+            for item in params.get("mappings", [])
+        ]
+
+    async def activate_pool_layout(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            activate_openclaw_pool,
+            migration_generation=params["migration_generation"],
+            preparation_id=params["preparation_id"],
+            registered_local_names=list(
+                params.get("registered_local_names", [])
+            ),
+            mappings=self._pool_mappings(params),
+        )
+        return result.to_data()
+
+    async def probe_pool_layout(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            inspect_runtime_layout,
+            engine=params["engine"],
+            expected_contract_version=params["layout_contract_version"],
+        )
+        return result.to_data()
+
+    async def publish_pool_mappings(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            publish_pool_mappings,
+            mappings=self._pool_mappings(params),
+        )
+        return result.to_data()
+
+    async def verify_pool_mappings(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            verify_skill_mappings,
+            mappings=self._pool_mappings(params),
+        )
+        return result.to_data()
 
     def _skills_resolve_base_dir(self) -> Path:
         """Resolve SKILLS_LINK_BASE_DIR from env, or default.
@@ -366,11 +423,14 @@ class _SkillsPortMixin:
 
         if clean_target_dir:
             target_dirs = {t.parent for t in desired}
+            reserved_layout_bridges = {"skills-local", "skills-repo"}
             for d in target_dirs:
                 if not d.is_dir():
                     continue
                 for entry in d.iterdir():
                     if not entry.is_symlink():
+                        continue
+                    if entry.name in reserved_layout_bridges:
                         continue
                     if entry not in desired:
                         entry.unlink()
