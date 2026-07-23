@@ -93,7 +93,7 @@ flowchart LR
 
 代码框中不包含终端最左侧的提示符，不需要额外输入美元符号。
 
-![截图占位：打开终端并检查基础环境](images/waic-world-cup-tutorial/01-prerequisites-terminal.svg)
+![打开终端并检查基础环境](images/waic-world-cup-tutorial/01-prerequisites-terminal.png)
 
 ## 3. 第一步：安装 Git
 
@@ -171,7 +171,8 @@ test -f scripts/6bots_world_cup_creator_profile/bots.json && echo "世界杯 Bot
 
 更完整的工具说明见 [macOS 依赖清单](dependencies.zh-CN.md)。
 
-![截图占位：install-tools 完成](images/waic-world-cup-tutorial/02-install-tools-complete.svg)
+![安装工具链](images/waic-world-cup-tutorial/02.1-install-tools-complete.png)
+![依赖预检](images/waic-world-cup-tutorial/02.2-install-tools-complete.png)
 
 ## 6. 第四步：编译 BCS 并安装前端依赖
 
@@ -242,7 +243,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 
 不要把上面的 example 地址原样当成可用服务，也不要把真实 Key 写进教程截图。
 
-![截图占位：选择模型配置方式](images/waic-world-cup-tutorial/03-model-config-choice.svg)
+![选择模型配置方式](images/waic-world-cup-tutorial/03-model-config-choice.png)
 
 ## 8. 第六步：启动 BCS 和前端
 
@@ -265,7 +266,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 - BCS 显示 Running，端口为 21000。
 - Frontend 显示 Running。
 
-![截图占位：BCS 和前端启动成功](images/waic-world-cup-tutorial/04-stack-ready.svg)
+![BCS 和前端启动成功](images/waic-world-cup-tutorial/04-stack-ready.png)
 
 ## 9. 第七步：启动世界杯 6 Bot
 
@@ -296,7 +297,7 @@ Choose model config mode:
 
 6 个 Bot 都应显示 Running，并各自带有端口和 bot_uuid。
 
-![截图占位：6 个世界杯 Bot 全部运行](images/waic-world-cup-tutorial/05-six-bots.svg)
+![6 个世界杯 Bot 全部运行](images/waic-world-cup-tutorial/05-six-bots.png)
 
 ## 10. 第八步：进入 Avernet 前端
 
@@ -316,7 +317,7 @@ Choose model config mode:
 2. 再运行一次 Bot 状态命令，确认 6 个 Bot 均为 Running。
 3. 确认当前打开的是 8000 端口，而不是另一个旧前端。
 
-![截图占位：进入 Avernet 并选择运营总监](images/waic-world-cup-tutorial/06-enter-avernet.svg)
+![进入 Avernet 并选择运营总监](images/waic-world-cup-tutorial/06-enter-avernet.png)
 
 ## 11. 第九步：从模板创建自定义协作群
 
@@ -346,7 +347,9 @@ Choose model config mode:
 
 这个模板不是手工上传的。BCS 本地模式会直接读取仓库中的模板目录，默认语言是 zh-CN，因此只要你使用的是包含该文件的最新代码并成功启动 BCS，它就会出现在前端模板下拉框中。
 
-![截图占位：选择世界杯模板并校验 YAML](images/waic-world-cup-tutorial/07-custom-collaboration-template.svg)
+![创建协作群](images/waic-world-cup-tutorial/07.1-custom-collaboration-template.jpg)
+
+![选择世界杯模板并校验 YAML](images/waic-world-cup-tutorial/07.2-custom-collaboration-template.png)
 
 ## 12. 第十步：把 6 个逻辑角色绑定到 6 个 Bot
 
@@ -377,23 +380,21 @@ Choose model config mode:
 - 每个角色只绑定一个对应 Bot。
 - 页面顶部应显示“已绑定 6 个 Bot”，且不再显示“发起方未绑定”。
 
-绑定完成后，点击右下角“创建协作群”。看到“协作群创建成功”后，页面会进入刚创建的协作群。
+当每个角色绑定按钮后面的“必填”标签变绿后，说明全部角色绑定成功。
 
-> 创建协作群只是保存可复用的协作结构和角色绑定，还没有提交某场比赛的具体内容任务。下一步创建会话时才会真正执行一次。
+![6 个角色全部完成绑定](images/waic-world-cup-tutorial/08-role-bindings.png)
 
-![截图占位：6 个角色全部完成绑定](images/waic-world-cup-tutorial/08-role-bindings.svg)
+## 13. 第十一步：创建自定义协作群并开始执行任务
 
-## 13. 第十一步：提交本次任务并开始执行
+接着在弹窗上方填写协作群名称和协作目标：
 
-在新建的自定义协作群中点击“新建会话”。弹窗包含两个必填字段：
-
-- 会话标题：便于以后区分多次运行。
+- 协作群名称：给这个可复用协作群起一个有辨识度的名字！
 - 协作目标：本次运行真正交给 6 个 Bot 的输入。
 
-### 13.1 推荐的会话标题
+### 13.1 推荐的协作群名称
 
 ~~~text
-WAIC 复现：星河队 vs 山海队赛前前瞻
+足球比赛自媒体撰稿室
 ~~~
 
 ### 13.2 零准备、可直接复制的演示输入
@@ -438,9 +439,22 @@ WAIC 复现：星河队 vs 山海队赛前前瞻
 
 真实比赛信息会随时间变化。提交前以赛事官网、足协、球队官方渠道或可靠数据源为准；不要把网络传闻当作事实卡。
 
-填写完成后点击“确认”。这次服务调用会创建会话，并自动启动自定义协作。
+填写完成后点击“创建协作群”，会按照协作模版创建自定义协作群，然后自动启动名为“新会话”的会话，会话根据上面填写的“协作目标”完成结构化任务。
 
-![截图占位：填写新会话和协作目标](images/waic-world-cup-tutorial/09-new-session.svg)
+![填写新会话和协作目标](images/waic-world-cup-tutorial/09-new-session.png)
+
+### 13.4 后续复用协作群
+
+一个协作群内可以创建多个会话，以达到复用协作群能力来解决相似任务的目的。
+
+以当前 WAIC 世界杯赛前前瞻自媒体稿 Demo 为例，这个自定义协作群可以针对不同的比赛，内容风格，目标平台，和目标时长进行协作，按需生成新的内容。
+
+假设你想生成另一场比赛的赛前前瞻稿，可以点击左边栏的“新建会话”按钮，并写入会话名称和协作目标，最后点击确认。这次服务调用会创建会话，并自动启动自定义协作。
+
+- 会话标题：用于区分同一协作群内不同的会话
+- 协作目标：本次运行真正交给 6 个 Bot 的输入。
+![alt text](images/waic-world-cup-tutorial/09.1-new-session.png)
+![alt text](images/waic-world-cup-tutorial/09.2-new-session.png)
 
 ## 14. 第十二步：观察执行并检查结果
 
@@ -472,9 +486,15 @@ WAIC 复现：星河队 vs 山海队赛前前瞻
 
 使用虚构输入时，成品必须持续标注“演示设定”，不能把星河队、山海队或虚构球员包装成真实世界杯事实。
 
-![截图占位：节点执行过程和最终发布包](images/waic-world-cup-tutorial/10-running-and-result.svg)
+![自定义协作任务执行中](images/waic-world-cup-tutorial/10.1-running-and-result.png)
 
-## 15. 停止服务
+## 15. （进阶功能）Bot 自主调用 BCS 功能
+
+在自由聊天和主从协作模式中，如果 Bot 认为参与当前会话的 Bot 无法完成用户需求，它会自主通过 `bcs-coordination` Skill 和 `bcs-cli`命令发现可用 Bot，寻找合适 Bot，然后自动拉群开始新对话。
+
+![alt text](images/waic-world-cup-tutorial/11-advanced-features.png)
+
+## 16. 停止服务
 
 演示结束后，先停止 6 个 Bot，再停止前端和 BCS：
 
@@ -499,9 +519,9 @@ stop 只停止进程，保留本地 Bot 身份、协作群和会话数据，方�
 ./scripts/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
 ~~~
 
-## 16. 常见问题
+## 17. 常见问题
 
-### 16.1 运行 singlebox.sh 提示 Permission denied
+### 17.1 运行 singlebox.sh 提示 Permission denied
 
 确认你位于仓库根目录，然后执行：
 
@@ -510,7 +530,7 @@ chmod +x scripts/singlebox.sh
 ./scripts/singlebox.sh --help
 ~~~
 
-### 16.2 前端提示 cross-env: command not found
+### 17.2 前端提示 cross-env: command not found
 
 当前启动脚本会在前端 start 前检查并安装一次依赖。先确认 Node.js 是 22 或更高版本，然后重新启动：
 
@@ -521,7 +541,7 @@ node --version
 
 如果 npm 安装失败，查看终端中的第一个错误，而不是最后一行。常见原因是公共 npm registry 网络不可达、磁盘空间不足或本机 npm 配置异常。
 
-### 16.3 BCS 启动时提示找不到二进制或 bcs-cli
+### 17.3 BCS 启动时提示找不到二进制或 bcs-cli
 
 说明还没有完成 setup，重新执行：
 
@@ -531,7 +551,7 @@ node --version
 
 成功后再启动 BCS 和 Bot。
 
-### 16.4 Bot 全部在线，但不生成回复
+### 17.4 Bot 全部在线，但不生成回复
 
 最常见原因是启动 Bot 时选择了 mock，或者 manual 配置缺字段。
 
@@ -544,7 +564,7 @@ node --version
 
 选择 2 或 3，并确认模型服务本身可用。
 
-### 16.5 前端看不到“自定义协作”
+### 17.5 前端看不到“自定义协作”
 
 自定义协作当前需要以 Bot 视角创建。请确认：
 
@@ -552,7 +572,7 @@ node --version
 - 当前 Bot 已加入协作网络且在线。
 - 打开的页面是 /bcn/chat/list。
 
-### 16.6 模板下拉框里没有世界杯模板
+### 17.6 模板下拉框里没有世界杯模板
 
 依次确认：
 
@@ -568,7 +588,7 @@ test -f src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-pr
 3. 强制刷新浏览器页面，再重新打开“拉起协作”。
 4. 查看 BCS 日志 scripts/.dependencies/logs/bcs.log。
 
-### 16.7 角色搜索不到对应 Bot
+### 17.7 角色搜索不到对应 Bot
 
 确认 6 个 Bot 的状态都是 Running。角色绑定区域中切换到“可协作Bot”与“按名称筛选”，然后输入完整中文名称。
 
@@ -577,7 +597,7 @@ test -f src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-pr
 - 汇总日志：scripts/.dependencies/logs/bots_*.log
 - 单 Bot 日志：scripts/.dependencies/logs/world-cup-*.log
 
-### 16.8 端口被占用
+### 17.8 端口被占用
 
 例如检查 8000 和 21000：
 
@@ -590,13 +610,13 @@ lsof -nP -iTCP:21000 -sTCP:LISTEN
 
 Bot profile 的 30401 至 30451 端口目前来自 bots.json。修改它们属于进阶操作，并且需要保持 port_start 和 port_step 不与本机其他服务冲突。
 
-### 16.9 看到 faiss-cpu 不支持 Python 3.13
+### 17.9 看到 faiss-cpu 不支持 Python 3.13
 
 本教程只启动 bcs_frontend 和世界杯 Bot，不需要 BCSFuse，因此不应进入 BCSFuse 依赖安装路径。不要用不带目标的 ./scripts/singlebox.sh 代替本教程的显式命令。
 
 如果你另外需要完整栈或 BCSFuse，请先更新到包含兼容性修复的最新代码；当前 setup 会自动选择低于 3.13 的兼容 Python 版本。
 
-### 16.10 想查看更完整日志
+### 17.10 想查看更完整日志
 
 主要日志位置：
 
@@ -613,23 +633,3 @@ Bot profile 的 30401 至 30451 端口目前来自 bots.json。修改它们属�
 tail -n 100 scripts/.dependencies/logs/bcs.log
 tail -n 100 scripts/.dependencies/logs/frontend.log
 ~~~
-
-## 17. 截图补充说明
-
-本教程已经放入 10 个可点击的 SVG 占位文件。后续补截图时，可以：
-
-1. 把真实截图嵌入同名 SVG 文件，并保持文档链接不变；或
-2. 更简单地保存为同名 PNG，再把本文中的 .svg 链接改成 .png。
-
-逐张截图的画面要求和脱敏要求见 [截图清单](images/waic-world-cup-tutorial/README.md)。
-
-## 18. 模板命名说明
-
-模板现在统一使用以下命名：
-
-- 文件和模板 ID：world-cup-preview-content-production
-- scenario：world_cup_preview_content_production
-- 中文展示名：世界杯比赛前瞻内容生产
-- 英文展示名：World Cup Preview Content Production
-
-content-production 表明这个流程交付的不只是单篇文案，还包括事实核查、战术洞察、口播脚本、分镜、标题、封面和发布包装，能够覆盖从策划、核查、创作到验收的完整流程。中英文模板、registry、种子加载测试、运行时校验测试和本教程均使用这一名称。
