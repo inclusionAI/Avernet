@@ -442,8 +442,8 @@ def test_is_current_online_deployment_false_for_rolled_back_completed_op():
 def test_is_current_online_deployment_true_after_restart_or_scale():
     """A restart / scale lands on the same online bot (higher baas id) but does NOT
     set the deployed version, so it must not make a live release look stale — else
-    retry() would misroute (re-run the release instead of restart) and the online
-    gate could re-issue a redundant deploy."""
+    the online_release gate would read the live release as superseded and a
+    crash-resume (or retry) of the task would re-issue a redundant deploy."""
     ledger = _ledger()
     publish_service = Mock()
     rec = _record(PublishStatus.ONLINE_PUB.value)

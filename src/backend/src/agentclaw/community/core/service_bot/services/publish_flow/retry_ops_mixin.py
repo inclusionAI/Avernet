@@ -126,11 +126,15 @@ class RetryOpsMixin:
 
         # Step 5: roll back FAILED -> rollback_status; the dispatch is a pure
         # function of rollback_status, so decide it before the write and set the
-        # retry flag ONLY for the restart branch. ``retry=True`` redirects the
-        # progress poll to ``sync_restart_progress`` (restart mode) — on the
-        # release/build branches it must be absent (cleared here in the same
-        # atomic write, in case a prior retry cycle left it), or the poll would
-        # sync a stale restart workflow instead of the fresh release
+        # retry flag ONLY for the restart branch. For VALIDATE_PUB,
+        # ``retry=True`` redirects the progress poll to ``sync_restart_progress``
+        # (restart mode); for SUCCESS the flag is inert — SUCCESS is not a poll
+        # wait state, so that restart is driven by the user-called
+        # /restart_status endpoint (pre-existing shape, flag kept for
+        # consistency). On the release/build branches the flag must be absent
+        # (cleared here in the same atomic write, in case a prior retry cycle
+        # left it — e.g. an inert SUCCESS-branch flag), or the poll would sync a
+        # stale restart workflow instead of the fresh release
         # (``ext.publish.<stage>``) and strand the record.
         use_restart = rollback_status in _RESTART_RETRY_STATUSES
         if use_restart:
@@ -202,8 +206,10 @@ class RetryOpsMixin:
             restart_result = {"success": False, "message": str(e)}
         success = restart_result.get("success", False)
         if success:
-            # The durable poll (retry-flag redirect → sync_restart_progress) drives
-            # the record out of its *_PUB wait state.
+            # VALIDATE_PUB: the durable poll (retry-flag redirect →
+            # sync_restart_progress) drives the record out of its wait state.
+            # SUCCESS: not a poll wait state — the poll completes immediately and
+            # the restart is settled by the user-called /restart_status endpoint.
             enqueue_progress_poll(self._task_queue_service, publish_id=publish_id)
         else:
             # The restart never submitted → clear the retry flag so a stray poll does
