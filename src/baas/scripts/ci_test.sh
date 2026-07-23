@@ -22,6 +22,14 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+if [[ -z "$base" ]]; then
+  # Auto-infer base ref so that local `just test` / bare `ci_test.sh` also
+  # enforces the changed-line-coverage gate, matching GitHub CI behavior.
+  if git rev-parse --verify origin/dev >/dev/null 2>&1; then
+    base="$(git merge-base "$head" origin/dev)"
+  fi
+fi
+
 if [[ ! -d "$baas_dir" ]]; then
   echo "baas CI failed: community package not found: $baas_dir" >&2
   exit 1
