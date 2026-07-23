@@ -6,6 +6,7 @@ from injector import inject
 
 from agentclaw.community.core.bot_collaborator.models import BotCollabLockModel
 from agentclaw.community.core.caller_identity.contracts import (
+    CallerIdentityIrreversibleError,
     DraftCallTypeCompensationResult,
     DraftCallTypeMutationResult,
 )
@@ -125,6 +126,19 @@ class CallerIdentityRepository:
                 effective_server_codes=effective_server_codes,
                 env=env,
             )
+            # COSEC: the aggregate transition is checked while holding the Bot
+            # row lock so concurrent MCP edits cannot downgrade a Caller Bot.
+            if bot.call_type == McpCallType.CALLER.value and aggregate is McpCallType.OWNER:
+                logger.warning(
+                    "caller_mcp_call_type_update_rejected_irreversible "
+                    "bot_pk=%s server_code=%s previous_bot_call_type=%s "
+                    "next_bot_call_type=%s",
+                    bot_pk,
+                    server_code,
+                    McpCallType.CALLER.value,
+                    aggregate.value,
+                )
+                raise CallerIdentityIrreversibleError
             revision = int(bot.caller_config_revision or 0) + 1
             bot.call_type = aggregate.value
             bot.caller_config_revision = revision

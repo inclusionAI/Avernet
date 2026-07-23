@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +30,51 @@ if TYPE_CHECKING:
 
 
 logger = get_logger()
+
+
+# Gateway appends this opaque compatibility value to only these Caller reads
+# and writes. Strip it at the ASGI boundary before authentication, business
+# middleware, and Uvicorn's completion-time access log can observe it.
+_CTOKEN_COMPATIBILITY_PATHS = (
+    re.compile(r"^/api/bots/[^/]+/caller-context$"),
+    re.compile(r"^/api/bots/[^/]+/mcps/[^/]+/call-type$"),
+    re.compile(r"^/api/v1/user-lists/(?:check|correct)$"),
+)
+
+
+def _remove_compatibility_ctoken(scope: dict) -> None:
+    """Remove only the opaque gateway ``ctoken`` from opted-in endpoints.
+
+    Mutating the original ASGI scope is intentional: subsequent request
+    objects, auth context construction, and Uvicorn's access logger all use
+    this same scope. Other query parameters remain available for normal
+    validation, including the strict unknown-parameter checks on Caller APIs.
+    """
+    if scope.get("type") != "http":
+        return
+    path = scope.get("path", "")
+    if not any(pattern.fullmatch(path) for pattern in _CTOKEN_COMPATIBILITY_PATHS):
+        return
+
+    raw_query_string = scope.get("query_string", b"")
+    if not raw_query_string:
+        return
+    pairs = parse_qsl(
+        raw_query_string.decode("latin-1"),
+        keep_blank_values=True,
+    )
+    filtered_pairs = [(key, value) for key, value in pairs if key != "ctoken"]
+    if len(filtered_pairs) == len(pairs):
+        return
+    scope["query_string"] = urlencode(filtered_pairs, doseq=True).encode("ascii")
+
+
+class CompatibilityCtokenMiddleware(BaseHTTPMiddleware):
+    """Erase gateway-only ctoken before any authentication or logging layer."""
+
+    async def dispatch(self, request: Request, call_next):
+        _remove_compatibility_ctoken(request.scope)
+        return await call_next(request)
 
 
 # =============================================================================
@@ -200,3 +246,7 @@ def install_middleware(
 
     # 安装 tracer 插件的中间件（由 DI 按 profile 绑定的实现决定行为）
     tracer.install(app)
+
+    # Add last so it is outermost: it must sanitize the shared ASGI scope
+    # before tracer, auth context, and default access logging use it.
+    app.add_middleware(CompatibilityCtokenMiddleware)

@@ -6,7 +6,9 @@ Replaces:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 
 from agentclaw.community.adapters.http.access.schemas import (
     AllowDisallowData,
@@ -16,12 +18,16 @@ from agentclaw.community.adapters.http.access.schemas import (
     SetBotsCeilingRequest,
     UpsertUserRequest,
     UserItem,
+    UserListCheckData,
+    UserListCorrectionRequest,
     WhitelistCheckData,
 )
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.api.user_list_service import UserListServiceProtocol
 from agentclaw.community.api.user_service import UserServiceProtocol
+from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.access.errors import UserNotFoundError
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -95,6 +101,73 @@ async def upsert_user(
 # ==================== Access (Whitelist) Router ====================
 
 access_router = APIRouter(prefix="/api/v1/access", tags=["access"])
+user_list_router = APIRouter(prefix="/api/v1/user-lists", tags=["user-lists"])
+
+
+@user_list_router.get("/check", response_model=ApiResponse[UserListCheckData])
+async def check_user_list(
+    entity_id: Annotated[str, Query(min_length=1, max_length=1024)],
+    user_list_type: Annotated[
+        str,
+        Query(
+            min_length=1,
+            max_length=64,
+            pattern=r"^[a-z][a-z0-9_.-]*$",
+        ),
+    ],
+    ctoken: Annotated[str | None, Query()] = None,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: UserListServiceProtocol = Injected(UserListServiceProtocol),
+) -> ApiResponse[UserListCheckData]:
+    """Return one authenticated user's current-environment feature eligibility."""
+    # Gateway may append this opaque compatibility value.  Do not use or log it.
+    del ctoken
+    # COSEC: do not permit a browser to probe another user's membership.
+    if entity_id != user.staffId:
+        logger.warning(
+            "user_list_check_rejected_entity_mismatch user_list_type=%s",
+            user_list_type,
+        )
+        raise Forbidden("USER_LIST_ENTITY_FORBIDDEN")
+
+    in_whitelist = service.is_in_user_list(
+        entity_id=user.staffId,
+        user_list_type=user_list_type,
+    )
+    logger.info(
+        "user_list_check_completed entity_id=%s user_list_type=%s "
+        "in_whitelist=%s",
+        user.staffId,
+        user_list_type,
+        in_whitelist,
+    )
+    return ApiResponse(
+        success=True,
+        message="OK",
+        error_code=200,
+        data=UserListCheckData(in_whitelist=in_whitelist),
+    )
+
+
+@user_list_router.put("/correct", response_model=ApiResponse[UserListCheckData])
+async def correct_user_list(
+    request: UserListCorrectionRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: UserListServiceProtocol = Injected(UserListServiceProtocol),
+) -> ApiResponse[UserListCheckData]:
+    """Apply one authenticated current-environment user-list correction."""
+    in_whitelist = service.correct_membership(
+        actor_id=user.staffId,
+        entity_id=request.entity_id,
+        user_list_type=request.user_list_type,
+        in_whitelist=request.in_whitelist,
+    )
+    return ApiResponse(
+        success=True,
+        message="OK",
+        error_code=200,
+        data=UserListCheckData(in_whitelist=in_whitelist),
+    )
 
 
 @access_router.get("/check", response_model=ApiResponse[WhitelistCheckData])

@@ -23,6 +23,7 @@ from tests.community._flows.mcp.api_lifecycle import MCP_FLOWS
 from tests.community._flows.quality.api_lifecycle import QUALITY_FLOWS
 from tests.community._flows.resources.api_lifecycle import RESOURCES_LIFECYCLE_FLOWS
 from tests.community._flows.skill_center.api_lifecycle import API_LIFECYCLE_FLOWS
+from tests.community._flows.user_list.api_lifecycle import USER_LIST_FLOWS
 from tests.community.framework.flow_coverage import (
     SINGLEBOX_E2E_EXEMPT,
     all_core_modules,
@@ -45,6 +46,7 @@ REGISTERED_FLOWS: list = [
     *EXPERT_CHAT_FLOWS,
     *CRON_FLOWS,
     *QUALITY_FLOWS,
+    *USER_LIST_FLOWS,
 ]
 
 

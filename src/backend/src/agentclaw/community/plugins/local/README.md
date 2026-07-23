@@ -19,6 +19,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_chat
   - agentclaw.community.core.bot_dormant   # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.caller_identity.models  # SQLite ORM side-effect import for caller identity tables
+  - agentclaw.community.core.user_list.models  # SQLite ORM side-effect import for user-list tables
   - agentclaw.community.core.economy.governance.contracts.models  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.economy.governance.repositories.orm  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.bot_management
