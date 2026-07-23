@@ -233,32 +233,39 @@ impl StoragePlugin for LocalStoragePlugin {
             }
         }
 
-        // Decide single vs multipart: presence of any {key}.p* file.
-        let has_parts = entries.iter().any(|e| {
-            let name = e.file_name();
-            name.to_string_lossy().starts_with(&p_prefix)
-        });
-
-        if has_parts {
-            // Multipart: extract part numbers, sort, concat.
-            let mut parts: Vec<(u16, PathBuf)> = Vec::new();
-            for e in &entries {
-                let name = e.file_name();
-                let name_str = name.to_string_lossy();
-                if let Some(rest) = name_str.strip_prefix(&p_prefix) {
-                    // rest is "{n}.{rand}.part"
-                    if let Some(dot_pos) = rest.find('.') {
-                        if let Ok(n) = rest[..dot_pos].parse::<u16>() {
-                            parts.push((n, e.path()));
-                        }
-                    }
-                }
+        let parse_part_number = |name: &str| -> Option<u16> {
+            let rest = name.strip_prefix(&p_prefix)?;
+            let (part_number, suffix) = rest.split_once('.')?;
+            let random_suffix = suffix.strip_suffix(".part")?;
+            if random_suffix.len() != 8
+                || !random_suffix.chars().all(|c| c.is_ascii_alphanumeric())
+            {
+                return None;
             }
+            part_number.parse::<u16>().ok()
+        };
+        let is_single_temp = |name: &str| {
+            name.strip_prefix(&prefix)
+                .and_then(|suffix| suffix.strip_suffix(".part"))
+                .is_some_and(|random_suffix| {
+                    random_suffix.len() == 8
+                        && random_suffix.chars().all(|c| c.is_ascii_alphanumeric())
+                })
+        };
+
+        // Multipart temp files must match {key}.p{n}.{rand}.part exactly.
+        let mut parts: Vec<(u16, PathBuf)> = entries
+            .iter()
+            .filter_map(|entry| {
+                let name = entry.file_name();
+                parse_part_number(&name.to_string_lossy()).map(|n| (n, entry.path()))
+            })
+            .collect();
+
+        if !parts.is_empty() {
+            // Multipart: sort by part number and concatenate.
             parts.sort_by_key(|(n, _)| *n);
 
-            if parts.is_empty() {
-                return Err(StorageError::Conflict("no parts found".into()));
-            }
             // Verify sequential part numbers (1-based, contiguous).
             for (i, (n, _)) in parts.iter().enumerate() {
                 let expected = (i as u16) + 1;
@@ -307,13 +314,12 @@ impl StoragePlugin for LocalStoragePlugin {
 
             Ok(StorageObjectMeta { key: handle.key.clone(), size: total, sha256: None })
         } else {
-            // Single: expect exactly one .part file (not matching {key}.p*).
+            // Single: expect exactly one temp file.
             let part_files: Vec<_> = entries
                 .iter()
                 .filter(|e| {
                     let name = e.file_name();
-                    let name_str = name.to_string_lossy();
-                    name_str.ends_with(".part") && !name_str.starts_with(&p_prefix)
+                    is_single_temp(&name.to_string_lossy())
                 })
                 .collect();
 
@@ -450,6 +456,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn multipart_roundtrip() {
+        let (p, _dir) = plugin();
+        let key = "multipart";
+        let prep = p.prepare_upload(req(key, 6)).await.unwrap();
+        p.stream_upload(&prep.handle, Some(1), stream_of(Bytes::from_static(b"abc")))
+            .await
+            .unwrap();
+        p.stream_upload(&prep.handle, Some(2), stream_of(Bytes::from_static(b"def")))
+            .await
+            .unwrap();
+
+        let meta = p.complete_upload(&prep.handle).await.unwrap();
+        assert_eq!(meta.size, 6);
+
+        let handle = StorageHandle {
+            backend: "local".into(),
+            key: key.to_string(),
+            backend_handle: serde_json::Value::Null,
+        };
+        let mut stream = p.get_stream(&handle).await.unwrap();
+        let chunks: Vec<Result<Bytes, std::io::Error>> =
+            StreamExt::collect(stream.as_mut()).await;
+        let assembled: Vec<u8> = chunks
+            .into_iter()
+            .flat_map(|chunk| chunk.unwrap())
+            .collect();
+        assert_eq!(assembled, b"abcdef");
+    }
+
+    #[tokio::test]
     async fn multipart_missing_part_yields_conflict() {
         let (p, _dir) = plugin();
         let prep = p.prepare_upload(req("k1", 6)).await.unwrap();
@@ -575,6 +611,54 @@ mod tests {
             assembled.extend_from_slice(&c.unwrap());
         }
         assert_eq!(assembled, body);
+    }
+
+    #[tokio::test]
+    async fn single_upload_with_p_prefixed_suffix_roundtrips() {
+        let (p, _dir) = plugin();
+        let key = "session-files/test/sid/fid/file.txt";
+        let body = Bytes::from_static(b"single upload with p-prefixed suffix");
+        let size = body.len() as u64;
+        let prep = p.prepare_upload(req(key, size)).await.unwrap();
+
+        let staged = p.data_dir.join(format!("{key}.pABCDEFG.part"));
+        tokio::fs::create_dir_all(staged.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&staged, &body).await.unwrap();
+
+        let meta = p.complete_upload(&prep.handle).await.unwrap();
+        assert_eq!(meta.key, key);
+        assert_eq!(meta.size, size);
+
+        let handle = StorageHandle {
+            backend: "local".into(),
+            key: key.to_string(),
+            backend_handle: serde_json::json!({ "final_path": p.final_path(key).to_string_lossy() }),
+        };
+        let mut stream = p.get_stream(&handle).await.unwrap();
+        let chunks: Vec<Result<Bytes, std::io::Error>> =
+            StreamExt::collect(stream.as_mut()).await;
+        let assembled: Vec<u8> = chunks
+            .into_iter()
+            .flat_map(|chunk| chunk.unwrap())
+            .collect();
+        assert_eq!(assembled, body);
+    }
+
+    #[tokio::test]
+    async fn malformed_p_prefixed_temp_is_rejected() {
+        let (p, _dir) = plugin();
+        let key = "session-files/test/sid/fid/file.txt";
+        let prep = p.prepare_upload(req(key, 3)).await.unwrap();
+        let staged = p.data_dir.join(format!("{key}.pBAD.X.part"));
+        tokio::fs::create_dir_all(staged.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&staged, b"abc").await.unwrap();
+
+        let err = p.complete_upload(&prep.handle).await.unwrap_err();
+        assert!(matches!(err, StorageError::Conflict(_)));
     }
 
     #[tokio::test]
