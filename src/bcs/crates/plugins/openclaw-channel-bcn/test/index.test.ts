@@ -920,10 +920,11 @@ describe('openclaw-channel-bcn', () => {
     }
   });
 
-  it('sends NO_REPLY only after terminal lifecycle when no assistant agent text is observed', async () => {
+  it('uses a message-less final only for tool runs without assistant text', async () => {
     const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
     const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
     let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
+    let dispatchCount = 0;
     const client = {
       sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
         responses.push({ id, ok, payload });
@@ -972,22 +973,33 @@ describe('openclaw-channel-bcn', () => {
           finalizeInboundContext(ctx: Record<string, unknown>) {
             return ctx;
           },
-          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions, replyOptions }: any) {
-            agentEventHandler?.({
-              runId: 'unrelated-run',
-              stream: 'assistant',
-              ts: 1,
-              data: { text: 'ignored text', delta: 'ignored text' },
-            });
-            await dispatcherOptions.deliver({ text: 'visible part 1' }, { kind: 'block' });
-            await dispatcherOptions.deliver({ text: 'visible part 2' }, { kind: 'block' });
-            const agentRunId = 'queued-agent-run';
+          async dispatchReplyWithBufferedBlockDispatcher({ replyOptions }: any) {
+            dispatchCount += 1;
+            const agentRunId = `queued-agent-run-${dispatchCount}`;
             replyOptions.onAgentRunStart(agentRunId);
+            if (dispatchCount !== 2) {
+              agentEventHandler?.({
+                runId: agentRunId,
+                sessionKey: 'bcs:group-1',
+                stream: 'tool',
+                ts: 2,
+                data: { phase: 'start', name: 'noop' },
+              });
+            }
+            if (dispatchCount === 3) {
+              agentEventHandler?.({
+                runId: agentRunId,
+                sessionKey: 'bcs:group-1',
+                stream: 'assistant',
+                ts: 3,
+                data: { delta: 'NO_REPLY' },
+              });
+            }
             agentEventHandler?.({
               runId: agentRunId,
               sessionKey: 'bcs:group-1',
               stream: 'lifecycle',
-              ts: 2,
+              ts: 4,
               data: { phase: 'end' },
             });
           },
@@ -1005,34 +1017,50 @@ describe('openclaw-channel-bcn', () => {
     setBcsRuntime(runtime as any);
     initAgentEventsSubscription();
 
-    const request: RequestFrame = {
-      type: 'req',
-      id: 'chat-1',
-      method: 'chat.send',
-      params: {
-        bcs_group_id: 'group-1',
-        channel: { source: 'api', user_id: 'user-1' },
-        session_context: {},
-        message: {
-          role: 'user',
-          content: [{ type: 'text', text: 'run with block reply' }],
-          timestamp: Date.now(),
+    function request(id: string, text: string): RequestFrame {
+      return {
+        type: 'req',
+        id,
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'group-1',
+          channel: { source: 'api', user_id: 'user-1' },
+          session_context: {},
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text }],
+            timestamp: Date.now(),
+          },
         },
-      },
-    };
+      };
+    }
 
     try {
-      await handleChatSend(request, client as any, account);
+      await handleChatSend(request('chat-tool-only', 'run a tool without replying'), client as any, account);
+      await handleChatSend(request('chat-no-tool', 'finish without tool or reply'), client as any, account);
+      await handleChatSend(request('chat-tool-text', 'run a tool and mention NO_REPLY'), client as any, account);
 
-      assert.equal(responses.length, 1);
-      const runId = responses[0].payload?.run_id;
+      assert.equal(responses.length, 3);
+      const runIds = responses.map(response => response.payload?.run_id);
       const chatEvents = events.filter(item => item.event === 'chat.event');
-      assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'final' ]);
+      assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'final', 'final', 'delta', 'final' ]);
+      assert.equal(chatEvents[0].payload.message, undefined);
+      assert.equal(chatEvents[0].payload.stop_reason, undefined);
+      assert.equal((chatEvents[1].payload.message as any).content[0].text, 'NO_REPLY');
       assert.deepEqual(
-        chatEvents.map(item => (item.payload.message as any).content[0].text),
-        [ 'NO_REPLY' ],
+        chatEvents.slice(2).map(item => (item.payload.message as any).content[0].text),
+        [ 'NO_REPLY', 'NO_REPLY' ],
       );
-      assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ runId ]);
+      assert.deepEqual(chatEvents.map(item => item.payload.run_id), [
+        runIds[0],
+        runIds[1],
+        runIds[2],
+        runIds[2],
+      ]);
+      assert.deepEqual(
+        events.filter(item => item.event === 'agent').map(item => item.payload.stream),
+        [ 'tool', 'lifecycle', 'lifecycle', 'tool', 'assistant', 'lifecycle' ],
+      );
     } finally {
       cleanupAgentEventsSubscription();
       abortAllStreams();
