@@ -305,7 +305,7 @@ class TestDistributedLockServiceIntegration:
         """Test that expired locks can be acquired by another holder."""
         try:
             # Create lock with very short expiration (already expired)
-            lock_repository.insert_lock(
+            lock_repository.try_acquire_lock(
                 lock_name=lock_name,
                 lock_holder="old_holder",
                 expire_time=datetime.now() - timedelta(seconds=10),

@@ -27,7 +27,7 @@ def _is_expected_distributed_lock_conflict(
     return (
         isinstance(exc, IntegrityError)
         and "OrmDistributedLockRepository" in type(instance).__name__
-        and func.__name__ == "insert_lock"
+        and func.__name__ == "try_acquire_lock"
     )
 
 

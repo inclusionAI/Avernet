@@ -1859,7 +1859,9 @@ class TestConvertChunksToSse:
             return 'event: error\ndata: {"msg":"boom"}\n\n'
 
         results = []
-        async for sse in convert_chunks_to_sse(chunks(), converter, "r1", on_error=on_error):
+        async for sse in convert_chunks_to_sse(
+            chunks(), converter, "r1", on_error=on_error
+        ):
             results.append(sse)
 
         assert len(results) == 2
