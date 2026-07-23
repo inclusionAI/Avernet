@@ -696,15 +696,20 @@ def _setup_restart(svc, record, bot_uuid="BOT-x"):
 
 
 @pytest.mark.asyncio
-async def test_restart_fallback_threads_config_artifact():
-    # On BOT_NOT_FOUND, restart falls back to release_async — which for a teclaw
-    # bot must carry the frozen artifact (from ext), not an empty config.
+async def test_restart_recreate_threads_config_artifact():
+    # On BOT_NOT_FOUND, restart recreates via release_async (the crash-safe
+    # recreate leg) — which for a teclaw bot must carry the frozen artifact
+    # (from ext), not an empty config. The creation must return bot_uuid (the
+    # recreate mints a NEW bot + binding; it never reuses the gone one).
     publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
     build_service = Mock()
     build_service.upgrade_async = AsyncMock(
         return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
     )
-    build_service.release_async = AsyncMock(return_value={"publish_id": 99})
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-recreated"}
+    )
     baas_service = Mock()
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
@@ -720,6 +725,8 @@ async def test_restart_fallback_threads_config_artifact():
     result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
     assert result["success"] is True
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
+    # The recreate minted a fresh binding for the new bot.
+    assert publish_service.create_device_binding.call_args.kwargs["device_id"] == "BOT-recreated"
 
 
 # ── Task 9: restart reads stored per-stage overrides ─────────────────────────
