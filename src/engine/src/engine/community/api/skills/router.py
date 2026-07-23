@@ -17,6 +17,9 @@ from engine.community.api.skills.schemas import (
     BindPathRequest,
     CenterEnsureRequestSchema,
     CleanSymlinkRequest,
+    RuntimeLayoutProbeApiResponse,
+    RuntimeLayoutProbeRequest,
+    RuntimeLayoutProbeResponse,
     SyncSymlinkRequest,
 )
 from engine.community.core.engine.capability import Capability
@@ -29,6 +32,7 @@ from engine.community.core.skills.models import (
     SyncBindPathsRequest,
     SyncSymlinksRequest,
 )
+from engine.community.core.skills.layout_probe import inspect_runtime_layout
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 log = logging.getLogger("api-skills")
@@ -37,6 +41,22 @@ log = logging.getLogger("api-skills")
 def _skills_plugin():
     from engine.community.manager import EngineManager
     return EngineManager.get_instance().skills
+
+
+@router.post("/layout/probe", response_model=RuntimeLayoutProbeApiResponse)
+def probe_runtime_skills_layout(
+    body: RuntimeLayoutProbeRequest,
+) -> RuntimeLayoutProbeApiResponse:
+    """Inspect local facts in FastAPI's worker pool, outside the event loop."""
+    result = inspect_runtime_layout(
+        engine=body.engine,
+        expected_contract_version=body.layout_contract_version,
+    )
+    return RuntimeLayoutProbeApiResponse(
+        success=True,
+        data=RuntimeLayoutProbeResponse.model_validate(result.to_data()),
+        message="运行时 Skills Pool 布局探测完成",
+    )
 
 
 @router.post("/symlink", response_model=ApiResponse)

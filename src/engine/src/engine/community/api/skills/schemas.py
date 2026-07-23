@@ -1,9 +1,11 @@
 """Skills router HTTP schemas."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
+
+from engine.community.api.response import ApiResponse
 
 
 class SymlinkItem(BaseModel):
@@ -49,6 +51,23 @@ class CenterEnsureResponseSchema(BaseModel):
     failed: list[CenterEnsureFailureSchema]
 
 
+class RuntimeLayoutProbeRequest(BaseModel):
+    engine: str
+    layout_contract_version: str
+
+
+class RuntimeLayoutProbeResponse(BaseModel):
+    status: Literal["READY", "NOT_CAPABLE", "TRANSIENT_ERROR", "INVALID"]
+    engine: str
+    layout_contract_version: str
+    preparation_id: str | None
+    evidence: dict[str, Any]
+
+
+class RuntimeLayoutProbeApiResponse(ApiResponse):
+    data: RuntimeLayoutProbeResponse
+
+
 __all__ = [
     "SymlinkItem",
     "SyncSymlinkRequest",
@@ -59,4 +78,7 @@ __all__ = [
     "CenterEnsureRequestSchema",
     "CenterEnsureFailureSchema",
     "CenterEnsureResponseSchema",
+    "RuntimeLayoutProbeRequest",
+    "RuntimeLayoutProbeResponse",
+    "RuntimeLayoutProbeApiResponse",
 ]
