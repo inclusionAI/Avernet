@@ -1025,12 +1025,9 @@ impl ChannelBindingCleanupPort for BcsChannelService {
     ) -> bcs_service_api::ServiceResult<u64> {
         let _guard = self.binding_admin_lock.lock().await;
         self.bindings
-            .delete_by_target(
-                &BindingTarget::Group {
-                    group_id: group_id.to_string(),
-                },
-                &self.env,
-            )
+            .delete_by_target(&BindingTarget::Group {
+                group_id: group_id.to_string(),
+            })
             .await
     }
 }
@@ -1366,8 +1363,8 @@ mod tests {
             self.inner.list_by_target(target, channel_type).await
         }
 
-        async fn delete_by_target(&self, target: &BindingTarget, env: &str) -> ServiceResult<u64> {
-            self.inner.delete_by_target(target, env).await
+        async fn delete_by_target(&self, target: &BindingTarget) -> ServiceResult<u64> {
+            self.inner.delete_by_target(target).await
         }
 
         async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
@@ -1418,7 +1415,6 @@ mod tests {
         async fn delete_by_target(
             &self,
             _target: &BindingTarget,
-            _env: &str,
         ) -> ServiceResult<u64> {
             unreachable!("inbound binding lookup test only calls find_active_by_account")
         }
@@ -1608,7 +1604,7 @@ mod tests {
             env: &str,
             new_id: Arc<dyn Fn() -> String + Send + Sync>,
         ) -> ServiceResult<Self> {
-            let binding_repo = Arc::new(MemoryChannelBindingRepo::new());
+            let binding_repo = Arc::new(MemoryChannelBindingRepo::new(env));
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
             let session_repo = Arc::new(RecordingSessionRepo::default());
@@ -1656,7 +1652,7 @@ mod tests {
         }
 
         async fn new_without_binding_list(group: Group) -> ServiceResult<Self> {
-            let binding_repo = Arc::new(MemoryChannelBindingRepo::new());
+            let binding_repo = Arc::new(MemoryChannelBindingRepo::new("pre"));
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
             let session_repo = Arc::new(RecordingSessionRepo::default());
@@ -1734,7 +1730,7 @@ mod tests {
     }
 
     async fn active_inbound_binding_repo() -> Arc<MemoryChannelBindingRepo> {
-        let bindings = Arc::new(MemoryChannelBindingRepo::new());
+        let bindings = Arc::new(MemoryChannelBindingRepo::new("pre"));
         bindings
             .create(active_binding(
                 "binding_1",
@@ -1849,7 +1845,7 @@ mod tests {
 
     #[tokio::test]
     async fn group_binding_cleanup_removes_only_bindings_for_requested_group() -> TestResult {
-        let harness = TestHarness::new_with_env(manager_group("group_1"), "dev").await?;
+        let harness = TestHarness::new(manager_group("group_1")).await?;
         let group_1 = BindingTarget::Group {
             group_id: "group_1".to_string(),
         };
@@ -2589,7 +2585,7 @@ mod tests {
     #[tokio::test]
     async fn inbound_classifies_missing_binding_and_lookup_failure() -> TestResult {
         let missing_binding = inbound_service(
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new("pre")),
             Arc::new(MemoryImParticipantRepo::new()),
             Arc::new(RecordingSessionRepo::default()),
             Arc::new(RecordingMessageFlow::default()),
@@ -2634,7 +2630,7 @@ mod tests {
     #[tokio::test]
     async fn inbound_classifies_invalid_input_and_context_resolution_failure() -> TestResult {
         let invalid_input = inbound_service(
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new("pre")),
             Arc::new(MemoryImParticipantRepo::new()),
             Arc::new(RecordingSessionRepo::default()),
             Arc::new(RecordingMessageFlow::default()),
@@ -2655,7 +2651,7 @@ mod tests {
             "account_ref",
         );
 
-        let bindings = Arc::new(MemoryChannelBindingRepo::new());
+        let bindings = Arc::new(MemoryChannelBindingRepo::new("pre"));
         bindings
             .create(active_binding(
                 "binding_context",
@@ -3718,7 +3714,7 @@ mod tests {
             target,
             group_chat_scope: Some(GroupChatScope::ConversationShared),
             outbound_visibility: visibility,
-            env: "dev".to_string(),
+            env: "pre".to_string(),
             status: BindingStatus::Active,
             created_by: Some("creator".to_string()),
             config: dingtalk_config(account_ref),
