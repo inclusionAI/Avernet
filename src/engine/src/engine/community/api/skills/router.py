@@ -20,6 +20,7 @@ from engine.community.api.skills.schemas import (
     PoolLayoutActivateApiResponse,
     PoolLayoutActivateRequest,
     PoolLayoutActivateResponse,
+    PoolLayoutRollbackRequest,
     PoolMappingVerifyRequest,
     RuntimeLayoutProbeApiResponse,
     RuntimeLayoutProbeRequest,
@@ -33,6 +34,7 @@ from engine.community.core.skills.models import (
     CenterEnsureRequest,
     CleanSymlinksRequest,
     PoolLayoutActivateRequest as PoolLayoutActivateCommand,
+    PoolLayoutRollbackRequest as PoolLayoutRollbackCommand,
     PoolLayoutProbeRequest as PoolLayoutProbeCommand,
     SymlinkItem,
     SyncBindPathsRequest,
@@ -101,6 +103,36 @@ async def activate_runtime_skills_layout(
             "Skills Pool 数据面已提交"
             if result.committed
             else "Skills Pool 数据面未提交"
+        ),
+    )
+
+
+@router.post(
+    "/layout/rollback",
+    response_model=PoolLayoutActivateApiResponse,
+)
+async def rollback_runtime_skills_layout(
+    body: PoolLayoutRollbackRequest,
+) -> PoolLayoutActivateApiResponse:
+    """从当前权威 Pool 内容重建 Legacy，并原子切换 local bridge。"""
+
+    plugin = _skills_plugin()
+    try:
+        result = await plugin.rollback_pool_layout(
+            PoolLayoutRollbackCommand(
+                rollback_generation=body.rollback_generation,
+                registered_local_names=body.registered_local_names,
+            )
+        )
+    except CapabilityNotSupportedError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+    return PoolLayoutActivateApiResponse(
+        success=result.committed,
+        data=PoolLayoutActivateResponse.model_validate(result.to_data()),
+        message=(
+            "Skills Pool 已显式回滚至 Legacy"
+            if result.committed
+            else "Skills Pool 显式回滚未提交"
         ),
     )
 

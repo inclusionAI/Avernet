@@ -31,6 +31,7 @@ from engine.community.core.skills.models import (
     CleanSymlinksResult,
     PoolLayoutActivateRequest,
     PoolLayoutActivationResult,
+    PoolLayoutRollbackRequest,
     PoolLayoutProbeRequest,
     PoolLayoutProbeResult,
     PoolMappingPublishResult,
@@ -173,6 +174,14 @@ class SkillsService(Protocol):
         auth: AuthContext | None = None,
     ) -> PoolLayoutActivationResult:
         """核对登记事实、同步完整 local 并原子提交 Legacy→Pool bridge。"""
+        ...
+
+    async def rollback_pool_layout(
+        self,
+        request: PoolLayoutRollbackRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolLayoutActivationResult:
+        """从当前 Pool 重建 Legacy local 并原子切回。"""
         ...
 
     async def probe_pool_layout(

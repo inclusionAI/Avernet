@@ -19,6 +19,7 @@ from engine.community.plugins.claude_code.layout_pool import (
     activate_claude_code_pool,
     inspect_claude_code_runtime_layout,
     publish_claude_code_pool_mappings,
+    rollback_claude_code_pool,
     verify_claude_code_pool_mappings,
 )
 
@@ -60,6 +61,19 @@ class _SkillsPortMixin:
             preparation_id=params["preparation_id"],
             registered_local_names=list(params.get("registered_local_names", [])),
             mappings=self._pool_mappings(params),
+        )
+        return result.to_data()
+
+    async def rollback_pool_layout(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            rollback_claude_code_pool,
+            rollback_generation=params["rollback_generation"],
+            registered_local_names=list(
+                params.get("registered_local_names", [])
+            ),
         )
         return result.to_data()
 

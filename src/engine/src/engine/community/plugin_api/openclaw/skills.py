@@ -108,6 +108,21 @@ class OpenClawSkillsPort(Protocol):
         """核对登记事实、同步完整 local 并原子提交永久兼容 bridge。"""
         ...
 
+    async def rollback_pool_layout(
+        self,
+        params: dict,
+    ) -> dict:
+        """Atomically rebuild and switch OpenClaw back to Legacy local.
+
+        ``params`` requires ``rollback_generation`` (str) and
+        ``registered_local_names`` (list[str]). The result requires
+        ``committed`` (bool), ``status`` (a Pool activation status string),
+        and ``evidence`` (dict). Only ``COMMITTED`` and
+        ``ALREADY_COMMITTED`` mean the filesystem authority changed;
+        consumers must fail closed for unknown status values.
+        """
+        ...
+
     async def probe_pool_layout(
         self, params: dict[str, Any]
     ) -> dict[str, Any]:

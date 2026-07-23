@@ -148,6 +148,48 @@ class FakeLayoutRepository:
         )
         return True
 
+    def record_post_cutover_failure(self, **kwargs: object) -> bool:
+        if not self._owns(kwargs):
+            return False
+        self.events.append("post_failure")
+        self.state = replace(
+            self.state,
+            last_failure_code=str(kwargs["failure_code"]),
+            last_failure_stage=str(kwargs["failure_stage"]),
+            last_failure_retryable=bool(kwargs["retryable"]),
+            last_failure_evidence=dict(kwargs["evidence"]),
+        )
+        return True
+
+    def mark_repair_required(self, **kwargs: object) -> bool:
+        if not self._owns(kwargs):
+            return False
+        self.events.append("manual_repair")
+        self.state = replace(
+            self.state,
+            phase=SkillLayoutPhase.NEEDS_MANUAL_REPAIR,
+            last_failure_code=str(kwargs["failure_code"]),
+            last_failure_stage=str(kwargs["failure_stage"]),
+            last_failure_retryable=False,
+            last_failure_evidence=dict(kwargs["evidence"]),
+        )
+        return True
+
+    def record_cutover_finalizing(self, **kwargs: object) -> bool:
+        if not self._owns(kwargs):
+            return False
+        self.events.append("finalizing")
+        self.state = replace(
+            self.state,
+            phase=SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            data_plane_cutover_committed=True,
+            last_failure_code="POST_CUTOVER_SYNC_PENDING",
+            last_failure_stage="post_cutover_sync",
+            last_failure_retryable=True,
+            last_failure_evidence=dict(kwargs["evidence"]),
+        )
+        return True
+
     def commit_pool_active(
         self,
         *,
@@ -444,6 +486,14 @@ async def test_mapping_failure_after_cutover_does_not_commit_database(
     assert layouts.state.active_layout is SkillLayout.LEGACY
     assert layouts.committed_locators is None
     assert runtime.events == ["probe", "cutover", "mapping"]
+    assert layouts.events == [
+        "ready",
+        "begin",
+        "cutover",
+        "post_failure",
+    ]
+    assert layouts.state.last_failure_stage == "mapping_publish"
+    assert layouts.state.last_failure_retryable is True
 
     runtime.publish_success = True
     runtime.events.clear()
@@ -460,6 +510,76 @@ async def test_mapping_failure_after_cutover_does_not_commit_database(
     assert retried.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
     assert runtime.events == ["probe", "mapping", "verify"]
     assert layouts.events == ["database"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_cutover_enters_manual_repair_and_stops_automation() -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=False,
+        status=PoolCutoverStatus.UNKNOWN,
+        evidence={"reason": "response_lost_after_request"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.MANUAL_REPAIR_REQUIRED
+    assert result.retryable is False
+    assert layouts.events == ["ready", "begin", "manual_repair"]
+    assert layouts.state.phase is SkillLayoutPhase.NEEDS_MANUAL_REPAIR
+    assert layouts.state.last_failure_stage == "cutover_outcome_unknown"
+    assert layouts.state.last_failure_evidence == runtime.cutover_result.to_dict()
+
+    runtime.events.clear()
+    repeated = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+    assert repeated.outcome is SkillsPoolReconcileOutcome.MANUAL_REPAIR_REQUIRED
+    assert runtime.events == []
+
+
+@pytest.mark.asyncio
+async def test_post_cutover_sync_pending_retries_finalization_before_mappings() -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=False,
+        status=PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING,
+        evidence={"reason": "post_cutover_sync_failed"},
+    )
+
+    first = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert first.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
+    assert first.retryable is True
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert layouts.state.data_plane_cutover_committed is True
+    assert runtime.events == ["probe", "cutover"]
+    assert layouts.events == ["ready", "begin", "finalizing"]
+
+    runtime.events.clear()
+    layouts.events.clear()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"post_sync": {"copied": 1}},
+    )
+    second = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert second.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.events == ["cutover", "database"]
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ class OpenClawPoolPaths:
 
     active: str = "/home/admin/.openclaw/workspace/skills"
     legacy_local: str = "/home/admin/.openclaw/workspace/skills/skills-local"
+    legacy_repo: str = "/home/admin/.openclaw/workspace/skills/skills-repo"
     pool_local: str = "/home/admin/.openclaw/workspace/skills-pool/skills-local"
     pool_repo: str = "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
 
@@ -22,6 +23,7 @@ class ClaudeCodePoolPaths:
 
     active: str = "/home/admin/.claude/skills"
     legacy_local: str = "/home/admin/.claude_code/workspace/skills/skills-local"
+    legacy_repo: str = "/home/admin/.claude_code/skills-repo"
     pool_local: str = "/home/admin/.claude_code/workspace/skills-pool/skills-local"
     pool_repo: str = "/home/admin/.claude_code/workspace/skills-pool/skills-repo"
 
@@ -32,6 +34,7 @@ class AICodingPoolPaths:
 
     active: str = "/home/admin/.claude/skills"
     legacy_local: str = "/home/admin/.aicoding/workspace/skills/skills-local"
+    legacy_repo: str = "/home/admin/.aicoding/skills-repo"
     pool_local: str = "/home/admin/.aicoding/workspace/skills-pool/skills-local"
     pool_repo: str = "/home/admin/.aicoding/workspace/skills-pool/skills-repo"
 

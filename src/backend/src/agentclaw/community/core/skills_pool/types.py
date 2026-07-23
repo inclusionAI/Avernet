@@ -21,8 +21,11 @@ class SkillLayoutPhase(StrEnum):
     POOL_PREPARING = "pool_preparing"
     POOL_READY = "pool_ready"
     POOL_ACTIVATING_PRE_CUTOVER = "pool_activating_pre_cutover"
+    POOL_CUTOVER_FINALIZING = "pool_cutover_finalizing"
     POOL_CUTOVER_COMMITTED = "pool_cutover_committed"
     POOL_ACTIVE = "pool_active"
+    LEGACY_ROLLBACK_PREPARING = "legacy_rollback_preparing"
+    LEGACY_ROLLBACK_COMMITTED = "legacy_rollback_committed"
     NEEDS_MANUAL_REPAIR = "manual_repair_required"
 
 

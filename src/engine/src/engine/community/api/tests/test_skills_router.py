@@ -265,6 +265,13 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
             evidence={"bridge": "valid"},
         ),
     )
+    plugin.rollback_pool_layout = AsyncMock(
+        return_value=PoolLayoutActivationResult(
+            committed=True,
+            status=PoolLayoutActivationStatus.COMMITTED,
+            evidence={"source": "current_pool"},
+        ),
+    )
     plugin.publish_pool_mappings = AsyncMock(
         return_value=PoolMappingPublishResult(
             published=True,
@@ -289,6 +296,13 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
             "mappings": mappings,
         },
     )
+    rollback = client.post(
+        "/api/skills/layout/rollback",
+        json={
+            "rollback_generation": "rollback-1",
+            "registered_local_names": ["a"],
+        },
+    )
     published = client.post(
         "/api/skills/layout/mappings/publish",
         json={"mappings": mappings},
@@ -299,9 +313,11 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
     )
 
     assert activation.json()["data"]["committed"] is True
+    assert rollback.json()["data"]["committed"] is True
     assert published.json()["data"]["published"] is True
     assert verified.json()["data"]["valid"] is True
     plugin.activate_pool_layout.assert_awaited_once()
+    plugin.rollback_pool_layout.assert_awaited_once()
     plugin.publish_pool_mappings.assert_awaited_once()
     plugin.verify_pool_mappings.assert_awaited_once()
 
@@ -325,6 +341,14 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
                 "preparation_id": "preparation-1",
                 "registered_local_names": [],
                 "mappings": [],
+            },
+        ),
+        (
+            "rollback_pool_layout",
+            "/api/skills/layout/rollback",
+            {
+                "rollback_generation": "rollback-1",
+                "registered_local_names": [],
             },
         ),
         (

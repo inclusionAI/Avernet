@@ -59,6 +59,16 @@ class SkillsPoolRuntimeProtocol(Protocol):
     ) -> PoolCutoverResult:
         ...
 
+    async def rollback_to_legacy(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        rollback_generation: str,
+        registered_local_names: list[str],
+    ) -> PoolCutoverResult:
+        ...
+
     async def publish_mappings(
         self,
         *,

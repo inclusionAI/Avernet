@@ -14,6 +14,7 @@ from engine.community.plugins.skills_pool.layout_activation import (
     SkillMapping,
     activate_aicoding_pool,
     publish_pool_mappings as _publish_pool_mappings,
+    rollback_aicoding_pool,
     verify_skill_mappings as _verify_skill_mappings,
 )
 from engine.community.plugins.skills_pool.layout_probe import (
@@ -74,5 +75,6 @@ __all__ = [
     "activate_aicoding_pool",
     "inspect_aicoding_runtime_layout",
     "publish_aicoding_pool_mappings",
+    "rollback_aicoding_pool",
     "verify_aicoding_pool_mappings",
 ]

@@ -44,9 +44,17 @@ Engine Layout Descriptor 仍不在本期范围内。
   阶段和独立证据；普通 probe 重试不会覆盖这份失败证据。
 - 数据面切换后先全量发布并验证 Pool mapping，再在一个 CAS 事务中更新该
   Bot 全部 local locator 和 `POOL_ACTIVE`。mapping 或事务失败只前滚重试。
-- 本模块当前只持久化尚未跨过 bridge 的结构性失败；bridge 已提交后的
-  `POST_CUTOVER_SYNC_PENDING`、mapping 与数据库提交失败的分阶段恢复和
-  审计持久化由 #376 的完整前滚恢复状态机承接，避免在 #370 重复定义状态。
+- bridge 结果未知时进入 `NEEDS_MANUAL_REPAIR`，停止普通自动重试；运维必须
+  附带操作者、备注和已核验的数据面事实，之后才会重新入队同一 generation。
+- bridge 已提交后的 `POST_CUTOVER_SYNC_PENDING`、mapping 与数据库失败均
+  持久化阶段、错误码、可重试性、证据和时间；重试只补齐 mapping、locator
+  与 `POOL_ACTIVE`，不恢复隔离副本。
+- 显式回滚先持久化 `LEGACY_ROLLBACK_PREPARING` 作为 Bot 级编辑暂停状态，
+  再从当前 Pool 全量重建新的 Legacy local 并原子交换。交换后即使 mapping
+  或数据库失败也保持 `LEGACY_ROLLBACK_COMMITTED`，同一 generation 可由
+  lease 过期后的新 worker 接管并继续提交 Legacy mapping 和 locator。
+- 显式回滚不会读取迁移隔离副本，Pool 激活后产生的 local 新增和修改会被
+  带入新的 Legacy；Pool 本身保留用于证据和后续恢复。
 - local 后置合并采用 best-effort 原子 exchange：一般的切换前修改、切换后
   Pool 修改和新增路径竞争均可收敛；无写栅栏时，跨 exchange 的已打开文件
   描述符或连续同文件写入仍存在极窄竞态，作为 #370 的显式接受限制。
@@ -62,6 +70,8 @@ provides:
   - "SkillsPoolReconcileService"
   - "SkillsPoolReconcileTaskHandler"
   - "SkillsPoolReconcileWakeupListener"
+  - "SkillsPoolRecoveryService"
+  - "SkillsPoolRollbackService"
   - "PoolCutoverStatus"
   - "PoolCutoverResult"
   - "BotSkillLayoutState and migration enums"

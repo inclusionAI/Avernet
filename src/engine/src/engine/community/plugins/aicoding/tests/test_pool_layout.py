@@ -10,6 +10,7 @@ from engine.community.plugins.aicoding.layout_pool import (
     activate_aicoding_pool,
     inspect_aicoding_runtime_layout,
     publish_aicoding_pool_mappings,
+    rollback_aicoding_pool,
     verify_aicoding_pool_mappings,
 )
 
@@ -147,6 +148,41 @@ def test_aicoding_activation_switches_local_and_keeps_repo_namespace(
     assert local_bridge.resolve() == pool_local.resolve()
     assert repo_bridge.resolve() == pool_repo.resolve()
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
+
+
+def test_aicoding_rollback_rebuilds_legacy_from_current_pool(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, _, _, pool_local, pool_repo = _prepared_home(tmp_path)
+    activated = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+    (pool_local / "handmade" / "SKILL.md").write_text("after-activation")
+    (pool_local / "new-local").mkdir()
+    (pool_local / "new-local" / "SKILL.md").write_text("new")
+
+    rolled_back = rollback_aicoding_pool(
+        rollback_generation="rollback-1",
+        registered_local_names=["handmade"],
+        home=home,
+    )
+
+    assert rolled_back.status is PoolActivationStatus.COMMITTED
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
+    assert (legacy_local / "handmade" / "SKILL.md").read_text() == (
+        "after-activation"
+    )
+    assert (legacy_local / "new-local" / "SKILL.md").read_text() == "new"
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == (
+        "after-activation"
+    )
 
 
 def test_aicoding_publishes_and_verifies_only_its_pool_sources(

@@ -35,6 +35,7 @@ from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
     SkillLayout,
+    SkillLayoutPhase,
 )
 from agentclaw.community.core.task_queue.services.registry import (
     HandlerRegistry,
@@ -159,6 +160,8 @@ class SkillsPoolReconcileTaskHandler:
     ) -> TaskOutcome | None:
         if state.active_layout is SkillLayout.POOL:
             return Complete()
+        if state.phase is SkillLayoutPhase.NEEDS_MANUAL_REPAIR:
+            return Fail("skills pool migration requires manual repair")
         if newly_claimed:
             return None
         generation = state.migration_generation

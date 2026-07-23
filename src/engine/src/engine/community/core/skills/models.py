@@ -189,6 +189,14 @@ class PoolLayoutActivateRequest:
 
 
 @dataclass
+class PoolLayoutRollbackRequest:
+    """Explicit Pool→Legacy rollback from the current authoritative Pool."""
+
+    rollback_generation: str
+    registered_local_names: list[str] = field(default_factory=list)
+
+
+@dataclass
 class PoolLayoutProbeRequest:
     """运行时 Pool layout 核验请求。"""
 
@@ -283,6 +291,7 @@ __all__ = [
     "CleanSymlinksRequest",
     "CleanSymlinksResult",
     "PoolLayoutActivateRequest",
+    "PoolLayoutRollbackRequest",
     "PoolLayoutActivationResult",
     "PoolLayoutActivationStatus",
     "PoolLayoutProbeRequest",

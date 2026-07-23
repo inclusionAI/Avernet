@@ -84,9 +84,12 @@ class SkillsPoolRuntime:
             )
             return PoolCutoverResult(
                 committed=False,
-                status=PoolCutoverStatus.TRANSIENT_ERROR,
+                # The request may have reached the runtime and crossed the
+                # atomic boundary before the response was lost. Retrying as a
+                # normal pre-cutover error would guess at filesystem truth.
+                status=PoolCutoverStatus.UNKNOWN,
                 evidence={
-                    "reason": "runtime_cutover_request_failed",
+                    "reason": "runtime_cutover_outcome_unknown",
                     "error_type": type(error).__name__,
                 },
             )
@@ -94,7 +97,7 @@ class SkillsPoolRuntime:
         if not isinstance(data, dict):
             return PoolCutoverResult(
                 committed=False,
-                status=PoolCutoverStatus.INVALID,
+                status=PoolCutoverStatus.UNKNOWN,
                 evidence={"reason": "runtime_cutover_response_invalid"},
             )
         raw_status = str(data.get("status", ""))
@@ -136,6 +139,67 @@ class SkillsPoolRuntime:
             )
             return False
         return response.get("success") is True
+
+    async def rollback_to_legacy(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        rollback_generation: str,
+        registered_local_names: list[str],
+    ) -> PoolCutoverResult:
+        try:
+            response = await self._invoke(
+                bot_id=bot_id,
+                user_id=user_id,
+                path="/api/skills/layout/rollback",
+                body={
+                    "rollback_generation": rollback_generation,
+                    "registered_local_names": registered_local_names,
+                },
+            )
+        except Exception as error:
+            logger.exception(
+                "[skills_pool.runtime] rollback outcome unknown bot_id=%s "
+                "generation=%s",
+                bot_id,
+                rollback_generation,
+            )
+            return PoolCutoverResult(
+                committed=False,
+                status=PoolCutoverStatus.UNKNOWN,
+                evidence={
+                    "reason": "runtime_rollback_outcome_unknown",
+                    "error_type": type(error).__name__,
+                },
+            )
+        data = response.get("data")
+        if not isinstance(data, dict):
+            return PoolCutoverResult(
+                committed=False,
+                status=PoolCutoverStatus.UNKNOWN,
+                evidence={"reason": "runtime_rollback_response_invalid"},
+            )
+        raw_status = str(data.get("status", ""))
+        try:
+            status = PoolCutoverStatus(raw_status)
+        except ValueError:
+            status = PoolCutoverStatus.UNKNOWN
+        evidence = dict(data.get("evidence") or {})
+        if status is PoolCutoverStatus.UNKNOWN:
+            evidence["raw_status"] = raw_status
+        return PoolCutoverResult(
+            committed=(
+                data.get("committed") is True
+                and status
+                in {
+                    PoolCutoverStatus.COMMITTED,
+                    PoolCutoverStatus.ALREADY_COMMITTED,
+                }
+            ),
+            status=status,
+            evidence=evidence,
+        )
 
     async def verify_mappings(
         self,

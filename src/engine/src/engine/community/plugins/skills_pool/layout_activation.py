@@ -734,6 +734,179 @@ def activate_hermes_pool(
     )
 
 
+def _rollback_pool(
+    *,
+    engine: str,
+    rollback_generation: str,
+    registered_local_names: list[str],
+    home: str | Path = "/home/admin",
+    exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+) -> PoolActivationResult:
+    """Rebuild Legacy from the current authoritative Pool tree, then swap."""
+
+    if not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", rollback_generation
+    ):
+        return _invalid("rollback_generation_invalid")
+    layout = _Layout.for_engine(engine, Path(home))
+    normalized_names: list[str] = []
+    for name in registered_local_names:
+        path = Path(name)
+        if (
+            not name
+            or path.is_absolute()
+            or len(path.parts) != 1
+            or name in {".", ".."}
+        ):
+            return _invalid("registered_local_name_invalid", name=name)
+        if name not in normalized_names:
+            normalized_names.append(name)
+
+    rebuild = layout.legacy_local.parent / (
+        f".skills-local.pool-rollback-{rollback_generation}"
+    )
+    copy_staging = layout.pool_root / (
+        f".rollback-copy-{rollback_generation}"
+    )
+    try:
+        if layout.legacy_local.is_dir() and not layout.legacy_local.is_symlink():
+            for name in normalized_names:
+                source = layout.legacy_local / name
+                if not source.is_dir() or source.is_symlink():
+                    return _data_inconsistent(
+                        "rebuilt_legacy_source_invalid",
+                        registered_name=name,
+                        source=str(source),
+                    )
+            return PoolActivationResult(
+                PoolActivationStatus.ALREADY_COMMITTED,
+                {
+                    "legacy_local": str(layout.legacy_local),
+                    "source": str(layout.pool_local),
+                },
+            )
+        if not layout.legacy_local.is_symlink() or _lexical_target(
+            layout.legacy_local
+        ) != Path(os.path.abspath(layout.pool_local)):
+            return _invalid("pool_local_bridge_invalid")
+        if not layout.pool_local.is_dir() or layout.pool_local.is_symlink():
+            return _data_inconsistent(
+                "pool_local_not_directory",
+                source=str(layout.pool_local),
+            )
+        if rebuild.is_symlink() or (
+            rebuild.exists() and not rebuild.is_dir()
+        ):
+            return _invalid("rollback_temporary_path_occupied", path=str(rebuild))
+        rebuild.mkdir(exist_ok=True)
+        local_names = mirror_local_tree(
+            source_root=layout.pool_local,
+            pool_local=rebuild,
+            staging_root=copy_staging,
+        )
+        for name in normalized_names:
+            source = rebuild / name
+            if not source.is_dir() or source.is_symlink():
+                return _data_inconsistent(
+                    "registered_pool_source_invalid",
+                    registered_name=name,
+                    source=str(source),
+                )
+        if not exchange_paths(layout.legacy_local, rebuild):
+            return PoolActivationResult(
+                PoolActivationStatus.NOT_ATOMIC,
+                {"reason": "atomic_exchange_unavailable"},
+            )
+        if not layout.legacy_local.is_dir() or layout.legacy_local.is_symlink():
+            return _invalid("rollback_result_ambiguous")
+        # The displaced object is only the compatibility symlink. Pool content
+        # itself remains intact for evidence and forward recovery.
+        rebuild.unlink(missing_ok=True)
+        return PoolActivationResult(
+            PoolActivationStatus.COMMITTED,
+            {
+                "legacy_local": str(layout.legacy_local),
+                "source": str(layout.pool_local),
+                "local_inventory": {
+                    "registered": len(normalized_names),
+                    "unregistered": len(
+                        set(local_names) - set(normalized_names)
+                    ),
+                    "total": len(local_names),
+                },
+            },
+        )
+    except OSError as error:
+        committed = (
+            layout.legacy_local.is_dir()
+            and not layout.legacy_local.is_symlink()
+        )
+        return PoolActivationResult(
+            (
+                PoolActivationStatus.COMMITTED
+                if committed
+                else PoolActivationStatus.TRANSIENT_ERROR
+            ),
+            {
+                "reason": (
+                    "post_rollback_cleanup_failed"
+                    if committed
+                    else "rollback_filesystem_operation_failed"
+                ),
+                "error_type": type(error).__name__,
+                "errno": error.errno,
+            },
+        )
+
+
+def rollback_openclaw_pool(
+    *,
+    rollback_generation: str,
+    registered_local_names: list[str],
+    home: str | Path = "/home/admin",
+    exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+) -> PoolActivationResult:
+    return _rollback_pool(
+        engine="openclaw",
+        rollback_generation=rollback_generation,
+        registered_local_names=registered_local_names,
+        home=home,
+        exchange_paths=exchange_paths,
+    )
+
+
+def rollback_claude_code_pool(
+    *,
+    rollback_generation: str,
+    registered_local_names: list[str],
+    home: str | Path = "/home/admin",
+    exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+) -> PoolActivationResult:
+    return _rollback_pool(
+        engine="claude_code",
+        rollback_generation=rollback_generation,
+        registered_local_names=registered_local_names,
+        home=home,
+        exchange_paths=exchange_paths,
+    )
+
+
+def rollback_aicoding_pool(
+    *,
+    rollback_generation: str,
+    registered_local_names: list[str],
+    home: str | Path = "/home/admin",
+    exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+) -> PoolActivationResult:
+    return _rollback_pool(
+        engine="aicoding",
+        rollback_generation=rollback_generation,
+        registered_local_names=registered_local_names,
+        home=home,
+        exchange_paths=exchange_paths,
+    )
+
+
 def verify_skill_mappings(
     *,
     mappings: list[SkillMapping],
@@ -854,5 +1027,8 @@ __all__ = [
     "activate_openclaw_pool",
     "atomic_exchange_paths",
     "publish_pool_mappings",
+    "rollback_aicoding_pool",
+    "rollback_claude_code_pool",
+    "rollback_openclaw_pool",
     "verify_skill_mappings",
 ]

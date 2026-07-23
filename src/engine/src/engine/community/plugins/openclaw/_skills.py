@@ -19,6 +19,7 @@ from engine.community.plugins.openclaw.layout_activation import (
     SkillMapping,
     activate_openclaw_pool,
     publish_pool_mappings,
+    rollback_openclaw_pool,
     verify_skill_mappings,
 )
 from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layout
@@ -65,6 +66,18 @@ class _SkillsPortMixin:
                 params.get("registered_local_names", [])
             ),
             mappings=self._pool_mappings(params),
+        )
+        return PoolLayoutActivationPortResult(**result.to_data())
+
+    async def rollback_pool_layout(
+        self, params: dict[str, Any]
+    ) -> PoolLayoutActivationPortResult:
+        result = await asyncio.to_thread(
+            rollback_openclaw_pool,
+            rollback_generation=params["rollback_generation"],
+            registered_local_names=list(
+                params.get("registered_local_names", [])
+            ),
         )
         return PoolLayoutActivationPortResult(**result.to_data())
 

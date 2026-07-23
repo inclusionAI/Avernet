@@ -44,7 +44,7 @@ class FakeTransport:
                 "timeout": timeout,
             }
         )
-        if path.endswith("/activate"):
+        if path.endswith(("/activate", "/rollback")):
             return {
                 "success": True,
                 "data": {
@@ -108,6 +108,12 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
         registered_local_names=["a"],
         mappings=mappings,
     )
+    rollback = await runtime.rollback_to_legacy(
+        bot_id="bot-1",
+        user_id="owner-1",
+        rollback_generation="rollback-1",
+        registered_local_names=["a"],
+    )
     published = await runtime.publish_mappings(
         bot_id="bot-1",
         user_id="owner-1",
@@ -121,15 +127,19 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
 
     assert cutover.committed
     assert cutover.status is PoolCutoverStatus.COMMITTED
+    assert rollback.committed
+    assert rollback.status is PoolCutoverStatus.COMMITTED
     assert published
     assert verified
     assert resolver.calls == [
         ("bot-1", "owner-1"),
         ("bot-1", "owner-1"),
         ("bot-1", "owner-1"),
+        ("bot-1", "owner-1"),
     ]
     assert [call["path"] for call in transport.calls] == [
         "/api/skills/layout/activate",
+        "/api/skills/layout/rollback",
         "/api/skills/layout/mappings/publish",
         "/api/skills/layout/mappings/verify",
     ]

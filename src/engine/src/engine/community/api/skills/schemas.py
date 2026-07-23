@@ -75,6 +75,11 @@ class PoolLayoutActivateRequest(BaseModel):
     mappings: list[SymlinkItem]
 
 
+class PoolLayoutRollbackRequest(BaseModel):
+    rollback_generation: str
+    registered_local_names: list[str]
+
+
 class PoolLayoutActivateResponse(BaseModel):
     committed: bool
     status: Literal[
@@ -113,6 +118,7 @@ __all__ = [
     "RuntimeLayoutProbeResponse",
     "RuntimeLayoutProbeApiResponse",
     "PoolLayoutActivateRequest",
+    "PoolLayoutRollbackRequest",
     "PoolLayoutActivateResponse",
     "PoolLayoutActivateApiResponse",
     "PoolMappingVerifyRequest",
