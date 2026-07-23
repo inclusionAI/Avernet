@@ -18,8 +18,8 @@ use bcs_protocol::{BCN_TRANSPORT_HEADER, BcsFrame, BotDeliveryKind, RequestFrame
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryPort, BotEventCommand, BotEventOutcome, BotRunContext,
     BotRunContextPort, ChatAbortCommand, ChatAbortOutcome, ChatEventState, GroupCallbackCommand,
-    GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService, ServiceResult,
-    ProviderTransportPreference,
+    GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService,
+    ProviderTransportPreference, ServiceResult, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
     TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
 };
@@ -575,7 +575,10 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
     assert_eq!(request.body["from"]["kind"], "bot");
     assert_eq!(request.body["from"]["name"], "sender-bot-id");
     assert_eq!(request.body["from"]["actor_id"], "sender-bot-id");
-    assert_eq!(request.body["timeout_ms"], 3_600_000);
+    assert_eq!(
+        request.body["timeout_ms"],
+        DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS
+    );
 
     server.abort();
 }
