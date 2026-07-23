@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
+import pytest
+
 from engine.community.plugins.claude_code.layout_pool import (
+    LAYOUT_CONTRACT_VERSION,
+    MappingPublishResult,
+    MappingVerificationResult,
+    PoolActivationResult,
     PoolActivationStatus,
+    RuntimeLayoutInspection,
     RuntimeLayoutInspectionStatus,
     SkillMapping,
     activate_claude_code_pool,
     inspect_claude_code_runtime_layout,
+    publish_claude_code_pool_mappings,
+    verify_claude_code_pool_mappings,
 )
+from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
 
 
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
@@ -106,6 +117,23 @@ def test_claude_code_probe_requires_both_stable_bridges(tmp_path: Path) -> None:
     assert invalid.evidence["reason"] == "stable_repo_bridge_invalid"
 
 
+def test_claude_code_probe_rejects_non_file_marker(tmp_path: Path) -> None:
+    home = tmp_path / "home" / "admin"
+    marker = (
+        home
+        / ".claude_code"
+        / "workspace"
+        / "skills-pool"
+        / ".pool-ready"
+    )
+    marker.mkdir(parents=True)
+
+    result = inspect_claude_code_runtime_layout(home=home)
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "marker_not_regular_file"
+
+
 def test_claude_code_activation_atomically_switches_physical_local(
     tmp_path: Path,
 ) -> None:
@@ -144,3 +172,130 @@ def test_claude_code_activation_atomically_switches_physical_local(
     assert local_bridge.resolve() == pool_local.resolve()
     assert repo_bridge.resolve() == pool_repo.resolve()
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
+
+
+def test_claude_code_publishes_and_verifies_pool_mappings(tmp_path: Path) -> None:
+    home, _, local_bridge, _, pool_local, _ = _prepared_home(tmp_path)
+    target = local_bridge.parent / "handmade"
+    source = pool_local / "handmade"
+    mapping = SkillMapping(source=str(source), target=str(target))
+
+    published = publish_claude_code_pool_mappings(
+        mappings=[mapping],
+        home=home,
+    )
+    verified = verify_claude_code_pool_mappings(
+        mappings=[mapping],
+        home=home,
+    )
+
+    assert published.published is True
+    assert target.is_symlink()
+    assert target.resolve() == source.resolve()
+    assert verified.valid is True
+    assert verified.evidence["managed_checked"] == 1
+
+    target.unlink()
+    other_source = pool_local / "other"
+    other_source.mkdir()
+    target.symlink_to(other_source, target_is_directory=True)
+
+    mismatch = verify_claude_code_pool_mappings(
+        mappings=[mapping],
+        home=home,
+    )
+
+    assert mismatch.valid is False
+    assert mismatch.evidence["failures"][0]["reason"] == "managed_source_conflict"
+
+
+@pytest.mark.asyncio
+async def test_claude_code_port_runs_pool_filesystem_operations_off_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.claude_code import _skills
+
+    loop_thread = threading.get_ident()
+    worker_threads: list[int] = []
+    received: list[dict[str, object]] = []
+
+    def record(result: object, kwargs: dict[str, object]) -> object:
+        worker_threads.append(threading.get_ident())
+        received.append(kwargs)
+        return result
+
+    monkeypatch.setattr(
+        _skills,
+        "activate_claude_code_pool",
+        lambda **kwargs: record(
+            PoolActivationResult(
+                PoolActivationStatus.COMMITTED,
+                {"bridge": "valid"},
+            ),
+            kwargs,
+        ),
+    )
+    monkeypatch.setattr(
+        _skills,
+        "inspect_claude_code_runtime_layout",
+        lambda **kwargs: record(
+            RuntimeLayoutInspection(
+                status=RuntimeLayoutInspectionStatus.READY,
+                engine="claude_code",
+                layout_contract_version=LAYOUT_CONTRACT_VERSION,
+                preparation_id=PREPARATION_ID,
+                evidence={},
+            ),
+            kwargs,
+        ),
+    )
+    monkeypatch.setattr(
+        _skills,
+        "publish_claude_code_pool_mappings",
+        lambda **kwargs: record(
+            MappingPublishResult(True, {"total": 1}),
+            kwargs,
+        ),
+    )
+    monkeypatch.setattr(
+        _skills,
+        "verify_claude_code_pool_mappings",
+        lambda **kwargs: record(
+            MappingVerificationResult(True, {"checked": 1}),
+            kwargs,
+        ),
+    )
+    port = ClaudeCodePluginImpl()
+    params = {
+        "migration_generation": "generation-1",
+        "preparation_id": PREPARATION_ID,
+        "registered_local_names": ["handmade"],
+        "mappings": [{"source": "/pool/handmade", "target": "/skills/handmade"}],
+    }
+
+    assert (await port.activate_pool_layout(params))["committed"] is True
+    assert (
+        await port.probe_pool_layout(
+            {"layout_contract_version": LAYOUT_CONTRACT_VERSION}
+        )
+    )["status"] == "READY"
+    assert (await port.publish_pool_mappings(params))["published"] is True
+    assert (await port.verify_pool_mappings(params))["valid"] is True
+    assert len(worker_threads) == 4
+    assert all(worker_thread != loop_thread for worker_thread in worker_threads)
+    assert received[0] == {
+        "migration_generation": "generation-1",
+        "preparation_id": PREPARATION_ID,
+        "registered_local_names": ["handmade"],
+        "mappings": [
+            SkillMapping(source="/pool/handmade", target="/skills/handmade")
+        ],
+    }
+    assert received[1] == {
+        "expected_contract_version": LAYOUT_CONTRACT_VERSION,
+    }
+    assert received[2] == received[3] == {
+        "mappings": [
+            SkillMapping(source="/pool/handmade", target="/skills/handmade")
+        ],
+    }
