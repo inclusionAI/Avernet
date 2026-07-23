@@ -2,9 +2,13 @@
 
 ## Approach
 
-Retry stops asking "is the online release recorded?" entirely: an `ONLINE_PUB`
-retry always re-enqueues the `online_release` task, whose gate + release process
-already decide run-vs-skip and first-release-vs-upgrade idempotently. The
+Retry stops asking "is the online release recorded?" entirely. Retry still only
+applies to a `FAILED` record and still rolls it back to its pre-failure status
+(`ext.source_status`); the change is the dispatch after that rollback: when the
+pre-failure status is `ONLINE_PUB`, retry now unconditionally re-enqueues the
+`online_release` task — instead of choosing restart-vs-rerun — because the
+task's gate + release process already decide run-vs-skip and
+first-release-vs-upgrade idempotently. The
 predicate keeps only its gate consumer and is renamed
 `is_current_online_deployment`. The shared *deploy atom* — open ledger op →
 acquire workflow (with uniform `BOT_NOT_FOUND` classification) → validate ids —
