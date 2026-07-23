@@ -99,6 +99,60 @@ def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution() -> 
     assert outbound_rule.header_operation_rules[0].value == "caller-token"
 
 
+def test_caller_identity_prefers_baas_bot_uuid_from_binding_props() -> None:
+    service = _bare_baas_service()
+    service._bot_repo = MagicMock()
+    service._bot_repo.get_by_id_and_entity.return_value = {
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "bot_type": "service",
+        "status": "ACTIVE",
+    }
+    service._device_binding_repo = MagicMock()
+    service._device_binding_repo.get_by_id.return_value = SimpleNamespace(
+        status="ACTIVE",
+        device_id="teamclaw-device-1",
+        device_props={"bot_uuid": "baas-bot-1"},
+    )
+    service._outbound_rule_provider = MagicMock()
+    service._outbound_rule_provider.build_caller_rule.return_value = (
+        OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["https://mcp.example"],
+                    action="set",
+                    header_name="x-caller-token",
+                    value="caller-token",
+                )
+            ]
+        )
+    )
+    service.list_devices_by_bot_uuid = MagicMock(
+        return_value=[{"provider_device_id": "device-1@template-1"}]
+    )
+    service.append_caller_outbound_rule = MagicMock(return_value=True)
+
+    service.update_caller_identity(
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        caller_user_id="caller-1",
+        caller_token=CallerToken(
+            access_token="caller-token",
+            subject_user_id="caller-1",
+            expires_at=datetime.now(),
+            fingerprint="ignored",
+        ),
+        stage="draft",
+        publish_id=None,
+        entity_id="entity-1",
+        binding_id=9,
+    )
+
+    service.list_devices_by_bot_uuid.assert_called_once_with(
+        "baas-bot-1", timeout=3.0
+    )
+
+
 def test_caller_identity_rejects_ambiguous_bot_without_entity_id() -> None:
     service = _bare_baas_service()
     service._bot_repo = MagicMock()

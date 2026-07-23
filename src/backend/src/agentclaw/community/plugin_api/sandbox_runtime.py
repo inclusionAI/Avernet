@@ -86,9 +86,19 @@ class SandboxRuntimeClient(Plugin, Protocol):
         ...
 
     def update_outbound_rule(
-        self, *, sandbox_id: str, rule: "OutBoundOperationRule", tenant_idx: int
+        self,
+        *,
+        sandbox_id: str,
+        rule: "OutBoundOperationRule",
+        tenant_idx: int,
+        mode: str = "replace",
     ) -> bool:
-        """Replace the live outbound-header rule on ``sandbox_id``."""
+        """Update the live outbound-header rule on ``sandbox_id``.
+
+        ``mode`` is ``replace`` by default. Provider-aware runtime overlays may
+        request ``append`` so a Caller rule does not erase existing managed
+        headers.
+        """
         ...
 
     def build_proxy_connection(

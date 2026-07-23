@@ -3270,7 +3270,9 @@ class BaasService:  # pragma: no cover
         ):
             raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
 
-        devices = self.list_devices_by_bot_uuid(str(binding.device_id), timeout=3.0)
+        baas_lookup_id, lookup_source = self._caller_baas_lookup_id(binding)
+        logger.info("caller_baas_device_lookup_source=%s", lookup_source)
+        devices = self.list_devices_by_bot_uuid(baas_lookup_id, timeout=3.0)
         if not devices:
             raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
         if len(devices) != 1:
@@ -3328,6 +3330,16 @@ class BaasService:  # pragma: no cover
             and not isinstance(binding_id, bool)
             and binding_id > 0
         )
+
+    @staticmethod
+    def _caller_baas_lookup_id(binding: Any) -> tuple[str, str]:
+        """Resolve the BaaS bot UUID from the binding without guessing."""
+        device_props = getattr(binding, "device_props", None)
+        if isinstance(device_props, dict):
+            bot_uuid = device_props.get("bot_uuid")
+            if isinstance(bot_uuid, str) and bot_uuid.strip():
+                return bot_uuid.strip(), "device_props.bot_uuid"
+        return str(binding.device_id), "binding.device_id"
 
     def _resolve_caller_binding_id(
         self,
