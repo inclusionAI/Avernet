@@ -56,11 +56,6 @@ def test_abort_multipart_upload_raises(backend):
         backend.abort_multipart_upload("path", "session-1")
 
 
-def test_list_objects_raises(backend):
-    with pytest.raises(NotImplementedError, match=_EXPECTED_MSG):
-        backend.list_objects("prefix", 10, None)
-
-
 def test_delete_object_raises(backend):
     with pytest.raises(NotImplementedError, match=_EXPECTED_MSG):
         backend.delete_object("key")
@@ -69,8 +64,3 @@ def test_delete_object_raises(backend):
 def test_build_staging_path_raises(backend):
     with pytest.raises(NotImplementedError, match=_EXPECTED_MSG):
         backend.build_staging_path("tenant", "tf-001", "file.txt")
-
-
-def test_build_staging_prefix_raises(backend):
-    with pytest.raises(NotImplementedError, match=_EXPECTED_MSG):
-        backend.build_staging_prefix("tenant")

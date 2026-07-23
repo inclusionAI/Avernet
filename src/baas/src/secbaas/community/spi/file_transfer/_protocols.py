@@ -36,12 +36,12 @@ class PartInfo:
 
 @dataclass(slots=True)
 class ObjectItem:
-    """Metadata for a single staging object.
+    """Metadata for a single staging object returned by list_objects.
 
     Fields:
         key: Full OSS object key.
         size: Object size in bytes.
-        last_modified: ISO 8601 timestamp of last modification.
+        last_modified: ISO-format timestamp of last modification.
     """
 
     key: str
@@ -51,12 +51,12 @@ class ObjectItem:
 
 @dataclass(slots=True)
 class ObjectListing:
-    """Result of listing staging objects with marker pagination.
+    """Paginated result of list_objects.
 
     Fields:
-        items: List of ObjectItem results.
-        truncated: True if there are more results beyond the requested limit.
-        next_marker: Opaque marker for the next page, or None if not truncated.
+        items: List of ObjectItem for the current page.
+        truncated: True if more results exist beyond this page.
+        next_marker: Opaque pagination token for the next page (None if not truncated).
     """
 
     items: list[ObjectItem]
@@ -184,24 +184,6 @@ class FileTransferBackend(Protocol):
         """
         ...
 
-    def list_objects(
-        self, prefix: str, limit: int, marker: str | None
-    ) -> ObjectListing:
-        """List staging objects with marker pagination.
-
-        limit capped at 1000 (OSS max_keys maximum).  Returns flat list
-        of objects in the staging area matching the prefix.
-
-        Args:
-            prefix: OSS key prefix to filter by.
-            limit: Maximum number of objects to return (capped at 1000).
-            marker: Opaque pagination marker from previous response.
-
-        Returns:
-            ObjectListing with items, truncated flag, and next_marker.
-        """
-        ...
-
     def delete_object(self, key: str) -> None:
         """Delete a single object from staging.
 
@@ -232,24 +214,5 @@ class FileTransferBackend(Protocol):
 
         Returns:
             Complete OSS object key string.
-        """
-        ...
-
-    def build_staging_prefix(
-        self,
-        tenant: str,
-        subdir: str | None = None,
-    ) -> str:
-        """Construct OSS key prefix for tenant-scoped object listing.
-
-        Used by list_staging to scope results to a single tenant.
-        The returned prefix ends with ``"/"``.
-
-        Args:
-            tenant: Tenant identifier for scoping.
-            subdir: Optional subdirectory under the tenant scope.
-
-        Returns:
-            Prefix string ending with ``"/"``.
         """
         ...

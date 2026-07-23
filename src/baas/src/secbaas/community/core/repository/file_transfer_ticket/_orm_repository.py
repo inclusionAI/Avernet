@@ -40,7 +40,8 @@ VALID_TRANSITIONS = frozenset(
         ("UPLOAD_COMPLETED", "FAILED"),
         ("PULLING", "FAILED"),
         ("PUSHING", "FAILED"),
-        # Phase 72: Cancel upload -- any non-terminal upload state -> CANCELLED
+        # Phase 72: Cancel upload -- non-terminal upload states -> CANCELLED
+        # (UPLOAD_COMPLETED deliberately excluded: OSS object already exists, cannot cancel)
         ("CREATED", "CANCELLED"),
         ("UPLOADING", "CANCELLED"),
         ("PULLING", "CANCELLED"),
@@ -143,8 +144,9 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         update_kwargs = {
             "status": new_status,
             "gmt_modified": func.now(),
-            "error_message": error_message,
         }
+        if error_message is not None:
+            update_kwargs["error_message"] = error_message
         result = (
             self._session.query(FileTransferTicketModel)
             .filter(
@@ -194,41 +196,6 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
             return None
         record = row.to_record()
         log.info("[file-transfer:get_by_transfer_id] result: id=%s", record.id)
-        return record
-
-    @with_orm_session
-    def get_by_fileservice_staging_path(
-        self,
-        staging_path: str,
-        tenant: str | None = None,
-    ) -> TicketRecord | None:
-        """Look up a ticket by its fileservice_staging_path.
-
-        Args:
-            staging_path: Full OSS object key (fileservice_staging_path).
-            tenant: Optional tenant filter for authorization enforcement.
-
-        Returns:
-            TicketRecord if found, None otherwise.
-        """
-        log.info(
-            "[file-transfer:get_by_staging_path] staging_path=%s, tenant=%s",
-            staging_path,
-            tenant,
-        )
-        env = get_current_env()
-        filters = [
-            FileTransferTicketModel.fileservice_staging_path == staging_path,
-            FileTransferTicketModel.env == env,
-        ]
-        if tenant is not None:
-            filters.append(FileTransferTicketModel.tenant == tenant)
-        row = self._session.query(FileTransferTicketModel).filter(*filters).first()
-        if row is None:
-            log.info("[file-transfer:get_by_staging_path] result: not found")
-            return None
-        record = row.to_record()
-        log.info("[file-transfer:get_by_staging_path] result: id=%s", record.id)
         return record
 
     @with_orm_session
