@@ -682,14 +682,35 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             )
 
         previous_status = ticket.status
-        # D-12: Transition ticket to DELETED first (atomic CAS), then
-        # best-effort OSS delete.  If the OSS call fails the ticket is
-        # already DELETED and a background cleanup job can retry.
-        self._ticket_repo.update_status(ticket.transfer_id, "DELETED")
+        # D-12: Delete OSS object first — if this fails with a transient
+        # error the ticket stays in its original terminal state and the
+        # caller can safely retry without hitting the idempotency guard.
         await asyncio.to_thread(
             self._file_transfer_backend.delete_object,
             ticket.fileservice_staging_path,
         )
+
+        # Only mark DELETED after OSS deletion succeeds.
+        # CAS-aware status update — a concurrent delete may have already
+        # transitioned this ticket.
+        try:
+            self._ticket_repo.update_status(ticket.transfer_id, "DELETED")
+        except TransferStateConflictError:
+            ticket = self._ticket_repo.get_by_transfer_id(
+                ticket.transfer_id, tenant=tenant
+            )
+            if ticket is not None and ticket.status == "DELETED":
+                logger.info(
+                    "dispatch_delete_transfer: CAS conflict resolved — "
+                    "ticket already DELETED (transfer_id=%s)",
+                    ticket.transfer_id,
+                )
+                return DeleteTransferResponse(
+                    transfer_id=ticket.transfer_id,
+                    previous_status=previous_status,
+                    new_status="DELETED",
+                )
+            raise
 
         logger.info(
             "dispatch_delete_transfer: result: transfer_id=%s, "

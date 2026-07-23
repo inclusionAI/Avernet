@@ -34,6 +34,36 @@ class PartInfo:
     etag: str | None = None
 
 
+@dataclass(slots=True)
+class ObjectItem:
+    """Metadata for a single staging object returned by list_objects.
+
+    Fields:
+        key: Full OSS object key.
+        size: Object size in bytes.
+        last_modified: ISO-format timestamp of last modification.
+    """
+
+    key: str
+    size: int
+    last_modified: str
+
+
+@dataclass(slots=True)
+class ObjectListing:
+    """Paginated result of list_objects.
+
+    Fields:
+        items: List of ObjectItem for the current page.
+        truncated: True if more results exist beyond this page.
+        next_marker: Opaque pagination token for the next page (None if not truncated).
+    """
+
+    items: list[ObjectItem]
+    truncated: bool
+    next_marker: str | None
+
+
 class FileTransferBackend(Protocol):
     """Protocol for file transfer storage backend operations.
 
