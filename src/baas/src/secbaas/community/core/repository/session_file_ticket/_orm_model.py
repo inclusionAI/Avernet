@@ -26,7 +26,7 @@ class SessionFileTicketModel(Base):
     )
     transfer_id = Column(String(128), nullable=False)
     tenant = Column(String(128), nullable=False)
-    session_id = Column(String(256), nullable=False)  # replaces paas_device_id
+    session_id = Column(String(256), nullable=False)            # replaces paas_device_id
     # No direction column
     status = Column(String(32), nullable=False)
     staging_subdir = Column(String(1024), nullable=True)
@@ -40,9 +40,9 @@ class SessionFileTicketModel(Base):
     operator = Column(String(256), nullable=False, server_default="unknown")
 
     __table_args__ = (
-        UniqueConstraint("transfer_id", name="uk_tid"),
-        Index("idx_env_tnt_sid", "env", "tenant", "session_id"),
-        Index("idx_env_tnt_dir", "env", "tenant", "staging_subdir"),
+        UniqueConstraint("transfer_id", "env", name="uk_sft_transfer_id_env"),
+        Index("idx_sft_status_created", "status", "gmt_create"),
+        Index("idx_sft_session", "tenant", "session_id"),
     )
 
     def to_record(self) -> SessionTicketRecord:

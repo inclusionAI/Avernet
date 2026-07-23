@@ -21,7 +21,7 @@ class SessionTicketRecord:
     gmt_modified: datetime
     transfer_id: str
     tenant: str
-    session_id: str  # replaces paas_device_id
+    session_id: str                         # replaces paas_device_id
     status: str
     staging_subdir: str | None
     filename: str
