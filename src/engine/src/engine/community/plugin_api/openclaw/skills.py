@@ -123,6 +123,12 @@ class OpenClawSkillsPort(Protocol):
         """
         ...
 
+    async def cleanup_pool_quarantine(
+        self, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Delete one exact migration generation under the fixed Pool root."""
+        ...
+
     async def probe_pool_layout(
         self, params: dict[str, Any]
     ) -> dict[str, Any]:

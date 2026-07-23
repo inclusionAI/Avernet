@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from agentclaw.community.core.bot_management.repository.protocol import (
@@ -37,6 +38,11 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
+from agentclaw.community.core.skills_pool.quarantine import (
+    QUARANTINE_RETENTION,
+    SKILLS_POOL_QUARANTINE_CLEANUP_TASK,
+    SkillsPoolQuarantineCleanupTaskHandler,
+)
 from agentclaw.community.core.task_queue.services.registry import (
     HandlerRegistry,
 )
@@ -67,6 +73,7 @@ def build_skills_pool_reconcile_payload(
     source: str,
     signal_identity: dict[str, object],
     wakeup_id: str | None = None,
+    observed_at: datetime | None = None,
 ) -> dict[str, object]:
     """Build the persisted work identity.
 
@@ -83,6 +90,7 @@ def build_skills_pool_reconcile_payload(
         "source": source,
         "signal_identity": dict(signal_identity),
         "wakeup_id": wakeup_id or uuid4().hex,
+        "observed_at": (observed_at or datetime.now(UTC)).isoformat(),
     }
 
 
@@ -95,11 +103,13 @@ class SkillsPoolReconcileTaskHandler:
         claim_service: SkillsPoolMigrationClaimService,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         reconcile_service: SkillsPoolReconcileService,
+        task_queue_service: TaskQueueService | None = None,
         lease_seconds: int = SKILLS_POOL_LEASE_SECONDS,
     ) -> None:
         self._claims = claim_service
         self._layouts = layout_repository
         self._reconcile = reconcile_service
+        self._queue = task_queue_service
         self._lease_seconds = lease_seconds
 
     @property
@@ -108,7 +118,9 @@ class SkillsPoolReconcileTaskHandler:
 
     def handle(self, payload: dict | None) -> TaskOutcome:
         try:
-            scope, wakeup_id = self._parse_payload(payload)
+            scope, wakeup_id, source, signal_identity, observed_at = (
+                self._parse_payload(payload)
+            )
         except ValueError as error:
             return Fail(f"invalid payload: {error}")
 
@@ -134,6 +146,25 @@ class SkillsPoolReconcileTaskHandler:
             return Retry("skills pool migration claim race lost")
         if claim.state is None:
             return Retry("skills pool migration claim returned no state")
+        if claim.state.active_layout is SkillLayout.POOL:
+            generation = claim.state.migration_generation
+            if generation is not None:
+                self._layouts.record_runtime_reconciliation(
+                    scope=scope,
+                    migration_generation=generation,
+                    observed_at=observed_at,
+                    evidence={
+                        "source": source,
+                        "signal_identity": signal_identity,
+                        "wakeup_id": wakeup_id,
+                    },
+                )
+                self._schedule_quarantine_cleanup(
+                    scope=scope,
+                    migration_generation=generation,
+                    delay_seconds=0,
+                )
+            return Complete()
 
         lease_outcome = self._ensure_lease(
             state=claim.state,
@@ -149,7 +180,40 @@ class SkillsPoolReconcileTaskHandler:
                 lease_owner=lease_owner,
             )
         )
+        if (
+            result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+            and self._queue is not None
+            and claim.state.migration_generation is not None
+        ):
+            self._schedule_quarantine_cleanup(
+                scope=scope,
+                migration_generation=claim.state.migration_generation,
+                delay_seconds=int(QUARANTINE_RETENTION.total_seconds()),
+            )
         return self._task_outcome(result)
+
+    def _schedule_quarantine_cleanup(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        delay_seconds: int,
+    ) -> None:
+        if self._queue is None:
+            return
+        self._queue.enqueue(
+            SKILLS_POOL_QUARANTINE_CLEANUP_TASK,
+            {
+                "scope": {
+                    "env": scope.env,
+                    "entity_id": scope.entity_id,
+                    "bot_id": scope.bot_id,
+                },
+                "migration_generation": migration_generation,
+            },
+            deadline_seconds=90 * 24 * 60 * 60,
+            delay_seconds=delay_seconds,
+        )
 
     def _ensure_lease(
         self,
@@ -225,7 +289,13 @@ class SkillsPoolReconcileTaskHandler:
     @staticmethod
     def _parse_payload(
         payload: dict | None,
-    ) -> tuple[BotSkillLayoutScope, str]:
+    ) -> tuple[
+        BotSkillLayoutScope,
+        str,
+        str,
+        dict[str, object],
+        datetime,
+    ]:
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         raw_scope = payload.get("scope")
@@ -243,9 +313,30 @@ class SkillsPoolReconcileTaskHandler:
         source = payload.get("source")
         if not isinstance(source, str) or not source.strip():
             raise ValueError("source must be a non-empty string")
-        if not isinstance(payload.get("signal_identity"), dict):
+        signal_identity = payload.get("signal_identity")
+        if not isinstance(signal_identity, dict):
             raise ValueError("signal_identity must be an object")
-        return BotSkillLayoutScope(**values), wakeup_id
+        raw_observed_at = payload.get("observed_at")
+        if raw_observed_at is None:
+            # Tasks persisted by the previous Backend remain executable, but
+            # their unknown event time can never qualify cleanup evidence.
+            observed_at = datetime.min.replace(tzinfo=UTC)
+        elif not isinstance(raw_observed_at, str):
+            raise ValueError("observed_at must be an ISO timestamp")
+        else:
+            try:
+                observed_at = datetime.fromisoformat(raw_observed_at)
+            except ValueError as error:
+                raise ValueError("observed_at must be an ISO timestamp") from error
+        if observed_at.tzinfo is None:
+            raise ValueError("observed_at must include a timezone")
+        return (
+            BotSkillLayoutScope(**values),
+            wakeup_id,
+            source,
+            signal_identity,
+            observed_at.astimezone(UTC),
+        )
 
 
 class SkillsPoolReconcileWakeupListener(LifecycleBase):
@@ -259,16 +350,20 @@ class SkillsPoolReconcileWakeupListener(LifecycleBase):
         task_queue_service: TaskQueueService,
         registry: HandlerRegistry | None = None,
         task_handler: SkillsPoolReconcileTaskHandler | None = None,
+        quarantine_task_handler: SkillsPoolQuarantineCleanupTaskHandler | None = None,
     ) -> None:
         self._bindings = binding_repository
         self._bots = bot_repository
         self._queue = task_queue_service
         self._registry = registry
         self._task_handler = task_handler
+        self._quarantine_task_handler = quarantine_task_handler
 
     async def bootstrap(self) -> None:
         if self._registry is not None and self._task_handler is not None:
             self._registry.register(self._task_handler)
+        if self._registry is not None and self._quarantine_task_handler is not None:
+            self._registry.register(self._quarantine_task_handler)
         from agentclaw.community.core.events.bus import get_event_bus
 
         bus = get_event_bus()

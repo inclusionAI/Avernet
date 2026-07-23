@@ -23,11 +23,12 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayoutPhase,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugins.skills_pool_quarantine_repository import (
+    SkillsPoolQuarantineRepositoryMixin,
+)
 
 
-class SkillsPoolLayoutRepository:
-    """在所有部署形态中使用同一套 ORM 状态读取语义。"""
-
+class SkillsPoolLayoutRepository(SkillsPoolQuarantineRepositoryMixin):
     @inject
     def __init__(self, database: DatabasePlugin) -> None:
         self._database = database
@@ -281,11 +282,15 @@ class SkillsPoolLayoutRepository:
         preparation_id: str,
         evidence: dict[str, object],
     ) -> bool:
-        """持久化不可逆边界，后续重试只能继续前滚。"""
-
         evidence_json = json.dumps(evidence, ensure_ascii=False)
+        runtime_evidence = evidence.get("evidence")
+        quarantine_path = (
+            runtime_evidence.get("quarantine")
+            if isinstance(runtime_evidence, dict)
+            else None
+        )
         with self._database.transactional_orm_session() as session:
-            affected = (
+            row = (
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
@@ -306,18 +311,27 @@ class SkillsPoolLayoutRepository:
                     BotSkillLayoutStateModel.lease_owner == lease_owner,
                     BotSkillLayoutStateModel.lease_expires_at > func.now(),
                 )
-                .update(
-                    {
-                        BotSkillLayoutStateModel.phase: (
-                            SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value
-                        ),
-                        BotSkillLayoutStateModel.data_plane_cutover_committed: 1,
-                        BotSkillLayoutStateModel.last_probe_evidence: evidence_json,
-                    },
-                    synchronize_session=False,
-                )
+                .with_for_update()
+                .one_or_none()
             )
-        return affected == 1
+            if row is None or row.rollout_evidence is None:
+                return False
+            engine = json.loads(row.rollout_evidence).get("engine_type")
+            if not isinstance(engine, str) or not engine:
+                return False
+            if not self._upsert_quarantine(
+                session,
+                scope=scope,
+                migration_generation=migration_generation,
+                engine=engine,
+                path=quarantine_path,
+                evidence_json=evidence_json,
+            ):
+                return False
+            row.phase = SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value
+            row.data_plane_cutover_committed = 1
+            row.last_probe_evidence = evidence_json
+        return True
 
     def record_cutover_finalizing(
         self,
@@ -328,8 +342,6 @@ class SkillsPoolLayoutRepository:
         preparation_id: str,
         evidence: dict[str, object],
     ) -> bool:
-        """Persist a known bridge commit whose post-sync must be retried."""
-
         evidence_json = json.dumps(evidence, ensure_ascii=False)
         with self._database.transactional_orm_session() as session:
             affected = (
@@ -693,6 +705,13 @@ class SkillsPoolLayoutRepository:
             )
             if affected != 1:
                 return False
+            if not self._activate_quarantine(
+                session,
+                scope=scope,
+                migration_generation=migration_generation,
+            ):
+                session.rollback()
+                return False
             for row in local_rows:
                 row.git_path = local_locators[row.id]
         return True
@@ -723,6 +742,7 @@ class SkillsPoolLayoutRepository:
                     BotSkillLayoutStateModel.target_layout.is_(None),
                     BotSkillLayoutStateModel.phase
                     == SkillLayoutPhase.POOL_ACTIVE.value,
+                    self._no_active_quarantine_cleanup(scope),
                 )
                 .update(
                     {

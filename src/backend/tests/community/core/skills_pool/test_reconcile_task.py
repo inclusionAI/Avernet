@@ -278,6 +278,7 @@ class FakeLayouts:
         self.acquire_calls: list[dict[str, object]] = []
         self.renew_result = True
         self.acquire_result = False
+        self.runtime_reconciliation_calls: list[dict[str, object]] = []
 
     def renew_lease(self, **kwargs: object) -> bool:
         self.renew_calls.append(kwargs)
@@ -291,6 +292,10 @@ class FakeLayouts:
                 lease_owner=str(kwargs["lease_owner"]),
             )
         return self.acquire_result
+
+    def record_runtime_reconciliation(self, **kwargs: object) -> bool:
+        self.runtime_reconciliation_calls.append(kwargs)
+        return True
 
 
 class FakeReconcileService:
@@ -371,6 +376,31 @@ def test_unclaimed_task_claims_then_reconciles_same_generation() -> None:
     assert reconcile.calls == [{"scope": SCOPE, "lease_owner": "skills-pool:wakeup-1"}]
 
 
+def test_pool_activation_schedules_generation_scoped_seven_day_cleanup() -> None:
+    state = _claimed_state()
+    claims = FakeClaimService(
+        [MigrationClaimResult(MigrationClaimOutcome.CLAIMED, state)]
+    )
+    layouts = FakeLayouts(state)
+    reconcile = FakeReconcileService(
+        [SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.POOL_ACTIVE)]
+    )
+    queue = MagicMock()
+    handler = SkillsPoolReconcileTaskHandler(
+        claim_service=claims,
+        layout_repository=layouts,
+        reconcile_service=reconcile,
+        task_queue_service=queue,
+    )
+
+    assert handler.handle(_payload()) == Complete()
+
+    task_type, payload = queue.enqueue.call_args.args[:2]
+    assert task_type == "skills_pool.quarantine.cleanup"
+    assert payload["migration_generation"] == "generation-1"
+    assert queue.enqueue.call_args.kwargs["delay_seconds"] == 7 * 24 * 60 * 60
+
+
 def test_stale_signal_metadata_is_not_forwarded_as_runtime_identity() -> None:
     state = _claimed_state()
     handler, _, _, reconcile = _handler(
@@ -413,6 +443,32 @@ def test_claimed_generation_renews_without_rechecking_rollout_gate() -> None:
     assert len(claims.calls) == 1
     assert layouts.renew_calls[0]["migration_generation"] == "generation-1"
     assert len(reconcile.calls) == 1
+
+
+def test_pool_active_wakeup_records_runtime_reconciliation_without_probe() -> None:
+    state = _claimed_state(active_layout=SkillLayout.POOL)
+    handler, _, layouts, reconcile = _handler(
+        claim_results=[
+            MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)
+        ],
+        reconcile_results=[
+            SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.ALREADY_ACTIVE)
+        ],
+        state=state,
+    )
+
+    outcome = handler.handle(_payload())
+
+    assert outcome == Complete()
+    assert reconcile.calls == []
+    assert layouts.runtime_reconciliation_calls[0]["scope"] == SCOPE
+    assert (
+        layouts.runtime_reconciliation_calls[0]["migration_generation"]
+        == "generation-1"
+    )
+    assert layouts.runtime_reconciliation_calls[0]["evidence"]["source"] == (
+        "arca_device_alive"
+    )
 
 
 def test_busy_generation_reschedules_until_lease_can_be_acquired() -> None:

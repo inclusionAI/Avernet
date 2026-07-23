@@ -246,6 +246,12 @@ class ClaudeCodeSkillsPort(Protocol):
         """
         ...
 
+    async def cleanup_pool_quarantine(
+        self, params: dict
+    ) -> dict:
+        """Delete one exact migration generation under the fixed Pool root."""
+        ...
+
     async def probe_pool_layout(
         self,
         params: dict,

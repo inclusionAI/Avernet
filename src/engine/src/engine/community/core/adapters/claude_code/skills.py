@@ -47,6 +47,8 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeResult,
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
+    PoolQuarantineCleanupRequest,
+    PoolQuarantineCleanupResult,
     PoolMappingPublishResult,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
@@ -420,6 +422,19 @@ class ClaudeCodeSkillsAdapter(SkillsService):
             ),
             status=status,
             evidence=evidence,
+        )
+
+    async def cleanup_pool_quarantine(
+        self,
+        request: PoolQuarantineCleanupRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolQuarantineCleanupResult:
+        raw = await self._port.cleanup_pool_quarantine(
+            {"migration_generation": request.migration_generation}
+        )
+        return PoolQuarantineCleanupResult(
+            status=str(raw.get("status", "TRANSIENT_ERROR")),
+            evidence=dict(raw.get("evidence") or {}),
         )
 
     async def publish_pool_mappings(

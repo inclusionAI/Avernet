@@ -22,3 +22,4 @@ def test_bootstrap_creates_bot_skill_layout_state_table() -> None:
     engine = db_mod._engine
     assert engine is not None
     assert "ac_bot_skill_layout_state" in inspect(engine).get_table_names()
+    assert "ac_skill_migration_quarantine" in inspect(engine).get_table_names()

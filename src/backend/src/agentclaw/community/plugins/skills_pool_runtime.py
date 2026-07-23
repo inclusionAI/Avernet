@@ -206,6 +206,46 @@ class SkillsPoolRuntime:
             evidence=evidence,
         )
 
+    async def cleanup_quarantine(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+        migration_generation: str,
+    ) -> dict[str, object]:
+        try:
+            response = await self._invoke(
+                bot_id=bot_id,
+                user_id=user_id,
+                path="/api/skills/layout/quarantine/cleanup",
+                body={"migration_generation": migration_generation},
+            )
+        except Exception as error:
+            logger.exception(
+                "[skills_pool.runtime] quarantine cleanup failed "
+                "bot_id=%s generation=%s",
+                bot_id,
+                migration_generation,
+            )
+            return {
+                "status": "TRANSIENT_ERROR",
+                "evidence": {
+                    "reason": "runtime_cleanup_outcome_unknown",
+                    "error_type": type(error).__name__,
+                },
+            }
+        data = response.get("data")
+        if not isinstance(data, dict):
+            return {
+                "status": "TRANSIENT_ERROR",
+                "evidence": {"reason": "invalid_runtime_response"},
+            }
+        return {
+            "status": str(data.get("status", "TRANSIENT_ERROR")),
+            "evidence": dict(data.get("evidence") or {}),
+        }
+
     async def verify_mappings(
         self,
         *,

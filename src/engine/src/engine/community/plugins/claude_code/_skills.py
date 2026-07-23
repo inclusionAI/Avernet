@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any
 
 from engine.community.plugins.claude_code.layout_pool import (
@@ -23,6 +24,7 @@ from engine.community.plugins.claude_code.layout_pool import (
     rollback_claude_code_pool,
     verify_claude_code_pool_mappings,
 )
+from engine.community.plugins.skills_pool.layout_quarantine import cleanup_quarantine
 
 log = logging.getLogger("claude-code-community-port")
 
@@ -75,6 +77,18 @@ class _SkillsPortMixin:
             registered_local_names=list(
                 params.get("registered_local_names", [])
             ),
+        )
+        return result.to_data()
+
+    async def cleanup_pool_quarantine(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            cleanup_quarantine,
+            engine="claude_code",
+            home=Path("/home/admin"),
+            migration_generation=params["migration_generation"],
         )
         return result.to_data()
 

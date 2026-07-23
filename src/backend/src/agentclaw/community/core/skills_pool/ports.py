@@ -70,6 +70,16 @@ class SkillsPoolRuntimeProtocol(Protocol):
     ) -> PoolCutoverResult:
         ...
 
+    async def cleanup_quarantine(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+        migration_generation: str,
+    ) -> dict[str, object]:
+        ...
+
     async def publish_mappings(
         self,
         *,
