@@ -1105,7 +1105,9 @@ class LocalProcessManager:
         """
         configured = os.environ.get("LOCAL_ENGINE_PYTHON")
         if configured:
-            candidate = Path(configured).expanduser().resolve()
+            candidate = Path(configured).expanduser()
+            if not candidate.is_absolute():
+                candidate = Path.cwd() / candidate
             if candidate.is_file() and os.access(candidate, os.X_OK):
                 return str(candidate)
             raise DeviceAllocateError(
