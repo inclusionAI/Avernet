@@ -15,8 +15,8 @@ status-guarded checkpoint:
   (BUILT→VALIDATE_PUB); a BUILDING crash simply rebuilds. On success enqueues the
   poll.
 * ``online_release`` — runs the online release *within* ONLINE_PUB (no self-
-  advance); ``ext.publish.online`` presence guards a re-run from creating a second
-  bot. On success enqueues the poll.
+  advance); the ledger-driven ``is_current_online_deployment`` gate keeps a
+  re-run from creating a second bot. On success enqueues the poll.
 * ``progress_poll`` — drives the BaaS-publish wait to terminal (VALIDATE_PUB→
   VALIDATING, ONLINE_PUB→SUCCESS) by reusing ``advance_publish_progress``;
   reschedules until the record leaves the ``*_PUB`` state.
@@ -275,9 +275,11 @@ class PublishOnlineReleaseHandler(_PublishTaskBase):
     The record enters at ONLINE_PUB — the user-driven ``process`` (or a retry) owns
     the go-live VALIDATING → ONLINE_PUB advance, so a concurrent double-submit can't
     reach this task twice. The release runs within ONLINE_PUB (no self-advance);
-    ``is_online_release_recorded`` (``ext.publish.online`` presence) is the
-    idempotency guard so a crash-resume re-run does not create a second BaaS bot.
-    The poll then drives ONLINE_PUB → SUCCESS.
+    the ledger-driven ``is_current_online_deployment`` gate is the idempotency
+    guard: the release is skipped only when this record's release is the current
+    live deployment on its bot, so a crash-resume re-run does not create a second
+    BaaS bot and a stale/failed release re-runs. The poll then drives
+    ONLINE_PUB → SUCCESS.
     """
 
     @property
@@ -294,12 +296,12 @@ class PublishOnlineReleaseHandler(_PublishTaskBase):
         if record is None:
             return Fail(f"publish record not found: publish_id={publish_id}")
 
-        # is_online_release_recorded is the crash-resume guard: the release runs
+        # is_current_online_deployment is the crash-resume guard: the release runs
         # within ONLINE_PUB (no self-advance), so the status alone cannot tell a
         # not-yet-run release from one that already created the BaaS bot. Only the
-        # ext.publish.online marker (written atomically with the record) does — a
-        # lease-expiry re-run of this task must not create a second bot.
-        if status == PublishStatus.ONLINE_PUB and not self._flow.is_online_release_recorded(
+        # ledger's bot timeline does — a lease-expiry re-run of this task must not
+        # create a second bot, and a stale or failed release must re-run.
+        if status == PublishStatus.ONLINE_PUB and not self._flow.is_current_online_deployment(
             publish_id
         ):
             release_result = await self._flow.execute_release_phase(record, operator)

@@ -2,7 +2,7 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Rename the predicate to `is_current_online_deployment`
+## Task 1: `[x]` Rename the predicate to `is_current_online_deployment`
 
 - **Goal:** Give the liveness predicate its real name and pin it as gate-only,
   before any behavior changes touch it.

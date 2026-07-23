@@ -46,7 +46,7 @@ class _FakeFlow:
             return None
         return SimpleNamespace(id=publish_id, status=self.status)
 
-    def is_online_release_recorded(self, publish_id):
+    def is_current_online_deployment(self, publish_id):
         return self._online_recorded
 
     async def execute_build_phase(self, record, operator):
