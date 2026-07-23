@@ -9,7 +9,13 @@ from typing import Protocol, runtime_checkable
 class UserListServiceProtocol(Protocol):
     """Read current-environment membership without exposing list entries."""
 
-    def is_in_user_list(self, *, entity_id: str, user_list_type: str) -> bool: ...
+    def is_in_user_list(
+        self,
+        *,
+        entity_id: str,
+        user_list_type: str,
+        env: str | None = None,
+    ) -> bool: ...
 
     def correct_membership(
         self,
@@ -18,6 +24,7 @@ class UserListServiceProtocol(Protocol):
         entity_id: str,
         user_list_type: str,
         in_whitelist: bool,
+        env: str | None = None,
     ) -> bool: ...
 
 

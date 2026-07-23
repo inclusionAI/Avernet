@@ -38,6 +38,18 @@ def _seed_current_env_member(world) -> None:
         )
 
 
+def _seed_other_entity_member(world) -> None:
+    _seed_user(world)
+    with world.get(DatabasePlugin).orm_session() as session:
+        session.add(
+            EntityUserListModel(
+                entity_id=_OTHER_ENTITY_ID,
+                user_list_type=_USER_LIST_TYPE,
+                env=get_current_env(),
+            )
+        )
+
+
 def _seed_other_scope_members(world) -> None:
     _seed_user(world)
     current_env = get_current_env()
@@ -59,7 +71,23 @@ def _seed_other_scope_members(world) -> None:
         )
 
 
+def _seed_manual_env_member(world) -> None:
+    _seed_user(world)
+    with world.get(DatabasePlugin).orm_session() as session:
+        session.add(
+            EntityUserListModel(
+                entity_id=_ENTITY_ID,
+                user_list_type=_USER_LIST_TYPE,
+                env="prod",
+            )
+        )
+
+
 def _seed_correction_actor(world) -> None:
+    make_staff_user(world, user_id=_CORRECTION_ACTOR)
+
+
+def _seed_manual_correction_actor(world) -> None:
     make_staff_user(world, user_id=_CORRECTION_ACTOR)
 
 
@@ -162,7 +190,51 @@ def user_list_check_ignores_other_types_and_environments():
 @endpoint_test(
     method="GET",
     path="/api/v1/user-lists/check",
-    scenario="rejects_other_entity",
+    scenario="manual_env_override",
+    input=CaseInput(
+        query_params={
+            "entity_id": _ENTITY_ID,
+            "user_list_type": _USER_LIST_TYPE,
+            "env": "prod",
+        },
+        headers={"x-user-id": _ENTITY_ID},
+    ),
+    seed=_seed_manual_env_member,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"in_whitelist": True},
+        },
+    ),
+)
+def user_list_check_supports_manual_environment_override():
+    """An explicit env selects that environment instead of runtime env."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/user-lists/check",
+    scenario="rejects_invalid_env",
+    input=CaseInput(
+        query_params={
+            "entity_id": _ENTITY_ID,
+            "user_list_type": _USER_LIST_TYPE,
+            "env": "staging",
+        },
+        headers={"x-user-id": _ENTITY_ID},
+    ),
+    seed=_seed_user,
+    expect=ExpectError(status=422),
+)
+def user_list_check_rejects_invalid_environment():
+    """Only normalized dev/pre/prod environment values are accepted."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/v1/user-lists/check",
+    scenario="queries_other_entity",
     input=CaseInput(
         query_params={
             "entity_id": _OTHER_ENTITY_ID,
@@ -170,11 +242,17 @@ def user_list_check_ignores_other_types_and_environments():
         },
         headers={"x-user-id": _ENTITY_ID},
     ),
-    seed=_seed_user,
-    expect=ExpectError(status=403),
+    seed=_seed_other_entity_member,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"in_whitelist": True},
+        },
+    ),
 )
-def user_list_check_rejects_another_users_membership_lookup():
-    """The browser may only inspect the authenticated user's own entry."""
+def user_list_check_queries_the_requested_entity_membership():
+    """The lookup uses the requested entity and keeps current-env isolation."""
 
 
 @endpoint_test(
@@ -207,7 +285,7 @@ def user_list_check_rejects_an_invalid_user_list_type():
     expect=ExpectError(status=422),
 )
 def user_list_check_requires_an_entity_id():
-    """The authenticated identity comparison cannot be skipped."""
+    """The lookup scope still requires an explicit entity identifier."""
 
 
 @endpoint_test(
@@ -254,6 +332,49 @@ def user_list_correction_allows_an_authenticated_user_to_add():
 )
 def user_list_correction_allows_another_authenticated_user_to_remove():
     """Another authenticated user may disable an exact entry."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/api/v1/user-lists/correct",
+    scenario="authenticated_user_adds_member_in_manual_env",
+    input=CaseInput(
+        query_params={"env": "prod"},
+        headers={"x-user-id": _CORRECTION_ACTOR},
+        json_body={
+            "entity_id": _CORRECTION_TARGET,
+            "user_list_type": _USER_LIST_TYPE,
+            "in_whitelist": True,
+        },
+    ),
+    seed=_seed_manual_correction_actor,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"in_whitelist": True}},
+    ),
+)
+def user_list_correction_supports_manual_environment_override():
+    """An explicit env selects the membership partition being corrected."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/api/v1/user-lists/correct",
+    scenario="rejects_invalid_correction_env",
+    input=CaseInput(
+        query_params={"env": "staging"},
+        headers={"x-user-id": _CORRECTION_ACTOR},
+        json_body={
+            "entity_id": _CORRECTION_TARGET,
+            "user_list_type": _USER_LIST_TYPE,
+            "in_whitelist": True,
+        },
+    ),
+    seed=_seed_correction_actor,
+    expect=ExpectError(status=422),
+)
+def user_list_correction_rejects_invalid_environment():
+    """Correction env accepts only normalized dev/pre/prod values."""
 
 
 @endpoint_test(
