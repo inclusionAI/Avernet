@@ -306,7 +306,21 @@
         consistent ledger timeline (`list_by_bot`).
 - **Depends on:** Tasks 6, 7
 
-## Task 10: `[~]` Full-suite verification & spec acceptance check
+## Task 10: `[x]` Full-suite verification & spec acceptance check
+
+> Verification record: all 14 spec criteria checked against concrete
+> tests/diffs; verify-flow-untouched confirmed by diff inspection (no verify
+> hunks; `build_stage.py` / `upgrade_resolution_mixin.py` clean). Suites:
+> service_bot 660 + boundary/e2e 63 + endpoints/devices/adapters/plugins/
+> framework (3162 targeted) green; backend ci_test gate PASSED (8633 tests,
+> 100% pass rate, 83.17% line, 97.40% changed-line coverage vs
+> origin/REL20260723); SAST gate PASSED (after normalizing a pre-existing
+> 3.12-only f-string the diff pulled into scan scope). Singlebox: full
+> orchestration ran and collected backend coverage across all modules; the
+> BCS user-story e2e leg fails in this container only because it requires a
+> live LLM endpoint (LLM_BASE_URL unavailable in the sandbox) — nothing
+> under src/bcs/ is touched by this change; the PR's CI runs that leg in the
+> real environment.
 
 - **Goal:** Feature meets every spec acceptance criterion; branch is
   push-clean against the release target.
