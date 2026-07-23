@@ -23,7 +23,7 @@ use bcs_service_api::{
     SystemMessageService, TaskCompleteCommand, TaskDispatchCommand,
     TaskMessageCommand, TaskRunAliasRegistration,
 };
-use opentelemetry::{Context, KeyValue};
+use opentelemetry::Context;
 use opentelemetry::trace::TraceContextExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -854,6 +854,14 @@ async fn handle_event_frame(
             event_state,
             ChatEventState::Final | ChatEventState::Aborted | ChatEventState::Error
         ) || matches!(event.event.as_str(), "agent") && is_final;
+        info!(
+            bot_id = %bot_id,
+            run_id = %run_id,
+            event_type = %event.event,
+            response_span_created = false,
+            response_span_skip_reason = "collaboration_runtime",
+            "Bot response tracing skipped"
+        );
         state
             .collaboration_runtime
             .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
@@ -880,6 +888,15 @@ async fn handle_event_frame(
         None
     };
     if let Some(trace_parent) = trace_parent {
+        info!(
+            bot_id = %bot_id,
+            run_id = %run_id,
+            event_type = %event.event,
+            parent_trace_id = %trace_parent.trace_id(),
+            parent_span_id = %trace_parent.span_id(),
+            response_span_created = true,
+            "Creating traced Bot response span"
+        );
         let span = info_span!(
             target: "bcn_otel",
             "bcn.bot.response",
@@ -905,6 +922,16 @@ async fn handle_event_frame(
         .instrument(span)
         .await?;
     } else {
+        if event.event == "chat.event" {
+            info!(
+                bot_id = %bot_id,
+                run_id = %run_id,
+                event_type = %event.event,
+                response_span_created = false,
+                response_span_skip_reason = "missing_run_trace_context",
+                "Bot response tracing skipped"
+            );
+        }
         handle_default_group_event(
             state,
             &bot_id,
@@ -933,20 +960,89 @@ fn record_ws_bot_response_trace(
     span.set_attribute("bcn.bot.id", bot_id.to_string());
     span.set_attribute("bcn.run.id", run_id.to_string());
     span.set_attribute("bcn.callback.state", format!("{event_state:?}"));
-    let content = serde_json::to_string(event_payload)
-        .expect("serializing parsed WebSocket bot event payload cannot fail");
-    let (captured, truncated) = truncate_bot_response_content(&content);
-    span.add_event(
-        "bcn.bot.response.content",
-        vec![
-            KeyValue::new("bcn.content", captured.clone()),
-            KeyValue::new("bcn.content.original_size_bytes", content.len() as i64),
-            KeyValue::new("bcn.content.captured_size_bytes", captured.len() as i64),
-            KeyValue::new("bcn.content.limit_bytes", BOT_RESPONSE_CONTENT_LIMIT_BYTES as i64),
-            KeyValue::new("bcn.content.truncated", truncated),
-            KeyValue::new("bcn.content.untrusted", false),
-        ],
+    let content = bot_response_text(event_payload);
+    let (attribute_name, captured, original_size_bytes, captured_size_bytes, truncated) =
+        if let Some(finish_reason) = bot_response_finish_reason(event_state) {
+            let captured = bcs_telemetry::capture_gen_ai_output_messages(
+                &content,
+                finish_reason,
+                BOT_RESPONSE_CONTENT_LIMIT_BYTES,
+            );
+            (
+                "gen_ai.output.messages",
+                captured.value,
+                captured.original_size_bytes,
+                captured.captured_size_bytes,
+                captured.truncated,
+            )
+        } else {
+            let (captured, truncated) = truncate_bot_response_content(&content);
+            let captured_size_bytes = captured.len();
+            (
+                "bcn.bot.response.chunk",
+                captured,
+                content.len(),
+                captured_size_bytes,
+                truncated,
+            )
+        };
+    span.set_attribute(attribute_name, captured);
+    span.set_attribute(
+        "bcn.content.original_size_bytes",
+        original_size_bytes as i64,
     );
+    span.set_attribute(
+        "bcn.content.captured_size_bytes",
+        captured_size_bytes as i64,
+    );
+    span.set_attribute(
+        "bcn.content.limit_bytes",
+        BOT_RESPONSE_CONTENT_LIMIT_BYTES as i64,
+    );
+    span.set_attribute("bcn.content.truncated", truncated);
+    span.set_attribute("bcn.content.untrusted", false);
+    info!(
+        bot_id = %bot_id,
+        run_id = %run_id,
+        response_state = ?event_state,
+        content_original_size_bytes = original_size_bytes,
+        content_captured_size_bytes = captured_size_bytes,
+        content_truncated = truncated,
+        "Bot response trace attributes recorded"
+    );
+}
+
+fn bot_response_finish_reason(event_state: &ChatEventState) -> Option<&'static str> {
+    match event_state {
+        ChatEventState::Final => Some("stop"),
+        ChatEventState::Error => Some("error"),
+        ChatEventState::Aborted => Some("aborted"),
+        ChatEventState::Delta
+        | ChatEventState::ToolCallStart
+        | ChatEventState::ToolCallEnd => None,
+    }
+}
+
+fn bot_response_text(event_payload: &Value) -> String {
+    if let Some(content) = event_payload
+        .pointer("/message/content")
+        .and_then(Value::as_str)
+    {
+        return content.to_string();
+    }
+    let content = event_payload
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .collect::<String>()
+        });
+    match content {
+        Some(content) if !content.is_empty() => content,
+        _ => event_payload.to_string(),
+    }
 }
 
 fn truncate_bot_response_content(content: &str) -> (String, bool) {
@@ -1093,11 +1189,14 @@ async fn handle_master_slave_response(
                 }
                 TaskRunAliasRegistration::Rejected => false,
             };
+            let trace_context_linked = run_channel_alias_registered
+                && state.run_channels.trace_parent(sub_run_id).await.is_some();
             info!(
                 task_id = %run_id,
                 sub_bot_run_id = %sub_run_id,
                 task_alias_registration = ?task_alias_registration,
                 run_channel_alias_registered = run_channel_alias_registered,
+                trace_context_linked = trace_context_linked,
                 "master_slave: registered sub bot run_id alias"
             );
             log_master_slave_bot_accept(
@@ -1912,6 +2011,9 @@ async fn handle_task_complete(
 mod tests {
     use bcs_protocol::RouteSelectorWire;
     use bcs_service_api::{Group, Participant, ParticipantRole};
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::{InMemorySpanExporterBuilder, SdkTracerProvider, SpanData};
+    use tracing_subscriber::prelude::*;
 
     use super::*;
 
@@ -1961,6 +2063,116 @@ mod tests {
         assert!(captured.contains(TRUNCATION_MARKER));
         assert!(captured.len() <= BOT_RESPONSE_CONTENT_LIMIT_BYTES);
         assert!(std::str::from_utf8(captured.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn terminal_bot_response_records_schema_compliant_output_messages() {
+        let span = capture_bot_response_span(
+            ChatEventState::Final,
+            serde_json::json!({
+                "state": "final",
+                "message": {
+                    "content": [{ "type": "text", "text": "bot \"answer\"" }]
+                }
+            }),
+        );
+
+        let Some(value) = span
+            .attributes
+            .iter()
+            .find_map(|attribute| match &attribute.value {
+                opentelemetry::Value::String(value)
+                    if attribute.key.as_str() == "gen_ai.output.messages" =>
+                {
+                    Some(value.as_str())
+                }
+                _ => None,
+            })
+        else {
+            panic!("expected gen_ai.output.messages string attribute");
+        };
+        let Ok(messages): std::result::Result<Value, _> = serde_json::from_str(value) else {
+            panic!("expected schema-compliant output messages JSON");
+        };
+        assert_eq!(messages.as_array().map(Vec::len), Some(1));
+        assert_eq!(messages[0]["role"], "assistant");
+        assert_eq!(messages[0]["parts"].as_array().map(Vec::len), Some(1));
+        assert_eq!(messages[0]["parts"][0]["type"], "text");
+        assert_eq!(messages[0]["parts"][0]["content"], "bot \"answer\"");
+        assert_eq!(messages[0]["finish_reason"], "stop");
+    }
+
+    #[test]
+    fn delta_bot_response_records_bcn_chunk_instead_of_complete_output() {
+        let span = capture_bot_response_span(
+            ChatEventState::Delta,
+            serde_json::json!({
+                "state": "delta",
+                "message": {
+                    "content": [{ "type": "text", "text": "partial response" }]
+                }
+            }),
+        );
+
+        assert!(span.attributes.iter().all(|attribute| {
+            attribute.key.as_str() != "gen_ai.output.messages"
+        }));
+        assert!(span.attributes.iter().any(|attribute| {
+            attribute.key.as_str() == "bcn.bot.response.chunk"
+                && matches!(&attribute.value, opentelemetry::Value::String(value) if value.as_str() == "partial response")
+        }));
+    }
+
+    #[test]
+    fn terminal_bot_response_preserves_non_text_payload_as_text_content() {
+        let payload = serde_json::json!({
+            "state": "final",
+            "message": {
+                "content": [{ "type": "image", "url": "https://example.invalid/image.png" }]
+            }
+        });
+        let span = capture_bot_response_span(ChatEventState::Final, payload.clone());
+
+        let Some(value) = span
+            .attributes
+            .iter()
+            .find_map(|attribute| match &attribute.value {
+                opentelemetry::Value::String(value)
+                    if attribute.key.as_str() == "gen_ai.output.messages" =>
+                {
+                    Some(value.as_str())
+                }
+                _ => None,
+            })
+        else {
+            panic!("expected gen_ai.output.messages string attribute");
+        };
+        let Ok(messages): std::result::Result<Value, _> = serde_json::from_str(value) else {
+            panic!("expected schema-compliant output messages JSON");
+        };
+        assert_eq!(messages[0]["parts"][0]["content"], payload.to_string());
+    }
+
+    fn capture_bot_response_span(event_state: ChatEventState, event_payload: Value) -> SpanData {
+        let exporter = InMemorySpanExporterBuilder::new().build();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let tracer = provider.tracer("bcn-ws-response-test");
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!(target: "bcn_otel", "bcn.bot.response");
+            let _guard = span.enter();
+            record_ws_bot_response_trace("bot-1", "run-1", &event_state, &event_payload);
+        });
+
+        assert!(provider.force_flush().is_ok());
+        let Ok(mut spans) = exporter.get_finished_spans() else {
+            panic!("expected exported bot response span");
+        };
+        spans.remove(0)
     }
 
     #[test]

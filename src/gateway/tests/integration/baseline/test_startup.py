@@ -33,7 +33,7 @@ class TestAppCreation:
         assert app is not None
 
     def test_app_has_expected_routes(self, client: TestClient) -> None:
-        routes = {r.path for r in client.app.routes}
+        routes = {getattr(r, "path", None) for r in client.app.routes}
         assert "/api/test" in routes
         assert "/health" in routes
         assert "/docs" in routes
