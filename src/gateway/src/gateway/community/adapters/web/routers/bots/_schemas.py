@@ -12,7 +12,7 @@ class Bot(BaseModel):
 
     bot_id: str
     bot_name: str
-    bot_desc: str | None = None
+    bot_desc: str
     engine: str
     cluster_name: str
     bot_type: str
@@ -24,12 +24,14 @@ class BotCreate(BaseModel):
     """Create-a-bot request body."""
 
     bot_name: str
-    bot_desc: str | None = None
+    bot_desc: str
     engine: str
     cluster_name: str
     bot_type: str
-    payload: dict[str, Any] = Field(
-        default_factory=dict, description="Engine/vendor-specific options."
+    engine_options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Engine/vendor-specific inputs, kept nested rather than "
+        "flattened into the request body.",
     )
 
 
@@ -39,7 +41,7 @@ class BotUpdate(BaseModel):
     bot_name: str | None = None
     bot_desc: str | None = None
     cluster_name: str | None = None
-    payload: dict[str, Any] | None = None
+    engine_options: dict[str, Any] | None = None
 
 
 class BotAuthPending(BaseModel):
