@@ -114,7 +114,7 @@
   - [ ] `pytest tests/community/core/service_bot/` green.
 - **Depends on:** —
 
-## Task 5: Rebase `first_release` / `upgrade_release` onto the atom
+## Task 5: `[x]` Rebase `first_release` / `upgrade_release` onto the atom
 
 - **Goal:** `release_stage.py` loses its hand-rolled open/acquire/validate and
   `_BotNotFoundError`; behavior byte-for-byte preserved.
