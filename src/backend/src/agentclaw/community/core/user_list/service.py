@@ -18,10 +18,17 @@ class UserListService:
     def __init__(self, repository: UserListRepositoryProtocol) -> None:
         self._repository = repository
 
-    def is_in_user_list(self, *, entity_id: str, user_list_type: str) -> bool:
+    def is_in_user_list(
+        self,
+        *,
+        entity_id: str,
+        user_list_type: str,
+        env: str | None = None,
+    ) -> bool:
         return self._repository.exists(
             entity_id=entity_id,
             user_list_type=user_list_type,
+            env=env,
         )
 
     def correct_membership(

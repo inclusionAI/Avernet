@@ -17,14 +17,21 @@ class UserListRepository:
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
 
-    def exists(self, *, entity_id: str, user_list_type: str) -> bool:
+    def exists(
+        self,
+        *,
+        entity_id: str,
+        user_list_type: str,
+        env: str | None = None,
+    ) -> bool:
+        target_env = env or get_current_env()
         with self._db.orm_session() as session:
             return (
                 session.query(EntityUserListModel.id)
                 .filter(
                     EntityUserListModel.entity_id == entity_id,
                     EntityUserListModel.user_list_type == user_list_type,
-                    EntityUserListModel.env == get_current_env(),
+                    EntityUserListModel.env == target_env,
                 )
                 .first()
                 is not None
