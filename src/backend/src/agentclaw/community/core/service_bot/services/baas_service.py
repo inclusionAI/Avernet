@@ -1853,9 +1853,22 @@ class BaasService:  # pragma: no cover
             # only floods the alarm/ticket pipeline. Whether a failure is truly
             # alarm-worthy is the caller's call, made where the business context
             # is known.
+            #
+            # The BaaS app only ever answers this endpoint with JSON
+            # (200/404/503/500); a 3xx status here is injected by the fronting
+            # gateway (Spanner) before the request reaches BaaS. Its ``Location``
+            # says where the request is being redirected (login/SSO host vs a
+            # moved route), and bot_uuid/tenant/device_affinity let us cluster
+            # intermittent redirects by bot/tenant/target device — the data
+            # needed to tell a partial-instance/routing fault apart from a
+            # blanket auth requirement.
+            location = e.response.headers.get("location")
             logger.warning(
                 f"[BaasService.get_ws_info_by_bot_uuid] "
-                f"HTTP error: {e.response.status_code} - {e.response.text}"
+                f"HTTP error: {e.response.status_code} - "
+                f"bot_uuid={bot_uuid}, tenant={effective_tenant}, "
+                f"device_affinity={device_affinity}, location={location!r} - "
+                f"{e.response.text}"
             )
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"

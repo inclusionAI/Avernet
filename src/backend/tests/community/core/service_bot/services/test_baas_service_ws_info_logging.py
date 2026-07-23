@@ -24,9 +24,14 @@ from agentclaw.community.core.service_bot.services.baas_service import (
 )
 
 
-def _make_service_raising(status_code: int, body: str) -> BaasService:
+def _make_service_raising(
+    status_code: int, body: str, headers: dict[str, str] | None = None
+) -> BaasService:
     """BaasService whose injected http_client.get(...).raise_for_status() raises
     an httpx.HTTPStatusError — the path get_ws_info classifies as an HTTP error.
+
+    ``headers`` seeds the raising response's headers (e.g. a gateway ``Location``
+    on a 3xx redirect) so tests can assert what the warning log surfaces.
     """
     binding = MagicMock()
     binding.device_id = "BOT-xyz"
@@ -34,7 +39,9 @@ def _make_service_raising(status_code: int, body: str) -> BaasService:
     binding_repo.get_by_id.return_value = binding
 
     request = httpx.Request("GET", "http://baas.test/api/v1/bots/BOT-xyz/ws-info")
-    response = httpx.Response(status_code, request=request, text=body)
+    response = httpx.Response(
+        status_code, request=request, text=body, headers=headers or {}
+    )
     err = httpx.HTTPStatusError(f"{status_code}", request=request, response=response)
     http_resp = MagicMock()
     http_resp.raise_for_status.side_effect = err
@@ -105,3 +112,28 @@ class TestGetWsInfoErrorLogging:
         service = _make_service_raising(500, "boom")
         with pytest.raises(BaasServiceError):
             service.get_ws_info(bind_id=1)
+
+    def test_302_redirect_logs_location_and_correlation_fields(self):
+        """A gateway 302 (Spanner) must surface the redirect ``Location`` plus
+        bot_uuid/tenant/device_affinity in the WARNING log, so intermittent
+        redirects can be clustered and the redirect target inspected.
+        """
+        body = (
+            '<html><head><title>302 Found</title></head>'
+            '<body><h1>302 Found</h1><hr/>Powered by Spanner</body></html>'
+        )
+        location = "https://login.example.com/sso?back=/api/v1/bots"
+        service = _make_service_raising(302, body, headers={"Location": location})
+        with patch(
+            "agentclaw.community.core.service_bot.services.baas_service.logger"
+        ) as spy:
+            with pytest.raises(BaasServiceError):
+                service.get_ws_info(bind_id=1, device_affinity="500207")
+
+        warnings = _ws_info_logged_calls(spy, "warning")
+        assert warnings, "302 should log at WARNING"
+        assert not _ws_info_logged_calls(spy, "error"), "302 must NOT log at ERROR"
+        logged = str(warnings[0].args[0])
+        assert location in logged, "redirect Location must be in the warning log"
+        assert "bot_uuid=BOT-xyz" in logged
+        assert "device_affinity=500207" in logged
