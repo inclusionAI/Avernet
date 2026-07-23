@@ -165,47 +165,138 @@
   - [ ] `pytest tests/community/core/service_bot/` green.
 - **Depends on:** Task 4 (atom); Task 1 (predicate name used in tests)
 
-## Task 7: Cross-publish-boundary test module
+## Task 7: DI-world publish harness — LocalBaas + world fixture + baseline lifecycle
 
-- **Goal:** Cover multi-record, multi-operation flows on a shared online bot —
-  the class of scenario endpoint tests don't reach.
+- **Goal:** A reusable DI-world harness for publish flows: the real app wiring
+  (TEST profile, per-test injector, in-memory SQLite) with **local
+  implementations only at system boundaries** — a new stateful LocalBaas
+  double for the one boundary that has none today (`BaasService` write paths
+  are documented-unmocked; `LocalHttpClient` raises on any call). Everything
+  else — `PublishFlowService`, task handlers, `BotBuildService` (teclaw
+  compose+freeze build), repositories, ext/state plumbing — is production
+  code resolved through the injector.
 - **Files:**
-  `tests/community/core/service_bot/services/test_publish_cross_publish_flows.py` (new)
-- **Done when:** (harness: real SQLite ledger + scripted `FakeBaas` + real
-  `PublishFlowService`, per `test_publish_crash_windows.py:43-108`)
-  - [ ] Scenario 1 — upgrade chain: v1 first-release → SUCCESS → v2 upgrade on
-        the same bot → SUCCESS; v1's predicate false, v2's true; exactly one
-        bot exists.
-  - [ ] Scenario 2 — rollback-then-re-promote (#5984 shape): v2 rolled back
-        (ROLLBACK_DEPLOY lands on the bot) → v2 re-promoted → gate re-runs the
-        release (predicate false at entry) → v2 current again.
-  - [ ] Scenario 3 — retry interleaved with a later publish: v1 fails in
-        ONLINE_PUB → v2 deploys on the same bot → v1 retry re-runs its release
-        path (asserts: no `execute_restart` call, no second bot).
-  - [ ] Scenario 4 — restart-recreate after an upgrade chain: bot gone →
-        recreate → recreated record's predicate true (FIRST_RELEASE/UPGRADE
-        coexistence, `publish_flow_service.py:914-927` max-by-baas_publish_id).
-  - [ ] Scenario 5 — failed-deploy retry across records: v1 live → v2 upgrade
-        issued, workflow FAILED (op outcome-corrected) → v1 still reads as
-        current (no false supersede) → v2 retry re-issues and lands → v2
-        current, v1 superseded.
-  - [ ] Each scenario asserts no duplicate bots/bindings.
-- **Depends on:** Tasks 3, 6
+  `tests/community/e2e/publish_boundary/__init__.py` (new),
+  `tests/community/e2e/publish_boundary/local_baas.py` (new),
+  `tests/community/e2e/publish_boundary/harness.py` (new),
+  `tests/community/e2e/publish_boundary/test_lifecycle_baseline.py` (new)
+- **Done when:**
+  - [ ] `LocalBaasService`: stateful in-memory double of the `BaasService`
+        surface the publish pipeline touches (create/upgrade/restart/scale
+        workflow issuance with monotonic workflow ids, per-bot workflow
+        timelines for `list_bot_publishes`, workflow progress for
+        `get_baas_publish_progress`, stop/destroy, container-provider
+        resolution → teclaw). Test controls: advance a workflow
+        `ACTIVE → SUCCESS/FAILED`, delete a bot (subsequent upgrade/restart
+        returns `BOT_NOT_FOUND`), and a call journal for issue-count
+        assertions.
+  - [ ] Harness fixture (`publish_world`): builds the TEST-profile injector
+        with the LocalBaas bound over `BaasService`/`BaasServiceProtocol`
+        (module-override pattern per `testing_devices_module.py`), attaches
+        the app, exposes `world`, an httpx client, and
+        `drain_tasks()` — loops `TaskWorker.run_once()` to quiescence so
+        durable publish tasks (`verify_flow`, `online_release`,
+        `progress_poll`, `restart`) run deterministically between steps.
+        Object-storage / engine-ext / approval boundaries use the existing
+        local plugins (`plugins/local/oss_storage.py`,
+        `engine_ext_client.py`, `bot_publish_approval.py`).
+  - [ ] Baseline scenario **L0 — full teclaw lifecycle via endpoints**:
+        `create_first_publish` → drain (build + verify release) → verify wait
+        → LocalBaas SUCCESS → drain → approval (local) → `process_publish` →
+        drain (online first release) → LocalBaas SUCCESS → drain →
+        record SUCCESS. Asserts: verify+online `FIRST_RELEASE` ops COMPLETED,
+        bindings ACTIVE, `is_current_online_deployment` true, exactly one
+        online bot in LocalBaas.
+  - [ ] Harness does not touch `_flows/`, acceptance manifests, or coverage
+        gates; confirm against the `Pre-push Module Selection` contract in
+        `AGENTS.md` before finalizing file placement.
+- **Depends on:** — (harness itself); scenarios in Tasks 8-9 depend on the
+  production changes.
 
-## Task 8: Full-suite verification & spec acceptance check
+## Task 8: DI-world regression scenarios — retry, failure outcome, cross-record liveness
+
+- **Goal:** The regression fix proven end-to-end through the production
+  wiring: retry recovery, deploy-failure outcome correction, and
+  cross-publish liveness — all via endpoints + task drains.
+- **Files:**
+  `tests/community/e2e/publish_boundary/test_retry_and_failure_flows.py` (new)
+- **Done when:**
+  - [ ] **R1 — online BaaS-wait failure → retry re-issues (the core loop
+        guard):** v1 live → `upgrade_publish` v2 → online upgrade issued →
+        LocalBaas fails the workflow → drain → v2 FAILED and its UPGRADE op
+        outcome-corrected to FAILED → `retry_publish` → drain → a **second**
+        issue reaches LocalBaas (fresh attempt) → LocalBaas SUCCESS → drain →
+        v2 SUCCESS. Asserts: exactly 2 upgrade issues, no restart issuance,
+        no duplicate bot/binding.
+  - [ ] **R2 — failed deploy never supersedes:** at R1's failure point
+        (before retry), v1's `is_current_online_deployment` still true; after
+        R1 completes, v1 superseded (status UPGRADED), v2 current.
+  - [ ] **R3 — retry interleaved with a later publish:** v1 FAILED in
+        ONLINE_PUB (release work failed pre-issue) → v2 publishes and lands
+        on the shared bot → v1 `retry_publish` → v1's release path re-runs
+        (upgrade over the shared bot; no restart of any stale workflow); final
+        ledger timeline consistent, exactly one bot.
+  - [ ] **R4 — verify-stage retry unchanged (deferred-symmetry guard):**
+        verify BaaS-wait failure → `retry_publish` → restart branch fires
+        (RESTART op at verify stage, `ext.retry` set); no verify release
+        re-run.
+  - [ ] **R5 — SUCCESS-record retry (failed restart-sync):** live record's
+        restart workflow fails → record FAILED (source SUCCESS) → retry →
+        re-restart via the restart branch (restart op attempt+1; release gate
+        never consulted).
+  - [ ] **R6 — online_release task redelivery idempotency:** after the online
+        release issued, re-run the task handler (simulated lease-expiry
+        redelivery) → gate skips (release live/in-flight), no second issue in
+        LocalBaas.
+- **Depends on:** Tasks 3, 7
+
+## Task 9: DI-world operational scenarios — chains, rollback, restart, recreate
+
+- **Goal:** The multi-record operational flows on a shared online bot proven
+  through production wiring: upgrade chains, rollback-then-re-promote,
+  restart semantics, and the recreate leg.
+- **Files:**
+  `tests/community/e2e/publish_boundary/test_chain_and_restart_flows.py` (new)
+- **Done when:**
+  - [ ] **C1 — upgrade chain:** v1 first-release → SUCCESS → v2
+        `upgrade_publish` → SUCCESS on the same bot; v1 predicate false /
+        status UPGRADED, v2 true; exactly one online bot ever created.
+  - [ ] **C2 — rollback-then-re-promote (#5984 shape):** v2 live → rollback
+        (ROLLBACK_DEPLOY lands on the bot, v2 demoted) → re-promote v2
+        through verify → online → gate re-runs the release (predicate false
+        at entry) → v2 current again; no stranded poll (the original #341
+        symptom asserted dead: `ext.publish.online` present, poll advances).
+  - [ ] **C3 — restart always hits BaaS:** v live and current →
+        `restart_publish` → RESTART workflow issued in LocalBaas (call
+        journal) despite the release being current; restart-sync drives it;
+        record stays SUCCESS.
+  - [ ] **C4 — restart recreate on gone bot:** delete the bot in LocalBaas →
+        `restart_publish` → RESTART op ABANDONED, FIRST_RELEASE op COMPLETED,
+        **new** bot + **new** binding (old binding not reused),
+        `ext.binding/publish/restart.<stage>` updated, restart-status
+        endpoint still resolves progress; record status unchanged.
+  - [ ] **C5 — recreate after upgrade chain:** C1 then C4 — recreated
+        record's predicate true (FIRST_RELEASE/UPGRADE coexistence,
+        max-by-`baas_publish_id`).
+  - [ ] Every scenario asserts no duplicate bots/bindings in LocalBaas and a
+        consistent ledger timeline (`list_by_bot`).
+- **Depends on:** Tasks 6, 7
+
+## Task 10: Full-suite verification & spec acceptance check
 
 - **Goal:** Feature meets every spec acceptance criterion; branch is
   push-clean against the release target.
 - **Files:** — (verification only)
 - **Done when:**
-  - [ ] Full `pytest tests/community/core/service_bot/` green; no other
-        backend suite regressed (run the module-selection pre-push contract).
+  - [ ] Full `pytest tests/community/core/service_bot/` and the new
+        `tests/community/e2e/publish_boundary/` green; no other backend suite
+        regressed (run the module-selection pre-push contract).
   - [ ] Every `spec.md` acceptance criterion checked off against a concrete
         test or diff (verify-flow-untouched confirmed by `git diff` showing no
         verify release/retry logic edits beyond renames/docstrings).
   - [ ] Pre-push hook run with merge target `origin/REL20260723`
         (`avernet.prePush.mergeTarget` already configured).
-- **Depends on:** Tasks 1-7
+- **Depends on:** Tasks 1-9
 
 ---
 
@@ -221,5 +312,9 @@
 - **Group B — Deploy atom + restart recreate:** Tasks 4, 5, 6
   - Theme: one shared crash-safe deploy shape; restart's BOT_NOT_FOUND leg
     becomes idempotent with a fresh op + new binding.
-- **Group C — Cross-boundary coverage & verification:** Tasks 7, 8
-  - Theme: multi-publish shared-bot scenarios + final spec acceptance check.
+- **Group C — DI-world cross-boundary coverage:** Tasks 7, 8, 9
+  - Theme: LocalBaas + production wiring; retry/failure and
+    chain/restart flows driven through endpoints with deterministic task
+    drains.
+- **Group D — Verification:** Task 10
+  - Theme: final spec acceptance check.

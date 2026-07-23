@@ -84,9 +84,16 @@ correct shape.
       shared online bot — including at minimum: an upgrade chain across
       successive publish records; a rollback that demotes a record and
       re-deploys the previous version, followed by re-promoting the demoted
-      record; and a retry that interleaves with a later publish's deploy on the
-      same bot. Each asserts the record reaches the correct live deployment and
-      that no duplicate/orphan bot is created.
+      record; a retry that interleaves with a later publish's deploy on the
+      same bot; a failed deploy retried to success; and restart flows
+      (including target-bot-gone recovery). Each asserts the record reaches
+      the correct live deployment and that no duplicate/orphan bot is created.
+- [ ] These cross-boundary scenarios run against the **production code path**
+      end-to-end — driven through the public publish operations with only the
+      system boundaries (the deployment platform, object storage, artifact
+      build I/O) replaced by local in-memory implementations — so the tests
+      exercise the real orchestration, persistence, and recovery logic rather
+      than isolated units.
 
 ## In Scope
 - The retry recovery decision for the online stage.
