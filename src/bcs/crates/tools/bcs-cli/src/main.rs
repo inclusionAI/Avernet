@@ -9,17 +9,19 @@
 //! # Configuration
 //!
 //! BCS CLI can be configured via:
-//! 1. Command-line arguments (highest priority)
-//! 2. Environment variables: MOLTIS_BCS_URL, BCS_COOKIE
-//! 3. Session file: $BOT_DATA_DIR/.bcs/session.json
-//! 4. Default local URL (lowest priority)
+//! 1. `--url` (highest priority)
+//! 2. `BCS_API_BASE_URL`
+//! 3. `MOLTIS_BCS_URL`
+//! 4. Session file: `$BOT_DATA_DIR/.bcs/session.json`
+//! 5. Runtime-selected compiled distribution default
+//! 6. Default local URL (lowest priority)
 //!
 //! # Environment-Based Configuration
 //!
-//! Set `env` environment variable to switch between environments:
-//! - `env=dev` (default) - development environment
-//! - `env=pre` - pre-production environment
-//! - `env=prod` - production environment
+//! Distribution builds may compile both pre and production defaults into one
+//! binary. Runtime environment priority is `AGENTCLAW_ENV`, `env`, then the
+//! server environment chain. `pre`/`prepub` selects pre; every other value
+//! selects production. Public builds omit both compiled defaults.
 //!
 //! # Token Discovery
 //!
@@ -51,7 +53,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 #[cfg(debug_assertions)]
 use clap::ArgAction;
 use clap::{Parser, Subcommand};
@@ -66,47 +67,18 @@ use bcs_protocol::{BCS_PROTOCOL_VERSION, BotConnectParams};
 // disable agentpass, agentpass token should be auto injected into the http headers
 const AUTH_VIA_AGENT_PASS: bool = false;
 const DEFAULT_GROUP_BATCH_SIZE: u64 = 20;
-const GROUP_CONTINUATION_VERSION: u8 = 1;
-
-#[derive(Debug, Serialize, Deserialize)]
-struct GroupContinuation {
-    version: u8,
-    bot_uuid: String,
-    next_offset: u64,
-    batch_size: u64,
-}
 
 #[derive(Debug, Serialize)]
 struct GroupListOutput {
     items: Vec<serde_json::Value>,
+    offset: u64,
     returned: u64,
     total: u64,
     has_more: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    continuation: Option<String>,
+    next_offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_command: Option<String>,
-}
-
-fn encode_group_continuation(token: &GroupContinuation) -> Result<String> {
-    let bytes = serde_json::to_vec(token)
-        .map_err(|error| anyhow!("Failed to encode list-groups continuation token: {error}"))?;
-    Ok(URL_SAFE_NO_PAD.encode(bytes))
-}
-
-fn decode_group_continuation(encoded: &str) -> Result<GroupContinuation> {
-    let bytes = URL_SAFE_NO_PAD
-        .decode(encoded)
-        .map_err(|_| anyhow!("Invalid list-groups continuation token"))?;
-    let token: GroupContinuation = serde_json::from_slice(&bytes)
-        .map_err(|_| anyhow!("Invalid list-groups continuation token"))?;
-    if token.version != GROUP_CONTINUATION_VERSION {
-        return Err(anyhow!(
-            "Unsupported list-groups continuation token version: {}",
-            token.version
-        ));
-    }
-    Ok(token)
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -330,6 +302,10 @@ fn resolve_bcs_url(cli: &Cli) -> Result<String> {
     }
 
     if let Some(url) = resolve_session_bcs_url()? {
+        return Ok(url);
+    }
+
+    if let Some(url) = bcs_cli::resolve_compiled_distribution_default_url()? {
         return Ok(url);
     }
 
@@ -1027,22 +1003,22 @@ enum Commands {
         focus: Option<String>,
     },
 
-    /// List groups the current bot formally participates in
+    /// List groups the authenticated human or bot formally participates in
     ListGroups {
         /// Authentication token (auto-discovered if not provided)
         #[arg(short, long)]
         token: Option<String>,
 
         /// Maximum number of groups to return in this batch
-        #[arg(long)]
-        batch_size: Option<u64>,
+        #[arg(long, default_value_t = DEFAULT_GROUP_BATCH_SIZE)]
+        batch_size: u64,
 
-        /// Continue from a token returned by a previous list-groups call
-        #[arg(long = "continue", value_name = "TOKEN")]
-        continuation: Option<String>,
+        /// Start listing at this zero-based group offset
+        #[arg(long, default_value_t = 0)]
+        offset: u64,
 
         /// Fetch all groups by following every batch
-        #[arg(long, conflicts_with = "continuation")]
+        #[arg(long)]
         all: bool,
     },
 
@@ -1749,7 +1725,7 @@ async fn main() -> Result<()> {
     // Get current environment (defaults to "dev")
     let env = get_current_env();
 
-    // Determine BCS URL: CLI arg > env var > session.json > default
+    // Determine BCS URL: CLI arg > env var > session.json > compiled default > local
     // Note: bcs_url resolution is deferred for commands that don't need it (e.g., --web mode).
     let bcs_url = resolve_bcs_url(&cli).unwrap_or_default();
 
@@ -2788,7 +2764,7 @@ async fn main() -> Result<()> {
         Commands::ListGroups {
             token,
             batch_size,
-            continuation,
+            offset: start_offset,
             all,
         } => {
             let token = get_token(token.as_deref())?;
@@ -2799,56 +2775,56 @@ async fn main() -> Result<()> {
                 oauth_headers.as_ref(),
             );
 
-            let bot_uuid = resolve_my_bot_uuid()?;
-            let continuation = continuation
-                .as_deref()
-                .map(decode_group_continuation)
-                .transpose()?;
-            if let Some(continuation) = continuation.as_ref() {
-                if continuation.bot_uuid != bot_uuid {
-                    return Err(anyhow!(
-                        "Continuation token belongs to bot {}, but the current session bot is {}",
-                        continuation.bot_uuid,
-                        bot_uuid
-                    ));
-                }
-            }
-            let start_offset = continuation
-                .as_ref()
-                .map(|token| token.next_offset)
-                .unwrap_or(0);
-            let batch_size = batch_size
-                .or_else(|| continuation.as_ref().map(|token| token.batch_size))
-                .unwrap_or(DEFAULT_GROUP_BATCH_SIZE);
             if batch_size == 0 {
                 return Err(anyhow!("Batch size must be greater than 0"));
             }
             let mut offset = start_offset;
             let mut groups = Vec::new();
+            let mut actor_id = None;
             let (next_offset, total) = loop {
                 debug_request!(
                     debug,
                     "GET",
-                    &format!("/bots/{}/groups", &bot_uuid),
+                    "/groups/my",
                     json!({
                         "offset": offset,
                         "limit": batch_size,
-                        "include_session_groups": false,
                     })
                 );
-                let page = client
-                    .list_bot_groups(&bot_uuid, offset, batch_size, false)
-                    .await?;
+                let page = client.list_my_groups(offset, batch_size).await?;
                 if page.offset != offset {
                     return Err(anyhow!(
-                        "Invalid bot groups pagination response: requested offset={}, received offset={}",
+                        "Invalid current actor groups pagination response: requested offset={}, received offset={}",
                         offset,
                         page.offset
                     ));
                 }
+                if page.actor_id.trim().is_empty() {
+                    return Err(anyhow!(
+                        "Current actor groups response did not identify the authenticated actor"
+                    ));
+                }
+                if let Some(current_actor_id) = actor_id.as_deref() {
+                    if current_actor_id != page.actor_id {
+                        return Err(anyhow!(
+                            "Current actor changed during pagination: expected {}, received {}",
+                            current_actor_id,
+                            page.actor_id
+                        ));
+                    }
+                } else {
+                    actor_id = Some(page.actor_id.clone());
+                }
                 let page_groups = page.items;
                 let total = page.total;
                 let page_returned = page_groups.len() as u64;
+                if page_returned == 0 && offset < total {
+                    return Err(anyhow!(
+                        "Current actor groups pagination made no progress at offset {} while total is {}",
+                        offset,
+                        total
+                    ));
+                }
                 groups.extend(page_groups);
                 let next_offset = offset.saturating_add(page_returned);
                 if !all || page_returned == 0 || next_offset >= total {
@@ -2856,27 +2832,29 @@ async fn main() -> Result<()> {
                 }
                 offset = next_offset;
             };
+            let actor_id = actor_id.ok_or_else(|| {
+                anyhow!("Current actor groups response did not identify the authenticated actor")
+            })?;
             let returned = groups.len() as u64;
             let has_more = !all && returned > 0 && next_offset < total;
-            let continuation = if has_more {
-                Some(encode_group_continuation(&GroupContinuation {
-                    version: GROUP_CONTINUATION_VERSION,
-                    bot_uuid: bot_uuid.clone(),
-                    next_offset,
-                    batch_size,
-                })?)
+            let next_offset = if has_more {
+                Some(next_offset)
             } else {
                 None
             };
-            let next_command = continuation
-                .as_ref()
-                .map(|token| format!("bcs-cli list-groups --continue {token}"));
+            let next_command = next_offset.map(|next_offset| {
+                format!(
+                    "bcs-cli list-groups --offset {} --batch-size {}",
+                    next_offset, batch_size
+                )
+            });
             let output = GroupListOutput {
                 items: groups,
+                offset: start_offset,
                 returned,
                 total,
                 has_more,
-                continuation,
+                next_offset,
                 next_command,
             };
 
@@ -2885,7 +2863,7 @@ async fn main() -> Result<()> {
             if structured_mode {
                 println!("{}", serde_json::to_string(&output)?);
             } else {
-                println!("Groups for current bot {} ({}/{}):", bot_uuid, returned, total);
+                println!("Groups for current actor {} ({}/{}):", actor_id, returned, total);
                 for group in &output.items {
                     let id = group
                         .get("id")
@@ -4236,20 +4214,6 @@ mod tests {
     }
 
     #[test]
-    fn group_continuation_rejects_unsupported_version() {
-        let encoded = encode_group_continuation(&GroupContinuation {
-            version: GROUP_CONTINUATION_VERSION + 1,
-            bot_uuid: "bot-1".to_string(),
-            next_offset: 20,
-            batch_size: 20,
-        })
-        .unwrap();
-
-        let error = decode_group_continuation(&encoded).unwrap_err();
-        assert!(error.to_string().contains("Unsupported list-groups continuation token version"));
-    }
-
-    #[test]
     fn test_create_group_accepts_manager_instead_of_driver() {
         let cli = Cli::try_parse_from([
             "bcs-cli",
@@ -4652,7 +4616,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_resolve_bcs_url_defaults_to_local() {
+    fn test_resolve_bcs_url_uses_distribution_default_or_local() {
         let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
         let original_url = std::env::var("MOLTIS_BCS_URL").ok();
         let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
@@ -4674,6 +4638,9 @@ mod tests {
             command: Commands::Health,
         };
         let result = resolve_bcs_url(&cli);
+        let expected = bcs_cli::resolve_compiled_distribution_default_url()
+            .unwrap()
+            .unwrap_or_else(|| "http://127.0.0.1:21000".to_string());
 
         if let Some(value) = original_data_dir {
             safe_set_var("BOT_DATA_DIR", value);
@@ -4697,12 +4664,12 @@ mod tests {
         }
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "http://127.0.0.1:21000");
+        assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
     #[serial]
-    fn test_resolve_bcs_url_defaults_to_local_when_agentclaw_env_pre() {
+    fn test_resolve_bcs_url_uses_pre_distribution_default_or_local() {
         let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
         let original_url = std::env::var("MOLTIS_BCS_URL").ok();
         let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
@@ -4724,6 +4691,9 @@ mod tests {
             command: Commands::Health,
         };
         let result = resolve_bcs_url(&cli);
+        let expected = bcs_cli::resolve_compiled_distribution_default_url()
+            .unwrap()
+            .unwrap_or_else(|| "http://127.0.0.1:21000".to_string());
 
         if let Some(value) = original_data_dir {
             safe_set_var("BOT_DATA_DIR", value);
@@ -4747,7 +4717,7 @@ mod tests {
         }
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "http://127.0.0.1:21000");
+        assert_eq!(result.unwrap(), expected);
     }
 
     #[test]

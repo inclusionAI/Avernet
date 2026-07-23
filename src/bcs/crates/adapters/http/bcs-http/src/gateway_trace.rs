@@ -1,4 +1,7 @@
 use axum::http::HeaderMap;
+use bcs_telemetry::{
+    CapturedGenAiMessages, capture_gen_ai_input_messages, capture_gen_ai_output_messages,
+};
 use opentelemetry::{KeyValue, global};
 use opentelemetry::trace::{Status, TraceContextExt};
 use opentelemetry_http::HeaderExtractor;
@@ -198,14 +201,52 @@ pub(crate) fn record_span_content_event(event_name: &'static str, content: &str)
     );
 }
 
-pub(crate) fn record_span_content_attributes(
-    content_attribute_name: &'static str,
+pub(crate) fn record_gen_ai_input_message(content: &str, untrusted: bool) {
+    let captured = capture_gen_ai_input_messages(content, SPAN_CONTENT_LIMIT_BYTES);
+    record_gen_ai_messages("gen_ai.input.messages", captured, untrusted);
+}
+
+pub(crate) fn record_gen_ai_output_message(
+    content: &str,
+    finish_reason: &str,
+    untrusted: bool,
+) {
+    let captured =
+        capture_gen_ai_output_messages(content, finish_reason, SPAN_CONTENT_LIMIT_BYTES);
+    record_gen_ai_messages("gen_ai.output.messages", captured, untrusted);
+}
+
+pub(crate) fn record_span_content_attribute(
+    attribute_name: &'static str,
     content: &str,
     untrusted: bool,
 ) {
     let captured = truncate_span_content(content, SPAN_CONTENT_LIMIT_BYTES);
     let span = Span::current();
-    span.set_attribute(content_attribute_name, captured.content);
+    span.set_attribute(attribute_name, captured.content);
+    span.set_attribute(
+        "bcn.content.original_size_bytes",
+        captured.original_size_bytes as i64,
+    );
+    span.set_attribute(
+        "bcn.content.captured_size_bytes",
+        captured.captured_size_bytes as i64,
+    );
+    span.set_attribute(
+        "bcn.content.limit_bytes",
+        SPAN_CONTENT_LIMIT_BYTES as i64,
+    );
+    span.set_attribute("bcn.content.truncated", captured.truncated);
+    span.set_attribute("bcn.content.untrusted", untrusted);
+}
+
+fn record_gen_ai_messages(
+    attribute_name: &'static str,
+    captured: CapturedGenAiMessages,
+    untrusted: bool,
+) {
+    let span = Span::current();
+    span.set_attribute(attribute_name, captured.value);
     span.set_attribute(
         "bcn.content.original_size_bytes",
         captured.original_size_bytes as i64,
@@ -449,11 +490,7 @@ mod tests {
         tracing::subscriber::with_default(subscriber, || {
             let span = info_span!(target: "bcn_otel", "bcn.gateway.dispatch");
             let _guard = span.enter();
-            record_span_content_attributes(
-                "gen_ai.input.messages",
-                &"x".repeat(5000),
-                false,
-            );
+            record_gen_ai_input_message(&"x".repeat(5000), false);
         });
 
         provider.force_flush().unwrap();
@@ -490,7 +527,7 @@ mod tests {
         assert!(captured_size <= 4096);
         assert!(spans[0].attributes.iter().any(|attribute| {
             attribute.key.as_str() == "bcn.content.captured_size_bytes"
-                && attribute.value == opentelemetry::Value::I64(captured_size as i64)
+                && matches!(attribute.value, opentelemetry::Value::I64(size) if size < 4096)
         }));
     }
 }

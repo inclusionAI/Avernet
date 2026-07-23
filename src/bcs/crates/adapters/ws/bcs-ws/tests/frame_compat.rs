@@ -1430,9 +1430,12 @@ async fn traced_chat_event_creates_bot_response_child_span_after_message_flow_ac
         attr.key.as_str() == "bcn.content.untrusted"
             && attr.value == opentelemetry::Value::Bool(false)
     }));
+    assert!(span.attributes.iter().all(|attr| {
+        attr.key.as_str() != "gen_ai.output.messages"
+    }));
     assert!(span.attributes.iter().any(|attr| {
-        attr.key.as_str() == "gen_ai.output.messages"
-            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str().contains("ws-response-content"))
+        attr.key.as_str() == "bcn.bot.response.chunk"
+            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str() == "ws-response-content")
     }));
 }
 
@@ -1504,10 +1507,7 @@ async fn traced_plugin_run_alias_creates_bot_response_child_span() {
     assert_eq!(span.span_context.trace_id().to_string(), "0af7651916cd43dd8448eb211c80319c");
     assert_eq!(span.parent_span_id.to_string(), "b7ad6b7169203331");
     assert!(span.events.events.is_empty());
-    assert!(span.attributes.iter().any(|attr| {
-        attr.key.as_str() == "gen_ai.output.messages"
-            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str().contains("plugin-ws-response"))
-    }));
+    assert_gen_ai_output_message(span, "plugin-ws-response", "stop");
 }
 
 #[tokio::test]
@@ -1562,6 +1562,36 @@ where
     let output = future.with_subscriber(subscriber).await;
     provider.force_flush().unwrap();
     (output, exporter.get_finished_spans().unwrap())
+}
+
+fn assert_gen_ai_output_message(
+    span: &opentelemetry_sdk::trace::SpanData,
+    expected_content: &str,
+    expected_finish_reason: &str,
+) {
+    let Some(value) = span
+        .attributes
+        .iter()
+        .find_map(|attribute| match &attribute.value {
+            opentelemetry::Value::String(value)
+                if attribute.key.as_str() == "gen_ai.output.messages" =>
+            {
+                Some(value.as_str())
+            }
+            _ => None,
+        })
+    else {
+        panic!("expected gen_ai.output.messages string attribute");
+    };
+    let Ok(messages): Result<serde_json::Value, _> = serde_json::from_str(value) else {
+        panic!("expected schema-compliant output messages JSON");
+    };
+    assert_eq!(messages.as_array().map(Vec::len), Some(1));
+    assert_eq!(messages[0]["role"], "assistant");
+    assert_eq!(messages[0]["parts"].as_array().map(Vec::len), Some(1));
+    assert_eq!(messages[0]["parts"][0]["type"], "text");
+    assert_eq!(messages[0]["parts"][0]["content"], expected_content);
+    assert_eq!(messages[0]["finish_reason"], expected_finish_reason);
 }
 
 #[tokio::test]

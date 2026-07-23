@@ -60,6 +60,15 @@ pub struct BotGroupListPage {
     pub limit: u64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CurrentActorGroupListPage {
+    pub actor_id: String,
+    pub items: Vec<serde_json::Value>,
+    pub total: u64,
+    pub offset: u64,
+    pub limit: u64,
+}
+
 /// Client for interacting with the Bot Coordination Service.
 #[derive(Debug, Clone)]
 pub struct BcsClient {
@@ -1749,6 +1758,39 @@ impl BcsClient {
         }
 
         response.json().await.context("Invalid bot groups response")
+    }
+
+    /// List groups that include the authenticated human or bot actor.
+    pub async fn list_my_groups(
+        &self,
+        offset: u64,
+        limit: u64,
+    ) -> Result<CurrentActorGroupListPage> {
+        let url = format!("{}/groups/my", self.base_url);
+
+        let response = self
+            .add_auth(self.http_client.get(&url).query(&[
+                ("offset", offset.to_string()),
+                ("limit", limit.to_string()),
+            ]))
+            .send()
+            .await
+            .context("Failed to list current actor groups")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "List current actor groups failed ({}): {}",
+                status,
+                body
+            ));
+        }
+
+        response
+            .json()
+            .await
+            .context("Invalid current actor groups response")
     }
 
     /// Add a member to a group.

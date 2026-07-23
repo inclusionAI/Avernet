@@ -2,7 +2,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
+use bcs_auth_api::{AuthConfig, AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::BotCore;
 use bcs_group::GroupStore;
@@ -38,6 +38,14 @@ fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
     let principal = AuthPrincipal {
         user_id: Some(staff_no.to_string()),
         user_name: Some(nick_name.to_string()),
+        ..Default::default()
+    };
+    Arc::new(AuthPluginChain::new(vec![Box::new(StaticAuthPlugin::with_principal(principal))]))
+}
+
+fn static_bot_auth_chain(bot_uuid: &str) -> Arc<AuthPluginChain> {
+    let principal = AuthPrincipal {
+        bot_uuid: Some(bot_uuid.to_string()),
         ..Default::default()
     };
     Arc::new(AuthPluginChain::new(vec![Box::new(StaticAuthPlugin::with_principal(principal))]))
@@ -1306,6 +1314,126 @@ async fn group_query_routes_delegate_to_group_query_service() {
     let workspace_calls = query.workspace_calls.lock().await;
     assert_eq!(workspace_calls.len(), 1);
     assert_eq!(workspace_calls[0].group_id, "group-1");
+}
+
+#[tokio::test]
+async fn my_groups_resolves_bot_principal_and_preserves_query() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder()
+        .group_query(query.clone())
+        .build_for_test();
+    let app = build_router(HttpAppState::new(services).with_auth_chain(
+        static_bot_auth_chain("bot-current"),
+        AuthConfig::default(),
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my?group_kind=normal&offset=4&limit=5&q=05&include_session_groups=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["actor_id"], "bot-current");
+    assert!(json.get("bot_uuid").is_none());
+    assert_eq!(json["items"][0]["group_id"], "bot-group-1");
+
+    let calls = query.bot_group_calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].bot_id, "bot-current");
+    assert_eq!(calls[0].group_kind, Some(Default::default()));
+    assert_eq!(calls[0].q.as_deref(), Some("05"));
+    assert_eq!(calls[0].offset, 4);
+    assert_eq!(calls[0].limit, 5);
+}
+
+#[tokio::test]
+async fn my_groups_resolves_human_identity() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder()
+        .group_query(query.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(chain),
+    )));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my?include_session_groups=false")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["actor_id"], "human_alice");
+
+    let calls = query.bot_group_calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].bot_id, "human_alice");
+}
+
+#[tokio::test]
+async fn my_groups_rejects_empty_bot_actor_identity() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder().group_query(query).build_for_test();
+    let app = build_router(HttpAppState::new(services).with_auth_chain(
+        static_bot_auth_chain(""),
+        AuthConfig::default(),
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn my_groups_rejects_anonymous_without_shadowing_group_detail() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder().group_query(query).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let my_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my?include_session_groups=false")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(my_response.status(), StatusCode::UNAUTHORIZED);
+
+    let detail_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/group-1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(detail_response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

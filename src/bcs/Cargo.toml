@@ -80,6 +80,7 @@ members = [
     "crates/tools/bcs-admin",
     "crates/tools/bcs-cli",
     # auxiliary
+    "crates/auxiliary/bcs-telemetry",
     "crates/auxiliary/ding-logger",
     # test-support
     "crates/test-support/bcs-test-support",
@@ -231,6 +232,7 @@ bcs-friend-store = { path = "crates/services/bcs-friend-store" }
 bcs-relation   = { path = "crates/services/bcs-relation" }
 bcs-relation-store = { path = "crates/services/bcs-relation-store" }
 bcs-secret         = { path = "crates/services/bcs-secret" }
+bcs-telemetry      = { path = "crates/auxiliary/bcs-telemetry" }
 ding-logger    = { path = "crates/auxiliary/ding-logger" }
 bcs-service-api  = { path = "crates/service-api/bcs-service-api" }
 bcs-services-container = { path = "crates/service-api/bcs-services-container" }
