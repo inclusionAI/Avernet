@@ -8,6 +8,7 @@ use bcs_service_api::{
     GroupCoreService, GroupStatus, GroupStrategy, HumanActor, MessageFlowService, MessageRole, Participant,
     ParticipantMode, ParticipantRole, PersistentGroupSendCommand, ProviderStreamGrayList,
     ProviderTransportPreference, RedactedToken, ServiceError, WebSendCommand,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     ServiceResult, Session, SessionHistoryCommand, SessionKind, SessionManagementService,
     SessionStatus, SessionUseCaseError,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
@@ -1173,6 +1174,7 @@ async fn accepted_chat_send_records_run_context_for_callback() {
     )
     .with_bot_run_context(run_context.clone());
 
+    let before_send_ms = bcs_protocol::now_ms();
     let outcome = flow
         .handle_web_send(WebSendCommand {
             caller: CallerContext::Human(HumanActor {
@@ -1192,6 +1194,7 @@ async fn accepted_chat_send_records_run_context_for_callback() {
         })
         .await
         .unwrap();
+    let after_send_ms = bcs_protocol::now_ms();
 
     let context = run_context
         .get_context(&outcome.primary_run_id)
@@ -1201,6 +1204,14 @@ async fn accepted_chat_send_records_run_context_for_callback() {
     assert_eq!(context.group_id, "group-1");
     assert_eq!(context.bcs_session_id.as_deref(), Some("group-1:abcdef12"));
     assert!(!context.terminal);
+    assert!(
+        context.deadline_ms
+            >= before_send_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+    );
+    assert!(
+        context.deadline_ms
+            <= after_send_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
+    );
 }
 
 #[tokio::test]

@@ -10,6 +10,7 @@ use bcs_protocol::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome, BotRunContext, BotRunContextPort,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     BotTerminalObserverPort, NoopBotTerminalObserver,
     BotRegistryCoreService, CallerContext, ChatAbortCommand, ChatAbortOutcome,
     DeliveryBlockContext, DeliveryBlockReason,
@@ -39,8 +40,6 @@ use tracing::{debug, info, warn};
 use crate::protocol_context::{group_context_input, group_type_wire};
 use crate::task_store::TaskStore;
 use crate::MSG_LOG_TARGET;
-
-const DEFAULT_GROUP_BOT_CALLBACK_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
 
 pub struct BcsMessageFlow {
     pub group: Arc<dyn GroupCoreService>,
@@ -212,7 +211,8 @@ impl BcsMessageFlow {
                     bot_id: bot_id.to_string(),
                     group_id: group_id.to_string(),
                     bcs_session_id: bcs_session_id.map(str::to_string),
-                    deadline_ms: now_ms().saturating_add(DEFAULT_GROUP_BOT_CALLBACK_TIMEOUT_MS),
+                    deadline_ms: now_ms()
+                        .saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS),
                     terminal: false,
                 })
                 .await;

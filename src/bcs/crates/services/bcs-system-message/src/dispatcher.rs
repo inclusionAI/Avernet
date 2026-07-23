@@ -14,6 +14,7 @@ use bcs_protocol::{
 };
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryPort, BotDeliveryTarget, BotRegistryCoreService, BotRunContext, BotRunContextPort,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryTarget,
     ProviderStreamGrayList, ProviderTransportPreference,
     ServiceError, ServiceResult,
@@ -332,7 +333,8 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                                 bot_id: recipient.clone(),
                                 group_id: cmd.group_id,
                                 bcs_session_id: cmd.bcs_session_id,
-                                deadline_ms: now_ms().saturating_add(300_000),
+                                deadline_ms: now_ms()
+                                    .saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS),
                                 terminal: false,
                             })
                             .await;
