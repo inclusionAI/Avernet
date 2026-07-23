@@ -9,6 +9,9 @@ use crate::ServiceResult;
 
 use super::message_flow::ChatEventState;
 
+/// Default lifetime for an HTTP Provider `chat.send` callback correlation.
+pub const DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
+
 #[derive(Clone)]
 pub enum ProviderBotEventCredential {
     StaticBearer(String),
