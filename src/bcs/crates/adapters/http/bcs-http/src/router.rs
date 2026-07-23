@@ -176,6 +176,7 @@ fn build_api_routes() -> Router<HttpAppState> {
             post(routes::friends::reject_friend_request),
         )
         .route("/groups", get(routes::groups::list_groups).post(routes::groups::create_group))
+        .route("/groups/my", get(routes::groups::list_my_groups))
         .route(
             "/groups/{id}",
             get(routes::groups::get_group).delete(routes::groups::delete_group),
