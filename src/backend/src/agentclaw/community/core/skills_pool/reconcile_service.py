@@ -19,10 +19,11 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skills_pool.models import (
-    OpenClawPoolPaths,
+    PoolPaths,
     PoolCutoverStatus,
     PoolSkillMapping,
     RegisteredSkillAsset,
+    pool_paths_for_engine,
 )
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
@@ -65,7 +66,7 @@ class SkillsPoolReconcileResult:
 
 
 class SkillsPoolReconcileService:
-    """将一个已认领的 OpenClaw Bot 前滚到 ``POOL_ACTIVE``。"""
+    """将一个已认领且受支持的多引擎 Bot 前滚到 ``POOL_ACTIVE``。"""
 
     @inject
     def __init__(
@@ -80,7 +81,6 @@ class SkillsPoolReconcileService:
         self._layouts = layout_repository
         self._skills = skill_repository
         self._runtime = runtime
-        self._paths = OpenClawPoolPaths()
 
     async def reconcile(
         self,
@@ -106,7 +106,12 @@ class SkillsPoolReconcileService:
         bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
         if bot is None:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_NOT_FOUND)
-        if bot.get("env") != scope.env or bot.get("active_engine") != "openclaw":
+        engine = bot.get("active_engine")
+        if bot.get("env") != scope.env or not isinstance(engine, str):
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+        try:
+            paths = pool_paths_for_engine(engine)
+        except ValueError:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
 
         owner_id = bot.get("owner_id")
@@ -124,7 +129,7 @@ class SkillsPoolReconcileService:
         probe = await self._runtime.probe(
             bot_id=scope.bot_id,
             user_id=user_id,
-            engine="openclaw",
+            engine=engine,
         )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
             if (
@@ -181,11 +186,11 @@ class SkillsPoolReconcileService:
             env=scope.env,
             bot_id=scope.bot_id,
             user_id=user_id,
-            engine="openclaw",
+            engine=engine,
         )
         try:
             local_names = [self._local_name(asset) for asset in local_assets]
-            mappings = self._build_pool_mappings(active_assets)
+            mappings = self._build_pool_mappings(active_assets, paths=paths)
         except ValueError as error:
             return SkillsPoolReconcileResult(
                 SkillsPoolReconcileOutcome.INVALID,
@@ -293,7 +298,7 @@ class SkillsPoolReconcileService:
             )
 
         local_locators = {
-            asset.skill_id: f"local://{self._paths.pool_local}/{name}"
+            asset.skill_id: f"local://{paths.pool_local}/{name}"
             for asset, name in zip(local_assets, local_names, strict=True)
         }
         if not self._layouts.commit_pool_active(
@@ -374,19 +379,21 @@ class SkillsPoolReconcileService:
     def _build_pool_mappings(
         self,
         assets: list[RegisteredSkillAsset],
+        *,
+        paths: PoolPaths,
     ) -> list[PoolSkillMapping]:
         mappings: list[PoolSkillMapping] = []
         targets: dict[str, str] = {}
         for asset in assets:
             if asset.git_path.startswith("local://"):
                 relative = PurePosixPath(self._local_name(asset))
-                source = PurePosixPath(self._paths.pool_local) / relative
+                source = PurePosixPath(paths.pool_local) / relative
             elif asset.git_path.startswith("git://"):
                 relative = self._source_tail(asset.git_path, "git://")
-                source = PurePosixPath(self._paths.pool_repo) / relative
+                source = PurePosixPath(paths.pool_repo) / relative
             else:
                 continue
-            target = str(PurePosixPath(self._paths.active) / relative.name)
+            target = str(PurePosixPath(paths.active) / relative.name)
             if targets.get(target) == str(source):
                 continue
             if target in targets:

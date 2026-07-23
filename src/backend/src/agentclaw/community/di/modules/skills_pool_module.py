@@ -31,7 +31,7 @@ from agentclaw.community.core.task_queue.services.registry import HandlerRegistr
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
-from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
+from agentclaw.community.plugins.skills_pool_runtime import SkillsPoolRuntime
 from agentclaw.community.plugins.skills_pool_layout_repository import (
     SkillsPoolLayoutRepository,
 )
@@ -63,7 +63,7 @@ class SkillsPoolModule(Module):
         )
         binder.bind(
             SkillsPoolRuntimeProtocol,
-            to=OpenClawSkillsPoolRuntime,
+            to=SkillsPoolRuntime,
             scope=singleton,
         )
         binder.bind(

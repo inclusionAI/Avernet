@@ -26,7 +26,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 logger = get_logger()
 
 
-class OpenClawSkillsPoolRuntime:
+class SkillsPoolRuntime:
     """ARCA/BaaS 共用的 adapter transport 实现。"""
 
     @inject
@@ -105,14 +105,10 @@ class OpenClawSkillsPoolRuntime:
         evidence = dict(data.get("evidence") or {})
         if status is PoolCutoverStatus.UNKNOWN:
             evidence["raw_status"] = raw_status
-        committed = (
-            data.get("committed") is True
-            and status
-            in {
-                PoolCutoverStatus.COMMITTED,
-                PoolCutoverStatus.ALREADY_COMMITTED,
-            }
-        )
+        committed = data.get("committed") is True and status in {
+            PoolCutoverStatus.COMMITTED,
+            PoolCutoverStatus.ALREADY_COMMITTED,
+        }
         return PoolCutoverResult(
             committed=committed,
             status=status,
@@ -186,4 +182,8 @@ class OpenClawSkillsPoolRuntime:
         )
 
 
-__all__ = ["OpenClawSkillsPoolRuntime"]
+# Compatibility for callers introduced by the initial OpenClaw rollout.
+OpenClawSkillsPoolRuntime = SkillsPoolRuntime
+
+
+__all__ = ["OpenClawSkillsPoolRuntime", "SkillsPoolRuntime"]

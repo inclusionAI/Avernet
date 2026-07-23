@@ -12,12 +12,31 @@ class OpenClawPoolPaths:
 
     active: str = "/home/admin/.openclaw/workspace/skills"
     legacy_local: str = "/home/admin/.openclaw/workspace/skills/skills-local"
-    pool_local: str = (
-        "/home/admin/.openclaw/workspace/skills-pool/skills-local"
-    )
-    pool_repo: str = (
-        "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
-    )
+    pool_local: str = "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+    pool_repo: str = "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
+
+
+@dataclass(frozen=True, slots=True)
+class ClaudeCodePoolPaths:
+    """Claude Code P3 的容器视角路径契约。"""
+
+    active: str = "/home/admin/.claude/skills"
+    legacy_local: str = "/home/admin/.claude_code/workspace/skills/skills-local"
+    pool_local: str = "/home/admin/.claude_code/workspace/skills-pool/skills-local"
+    pool_repo: str = "/home/admin/.claude_code/workspace/skills-pool/skills-repo"
+
+
+PoolPaths = OpenClawPoolPaths | ClaudeCodePoolPaths
+
+
+def pool_paths_for_engine(engine: str) -> PoolPaths:
+    """Resolve only explicitly supported engine layouts; never fall back."""
+
+    if engine == "openclaw":
+        return OpenClawPoolPaths()
+    if engine == "claude_code":
+        return ClaudeCodePoolPaths()
+    raise ValueError(f"engine Pool layout not implemented: {engine}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,9 +90,12 @@ class PoolCutoverResult:
 
 
 __all__ = [
+    "ClaudeCodePoolPaths",
     "OpenClawPoolPaths",
+    "PoolPaths",
     "PoolCutoverResult",
     "PoolCutoverStatus",
     "PoolSkillMapping",
     "RegisteredSkillAsset",
+    "pool_paths_for_engine",
 ]
