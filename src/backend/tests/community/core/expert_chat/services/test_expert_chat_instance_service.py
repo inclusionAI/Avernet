@@ -73,6 +73,9 @@ def _make_service(
     bot_repo=None,
     binding_repo=None,
     bot_build_service=None,
+    caller_identity=None,
+    token_provider=None,
+    runtime_updater=None,
 ):
     """Construct ExpertChatInstanceService with mocks."""
     instance_repo = instance_repo or MagicMock()
@@ -81,6 +84,9 @@ def _make_service(
     bot_repo = bot_repo or MagicMock()
     binding_repo = binding_repo or MagicMock()
     bot_build_service = bot_build_service or MagicMock()
+    caller_identity = caller_identity or MagicMock()
+    token_provider = token_provider or MagicMock()
+    runtime_updater = runtime_updater or MagicMock()
 
     svc = ExpertChatInstanceService(
         instance_repo=instance_repo,
@@ -89,8 +95,11 @@ def _make_service(
         bot_repo=bot_repo,
         binding_repo=binding_repo,
         bot_build_service=bot_build_service,
+        caller_identity=caller_identity,
+        token_provider=token_provider,
+        runtime_updater=runtime_updater,
     )
-    return svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service
+    return svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater
 
 
 def _wire_publish(publish_repo, record=None):
@@ -130,7 +139,7 @@ class TestResolveBuildArtifact:
 
     def test_no_success_publish_raises_not_published(self):
         """Lines 267, 271: No success publish record raises BotNotPublishedError."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         publish_repo.get_by_publish_bot_id = MagicMock(return_value=None)
 
         with pytest.raises(BotNotPublishedError) as exc_info:
@@ -141,7 +150,7 @@ class TestResolveBuildArtifact:
 
     def test_success_returns_record_and_migration_path(self):
         """Successful resolution returns (record, migration_path)."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         record = MockPublishRecord(
             id=456,
             version=2,
@@ -156,7 +165,7 @@ class TestResolveBuildArtifact:
 
     def test_publish_record_ext_none_returns_none_migration_path(self):
         """Line 275: When publish_record.ext is None, migration_path should be None."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         record = MockPublishRecord(id=789, version=1, ext=None)
         # Override __post_init__ effect
         record.ext = None
@@ -169,7 +178,7 @@ class TestResolveBuildArtifact:
 
     def test_publish_record_version_none_uses_default(self):
         """Line 103: When publish_record.version is None, default to 1."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         record = MockPublishRecord(id=999, version=None, ext={"migration_path": "/nas/path"})
         # Ensure version is None
         record.version = None
@@ -187,7 +196,7 @@ class TestCreateContainer:
     @pytest.mark.asyncio
     async def test_bot_not_found_raises_connection_error(self):
         """Bot not found raises ConnectionError."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         bot_repo.get_by_id_and_owner = MagicMock(return_value=None)
 
         with pytest.raises(ConnectionError) as exc_info:
@@ -199,7 +208,7 @@ class TestCreateContainer:
     @pytest.mark.asyncio
     async def test_generic_exception_wrapped_as_connection_error(self):
         """Generic exceptions wrapped as ConnectionError."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         _wire_bot_repo(bot_repo)
         bot_build_service.release_async = AsyncMock(side_effect=RuntimeError("network error"))
 
@@ -212,7 +221,7 @@ class TestCreateContainer:
     @pytest.mark.asyncio
     async def test_no_bot_uuid_in_result_raises_connection_error(self):
         """No bot_uuid in release_async result raises ConnectionError."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         _wire_bot_repo(bot_repo)
         bot_build_service.release_async = AsyncMock(return_value={"publish_id": 999})  # No bot_uuid
 
@@ -225,7 +234,7 @@ class TestCreateContainer:
     @pytest.mark.asyncio
     async def test_success_returns_bot_uuid_and_publish_id(self):
         """Successful create returns bot_uuid and publish_id."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         _wire_bot_repo(bot_repo)
         _wire_binding_repo(binding_repo)
         bot_build_service.release_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
@@ -250,7 +259,7 @@ class TestCreateContainer:
     @pytest.mark.asyncio
     async def test_release_async_called_with_correct_params(self):
         """release_async is called with expected parameters."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         bot_info = {
             "bot_id": BOT_ID,
             "owner_id": OWNER_ID,
@@ -279,7 +288,7 @@ class TestUpgradeContainer:
     @pytest.mark.asyncio
     async def test_bot_not_found_raises_connection_error(self):
         """Bot not found raises ConnectionError."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         bot_repo.get_by_id_and_owner = MagicMock(return_value=None)
 
         with pytest.raises(ConnectionError) as exc_info:
@@ -290,7 +299,7 @@ class TestUpgradeContainer:
     @pytest.mark.asyncio
     async def test_success_returns_bot_uuid_and_publish_id(self):
         """Successful upgrade returns bot_uuid and publish_id."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         _wire_bot_repo(bot_repo)
         bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
 
@@ -303,7 +312,7 @@ class TestUpgradeContainer:
     @pytest.mark.asyncio
     async def test_generic_exception_wrapped_as_connection_error(self):
         """Generic exceptions wrapped as ConnectionError."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         _wire_bot_repo(bot_repo)
         bot_build_service.upgrade_async = AsyncMock(side_effect=RuntimeError("upgrade failed"))
 
@@ -316,7 +325,7 @@ class TestUpgradeContainer:
     @pytest.mark.asyncio
     async def test_upgrade_async_called_with_correct_params(self):
         """upgrade_async is called with expected parameters."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         bot_info = {
             "bot_id": BOT_ID,
             "owner_id": OWNER_ID,
@@ -344,7 +353,7 @@ class TestBuildConnection:
 
     def test_baas_service_error_wrapped_as_connection_error(self):
         """BaasServiceError wrapped as ConnectionError."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         baas.get_ws_info_by_bot_uuid = MagicMock(side_effect=BaasServiceError("ws error"))
 
         with pytest.raises(ConnectionError) as exc_info:
@@ -355,7 +364,7 @@ class TestBuildConnection:
 
     def test_generic_exception_wrapped_as_connection_error(self):
         """Generic exceptions wrapped as ConnectionError."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         baas.get_ws_info_by_bot_uuid = MagicMock(side_effect=RuntimeError("timeout"))
 
         with pytest.raises(ConnectionError) as exc_info:
@@ -365,7 +374,7 @@ class TestBuildConnection:
 
     def test_success_returns_connection_dict(self):
         """Successful build returns connection dict."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         ws_info = _make_ws_info()
         baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
 
@@ -385,7 +394,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_no_success_publish_raises_not_published(self):
         """No success publish record raises BotNotPublishedError."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         instance_repo.get_instance = MagicMock(return_value=None)
         instance_repo.upsert_instance = MagicMock(
             return_value={"id": 1, "status": "init", "ext": None}
@@ -398,7 +407,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_success_instance_returns_immediately(self):
         """Instance already success with matching version returns immediately."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -423,7 +432,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_success_instance_with_old_version_upgrades(self):
         """Success instance with old version triggers upgrade."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -449,7 +458,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_new_instance_creates_container(self):
         """New instance triggers create_container."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         instance_repo.upsert_instance = MagicMock(
             return_value={"id": 1, "status": "init", "ext": None}
         )
@@ -488,7 +497,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_instance_not_ready_returns_need_poll(self):
         """Instance not ready returns need_poll=True."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -512,7 +521,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_init_status_with_baas_publish_id_skips_upgrade(self):
         """When status is 'init' and baas_publish_id exists, should skip upgrade and poll progress."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -543,7 +552,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_init_status_without_baas_publish_id_calls_upgrade(self):
         """When status is 'init' but no baas_publish_id, should call upgrade."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -569,7 +578,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_non_init_status_calls_upgrade(self):
         """When status is not 'init' (e.g., 'failed'), should call upgrade."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -598,7 +607,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_success_instance_without_bot_uuid_creates_container(self):
         """Success instance without bot_uuid triggers create."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": None,  # No bot_uuid
             "service_bot_publish_id": 123,
@@ -630,7 +639,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_success_instance_version_none_uses_zero(self):
         """ext.get('version') defaults to 0 when None."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "version": None,  # No version
@@ -660,7 +669,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_baas_publish_failed_sets_status_to_failed(self):
         """FAILED status from baas_publish sets instance status to 'failed'."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         instance_repo.upsert_instance = MagicMock(
             return_value={"id": 1, "status": "init", "ext": None}
         )
@@ -694,7 +703,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_create_without_publish_id_skips_poll(self):
         """When baas_publish_id is None, skip polling."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         instance_repo.upsert_instance = MagicMock(
             return_value={"id": 1, "status": "init", "ext": None}
         )
@@ -725,7 +734,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_upgrade_adds_bot_uuid_to_ext_if_missing(self):
         """Upgrade preserves bot_uuid in ext when upgrading."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -766,7 +775,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_force_upgrade_bypasses_version_check(self):
         """force_upgrade=True bypasses the version check fast path."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -797,7 +806,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_upgrade_updates_version_in_ext(self):
         """Upgrade container updates version in ext to new version."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -834,7 +843,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_force_upgrade_false_uses_fast_path(self):
         """force_upgrade=False uses the version check fast path when version is current."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -859,7 +868,7 @@ class TestGetCallerConnection:
     @pytest.mark.asyncio
     async def test_force_upgrade_creates_when_no_bot_uuid(self):
         """force_upgrade=True with no bot_uuid triggers create, not upgrade."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": None,  # No bot_uuid
             "service_bot_publish_id": 123,
@@ -898,7 +907,7 @@ class TestGetCallerConnectionExceptionHandling:
     @pytest.mark.asyncio
     async def test_exception_records_traceback_in_ext(self):
         """Exception during get_caller_connection records traceback in instance ext."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         instance_repo.get_instance = MagicMock(return_value=None)
         instance_repo.upsert_instance = MagicMock(
             return_value={"id": 1, "status": "init", "ext": None}
@@ -925,7 +934,7 @@ class TestGetCallerConnectionExceptionHandling:
     @pytest.mark.asyncio
     async def test_exception_update_failure_does_not_affect_main_flow(self):
         """If update_instance fails when recording error, exception still propagates."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         instance_repo.get_instance = MagicMock(return_value=None)
         instance_repo.upsert_instance = MagicMock(
             return_value={"id": 1, "status": "init", "ext": None}
@@ -943,7 +952,7 @@ class TestGetCallerConnectionExceptionHandling:
     @pytest.mark.asyncio
     async def test_exception_in_upgrade_records_traceback(self):
         """Exception during upgrade records traceback in instance ext."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "version": 1,
@@ -971,7 +980,7 @@ class TestGetCallerConnectionExceptionHandling:
     @pytest.mark.asyncio
     async def test_build_connection_exception_records_traceback(self):
         """Exception during _build_connection records traceback in instance ext."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "version": 2,
@@ -1000,7 +1009,7 @@ class TestGetCallerConnectionExceptionHandling:
     @pytest.mark.asyncio
     async def test_exception_preserves_existing_ext(self):
         """Exception handling preserves existing ext data and adds error info."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "version": 1,
@@ -1035,7 +1044,7 @@ class TestGetCallerConnectionEdgeCases:
     @pytest.mark.asyncio
     async def test_create_container_success_returns_connection(self):
         """Full happy path: create container and return connection."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
 
         call_count = [0]
         def mock_get_instance(*args, **kwargs):
@@ -1067,7 +1076,7 @@ class TestGetCallerConnectionEdgeCases:
     @pytest.mark.asyncio
     async def test_publish_record_version_none_uses_default_one(self):
         """When publish_record.version is None, defaults to 1 for comparison."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "version": 2,
@@ -1095,7 +1104,7 @@ class TestRepositoryUpdateInstanceWithStatusOnly:
     @pytest.mark.asyncio
     async def test_publish_status_success_sets_instance_status(self):
         """SUCCESS status from baas_publish sets instance status to 'success'."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
 
         call_count = [0]
         def mock_get_instance(*args, **kwargs):
@@ -1132,7 +1141,7 @@ class TestRepositoryUpdateInstanceWithStatusOnly:
     @pytest.mark.asyncio
     async def test_publish_status_failed_sets_instance_status(self):
         """FAILED status from baas_publish sets instance status to 'failed'."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
 
         call_count = [0]
         def mock_get_instance(*args, **kwargs):
@@ -1169,7 +1178,7 @@ class TestRepositoryUpdateInstanceWithStatusOnly:
     @pytest.mark.asyncio
     async def test_publish_status_running_sets_instance_status_to_init(self):
         """RUNNING status sets instance status to 'init' (not original status)."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
 
         call_count = [0]
         def mock_get_instance(*args, **kwargs):
@@ -1213,7 +1222,7 @@ class TestGetCallerConnectionIamToken:
     @pytest.mark.asyncio
     async def test_iam_token_param_accepted_without_error(self):
         """Passing iam_token does not raise any error."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -1237,7 +1246,7 @@ class TestGetCallerConnectionIamToken:
     @pytest.mark.asyncio
     async def test_iam_token_none_works_same_as_default(self):
         """Passing iam_token=None works the same as not passing it."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -1262,7 +1271,7 @@ class TestGetCallerConnectionIamToken:
     @pytest.mark.asyncio
     async def test_iam_token_with_force_upgrade_accepted(self):
         """iam_token works correctly with force_upgrade parameter."""
-        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service = _make_service()
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
             "bot_uuid": BOT_UUID,
             "service_bot_publish_id": 123,
@@ -1286,3 +1295,270 @@ class TestGetCallerConnectionIamToken:
 
         assert result["need_poll"] is False
         bot_build_service.upgrade_async.assert_called_once()
+
+
+class TestCallerIdentityExchange:
+    """Tests for caller identity exchange when container is successfully pulled."""
+
+    @pytest.mark.asyncio
+    async def test_exchange_called_when_status_success_and_iam_token_provided(self):
+        """When status is SUCCESS and iam_token is provided, exchange_caller_identity is called."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        # Setup mocks
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Call with iam_token
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        # Verify exchange_caller_identity was called
+        caller_identity.exchange_caller_identity.assert_called_once()
+        call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
+        assert call_kwargs["iam_token"] == "test-iam-token"
+        assert call_kwargs["caller_user_id"] == USER_ID
+        assert call_kwargs["bot_id"] == BOT_ID
+        assert call_kwargs["owner_user_id"] == OWNER_ID
+        assert call_kwargs["stage"] == "online"
+        assert call_kwargs["entity_id"] == OWNER_ID
+        assert call_kwargs["is_test_exchange"] is False
+
+    @pytest.mark.asyncio
+    async def test_exchange_not_called_when_no_iam_token(self):
+        """When iam_token is None, exchange_caller_identity is not called and warning is logged."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Call without iam_token
+        with patch("agentclaw.community.core.expert_chat.services.expert_chat_instance_service.logger") as mock_logger:
+            result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        # Verify exchange_caller_identity was NOT called
+        caller_identity.exchange_caller_identity.assert_not_called()
+        # Verify warning was logged
+        mock_logger.warning.assert_called()
+        warning_call = mock_logger.warning.call_args
+        assert "Skip caller identity exchange" in str(warning_call)
+
+    @pytest.mark.asyncio
+    async def test_exchange_not_called_when_status_not_success(self):
+        """When status is not SUCCESS, exchange_caller_identity is not called."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "RUNNING"})
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Call with iam_token but status is RUNNING
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        # Verify exchange_caller_identity was NOT called
+        caller_identity.exchange_caller_identity.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_exchange_failure_does_not_interrupt_container_startup(self):
+        """When exchange_caller_identity fails, container startup continues normally."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Make exchange_caller_identity raise an exception
+        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("exchange failed"))
+
+        # Call with iam_token
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        # Verify the method still returns successfully despite the exchange failure
+        assert result["need_poll"] is False
+        assert result["connection"]["bot_uuid"] == BOT_UUID
+        # Verify exchange_caller_identity was called
+        caller_identity.exchange_caller_identity.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_exchange_with_binding_id_passed(self):
+        """binding_id is passed to exchange_caller_identity when available."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+            "binding_id": BINDING_ID,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "init", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Call with iam_token
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        # Verify binding_id was passed
+        caller_identity.exchange_caller_identity.assert_called_once()
+        call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
+        assert call_kwargs["binding_id"] == BINDING_ID
+
+    @pytest.mark.asyncio
+    async def test_exchange_publish_id_from_service_bot_publish_record(self):
+        """publish_id comes from service_bot_publish_id (publish_record.id)."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        SERVICE_BOT_PUBLISH_ID = 456  # This should be passed as publish_id
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 789,  # Old value
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        # Create publish record with specific ID
+        _wire_publish(publish_repo, MockPublishRecord(id=SERVICE_BOT_PUBLISH_ID, version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Call with iam_token
+        result = await svc.get_caller_connection(
+            USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+        )
+
+        # Verify publish_id is from publish_record.id
+        caller_identity.exchange_caller_identity.assert_called_once()
+        call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
+        assert call_kwargs["publish_id"] == SERVICE_BOT_PUBLISH_ID
+
+    @pytest.mark.asyncio
+    async def test_exchange_success_logs_info(self):
+        """Successful exchange logs info message."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        with patch("agentclaw.community.core.expert_chat.services.expert_chat_instance_service.logger") as mock_logger:
+            result = await svc.get_caller_connection(
+                USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+            )
+
+        # Verify success log
+        mock_logger.info.assert_called()
+        info_calls = [str(call) for call in mock_logger.info.call_args_list]
+        assert any("Caller identity exchange succeeded" in call for call in info_calls)
+
+    @pytest.mark.asyncio
+    async def test_exchange_failure_logs_error(self):
+        """Exchange failure logs error message."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
+
+        existing_ext = {
+            "bot_uuid": BOT_UUID,
+            "service_bot_publish_id": 123,
+            "version": 1,
+        }
+        instance_repo.get_instance = MagicMock(
+            return_value={"id": 1, "status": "success", "ext": existing_ext}
+        )
+        _wire_publish(publish_repo, MockPublishRecord(version=2))
+        _wire_bot_repo(bot_repo)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        baas.get_publish_progress = MagicMock(return_value={"status": "SUCCESS"})
+        ws_info = _make_ws_info()
+        baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
+        instance_repo.update_instance = MagicMock(return_value=True)
+
+        # Make exchange_caller_identity raise an exception
+        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("exchange failed"))
+
+        with patch("agentclaw.community.core.expert_chat.services.expert_chat_instance_service.logger") as mock_logger:
+            result = await svc.get_caller_connection(
+                USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
+            )
+
+        # Verify error log
+        mock_logger.error.assert_called()
+        error_call = str(mock_logger.error.call_args)
+        assert "Caller identity exchange failed" in error_call
+        assert "exchange failed" in error_call
