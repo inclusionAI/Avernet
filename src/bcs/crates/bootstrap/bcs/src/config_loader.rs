@@ -157,7 +157,12 @@ fn is_sensitive_config_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     matches!(
         lower.as_str(),
-        "password" | "api_key" | "auth_token" | "client_secret" | "gateway_client_secret"
+        "password"
+            | "api_key"
+            | "auth_token"
+            | "client_secret"
+            | "gateway_client_secret"
+            | "extra_headers"
     ) || lower.ends_with("_password")
         || lower.ends_with("_api_key")
         || lower.ends_with("_secret")
@@ -542,6 +547,28 @@ mod tests {
         assert_eq!(source["cache"]["redis"]["connection"]["password"], "redis-pass");
     }
 
+    #[test]
+    fn test_redact_telemetry_extra_headers_as_a_sensitive_container() {
+        let source = serde_json::json!({
+            "telemetry": {
+                "otlp_traces_endpoint": "https://collector.example.com/v1/traces",
+                "extra_headers": {
+                    "x-collector-route": "collector-local",
+                    "authorization": "Bearer secret"
+                }
+            }
+        });
+
+        let redacted = redact_sensitive_values(&source);
+
+        assert_eq!(
+            redacted["telemetry"]["otlp_traces_endpoint"],
+            "https://collector.example.com/v1/traces"
+        );
+        assert_eq!(redacted["telemetry"]["extra_headers"], "<redacted>");
+        assert!(source["telemetry"]["extra_headers"].is_object());
+    }
+
     // =========================================================================
     // ConfigLoader tests (require temp files)
     // =========================================================================
@@ -651,6 +678,26 @@ mod tests {
         assert_eq!(digest.path, "./logs");
         assert_eq!(digest.file, "bcs-chat-digest.log");
         assert_eq!(digest.targets, vec!["bcs_chat_digest"]);
+    }
+
+    #[test]
+    fn test_real_local_config_routes_all_errors_to_common_error_file() {
+        let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../configs/bcs-config-local.toml");
+        let content = std::fs::read_to_string(config_path).unwrap();
+        let config: crate::config::BcsConfig = toml::from_str(&content).unwrap();
+
+        let common_error = config
+            .logging
+            .outputs
+            .iter()
+            .find(|output| output.name == "common-error")
+            .expect("local config should include common-error output");
+
+        assert_eq!(common_error.path, "./logs");
+        assert_eq!(common_error.file, "common-error.log");
+        assert_eq!(common_error.level, "error");
+        assert_eq!(common_error.targets, vec!["*"]);
     }
 
     #[test]

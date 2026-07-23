@@ -36,7 +36,10 @@ from secbaas.community.spi.sandbox.k8s import K8sSandboxPlugin
 from ._paas_service import PaasService
 
 if TYPE_CHECKING:
-    from secbaas.community.api.device_manage import OutBoundOperationRule
+    from secbaas.community.api.device_manage import (
+        OutBoundOperationRule,
+        OutBoundOperationRuleUpdatedMode,
+    )
     from secbaas.community.api.health_check.bot import TTLInfo
 
 _SANDBOX_ID_ORDINAL = re.compile(r"^(.+)-(\d+)$")
@@ -781,6 +784,7 @@ class K8sPaasService(PaasService):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update the outbound proxy rules ConfigMap for a K8s StatefulSet.
 

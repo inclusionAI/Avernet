@@ -252,6 +252,18 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         rows.iter().map(row_to_binding).collect()
     }
 
+    async fn delete_by_target(&self, target: &BindingTarget, env: &str) -> ServiceResult<u64> {
+        let target_json = serde_json::to_string(target)?;
+        self.execute(
+            "delete_bindings_by_target",
+            DbStatement::with_params(
+                "DELETE FROM bcs_channel_bindings WHERE target_json = ? AND env = ?",
+                vec![DbValue::from(target_json), DbValue::from(env)],
+            ),
+        )
+        .await
+    }
+
     async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
         let status = if active {
             BindingStatus::Active
@@ -928,6 +940,13 @@ mod tests {
         group_other_channel.channel_type = "test_im".to_string();
         binding_repo.create(group_other_channel).await?;
 
+        let mut group_other_env = binding();
+        group_other_env.id = "binding_other_env".to_string();
+        group_other_env.account_ref = "account_pre".to_string();
+        group_other_env.channel_type = "test_im".to_string();
+        group_other_env.env = "pre".to_string();
+        binding_repo.create(group_other_env).await?;
+
         let mut other_group = binding();
         other_group.id = "binding_other_group".to_string();
         other_group.account_ref = "robot_2".to_string();
@@ -940,13 +959,19 @@ mod tests {
             group_id: "group_1".to_string(),
         };
         let all_channels = binding_repo.list_by_target(&group_target, None).await?;
-        assert_eq!(all_channels.len(), 2);
+        assert_eq!(all_channels.len(), 3);
 
         let dingtalk = binding_repo
             .list_by_target(&group_target, Some("dingtalk"))
             .await?;
         assert_eq!(dingtalk.len(), 1);
         assert_eq!(dingtalk[0].id, "binding_1");
+
+        assert_eq!(binding_repo.delete_by_target(&group_target, "dev").await?, 2);
+        let remaining_group_bindings = binding_repo.list_by_target(&group_target, None).await?;
+        assert_eq!(remaining_group_bindings.len(), 1);
+        assert_eq!(remaining_group_bindings[0].id, "binding_other_env");
+        assert!(binding_repo.get("binding_other_group").await?.is_some());
 
         Ok(())
     }

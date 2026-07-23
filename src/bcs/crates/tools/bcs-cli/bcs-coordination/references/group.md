@@ -10,7 +10,7 @@
 | `confirm-group-help` | `--url`                 | 确认群聊提案                 |
 | `create-group`       | `--topic`               | 直接创建群组                 |
 | `get-group`          | `--group`               | 获取群组信息                 |
-| `list-groups`        | `[--mine]`              | 列出所有群组，或当前 Bot 所在群组 |
+| `list-groups`        | 无                      | 列出当前认证用户或 Bot 正式参与的群组 |
 | `add-member`         | `--group`, `--bot-uuid` | 添加成员到已有群组           |
 | `group-status`       | `--group`, `--status`   | 更新群组状态（仅协调者）     |
 | `terminate-group`    | `--group`               | 终止群组会话（仅 driver）    |
@@ -100,12 +100,13 @@ bcs confirm-group-help --url "http://xxx/proposals/xxx/confirm"
 跳过提案流程，直接创建一个群组。**推荐在 agent 已知参与者的场景下使用**（如 agent 自己建群自己确认）。
 
 ```bash
-bcs create-group --driver "<driver_bot_id>" --participants "<bot1,bot2>" [--topic "<群组主题>"] [--context "<协作背景>"]
+bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --participants "<bot1,bot2>" [--topic "<群组主题>"] [--context "<协作背景>"]
 ```
 
 **参数：**
 
-- `--driver "BotID"`: 指定 driver Bot（**必需**）
+- `--driver "BotID"`: 创建普通 chat 群，并指定 driver Bot（与 `--manager` 二选一）
+- `--manager "BotID"`: 创建 manager-worker 群，并指定唯一 manager Bot（与 `--driver` 二选一）
 - `--participants "Bot1,Bot2"`: 参与者列表（**必需**）
 - `--topic "主题"`: 群组主题，设置群组 label 为 "Group: {topic}"（可选）
 - `--context "背景"`: 协作背景描述（可选）
@@ -119,6 +120,9 @@ bcs create-group --driver "bot-001" --participants "bot-sec,bot-dba" --topic "�
 
 # 带上下文
 bcs create-group --driver "bot-001" --participants "bot-dba,bot-pm" --topic "数据库死锁排查" --context "用户反馈系统卡顿，疑似死锁"
+
+# manager-worker 群；participants 自动作为 worker，manager 无需重复出现在列表中
+bcs create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker-2" --topic "并行实现任务"
 ```
 
 **返回示例：**
@@ -168,36 +172,57 @@ bcs get-group --group "grp-001"
 
 ## list-groups - 列出群组
 
-默认列出所有群组：
+列出当前认证主体正式参与的群组，不包含仅通过 session 参与的群组。服务端根据
+认证信息识别主体：Bot token 对应 Bot UUID，用户身份对应
+`human_<staff_no>`；CLI 不需要从本地 session 读取 Bot UUID。
 
 ```bash
 bcs list-groups
 ```
 
-使用 `--mine` 仅列出当前 Bot 参与的群组。当前 Bot 从
-`$BOT_DATA_DIR/.bcs/session.json` 的 `bot_uuid` 读取：
+默认从 offset `0` 开始，每批返回最多 20 个群组。可以直接指定 offset
+和批大小，或使用 `--all` 从指定 offset 起获取所有剩余结果：
 
 ```bash
-bcs list-groups --mine
+bcs list-groups --offset 20 --batch-size 10
+bcs list-groups --offset 20 --all
+```
+
+当后面还有结果时，结构化输出会包含 `next_offset` 和可直接执行的
+`next_command`：
+
+```json
+{
+  "items": [
+    {"group_id": "grp-021"},
+    {"group_id": "grp-022"}
+  ],
+  "offset": 20,
+  "returned": 2,
+  "total": 42,
+  "has_more": true,
+  "next_offset": 22,
+  "next_command": "bcs-cli list-groups --offset 22 --batch-size 2"
+}
 ```
 
 **返回示例：**
 
 ```json
-[
-  {
-    "group_id": "grp-001",
-    "topic": "数据库死锁排查",
-    "status": "active",
-    "participants_count": 3
-  },
-  {
-    "group_id": "grp-002",
-    "topic": "安全事件处理",
-    "status": "completed",
-    "participants_count": 4
-  }
-]
+{
+  "items": [
+    {
+      "group_id": "grp-001",
+      "topic": "数据库死锁排查",
+      "status": "active",
+      "participants_count": 3
+    }
+  ],
+  "offset": 0,
+  "returned": 1,
+  "total": 1,
+  "has_more": false
+}
 ```
 
 ---
@@ -426,7 +451,7 @@ bcs request-group-help --topic "数据库死锁排查" --participants "bot-dba-u
 | `confirm-group-help` | `group_id`, `driver_bot`, `participants`, `chat_url`       |
 | `create-group`       | `id`, `driver_bot`, `participants`, `chat_url`             |
 | `get-group`          | `group_id`, `topic`, `status`, `driver_bot`, `originator`, `participants`, `created_at` |
-| `list-groups`        | 群组列表：`group_id`, `topic`, `status`, `participants_count` |
+| `list-groups`        | `items`, `offset`, `returned`, `total`, `has_more`, 可选 `next_offset`/`next_command` |
 | `add-member`         | 添加确认                                                   |
 | `group-status`       | `updated`, `group_id`, `status`, `reason`, `changed_by`    |
 | `terminate-group`    | 终止确认                                                   |

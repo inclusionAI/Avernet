@@ -277,13 +277,24 @@ class ContentScanner:
         if file_avg_scores:
             return int(sum(file_avg_scores) / len(file_avg_scores))
 
-        # Fallback: penalty-based scoring
+        # Fallback: penalty-based scoring. LLM01 ("LLM 服务未启用") is not a
+        # content defect — it means the diagnostic never ran, so it neither
+        # adds penalty nor softens the score. Without this skip, an all-LLM01
+        # scan (LLM down) gets softened to a misleadingly high score
+        # (e.g. 6 INFO findings → 100 - 6*2 = 88). When *every* finding is
+        # LLM01, no real diagnosis ran → report 0 instead of a dressed-up 88.
         penalty = 0
+        real_findings = False
         for f in findings:
+            if f.rule_id == "LLM01":
+                continue
+            real_findings = True
             if f.severity == Severity.CRITICAL:
                 penalty += 20
             elif f.severity == Severity.WARNING:
                 penalty += 10
             elif f.severity == Severity.INFO:
                 penalty += 2
+        if not real_findings:
+            return 0
         return max(0, 100 - penalty)

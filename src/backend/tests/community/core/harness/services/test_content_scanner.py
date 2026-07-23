@@ -400,6 +400,45 @@ class TestScoring:
         ]
         assert ContentScanner._compute_score(findings) == 80  # 100 - 20
 
+    def test_llm_disabled_findings_not_scored_as_content(self):
+        """LLM01 (LLM disabled) is not a content defect — it must not be
+        softened into a high score via the INFO penalty branch.
+
+        Reproduces the prod case where LLM service was down: 6 LLM01 INFO
+        findings (AGENTS×3 / TOOLS×2 / SOUL×1) were scored as
+        100 - 6*2 = 88, misreporting a non-scanned bot as healthy. With the
+        fix, an all-LLM-disabled scan reports 0 (no real diagnosis ran), and
+        real content findings alongside LLM01 are penalised as before.
+        """
+        file_types = ["AGENTS.md", "TOOLS.md", "SOUL.md"]
+        llm_disabled = (
+            [Finding(rule_id="LLM01", rule_name="LLM 服务未启用",
+                     severity=Severity.INFO, file_type="AGENTS.md",
+                     message="m", score=0) for _ in range(3)]
+            + [Finding(rule_id="LLM01", rule_name="LLM 服务未启用",
+                       severity=Severity.INFO, file_type="TOOLS.md",
+                       message="m", score=0) for _ in range(2)]
+            + [Finding(rule_id="LLM01", rule_name="LLM 服务未启用",
+                       severity=Severity.INFO, file_type="SOUL.md",
+                       message="m", score=0)]
+        )
+        # All LLM01, no real diagnosis ran → 0, not 88
+        assert ContentScanner._compute_score(llm_disabled, file_types=file_types) == 0
+
+    def test_llm_disabled_ignored_when_real_findings_present(self):
+        """Real content findings are still penalised even if LLM01 findings
+        are mixed in — LLM01 neither adds penalty nor softens the score."""
+        findings = [
+            Finding(rule_id="LLM01", rule_name="LLM 服务未启用",
+                    severity=Severity.INFO, file_type="AGENTS.md",
+                    message="m", score=0),
+            Finding(rule_id="D-SAFETY-001", rule_name="test",
+                    severity=Severity.CRITICAL, file_type="SAFETY.md",
+                    message="m", score=0),
+        ]
+        # Only the CRITICAL counts: 100 - 20 = 80 (LLM01 skipped, not +2)
+        assert ContentScanner._compute_score(findings) == 80
+
 
 class TestSummarize:
     """Test the findings summary — summarized by file-type-level result (pass/warning/fail/error)."""

@@ -128,3 +128,60 @@ def test_caller_identity_rejects_ambiguous_bot_without_entity_id() -> None:
 
     assert exc_info.value.code == CALLER_TARGET_AMBIGUOUS
     service._bot_repo.get_by_id_and_owner.assert_not_called()
+
+
+def test_caller_identity_test_exchange_allows_active_personal_bot() -> None:
+    service = _bare_baas_service()
+    service._bot_repo = MagicMock()
+    service._bot_repo.get_by_id_and_entity.return_value = {
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "bot_type": "personal",
+        "status": "ACTIVE",
+    }
+    service._device_binding_repo = MagicMock()
+    service._device_binding_repo.get_by_id.return_value = SimpleNamespace(
+        status="ACTIVE",
+        device_id="baas-bot-1",
+    )
+    service._outbound_rule_provider = MagicMock()
+    service._outbound_rule_provider.build_caller_rule.return_value = (
+        OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["https://mcp.example"],
+                    action="set",
+                    header_name="x-caller-token",
+                    value="caller-token",
+                )
+            ]
+        )
+    )
+    service._build_outbound_operation_rule = MagicMock(
+        return_value=OutBoundOperationRule()
+    )
+    service.list_devices_by_bot_uuid = MagicMock(
+        return_value=[{"provider_device_id": "device-1@template-1"}]
+    )
+    service.update_device_outbound_rule = MagicMock(return_value=True)
+
+    service.update_caller_identity(
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        caller_user_id="owner-1",
+        caller_token=CallerToken(
+            access_token="caller-token",
+            subject_user_id="owner-1",
+            expires_at=datetime.now(),
+            fingerprint="ignored",
+        ),
+        agent_pass_token="agent-pass-token",
+        agent_code="agent-code",
+        stage="draft",
+        publish_id=None,
+        entity_id="entity-1",
+        binding_id=9,
+        is_test_exchange=True,
+    )
+
+    service.update_device_outbound_rule.assert_called_once()

@@ -1,100 +1,54 @@
-"""Unit tests for BareAuthPlugin and AuthUser model."""
+"""Unit tests for BareAuthPlugin and AuthenticatedUser model."""
 
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from gateway.community.plugins.auth.bare import BareAuthPlugin
-from gateway.community.spi.auth import AuthError, AuthUser
+from gateway.community.spi.auth import AuthenticatedUser, AuthError
 
-# ── AuthUser model ───────────────────────────────────────────────────────────
+# ── AuthenticatedUser model ───────────────────────────────────────────────────
 
 
-class TestAuthUser:
+class TestAuthenticatedUser:
     def test_basic_construction(self) -> None:
-        user = AuthUser(
-            id="u1",
-            operatorName="op1",
-            staffId="s001",
-        )
+        user = AuthenticatedUser(id="u1", username="op1")
         assert user.id == "u1"
-        assert user.operatorName == "op1"
-        assert user.staffId == "s001"
+        assert user.username == "op1"
 
-    def test_staffId_alias_populates_outUserNo(self) -> None:
-        user = AuthUser(id="u1", operatorName="op1", staffId="s100")
-        assert user.outUserNo == "s100"
-        assert user.staffId == "s100"
-
-    def test_outUserNo_direct_field(self) -> None:
-        user = AuthUser(id="u1", operatorName="op1", outUserNo="d100")
-        assert user.staffId == "d100"
-        assert user.outUserNo == "d100"
-
-    def test_tenantId_alias(self) -> None:
-        user = AuthUser(
-            id="u1",
-            operatorName="op1",
-            staffId="s001",
-            tenantId="t100",
-        )
-        assert user.tntInstId == "t100"
-        assert user.tenantId == "t100"
-
-    def test_tntInstId_direct_field(self) -> None:
-        user = AuthUser(
-            id="u1",
-            operatorName="op1",
-            staffId="s001",
-            tntInstId="direct-tenant",
-        )
-        assert user.tenantId == "direct-tenant"
+    def test_required_fields_must_be_provided(self) -> None:
+        # id and username are mandatory (no `| None`, no default).
+        with pytest.raises(ValidationError):
+            AuthenticatedUser(id="u1")  # type: ignore[call-arg]
+        with pytest.raises(ValidationError):
+            AuthenticatedUser(username="op1")  # type: ignore[call-arg]
 
     def test_optional_fields_default_none(self) -> None:
-        user = AuthUser(id="u1", operatorName="op1", staffId="s001")
-        assert user.mobileNumber is None
-        assert user.nickName is None
-        assert user.realName is None
-        assert user.tntInstId is None
-        assert user.tenantId is None
+        user = AuthenticatedUser(id="u1", username="op1")
+        assert user.display_name is None
+        assert user.full_name is None
+        assert user.tenant_id is None
 
     def test_all_fields(self) -> None:
-        user = AuthUser(
+        user = AuthenticatedUser(
             id="u1",
-            mobileNumber="13800138000",
-            nickName="花名",
-            operatorName="domain_admin",
-            staffId="s001",
-            realName="张三",
-            tenantId="tenant-a",
+            username="domain_admin",
+            display_name="Ada",
+            full_name="Ada Lovelace",
+            tenant_id="tenant-a",
         )
-        assert user.mobileNumber == "13800138000"
-        assert user.nickName == "花名"
-        assert user.operatorName == "domain_admin"
-        assert user.realName == "张三"
+        assert user.display_name == "Ada"
+        assert user.full_name == "Ada Lovelace"
+        assert user.tenant_id == "tenant-a"
 
     def test_json_roundtrip(self) -> None:
-        user = AuthUser(
-            id="u1",
-            operatorName="op1",
-            staffId="s001",
-            tenantId="t1",
-        )
-        data = user.model_dump(by_alias=True)
-        assert data["staffId"] == "s001"
-        assert data["tenantId"] == "t1"
-        restored = AuthUser.model_validate(data)
-        assert restored.staffId == "s001"
-        assert restored.tenantId == "t1"
-
-    def test_populate_by_name(self) -> None:
-        """Both alias and field name should work for population."""
-        user = AuthUser(
-            id="u1",
-            operatorName="op1",
-            outUserNo="by-field",
-        )
-        assert user.staffId == "by-field"
+        user = AuthenticatedUser(id="u1", username="op1", tenant_id="t1")
+        data = user.model_dump()
+        assert data["id"] == "u1"
+        assert data["tenant_id"] == "t1"
+        restored = AuthenticatedUser.model_validate(data)
+        assert restored == user
 
 
 # ── AuthError ────────────────────────────────────────────────────────────────
@@ -119,10 +73,8 @@ class TestBareAuthPlugin:
         plugin = BareAuthPlugin()
         user = plugin._default_user
         assert user.id == "bare-user-001"
-        assert user.operatorName == "bare_operator"
-        assert user.staffId == "000001"
-        assert user.nickName == "BareUser"
-        assert user.realName == "Bare User"
+        assert user.username == "bare_operator"
+        assert user.display_name == "Bare User"
 
     @pytest.mark.asyncio
     async def test_get_login_user_returns_default(self) -> None:
@@ -139,19 +91,15 @@ class TestBareAuthPlugin:
 
     @pytest.mark.asyncio
     async def test_custom_user_injection(self) -> None:
-        custom = AuthUser(
-            id="custom-001",
-            operatorName="custom_op",
-            staffId="custom-staff",
-        )
+        custom = AuthenticatedUser(id="custom-001", username="custom_op")
         plugin = BareAuthPlugin(default_user=custom)
         user = await plugin.get_login_user()
         assert user.id == "custom-001"
-        assert user.operatorName == "custom_op"
+        assert user.username == "custom_op"
 
     def test_is_allowed_always_true(self) -> None:
         plugin = BareAuthPlugin()
-        user = AuthUser(id="any", operatorName="any", staffId="s")
+        user = AuthenticatedUser(id="any", username="any")
         assert plugin.is_allowed(user) is True
 
     def test_is_allowed_with_none_user(self) -> None:
@@ -170,9 +118,7 @@ class TestBareAuthPlugin:
     @pytest.mark.asyncio
     async def test_multiple_instances_independent(self) -> None:
         p1 = BareAuthPlugin()
-        p2 = BareAuthPlugin(
-            default_user=AuthUser(id="other", operatorName="op", staffId="s")
-        )
+        p2 = BareAuthPlugin(default_user=AuthenticatedUser(id="other", username="op"))
         u1 = await p1.get_login_user()
         u2 = await p2.get_login_user()
         assert u1.id == "bare-user-001"

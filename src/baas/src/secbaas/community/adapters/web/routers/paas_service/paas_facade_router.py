@@ -44,6 +44,7 @@ from secbaas.community.api.device_manage import (
     DeviceNotFoundException,
     ErrorCode,
     OutBoundOperationRule,
+    OutBoundOperationRuleUpdatedMode,
     PaasServiceFacade,
     SigmaCreationResult,
     SigmaDeviceConfig,
@@ -666,6 +667,10 @@ async def update_outbound_operation_rule(
         Path(description="设备ID，格式：device_id@template_id"),
     ],
     outbound_operation_rule: OutBoundOperationRule,
+    mode: Annotated[
+        OutBoundOperationRuleUpdatedMode | None,
+        Query(description="更新模式：replace(默认) 或 append。不传时默认 replace"),
+    ] = None,
     facade: PaasServiceFacade = Depends(
         Provide[ApplicationContainer.services.paas_facade]
     ),
@@ -695,6 +700,7 @@ async def update_outbound_operation_rule(
         await facade.update_outbound_operation_rule(
             paas_device_id=paas_device_id,
             outbound_operation_rule=outbound_operation_rule,
+            mode=mode,
         )
         logger.info("Outbound operation rule updated successfully: %s", paas_device_id)
         return ApiResponse(

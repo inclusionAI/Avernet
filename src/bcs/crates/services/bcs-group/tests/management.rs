@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 use bcs_service_api::{
     ActorKind, AgentCredentials, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
+    ChannelBindingCleanupPort,
     BotDeliveryTarget, BotRuntimeConnectCommand, BotRuntimeConnectOutcome,
     BotRuntimeConnectionService, BotRuntimeDisconnectCommand, BotRuntimeStatusCommand,
     BotRuntimeStatusOutcome, BotUseCaseError, DefaultDelivery, DmCreateCommand,
@@ -25,6 +26,34 @@ use bcs_service_api::{
 use bcs_group::{GroupConfig, GroupManagement, GroupStore};
 use bcs_test_support::NoopSystemMessageService;
 use tokio::sync::Mutex;
+
+#[derive(Default)]
+struct RecordingChannelBindingCleanup {
+    deleted_group_ids: Mutex<Vec<String>>,
+    fail: bool,
+}
+
+impl RecordingChannelBindingCleanup {
+    fn failing() -> Self {
+        Self {
+            deleted_group_ids: Mutex::new(Vec::new()),
+            fail: true,
+        }
+    }
+}
+
+#[async_trait]
+impl ChannelBindingCleanupPort for RecordingChannelBindingCleanup {
+    async fn delete_bindings_for_group(&self, group_id: &str) -> ServiceResult<u64> {
+        self.deleted_group_ids.lock().await.push(group_id.to_string());
+        if self.fail {
+            return Err(ServiceError::InternalError(
+                "channel binding cleanup failed".to_string(),
+            ));
+        }
+        Ok(1)
+    }
+}
 
 #[tokio::test]
 async fn create_group_authorizes_human_caller_with_any_driver() {
@@ -1438,6 +1467,73 @@ async fn delete_group_enforces_legacy_driver_and_dm_rules() {
         GroupUseCaseError::InvalidProposal(message)
             if message.contains("DM groups")
     ));
+}
+
+#[tokio::test]
+async fn delete_group_cleans_up_channel_bindings() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
+    let cleanup = Arc::new(RecordingChannelBindingCleanup::default());
+    let service = fixture
+        .service_with_limits(5, 10, 10)
+        .with_channel_binding_cleanup(cleanup.clone());
+    service
+        .create_group(create_cmd(
+            Some("driver"),
+            "driver",
+            vec![participant("driver", Some("driver"))],
+        ))
+        .await
+        .unwrap();
+
+    let deleted = service
+        .delete_group(GroupDeleteCommand {
+            caller_actor_id: "driver".to_string(),
+            group_id: "group-under-test".to_string(),
+        })
+        .await
+        .expect("group and channel bindings should be deleted together");
+
+    assert!(deleted.deleted);
+    assert!(fixture.group.get("group-under-test").await.is_none());
+    assert_eq!(
+        cleanup.deleted_group_ids.lock().await.as_slice(),
+        ["group-under-test"]
+    );
+}
+
+#[tokio::test]
+async fn delete_group_restores_group_when_channel_binding_cleanup_fails() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
+    let cleanup = Arc::new(RecordingChannelBindingCleanup::failing());
+    let service = fixture
+        .service_with_limits(5, 10, 10)
+        .with_channel_binding_cleanup(cleanup);
+    service
+        .create_group(create_cmd(
+            Some("driver"),
+            "driver",
+            vec![participant("driver", Some("driver"))],
+        ))
+        .await
+        .unwrap();
+
+    let error = service
+        .delete_group(GroupDeleteCommand {
+            caller_actor_id: "driver".to_string(),
+            group_id: "group-under-test".to_string(),
+        })
+        .await
+        .expect_err("binding cleanup failure must fail group deletion");
+
+    assert!(matches!(
+        error,
+        GroupUseCaseError::Service(ServiceError::InternalError(ref message))
+            if message == "channel binding cleanup failed"
+    ));
+    assert!(
+        fixture.group.get("group-under-test").await.is_some(),
+        "group must be restored when binding cleanup fails"
+    );
 }
 
 #[tokio::test]

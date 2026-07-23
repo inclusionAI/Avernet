@@ -84,6 +84,7 @@ def _parse_config(raw: dict) -> Config:
     web = WebConfig(
         port=int(web_raw.get("port", 8888)),
         start=web_raw.get("start", WebConfig.start),
+        enable_api_docs=bool(web_raw.get("enable_api_docs", True)),
     )
     log_raw = raw.get("log_config") or {}
     log_config = LogConfig(

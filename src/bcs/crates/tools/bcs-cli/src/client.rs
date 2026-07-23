@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
+use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use tracing::{debug, info, warn};
 
@@ -35,6 +36,15 @@ pub struct BotGroupListPage {
     pub limit: u64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CurrentActorGroupListPage {
+    pub actor_id: String,
+    pub items: Vec<serde_json::Value>,
+    pub total: u64,
+    pub offset: u64,
+    pub limit: u64,
+}
+
 /// Client for interacting with the Bot Coordination Service.
 #[derive(Debug, Clone)]
 pub struct BcsClient {
@@ -54,6 +64,9 @@ pub struct BcsClient {
     /// as `X-BCS-Service-Key` for external caller attribution and replaces bot
     /// bearer / X-BCS-Bot-Token on the wire.
     service_key: Option<String>,
+    /// W3C Trace Context inherited from the Bash tool process. The CLI is a
+    /// transparent carrier and never creates its own span.
+    traceparent: Option<HeaderValue>,
 }
 
 impl BcsClient {
@@ -70,6 +83,7 @@ impl BcsClient {
             oauth_headers: None,
             client_identity: None,
             service_key: None,
+            traceparent: None,
         }
     }
 
@@ -86,6 +100,7 @@ impl BcsClient {
             oauth_headers: None,
             client_identity: None,
             service_key: None,
+            traceparent: None,
         }
     }
 
@@ -106,6 +121,7 @@ impl BcsClient {
             oauth_headers: None,
             client_identity: None,
             service_key: None,
+            traceparent: None,
         }
     }
 
@@ -126,6 +142,7 @@ impl BcsClient {
             oauth_headers: Some(oauth_headers),
             client_identity: None,
             service_key: None,
+            traceparent: None,
         }
     }
 
@@ -145,6 +162,7 @@ impl BcsClient {
             oauth_headers: None,
             client_identity: None,
             service_key: Some(raw_key.into()),
+            traceparent: None,
         }
     }
 
@@ -166,6 +184,15 @@ impl BcsClient {
     /// Set the client identity for X-BCS-Client header (e.g., "bcs-cli/0.3.0").
     pub fn set_client_identity(&mut self, identity: impl Into<String>) {
         self.client_identity = Some(identity.into());
+    }
+
+    /// Configure the opaque Trace Context propagated only on business dispatch
+    /// requests. The gateway owns W3C validation; polling and management
+    /// requests intentionally omit it.
+    pub fn set_traceparent(&mut self, value: &str) -> Result<()> {
+        let header = HeaderValue::from_str(value).context("invalid TRACEPARENT header value")?;
+        self.traceparent = Some(header);
+        Ok(())
     }
 
     /// Get the current token.
@@ -290,6 +317,25 @@ impl BcsClient {
     fn add_chat_headers(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         self.add_auth(builder)
             .header(BCS_CHAT_VERSION_HEADER, BCS_CHAT_VERSION)
+    }
+
+    fn add_chat_dispatch_headers(
+        &self,
+        builder: reqwest::RequestBuilder,
+        detach: bool,
+        client_wait_timeout_ms: u64,
+    ) -> reqwest::RequestBuilder {
+        let builder = self
+            .add_chat_headers(builder)
+            .header("X-BCS-Client-Detach", detach.to_string())
+            .header(
+                "X-BCS-Client-Wait-Timeout-Ms",
+                client_wait_timeout_ms.to_string(),
+            );
+        match &self.traceparent {
+            Some(traceparent) => builder.header("traceparent", traceparent.clone()),
+            None => builder,
+        }
     }
 
     // ========================================================================
@@ -992,11 +1038,14 @@ impl BcsClient {
         payload: &serde_json::Value,
         timeout_ms: Option<u64>,
     ) -> reqwest::RequestBuilder {
-        self.add_chat_headers(
+        let client_wait_timeout_ms = Self::chat_request_timeout(timeout_ms).as_millis() as u64;
+        self.add_chat_dispatch_headers(
             self.http_client
                 .post(url)
                 .json(payload)
                 .timeout(Self::chat_request_timeout(timeout_ms)),
+            false,
+            client_wait_timeout_ms,
         )
     }
 
@@ -1089,6 +1138,8 @@ impl BcsClient {
         tags: &[String],
         response_mode: Option<&str>,
         organization_code: Option<&str>,
+        client_wait_timeout_ms: u64,
+        detach: bool,
     ) -> Result<ChatRunSubmitResponse> {
         let url = format!("{}/bots/{}/chat-async", self.base_url, bot_id);
         let payload = Self::chat_async_payload(
@@ -1101,11 +1152,13 @@ impl BcsClient {
         );
 
         let response = self
-            .add_chat_headers(
+            .add_chat_dispatch_headers(
                 self.http_client
                     .post(&url)
                     .json(&payload)
                     .timeout(Duration::from_secs(10)),
+                detach,
+                client_wait_timeout_ms,
             )
             .send()
             .await
@@ -1241,7 +1294,8 @@ impl BcsClient {
         poll_wait_ms: Option<u64>,
         organization_code: Option<&str>,
     ) -> Result<serde_json::Value> {
-        let overall_timeout = Duration::from_millis(overall_timeout_ms.unwrap_or(30 * 60 * 1_000));
+        let client_wait_timeout_ms = overall_timeout_ms.unwrap_or(30 * 60 * 1_000);
+        let overall_timeout = Duration::from_millis(client_wait_timeout_ms);
         let poll_wait_ms = poll_wait_ms.unwrap_or(15_000);
 
         let submit = self
@@ -1253,6 +1307,8 @@ impl BcsClient {
                 tags,
                 response_mode,
                 organization_code,
+                client_wait_timeout_ms,
+                false,
             )
             .await?;
         let run_id = submit.run_id.clone();
@@ -1328,7 +1384,8 @@ impl BcsClient {
         poll_wait_ms: Option<u64>,
         organization_code: Option<&str>,
     ) -> Result<serde_json::Value> {
-        let overall_timeout = Duration::from_millis(overall_timeout_ms.unwrap_or(30 * 60 * 1_000));
+        let client_wait_timeout_ms = overall_timeout_ms.unwrap_or(30 * 60 * 1_000);
+        let overall_timeout = Duration::from_millis(client_wait_timeout_ms);
         let poll_wait_ms = poll_wait_ms.unwrap_or(15_000);
 
         let submit = self
@@ -1340,6 +1397,8 @@ impl BcsClient {
                 tags,
                 response_mode,
                 organization_code,
+                client_wait_timeout_ms,
+                true,
             )
             .await?;
         let run_id = submit.run_id.clone();
@@ -1523,6 +1582,25 @@ impl BcsClient {
         context: Option<&str>,
         topic: Option<&str>,
     ) -> Result<CreateGroupResponse> {
+        self.create_group_with_strategy_and_context(
+            driver_bot,
+            participants,
+            context,
+            topic,
+            None,
+        )
+        .await
+    }
+
+    /// Create a group with optional context, topic, and group strategy.
+    pub async fn create_group_with_strategy_and_context(
+        &self,
+        driver_bot: &str,
+        participants: Vec<ParticipantInfo>,
+        context: Option<&str>,
+        topic: Option<&str>,
+        group_strategy: Option<&str>,
+    ) -> Result<CreateGroupResponse> {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
@@ -1538,7 +1616,7 @@ impl BcsClient {
             topic: topic.map(|s| s.to_string()),
             group_kind: None,
             service_spec: None,
-            group_strategy: None,
+            group_strategy: group_strategy.map(str::to_string),
             originator: None,
             collaboration_definition_yaml: None,
             auto_start_on_service_invocation: None,
@@ -1643,6 +1721,39 @@ impl BcsClient {
         }
 
         response.json().await.context("Invalid bot groups response")
+    }
+
+    /// List groups that include the authenticated human or bot actor.
+    pub async fn list_my_groups(
+        &self,
+        offset: u64,
+        limit: u64,
+    ) -> Result<CurrentActorGroupListPage> {
+        let url = format!("{}/groups/my", self.base_url);
+
+        let response = self
+            .add_auth(self.http_client.get(&url).query(&[
+                ("offset", offset.to_string()),
+                ("limit", limit.to_string()),
+            ]))
+            .send()
+            .await
+            .context("Failed to list current actor groups")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "List current actor groups failed ({}): {}",
+                status,
+                body
+            ));
+        }
+
+        response
+            .json()
+            .await
+            .context("Invalid current actor groups response")
     }
 
     /// Add a member to a group.
@@ -2756,6 +2867,105 @@ mod tests {
     }
 
     #[test]
+    fn test_chat_dispatch_headers_include_configured_traceparent() {
+        let mut client = BcsClient::new("http://localhost:21000");
+        client
+            .set_traceparent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+            .unwrap();
+
+        let request = client
+            .add_chat_dispatch_headers(
+                client.http_client.post("http://localhost:21000/bots/bot-1/chat-async"),
+                true,
+                1_800_000,
+            )
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            request
+                .headers()
+                .get("traceparent")
+                .and_then(|value| value.to_str().ok()),
+            Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("x-bcs-client-detach")
+                .and_then(|value| value.to_str().ok()),
+            Some("true")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("x-bcs-client-wait-timeout-ms")
+                .and_then(|value| value.to_str().ok()),
+            Some("1800000")
+        );
+    }
+
+    #[test]
+    fn test_status_poll_headers_omit_trace_and_wait_controls() {
+        let mut client = BcsClient::new("http://localhost:21000");
+        client
+            .set_traceparent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+            .unwrap();
+
+        let request = client
+            .add_chat_headers(client.http_client.get("http://localhost:21000/chat/runs/run-1"))
+            .build()
+            .unwrap();
+
+        assert!(request.headers().get("traceparent").is_none());
+        assert!(request.headers().get("x-bcs-client-detach").is_none());
+        assert!(
+            request
+                .headers()
+                .get("x-bcs-client-wait-timeout-ms")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_set_traceparent_forwards_http_safe_values_without_w3c_semantic_validation() {
+        let values = [
+            "not-a-traceparent",
+            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-09",
+            "02-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-09-extension",
+        ];
+
+        for value in values {
+            let mut client = BcsClient::new("http://localhost:21000");
+            client.set_traceparent(value).unwrap();
+            let request = client
+                .add_chat_dispatch_headers(
+                    client.http_client.post("http://localhost:21000/bots/bot-1/chat-async"),
+                    true,
+                    1_800_000,
+                )
+                .build()
+                .unwrap();
+
+            assert_eq!(
+                request
+                    .headers()
+                    .get("traceparent")
+                    .and_then(|header| header.to_str().ok()),
+                Some(value)
+            );
+        }
+    }
+
+    #[test]
+    fn test_set_traceparent_rejects_unsafe_http_header_values() {
+        for value in ["bad\ntraceparent", "bad\r\ntraceparent: injected"] {
+            let mut client = BcsClient::new("http://localhost:21000");
+            assert!(client.set_traceparent(value).is_err(), "accepted {value:?}");
+        }
+    }
+
+    #[test]
     fn test_chat_version_header_advertises_version_2() {
         assert_eq!(BCS_CHAT_VERSION, "2");
     }
@@ -3010,7 +3220,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = BcsClient::new(server.uri());
+        let mut client = BcsClient::new(server.uri());
+        client
+            .set_traceparent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+            .unwrap();
         let error = client
             .chat_polling(
                 "bot-target",
@@ -3033,6 +3246,27 @@ mod tests {
             .iter()
             .find(|request| request.url.path() == "/bots/bot-target/chat-async")
             .expect("chat submit request");
+        assert_eq!(
+            submit
+                .headers
+                .get("traceparent")
+                .and_then(|value| value.to_str().ok()),
+            Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+        );
+        assert_eq!(
+            submit
+                .headers
+                .get("x-bcs-client-detach")
+                .and_then(|value| value.to_str().ok()),
+            Some("false")
+        );
+        assert_eq!(
+            submit
+                .headers
+                .get("x-bcs-client-wait-timeout-ms")
+                .and_then(|value| value.to_str().ok()),
+            Some("20")
+        );
         let payload: serde_json::Value = serde_json::from_slice(&submit.body).unwrap();
         assert!(payload.get("timeout_ms").is_none());
         assert!(payload.get("caller_wait_mode").is_none());
@@ -3154,6 +3388,13 @@ mod tests {
         assert_eq!(
             request.timeout().copied(),
             Some(Duration::from_millis(17_345))
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("x-bcs-client-wait-timeout-ms")
+                .and_then(|value| value.to_str().ok()),
+            Some("17345")
         );
     }
 }

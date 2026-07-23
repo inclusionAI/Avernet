@@ -48,6 +48,15 @@ enabled = true
 mode = "pull"
 endpoint_path = "/metrics"
 
+[telemetry]
+enabled = true
+service_name = "bcn"
+# Complete OTLP traces endpoint; include /v1/traces.
+otlp_traces_endpoint = "http://otel-collector.example.com:4318/v1/traces"
+
+[telemetry.extra_headers]
+x-collector-route = "collector-local"
+
 [llm]
 type = "none"
 base_url = "https://api.openai.com/v1"
@@ -103,6 +112,15 @@ file = "bcs.log"
 level = "info"
 rotation = "daily"
 targets = ["*", "!bcs_chat_digest", "!bcs_sse_detail"]
+max_keep_days = 7
+
+[[logging.outputs]]
+name = "common-error"
+path = "/var/log/bcs"
+file = "common-error.log"
+level = "error"
+rotation = "daily"
+targets = ["*"]
 max_keep_days = 7
 
 [[logging.outputs]]

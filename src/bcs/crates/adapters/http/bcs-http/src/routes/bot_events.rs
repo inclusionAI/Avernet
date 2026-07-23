@@ -17,8 +17,10 @@ use bcs_service_api::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tracing::{info, warn};
+use tracing::{Span, info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::gateway_trace::{record_gen_ai_output_message, record_span_content_attribute};
 use crate::state::HttpAppState;
 
 const BOT_EVENT_REQUEST_BODY_LIMIT: usize = 2 * 1024 * 1024;
@@ -205,7 +207,18 @@ pub async fn post_bot_event(
     headers: HeaderMap,
     LoggedBotEventRequest(req): LoggedBotEventRequest,
 ) -> Result<Json<Value>, BotEventRouteError> {
-    let provider_id = header_required(&headers, BCN_PROVIDER_ID_HEADER)?;
+    let callback_content = bot_event_trace_content(&req);
+    let requested_finish_reason = requested_finish_reason(&req);
+    let provider_id = match header_required(&headers, BCN_PROVIDER_ID_HEADER) {
+        Ok(provider_id) => provider_id,
+        Err(error) => {
+            record_bot_response_auth_failure(
+                &callback_content,
+                requested_finish_reason,
+            );
+            return Err(error);
+        }
+    };
     // Derive state: prefer the explicit `state` field (1.0); fall back to
     // extracting from `payload.state` for chat events (2.0 callback-streaming);
     // for agent events default to Delta (non-terminal, goes through pipeline).
@@ -229,6 +242,8 @@ pub async fn post_bot_event(
         // agent events (tool/thinking/lifecycle) — non-terminal pipeline.
         ChatEventState::Delta
     } else {
+        Span::current().set_attribute("bcn.auth.result", "unverified");
+        record_gen_ai_output_message(&callback_content, "unknown", true);
         return Err(BotEventRouteError::bad_request(
             "state is required when event/payload are absent (1.0 contract)",
         ));
@@ -243,7 +258,16 @@ pub async fn post_bot_event(
         message_text = %req.message.text,
         "provider callback: received bot event"
     );
-    let credential = credential_from_headers(&state, &headers, &provider_id).await?;
+    let credential = match credential_from_headers(&state, &headers, &provider_id).await {
+        Ok(credential) => credential,
+        Err(error) => {
+            record_bot_response_auth_failure(
+                &callback_content,
+                finish_reason(&effective_state),
+            );
+            return Err(error);
+        }
+    };
 
     let outcome = match state
         .services
@@ -251,11 +275,11 @@ pub async fn post_bot_event(
         .submit_event(ProviderBotEventCommand {
             provider_id: provider_id.clone(),
             credential,
-            run_id: req.run_id,
-            state: effective_state,
-            message_text: req.message.text,
-            event: req.event,
-            payload: req.payload,
+            run_id: req.run_id.clone(),
+            state: effective_state.clone(),
+            message_text: req.message.text.clone(),
+            event: req.event.clone(),
+            payload: req.payload.clone(),
         })
         .await
     {
@@ -266,7 +290,14 @@ pub async fn post_bot_event(
                 error = %error,
                 "provider callback: bot event rejected"
             );
-            return Err(bot_event_error(error));
+            let route_error = bot_event_error(error);
+            if matches!(route_error.status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+                record_bot_response_auth_failure(
+                    &callback_content,
+                    finish_reason(&effective_state),
+                );
+            }
+            return Err(route_error);
         }
     };
     info!(
@@ -274,6 +305,28 @@ pub async fn post_bot_event(
         delivered_count = %outcome.delivered_count,
         failed_count = %outcome.failed_count,
         "provider callback: bot event processed"
+    );
+    let span = Span::current();
+    span.set_attribute("bcn.auth.result", "success");
+    span.set_attribute("bcn.operation", "bot.response");
+    span.set_attribute("bcn.provider.id", provider_id.clone());
+    span.set_attribute("bcn.run.id", req.run_id.clone());
+    span.set_attribute("bcn.callback.state", format!("{effective_state:?}"));
+    if let Some(seq) = req.seq {
+        span.set_attribute("bcn.callback.seq", seq as i64);
+    }
+    if let Some(event) = req.event.as_deref() {
+        span.set_attribute("bcn.callback.event", event.to_string());
+    }
+    span.set_attribute(
+        "bcn.callback.delivered_count",
+        outcome.delivered_count as i64,
+    );
+    span.set_attribute("bcn.callback.failed_count", outcome.failed_count as i64);
+    record_bot_response_content(
+        &callback_content,
+        finish_reason(&effective_state),
+        false,
     );
 
     Ok(Json(json!({
@@ -299,7 +352,6 @@ pub async fn post_coordination_event(
         mcp_server = ?req.mcp_server,
         "provider callback: received coordination event"
     );
-
     let outcome = state
         .services
         .provider_bot_events
@@ -320,12 +372,86 @@ pub async fn post_coordination_event(
         })
         .await
         .map_err(bot_event_error)?;
-
     Ok(Json(json!({
         "ok": true,
         "processed": outcome.processed,
         "duplicate": outcome.duplicate,
     })))
+}
+
+fn record_bot_response_auth_failure(
+    callback_content: &str,
+    finish_reason: Option<&str>,
+) {
+    Span::current().set_attribute("bcn.auth.result", "failed");
+    record_bot_response_content(callback_content, finish_reason, true);
+}
+
+fn record_bot_response_content(
+    content: &str,
+    finish_reason: Option<&str>,
+    untrusted: bool,
+) {
+    if let Some(finish_reason) = finish_reason {
+        record_gen_ai_output_message(content, finish_reason, untrusted);
+    } else {
+        record_span_content_attribute("bcn.bot.response.chunk", content, untrusted);
+    }
+}
+
+fn finish_reason(state: &ChatEventState) -> Option<&'static str> {
+    match state {
+        ChatEventState::Final => Some("stop"),
+        ChatEventState::Error => Some("error"),
+        ChatEventState::Aborted => Some("aborted"),
+        ChatEventState::Delta
+        | ChatEventState::ToolCallStart
+        | ChatEventState::ToolCallEnd => None,
+    }
+}
+
+fn requested_finish_reason(req: &BotEventRequest) -> Option<&'static str> {
+    if let Some(state) = req.state.as_ref() {
+        return finish_reason(state);
+    }
+    match req
+        .payload
+        .as_ref()
+        .and_then(|payload| payload.get("state"))
+        .and_then(Value::as_str)
+    {
+        Some("final") => Some("stop"),
+        Some("error") => Some("error"),
+        Some("aborted") => Some("aborted"),
+        Some("delta") => None,
+        _ if req.event.is_some() => None,
+        _ => Some("unknown"),
+    }
+}
+
+fn bot_event_trace_content(req: &BotEventRequest) -> String {
+    if !req.message.text.is_empty() {
+        return req.message.text.clone();
+    }
+    let Some(payload) = req.payload.as_ref() else {
+        return String::new();
+    };
+    if let Some(content) = payload.pointer("/message/content").and_then(Value::as_str) {
+        return content.to_string();
+    }
+    let content = payload
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .collect::<String>()
+        });
+    match content {
+        Some(content) if !content.is_empty() => content,
+        _ => payload.to_string(),
+    }
 }
 
 fn header_required(headers: &HeaderMap, name: &'static str) -> Result<String, BotEventRouteError> {
@@ -406,5 +532,35 @@ fn bot_event_error(error: ProviderBotEventError) -> BotEventRouteError {
         ProviderBotEventError::Internal(message) => {
             BotEventRouteError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_content_preserves_agent_payload_when_message_text_is_absent() {
+        let request = BotEventRequest {
+            run_id: "run-1".to_string(),
+            seq: Some(1),
+            state: None,
+            message: BotEventMessage::default(),
+            event: Some("agent".to_string()),
+            payload: Some(json!({
+                "type": "tool_result",
+                "tool_name": "search",
+                "result": "found"
+            })),
+        };
+
+        let content = bot_event_trace_content(&request);
+        let Ok(payload): Result<Value, _> = serde_json::from_str(&content) else {
+            panic!("expected preserved payload JSON");
+        };
+
+        assert_eq!(payload["type"], "tool_result");
+        assert_eq!(payload["tool_name"], "search");
+        assert_eq!(payload["result"], "found");
     }
 }

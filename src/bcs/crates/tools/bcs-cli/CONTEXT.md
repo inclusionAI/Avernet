@@ -28,6 +28,13 @@
 ## Configuration
 
 - CLI args, optional config files, and tokens are read at tool entrypoints only.
+- BCS API URL precedence is `--url`, `BCS_API_BASE_URL`, `MOLTIS_BCS_URL`,
+  `$BOT_DATA_DIR/.bcs/session.json`, a runtime-selected compiled distribution
+  default, then the local default.
+- Distributions may compile both `BCS_CLI_DEFAULT_PRE_URL` and
+  `BCS_CLI_DEFAULT_PROD_URL` into one binary. The CLI selects pre for
+  `pre`/`prepub` and production for every other runtime environment. Public
+  builds omit both values and retain the local default.
 - This crate must not choose server-side concrete implementations.
 
 ## Runtime ownership

@@ -81,6 +81,7 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
             group_link_url: None,
             session_link_url: None,
         },
+        ..BcsConfig::default()
     }
 }
 

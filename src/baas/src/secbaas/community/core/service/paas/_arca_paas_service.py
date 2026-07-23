@@ -430,27 +430,44 @@ class ArcaPaasService(PaasService):
                         f"Storage cleanup skipped: storage attribute missing, "
                         f"paas_device_id={paas_device_id}"
                     )
-                elif not isinstance(storage, dict):
-                    self._logger.warning(
-                        f"Storage cleanup skipped: storage is not a dict, "
-                        f"paas_device_id={paas_device_id}, "
-                        f"get_info={_safe_repr(info)}"
-                    )
-                elif storage.get("storage_id") is None:
-                    self._logger.warning(
-                        f"Storage cleanup skipped: storage_id key missing, "
-                        f"paas_device_id={paas_device_id}, "
-                        f"get_info={_safe_repr(info)}"
-                    )
                 else:
-                    storage_id = storage["storage_id"]
-                    if not isinstance(storage_id, str):
+                    # Compatible with both dict and object types
+                    raw_storage_id = None
+                    _storage_type_ok = False
+                    if isinstance(storage, dict):
+                        raw_storage_id = storage.get("storage_id")
+                        _storage_type_ok = True
+                    elif hasattr(storage, "storage_id"):
+                        raw_storage_id = getattr(storage, "storage_id", None)
+                        _storage_type_ok = True
+                    else:
                         self._logger.warning(
-                            f"Storage cleanup skipped: storage_id is not a string, "
+                            f"Storage cleanup skipped: unrecognized storage type, "
                             f"paas_device_id={paas_device_id}, "
-                            f"storage_id={_safe_repr(storage_id)}"
+                            f"storage_type={type(storage).__name__}"
                         )
-                        storage_id = None
+
+                    if _storage_type_ok:
+                        # Final validation: must be a non-empty string
+                        if raw_storage_id is None:
+                            self._logger.warning(
+                                f"Storage cleanup skipped: storage_id missing, "
+                                f"paas_device_id={paas_device_id}, "
+                                f"get_info={_safe_repr(info)}"
+                            )
+                        elif not isinstance(raw_storage_id, str):
+                            self._logger.warning(
+                                f"Storage cleanup skipped: storage_id is not a string, "
+                                f"paas_device_id={paas_device_id}, "
+                                f"storage_id={_safe_repr(raw_storage_id)}"
+                            )
+                        elif raw_storage_id == "":
+                            self._logger.warning(
+                                f"Storage cleanup skipped: storage_id is empty string, "
+                                f"paas_device_id={paas_device_id}"
+                            )
+                        else:
+                            storage_id = raw_storage_id
             except Exception:
                 self._logger.warning(
                     f"Storage cleanup skipped: get_info failed, "
@@ -645,12 +662,14 @@ class ArcaPaasService(PaasService):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule for Arca sandbox.
 
         Args:
             paas_device_id: Arca sandbox_id to update.
             outbound_operation_rule: New outbound operation rule to apply.
+            mode: Update mode (REPLACE or APPEND). Defaults to REPLACE if not provided.
 
         Returns:
             True if successful.
@@ -663,12 +682,14 @@ class ArcaPaasService(PaasService):
             self._update_outbound_operation_rule_sync,
             paas_device_id,
             outbound_operation_rule,
+            mode,
         )
 
     def _update_outbound_operation_rule_sync(
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Synchronous implementation of update_outbound_operation_rule for use in to_thread()."""
         try:
@@ -676,9 +697,13 @@ class ArcaPaasService(PaasService):
                 f"Updating outbound operation rule for sandbox: {paas_device_id}"
             )
             sandbox = self._arca_sandbox_plugin.connect_sync_sandbox(paas_device_id)
+            update_mode = OutBoundOperationRuleUpdatedMode.REPLACE
+            if mode and mode == OutBoundOperationRuleUpdatedMode.APPEND:
+                update_mode = OutBoundOperationRuleUpdatedMode.APPEND
+
             result = sandbox.update_outbound_rule(
                 rule=outbound_operation_rule,
-                updated_mode=OutBoundOperationRuleUpdatedMode.REPLACE,
+                updated_mode=update_mode,
             )
             self._logger.info(
                 f"Outbound operation rule updated successfully: {paas_device_id}, result={result}"

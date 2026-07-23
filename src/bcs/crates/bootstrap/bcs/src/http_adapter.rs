@@ -14,7 +14,9 @@ use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort, SecretService};
 use bcs_services_container::Services;
 use bcs_ws::bot::BotConnectionRegistry;
 use bcs_ws::shared::RunChannelManager;
+use opentelemetry::trace::TraceContextExt;
 use tokio::sync::mpsc;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::server::BcsServerState;
 
@@ -237,8 +239,50 @@ impl ChatRunEventPort for BootstrapRunChannelPort {
         source: Option<String>,
         from: Option<String>,
     ) {
+        let current_span = tracing::Span::current();
+        let is_gateway_dispatch = current_span.metadata().is_some_and(|metadata| {
+            metadata.target() == "bcn_otel" && metadata.name() == "bcn.gateway.dispatch"
+        });
+        let (trace_parent, trace_context_status) = if source.as_deref() != Some("http-chat-async") {
+            (None, "source_not_http_chat_async")
+        } else if !is_gateway_dispatch {
+            (None, "gateway_span_not_current")
+        } else {
+            let context = current_span.context();
+            let span_context = context.span().span_context().clone();
+            if span_context.is_valid() {
+                (Some(span_context), "attached")
+            } else {
+                (None, "current_span_context_invalid")
+            }
+        };
+        let trace_id = trace_parent
+            .as_ref()
+            .map(|context| context.trace_id().to_string())
+            .unwrap_or_default();
+        let parent_span_id = trace_parent
+            .as_ref()
+            .map(|context| context.span_id().to_string())
+            .unwrap_or_default();
+        tracing::info!(
+            run_id = %run_id,
+            session_key = %session_key,
+            source = ?source,
+            is_gateway_dispatch,
+            trace_context_status,
+            trace_id = %trace_id,
+            parent_span_id = %parent_span_id,
+            "Chat run trace context registration evaluated"
+        );
         self.run_channels
-            .register(run_id, session_key, sender, source, from)
+            .register_with_trace_parent(
+                run_id,
+                session_key,
+                sender,
+                source,
+                from,
+                trace_parent,
+            )
             .await;
     }
 
@@ -336,6 +380,8 @@ mod tests {
     use bcs_ws::web::WorkbenchConnectionRegistry;
     use std::collections::HashMap;
     use tokio::sync::Mutex;
+    use tracing::{Instrument, info_span, instrument::WithSubscriber};
+    use tracing_subscriber::prelude::*;
 
     #[test]
     fn health_version_uses_runtime_override_when_set() {
@@ -348,6 +394,59 @@ mod tests {
         assert!(version.contains("avernet main/def"));
         assert!(version.contains("2026-07-10"));
         assert!(!version.contains("build "));
+    }
+
+    #[tokio::test]
+    async fn async_chat_run_registration_captures_current_trace_context() {
+        let exporter = opentelemetry_sdk::trace::InMemorySpanExporterBuilder::new().build();
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_simple_exporter(exporter)
+            .build();
+        let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, "run-channel-test");
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new("bcn_otel=info"))
+            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+        let run_channels = Arc::new(RunChannelManager::new());
+        let port = BootstrapRunChannelPort {
+            run_channels: run_channels.clone(),
+        };
+        let (tx, _rx) = mpsc::channel(1);
+        let (unrelated_tx, _unrelated_rx) = mpsc::channel(1);
+
+        async move {
+            let span = info_span!(target: "bcn_otel", "bcn.gateway.dispatch");
+            async {
+                port.register(
+                    "run-traced".to_string(),
+                    "group-1".to_string(),
+                    tx,
+                    Some("http-chat-async".to_string()),
+                    None,
+                )
+                .await;
+            }
+            .instrument(span)
+            .await;
+
+            let unrelated = info_span!(target: "bcn_otel", "unrelated.span");
+            async {
+                port.register(
+                    "run-unrelated".to_string(),
+                    "group-1".to_string(),
+                    unrelated_tx,
+                    Some("http-chat-async".to_string()),
+                    None,
+                )
+                .await;
+            }
+            .instrument(unrelated)
+            .await;
+        }
+        .with_subscriber(subscriber)
+        .await;
+
+        assert!(run_channels.trace_parent("run-traced").await.is_some());
+        assert!(run_channels.trace_parent("run-unrelated").await.is_none());
     }
 
     struct NoopGroupMetricsSnapshotPort;

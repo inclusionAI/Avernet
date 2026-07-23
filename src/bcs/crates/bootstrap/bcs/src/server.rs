@@ -85,7 +85,8 @@ use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotDeliveryPort, BotDeliveryTarget, BotRegistryCoreService,
-    BotMetricsSnapshotPort, BotRunContextPort, BotTerminalObserverPort, ChannelService,
+    BotMetricsSnapshotPort, BotRunContextPort, BotTerminalObserverPort, ChannelBindingCleanupPort,
+    ChannelService,
     CollaborationTemplateService,
     DirectChatClientKind, DirectChatRunEvent, DirectChatRunLifecycleHook,
     DirectChatRunReason, DirectChatRunSnapshotPort, FrontendDeliveryPort, GroupCoreService,
@@ -156,6 +157,34 @@ fn build_file_collaboration_template_service_with_judge_templates(
 }
 
 type ChannelSlot = Arc<OnceLock<Arc<dyn ChannelService>>>;
+
+#[derive(Default)]
+struct DeferredChannelBindingCleanupPort {
+    service: OnceLock<Arc<dyn ChannelBindingCleanupPort>>,
+}
+
+impl DeferredChannelBindingCleanupPort {
+    fn set(&self, service: Arc<dyn ChannelBindingCleanupPort>) {
+        if self.service.set(service).is_err() {
+            warn!("channel binding cleanup port already initialized");
+        }
+    }
+}
+
+#[async_trait]
+impl ChannelBindingCleanupPort for DeferredChannelBindingCleanupPort {
+    async fn delete_bindings_for_group(
+        &self,
+        group_id: &str,
+    ) -> bcs_service_api::ServiceResult<u64> {
+        let service = self.service.get().ok_or_else(|| {
+            bcs_service_api::ServiceError::InternalError(
+                "channel binding cleanup port is not initialized".to_string(),
+            )
+        })?;
+        service.delete_bindings_for_group(group_id).await
+    }
+}
 
 type ChannelRepos = (
     Arc<dyn ChannelBindingRepoPort>,
@@ -309,6 +338,7 @@ async fn channel_repos_with_storage(
 fn build_channel_runtime(
     config: &BcsConfig,
     channel_slot: ChannelSlot,
+    channel_binding_cleanup: Arc<DeferredChannelBindingCleanupPort>,
     channel_repos: ChannelRepos,
     session_repo: Arc<dyn SessionRepoPort>,
     message_flow: Arc<dyn MessageFlowService>,
@@ -319,6 +349,9 @@ fn build_channel_runtime(
 ) -> Result<ChannelRuntime> {
     if !channel_bridge_enabled(config) {
         info!("channel bridge disabled");
+        channel_binding_cleanup.set(Arc::new(
+            bcs_service_api::NoopChannelBindingCleanupPort,
+        ));
         return Ok(ChannelRuntime {
             service: Arc::new(DisabledChannelService),
             http_ingress: None,
@@ -335,7 +368,7 @@ fn build_channel_runtime(
         ChannelProviderRegistry::new(providers.clone())
             .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?,
     );
-    let channel_service: Arc<dyn ChannelService> = Arc::new(BcsChannelService::new(
+    let channel_service_impl = Arc::new(BcsChannelService::new(
         channel_bindings,
         channel_conversations,
         channel_im_participants,
@@ -350,6 +383,8 @@ fn build_channel_runtime(
         Arc::new(now_ms),
         Arc::new(|| uuid::Uuid::new_v4().to_string()),
     ));
+    let channel_service: Arc<dyn ChannelService> = channel_service_impl.clone();
+    channel_binding_cleanup.set(channel_service_impl);
     if channel_slot.set(channel_service.clone()).is_err() {
         warn!("message-flow channel slot already initialized");
     }
@@ -1003,6 +1038,7 @@ impl Default for BcsServerState {
                 outbound_url_guard.clone(),
             )),
         );
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let group_management_impl = Arc::new(GroupManagement::new(
             sessions.clone(),
             bot_registry.clone(),
@@ -1017,6 +1053,7 @@ impl Default for BcsServerState {
             session_management.clone(),
             system_message.clone(),
         )
+        .with_channel_binding_cleanup(channel_binding_cleanup.clone())
         .with_outbound_url_guard(outbound_url_guard.clone())
         .with_bot_runtime(bot_use_cases.clone()));
         let group_management = maybe_wrap_group_management(&config, group_management_impl.clone());
@@ -1059,6 +1096,7 @@ impl Default for BcsServerState {
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
+            channel_binding_cleanup,
             memory_channel_repos(None),
             session_repo.clone(),
             message_flow.clone(),
@@ -1376,6 +1414,7 @@ fn build_use_case_bundle(
     frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     group_message_history: Arc<dyn GroupMessageHistoryService>,
     session_management: Arc<dyn SessionManagementService>,
+    channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     bot_run_context: Arc<dyn BotRunContextPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
@@ -1440,6 +1479,7 @@ fn build_use_case_bundle(
         session_management.clone(),
         system_message.clone(),
     )
+    .with_channel_binding_cleanup(channel_binding_cleanup)
     .with_outbound_url_guard(callback_url_guard.clone())
     .with_bot_runtime(bot_use_cases.clone()));
     let proposal_base_url = config
@@ -2117,6 +2157,7 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let use_cases = build_use_case_bundle(
             &config,
             bot_registry.clone(),
@@ -2134,6 +2175,7 @@ impl BcsServer {
             frontend_delivery.clone(),
             group_message_history.clone(),
             session_management.clone(),
+            channel_binding_cleanup.clone(),
             bot_run_context.clone(),
             user_directory.clone(),
             Some(message_repo.clone()),
@@ -2191,6 +2233,7 @@ impl BcsServer {
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
+            channel_binding_cleanup,
             memory_channel_repos(None),
             session_repo.clone(),
             message_flow.clone(),
@@ -2634,6 +2677,7 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
+        let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let use_cases = build_use_case_bundle(
             &config,
             bot_registry.clone(),
@@ -2651,6 +2695,7 @@ impl BcsServer {
             frontend_delivery.clone(),
             group_message_history.clone(),
             session_management.clone(),
+            channel_binding_cleanup.clone(),
             bot_run_context.clone(),
             user_directory.clone(),
             Some(message_repo.clone()),
@@ -2725,6 +2770,7 @@ impl BcsServer {
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
+            channel_binding_cleanup,
             channel_repos,
             session_repo.clone(),
             message_flow.clone(),
@@ -2995,7 +3041,11 @@ impl BcsServer {
                         .unwrap()
                 },
             ))
-            .layer(TraceLayer::new_for_http())
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(bcs_http::gateway_trace::BcnMakeSpan)
+                    .on_response(bcs_http::gateway_trace::BcnOnResponse),
+            )
             .layer(
                 CorsLayer::new()
                     .allow_origin(AllowOrigin::predicate(move |origin, _| {

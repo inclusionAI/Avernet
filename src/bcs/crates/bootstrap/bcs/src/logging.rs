@@ -8,6 +8,7 @@
 //! - Automatic cleanup of old log files (`max_keep_days`)
 
 use crate::config::{LogOutputConfig, LogOutputFormat, LoggingConfig};
+use opentelemetry_sdk::trace::SdkTracer;
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{IsTerminal, Write};
@@ -190,24 +191,11 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
 
 /// Initialize the tracing subscriber based on `LoggingConfig`.
 ///
-/// Two code paths:
-/// - Console-only (no file outputs): uses `tracing_subscriber::fmt()` directly.
-/// - Console + file outputs: uses registry with per-layer filters.
-pub fn init(config: &LoggingConfig) {
+/// Console, file, and BCN OpenTelemetry output use independent layer filters.
+pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
     let timer = LocalTime::new(format_description!(
         "[year]-[month]-[day] [hour]:[minute]:[second]"
     ));
-
-    if config.outputs.is_empty() {
-        if config.console {
-            tracing_subscriber::fmt()
-                .with_timer(timer)
-                .with_ansi(console_ansi_enabled())
-                .with_env_filter(build_env_filter(config))
-                .init();
-        }
-        return;
-    }
 
     let file_layers: Vec<Box<dyn Layer<_> + Send + Sync>> = config
         .outputs
@@ -262,9 +250,14 @@ pub fn init(config: &LoggingConfig) {
         None
     };
 
+    let otel_layer = tracing_opentelemetry::layer()
+        .with_tracer(tracer)
+        .with_filter(Targets::new().with_target("bcn_otel", LevelFilter::TRACE));
+
     tracing_subscriber::registry()
         .with(console_layer)
         .with(file_layers)
+        .with(otel_layer)
         .init();
 }
 
@@ -397,6 +390,64 @@ mod tests {
         assert!(!main.contains("endpoint=bot_chat"));
         assert!(digest.contains("endpoint=bot_chat"));
         assert!(!digest.contains("ordinary bcs log"));
+    }
+
+    #[test]
+    fn error_is_written_to_main_and_common_error_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let main_output = LogOutputConfig {
+            name: "main".to_string(),
+            path: path.clone(),
+            file: "bcs.log".to_string(),
+            level: "info".to_string(),
+            rotation: "daily".to_string(),
+            format: LogOutputFormat::Text,
+            targets: vec!["*".to_string()],
+            max_keep_days: 7,
+        };
+        let common_error_output = LogOutputConfig {
+            name: "common-error".to_string(),
+            path,
+            file: "common-error.log".to_string(),
+            level: "error".to_string(),
+            rotation: "daily".to_string(),
+            format: LogOutputFormat::Text,
+            targets: vec!["*".to_string()],
+            max_keep_days: 7,
+        };
+
+        let subscriber = tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(RotatingFileWriter::new(dir.path(), &main_output.file))
+                    .with_ansi(false)
+                    .with_filter(build_output_targets_filter(&main_output)),
+            )
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(RotatingFileWriter::new(
+                        dir.path(),
+                        &common_error_output.file,
+                    ))
+                    .with_ansi(false)
+                    .with_filter(build_output_targets_filter(&common_error_output)),
+            );
+
+        let dispatch = tracing::Dispatch::new(subscriber);
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::warn!(target: "bcs_http::routes", "warning stays in main only");
+            tracing::error!(target: "bcs_http::routes", "error is duplicated");
+        });
+
+        let main = std::fs::read_to_string(dir.path().join("bcs.log")).unwrap();
+        let common_error =
+            std::fs::read_to_string(dir.path().join("common-error.log")).unwrap();
+
+        assert!(main.contains("warning stays in main only"));
+        assert!(main.contains("error is duplicated"));
+        assert!(!common_error.contains("warning stays in main only"));
+        assert!(common_error.contains("error is duplicated"));
     }
 
     #[test]

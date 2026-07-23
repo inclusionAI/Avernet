@@ -1136,7 +1136,9 @@ class TestUpdateOutboundOperationRule:
 
         result = await f.update_outbound_operation_rule("dev@42", rule)
         assert result is True
-        mock_svc.update_outbound_operation_rule.assert_awaited_once_with("dev", rule)
+        mock_svc.update_outbound_operation_rule.assert_awaited_once_with(
+            "dev", rule, mode=None
+        )
 
     @pytest.mark.asyncio
     async def test_update_rule_template_not_found(self):

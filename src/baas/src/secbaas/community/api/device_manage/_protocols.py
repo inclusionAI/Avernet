@@ -34,7 +34,7 @@ if TYPE_CHECKING:
         SigmaDeviceConfig,
         TeClawDeviceConfig,
     )
-    from ._outbound_rule import OutBoundOperationRule
+    from ._outbound_rule import OutBoundOperationRule, OutBoundOperationRuleUpdatedMode
 
 
 @runtime_checkable
@@ -189,6 +189,7 @@ class LocalPaasService(Protocol):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule for a device."""
         ...
@@ -302,6 +303,7 @@ class PaasServiceFacade(Protocol):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule for a device."""
         ...

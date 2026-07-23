@@ -79,3 +79,32 @@ async def test_stream_dispatch_skips_dropped_converter_events():
         "state": "delta",
         "deltaText": "hello",
     }
+
+
+@pytest.mark.asyncio
+async def test_stream_dispatch_error_yields_error_sse():
+    """When chunk_iter raises, on_error produces an error SSE event."""
+
+    class _ErrorStreamService:
+        async def handle_chat_send_stream(self, _input):
+            async def _chunks():
+                yield StreamChunk(type="delta", content="hi")
+                raise RuntimeError("chunk boom")
+
+            return _chunks()
+
+    response = await _dispatch_chat_send_stream(
+        _chat_send_request(),
+        _ErrorStreamService(),
+        _ConverterFactory(),
+    )
+
+    items = []
+    async for item in response.body_iterator:
+        items.append(item)
+
+    # delta + error
+    assert len(items) == 2
+    assert items[0].startswith("id: 1\nevent: chat\n")
+    assert "error" in items[1]
+    assert "INTERNAL_ERROR" in items[1]
