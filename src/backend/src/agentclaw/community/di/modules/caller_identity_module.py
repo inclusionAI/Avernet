@@ -21,6 +21,11 @@ from agentclaw.community.core.bot_collaborator.repository.protocol import (
     CollaboratorRepositoryProtocol,
 )
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.caller_identity.protocols import (
+    CallerIdentityTokenExchangeProtocol,
+    CallerRuntimeUpdaterProtocol,
+    CallerTokenProviderProtocol,
+)
 from agentclaw.community.core.caller_identity.repository import (
     CallerIdentityRepositoryProtocol,
 )
@@ -85,11 +90,41 @@ class CallerIdentityModule(Module):
     @singleton
     @provider
     @inject
+    def caller_identity_token_exchange_protocol(
+        self,
+        service: CallerIdentityService,
+    ) -> CallerIdentityTokenExchangeProtocol:
+        """Bind CallerIdentityService to core layer protocol."""
+        return service
+
+    @singleton
+    @provider
+    @inject
+    def caller_token_provider_protocol(
+        self,
+        provider: CallerTokenProvider,
+    ) -> CallerTokenProviderProtocol:
+        """Bind CallerTokenProvider to core layer protocol."""
+        return provider
+
+    @singleton
+    @provider
+    @inject
     def caller_runtime_updater(
         self,
         baas_service: BaasService,
     ) -> CallerRuntimeUpdater:
         """Use the existing BaaS singleton for the Caller outbound PUT."""
+        return baas_service
+
+    @singleton
+    @provider
+    @inject
+    def caller_runtime_updater_protocol(
+        self,
+        baas_service: BaasService,
+    ) -> CallerRuntimeUpdaterProtocol:
+        """Bind BaasService to core layer protocol."""
         return baas_service
 
     @singleton

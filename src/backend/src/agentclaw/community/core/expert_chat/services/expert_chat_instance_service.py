@@ -33,13 +33,13 @@ from typing import Any, Dict, Optional
 
 from injector import inject
 
-from agentclaw.community.api.caller_credential import (
-    CallerRuntimeUpdater,
-    CallerTokenProvider,
-)
-from agentclaw.community.api.caller_identity_service import CallerIdentityServiceProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
+from agentclaw.community.core.caller_identity.protocols import (
+    CallerIdentityTokenExchangeProtocol,
+    CallerRuntimeUpdaterProtocol,
+    CallerTokenProviderProtocol,
+)
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from agentclaw.community.core.expert_chat.errors import (
@@ -71,8 +71,8 @@ class ExpertChatInstanceService:
     lifecycle), ``BotPublishRepositoryProtocol`` (success publish order /
     migration_path reverse-lookup), ``BotRepository`` (bot info lookup),
     ``DeviceBindingRepository`` (device binding for caller containers),
-    ``CallerIdentityServiceProtocol`` (caller identity exchange),
-    ``CallerTokenProvider`` (token exchange), ``CallerRuntimeUpdater``
+    ``CallerIdentityTokenExchangeProtocol`` (caller identity exchange),
+    ``CallerTokenProviderProtocol`` (token exchange), ``CallerRuntimeUpdaterProtocol``
     (runtime identity update).
     """
 
@@ -85,9 +85,9 @@ class ExpertChatInstanceService:
         bot_repo: BotRepository,
         binding_repo: DeviceBindingRepository,
         bot_build_service: BotBuildService,
-        caller_identity: CallerIdentityServiceProtocol,
-        token_provider: CallerTokenProvider,
-        runtime_updater: CallerRuntimeUpdater,
+        caller_identity: CallerIdentityTokenExchangeProtocol,
+        token_provider: CallerTokenProviderProtocol,
+        runtime_updater: CallerRuntimeUpdaterProtocol,
     ) -> None:
         self._instance_repo = instance_repo
         self._baas = baas_service
