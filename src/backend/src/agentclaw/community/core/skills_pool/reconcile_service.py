@@ -61,6 +61,7 @@ class SkillsPoolReconcileResult:
     outcome: SkillsPoolReconcileOutcome
     preparation_id: str | None = None
     evidence: dict[str, object] | None = None
+    retryable: bool | None = None
 
 
 class SkillsPoolReconcileService:
@@ -98,32 +99,19 @@ class SkillsPoolReconcileService:
             or state.target_layout is not SkillLayout.POOL
             or state.migration_generation is None
         ):
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.NOT_CLAIMED
-            )
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.NOT_CLAIMED)
         if state.lease_owner != lease_owner:
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.LEASE_NOT_HELD
-            )
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.LEASE_NOT_HELD)
 
         bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
         if bot is None:
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.BOT_NOT_FOUND
-            )
-        if (
-            bot.get("env") != scope.env
-            or bot.get("active_engine") != "openclaw"
-        ):
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.BOT_CHANGED
-            )
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_NOT_FOUND)
+        if bot.get("env") != scope.env or bot.get("active_engine") != "openclaw":
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
 
         owner_id = bot.get("owner_id")
         if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.BOT_CHANGED
-            )
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         user_id = str(owner_id)
         generation = state.migration_generation
         if not self._layouts.holds_lease(
@@ -131,9 +119,7 @@ class SkillsPoolReconcileService:
             migration_generation=generation,
             lease_owner=lease_owner,
         ):
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.LEASE_NOT_HELD
-            )
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.LEASE_NOT_HELD)
 
         probe = await self._runtime.probe(
             bot_id=scope.bot_id,
@@ -141,17 +127,50 @@ class SkillsPoolReconcileService:
             engine="openclaw",
         )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
+            if (
+                probe.status is RuntimeLayoutProbeStatus.INVALID
+                and not state.data_plane_cutover_committed
+            ):
+                recorded = self._layouts.record_pre_cutover_failure(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    failure_code="INVALID",
+                    failure_stage="runtime_probe",
+                    retryable=False,
+                    evidence=probe.evidence,
+                )
+                if not recorded:
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                    )
             return SkillsPoolReconcileResult(
                 self._probe_outcome(probe.status),
                 evidence=probe.evidence,
+                retryable=(probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR),
             )
         if (
             probe.preparation_id is None
             or probe.layout_contract_version != state.layout_contract_version
         ):
+            if not state.data_plane_cutover_committed:
+                recorded = self._layouts.record_pre_cutover_failure(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    failure_code="INVALID",
+                    failure_stage="runtime_probe",
+                    retryable=False,
+                    evidence=probe.evidence,
+                )
+                if not recorded:
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                    )
             return SkillsPoolReconcileResult(
                 SkillsPoolReconcileOutcome.INVALID,
                 evidence=probe.evidence,
+                retryable=False,
             )
 
         local_assets = self._skills.list_bot_local_assets(
@@ -204,9 +223,7 @@ class SkillsPoolReconcileService:
                 mappings=mappings,
             )
             if not cutover.committed:
-                failure_profile = self._cutover_failure_profile(
-                    cutover.status
-                )
+                failure_profile = self._cutover_failure_profile(cutover.status)
                 if failure_profile is not None:
                     outcome, stage, retryable = failure_profile
                     cutover_evidence = cutover.to_dict()
@@ -228,6 +245,7 @@ class SkillsPoolReconcileService:
                         outcome,
                         preparation_id=probe.preparation_id,
                         evidence=cutover_evidence,
+                        retryable=retryable,
                     )
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.CUTOVER_FAILED,

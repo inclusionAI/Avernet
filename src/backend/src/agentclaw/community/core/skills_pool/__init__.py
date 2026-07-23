@@ -16,6 +16,11 @@ from agentclaw.community.core.skills_pool.reconcile_service import (
     SkillsPoolReconcileResult,
     SkillsPoolReconcileService,
 )
+from agentclaw.community.core.skills_pool.reconcile_task import (
+    SKILLS_POOL_RECONCILE_TASK,
+    SkillsPoolReconcileTaskHandler,
+    SkillsPoolReconcileWakeupListener,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -36,8 +41,11 @@ __all__ = [
     "SkillLayout",
     "SkillLayoutPhase",
     "SkillsPoolMigrationClaimService",
+    "SKILLS_POOL_RECONCILE_TASK",
     "SkillsPoolReconcileOutcome",
     "SkillsPoolReconcileResult",
     "SkillsPoolReconcileService",
+    "SkillsPoolReconcileTaskHandler",
+    "SkillsPoolReconcileWakeupListener",
     "SkillsPoolRolloutGate",
 ]

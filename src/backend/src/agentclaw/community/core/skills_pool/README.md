@@ -18,8 +18,22 @@ OpenClaw 原子数据面切换与 Pool mapping，并在最后事务性提交 loc
   `ac_bot_publish` DRAFT 记录证明。认领入口不接受调用方自报运行形态，
   ONLINE 服务与 Teclaw 不产生认领。
 - lease 的认领、接管和续租都由数据库时钟与 generation fencing 保护。
-- 激活只处理已经认领且由当前 worker 持有 lease 的 OpenClaw Bot；每次执行
-  都重新读取 Bot 和当前 provider binding，并重新 probe marker。
+- ARCA 存活和 BaaS 发布完成事件只做当前 binding 的基础身份校验并写入
+  `skills_pool.reconcile` 持久化任务；事件处理器不读取 marker、不推送
+  mapping，也不提交 locator。
+- 这两个持久化交接是 required delivery：ARCA 在提交 ACTIVE 前入队，失败
+  时保持 PENDING 并由下一次存活回调重投；BaaS 则由发布任务退避重试。
+  ACTIVE 心跳不重复插入任务。
+- 持久化任务以 `(env, entity_id, bot_id)` 为唯一 Bot 身份。事件中的
+  sandbox、device 或 publish 标识只作为审计证据；每次执行都会重新读取
+  当前 Bot，并由 runtime adapter 重新解析当前 provider binding。
+- 未认领 Bot 每次唤醒都重新经过 rollout gate；一旦 generation 已持久化，
+  后续任务只续租或接管同一 generation，不再因白名单移除而停止。
+- `NOT_CAPABLE` 正常完成并保持 Legacy，暂时性错误交给任务队列指数退避，
+  无效结构持久化失败证据并阻断；重复任务通过 generation/lease 收敛。
+- 激活只处理当前仍可编辑、已经认领且由当前 worker 持有 lease 的
+  OpenClaw Bot；每次执行都重新读取 Bot 和当前 provider binding，并重新
+  probe marker。
 - 容器内以系统原生原子 exchange 将 Legacy local 切成指向 Pool canonical
   local 的永久单向 bridge；不支持原子 exchange 时保持 Legacy。
 - 激活前同时核对已登记 local，并从文件系统枚举未登记 local、受管 active
@@ -45,6 +59,8 @@ provides:
   - "SkillsPoolRolloutGate"
   - "SkillsPoolMigrationClaimService"
   - "SkillsPoolReconcileService"
+  - "SkillsPoolReconcileTaskHandler"
+  - "SkillsPoolReconcileWakeupListener"
   - "PoolCutoverStatus"
   - "PoolCutoverResult"
   - "BotSkillLayoutState and migration enums"
@@ -55,12 +71,19 @@ consumes:
   - "DatabasePlugin (through plugins/skills_pool_layout_repository.py)"
   - "SkillsPoolRuntimeProtocol"
   - "SkillsPoolSkillRepositoryProtocol"
+  - "DeviceBindingRepository"
+  - "TaskQueueService and HandlerRegistry"
 internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.common_config
+  - agentclaw.community.core.devices
+  - agentclaw.community.core.events
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.service_bot
+  - agentclaw.community.core.task_queue
   - agentclaw.community.core.base
+  - agentclaw.community.kernel.lifecycle
+  - agentclaw.community.log
   - agentclaw.community.plugin_api.database
   - agentclaw.community.core.skills_pool.ports
 ```
