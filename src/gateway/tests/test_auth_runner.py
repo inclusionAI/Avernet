@@ -85,3 +85,15 @@ async def test_or_falls_back_to_second_alternative() -> None:
 async def test_unknown_strategy_is_denied() -> None:
     with pytest.raises(AuthError):
         await authenticate(_CREDS, [{"missing": StrategyParams()}], {})
+
+
+async def test_invalid_credential_is_terminal_no_fallback() -> None:
+    # A present-but-invalid credential (AuthError) in one alternative must NOT
+    # fall back to a later valid alternative — the whole attempt is rejected.
+    registry: dict[str, AuthStrategy] = {
+        "bad": _Fixed("bad", AuthError("invalid api key")),
+        "good": _Fixed("good", _principal()),
+    }
+    req = [{"bad": StrategyParams()}, {"good": StrategyParams()}]
+    with pytest.raises(AuthError):
+        await authenticate(_CREDS, req, registry)
