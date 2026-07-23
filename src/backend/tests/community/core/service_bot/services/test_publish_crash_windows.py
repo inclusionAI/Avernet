@@ -1101,3 +1101,75 @@ async def test_verify_stage_restart_bot_not_found_gets_same_recreate():
     ext = svc._publish_service.update_publish_ext.call_args.kwargs["ext"]
     assert ext["restart"]["verify"] == 901
     assert ext["binding"]["verify"] == 55
+
+
+@pytest.mark.asyncio
+async def test_restart_recreate_crash_before_complete_finalized_on_redelivery():
+    """Group B review Finding 1: a crash between the recreate's ext write and
+    its complete_operation leaves the FIRST_RELEASE op ID_RECORDED while ext
+    already points at the NEW bot. The re-delivered restart takes the happy
+    (upgrade) path — the recreate leg never runs again — so execute_restart must
+    finalize the stranded op itself, or the dangling latest attempt hides the
+    record's release from is_current_online_deployment forever."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-new", "CREATE")
+        return {"bot_uuid": "BOT-new", "publish_id": wid, "success": True}
+
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    record = _restart_record()
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=record)
+
+    # Crash seam: complete_operation dies on its first call — after the recreate
+    # already wrote ext (binding/publish/restart → the new ids).
+    real_complete = ledger.complete
+    state = {"crashed": False}
+
+    def crash_once(op_id):
+        if not state["crashed"]:
+            state["crashed"] = True
+            raise RuntimeError("pod died after ext write, before complete")
+        return real_complete(op_id)
+
+    ledger.complete = crash_once
+
+    with pytest.raises(RuntimeError):
+        await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    fr = ledger.get_latest_by_kind(1, "first_release", "online")
+    assert fr.state == PublishOperationState.ID_RECORDED.value  # stranded
+
+    # Re-delivery: ext now points at the NEW bot (mirror the landed ext write on
+    # the record the resolution re-reads), and the new bot upgrades fine.
+    record.ext = {"migration_path": "/m", "config_artifact": None,
+                  "binding": {"online": 55}, "publish": {"online": 901},
+                  "restart": {"online": 901}}
+    svc._publish_service.get_device_binding_by_id = Mock(
+        return_value=Mock(device_id="BOT-new")
+    )
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-new", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    assert result["success"] is True
+
+    # The happy path finalized the stranded recreate op before deploying...
+    fr = ledger.get_latest_by_kind(1, "first_release", "online")
+    assert fr.state == PublishOperationState.COMPLETED.value
+    assert fr.baas_publish_id == 901
+    # ...and its own RESTART attempt completed with the new workflow.
+    restart_op = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_op.state == PublishOperationState.COMPLETED.value
+    assert restart_op.baas_publish_id == 902
+    # No duplicate creation happened on the re-delivery.
+    assert build_service.release_async.await_count == 1
