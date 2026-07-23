@@ -346,6 +346,38 @@ def test_exchange_caller_identity_passes_binding_id_in_all_stages(
     assert runtime_updater.update_caller_identity.call_args.kwargs["binding_id"] == 9
 
 
+@pytest.mark.parametrize("binding_id", [None, 0, -1, False])
+def test_exchange_caller_identity_does_not_pass_invalid_binding_id(
+    binding_id: int | None | bool,
+) -> None:
+    """Invalid binding_id values should not be passed to runtime_updater."""
+    service, _ = _service(bot=_bot(call_type="caller"))
+    token_provider = MagicMock()
+    token_provider.exchange.return_value = CallerToken(
+        access_token="caller-token",
+        subject_user_id="caller-1",
+        expires_at=datetime.now(),
+        fingerprint="fingerprint",
+    )
+    runtime_updater = MagicMock()
+
+    service.exchange_caller_identity(
+        iam_token="iam-token",
+        caller_user_id="caller-1",
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        token_provider=token_provider,
+        runtime_updater=runtime_updater,
+        stage="online",
+        publish_id=1,
+        entity_id="entity-1",
+        binding_id=binding_id,
+    )
+
+    # Invalid binding_id should not be in kwargs
+    assert "binding_id" not in runtime_updater.update_caller_identity.call_args.kwargs
+
+
 @pytest.mark.asyncio
 async def test_mcp_update_syncs_complete_identity_manifest_to_agent_principal() -> None:
     service, deps = _service(bot=_bot())
