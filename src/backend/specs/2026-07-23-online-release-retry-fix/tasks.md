@@ -88,7 +88,7 @@
   - [ ] `pytest tests/community/core/service_bot/` green.
 - **Depends on:** Tasks 1, 2
 
-## Task 4: Extract the deploy atom in `operation_runner.py`
+## Task 4: `[x]` Extract the deploy atom in `operation_runner.py`
 
 - **Goal:** One shared open → acquire (uniform `BOT_NOT_FOUND` classification)
   → validate sequence, with abandon-on-bot-gone, usable by all three deploy

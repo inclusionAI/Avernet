@@ -23,6 +23,8 @@ from agentclaw.community.plugins.publish_operation_repository import (
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     PublishOperationError,
     PublishOperationRunner,
+    TargetBotGoneError,
+    acquire_deploy_workflow,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 
@@ -327,3 +329,145 @@ def test_record_step_result_merges(ledger, baas):
     op = r.record_step_result(op, {"draft_id": 9})
     assert op.result["binding_id"] == 5
     assert op.result["draft_id"] == 9
+
+
+# ── acquire_deploy_workflow (the deploy atom) ─────────────────────────────────
+def test_atom_happy_path_records_workflow(ledger, baas):
+    r = _runner(ledger, baas)
+
+    async def issue():
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    op = run(acquire_deploy_workflow(
+        r, publish_id=1, kind=PublishOperationKind.UPGRADE,
+        stage=PublishStage.ONLINE, operator="op", issue=issue, bot_uuid="BOT-live",
+    ))
+    assert op.baas_publish_id == 1001
+    # Returned un-completed: follow-up steps + complete stay with the caller.
+    assert op.state == PublishOperationState.ID_RECORDED.value
+
+
+def test_atom_bot_not_found_abandons_with_reason_and_raises(ledger, baas):
+    r = _runner(ledger, baas)
+
+    async def issue():
+        return {"success": False, "error_code": "BOT_NOT_FOUND"}
+
+    with pytest.raises(TargetBotGoneError):
+        run(acquire_deploy_workflow(
+            r, publish_id=1, kind=PublishOperationKind.UPGRADE,
+            stage=PublishStage.ONLINE, operator="op", issue=issue,
+            bot_uuid="BOT-gone", bot_gone_reason="BOT_NOT_FOUND -> first release",
+        ))
+    op = ledger.get_latest_by_kind(1, UPGRADE, "online")
+    assert op.state == PublishOperationState.ABANDONED.value
+    assert op.last_error == "BOT_NOT_FOUND -> first release"
+
+
+def test_atom_creation_requires_bot_uuid(ledger, baas):
+    r = _runner(ledger, baas)
+
+    async def issue():
+        # Creation that "succeeds" but fails to return the new bot's uuid.
+        return {"publish_id": 999}
+
+    with pytest.raises(PublishOperationError):
+        run(acquire_deploy_workflow(
+            r, publish_id=1, kind=PublishOperationKind.FIRST_RELEASE,
+            stage=PublishStage.ONLINE, operator="op", issue=issue,
+        ))
+
+
+def test_atom_never_skips_issue_for_current_deployment(ledger, baas):
+    """The point-2 guard: the atom has no skip-if-current-deployment logic —
+    a deploy on a bot whose release is live and current still reaches issue
+    (a restart must always re-deploy via BaaS)."""
+    r = _runner(ledger, baas)
+
+    async def land(kind):
+        async def issue():
+            wid = baas.issue("BOT-live", "UPDATE")
+            return {"publish_id": wid, "success": True}
+        op = await acquire_deploy_workflow(
+            r, publish_id=1, kind=kind,
+            stage=PublishStage.ONLINE, operator="op", issue=issue,
+            bot_uuid="BOT-live",
+        )
+        r.complete_operation(op)
+        return op
+
+    run(land(PublishOperationKind.UPGRADE))       # the live, current release
+    op2 = run(land(PublishOperationKind.RESTART))  # restart still issues
+    assert op2.baas_publish_id == 1002
+    assert len(baas.list_bot_publishes("BOT-live")) == 2
+
+
+def test_atom_crash_before_record_resumes_via_adopt(ledger, baas):
+    """Existing-bot crash window: issue landed, record_workflow died. The re-run
+    resumes the SAME op and adopts the in-doubt workflow (no second issue)."""
+    r = _runner(ledger, baas)
+    issued = []
+
+    async def issue():
+        wid = baas.issue("BOT-live", "UPDATE")
+        issued.append(wid)
+        return {"publish_id": wid, "success": True}
+
+    real = ledger.record_workflow
+    state = {"crashed": False}
+
+    def crash_once(*a, **kw):
+        if not state["crashed"]:
+            state["crashed"] = True
+            raise RuntimeError("pod died after issue, before record")
+        return real(*a, **kw)
+
+    ledger.record_workflow = crash_once
+
+    kwargs = dict(
+        publish_id=1, kind=PublishOperationKind.UPGRADE,
+        stage=PublishStage.ONLINE, operator="op", issue=issue, bot_uuid="BOT-live",
+    )
+    # First call establishes the baseline fence and issues, then crashes on record.
+    with pytest.raises(RuntimeError):
+        run(acquire_deploy_workflow(r, **kwargs))
+    assert len(issued) == 1
+
+    op = run(acquire_deploy_workflow(r, **kwargs))
+    assert len(issued) == 1                      # adopted, not re-issued
+    assert op.baas_publish_id == issued[0]
+
+
+def test_atom_crash_before_record_reissues_for_creation(ledger, baas):
+    """Creation crash window: no bot to adopt from → the re-run re-issues
+    (the accepted Option-C orphan), and the op records the second workflow."""
+    r = _runner(ledger, baas)
+    issued = []
+
+    async def issue():
+        wid = baas.issue("BOT-new", "CREATE")
+        issued.append(wid)
+        return {"publish_id": wid, "bot_uuid": "BOT-new", "success": True}
+
+    real = ledger.record_workflow
+    state = {"crashed": False}
+
+    def crash_once(*a, **kw):
+        if not state["crashed"]:
+            state["crashed"] = True
+            raise RuntimeError("pod died after issue, before record")
+        return real(*a, **kw)
+
+    ledger.record_workflow = crash_once
+
+    kwargs = dict(
+        publish_id=1, kind=PublishOperationKind.FIRST_RELEASE,
+        stage=PublishStage.ONLINE, operator="op", issue=issue,
+    )
+    with pytest.raises(RuntimeError):
+        run(acquire_deploy_workflow(r, **kwargs))
+    op = run(acquire_deploy_workflow(r, **kwargs))
+    assert len(issued) == 2
+    assert op.baas_publish_id == issued[1]
+    assert op.bot_uuid == "BOT-new"
