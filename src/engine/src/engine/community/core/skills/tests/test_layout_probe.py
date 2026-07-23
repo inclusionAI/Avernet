@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import errno
 import json
+import os
 from pathlib import Path
+
+import pytest
 
 from engine.community.core.skills.layout_probe import (
     LAYOUT_CONTRACT_VERSION,
@@ -80,13 +83,9 @@ def test_absent_marker_is_not_capable(tmp_path):
 
 def test_marker_nas_io_error_is_transient(tmp_path, monkeypatch):
     home, _, _, pool_repo = _ready_home(tmp_path)
-    marker_path = home / ".openclaw" / "workspace" / "skills-pool" / ".pool-ready"
-    original_read_bytes = Path.read_bytes
 
-    def fail_marker_read(path):
-        if path == marker_path:
-            raise OSError(errno.ESTALE, "stale NAS handle")
-        return original_read_bytes(path)
+    def fail_marker_read(_path):
+        raise OSError(errno.ESTALE, "stale NAS handle")
 
     monkeypatch.setattr(Path, "read_bytes", fail_marker_read)
 
@@ -103,13 +102,9 @@ def test_marker_nas_io_error_is_transient(tmp_path, monkeypatch):
 
 def test_marker_stat_nas_io_error_is_transient(tmp_path, monkeypatch):
     home, _, _, pool_repo = _ready_home(tmp_path)
-    marker_path = home / ".openclaw" / "workspace" / "skills-pool" / ".pool-ready"
-    original_stat = Path.stat
 
-    def fail_marker_stat(path, *args, **kwargs):
-        if path == marker_path:
-            raise OSError(errno.ESTALE, "stale NAS handle")
-        return original_stat(path, *args, **kwargs)
+    def fail_marker_stat(_path, *_args, **_kwargs):
+        raise OSError(errno.ESTALE, "stale NAS handle")
 
     monkeypatch.setattr(Path, "stat", fail_marker_stat)
 
@@ -320,3 +315,125 @@ def test_teclaw_is_noop_without_touching_home(tmp_path):
 
     assert result.status is RuntimeLayoutInspectionStatus.NOT_CAPABLE
     assert result.evidence["reason"] == "engine_has_no_filesystem_pool_layout"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("preparation_id", "not-a-uuid"),
+        ("prepared_at", None),
+        ("prepared_at", "not-a-timestamp"),
+    ],
+)
+def test_marker_contract_rejects_invalid_identity_or_timestamp(
+    tmp_path, field, value
+):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    marker_path = home / ".openclaw" / "workspace" / "skills-pool" / ".pool-ready"
+    marker = json.loads(marker_path.read_text())
+    marker[field] = value
+    marker_path.write_text(json.dumps(marker))
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "marker_contract_mismatch"
+
+
+def test_marker_contract_rejects_non_dict_validation_summary(tmp_path):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    marker_path = home / ".openclaw" / "workspace" / "skills-pool" / ".pool-ready"
+    marker = json.loads(marker_path.read_text())
+    marker["validation_summary"] = []
+    marker_path.write_text(json.dumps(marker))
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "marker_contract_mismatch"
+
+
+def test_relative_repo_bridge_target_is_accepted(tmp_path):
+    home, legacy_root, _, pool_repo = _ready_home(tmp_path)
+    bridge = legacy_root / "skills-repo"
+    bridge.unlink()
+    bridge.symlink_to(
+        os.path.relpath(pool_repo, start=bridge.parent),
+        target_is_directory=True,
+    )
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+
+
+def test_repo_and_external_active_entries_preserve_ready_status(tmp_path):
+    home, legacy_root, _, pool_repo = _ready_home(tmp_path)
+    (pool_repo / "repo-skill").mkdir()
+    repo_active = legacy_root / "repo-skill"
+    repo_active.symlink_to(
+        legacy_root / "skills-repo" / "repo-skill",
+        target_is_directory=True,
+    )
+    external_skill = tmp_path / "external-skill"
+    external_skill.mkdir()
+    (legacy_root / "external-skill").symlink_to(
+        external_skill,
+        target_is_directory=True,
+    )
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+
+
+def test_invalid_declared_managed_entry_is_rejected(tmp_path):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    marker_path = home / ".openclaw" / "workspace" / "skills-pool" / ".pool-ready"
+    marker = json.loads(marker_path.read_text())
+    marker["validation_summary"]["managed_active_entries"] = [
+        {"source": "unknown"}
+    ]
+    marker_path.write_text(json.dumps(marker))
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "managed_active_entry_invalid"
+
+
+def test_other_engine_is_not_capable_without_touching_home(tmp_path):
+    result = inspect_runtime_layout(
+        engine="claude_code",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=tmp_path / "missing",
+        repo_is_mounted=lambda _path: (_ for _ in ()).throw(AssertionError()),
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.NOT_CAPABLE
+    assert result.evidence["reason"] == "engine_pool_probe_not_implemented"
