@@ -110,6 +110,27 @@ class PublishOperationRepository(ABC):
         """Mark a non-terminal operation ``ABANDONED`` (superseded). ``None`` if
         already terminal."""
 
+    @abstractmethod
+    def fail_by_workflow(
+        self,
+        publish_id: int,
+        baas_publish_id: int,
+        error: str,
+    ) -> bool:
+        """Outcome-correct the op carrying this BaaS workflow to ``FAILED``.
+
+        The op's own steps may have completed long before its BaaS workflow
+        reaches a terminal state — ``COMPLETED`` means "bookkeeping done", not
+        "deploy landed". When the progress sync observes the workflow FAILED,
+        this write records that outcome on the ledger row so liveness readers
+        (``is_current_online_deployment`` and its superseded scan) stop
+        treating the deploy as landed. Permits ``ID_RECORDED -> FAILED`` and —
+        deliberately, unlike :meth:`fail` — ``COMPLETED -> FAILED``.
+
+        Returns ``True`` if a row was corrected; ``False`` when no row of this
+        publish carries ``baas_publish_id`` (e.g. pre-ledger records) or the
+        matching row is already ``FAILED``/``ABANDONED``."""
+
     # ── field updates (within a held operation; no state change) ────────
     @abstractmethod
     def update_result(

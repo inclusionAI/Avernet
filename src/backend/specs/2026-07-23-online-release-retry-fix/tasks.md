@@ -25,7 +25,7 @@
   - [ ] `pytest tests/community/core/service_bot/` green.
 - **Depends on:** —
 
-## Task 2: Ledger reflects deploy outcome — fail the op on observed workflow failure
+## Task 2: `[x]` Ledger reflects deploy outcome — fail the op on observed workflow failure
 
 - **Goal:** A deploy whose BaaS workflow failed must not read as live: the
   progress-sync failure path marks the ledger op carrying that workflow

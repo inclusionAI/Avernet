@@ -278,6 +278,7 @@ class ProgressSyncMixin:
         current_status: _FailureSourceStatus,
         ext: dict,
         progress: dict,
+        baas_publish_id: int,
         error_message: str | None = None,
     ) -> PublishFlowResult:
         """Handle a failed BaaS publish.
@@ -287,6 +288,9 @@ class ProgressSyncMixin:
             current_status: Current status
             ext: Extension fields
             progress: BaaS publish progress information
+            baas_publish_id: The failed BaaS workflow's id — its ledger op is
+                outcome-corrected to FAILED so liveness readers stop treating
+                the deploy as landed
             error_message: Custom error message; generated from the number of failed devices when not provided
 
         Returns:
@@ -295,6 +299,15 @@ class ProgressSyncMixin:
         if error_message is None:
             failed_devices = progress.get("failed_devices", [])
             error_message = f"BaaS publish failed: {len(failed_devices)} device(s) failed"
+
+        # Outcome correction, before the record's FAILED write: the op's steps
+        # completed at bookkeeping time, but its workflow just terminally failed —
+        # without this, the failed deploy still reads as the live deployment, so
+        # the online-release gate would skip the re-issue on retry (a FAILED
+        # retry loop) and the deploy would wrongly supersede a live release.
+        self._publish_operation_repo.fail_by_workflow(
+            publish_id, baas_publish_id, error_message
+        )
 
         self._clear_retry_flag(ext)
         ext["error_message"] = error_message
@@ -421,6 +434,7 @@ class ProgressSyncMixin:
                 current_status=current_status,
                 ext=ext,
                 progress=progress,
+                baas_publish_id=baas_publish_id,
             )
 
         else:
@@ -601,6 +615,7 @@ class ProgressSyncMixin:
                     current_status=current_status,
                     ext=ext,
                     progress=progress,
+                    baas_publish_id=restart_publish_id,
                     error_message=f"Restart publish status: {baas_status}",
                 )
 
@@ -628,6 +643,7 @@ class ProgressSyncMixin:
                 current_status=current_status,
                 ext=ext,
                 progress=progress,
+                baas_publish_id=restart_publish_id,
             )
 
         else:

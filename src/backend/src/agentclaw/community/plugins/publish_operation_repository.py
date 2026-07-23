@@ -216,6 +216,45 @@ class OrmPublishOperationRepository(PublishOperationRepository):
             forbidden_sources=_TERMINAL,
         )
 
+    def fail_by_workflow(
+        self,
+        publish_id: int,
+        baas_publish_id: int,
+        error: str,
+    ) -> bool:
+        # Outcome correction: unlike fail(), COMPLETED is an allowed source —
+        # the workflow's terminal FAILED arrived after bookkeeping completed.
+        # ABANDONED/FAILED rows stay untouched (already not treated as landed).
+        with self._db.orm_session() as db:
+            affected = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.publish_id == publish_id,
+                    self.Model.baas_publish_id == baas_publish_id,
+                    self.Model.state.in_(
+                        [
+                            PublishOperationState.ID_RECORDED.value,
+                            PublishOperationState.COMPLETED.value,
+                        ]
+                    ),
+                )
+                .update(
+                    {
+                        self.Model.state: PublishOperationState.FAILED.value,
+                        self.Model.last_error: error,
+                        self.Model.gmt_modified: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        if affected:
+            logger.info(
+                "[publish_operation:fail_by_workflow] publish_id=%s "
+                "baas_publish_id=%s corrected to FAILED: %s",
+                publish_id, baas_publish_id, error,
+            )
+        return bool(affected)
+
     # ── field updates (no state change) ─────────────────────────────────
     def update_result(
         self,

@@ -475,6 +475,85 @@ def test_is_current_online_deployment_ignores_ext_marker():
     assert svc.is_current_online_deployment(2) is False
 
 
+def test_sync_failure_outcome_corrects_release_op():
+    """A BaaS-wait failure must fail the ledger op, not just the record: the
+    release op COMPLETED at bookkeeping time, and without the correction the
+    failed deploy still reads as the live deployment — the online gate would
+    skip the re-issue on retry and the record would loop FAILED forever."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+
+    op = _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                            bot_uuid="BOT-live", baas_id=901)
+    assert svc.is_current_online_deployment(1) is True
+
+    svc._handle_sync_failure(
+        publish_id=1,
+        current_status=PublishStatus.ONLINE_PUB,
+        ext={},
+        progress={"status": "FAILED", "failed_devices": [{"id": "d1"}]},
+        baas_publish_id=901,
+    )
+
+    corrected = ledger.get_by_id(op.id)
+    assert corrected.state == PublishOperationState.FAILED.value
+    # The failed deploy no longer reads as the live deployment → the gate
+    # re-runs the release and open_operation opens a fresh attempt.
+    assert svc.is_current_online_deployment(1) is False
+
+
+def test_failed_deploy_does_not_supersede_live_release():
+    """Cross-record liveness: v1's release is live; v2's later upgrade lands
+    (higher baas id) then its workflow FAILS. Before #Task2 the COMPLETED v2 op
+    superseded v1 forever; after the outcome correction v1 reads current again."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+
+    _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=901)
+    _land_completed_op(svc, ledger, publish_id=2, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=902)
+    # v2's landed deploy supersedes v1 while it is (presumed) live/in-flight.
+    assert svc.is_current_online_deployment(1) is False
+
+    # v2's workflow terminally fails → outcome-corrected → it never took:
+    # v1's release is the latest *landed* deploy on the bot again.
+    assert ledger.fail_by_workflow(2, 902, "BaaS publish failed") is True
+    assert svc.is_current_online_deployment(1) is True
+
+
+def test_sync_restart_failure_outcome_corrects_restart_op():
+    """The restart wait failing corrects the RESTART op too — consistent ledger
+    semantics (a restart op is not a version-setting deploy, but its recorded
+    outcome should still reflect reality)."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+
+    op = _land_completed_op(svc, ledger, publish_id=1, kind="restart",
+                            bot_uuid="BOT-live", baas_id=905)
+    svc._handle_sync_failure(
+        publish_id=1,
+        current_status=PublishStatus.ONLINE_PUB,
+        ext={},
+        progress={"status": "FAILED"},
+        baas_publish_id=905,
+        error_message="Restart publish status: FAILED",
+    )
+    assert ledger.get_by_id(op.id).state == PublishOperationState.FAILED.value
+
+
 def test_abandon_inflight_operations_marks_nonterminal():
     ledger = _ledger()
     svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock())
