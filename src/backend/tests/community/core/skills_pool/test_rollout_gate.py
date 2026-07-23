@@ -178,13 +178,21 @@ def test_non_pool_engine_never_matches(engine_type: str) -> None:
     )
 
 
-def test_service_draft_is_editable_but_published_service_is_not() -> None:
-    gate = make_gate(enabled_config())
+@pytest.mark.parametrize("engine_type", ["openclaw", "aicoding"])
+def test_service_draft_is_editable_but_published_service_is_not(
+    engine_type: str,
+) -> None:
+    gate = make_gate(enabled_config(promoted_engines=[engine_type]))
 
-    assert evaluate(gate, runtime_form=BotRuntimeForm.SERVICE_DRAFT).eligible
+    assert evaluate(
+        gate,
+        engine_type=engine_type,
+        runtime_form=BotRuntimeForm.SERVICE_DRAFT,
+    ).eligible
     assert (
         evaluate(
             gate,
+            engine_type=engine_type,
             runtime_form=BotRuntimeForm.PUBLISHED_SERVICE,
         ).reason
         is RolloutDecisionReason.RUNTIME_NOT_EDITABLE

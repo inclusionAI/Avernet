@@ -26,7 +26,17 @@ class ClaudeCodePoolPaths:
     pool_repo: str = "/home/admin/.claude_code/workspace/skills-pool/skills-repo"
 
 
-PoolPaths = OpenClawPoolPaths | ClaudeCodePoolPaths
+@dataclass(frozen=True, slots=True)
+class AICodingPoolPaths:
+    """AICoding P3 的容器视角路径契约。"""
+
+    active: str = "/home/admin/.claude/skills"
+    legacy_local: str = "/home/admin/.aicoding/workspace/skills/skills-local"
+    pool_local: str = "/home/admin/.aicoding/workspace/skills-pool/skills-local"
+    pool_repo: str = "/home/admin/.aicoding/workspace/skills-pool/skills-repo"
+
+
+PoolPaths = OpenClawPoolPaths | ClaudeCodePoolPaths | AICodingPoolPaths
 
 
 def pool_paths_for_engine(engine: str) -> PoolPaths:
@@ -36,6 +46,8 @@ def pool_paths_for_engine(engine: str) -> PoolPaths:
         return OpenClawPoolPaths()
     if engine == "claude_code":
         return ClaudeCodePoolPaths()
+    if engine == "aicoding":
+        return AICodingPoolPaths()
     raise ValueError(f"engine Pool layout not implemented: {engine}")
 
 
@@ -90,6 +102,7 @@ class PoolCutoverResult:
 
 
 __all__ = [
+    "AICodingPoolPaths",
     "ClaudeCodePoolPaths",
     "OpenClawPoolPaths",
     "PoolPaths",

@@ -98,6 +98,21 @@ class _Layout:
 
     @classmethod
     def for_engine(cls, engine: str, home: Path) -> "_Layout":
+        if engine == "aicoding":
+            workspace = home / ".aicoding" / "workspace"
+            legacy_root = home / ".claude" / "skills"
+            legacy_local = workspace / "skills" / "skills-local"
+            pool_root = workspace / "skills-pool"
+            return cls(
+                legacy_root=legacy_root,
+                legacy_local=legacy_local,
+                pool_root=pool_root,
+                pool_local=pool_root / "skills-local",
+                pool_repo=pool_root / "skills-repo",
+                legacy_repo=home / ".aicoding" / "skills-repo",
+                local_bridge=legacy_root / "skills-local",
+                repo_bridge=home / ".aicoding" / "skills-repo",
+            )
         if engine == "claude_code":
             workspace = home / ".claude_code" / "workspace"
             legacy_root = home / ".claude" / "skills"
@@ -650,6 +665,30 @@ def activate_claude_code_pool(
     )
 
 
+def activate_aicoding_pool(
+    *,
+    migration_generation: str,
+    preparation_id: str,
+    registered_local_names: list[str],
+    mappings: list[SkillMapping],
+    home: str | Path = "/home/admin",
+    repo_is_mounted: Callable[[Path], bool] | None = None,
+    exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+    before_post_sync: Callable[[], None] | None = None,
+) -> PoolActivationResult:
+    return _activate_pool(
+        engine="aicoding",
+        migration_generation=migration_generation,
+        preparation_id=preparation_id,
+        registered_local_names=registered_local_names,
+        mappings=mappings,
+        home=home,
+        repo_is_mounted=repo_is_mounted,
+        exchange_paths=exchange_paths,
+        before_post_sync=before_post_sync,
+    )
+
+
 def verify_skill_mappings(
     *,
     mappings: list[SkillMapping],
@@ -764,6 +803,7 @@ __all__ = [
     "PoolActivationResult",
     "PoolActivationStatus",
     "SkillMapping",
+    "activate_aicoding_pool",
     "activate_claude_code_pool",
     "activate_openclaw_pool",
     "atomic_exchange_paths",

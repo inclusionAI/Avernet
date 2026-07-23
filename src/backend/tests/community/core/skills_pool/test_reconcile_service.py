@@ -357,7 +357,35 @@ async def test_claude_code_uses_its_own_pool_paths_for_full_activation() -> None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("engine", ["openclaw", "claude_code"])
+async def test_aicoding_uses_its_own_pool_paths_for_full_activation() -> None:
+    layouts = FakeLayoutRepository()
+    pool_local = "/home/admin/.aicoding/workspace/skills-pool/skills-local"
+    pool_repo = "/home/admin/.aicoding/workspace/skills-pool/skills-repo"
+    runtime = FakeRuntime(
+        engine="aicoding",
+        pool_local=pool_local,
+        pool_repo=pool_repo,
+    )
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine="aicoding",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.committed_locators == {
+        11: f"local://{pool_local}/local-a",
+        12: f"local://{pool_local}/local-b",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code", "aicoding"])
 async def test_mapping_failure_after_cutover_does_not_commit_database(
     engine: str,
 ) -> None:
