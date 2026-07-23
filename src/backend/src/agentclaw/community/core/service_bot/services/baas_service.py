@@ -2278,7 +2278,7 @@ class BaasService:  # pragma: no cover
             stage_str = stage
             ext_info = ext_info or {}
             if ext_info.get("biz_id"):
-                stage_str += f"-{ext_info.get("biz_id")}"
+                stage_str += f"-{ext_info.get('biz_id')}"
             start_service_cmd += f" --stage {stage_str}"
 
         if version:
