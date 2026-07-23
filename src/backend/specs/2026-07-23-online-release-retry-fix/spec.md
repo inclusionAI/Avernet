@@ -52,6 +52,14 @@ correct shape.
 - [ ] An online-stage retry whose release **did** land and is still live does not
       issue a redundant re-deploy; it resumes by waiting for/settling the
       existing deployment.
+- [ ] An online-stage retry after the deploy was issued but its BaaS workflow
+      ultimately **failed** re-issues the deploy as a fresh attempt — the failed
+      deploy is never mistaken for a live one, so the retry can never skip the
+      work and strand the record in a failure loop.
+- [ ] The system's record of what is deployed reflects observed deploy
+      failures: a deploy whose workflow failed does not count as the live
+      deployment, and does not supersede a genuinely live earlier release on
+      the same bot.
 - [ ] Retrying a failed publish whose pre-failure stage was the verify stage, or
       whose pre-failure state was a fully-published (live) record, still uses the
       BaaS restart path — unchanged from today.
@@ -86,6 +94,9 @@ correct shape.
   single (gate) consumer.
 - Guaranteeing restart always re-deploys via BaaS (the live-deployment check
   stays out of the restart path).
+- Recording observed deploy failure in the operation ledger, so "is this
+  release live?" answers correctly after a failed deploy (the flaw that made
+  retry able to skip necessary work).
 - Extracting the shared deploy operation shape across online first-release,
   online upgrade, and restart.
 - Fixing the restart "target bot vanished" recovery to be crash-idempotent, the
