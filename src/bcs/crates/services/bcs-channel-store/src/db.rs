@@ -252,13 +252,17 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         rows.iter().map(row_to_binding).collect()
     }
 
-    async fn delete_by_target(&self, target: &BindingTarget, env: &str) -> ServiceResult<u64> {
+    async fn delete_by_target(&self, target: &BindingTarget) -> ServiceResult<u64> {
         let target_json = serde_json::to_string(target)?;
+        // 以下为安全注释COSEC：删除范围固定为 repository env，禁止调用方选择其他环境。
         self.execute(
             "delete_bindings_by_target",
             DbStatement::with_params(
                 "DELETE FROM bcs_channel_bindings WHERE target_json = ? AND env = ?",
-                vec![DbValue::from(target_json), DbValue::from(env)],
+                vec![
+                    DbValue::from(target_json),
+                    DbValue::from(self.env.as_str()),
+                ],
             ),
         )
         .await
@@ -929,7 +933,10 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_binding_list_by_target_filters_target_and_channel() -> ServiceResult<()> {
-        let (binding_repo, _, _) = sqlite_stores().await?;
+        let db = sqlite_db().await?;
+        let db_plugin: Arc<dyn DbPlugin> = db;
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone(), "dev");
+        let other_env_repo = DbChannelBindingStore::sqlite(db_plugin, "pre");
 
         let group_dingtalk = binding();
         binding_repo.create(group_dingtalk).await?;
@@ -945,7 +952,7 @@ mod tests {
         group_other_env.account_ref = "account_pre".to_string();
         group_other_env.channel_type = "test_im".to_string();
         group_other_env.env = "pre".to_string();
-        binding_repo.create(group_other_env).await?;
+        other_env_repo.create(group_other_env).await?;
 
         let mut other_group = binding();
         other_group.id = "binding_other_group".to_string();
@@ -959,7 +966,7 @@ mod tests {
             group_id: "group_1".to_string(),
         };
         let all_channels = binding_repo.list_by_target(&group_target, None).await?;
-        assert_eq!(all_channels.len(), 3);
+        assert_eq!(all_channels.len(), 2);
 
         let dingtalk = binding_repo
             .list_by_target(&group_target, Some("dingtalk"))
@@ -967,10 +974,10 @@ mod tests {
         assert_eq!(dingtalk.len(), 1);
         assert_eq!(dingtalk[0].id, "binding_1");
 
-        assert_eq!(binding_repo.delete_by_target(&group_target, "dev").await?, 2);
+        assert_eq!(binding_repo.delete_by_target(&group_target).await?, 2);
         let remaining_group_bindings = binding_repo.list_by_target(&group_target, None).await?;
-        assert_eq!(remaining_group_bindings.len(), 1);
-        assert_eq!(remaining_group_bindings[0].id, "binding_other_env");
+        assert!(remaining_group_bindings.is_empty());
+        assert!(other_env_repo.get("binding_other_env").await?.is_some());
         assert!(binding_repo.get("binding_other_group").await?.is_some());
 
         Ok(())

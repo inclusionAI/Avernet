@@ -14,7 +14,7 @@
 1. 保留现有全量查询接口及响应结构，兼容 CLI 和既有管理调用方；查询结果限定为当前运行环境。
 2. 新增 `GET /channels/bindings/by-target`，必须指定 `target_type=bot|group` 与非空 `target_id`，可选 `channel_type`。
 3. HTTP adapter 将查询参数转换为领域 `BindingTarget`，application service 调用 repository 的目标查询能力，并沿用 provider 配置脱敏。
-4. repository 由 composition root 绑定到当前运行环境，并在存储层按环境与目标筛选；数据库实现使用参数化查询，内存实现遵循相同语义。
+4. repository 由 composition root 绑定到当前运行环境，并在存储层按环境隔离全部读写；`delete_by_target` 也只使用 repository 自身环境，不接受调用方传入环境。数据库实现使用参数化查询，内存实现遵循相同语义。
 5. 第一版沿用现有 binding 管理接口的人类身份认证边界，不在本次改造中新增 Bot owner 或群成员授权模型。
 
 ## 验收标准
@@ -39,7 +39,7 @@ GET /channels/bindings/by-target?target_type=group&target_id=group_1&channel_typ
 
 ## 测试
 
-- repository contract：运行环境隔离、Bot/Group 目标隔离与可选渠道过滤。
+- repository contract：运行环境隔离、Bot/Group 目标隔离、按目标清理隔离与可选渠道过滤。
 - service：目标查询结果的 provider 配置脱敏。
 - HTTP contract：新路由的人类身份认证。
 - route unit：目标类型转换与空目标校验。

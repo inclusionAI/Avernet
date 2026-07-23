@@ -264,14 +264,6 @@ async fn binding_repo_lists_only_requested_target_and_optional_channel() -> Serv
     group_other_channel.channel_type = "test_im".to_string();
     repo.create(group_other_channel).await?;
 
-    let mut group_other_env = binding("group_other_env", "account_pre", BindingStatus::Active);
-    group_other_env.target = BindingTarget::Group {
-        group_id: "group_1".to_string(),
-    };
-    group_other_env.channel_type = "test_im".to_string();
-    group_other_env.env = "pre".to_string();
-    repo.create(group_other_env).await?;
-
     let mut other_group = binding("other_group", "robot_2", BindingStatus::Active);
     other_group.target = BindingTarget::Group {
         group_id: "group_2".to_string(),
@@ -288,7 +280,7 @@ async fn binding_repo_lists_only_requested_target_and_optional_channel() -> Serv
         group_id: "group_1".to_string(),
     };
     let group_all_channels = repo.list_by_target(&group_target, None).await?;
-    assert_eq!(group_all_channels.len(), 3);
+    assert_eq!(group_all_channels.len(), 2);
 
     let group_dingtalk = repo
         .list_by_target(&group_target, Some("dingtalk"))
@@ -305,10 +297,9 @@ async fn binding_repo_lists_only_requested_target_and_optional_channel() -> Serv
     assert_eq!(bot_bindings.len(), 1);
     assert_eq!(bot_bindings[0].id, "bot_binding");
 
-    assert_eq!(repo.delete_by_target(&group_target, "dev").await?, 2);
+    assert_eq!(repo.delete_by_target(&group_target).await?, 2);
     let remaining_group_bindings = repo.list_by_target(&group_target, None).await?;
-    assert_eq!(remaining_group_bindings.len(), 1);
-    assert_eq!(remaining_group_bindings[0].id, "group_other_env");
+    assert!(remaining_group_bindings.is_empty());
     assert_eq!(repo.list_by_target(&bot_target, None).await?.len(), 1);
     assert_eq!(
         repo.list_by_target(

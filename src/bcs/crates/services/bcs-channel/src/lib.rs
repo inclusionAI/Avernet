@@ -1025,12 +1025,9 @@ impl ChannelBindingCleanupPort for BcsChannelService {
     ) -> bcs_service_api::ServiceResult<u64> {
         let _guard = self.binding_admin_lock.lock().await;
         self.bindings
-            .delete_by_target(
-                &BindingTarget::Group {
-                    group_id: group_id.to_string(),
-                },
-                &self.env,
-            )
+            .delete_by_target(&BindingTarget::Group {
+                group_id: group_id.to_string(),
+            })
             .await
     }
 }
@@ -1366,8 +1363,8 @@ mod tests {
             self.inner.list_by_target(target, channel_type).await
         }
 
-        async fn delete_by_target(&self, target: &BindingTarget, env: &str) -> ServiceResult<u64> {
-            self.inner.delete_by_target(target, env).await
+        async fn delete_by_target(&self, target: &BindingTarget) -> ServiceResult<u64> {
+            self.inner.delete_by_target(target).await
         }
 
         async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
@@ -1418,7 +1415,6 @@ mod tests {
         async fn delete_by_target(
             &self,
             _target: &BindingTarget,
-            _env: &str,
         ) -> ServiceResult<u64> {
             unreachable!("inbound binding lookup test only calls find_active_by_account")
         }
@@ -1849,7 +1845,7 @@ mod tests {
 
     #[tokio::test]
     async fn group_binding_cleanup_removes_only_bindings_for_requested_group() -> TestResult {
-        let harness = TestHarness::new_with_env(manager_group("group_1"), "dev").await?;
+        let harness = TestHarness::new(manager_group("group_1")).await?;
         let group_1 = BindingTarget::Group {
             group_id: "group_1".to_string(),
         };

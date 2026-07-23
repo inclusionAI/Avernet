@@ -142,11 +142,12 @@ impl ChannelBindingRepoPort for MemoryChannelBindingRepo {
             .collect())
     }
 
-    async fn delete_by_target(&self, target: &BindingTarget, env: &str) -> ServiceResult<u64> {
+    async fn delete_by_target(&self, target: &BindingTarget) -> ServiceResult<u64> {
+        // 以下为安全注释COSEC：删除范围固定为 repository env，禁止调用方选择其他环境。
         let removed = {
             let mut bindings = self.bindings.write().await;
             let original_len = bindings.len();
-            bindings.retain(|binding| binding.target != *target || binding.env != env);
+            bindings.retain(|binding| binding.target != *target || binding.env != self.env);
             (original_len - bindings.len()) as u64
         };
         self.save_to_disk().await?;
@@ -651,6 +652,7 @@ mod tests {
             .set_config("binding_pre", serde_json::json!({"changed": true}))
             .await?;
         prod_repo.delete("binding_pre").await?;
+        assert_eq!(prod_repo.delete_by_target(&prod_binding.target).await?, 1);
 
         let reloaded_pre = MemoryChannelBindingRepo::with_data_dir(path, "pre");
         reloaded_pre.load_from_disk().await?;
