@@ -35,6 +35,10 @@ tracing-subscriber = { workspace = true }
 # HTTP client
 reqwest = { workspace = true }
 
+# Async utilities
+futures = { workspace = true }
+tokio-util = { workspace = true, features = ["io"] }
+
 # URL encoding
 urlencoding = "2"
 

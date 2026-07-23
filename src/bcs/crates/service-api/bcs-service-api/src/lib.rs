@@ -49,6 +49,11 @@ pub use application::session::{
     CreateOrReactivateCommand, CreateOrReactivateOutcome, SessionManagementService,
     SessionUseCaseError,
 };
+pub use application::session_files::{
+    CapabilitiesView, DeleteFileCommand, DownloadRoute, PrepareUploadCommand, PrepareUploadResult,
+    SessionFileService, SessionFileUseCaseError,
+    ShareConsumeResult, ShareMintCommand, ShareMintResult,
+};
 pub use application::collaboration_runtime::{
     CancelStateMachineRunCommand, CollaborationDefinitionParticipantSlot,
     CollaborationDefinitionValidationDiagnostic, CollaborationDefinitionValidationOutcome,

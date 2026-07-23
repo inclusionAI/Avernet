@@ -137,6 +137,10 @@ bcs-group-store = { workspace = true }
 bcs-relation-store = { workspace = true }
 bcs-session = { workspace = true }
 bcs-session-store = { workspace = true }
+bcs-session-file = { workspace = true }
+bcs-session-file-store = { workspace = true }
+bcs-storage-api = { workspace = true }
+bcs-storage-local = { workspace = true }
 bcs-message = { workspace = true }
 bcs-message-store = { workspace = true }
 bcs-callback = { workspace = true }

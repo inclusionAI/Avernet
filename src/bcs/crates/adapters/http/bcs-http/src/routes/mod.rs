@@ -24,6 +24,7 @@ pub mod providers;
 pub mod register;
 pub mod secret;
 pub mod services;
+pub mod session_files;
 pub mod sessions;
 pub mod templates;
 

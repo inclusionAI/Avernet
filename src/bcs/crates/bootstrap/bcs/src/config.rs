@@ -47,6 +47,71 @@ fn default_invite_ttl_seconds() -> u64 {
     86400
 }
 
+/// Session file workspace configuration (Task 11 bootstrap wiring).
+///
+/// Mirrors `InviteConfig` in shape: an optional secret with a random
+/// fallback, an integer default TTL, and an optional public base URL.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SessionFilesConfig {
+    /// Storage backend tag. `"local"` selects `bcs_storage_local::LocalStoragePlugin`.
+    /// Other backends are linked into the binary by future plugin registration.
+    #[serde(default = "default_session_files_storage_backend")]
+    pub storage_backend: String,
+
+    /// Object size at or above which uploads switch from single-PUT to multipart.
+    #[serde(default = "default_session_files_multipart_threshold")]
+    pub multipart_threshold: u64,
+
+    /// Hard cap on a single object's size in bytes; intersected with the
+    /// backend's `capabilities().max_object_size` at service construction.
+    #[serde(default = "default_session_files_max_file_size")]
+    pub max_file_size: u64,
+
+    /// Directory used by `LocalStoragePlugin` for the local backend.
+    /// Defaults to `{bots_base_dir}/session-files` when unset.
+    #[serde(default)]
+    pub data_dir: Option<String>,
+
+    /// Share-token configuration — independent of `invite.token_secret`
+    /// so rotating one does not invalidate the other's outstanding tokens.
+    #[serde(default)]
+    pub share: SessionFilesShareConfig,
+}
+
+fn default_session_files_storage_backend() -> String {
+    "local".to_string()
+}
+
+fn default_session_files_multipart_threshold() -> u64 {
+    104_857_600
+}
+
+fn default_session_files_max_file_size() -> u64 {
+    5_368_709_120
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SessionFilesShareConfig {
+    /// HMAC secret for share-token mint/consume. If unset, bootstrap logs a
+    /// warning and generates a random 32-byte secret that does NOT survive
+    /// restart — production deployments must set this explicitly.
+    #[serde(default)]
+    pub token_secret: Option<String>,
+
+    /// Default share-token TTL in seconds. Clamped to `[60, 604800]` at mint.
+    #[serde(default = "default_session_files_share_ttl")]
+    pub default_ttl_seconds: u64,
+
+    /// Public base URL used to construct share links. When None, falls back
+    /// to `bcs_endpoint` or `http://{bind}:{port}` in the service layer.
+    #[serde(default)]
+    pub share_base_url: Option<String>,
+}
+
+fn default_session_files_share_ttl() -> u64 {
+    86400
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct CorsConfig {
@@ -408,6 +473,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub invite: InviteConfig,
 
+    /// Session file workspace configuration (uploads, downloads, share tokens).
+    #[serde(default)]
+    pub session_files: SessionFilesConfig,
+
     /// Provider IDs allowed to call the switch-bot-delivery endpoint.
     /// Empty list means no provider can switch bot delivery.
     #[serde(default)]
@@ -692,6 +761,7 @@ impl Default for BcsConfig {
             api_keys: Vec::new(),
             metrics: MetricsConfig::default(),
             invite: InviteConfig::default(),
+            session_files: SessionFilesConfig::default(),
             allowed_switch_provider_ids: Vec::new(),
             provider_stream_gray_enabled: default_provider_stream_gray_enabled(),
             provider_stream_gray_created_by: Vec::new(),

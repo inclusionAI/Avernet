@@ -19,6 +19,7 @@ thiserror = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 base64 = { workspace = true }
+ulid        = { workspace = true }
 
 [dev-dependencies]
 serde_yaml = { workspace = true }

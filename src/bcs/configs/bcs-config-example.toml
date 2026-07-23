@@ -231,6 +231,17 @@ base_url = "https://bcs.example.com"
 group_link_url = "https://botchat.example.com/groups/{group_id}"
 session_link_url = "https://botchat.example.com/sessions/{session_id}"
 
+[session_files]
+storage_backend = "local"
+multipart_threshold = 104857600
+max_file_size = 5368709120
+data_dir = "/var/bcs/session-files"
+
+[session_files.share]
+token_secret = "replace-with-share-token-secret"
+default_ttl_seconds = 86400
+share_base_url = "https://bcs.example.com"
+
 [manifest]
 schema_version = 1
 
