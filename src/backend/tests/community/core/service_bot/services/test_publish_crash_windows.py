@@ -923,3 +923,181 @@ async def test_offline_destroy_stop_failure_propagates_for_retry():
     with pytest.raises(RuntimeError):
         await svc.execute_offline_destroy(publish_id=5, stage="online", operator="op")
     svc._release_binding.assert_not_called()
+
+
+# ── restart: atom rebase + crash-safe recreate leg ────────────────────────────
+def _recreate_restart_flow(ledger, baas, build_service, *, record, bot_uuid="BOT-gone"):
+    """Flow wired for execute_restart's resolution reads (record → binding →
+    bot → artifact) with a real ledger + FakeBaas."""
+    svc = _flow(ledger=ledger, baas=baas, build_service=build_service)
+    svc._publish_service.get_publish_by_id = Mock(return_value=record)
+    svc._publish_service.get_device_binding_by_id = Mock(
+        return_value=Mock(device_id=bot_uuid)
+    )
+    svc._publish_service.create_device_binding = Mock(return_value=55)
+    svc._publish_service.update_publish_ext = Mock()
+    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b2", "entity_id": "u1"})
+    svc.refresh_publish_handle = Mock()
+    return svc
+
+
+def _restart_record(stage="online"):
+    rec = _record(PublishStatus.SUCCESS.value)
+    rec.ext = {"migration_path": "/m", "config_artifact": None,
+               "binding": {stage: 88}}
+    return rec
+
+
+@pytest.mark.asyncio
+async def test_restart_bot_not_found_recreates_with_fresh_op_and_binding():
+    """The recreate leg: RESTART op ABANDONED, a FIRST_RELEASE op completes with
+    a NEW bot + NEW binding (the old binding pointing at the gone bot is never
+    reused), and ext.binding/publish/restart.<stage> move to the new ids —
+    restart.<stage> keeps sync_restart_progress resolvable after the RESTART
+    op's abandonment left no ledger workflow id."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-new", "CREATE")
+        return {"bot_uuid": "BOT-new", "publish_id": wid, "success": True}
+
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=_restart_record())
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    assert result["restart_publish_id"] == 901
+
+    restart_op = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_op.state == PublishOperationState.ABANDONED.value
+    assert restart_op.last_error == "BOT_NOT_FOUND -> recreate"
+
+    fr = ledger.get_latest_by_kind(1, "first_release", "online")
+    assert fr.state == PublishOperationState.COMPLETED.value
+    assert fr.bot_uuid == "BOT-new"
+    assert fr.baas_publish_id == 901
+    assert fr.result["binding_id"] == 55
+
+    # A NEW binding for the new bot; the gone bot's binding is not reused.
+    binding_kwargs = svc._publish_service.create_device_binding.call_args.kwargs
+    assert binding_kwargs["device_id"] == "BOT-new"
+
+    # One ext write carrying all three read handles for the stage.
+    ext = svc._publish_service.update_publish_ext.call_args.kwargs["ext"]
+    assert ext["binding"]["online"] == 55
+    assert ext["publish"]["online"] == 901
+    assert ext["restart"]["online"] == 901
+
+    svc.refresh_publish_handle.assert_called_once_with(55, 901)
+
+
+@pytest.mark.asyncio
+async def test_restart_recreate_crash_resume_converges_like_first_release():
+    """Crash in the recreate's issue→record window. The resume re-runs
+    execute_restart: a fresh RESTART attempt re-classifies BOT_NOT_FOUND, and
+    the recreate RESUMES the same FIRST_RELEASE op — creation semantics, so the
+    re-issue is the bounded Option-C orphan (identical to a normal first
+    release; the former inline recreate had this window with no op bookkeeping
+    at all). The binding is minted once and the op converges on the recorded
+    workflow."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-new", "CREATE")
+        return {"bot_uuid": "BOT-new", "publish_id": wid, "success": True}
+
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=_restart_record())
+
+    _crash_before_record(ledger)
+    with pytest.raises(RuntimeError):
+        await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    assert build_service.release_async.await_count == 1
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    assert result["success"] is True
+
+    # Bounded re-issue (accepted creation orphan), binding minted exactly once,
+    # op converged COMPLETED on the second (recorded) workflow.
+    assert build_service.release_async.await_count == 2
+    fr = ledger.get_latest_by_kind(1, "first_release", "online")
+    assert fr.attempt == 1              # SAME op resumed, not a new attempt
+    assert fr.state == PublishOperationState.COMPLETED.value
+    assert fr.baas_publish_id == 902
+    assert svc._publish_service.create_device_binding.call_count == 1
+    # Each delivery attempt opened its own RESTART attempt, both abandoned.
+    assert ledger.get_latest_by_kind(1, "restart", "online").attempt == 2
+
+
+@pytest.mark.asyncio
+async def test_restart_of_live_current_deployment_still_issues_baas_call():
+    """The point-2 guard end-to-end: the record's release is COMPLETED and
+    current, yet restart must still re-deploy via BaaS — the skip-if-current
+    check belongs to the online_release gate alone."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+    record = _restart_record()
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=record,
+                        bot_uuid="BOT-live")
+    _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=850)
+    assert svc.is_current_online_deployment(1) is True
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.upgrade_async.assert_awaited_once()
+    restart_op = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_op.state == PublishOperationState.COMPLETED.value
+    # The restart (not sets_deployed_version) leaves the release current.
+    assert svc.is_current_online_deployment(1) is True
+
+
+@pytest.mark.asyncio
+async def test_verify_stage_restart_bot_not_found_gets_same_recreate():
+    """execute_restart is stage-agnostic: a verify-stage restart whose bot is
+    gone takes the same crash-safe recreate leg (verify-stage ledger ops + ext
+    keys; the verify release/retry flow itself is untouched)."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-new-v", "CREATE")
+        return {"bot_uuid": "BOT-new-v", "publish_id": wid, "success": True}
+
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    svc = _recreate_restart_flow(ledger, baas, build_service,
+                        record=_restart_record(stage="verify"))
+
+    result = await svc.execute_restart(publish_id=1, stage="verify", operator="op")
+
+    assert result["success"] is True
+    assert ledger.get_latest_by_kind(1, "restart", "verify").state == \
+        PublishOperationState.ABANDONED.value
+    fr = ledger.get_latest_by_kind(1, "first_release", "verify")
+    assert fr.state == PublishOperationState.COMPLETED.value
+    ext = svc._publish_service.update_publish_ext.call_args.kwargs["ext"]
+    assert ext["restart"]["verify"] == 901
+    assert ext["binding"]["verify"] == 55

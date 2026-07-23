@@ -131,7 +131,7 @@
         edits from Task 1 aside) — the extraction is pure code motion.
 - **Depends on:** Task 4
 
-## Task 6: Rebase `execute_restart` onto the atom + crash-safe recreate leg
+## Task 6: `[x]` Rebase `execute_restart` onto the atom + crash-safe recreate leg
 
 - **Goal:** Restart shares the atom, and its `BOT_NOT_FOUND` leg becomes
   abandon → fresh `FIRST_RELEASE` op → **new** binding → ext dual-writes,

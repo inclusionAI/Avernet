@@ -6,7 +6,8 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
-    PublishOperationError,
+    TargetBotGoneError,
+    acquire_deploy_workflow,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
@@ -187,10 +188,12 @@ class RestartMixin:
         the in-doubt restart workflow instead of issuing a second one.
 
         Re-resolves everything from ``publish_id`` (the durable task carries only
-        ids), then: open a ``restart`` op keyed to the bot, acquire the workflow
-        (upgrade; BOT_NOT_FOUND falls back to a create with the same artifact),
-        dual-write ``ext.restart.<stage>`` for the status read, refresh the teclaw
-        read handle, and complete the op. Returns ``{success, message}``."""
+        ids), then runs the deploy atom for a ``restart`` op keyed to the bot
+        (upgrade interface; a BOT_NOT_FOUND abandons the op and hands off to
+        :meth:`_recreate_restart_target` — a fresh, crash-safe first-release op
+        with a new bot + binding), dual-writes ``ext.restart.<stage>`` for the
+        status read, refreshes the teclaw read handle, and completes the op.
+        Returns ``{success, message}``."""
         stage_enum = PublishStage(stage)
         publish_record = self._publish_service.get_publish_by_id(publish_id)
         if not publish_record:
@@ -221,16 +224,8 @@ class RestartMixin:
         # so restarting a non-latest stage never delivers another stage's channels.
         delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
 
-        op = self._operation_runner.open_operation(
-            publish_id=publish_id,
-            kind=PublishOperationKind.RESTART,
-            stage=stage_enum,
-            bot_uuid=bot_uuid,
-            operator=operator,
-        )
-
         async def _issue():
-            restart_result = await self._build_service.upgrade_async(
+            return await self._build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot,
                 user_id=publish_record.owner_id,
@@ -240,52 +235,44 @@ class RestartMixin:
                 version=version,
                 delivery=delivery,
             )
-            if (
-                restart_result.get("success") is False
-                and restart_result.get("error_code") == "BOT_NOT_FOUND"
-            ):
-                # NOTE (#197, known limitation): the BOT_NOT_FOUND fallback recreates
-                # the bot inline. Because restart reuses the existing binding (which
-                # still points at the gone bot_uuid) rather than minting a new one,
-                # this recreate leg is NOT fully crash-idempotent — a crash in the
-                # narrow window after the create but before the workflow is recorded
-                # can re-create a second orphan bot on resume (adopt-by-query queries
-                # the OLD, gone bot and finds nothing). This is a rare path
-                # (restarting an already-destroyed bot) and a pre-existing shape;
-                # a proper fix (mint a fresh binding + a dedicated recreate op, like
-                # upgrade_release's first-release fallback) is tracked as a follow-up.
-                logger.warning(
-                    "[PublishFlowService.execute_restart] target bot not found, "
-                    "fallback to first release: publish_id=%s bot_uuid=%s stage=%s",
-                    publish_id, bot_uuid, stage_enum.value,
-                )
-                restart_result = await self._build_service.release_async(
-                    bot=bot,
-                    user_id=publish_record.owner_id,
-                    migration_path=migration_path,
-                    device_count=1,
-                    publish_stage=stage_enum,
-                    version=version,
-                    delivery=delivery,
-                )
-            return restart_result
 
-        # NOTE: acquire_workflow exceptions are NOT caught + failed here. A genuine
-        # crash leaves the op non-terminal so the durable task retry re-runs and the
-        # SAME op resumes → adopt-by-query (existing bot). Catching + fail_operation
-        # would open a fresh attempt on retry and re-issue a second restart. A
-        # transient BaaS error propagates → the task handler returns/raises and the
-        # queue retries, converging via adoption. acquire_workflow guarantees a
-        # recorded publish_id (raises PublishOperationError otherwise).
-        op = await self._operation_runner.acquire_workflow(op, _issue)
-        restart_publish_id = op.baas_publish_id
-        if restart_publish_id is None:
-            # Defensive: acquire_workflow guarantees a recorded id (issue/adopt);
-            # completing with None would hide an un-recorded workflow now that
-            # complete() also accepts PENDING (#197).
-            raise PublishOperationError(
-                f"restart did not record a BaaS publish_id: publish_id={publish_id}"
+        # NOTE: transient errors out of the atom are NOT caught + failed here. A
+        # genuine crash leaves the op non-terminal so the durable task retry
+        # re-runs and the SAME op resumes → adopt-by-query (existing bot).
+        # Catching + fail_operation would open a fresh attempt on retry and
+        # re-issue a second restart. The one classified signal is BOT_NOT_FOUND:
+        # the atom abandons the RESTART op and the recreate leg runs as its own
+        # fresh, crash-safe first-release op (new bot + NEW binding) — the same
+        # guarantee upgrade_release's fallback has, replacing the former inline
+        # recreate whose crash window could orphan a second bot.
+        try:
+            op = await acquire_deploy_workflow(
+                self._operation_runner,
+                publish_id=publish_id,
+                kind=PublishOperationKind.RESTART,
+                stage=stage_enum,
+                operator=operator,
+                issue=_issue,
+                bot_uuid=bot_uuid,
+                bot_gone_reason="BOT_NOT_FOUND -> recreate",
             )
+        except TargetBotGoneError:
+            logger.warning(
+                "[PublishFlowService.execute_restart] target bot not found, "
+                "recreating via first release: publish_id=%s bot_uuid=%s stage=%s",
+                publish_id, bot_uuid, stage_enum.value,
+            )
+            return await self._recreate_restart_target(
+                publish_id=publish_id,
+                stage_enum=stage_enum,
+                publish_record=publish_record,
+                bot=bot,
+                migration_path=migration_path,
+                version=version,
+                delivery=delivery,
+                operator=operator,
+            )
+        restart_publish_id = op.baas_publish_id
 
         # Refresh the teclaw read handle to the restart workflow (best-effort).
         self.refresh_publish_handle(binding_id, restart_publish_id)
@@ -310,4 +297,88 @@ class RestartMixin:
         )
         return {"success": True, "message": f"Restart submitted, stage: {stage_enum.value}",
                 "stage": stage_enum.value, "restart_publish_id": restart_publish_id}
+
+    async def _recreate_restart_target(
+        self,
+        *,
+        publish_id: int,
+        stage_enum: PublishStage,
+        publish_record,
+        bot: dict,
+        migration_path: str,
+        version: str,
+        delivery,
+        operator: str,
+    ) -> dict:
+        """Recreate a restart's gone target bot — crash-safe (closes the former
+        known limitation).
+
+        Runs AFTER the RESTART op was abandoned (``BOT_NOT_FOUND -> recreate``)
+        as its own ``FIRST_RELEASE`` op: a creation kind, so a crash-resume
+        rebuilds from the ledger exactly like a normal first release (issue-once
+        with the bounded Option-C orphan window, follow-ups skipped via the op
+        ``result``) — never adopt-by-query against the old, gone bot. The
+        recreate genuinely deploys this record's version as a fresh bot, so
+        ``FIRST_RELEASE`` is also the semantically right kind: for an online
+        recreate the record's latest release op is this deploy, and the
+        liveness gate correctly reads it as the current deployment.
+
+        A **new** binding is minted (recorded into the op ``result`` so a
+        re-run reuses it) — the old binding still points at the gone bot_uuid
+        and is never reused. Ext gets ``binding/publish/restart.<stage>`` in
+        one write: binding/publish are the release read handles, and
+        ``restart.<stage>`` keeps ``sync_restart_progress`` working — after the
+        RESTART op's abandonment the ledger holds no restart workflow id, so
+        the sync falls back to that ext marker. The record's status is not
+        touched (a restart runs at SUCCESS / *_PUB; there is no transition
+        here)."""
+        async def _issue():
+            return await self._build_service.release_async(
+                bot=bot,
+                user_id=publish_record.owner_id,
+                migration_path=migration_path,
+                device_count=1,
+                publish_stage=stage_enum,
+                version=version,
+                delivery=delivery,
+            )
+
+        op = await acquire_deploy_workflow(
+            self._operation_runner,
+            publish_id=publish_id,
+            kind=PublishOperationKind.FIRST_RELEASE,
+            stage=stage_enum,
+            operator=operator,
+            issue=_issue,
+        )
+        new_bot_uuid = op.bot_uuid
+        recreate_publish_id = op.baas_publish_id
+
+        binding_id = (op.result or {}).get("binding_id")
+        if binding_id is None:
+            binding_id = self.create_release_binding(
+                bot=bot,
+                bot_uuid=new_bot_uuid,
+                baas_publish_id=recreate_publish_id,
+                operator=operator,
+            )
+            op = self._operation_runner.record_step_result(op, {"binding_id": binding_id})
+
+        def _mutate(latest_ext: dict) -> None:
+            latest_ext.setdefault("binding", {})[stage_enum.value] = binding_id
+            latest_ext.setdefault("publish", {})[stage_enum.value] = recreate_publish_id
+            latest_ext.setdefault("restart", {})[stage_enum.value] = recreate_publish_id
+
+        self._mutate_and_update_ext(publish_id=publish_id, mutator=_mutate)
+
+        self.refresh_publish_handle(binding_id, recreate_publish_id)
+        self._operation_runner.complete_operation(op)
+        logger.info(
+            "[PublishFlowService._recreate_restart_target] recreated: publish_id=%s "
+            "stage=%s new_bot_uuid=%s recreate_publish_id=%s binding_id=%s",
+            publish_id, stage_enum.value, new_bot_uuid, recreate_publish_id, binding_id,
+        )
+        return {"success": True,
+                "message": f"Restart target recreated, stage: {stage_enum.value}",
+                "stage": stage_enum.value, "restart_publish_id": recreate_publish_id}
 
