@@ -407,9 +407,6 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
 
         # Conditional fields per status
         download_url = record.download_url if record.status == "DONE" else None
-        # OSS presigned URLs embed their own expiry — expires_at is null for transfer queries
-        expires_at: str | None = None
-
         error_message = record.error_message if record.status == "FAILED" else None
 
         return GetTransferStatusResponse(
@@ -419,7 +416,6 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             filename=record.filename,
             device_path=record.device_path,
             download_url=download_url,
-            expires_at=expires_at,
             error_message=error_message,
             created_at=record.gmt_create.isoformat(),
             updated_at=record.gmt_modified.isoformat(),
