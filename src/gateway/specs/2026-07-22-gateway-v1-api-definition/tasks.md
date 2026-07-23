@@ -33,7 +33,7 @@
 
 ## Task 4: `bots` schemas
 - **Goal:** Request/response DTOs for the bots group.
-- **Files:** `adapters/web/routers/bots/__init__.py`, `adapters/web/routers/bots/schemas.py`
+- **Files:** `adapters/web/routers/bots/__init__.py` (re-export), `adapters/web/routers/bots/_schemas.py`
 - **Done when:**
   - [ ] Models: `Bot`, `BotCreate` (`bot_name, bot_desc, engine, cluster_name, bot_type, payload`), `BotUpdate` (no `engine`), `BotAuthPending`, `BotAuthStatus`, `BotStatus`, `Ceiling`, `Passport`, `EngineConfig`.
   - [ ] No `entity_id`/ownership params (identity is implicit from the principal). Ruff/mypy clean.
@@ -41,7 +41,7 @@
 
 ## Task 5: `bots` router (stubbed)
 - **Goal:** The representative group's endpoints, proving envelope + security + generics end-to-end.
-- **Files:** `adapters/web/routers/bots/router.py`
+- **Files:** `adapters/web/routers/bots/_router.py`
 - **Done when:**
   - [ ] `APIRouter(prefix="/openapi/v1/bots")` with all plan operations (create 201/202, auth-status, list w/ `PageParams`, get, update, delete, restart, status, check-name, ceiling, passport, get/put engine-config).
   - [ ] Every route sets `response_model=Envelope[...]` and `openapi_extra=user_principal()`; handlers `raise NotImplementedError`.
@@ -60,7 +60,7 @@
 
 ## Task 7: `identity` group
 - **Goal:** Bot identity-file read/write endpoints.
-- **Files:** `adapters/web/routers/identity/{__init__.py,schemas.py,router.py}`
+- **Files:** `adapters/web/routers/identity/{__init__.py,_schemas.py,_router.py}`
 - **Done when:**
   - [ ] `GET /openapi/v1/identity/bot/{bot_id}`, `GET/PUT /openapi/v1/identity/bot/{bot_id}/{file_type}` (file_type enum whitelist; PUT body `content`).
   - [ ] Envelope + `user_principal()`; stubbed; registered; visible in `/openapi.json`; contract test extended to assert this group.
@@ -68,7 +68,7 @@
 
 ## Task 8: `resources` group
 - **Goal:** Unified files+links resource endpoints.
-- **Files:** `adapters/web/routers/resources/{__init__.py,schemas.py,router.py}`
+- **Files:** `adapters/web/routers/resources/{__init__.py,_schemas.py,_router.py}`
 - **Done when:**
   - [ ] `GET ""`, `POST ""` (unified `type: file|link|folder`; Yuque = link), `GET/PUT/DELETE /{resource_id}`, `GET /{resource_id}/download` (binary, not enveloped), `GET /{resource_id}/preview`, `GET /check-name`, `POST /upload` (multipart).
   - [ ] Envelope + `user_principal()`; stubbed; registered; contract test extended.
@@ -76,7 +76,7 @@
 
 ## Task 9: `mcp` group
 - **Goal:** MCP market + unified config endpoints.
-- **Files:** `adapters/web/routers/mcp/{__init__.py,schemas.py,router.py}`
+- **Files:** `adapters/web/routers/mcp/{__init__.py,_schemas.py,_router.py}`
 - **Done when:**
   - [ ] `GET /servers`, `GET /servers/{server_code}`, `GET /servers/{server_code}/permissions`, `GET /tenants`, `GET/PUT /servers/{server_code}/config`.
   - [ ] Envelope + `user_principal()`; stubbed; registered; contract test extended.
@@ -84,7 +84,7 @@
 
 ## Task 10: `routines` group
 - **Goal:** Scheduled-task endpoints (was cron), stable schema with nested trigger.
-- **Files:** `adapters/web/routers/routines/{__init__.py,schemas.py,router.py}`
+- **Files:** `adapters/web/routers/routines/{__init__.py,_schemas.py,_router.py}`
 - **Done when:**
   - [ ] `GET ""` (filter `bot_id,status`), `POST ""` (body `bot_id, name, trigger:{type:"schedule",cron}, command`), `GET/PATCH/DELETE /{routine_id}`, `POST /{routine_id}/run`, `GET /{routine_id}/runs`.
   - [ ] `trigger` modeled as a nested object (extensible); Envelope + `user_principal()`; stubbed; registered; contract test extended.
@@ -92,7 +92,7 @@
 
 ## Task 11: `skills` group (catalog + bot sub-resource)
 - **Goal:** Skill catalog plus an agent's installed skills.
-- **Files:** `adapters/web/routers/skills/{__init__.py,schemas.py,router.py}`
+- **Files:** `adapters/web/routers/skills/{__init__.py,_schemas.py,_router.py}`
 - **Done when:**
   - [ ] `GET /openapi/v1/skills`, `GET /openapi/v1/skills/{skill_id}`; `GET/POST /openapi/v1/bots/{bot_id}/skills`, `DELETE /openapi/v1/bots/{bot_id}/skills/{skill_id}`.
   - [ ] Envelope + `user_principal()`; stubbed; registered; contract test extended.
@@ -100,7 +100,7 @@
 
 ## Task 12: `channels` group
 - **Goal:** Channel config CRUD (DingTalk).
-- **Files:** `adapters/web/routers/channels/{__init__.py,schemas.py,router.py}`
+- **Files:** `adapters/web/routers/channels/{__init__.py,_schemas.py,_router.py}`
 - **Done when:**
   - [ ] `GET ""` (filter `bot_id`), `POST ""` (type `dingding`), `GET/PUT /{channel_id}`, `PATCH /{channel_id}` (toggle `status`), `DELETE /{channel_id}`.
   - [ ] Envelope + `user_principal()`; stubbed; registered; contract test extended.

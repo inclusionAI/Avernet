@@ -97,9 +97,12 @@ Shared contract (Milestone 1):
 - `adapters/web/contracts/pagination.py` (new) — `PageParams` (page/page_size query dependency).
 - `adapters/web/routers/__init__.py` (new) — `include_all(app)` aggregator.
 
-Per group (Milestone 1 = `bots`; Milestone 2 = the rest):
-- `adapters/web/routers/<group>/router.py` (new) — `APIRouter(prefix="/openapi/v1/<group>")`, stubbed handlers.
-- `adapters/web/routers/<group>/schemas.py` (new) — Pydantic request/response models.
+Per group (Milestone 1 = `bots`; Milestone 2 = the rest). Modules are **private**
+(`_`-prefixed), with the group's `__init__.py` re-exporting the router (repo convention,
+per review feedback):
+- `adapters/web/routers/<group>/_router.py` (new) — `APIRouter(prefix="/openapi/v1/<group>")`, stubbed handlers.
+- `adapters/web/routers/<group>/_schemas.py` (new) — Pydantic request/response models.
+- `adapters/web/routers/<group>/__init__.py` (new) — re-exports the group `router`.
 
 Wiring:
 - `adapters/web/app.py` — in `create_app()`, call `include_all(app)` after middleware install.
