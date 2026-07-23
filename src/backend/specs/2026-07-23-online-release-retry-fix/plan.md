@@ -10,7 +10,13 @@ pre-failure status is `ONLINE_PUB`, retry now unconditionally re-enqueues the
 task's gate + release process already decide run-vs-skip and
 first-release-vs-upgrade idempotently. The
 predicate keeps only its gate consumer and is renamed
-`is_current_online_deployment`. The shared *deploy atom* — open ledger op →
+`is_current_online_deployment`. For that gate decision to be sound without the
+old restart branch, the ledger must reflect observed deploy **outcome**: today
+a release op is `COMPLETED` at bookkeeping time and never touched when its
+BaaS workflow later fails, so a failed deploy looks live — the gate would skip
+the re-issue and strand the retry in a failure loop. The progress-sync failure
+path therefore now also marks the ledger op carrying the failed workflow as
+`FAILED` (an outcome-correction write). The shared *deploy atom* — open ledger op →
 acquire workflow (with uniform `BOT_NOT_FOUND` classification) → validate ids —
 is extracted so `first_release`, `upgrade_release`, and `execute_restart` share
 one crash-safe shape, and restart's `BOT_NOT_FOUND` recreate leg becomes an
@@ -31,6 +37,11 @@ documented orphan window). Verify flow behavior is untouched.
   — `execute_restart` rebased onto the atom; new crash-safe recreate leg.
 - `src/backend/src/agentclaw/community/core/service_bot/services/publish_flow/operation_runner.py`
   — hosts the new deploy-atom helper (uses only runner + ledger seams).
+- `src/backend/src/agentclaw/community/core/service_bot/services/publish_flow/progress_sync_mixin.py`
+  — sync-failure path gains the ledger outcome-correction write.
+- `src/backend/src/agentclaw/community/core/service_bot/repository/publish_operation_protocol.py`
+  + `src/backend/src/agentclaw/community/plugins/publish_operation_repository.py`
+  — new `fail_by_workflow` repository method.
 - `src/backend/tests/community/core/service_bot/` — updated + new tests
   (cross-publish-boundary module).
 
@@ -53,6 +64,15 @@ No HTTP API changes. Internal interfaces:
   **deleted**. Replaced by a module-level
   `_RESTART_RETRY_STATUSES = frozenset({VALIDATE_PUB, SUCCESS})` membership
   check in `retry()` (no `publish_id`-dependent logic left).
+- New repository method
+  `fail_by_workflow(publish_id, baas_publish_id, error) -> bool` on the
+  publish-operation protocol + ORM implementation: finds the op row for this
+  publish carrying `baas_publish_id` and sets it `FAILED` with `error`.
+  Explicitly permits the `COMPLETED → FAILED` transition — this is an
+  *outcome correction* (the workflow's terminal state arrived after
+  bookkeeping completed), not a step-state regression. No-op (returns False)
+  when no matching row exists (e.g. pre-ledger records) or the row is already
+  `FAILED`/`ABANDONED`.
 - New in `operation_runner.py`:
   - `class TargetBotGoneError(Exception)` — uniform "BaaS says BOT_NOT_FOUND"
     signal (replaces `release_stage._BotNotFoundError` and restart's inline
@@ -106,7 +126,36 @@ No HTTP API changes. Internal interfaces:
   `ext.publish.online` marker as the guard; the guard is the ledger-driven
   liveness predicate).
 
-### 3. Deploy atom + restart recreate fix (`operation_runner.py`, `release_stage.py`, `restart_mixin.py`)
+### 3. Ledger reflects deploy outcome (`progress_sync_mixin.py`, repositories)
+
+The precondition for the retry re-route: without it, a BaaS-wait failure
+leaves a `COMPLETED` release op (completed at bookkeeping time,
+`release_stage.py:229`/`:335`) that the predicate reads as live, so the gate
+skips the re-issue and the retry loops FAILED forever. Two consumers are
+corrected by one write:
+
+- `_handle_sync_failure` (`progress_sync_mixin.py:276-316`) gains a
+  `baas_publish_id` parameter and calls
+  `self._publish_operation_repo.fail_by_workflow(publish_id, baas_publish_id,
+  error_message)` before the record's FAILED write. Both callers already hold
+  the workflow id: `advance_publish_progress` (release wait,
+  `progress_sync_mixin.py:376`) and `sync_restart_progress` (restart wait,
+  `progress_sync_mixin.py:557`). Failing the restart op too is deliberate —
+  consistent ledger semantics; restart retry behavior is unaffected
+  (`open_operation` opens a fresh attempt on any terminal latest).
+- Effect on the predicate: a failed deploy's op is now `FAILED`, so
+  `_completed_online_release_op` (`publish_flow_service.py:902-927`) no longer
+  returns it → gate false → `execute_release_phase` re-runs →
+  `open_operation` sees a terminal latest → fresh attempt → the deploy is
+  re-issued. Effect on the liveness scan: `_online_release_superseded`
+  (`publish_flow_service.py:929-953`) stops counting failed deploys as
+  "landed", making its docstring's "FAILED deploys never took" actually true
+  for workflow-level failures.
+- `complete_operation` keeps its "bookkeeping done" meaning; no op-state
+  machine restructure. `attempt` semantics unchanged (a re-issue is a new
+  attempt of the same kind).
+
+### 4. Deploy atom + restart recreate fix (`operation_runner.py`, `release_stage.py`, `restart_mixin.py`)
 
 - `release_stage.py`:
   - `first_release` (`:150-244`): open/acquire/validate
@@ -149,7 +198,7 @@ No HTTP API changes. Internal interfaces:
     verify-**stage** restarts. This is intentional and does not touch the
     verify release/retry flow (the out-of-scope item).
 
-### 4. Tests
+### 5. Tests
 
 - Update: `test_publish_crash_windows.py:385-475` (rename call sites),
   `test_publish_tasks.py:49` (fake method rename),
@@ -166,12 +215,25 @@ None new.
 
 ## Risks & Mitigations
 
+- **Risk:** Without the ledger outcome write, the retry re-route strands
+  BaaS-wait failures: the failed deploy's op stays `COMPLETED`, the gate skips
+  the re-issue, and the record loops FAILED (the flaw flagged on #341's
+  approach).
+  **Mitigation:** `fail_by_workflow` in the sync-failure path (Key Files §3)
+  lands **before** the retry re-route in task order; a dedicated
+  fail-then-retry-then-re-issue test guards the loop.
 - **Risk:** An ONLINE_PUB retry of a still-live release no longer re-deploys
   (previously the restart branch re-deployed). If BaaS-side state were somehow
   bad while the ledger says "current", retry alone won't heal it.
   **Mitigation:** Deliberate, spec'd behavior (criterion: no redundant
-  re-deploy). The explicit `/restart` endpoint remains the "force a re-deploy"
-  tool and always hits BaaS.
+  re-deploy). "Still-live" now genuinely means the workflow did not fail
+  (§3). The explicit `/restart` endpoint remains the "force a re-deploy" tool
+  and always hits BaaS.
+- **Risk:** `COMPLETED → FAILED` outcome correction races the liveness scan
+  (a reader sees COMPLETED just before the poll fails it).
+  **Mitigation:** Same read-skew window exists today for every ledger read;
+  the gate re-checks on each task run and the poll converges the record —
+  no new invariant is broken.
 - **Risk:** Removing the retry-flag from the ONLINE_PUB branch changes which
   sync path the poll takes for online retries.
   **Mitigation:** That is the fix (poll must follow `ext.publish.online`, the
@@ -221,6 +283,12 @@ unchanged.
 - **Unit (updated):** predicate rename tests; retry dispatch tests — ONLINE_PUB
   always → `_retry_via_online_release` (recorded or not), VALIDATE_PUB/SUCCESS
   → restart; retry-flag written only on restart branches.
+- **Unit (new, ledger outcome):** sync-failure marks the matching op FAILED
+  (release wait and restart wait); `fail_by_workflow` permits
+  `COMPLETED → FAILED`, no-ops on missing/already-terminal-failed rows; the
+  end-to-end loop guard — deploy issued → workflow FAILED → retry → gate
+  false → fresh attempt re-issues (assert two BaaS issues, record converges);
+  failed deploy no longer supersedes a live earlier release.
 - **Unit (new):** restart BOT_NOT_FOUND recreate — abandons RESTART op, opens
   FIRST_RELEASE op, mints new binding, dual-writes `ext.restart`; crash between
   create and record converges without a second orphan (crash-window harness);

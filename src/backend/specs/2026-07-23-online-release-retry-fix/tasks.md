@@ -25,7 +25,36 @@
   - [ ] `pytest tests/community/core/service_bot/` green.
 - **Depends on:** —
 
-## Task 2: Re-route retry — dispatch by rollback status, flag only restart branches
+## Task 2: Ledger reflects deploy outcome — fail the op on observed workflow failure
+
+- **Goal:** A deploy whose BaaS workflow failed must not read as live: the
+  progress-sync failure path marks the ledger op carrying that workflow
+  `FAILED`, so the gate re-runs the release and a failed deploy never
+  supersedes a live one. Precondition for the retry re-route (Task 3).
+- **Files:**
+  `src/agentclaw/community/core/service_bot/repository/publish_operation_protocol.py`,
+  `src/agentclaw/community/plugins/publish_operation_repository.py`,
+  `src/agentclaw/community/core/service_bot/services/publish_flow/progress_sync_mixin.py`,
+  ledger/repo + sync tests
+- **Done when:**
+  - [ ] `fail_by_workflow(publish_id, baas_publish_id, error) -> bool` on the
+        protocol + ORM repo: finds this publish's op row by `baas_publish_id`,
+        sets `FAILED` + error; permits `COMPLETED → FAILED` (outcome
+        correction) and `ID_RECORDED → FAILED`; returns False (no-op) when no
+        row matches or the row is already FAILED/ABANDONED.
+  - [ ] `_handle_sync_failure` (`progress_sync_mixin.py:276-316`) takes
+        `baas_publish_id` and calls `fail_by_workflow` before the record's
+        FAILED write; both callers pass it (`advance_publish_progress`
+        release wait, `sync_restart_progress` restart wait).
+  - [ ] Tests: release-wait failure marks the release op FAILED; restart-wait
+        failure marks the restart op FAILED; predicate false after a failed
+        deploy (op was COMPLETED); a failed deploy no longer supersedes a
+        genuinely live earlier release on the same bot; `fail_by_workflow`
+        no-op cases covered.
+  - [ ] `pytest tests/community/core/service_bot/` green.
+- **Depends on:** Task 1
+
+## Task 3: Re-route retry — dispatch by rollback status, flag only restart branches
 
 - **Goal:** An `ONLINE_PUB`-pre-failure retry always re-enqueues
   `online_release`; the restart-vs-rerun heuristic and the predicate's retry
@@ -49,13 +78,17 @@
         current and when it is not; FAILED+source=VALIDATE_PUB and
         FAILED+source=SUCCESS still restart; `ext.retry` present after
         restart-branch rollback, absent after release-branch rollback.
+  - [ ] Test — the loop guard (end-to-end with Task 2): online deploy issued →
+        workflow FAILED → retry → gate false → fresh ledger attempt →
+        **second BaaS issue** → record converges (never skips, never
+        strands).
   - [ ] Test: retry-then-poll for ONLINE_PUB — after the release re-run, the
         poll follows `ext.publish.online` (no `sync_restart_progress`
         redirect), covering the latent stranding bug from the plan.
   - [ ] `pytest tests/community/core/service_bot/` green.
-- **Depends on:** Task 1
+- **Depends on:** Tasks 1, 2
 
-## Task 3: Extract the deploy atom in `operation_runner.py`
+## Task 4: Extract the deploy atom in `operation_runner.py`
 
 - **Goal:** One shared open → acquire (uniform `BOT_NOT_FOUND` classification)
   → validate sequence, with abandon-on-bot-gone, usable by all three deploy
@@ -81,7 +114,7 @@
   - [ ] `pytest tests/community/core/service_bot/` green.
 - **Depends on:** —
 
-## Task 4: Rebase `first_release` / `upgrade_release` onto the atom
+## Task 5: Rebase `first_release` / `upgrade_release` onto the atom
 
 - **Goal:** `release_stage.py` loses its hand-rolled open/acquire/validate and
   `_BotNotFoundError`; behavior byte-for-byte preserved.
@@ -96,9 +129,9 @@
         `fallback` (op already abandoned by the atom — no double abandon).
   - [ ] Existing release/crash-window tests pass **unmodified** (rename-only
         edits from Task 1 aside) — the extraction is pure code motion.
-- **Depends on:** Task 3
+- **Depends on:** Task 4
 
-## Task 5: Rebase `execute_restart` onto the atom + crash-safe recreate leg
+## Task 6: Rebase `execute_restart` onto the atom + crash-safe recreate leg
 
 - **Goal:** Restart shares the atom, and its `BOT_NOT_FOUND` leg becomes
   abandon → fresh `FIRST_RELEASE` op → **new** binding → ext dual-writes,
@@ -130,9 +163,9 @@
         current deployment still issues the BaaS call (point-2 guard);
         verify-stage restart BOT_NOT_FOUND gets the same recreate.
   - [ ] `pytest tests/community/core/service_bot/` green.
-- **Depends on:** Task 3 (atom); Task 1 (predicate name used in tests)
+- **Depends on:** Task 4 (atom); Task 1 (predicate name used in tests)
 
-## Task 6: Cross-publish-boundary test module
+## Task 7: Cross-publish-boundary test module
 
 - **Goal:** Cover multi-record, multi-operation flows on a shared online bot —
   the class of scenario endpoint tests don't reach.
@@ -152,10 +185,14 @@
   - [ ] Scenario 4 — restart-recreate after an upgrade chain: bot gone →
         recreate → recreated record's predicate true (FIRST_RELEASE/UPGRADE
         coexistence, `publish_flow_service.py:914-927` max-by-baas_publish_id).
+  - [ ] Scenario 5 — failed-deploy retry across records: v1 live → v2 upgrade
+        issued, workflow FAILED (op outcome-corrected) → v1 still reads as
+        current (no false supersede) → v2 retry re-issues and lands → v2
+        current, v1 superseded.
   - [ ] Each scenario asserts no duplicate bots/bindings.
-- **Depends on:** Tasks 2, 5
+- **Depends on:** Tasks 3, 6
 
-## Task 7: Full-suite verification & spec acceptance check
+## Task 8: Full-suite verification & spec acceptance check
 
 - **Goal:** Feature meets every spec acceptance criterion; branch is
   push-clean against the release target.
@@ -168,7 +205,7 @@
         verify release/retry logic edits beyond renames/docstrings).
   - [ ] Pre-push hook run with merge target `origin/REL20260723`
         (`avernet.prePush.mergeTarget` already configured).
-- **Depends on:** Tasks 1-6
+- **Depends on:** Tasks 1-7
 
 ---
 
@@ -177,11 +214,12 @@
 > Groups bundle tasks into end-to-end units. `implement` executes one group at
 > a time and runs code review on each group before moving on.
 
-- **Group A — Predicate + retry re-route (the regression fix):** Tasks 1, 2
-  - Theme: retry stops consulting the liveness predicate; ONLINE_PUB retries
-    always re-drive the release path; the predicate gets its gate-only name.
-- **Group B — Deploy atom + restart recreate:** Tasks 3, 4, 5
+- **Group A — Predicate + ledger outcome + retry re-route (the regression fix):** Tasks 1, 2, 3
+  - Theme: the ledger learns deploy outcome, retry stops consulting the
+    liveness predicate, ONLINE_PUB retries always re-drive the release path,
+    and the predicate gets its gate-only name.
+- **Group B — Deploy atom + restart recreate:** Tasks 4, 5, 6
   - Theme: one shared crash-safe deploy shape; restart's BOT_NOT_FOUND leg
     becomes idempotent with a fresh op + new binding.
-- **Group C — Cross-boundary coverage & verification:** Tasks 6, 7
+- **Group C — Cross-boundary coverage & verification:** Tasks 7, 8
   - Theme: multi-publish shared-bot scenarios + final spec acceptance check.
