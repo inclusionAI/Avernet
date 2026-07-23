@@ -91,6 +91,11 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "session_resources": _SESSION_RESOURCES_EXEMPT_REASON,
     "services": _EXEMPT_REASON,
     "skill_center": _EXEMPT_REASON,
+    "skills_pool": (
+        "Internal migration control-plane component with no HTTP/router surface in "
+        "Issue #367; covered by repository, rollout-gate, claim-service, DI, and "
+        "local-bootstrap contract tests."
+    ),
     "storage": _EXEMPT_REASON,
     "system_config": _EXEMPT_REASON,
     "task_queue": _TASK_QUEUE_EXEMPT_REASON,
