@@ -1104,13 +1104,14 @@ async def test_verify_stage_restart_bot_not_found_gets_same_recreate():
 
 
 @pytest.mark.asyncio
-async def test_restart_recreate_crash_before_complete_finalized_on_redelivery():
-    """Group B review Finding 1: a crash between the recreate's ext write and
-    its complete_operation leaves the FIRST_RELEASE op ID_RECORDED while ext
-    already points at the NEW bot. The re-delivered restart takes the happy
-    (upgrade) path — the recreate leg never runs again — so execute_restart must
-    finalize the stranded op itself, or the dangling latest attempt hides the
-    record's release from is_current_online_deployment forever."""
+async def test_restart_recreate_crash_before_complete_resumes_idempotently():
+    """A crash between the recreate's ext write and its complete_operation
+    leaves the FIRST_RELEASE op ID_RECORDED while ext already points at the NEW
+    bot + its recreate workflow. Because RESTART_TASK is at-least-once, the
+    redelivery of the SAME restart request must finish that bookkeeping and
+    return the recreate's existing workflow — NOT open a second RESTART op and
+    issue another deploy (PR #360 review: doing so left two concurrent deploy
+    workflows for one restart)."""
     ledger = _ledger()
     baas = FakeBaas()
     build_service = Mock()
@@ -1144,32 +1145,36 @@ async def test_restart_recreate_crash_before_complete_finalized_on_redelivery():
 
     fr = ledger.get_latest_by_kind(1, "first_release", "online")
     assert fr.state == PublishOperationState.ID_RECORDED.value  # stranded
+    restart_before = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_before.state == PublishOperationState.ABANDONED.value
 
-    # Re-delivery: ext now points at the NEW bot (mirror the landed ext write on
-    # the record the resolution re-reads), and the new bot upgrades fine.
+    # Re-delivery: ext points at the NEW bot + workflow 901 (the recreate's
+    # landed ext write on the record the resolution re-reads).
     record.ext = {"migration_path": "/m", "config_artifact": None,
                   "binding": {"online": 55}, "publish": {"online": 901},
                   "restart": {"online": 901}}
     svc._publish_service.get_device_binding_by_id = Mock(
         return_value=Mock(device_id="BOT-new")
     )
-
-    async def upgrade_async(**kw):
-        wid = baas.issue("BOT-new", "UPDATE")
-        return {"publish_id": wid, "success": True}
-
-    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+    # An upgrade here would be the bug; wire it to prove it is never called.
+    build_service.upgrade_async = AsyncMock(
+        side_effect=AssertionError("redelivery must not issue a second deploy")
+    )
 
     result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
     assert result["success"] is True
+    # Idempotent: the redelivery returns the recreate's existing workflow.
+    assert result["restart_publish_id"] == 901
 
-    # The happy path finalized the stranded recreate op before deploying...
+    # The stranded recreate op is finalized...
     fr = ledger.get_latest_by_kind(1, "first_release", "online")
     assert fr.state == PublishOperationState.COMPLETED.value
     assert fr.baas_publish_id == 901
-    # ...and its own RESTART attempt completed with the new workflow.
-    restart_op = ledger.get_latest_by_kind(1, "restart", "online")
-    assert restart_op.state == PublishOperationState.COMPLETED.value
-    assert restart_op.baas_publish_id == 902
-    # No duplicate creation happened on the re-delivery.
+    # ...and NO new RESTART attempt was opened, NO second deploy issued.
+    restart_after = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_after.attempt == restart_before.attempt
+    assert restart_after.state == PublishOperationState.ABANDONED.value
+    build_service.upgrade_async.assert_not_awaited()
     assert build_service.release_async.await_count == 1
+    # Exactly one deploy workflow exists on the recreated bot.
+    assert len(baas.list_bot_publishes("BOT-new")) == 1
