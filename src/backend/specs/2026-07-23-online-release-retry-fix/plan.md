@@ -204,10 +204,22 @@ corrected by one write:
   `test_publish_tasks.py:49` (fake method rename),
   `test_bot_publish_service.py:2064` (comment), retry tests asserting the old
   restart-vs-rerun split, restart BOT_NOT_FOUND tests.
-- New: `tests/community/core/service_bot/services/test_publish_cross_publish_flows.py`
-  — reuses the `test_publish_crash_windows.py` harness pattern (real SQLite
-  ledger `:60-67`, scripted `FakeBaas` `:91-108`, real `PublishFlowService`
-  with mocked collaborators).
+- New: `tests/community/e2e/publish_boundary/` — DI-world cross-publish
+  package on the endpoint framework's fixtures
+  (`tests/community/framework/fixtures.py`): TEST-profile injector, real app,
+  in-memory SQLite, production `PublishFlowService`/`BotBuildService` (teclaw
+  compose+freeze) — with local implementations only at system boundaries.
+  New `LocalBaasService` stateful double bound over `BaasService` via a
+  test-module override (pattern: `di/modules/testing_devices_module.py`) —
+  today BaaS write paths have **no** local impl (`LocalHttpClient` raises;
+  see `docs/singlebox-eval/findings/devices-baas-write-paths-unmocked.md`).
+  Durable tasks run deterministically via `TaskWorker.run_once()`
+  (`core/task_queue/services/worker.py:160`) drained to quiescence between
+  endpoint calls (`router_publish.py`: create/upgrade/process/retry/restart).
+  Other boundaries use existing local plugins (`plugins/local/oss_storage.py`,
+  `engine_ext_client.py`, `bot_publish_approval.py`). Placement avoids
+  `_flows/` + acceptance/coverage manifests (the `Pre-push Module Selection`
+  contract in `AGENTS.md`).
 
 ## Dependencies
 
@@ -293,19 +305,23 @@ unchanged.
   FIRST_RELEASE op, mints new binding, dual-writes `ext.restart`; crash between
   create and record converges without a second orphan (crash-window harness);
   restart of a live current deployment still calls BaaS (the point-2 guard).
-- **Cross-publish-boundary (new module):** each scenario drives **multiple
-  publish records** against one shared FakeBaas bot and asserts live-deployment
-  correctness + no duplicate bots/bindings:
-  1. Upgrade chain: v1 first-release → SUCCESS → v2 upgrade → SUCCESS; v1
-     superseded, v2 is current.
-  2. Rollback-then-re-promote (#5984 shape): v2 rolled back (ROLLBACK_DEPLOY
-     lands) → v2 re-promoted → gate re-runs the release (predicate false) →
-     v2 current again.
-  3. Retry interleaved with a later publish: v1 ONLINE_PUB fails → v2
-     publishes on the same bot → v1 retry re-runs its release path (never
-     restarts over v2's deploy).
-  4. Restart-recreate after an upgrade chain: bot gone → recreate → predicate
-     true for the recreated record.
+- **Cross-publish-boundary (new DI-world package,
+  `tests/community/e2e/publish_boundary/`):** endpoint-driven flows through
+  the production wiring (teclaw provider), LocalBaas at the boundary,
+  `TaskWorker.run_once()` drains between steps; every scenario asserts
+  live-deployment correctness, ledger-timeline consistency, and no duplicate
+  bots/bindings. Case inventory (detailed done-when in `tasks.md` Tasks 7-9):
+  - L0 baseline full lifecycle (create → build/verify → approve → process →
+    online → SUCCESS).
+  - R1 online BaaS-wait failure → retry re-issues (loop guard, 2 issues);
+    R2 failed deploy never supersedes the live release; R3 retry interleaved
+    with a later publish on the shared bot; R4 verify-stage retry still
+    restarts (deferred-symmetry guard); R5 SUCCESS-record retry re-restarts;
+    R6 online_release redelivery idempotency (no second issue).
+  - C1 upgrade chain; C2 rollback-then-re-promote (#5984, stranded-poll
+    asserted dead); C3 restart always hits BaaS despite current deployment;
+    C4 restart-recreate on gone bot (new bot + new binding, restart-status
+    still resolves); C5 recreate after upgrade chain (kind coexistence).
 - **Suite:** full `tests/community/core/service_bot/` green; pre-push contract
   per `AGENTS.md` with merge target `REL20260723`
   (`AVERNET_PRE_PUSH_MERGE_TARGET`).
