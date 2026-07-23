@@ -649,6 +649,53 @@ class TestDispatchDeleteTransfer:
         assert result.previous_status == "DELETED"
         assert result.new_status == "DELETED"
 
+    @pytest.mark.asyncio
+    async def test_delete_cas_conflict_recovered(
+        self, dispatcher, ticket_repo, file_backend
+    ):
+        """CAS conflict on delete update_status: re-read returns DELETED → success."""
+        ticket_done = _make_ticket(status="DONE")
+        ticket_deleted = _make_ticket(status="DELETED")
+        ticket_repo.get_by_transfer_id.side_effect = [
+            ticket_done,  # first read: status=DONE (passes terminal check)
+            ticket_deleted,  # CAS re-read: already DELETED by concurrent delete
+        ]
+
+        def _raise_cas(*args, **kwargs):
+            raise TransferStateConflictError("conflict")
+
+        ticket_repo.update_status.side_effect = _raise_cas
+
+        result = await dispatcher.dispatch_delete_transfer("tf-001", tenant="t1")
+        assert isinstance(result, DeleteTransferResponse)
+        assert result.previous_status == "DONE"
+        assert result.new_status == "DELETED"
+        file_backend.delete_object.assert_called_once_with(
+            ticket_done.fileservice_staging_path
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_cas_conflict_unrecoverable(
+        self, dispatcher, ticket_repo, file_backend
+    ):
+        """CAS conflict on delete with unrecoverable state → re-raises error."""
+        ticket_done = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.side_effect = [
+            ticket_done,  # first read: status=DONE
+            ticket_done,  # CAS re-read: still DONE (unrecoverable — should raise)
+        ]
+
+        def _raise_cas(*args, **kwargs):
+            raise TransferStateConflictError("conflict")
+
+        ticket_repo.update_status.side_effect = _raise_cas
+
+        with pytest.raises(TransferStateConflictError):
+            await dispatcher.dispatch_delete_transfer("tf-001", tenant="t1")
+        file_backend.delete_object.assert_called_once_with(
+            ticket_done.fileservice_staging_path
+        )
+
 
 # ── dispatch_generate_share_link ──────────────────────────────────────
 
