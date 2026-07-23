@@ -370,9 +370,7 @@ async def cancel_upload(
 async def delete_transfer(
     tenant: Annotated[str, Path(description="Tenant for isolation")],
     bot_uuid: Annotated[str, Path(description="Bot UUID")],
-    transfer_id: Annotated[
-        str, Path(description="Transfer ID to delete")
-    ],
+    transfer_id: Annotated[str, Path(description="Transfer ID to delete")],
     dispatcher: BotFileTransferDispatcher = Depends(
         Provide[ApplicationContainer.services.bot_file_transfer_dispatcher]
     ),
@@ -485,5 +483,3 @@ async def generate_share_link(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "INTERNAL_ERROR", "message": str(e)},
         )
-
-

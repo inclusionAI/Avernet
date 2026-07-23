@@ -186,5 +186,3 @@ class FileTransferBackend(Protocol):
             Complete OSS object key string.
         """
         ...
-
-    

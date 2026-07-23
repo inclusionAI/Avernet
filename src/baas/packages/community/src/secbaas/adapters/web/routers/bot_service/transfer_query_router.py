@@ -7,7 +7,6 @@ from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, HTTPException, Path, status
-
 from secbaas.api import ApiResponse
 from secbaas.api.bot_runtime import (
     BotFileTransferDispatcher,

@@ -84,5 +84,3 @@ class NoopFileTransferBackend(FileTransferBackend):
             "File transfer is not configured. "
             "Set config.plugins.file_transfer to 'real' to enable."
         )
-
-    

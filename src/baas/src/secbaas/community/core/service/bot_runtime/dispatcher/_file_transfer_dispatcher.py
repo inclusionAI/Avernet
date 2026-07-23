@@ -146,9 +146,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             subdir=staging_subdir,
         )
 
-        expires_at = (
-            datetime.now(UTC) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
 
         # Validate file_size before routing (applies to both SINGLE and MULTIPART)
         if file_size < 0:
@@ -371,9 +369,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             device_path,
         )
 
-        expires_at = (
-            datetime.now(UTC) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
         return GetDownloadUrlResponse(
             transfer_id=transfer_id,
             expires_at=expires_at,
@@ -746,9 +742,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             expire_seconds,
         )
 
-        expires_at = (
-            datetime.now(UTC) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
         return ShareLinkResponse(
             share_url=share_url,
             transfer_id=transfer_id,
