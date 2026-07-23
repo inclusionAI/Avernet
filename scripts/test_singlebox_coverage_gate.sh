@@ -22,7 +22,7 @@ make_fake_repo() {
     "${tmp}/src/backend/src/agentclaw/community/core/cron" \
     "${tmp}/src/backend/src/agentclaw/community/plugin_api" \
     "${tmp}/src/baas" \
-    "${tmp}/src/bcs/scripts"
+    "${tmp}/src/bcs/scripts/e2e-test"
   cp "$SCRIPT" "${tmp}/scripts/ci/singlebox_coverage.sh"
   cp "$REPORTER" "${tmp}/scripts/ci/singlebox_coverage_report.py"
   cp "$MANIFEST_CHECKER" "${tmp}/scripts/ci/singlebox_coverage_manifest_check.py"
@@ -64,6 +64,15 @@ modules:
       router_min_percent: 100
 YAML
   chmod +x "${tmp}/scripts/ci/singlebox_coverage.sh"
+  cat > "${tmp}/src/bcs/scripts/e2e-test/mock_services.sh" <<'SH'
+#!/usr/bin/env bash
+bcs_e2e_mock_start() {
+  BCS_E2E_MOCK_BASE_URL="http://127.0.0.1:39090"
+  BCS_E2E_JUDGE_API_KEY="local-e2e-key"
+  export BCS_E2E_MOCK_BASE_URL BCS_E2E_JUDGE_API_KEY
+}
+bcs_e2e_mock_stop() { :; }
+SH
   cat > "${tmp}/scripts/singlebox.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -74,6 +83,10 @@ esac
 if [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" != "${SINGLEBOX_EXPECTED_MODEL_CONFIG_MODE:-mock}" ]; then
   echo "singlebox coverage model config mode mismatch" >&2
   exit 12
+fi
+if [ "${BCS_E2E_MOCK_BASE_URL:-}" != "http://127.0.0.1:39090" ]; then
+  echo "singlebox coverage should expose the Provider/Judge mock to BCS" >&2
+  exit 16
 fi
 case "${STANDALONE_OPENCLAW_ROOT:-}" in
   "${PWD}/scripts/.dependencies/coverage/singlebox/standalone-openclaw") ;;

@@ -45,11 +45,14 @@ class NotifyEntry(BaseModel):
 
 
 class BotNotifySummary(BaseModel):
-    """Notifications grouped by bot."""
+    """Notifications grouped by bot, including per-bot probe status."""
     bot_id: str
     bot_name: str
     sandbox_id: str
     notifications: list[NotifyEntry]
+    status: str = "ok"
+    error_code: str | None = None
+    error_message: str | None = None
 
 
 class NotifySummaryResponse(BaseModel):
@@ -101,16 +104,28 @@ async def _probe_bot_notify(
                     bot_name=bot_name,
                     sandbox_id=sandbox_id,
                     notifications=[],
+                    status="error",
+                    error_code=f"ENGINE_HTTP_{resp.status_code}",
+                    error_message=f"Engine notify returned HTTP {resp.status_code}",
                 )
             result = resp.json()
 
         if not result.get("success"):
             logger.warning(f"[notify] probe failed for bot={bot_id}: {result}")
+            message = str(
+                result.get("message")
+                or result.get("error")
+                or "Engine notify failed"
+            )
+            code, separator, detail = message.partition(":")
             return BotNotifySummary(
                 bot_id=bot_id,
                 bot_name=bot_name,
                 sandbox_id=sandbox_id,
                 notifications=[],
+                status="error",
+                error_code=code.strip() if separator else "ENGINE_NOTIFY_ERROR",
+                error_message=detail.strip() if separator else message,
             )
 
         notifications_data = result.get("data", [])
@@ -133,6 +148,9 @@ async def _probe_bot_notify(
             bot_name=bot_name,
             sandbox_id=sandbox_id,
             notifications=[],
+            status="error",
+            error_code="NOTIFY_PROBE_ERROR",
+            error_message=str(e),
         )
 
 

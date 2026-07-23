@@ -1285,7 +1285,7 @@ fn validate_state_machine_runtime_bindings_before_create(
         }
         if referenced_slots.contains(slot) && bot_ids.len() != 1 {
             return Err(HttpAdapterError::BadRequest(format!(
-                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in MVP"
+                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in the current runtime"
             )));
         }
         resolved_slots.insert(slot.clone());
@@ -1466,6 +1466,7 @@ fn group_detail_to_create_json(result: GroupDetailResult, created: bool) -> Valu
         "participants": result.participants.iter().map(|p| &p.bot_uuid).collect::<Vec<_>>(),
         "context_injected": result.context_injected,
         "chat_url": result.chat_url,
+        "session_id": result.latest_running_session_id,
         "group_kind": result.group_kind,
         "dm_pair_key": result.dm_pair_key,
         "created": created
@@ -1633,11 +1634,18 @@ async fn resolve_actor_caller(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<String, HttpAdapterError> {
-    if let Ok(bot_id) = authenticated_bot_from_headers(state, headers).await {
-        if !bot_id.trim().is_empty() {
-            return Ok(bot_id);
+    let explicit_bot_token = headers.contains_key("X-BCS-Bot-Token");
+    match authenticated_bot_from_headers(state, headers).await {
+        Ok(bot_id) if !bot_id.trim().is_empty() => return Ok(bot_id),
+        Ok(_) if explicit_bot_token => {
+            return Err(HttpAdapterError::Unauthorized(
+                "valid bot token is required".to_string(),
+            ));
         }
+        Err(error) if explicit_bot_token => return Err(error),
+        _ => {}
     }
+
     extract_human_actor_id(state, headers, uri)
         .await
         .ok_or_else(|| HttpAdapterError::Unauthorized("valid bot token or human cookie is required".to_string()))

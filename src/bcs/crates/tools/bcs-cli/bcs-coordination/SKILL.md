@@ -43,7 +43,7 @@ export BCS_API_BASE_URL="${BCS_API_BASE_URL:-http://127.0.0.1:21000}"
 
 bcs() {
   if [ -n "${BCS_BOT_TOKEN:-}" ]; then
-    BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" --token "$BCS_BOT_TOKEN" "$@"
+    BOT_DATA_DIR="$BOT_DATA_DIR" BCN_BOT_TOKEN="$BCS_BOT_TOKEN" bcs-cli --url "$BCS_API_BASE_URL" "$@"
   else
     BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" "$@"
   fi
@@ -54,9 +54,9 @@ bcs() {
 
 本技能会按以下顺序查找 token：
 
-1. `BCS_BOT_TOKEN` 环境变量：由上面的 `bcs` 包装函数转成显式 `--token`
-2. `$BOT_DATA_DIR/.bcs/session.json`：由 `bcs connect` 或 WebSocket channel 写入
-3. `--token` 显式参数：需要手动覆盖时，直接运行完整的 `bcs-cli --url "$BCS_API_BASE_URL" --token "<token>" ...`
+1. `--token` 显式参数：需要手动覆盖时，把它放在 `collaboration` 命令之后，例如 `bcs-cli --url "$BCS_API_BASE_URL" collaboration --token "<token>" create workflow.yaml ...`
+2. `BCS_BOT_TOKEN` 环境变量：由上面的 `bcs` 包装函数传给 CLI 支持的 `BCN_BOT_TOKEN`
+3. `$BOT_DATA_DIR/.bcs/session.json`：由 `bcs connect` 或 WebSocket channel 写入
 
 ### 会话文件示例
 
@@ -80,6 +80,7 @@ bcs() {
 bcs health
 bcs list
 bcs request-group-help --topic "数据库死锁排查，需要DBA专家"
+bcs collaboration validate /path/to/workflow.yaml
 ```
 
 若不使用 shell 函数，等价写法为：
@@ -112,6 +113,7 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 处理自定义协作时，还需按任务直接读取以下资料：
 
 - 编写或修改 YAML：读取 [references/custom-collaboration-schema.md](references/custom-collaboration-schema.md)。
+- 校验 YAML 与新建自定义协作群：严格执行 [references/custom-collaboration.md](references/custom-collaboration.md) 中的 CLI 流程。
 
 ---
 
@@ -156,4 +158,6 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 5. **及时确认**: `confirm_url` 有效期为10分钟
 6. **尊重专长**: 不要强迫其他Bot接受超出其能力范围的任务
 7. **使用路由**: 所有跨Bot消息通过BCS路由，确保WebSocket连接
-8. **会话文件直传后端**: `session file upload` 对 presign 后端（baas/OSS）要求本机/进程网络可达 OSS；仅能连 BCS 的环境用 local 后端。跨主机 PUT 到后端 OSS URL 时 Bearer 不应发送（OSS 预签名 URL 自鉴权），`bcs` CLI 已处理；自定义客户端需注意。
+8. **返回群聊入口**: 建群响应包含 `chat_url` 时，必须立即把可点击的群聊入口提供给用户，不能只保留在工具输出中
+9. **保留默认会话**: 建群响应包含 `session_id` 时，保留它供后续 BCS Session 操作使用。若运行环境使用 `sessions_send`，先通过会话列表找到与该 BCS `session_id` 对应的完整 `sessionKey`，并以 `sessionKey` 发送；不得把 Bot 名称作为 `agentId` 代替会话定位。无法解析或看不到目标会话时，使用 `bcs session chat --session "$session_id" --message "..."`
+10. **明确建群授权**: 自定义协作 YAML 校验通过但用户尚未明确要求建群时，必须用问句请求确认，例如：“是否现在按以上 YAML 创建自定义协作群？回复‘确认创建’后我将建群并返回群聊入口。”不得只用“如需创建……”模糊收尾。用户已经明确要求创建时，不重复确认

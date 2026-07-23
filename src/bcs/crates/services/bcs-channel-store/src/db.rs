@@ -69,19 +69,28 @@ pub type ChannelSqlFlavor = DbSqlFlavor;
 pub struct DbChannelBindingStore {
     db: Arc<dyn DbPlugin>,
     flavor: ChannelSqlFlavor,
+    env: String,
 }
 
 impl DbChannelBindingStore {
-    pub fn new(db: Arc<dyn DbPlugin>, flavor: ChannelSqlFlavor) -> Self {
-        Self { db, flavor }
+    pub fn new(
+        db: Arc<dyn DbPlugin>,
+        flavor: ChannelSqlFlavor,
+        env: impl Into<String>,
+    ) -> Self {
+        Self {
+            db,
+            flavor,
+            env: env.into(),
+        }
     }
 
-    pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
-        Self::new(db, ChannelSqlFlavor::Mysql)
+    pub fn mysql(db: Arc<dyn DbPlugin>, env: impl Into<String>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Mysql, env)
     }
 
-    pub fn sqlite(db: Arc<dyn DbPlugin>) -> Self {
-        Self::new(db, ChannelSqlFlavor::Sqlite)
+    pub fn sqlite(db: Arc<dyn DbPlugin>, env: impl Into<String>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Sqlite, env)
     }
 
     pub fn flavor(&self) -> ChannelSqlFlavor {
@@ -111,6 +120,13 @@ impl DbChannelBindingStore {
 #[async_trait]
 impl ChannelBindingRepoPort for DbChannelBindingStore {
     async fn create(&self, binding: ChannelBinding) -> ServiceResult<()> {
+        // 以下为安全注释COSEC：拒绝跨环境写入，避免调用方绕过 repository 的环境隔离。
+        if binding.env != self.env {
+            return Err(ServiceError::InternalError(format!(
+                "channel binding env '{}' does not match repository env '{}'",
+                binding.env, self.env
+            )));
+        }
         let target_json = serde_json::to_string(&binding.target)?;
         let config_json = serde_json::to_string(&binding.config)?;
 
@@ -146,8 +162,8 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                 DbStatement::with_params(
                     "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                      visibility, env, status, created_by, config_json \
-                     FROM bcs_channel_bindings WHERE id = ? LIMIT 1",
-                    vec![DbValue::from(id)],
+                     FROM bcs_channel_bindings WHERE id = ? AND env = ? LIMIT 1",
+                    vec![DbValue::from(id), DbValue::from(self.env.as_str())],
                 ),
             )
             .await?;
@@ -170,9 +186,11 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                     "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                      visibility, env, status, created_by, config_json \
                      FROM bcs_channel_bindings \
-                     WHERE channel_type = ? AND account_ref = ? AND status = 'active' \
+                     WHERE env = ? AND channel_type = ? AND account_ref = ? \
+                       AND status = 'active' \
                      LIMIT 1",
                     vec![
+                        DbValue::from(self.env.as_str()),
                         DbValue::from(channel_type.as_str()),
                         DbValue::from(account_ref),
                     ],
@@ -190,10 +208,11 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         let rows = self
             .query(
                 "list_bindings",
-                DbStatement::new(
+                DbStatement::with_params(
                     "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                      visibility, env, status, created_by, config_json \
-                     FROM bcs_channel_bindings ORDER BY id",
+                     FROM bcs_channel_bindings WHERE env = ? ORDER BY id",
+                    vec![DbValue::from(self.env.as_str())],
                 ),
             )
             .await?;
@@ -211,27 +230,39 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                 "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                  visibility, env, status, created_by, config_json \
                  FROM bcs_channel_bindings \
-                 WHERE target_json = ? AND channel_type = ? ORDER BY id",
-                vec![DbValue::from(target_json), DbValue::from(channel_type)],
+                 WHERE env = ? AND target_json = ? AND channel_type = ? ORDER BY id",
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(target_json),
+                    DbValue::from(channel_type),
+                ],
             ),
             None => DbStatement::with_params(
                 "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                  visibility, env, status, created_by, config_json \
-                 FROM bcs_channel_bindings WHERE target_json = ? ORDER BY id",
-                vec![DbValue::from(target_json)],
+                 FROM bcs_channel_bindings \
+                 WHERE env = ? AND target_json = ? ORDER BY id",
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(target_json),
+                ],
             ),
         };
         let rows = self.query("list_bindings_by_target", statement).await?;
         rows.iter().map(row_to_binding).collect()
     }
 
-    async fn delete_by_target(&self, target: &BindingTarget, env: &str) -> ServiceResult<u64> {
+    async fn delete_by_target(&self, target: &BindingTarget) -> ServiceResult<u64> {
         let target_json = serde_json::to_string(target)?;
+        // 以下为安全注释COSEC：删除范围固定为 repository env，禁止调用方选择其他环境。
         self.execute(
             "delete_bindings_by_target",
             DbStatement::with_params(
                 "DELETE FROM bcs_channel_bindings WHERE target_json = ? AND env = ?",
-                vec![DbValue::from(target_json), DbValue::from(env)],
+                vec![
+                    DbValue::from(target_json),
+                    DbValue::from(self.env.as_str()),
+                ],
             ),
         )
         .await
@@ -247,10 +278,14 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
             "set_binding_status",
             DbStatement::with_params(
                 format!(
-                    "UPDATE bcs_channel_bindings SET status = ?, {} WHERE id = ?",
+                    "UPDATE bcs_channel_bindings SET status = ?, {} WHERE id = ? AND env = ?",
                     self.flavor.set_modified_now()
                 ),
-                vec![DbValue::from(binding_status_to_str(status)), DbValue::from(id)],
+                vec![
+                    DbValue::from(binding_status_to_str(status)),
+                    DbValue::from(id),
+                    DbValue::from(self.env.as_str()),
+                ],
             ),
         )
         .await?;
@@ -263,10 +298,14 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
             "set_binding_config",
             DbStatement::with_params(
                 format!(
-                    "UPDATE bcs_channel_bindings SET config_json = ?, {} WHERE id = ?",
+                    "UPDATE bcs_channel_bindings SET config_json = ?, {} WHERE id = ? AND env = ?",
                     self.flavor.set_modified_now()
                 ),
-                vec![DbValue::from(config_json), DbValue::from(id)],
+                vec![
+                    DbValue::from(config_json),
+                    DbValue::from(id),
+                    DbValue::from(self.env.as_str()),
+                ],
             ),
         )
         .await?;
@@ -277,8 +316,8 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         self.execute(
             "delete_binding",
             DbStatement::with_params(
-                "DELETE FROM bcs_channel_bindings WHERE id = ?",
-                vec![DbValue::from(id)],
+                "DELETE FROM bcs_channel_bindings WHERE id = ? AND env = ?",
+                vec![DbValue::from(id), DbValue::from(self.env.as_str())],
             ),
         )
         .await?;
@@ -795,7 +834,7 @@ mod tests {
         let db_plugin: Arc<dyn DbPlugin> = db;
 
         Ok((
-            Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone())),
+            Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone(), "dev")),
             Arc::new(DbConversationSessionStore::sqlite(db_plugin.clone())),
             Arc::new(DbImParticipantStore::sqlite(db_plugin)),
         ))
@@ -894,7 +933,10 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_binding_list_by_target_filters_target_and_channel() -> ServiceResult<()> {
-        let (binding_repo, _, _) = sqlite_stores().await?;
+        let db = sqlite_db().await?;
+        let db_plugin: Arc<dyn DbPlugin> = db;
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone(), "dev");
+        let other_env_repo = DbChannelBindingStore::sqlite(db_plugin, "pre");
 
         let group_dingtalk = binding();
         binding_repo.create(group_dingtalk).await?;
@@ -910,7 +952,7 @@ mod tests {
         group_other_env.account_ref = "account_pre".to_string();
         group_other_env.channel_type = "test_im".to_string();
         group_other_env.env = "pre".to_string();
-        binding_repo.create(group_other_env).await?;
+        other_env_repo.create(group_other_env).await?;
 
         let mut other_group = binding();
         other_group.id = "binding_other_group".to_string();
@@ -924,7 +966,7 @@ mod tests {
             group_id: "group_1".to_string(),
         };
         let all_channels = binding_repo.list_by_target(&group_target, None).await?;
-        assert_eq!(all_channels.len(), 3);
+        assert_eq!(all_channels.len(), 2);
 
         let dingtalk = binding_repo
             .list_by_target(&group_target, Some("dingtalk"))
@@ -932,11 +974,75 @@ mod tests {
         assert_eq!(dingtalk.len(), 1);
         assert_eq!(dingtalk[0].id, "binding_1");
 
-        assert_eq!(binding_repo.delete_by_target(&group_target, "dev").await?, 2);
+        assert_eq!(binding_repo.delete_by_target(&group_target).await?, 2);
         let remaining_group_bindings = binding_repo.list_by_target(&group_target, None).await?;
-        assert_eq!(remaining_group_bindings.len(), 1);
-        assert_eq!(remaining_group_bindings[0].id, "binding_other_env");
+        assert!(remaining_group_bindings.is_empty());
+        assert!(other_env_repo.get("binding_other_env").await?.is_some());
         assert!(binding_repo.get("binding_other_group").await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_binding_repo_isolates_environment_reads_and_writes() -> ServiceResult<()> {
+        let db = sqlite_db().await?;
+        let db_plugin: Arc<dyn DbPlugin> = db;
+        let pre_repo = DbChannelBindingStore::sqlite(db_plugin.clone(), "pre");
+        let prod_repo = DbChannelBindingStore::sqlite(db_plugin, "prod");
+
+        let mut pre_binding = binding();
+        pre_binding.id = "binding_pre".to_string();
+        pre_binding.env = "pre".to_string();
+        pre_repo.create(pre_binding).await?;
+
+        let mut prod_binding = binding();
+        prod_binding.id = "binding_prod".to_string();
+        prod_binding.env = "prod".to_string();
+        prod_repo.create(prod_binding.clone()).await?;
+
+        let pre_items = pre_repo.list().await?;
+        assert_eq!(pre_items.len(), 1);
+        assert_eq!(pre_items[0].id, "binding_pre");
+        assert_eq!(pre_repo.get("binding_prod").await?, None);
+
+        let target = BindingTarget::Group {
+            group_id: "group_1".to_string(),
+        };
+        let pre_target_items = pre_repo
+            .list_by_target(&target, Some("dingtalk"))
+            .await?;
+        assert_eq!(pre_target_items.len(), 1);
+        assert_eq!(pre_target_items[0].id, "binding_pre");
+
+        let pre_active = pre_repo
+            .find_active_by_account("dingtalk".to_string(), "robot_1")
+            .await?;
+        assert_eq!(
+            pre_active.as_ref().map(|binding| binding.id.as_str()),
+            Some("binding_pre")
+        );
+
+        pre_repo.set_status("binding_prod", false).await?;
+        pre_repo
+            .set_config("binding_prod", serde_json::json!({"changed": true}))
+            .await?;
+        pre_repo.delete("binding_prod").await?;
+
+        let unchanged_prod = prod_repo
+            .get("binding_prod")
+            .await?
+            .expect("prod binding must remain visible in prod");
+        assert_eq!(unchanged_prod.status, BindingStatus::Active);
+        assert_eq!(unchanged_prod.config, prod_binding.config);
+
+        let mut mismatched = binding();
+        mismatched.id = "binding_mismatched".to_string();
+        mismatched.env = "prod".to_string();
+        let error = pre_repo
+            .create(mismatched)
+            .await
+            .expect_err("repository must reject a cross-environment write");
+        assert!(error.to_string().contains("does not match repository env"));
 
         Ok(())
     }
@@ -945,7 +1051,7 @@ mod tests {
     async fn sqlite_channel_tables_populate_audit_timestamps() -> ServiceResult<()> {
         let db = sqlite_db().await?;
         let db_plugin: Arc<dyn DbPlugin> = db;
-        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone());
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone(), "dev");
         let conversation_repo = DbConversationSessionStore::sqlite(db_plugin.clone());
         let participant_repo = DbImParticipantStore::sqlite(db_plugin.clone());
 
@@ -1011,7 +1117,7 @@ mod tests {
     async fn sqlite_write_paths_refresh_gmt_modified() -> ServiceResult<()> {
         let db = sqlite_db().await?;
         let db_plugin: Arc<dyn DbPlugin> = db;
-        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone());
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone(), "dev");
         let conversation_repo = DbConversationSessionStore::sqlite(db_plugin.clone());
         let participant_repo = DbImParticipantStore::sqlite(db_plugin.clone());
 

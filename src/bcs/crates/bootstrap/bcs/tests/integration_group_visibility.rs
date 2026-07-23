@@ -2018,6 +2018,10 @@ async fn test_create_group_returns_chat_url() {
     let get_data: serde_json::Value = get_resp.json().await.expect("parse group");
     let session_id = get_data["latest_running_session_id"].as_str()
         .expect("Group detail should expose the initial session id");
+    assert_eq!(
+        group_data["session_id"], session_id,
+        "Create response should expose the initial session id"
+    );
     let expected_url = format!(
         "https://botchat.example.com/bcn/chat/detail?id={}&bot_uuid={}&session={}",
         urlencoding::encode(group_id),

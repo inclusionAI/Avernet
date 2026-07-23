@@ -1,5 +1,157 @@
-use bcs_collaboration_runtime::{reject_explicit_participant_roles, validate_definition};
+use bcs_collaboration_runtime::{
+    reject_explicit_participant_roles, validate_authoring_definition_yaml, validate_definition,
+};
 use bcs_domain::{CollaborationDefinition, CollaborationRuntimeDefinition, StateMachineGraphMode};
+use bcs_service_api::ValidateCollaborationDefinitionYamlCommand;
+
+const AUTHORING_YAML: &str = r#"
+name: Custom collaboration workflow
+participants:
+  writer:
+    display_name: Writer
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      answer:
+        kind: bot_task
+        display_name: Answer
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Produce the final answer.
+        final_output: true
+"#;
+
+fn validate_authoring(
+    yaml: &str,
+    judge_available: bool,
+) -> bcs_service_api::CollaborationDefinitionValidationOutcome {
+    validate_authoring_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
+        definition_yaml: yaml.to_string(),
+        judge_available,
+    })
+}
+
+#[test]
+fn authoring_validation_returns_binding_and_graph_summary() {
+    let outcome = validate_authoring(AUTHORING_YAML, false);
+
+    assert!(outcome.valid, "{:?}", outcome.errors);
+    assert_eq!(outcome.summary.participants, 1);
+    assert_eq!(outcome.summary.nodes, 1);
+    assert_eq!(outcome.summary.initial_nodes, vec!["answer"]);
+    assert_eq!(outcome.summary.final_output_node.as_deref(), Some("answer"));
+    assert_eq!(outcome.participants[0].binding, "writer");
+    assert!(outcome.participants[0].required);
+    assert!(outcome.participants[0].assigned);
+    assert!(outcome.definition.is_some());
+}
+
+#[test]
+fn authoring_validation_rejects_unknown_keys() {
+    let yaml = AUTHORING_YAML.replacen(
+        "name: Custom collaboration workflow",
+        "verions: 1\nname: Custom collaboration workflow",
+        1,
+    );
+    let outcome = validate_authoring(&yaml, false);
+
+    assert!(!outcome.valid);
+    assert_eq!(outcome.errors[0].code, "UNKNOWN_KEY");
+    assert_eq!(outcome.errors[0].path, "$.verions");
+}
+
+#[test]
+fn authoring_validation_rejects_multiple_entry_nodes() {
+    let yaml = AUTHORING_YAML.replace(
+        "      answer:\n",
+        "      draft:\n        kind: bot_task\n        display_name: Draft\n        assignee:\n          type: bot_binding\n          binding: writer\n        instruction: Draft an answer.\n        transitions:\n          complete:\n            targets: [answer]\n      review:\n        kind: bot_task\n        display_name: Review\n        assignee:\n          type: bot_binding\n          binding: writer\n        instruction: Review the answer.\n        transitions:\n          complete:\n            targets: [answer]\n      answer:\n",
+    );
+    let outcome = validate_authoring(&yaml, false);
+
+    assert!(!outcome.valid);
+    assert_eq!(outcome.errors[0].code, "INVALID_DEFINITION");
+    assert!(outcome.errors[0].message.contains("exactly one zero in-degree entry"));
+}
+
+#[test]
+fn authoring_validation_rejects_judge_when_server_has_no_judge_provider() {
+    let yaml = AUTHORING_YAML.replace(
+        "        final_output: true",
+        "        judge:\n          type: llm\n          criteria: [quality]\n          outcomes: [approved]\n        transitions:\n          approved:\n            targets: [publish]\n      publish:\n        kind: bot_task\n        display_name: Publish\n        assignee:\n          type: bot_binding\n          binding: writer\n        instruction: Publish the answer.\n        final_output: true",
+    );
+    let outcome = validate_authoring(&yaml, false);
+
+    assert!(!outcome.valid);
+    assert_eq!(outcome.errors[0].code, "UNAVAILABLE_FEATURE");
+}
+
+#[test]
+fn authoring_validation_accepts_judge_when_server_has_judge_provider() {
+    let yaml = AUTHORING_YAML.replace(
+        "        final_output: true",
+        "        judge:\n          type: llm\n          criteria: [quality]\n          outcomes: [approved]\n        transitions:\n          approved:\n            targets: [publish]\n      publish:\n        kind: bot_task\n        display_name: Publish\n        assignee:\n          type: bot_binding\n          binding: writer\n        instruction: Publish the answer.\n        final_output: true",
+    );
+    let outcome = validate_authoring(&yaml, true);
+
+    assert!(outcome.valid, "{:?}", outcome.errors);
+}
+
+#[test]
+fn authoring_validation_rejects_fields_not_supported_by_the_current_runtime() {
+    let machine_fields = [
+        ("input_schema", "    input_schema: {}\n    nodes:"),
+        ("variables", "    variables:\n      draft: null\n    nodes:"),
+        ("events", "    events:\n      approved: null\n    nodes:"),
+    ];
+    for (field, replacement) in machine_fields {
+        let yaml = AUTHORING_YAML.replace("    nodes:", replacement);
+        let outcome = validate_authoring(&yaml, false);
+        assert!(!outcome.valid, "{field} must be rejected");
+        assert!(
+            outcome.errors[0].message.contains(field),
+            "unexpected {field} diagnostic: {:?}",
+            outcome.errors
+        );
+    }
+
+    let node_fields = [
+        (
+            "output_contract",
+            "        output_contract:\n          type: json\n        final_output: true",
+        ),
+        (
+            "action",
+            "        action:\n          type: tool\n        final_output: true",
+        ),
+    ];
+    for (field, replacement) in node_fields {
+        let yaml = AUTHORING_YAML.replace("        final_output: true", replacement);
+        let outcome = validate_authoring(&yaml, false);
+        assert!(!outcome.valid, "{field} must be rejected");
+        assert!(
+            outcome.errors[0].message.contains(field),
+            "unexpected {field} diagnostic: {:?}",
+            outcome.errors
+        );
+    }
+
+    let yaml = AUTHORING_YAML.replace(
+        "        final_output: true",
+        "        transitions:\n          complete:\n            targets: [publish]\n            guard: approved\n      publish:\n        kind: bot_task\n        display_name: Publish\n        assignee:\n          type: bot_binding\n          binding: writer\n        instruction: Publish the answer.\n        final_output: true",
+    );
+    let outcome = validate_authoring(&yaml, false);
+    assert!(!outcome.valid, "guard must be rejected");
+    assert!(
+        outcome.errors[0].message.contains("guard"),
+        "unexpected guard diagnostic: {:?}",
+        outcome.errors
+    );
+}
 
 #[test]
 fn validates_collaboration_template_seed_definitions() {
@@ -154,7 +306,7 @@ fn reject_explicit_participant_roles_rejects_new_input() {
 }
 
 #[test]
-fn rejects_custom_outcome_transition_in_mvp() {
+fn rejects_custom_outcome_transition_without_judge() {
     let mut definition = risk_review_definition();
     let state_machine = match &mut definition.runtime {
         CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
@@ -222,6 +374,9 @@ runtime:
           type: bot_binding
           binding: driver
         instruction: 说明需要修订的内容。
+        transitions:
+          complete:
+            targets: [publish]
 "#,
     )
     .expect("fixture should parse");
@@ -229,7 +384,10 @@ runtime:
     let compiled = validate_definition(definition).expect("judge definition should validate");
 
     assert_eq!(compiled.initial_nodes, vec!["synthesize".to_string()]);
-    assert_eq!(compiled.upstreams["publish"], vec!["synthesize".to_string()]);
+    assert_eq!(
+        compiled.upstreams["publish"],
+        vec!["revise".to_string(), "synthesize".to_string()]
+    );
     assert_eq!(compiled.upstreams["revise"], vec!["synthesize".to_string()]);
     let requires = compiled.definition.requires.expect("requires should be inferred");
     assert!(requires.server_features.contains(&"state_machine.node.judge".to_string()));
@@ -256,6 +414,79 @@ fn infers_judge_requires_without_capability_declaration() {
 
     assert!(requires.server_features.contains(&"state_machine.node.judge".to_string()));
     assert!(requires.server_features.contains(&"state_machine.outcome_transitions".to_string()));
+}
+
+#[test]
+fn rejects_fields_not_supported_by_the_current_runtime() {
+    let mut definition = risk_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine.input_schema = Some(serde_json::json!({"type": "object"}));
+    let error = validate_definition(definition).expect_err("input_schema must be rejected");
+    assert!(error.to_string().contains("input_schema"));
+
+    let mut definition = risk_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine
+        .variables
+        .insert("draft".to_string(), serde_json::Value::Null);
+    let error = validate_definition(definition).expect_err("variables must be rejected");
+    assert!(error.to_string().contains("variables"));
+
+    let mut definition = risk_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine
+        .events
+        .insert("approved".to_string(), serde_json::Value::Null);
+    let error = validate_definition(definition).expect_err("events must be rejected");
+    assert!(error.to_string().contains("events"));
+
+    let mut definition = risk_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine
+        .nodes
+        .get_mut("understand")
+        .expect("node")
+        .output_contract = Some(bcs_domain::OutputContract::default());
+    let error = validate_definition(definition).expect_err("output_contract must be rejected");
+    assert!(error.to_string().contains("output_contract"));
+
+    let mut definition = risk_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine.nodes.get_mut("understand").expect("node").action =
+        Some(bcs_domain::StateMachineAction::default());
+    let error = validate_definition(definition).expect_err("action must be rejected");
+    assert!(error.to_string().contains("action"));
+
+    let mut definition = risk_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine
+        .nodes
+        .get_mut("understand")
+        .expect("node")
+        .transitions
+        .get_mut("complete")
+        .expect("transition")
+        .guard = Some("approved".to_string());
+    let error = validate_definition(definition).expect_err("guard must be rejected");
+    assert!(error.to_string().contains("guard"));
 }
 
 fn risk_review_definition() -> CollaborationDefinition {

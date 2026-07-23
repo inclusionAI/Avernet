@@ -3,7 +3,7 @@
 //! This is a tool-local client, not a public SDK. Shared wire DTOs live in
 //! `bcs-protocol`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
@@ -17,8 +17,8 @@ use bcs_protocol::{
     ChatRunStatusResponse, ChatRunSubmitResponse, ConfirmProposalResponse, CreateGroupRequest,
     CreateGroupResponse, DiscoverBotsExtendedResponse, DiscoverBotsResponse, FriendApiResponse,
     FusionRequest, FusionResponse, JoinRequest, JoinResponse, OnboardRequest, OnboardResponse,
-    ParticipantInfo, ProposalResponse, QueryBotEntry, QueryBotsRequest, SetVisibilityRequest,
-    Skill, UpdateStatusRequest, UpdateStatusResponse,
+    ParticipantBindingInfo, ParticipantInfo, ProposalResponse, QueryBotEntry, QueryBotsRequest,
+    SetVisibilityRequest, Skill, UpdateStatusRequest, UpdateStatusResponse,
 };
 
 // ============================================================================
@@ -58,6 +58,18 @@ pub struct BotGroupListPage {
     pub total: u64,
     pub offset: u64,
     pub limit: u64,
+}
+
+/// Inputs for creating a state-machine group from authoring YAML.
+#[derive(Debug)]
+pub struct CreateCustomGroupOptions {
+    pub id: Option<String>,
+    pub driver_bot: String,
+    pub participant_bindings: BTreeMap<String, ParticipantBindingInfo>,
+    pub definition_yaml: String,
+    pub context: Option<String>,
+    pub topic: Option<String>,
+    pub auto_start_on_service_invocation: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1553,6 +1565,84 @@ impl BcsClient {
     // ========================================================================
     // Group Management
     // ========================================================================
+
+    /// Validate an authoring-time state-machine YAML document against the
+    /// currently running BCS server.
+    pub async fn validate_collaboration_definition(
+        &self,
+        definition_yaml: &str,
+    ) -> Result<serde_json::Value> {
+        let url = format!("{}/collaboration/definitions/validate", self.base_url);
+        let response = self
+            .add_auth(self.http_client.post(&url).json(&serde_json::json!({
+                "definition_yaml": definition_yaml,
+            })))
+            .send()
+            .await
+            .context("Failed to validate collaboration definition YAML")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "Validate collaboration definition YAML failed ({}): {}",
+                status,
+                body
+            ));
+        }
+
+        response
+            .json()
+            .await
+            .context("Invalid collaboration definition validation response")
+    }
+
+    /// Create a state-machine group from authoring YAML and logical participant bindings.
+    pub async fn create_custom_group(
+        &self,
+        options: CreateCustomGroupOptions,
+    ) -> Result<CreateGroupResponse> {
+        let url = format!("{}/groups", self.base_url);
+        let payload = CreateGroupRequest {
+            id: options.id,
+            label: None,
+            mode: None,
+            driver_bot: Some(options.driver_bot.clone()),
+            participants: Vec::new(),
+            participant_bindings: options.participant_bindings,
+            target_actor_id: None,
+            routing_policy: None,
+            context: options.context,
+            topic: options.topic,
+            group_kind: None,
+            service_spec: None,
+            group_strategy: Some("state_machine".to_string()),
+            originator: Some(options.driver_bot),
+            collaboration_definition_yaml: Some(options.definition_yaml),
+            auto_start_on_service_invocation: Some(options.auto_start_on_service_invocation),
+            visibility: None,
+        };
+        let response = self
+            .add_auth(self.http_client.post(&url).json(&payload))
+            .send()
+            .await
+            .context("Failed to create custom collaboration group")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "Create custom collaboration group failed ({}): {}",
+                status,
+                body
+            ));
+        }
+
+        response
+            .json()
+            .await
+            .context("Invalid custom collaboration group response")
+    }
 
     /// Create a group (legacy method with mode parameter).
     #[deprecated(since = "0.5.0", note = "Use create_group_no_mode instead")]

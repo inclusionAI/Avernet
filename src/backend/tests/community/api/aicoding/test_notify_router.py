@@ -218,6 +218,34 @@ class TestProbeBotNotify:
 
         assert result is not None
         assert result.notifications == []
+        assert result.status == "error"
+        assert result.error_code == "ENGINE_NOTIFY_ERROR"
+        assert result.error_message == "Connection failed"
+
+    @pytest.mark.asyncio
+    async def test_probe_bot_notify_preserves_engine_error_code(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "success": False,
+            "data": [],
+            "message": "RELAY_UNAVAILABLE: relay down",
+        }
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await _probe_bot_notify(
+                "bot_relay", "Relay Bot", "sandbox_relay", MagicMock()
+            )
+
+        assert result is not None
+        assert result.status == "error"
+        assert result.error_code == "RELAY_UNAVAILABLE"
+        assert result.error_message == "relay down"
+        assert result.notifications == []
 
     @pytest.mark.asyncio
     async def test_probe_bot_notify_exception(self):
@@ -236,6 +264,9 @@ class TestProbeBotNotify:
         assert result is not None
         assert result.bot_id == "bot_005"
         assert result.notifications == []
+        assert result.status == "error"
+        assert result.error_code == "NOTIFY_PROBE_ERROR"
+        assert result.error_message == "Network error"
 
     @pytest.mark.asyncio
     async def test_probe_bot_notify_local_mode(self):
@@ -286,6 +317,8 @@ class TestProbeBotNotify:
         assert result is not None
         assert result.bot_id == "bot_007"
         assert result.notifications == []
+        assert result.status == "error"
+        assert result.error_code == "ENGINE_HTTP_500"
 
 
 class TestGetNotifySummaryNoBots:

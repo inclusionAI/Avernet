@@ -250,6 +250,11 @@ bcs session chat --session "<session_id>" --message "<消息内容>"
 
 与 Group 级 chat（`/groups/{id}/chat`）的区别：Session chat 将 session_id 锁定在路径上，消息只在该 Session 的参与者间路由。
 
+认证 Human 尚未加入目标 Session 时，服务端会先以
+`Observer + Present` 加入，再以该 Human 的 `actor_id` 发送消息。
+请求体中的 `from` 不会覆盖 Human 身份；Bot 调用者仍必须已经是
+Session 参与者。
+
 **示例：**
 
 ```bash
