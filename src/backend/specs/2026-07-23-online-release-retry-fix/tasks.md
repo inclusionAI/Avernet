@@ -222,7 +222,14 @@
 - **Depends on:** — (harness itself); scenarios in Tasks 8-9 depend on the
   production changes.
 
-## Task 8: DI-world regression scenarios — retry, failure outcome, cross-record liveness
+## Task 8: `[x]` DI-world regression scenarios — retry, failure outcome, cross-record liveness
+
+> Implementation note: R3's "later publish deploys on the shared bot" is
+> realized as a **restart of live v1** interleaved between v2's failure and
+> retry (an upgrade record requires its base SUCCESS, so a literal
+> third-record deploy cannot interleave there); it exercises the same
+> cross-record shared-bot property. R2 is folded into R1's narrative at its
+> natural point (the failure instant).
 
 - **Goal:** The regression fix proven end-to-end through the production
   wiring: retry recovery, deploy-failure outcome correction, and
