@@ -104,7 +104,10 @@ async def test_c2_rollback_then_repromote(app_with_testing_modules, world):
     assert status_of(world, V2) == PublishStatus.VALIDATING.value
 
     await api(app, "POST", PROCESS, json={"publish_id": V2})
-    await drain(world, until=lambda: baas.updates_of(shared) == 4)
+    # Shared-bot updates: v2's original upgrade, the rollback deploy, and now
+    # the re-promote upgrade (the verify re-promote lands on the verify bot).
+    await drain(world, until=lambda: baas.updates_of(shared) == 3)
+    assert baas.updates_of(shared) == 3
     # A fresh online deploy was issued and ext points at the NEW workflow —
     # the stranded-poll symptom ("No baas_publish_id found") is dead.
     v2_second_online_wid = (ext_of(world, V2).get("publish") or {})["online"]
