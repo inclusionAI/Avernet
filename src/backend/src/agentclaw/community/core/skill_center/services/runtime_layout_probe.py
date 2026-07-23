@@ -58,6 +58,9 @@ class RuntimePoolLayout:
         if engine == "aicoding":
             pool_root = Path(home) / ".aicoding" / "workspace" / "skills-pool"
             return cls(pool_root=pool_root, marker=pool_root / ".pool-ready")
+        if engine == "hermes":
+            pool_root = Path(home) / ".hermes" / "workspace" / "skills-pool"
+            return cls(pool_root=pool_root, marker=pool_root / ".pool-ready")
         raise ValueError(f"engine Pool layout not implemented: {engine}")
 
 
@@ -111,7 +114,7 @@ class CurrentRuntimeLayoutProbeService:
                 engine,
                 "engine_has_no_filesystem_pool_layout",
             )
-        if engine not in {"openclaw", "claude_code", "aicoding"}:
+        if engine not in {"openclaw", "claude_code", "aicoding", "hermes"}:
             return self._not_capable(engine, "engine_pool_probe_not_implemented")
         layout = layout or RuntimePoolLayout.for_engine(engine)
 

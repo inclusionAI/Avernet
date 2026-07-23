@@ -385,7 +385,44 @@ async def test_aicoding_uses_its_own_pool_paths_for_full_activation() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("engine", ["openclaw", "claude_code", "aicoding"])
+async def test_hermes_h0_ready_uses_its_own_pool_paths_for_full_activation() -> None:
+    layouts = FakeLayoutRepository()
+    pool_local = "/home/admin/.hermes/workspace/skills-pool/skills-local"
+    pool_repo = "/home/admin/.hermes/workspace/skills-pool/skills-repo"
+    runtime = FakeRuntime(
+        engine="hermes",
+        pool_local=pool_local,
+        pool_repo=pool_repo,
+    )
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        evidence={
+            "checks": {
+                "legacy_local_bridge_valid": True,
+                "stable_repo_bridge_valid": True,
+            }
+        },
+    )
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine="hermes",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.committed_locators == {
+        11: f"local://{pool_local}/local-a",
+        12: f"local://{pool_local}/local-b",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code", "aicoding", "hermes"])
 async def test_mapping_failure_after_cutover_does_not_commit_database(
     engine: str,
 ) -> None:

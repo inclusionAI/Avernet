@@ -59,6 +59,23 @@ class _FilesystemPoolLayout:
 
     @classmethod
     def for_engine(cls, engine: str, home: Path) -> "_FilesystemPoolLayout":
+        if engine == "hermes":
+            workspace = home / ".hermes" / "workspace"
+            legacy_root = home / ".hermes" / "skills"
+            legacy_local = workspace / "skills" / "skills-local"
+            legacy_repo = home / ".hermes" / "skills-repo"
+            pool_root = workspace / "skills-pool"
+            return cls(
+                legacy_root=legacy_root,
+                legacy_local=legacy_local,
+                legacy_repo=legacy_repo,
+                pool_root=pool_root,
+                pool_local=pool_root / "skills-local",
+                pool_repo=pool_root / "skills-repo",
+                marker=pool_root / ".pool-ready",
+                local_bridge=legacy_root / "skills-local",
+                repo_bridge=legacy_repo,
+            )
         if engine == "aicoding":
             workspace = home / ".aicoding" / "workspace"
             legacy_root = home / ".claude" / "skills"
@@ -237,7 +254,7 @@ def _marker_contract_valid(
             and bridge.get("target") == str(layout.pool_repo)
             and bridge.get("valid") is True
         )
-    return summary.get("structural_bridges") == [
+    bridges_valid = summary.get("structural_bridges") == [
         {
             "name": "stable_local_bridge",
             "path": str(layout.local_bridge),
@@ -251,6 +268,9 @@ def _marker_contract_valid(
             "valid": True,
         },
     ]
+    if expected_engine == "hermes":
+        return bridges_valid and summary.get("legacy_bridge_verified") is True
+    return bridges_valid
 
 
 def _managed_entry_record(
@@ -337,7 +357,7 @@ def inspect_runtime_layout(
             expected_contract_version,
             "engine_has_no_filesystem_pool_layout",
         )
-    if engine not in {"openclaw", "claude_code", "aicoding"}:
+    if engine not in {"openclaw", "claude_code", "aicoding", "hermes"}:
         return _not_capable(
             engine,
             expected_contract_version,
@@ -585,6 +605,8 @@ def inspect_runtime_layout(
     else:
         checks["stable_local_bridge_valid"] = True
         checks["stable_repo_bridge_valid"] = True
+        if engine == "hermes":
+            checks["legacy_local_bridge_valid"] = True
     return RuntimeLayoutInspection(
         status=RuntimeLayoutInspectionStatus.READY,
         engine=engine,

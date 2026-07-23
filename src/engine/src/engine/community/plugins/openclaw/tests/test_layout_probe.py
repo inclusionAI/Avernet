@@ -422,7 +422,7 @@ def test_invalid_declared_managed_entry_is_rejected(tmp_path):
 
 def test_other_engine_is_not_capable_without_touching_home(tmp_path):
     result = inspect_runtime_layout(
-        engine="hermes",
+        engine="unsupported-engine",
         expected_contract_version=LAYOUT_CONTRACT_VERSION,
         home=tmp_path / "missing",
         repo_is_mounted=lambda _path: (_ for _ in ()).throw(AssertionError()),
