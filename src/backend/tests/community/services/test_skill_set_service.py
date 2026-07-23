@@ -132,6 +132,45 @@ class TestGetSymlinkMappings:
             ),
         ]
 
+    def test_aicoding_pool_locators_drive_restart_mappings(
+        self, skill_set_service, mock_skill_set_repo
+    ):
+        pool_local = (
+            "/home/admin/.aicoding/workspace/skills-pool/skills-local/handmade"
+        )
+        skill_set_service.engine_type = "aicoding"
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "AICoding Pool", "is_default": False}
+        ]
+        mock_skill_set_repo.get_skills_in_set.return_value = [
+            {
+                "id": "1",
+                "name": "handmade",
+                "git_path": f"local://{pool_local}",
+            },
+            {
+                "id": "2",
+                "name": "repo-skill",
+                "git_path": "git://business/repo-skill",
+            },
+        ]
+
+        mappings = skill_set_service.get_symlink_mappings(
+            user_id="100015",
+            bolt_id="default",
+        )
+
+        assert [(mapping.source, mapping.target) for mapping in mappings] == [
+            (
+                pool_local,
+                "/home/admin/.claude/skills/handmade",
+            ),
+            (
+                "/home/admin/.aicoding/skills-repo/business/repo-skill",
+                "/home/admin/.claude/skills/repo-skill",
+            ),
+        ]
+
     def test_local_path_with_relative_name(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo
     ):

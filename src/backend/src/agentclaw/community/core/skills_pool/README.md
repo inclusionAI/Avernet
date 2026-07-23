@@ -3,7 +3,7 @@
 Skills Pool 控制面的 Bot 级布局状态、首次迁移认领和激活编排边界。
 容器目录准备由镜像负责；本模块通过当前 runtime adapter 完成 probe、
 受支持文件型引擎的原子数据面切换与 Pool mapping，并在最后事务性提交
-locator 和 `POOL_ACTIVE`。当前已接入 OpenClaw 与 Claude Code；完整多引擎
+locator 和 `POOL_ACTIVE`。当前已接入 OpenClaw、Claude Code 与 AICoding；完整多引擎
 Engine Layout Descriptor 仍不在本期范围内。
 
 ## 核心语义

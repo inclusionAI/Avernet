@@ -59,6 +59,23 @@ class _FilesystemPoolLayout:
 
     @classmethod
     def for_engine(cls, engine: str, home: Path) -> "_FilesystemPoolLayout":
+        if engine == "aicoding":
+            workspace = home / ".aicoding" / "workspace"
+            legacy_root = home / ".claude" / "skills"
+            legacy_local = workspace / "skills" / "skills-local"
+            legacy_repo = home / ".aicoding" / "skills-repo"
+            pool_root = workspace / "skills-pool"
+            return cls(
+                legacy_root=legacy_root,
+                legacy_local=legacy_local,
+                legacy_repo=legacy_repo,
+                pool_root=pool_root,
+                pool_local=pool_root / "skills-local",
+                pool_repo=pool_root / "skills-repo",
+                marker=pool_root / ".pool-ready",
+                local_bridge=legacy_root / "skills-local",
+                repo_bridge=legacy_repo,
+            )
         if engine == "claude_code":
             workspace = home / ".claude_code" / "workspace"
             legacy_root = home / ".claude" / "skills"
@@ -320,7 +337,7 @@ def inspect_runtime_layout(
             expected_contract_version,
             "engine_has_no_filesystem_pool_layout",
         )
-    if engine not in {"openclaw", "claude_code"}:
+    if engine not in {"openclaw", "claude_code", "aicoding"}:
         return _not_capable(
             engine,
             expected_contract_version,
@@ -490,7 +507,7 @@ def inspect_runtime_layout(
             preparation_id=preparation_id,
         )
     required_bridges = [("legacy_repo", layout.repo_bridge, layout.pool_repo)]
-    if engine == "claude_code":
+    if engine != "openclaw":
         required_bridges = [
             ("stable_local", layout.local_bridge, layout.legacy_local),
             ("stable_repo", layout.repo_bridge, layout.pool_repo),
