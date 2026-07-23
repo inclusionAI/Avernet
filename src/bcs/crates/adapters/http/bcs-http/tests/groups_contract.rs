@@ -1451,15 +1451,19 @@ async fn my_groups_rejects_explicit_bot_token_when_container_validation_fails() 
 async fn my_groups_rejects_empty_bot_actor_identity() {
     let query = Arc::new(RecordingGroupQuery::default());
     let services = Services::builder().group_query(query).build_for_test();
-    let app = build_router(HttpAppState::new(services).with_auth_chain(
-        static_bot_auth_chain(""),
-        AuthConfig::default(),
-    ));
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(
+        HttpAppState::new(services)
+            .with_auth_chain(static_bot_auth_chain(""), AuthConfig::default())
+            .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
 
     let response = app
         .oneshot(
             Request::builder()
                 .uri("/groups/my")
+                .header("authorization", "Bearer human-oauth-token")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
                 .body(Body::empty())
                 .unwrap(),
         )
