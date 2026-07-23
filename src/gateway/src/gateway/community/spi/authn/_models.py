@@ -12,6 +12,8 @@ third-party / app-principal access is added; ``PrincipalType`` is left open for
 that.
 """
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
@@ -52,3 +54,36 @@ class UserPrincipal(BaseModel):
 # `Principal` becomes a discriminated union (UserPrincipal | AppPrincipal | ...)
 # when app-principal access lands; for now the only member is UserPrincipal.
 Principal = UserPrincipal
+
+
+# ── Strategy inputs (framework-agnostic) ─────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class CredentialBundle:
+    """Framework-agnostic snapshot of a request's credentials.
+
+    A delivery adapter fills this from the incoming request (e.g. a FastAPI
+    ``Request``); an ``AuthStrategy`` reads it without depending on any web
+    framework.
+    """
+
+    headers: Mapping[str, str]
+    cookies: Mapping[str, str]
+    query: Mapping[str, str]
+
+
+class Delegation(StrEnum):
+    """Whether a route lets the caller act on behalf of an end user."""
+
+    OPTIONAL = "optional"  # end-user handle allowed but not required (default)
+    FORBIDDEN = "forbidden"  # pure caller only; reject an end-user handle
+    # REQUIRED lands with verified delegation (app acting for a real user).
+
+
+@dataclass(frozen=True)
+class StrategyParams:
+    """Per-route parameters for one strategy, from its ``x-avernet-security`` block."""
+
+    scopes: frozenset[str] = frozenset()
+    delegation: Delegation = Delegation.OPTIONAL

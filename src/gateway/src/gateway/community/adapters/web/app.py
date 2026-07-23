@@ -62,6 +62,14 @@ def create_app() -> FastAPI:
         """Liveness probe."""
         return {"status": "ok"}
 
+    # Wire the authenticator (composition). Imported lazily inside the factory so
+    # the adapters layer keeps no *static* dependency on bootstrap — function-body
+    # imports are exempt from the layer-boundary check by design (composition at
+    # call time).
+    from gateway.community.bootstrap import build_authenticator
+
+    app.state.authenticator = build_authenticator()
+
     # Mount the public /openapi/v1 API group routers.
     include_all(app)
 

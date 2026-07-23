@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 from pydantic import ValidationError
 
 from gateway.community.spi.auth import AuthenticatedUser
-from gateway.community.spi.authn import Principal, PrincipalType, UserPrincipal
+from gateway.community.spi.authn import (
+    CredentialBundle,
+    Delegation,
+    Principal,
+    PrincipalType,
+    StrategyParams,
+    UserPrincipal,
+)
 
 
 def _subject() -> AuthenticatedUser:
@@ -46,3 +55,22 @@ def test_user_principal_is_immutable() -> None:
 
 def test_principal_alias_is_user_principal() -> None:
     assert Principal is UserPrincipal
+
+
+def test_strategy_params_defaults() -> None:
+    params = StrategyParams()
+    assert params.scopes == frozenset()
+    assert params.delegation is Delegation.OPTIONAL
+
+
+def test_strategy_params_are_frozen() -> None:
+    params = StrategyParams(scopes=frozenset({"bots:read"}))
+    with pytest.raises(FrozenInstanceError):
+        params.delegation = Delegation.FORBIDDEN  # type: ignore[misc]
+
+
+def test_credential_bundle_is_frozen() -> None:
+    creds = CredentialBundle(headers={}, cookies={"SSO_TOKEN": "x"}, query={})
+    assert creds.cookies["SSO_TOKEN"] == "x"
+    with pytest.raises(FrozenInstanceError):
+        creds.headers = {}  # type: ignore[misc]
