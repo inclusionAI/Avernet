@@ -26,7 +26,8 @@ use bcs_service_api::{
     SessionHistoryCommand, SessionHistoryResult,
     PersistentGroupSendCommand, PersistentGroupSendOutcome, RouteAndSendResult, RoutingCoreService,
     RoutingDecision, RoutingTarget, ServiceError, ServiceResult, Session, SessionKind,
-    SessionManagementService, SessionStatus, SessionUseCaseError, TaskCompleteCommand,
+    SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
+    SystemMessageService, TaskCompleteCommand,
     TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome, TaskRunAliasRegistration,
     WebSendCommand, WebSendOutcome,
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
@@ -404,6 +405,7 @@ struct RecordingMessageFlow {
     group_chats: Mutex<Vec<GroupChatCommand>>,
     persistent_sends: Mutex<Vec<PersistentGroupSendCommand>>,
     callbacks: Mutex<Vec<GroupCallbackCommand>>,
+    system_notifications: Mutex<Vec<SystemMessageEvent>>,
     next_group_chat_error: Mutex<Option<ServiceError>>,
     next_persistent_error: Mutex<Option<ServiceError>>,
 }
@@ -532,6 +534,20 @@ impl MessageFlowService for RecordingMessageFlow {
         _cmd: TaskCompleteCommand,
     ) -> ServiceResult<TaskCompleteOutcome> {
         unreachable!("not used by this contract")
+    }
+}
+
+#[async_trait::async_trait]
+impl SystemMessageService for RecordingMessageFlow {
+    async fn notify(
+        &self,
+        _group_id: &str,
+        event: SystemMessageEvent,
+        _session_id: &str,
+        _session_participants: &[Participant],
+    ) -> ServiceResult<usize> {
+        self.system_notifications.lock().await.push(event);
+        Ok(1)
     }
 }
 
@@ -775,6 +791,7 @@ async fn build_group_app_with_identity(
         .bot_delivery(bot_delivery.clone())
         .frontend_delivery(frontend_delivery.clone())
         .message_flow(message_flow.clone())
+        .system_message(message_flow.clone())
         .session_management(Arc::new(StaticSessionManagement::new(test_session(
                 "group-1:abcdef12",
                 "group-1",
@@ -918,6 +935,17 @@ async fn session_chat_auto_joins_authenticated_human_and_binds_sender_identity()
             if human.actor_id == "human_456" && human.staff_no == "456"
     ));
     drop(group_chats);
+
+    let system_notifications = message_flow.system_notifications.lock().await;
+    assert_eq!(system_notifications.len(), 1);
+    assert!(matches!(
+        &system_notifications[0],
+        SystemMessageEvent::HumanJoined { group_id, actor }
+            if group_id == "group-1"
+                && actor.bot_uuid == "human_456"
+                && actor.actor_kind == bcs_service_api::ActorKind::Human
+    ));
+    drop(system_notifications);
 
     let response = app
         .oneshot(
