@@ -12,6 +12,8 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 )
 from agentclaw.community.core.skills_pool.models import (
     OpenClawPoolPaths,
+    PoolCutoverResult,
+    PoolCutoverStatus,
     RegisteredSkillAsset,
 )
 from agentclaw.community.core.skills_pool.reconcile_service import (
@@ -108,6 +110,19 @@ class FakeLayoutRepository:
         )
         return True
 
+    def record_pre_cutover_failure(self, **kwargs: object) -> bool:
+        if not self._owns(kwargs):
+            return False
+        self.events.append("failure")
+        self.state = replace(
+            self.state,
+            last_failure_code=str(kwargs["failure_code"]),
+            last_failure_stage=str(kwargs["failure_stage"]),
+            last_failure_retryable=bool(kwargs["retryable"]),
+            last_failure_evidence=dict(kwargs["evidence"]),
+        )
+        return True
+
     def commit_pool_active(
         self,
         *,
@@ -181,6 +196,17 @@ class FakeRuntime:
     def __init__(self) -> None:
         self.events: list[str] = []
         self.publish_success = True
+        self.cutover_result = PoolCutoverResult(
+            committed=True,
+            status=PoolCutoverStatus.COMMITTED,
+            evidence={
+                "local_inventory": {
+                    "registered": 2,
+                    "unregistered": 1,
+                    "total": 3,
+                }
+            },
+        )
         self.probe_result = RuntimeLayoutProbeResult(
             status=RuntimeLayoutProbeStatus.READY,
             engine="openclaw",
@@ -193,7 +219,7 @@ class FakeRuntime:
         self.events.append("probe")
         return self.probe_result
 
-    async def cutover(self, **kwargs: object) -> dict[str, object]:
+    async def cutover(self, **kwargs: object) -> PoolCutoverResult:
         self.events.append("cutover")
         assert kwargs["registered_local_names"] == ["local-a", "local-b"]
         mappings = kwargs["mappings"]
@@ -202,7 +228,7 @@ class FakeRuntime:
             f"{OpenClawPoolPaths().pool_local}/local-b",
             f"{OpenClawPoolPaths().pool_repo}/business/repo-skill",
         ]
-        return {"committed": True, "bridge": "valid"}
+        return self.cutover_result
 
     async def publish_mappings(self, **kwargs: object) -> bool:
         self.events.append("mapping")
@@ -278,6 +304,77 @@ async def test_mapping_failure_after_cutover_does_not_commit_database() -> None:
     assert retried.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
     assert runtime.events == ["probe", "mapping", "verify"]
     assert layouts.events == ["database"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("runtime_status", "expected_outcome"),
+    [
+        (
+            "DATA_INCONSISTENT",
+            SkillsPoolReconcileOutcome.DATA_INCONSISTENT,
+        ),
+        (
+            "ACTIVE_ENTRY_CONFLICT",
+            SkillsPoolReconcileOutcome.ACTIVE_ENTRY_CONFLICT,
+        ),
+    ],
+)
+async def test_structural_cutover_failure_is_persisted_without_data_plane_change(
+    runtime_status: str,
+    expected_outcome: SkillsPoolReconcileOutcome,
+) -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=False,
+        status=PoolCutoverStatus(runtime_status),
+        evidence={
+            "reason": "unsafe_filesystem_truth",
+            "affected": ["handmade"],
+        },
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is expected_outcome
+    assert layouts.events == ["ready", "begin", "failure"]
+    assert layouts.state.active_layout is SkillLayout.LEGACY
+    assert layouts.state.data_plane_cutover_committed is False
+    assert layouts.state.last_failure_code == runtime_status
+    assert layouts.state.last_failure_stage == "pre_cutover_validation"
+    assert layouts.state.last_failure_retryable is False
+    assert layouts.state.last_failure_evidence == runtime.cutover_result.to_dict()
+    assert runtime.events == ["probe", "cutover"]
+    assert layouts.committed_locators is None
+
+
+@pytest.mark.asyncio
+async def test_non_atomic_cutover_is_persisted_and_keeps_legacy() -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=False,
+        status=PoolCutoverStatus.NOT_ATOMIC,
+        evidence={"reason": "atomic_exchange_unavailable"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
+    assert layouts.events == ["ready", "begin", "failure"]
+    assert layouts.state.active_layout is SkillLayout.LEGACY
+    assert layouts.state.last_failure_code == "NOT_ATOMIC"
+    assert layouts.state.last_failure_stage == "atomic_cutover"
+    assert layouts.state.last_failure_retryable is False
+    assert layouts.state.last_failure_evidence == runtime.cutover_result.to_dict()
+    assert runtime.events == ["probe", "cutover"]
 
 
 @pytest.mark.asyncio

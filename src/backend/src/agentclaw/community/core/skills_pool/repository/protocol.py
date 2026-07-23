@@ -99,6 +99,20 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """在运行时原子切换前持久化 pre-cutover 阶段。"""
         ...
 
+    def record_pre_cutover_failure(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        failure_code: str,
+        failure_stage: str,
+        retryable: bool,
+        evidence: dict[str, object],
+    ) -> bool:
+        """持久化尚未跨越数据面边界的结构化失败及审计证据。"""
+        ...
+
     def commit_pool_active(
         self,
         *,

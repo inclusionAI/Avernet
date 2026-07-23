@@ -64,6 +64,7 @@ class BotSkillLayoutStateModel(Base):
     last_failure_code = Column(String(64), nullable=True)
     last_failure_stage = Column(String(64), nullable=True)
     last_failure_retryable = Column(SmallInteger, nullable=True)
+    last_failure_evidence = Column(Text, nullable=True)
     last_failure_at = Column(DateTime, nullable=True)
     pool_activated_at = Column(DateTime, nullable=True)
     lease_owner = Column(String(128), nullable=True)
@@ -123,6 +124,11 @@ class BotSkillLayoutStateModel(Base):
             last_failure_retryable=(
                 bool(self.last_failure_retryable)
                 if self.last_failure_retryable is not None
+                else None
+            ),
+            last_failure_evidence=(
+                json.loads(self.last_failure_evidence)
+                if self.last_failure_evidence
                 else None
             ),
             last_failure_at=self.last_failure_at,

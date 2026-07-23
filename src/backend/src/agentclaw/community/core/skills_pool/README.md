@@ -22,8 +22,19 @@ OpenClaw 原子数据面切换与 Pool mapping，并在最后事务性提交 loc
   都重新读取 Bot 和当前 provider binding，并重新 probe marker。
 - 容器内以系统原生原子 exchange 将 Legacy local 切成指向 Pool canonical
   local 的永久单向 bridge；不支持原子 exchange 时保持 Legacy。
+- 激活前同时核对已登记 local，并从文件系统枚举未登记 local、受管 active
+  entry 与外部 entry；完整 local 内容进入 Pool，但不会为未登记内容创建
+  数据库记录，外部 entry 保持原目标。
+- 已登记源缺失/不可读或受管入口冲突时，在数据面切换前阻断并持久化失败码、
+  阶段和独立证据；普通 probe 重试不会覆盖这份失败证据。
 - 数据面切换后先全量发布并验证 Pool mapping，再在一个 CAS 事务中更新该
   Bot 全部 local locator 和 `POOL_ACTIVE`。mapping 或事务失败只前滚重试。
+- 本模块当前只持久化尚未跨过 bridge 的结构性失败；bridge 已提交后的
+  `POST_CUTOVER_SYNC_PENDING`、mapping 与数据库提交失败的分阶段恢复和
+  审计持久化由 #376 的完整前滚恢复状态机承接，避免在 #370 重复定义状态。
+- local 后置合并采用 best-effort 原子 exchange：一般的切换前修改、切换后
+  Pool 修改和新增路径竞争均可收敛；无写栅栏时，跨 exchange 的已打开文件
+  描述符或连续同文件写入仍存在极窄竞态，作为 #370 的显式接受限制。
 
 ## Context Boundary
 
@@ -34,6 +45,8 @@ provides:
   - "SkillsPoolRolloutGate"
   - "SkillsPoolMigrationClaimService"
   - "SkillsPoolReconcileService"
+  - "PoolCutoverStatus"
+  - "PoolCutoverResult"
   - "BotSkillLayoutState and migration enums"
 consumes:
   - "BotRepository"

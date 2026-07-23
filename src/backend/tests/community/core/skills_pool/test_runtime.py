@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentclaw.community.core.skills_pool.models import (
+    PoolCutoverStatus,
     PoolSkillMapping,
 )
 from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
@@ -44,7 +45,14 @@ class FakeTransport:
             }
         )
         if path.endswith("/activate"):
-            return {"success": True, "data": {"committed": True}}
+            return {
+                "success": True,
+                "data": {
+                    "committed": True,
+                    "status": "COMMITTED",
+                    "evidence": {},
+                },
+            }
         if path.endswith("/publish"):
             return {"success": True, "data": {"published": True}}
         return {"success": True, "data": {"valid": True}}
@@ -53,6 +61,24 @@ class FakeTransport:
 class FakeProbe:
     async def probe_bot(self, **kwargs):
         return kwargs
+
+
+class FutureStatusTransport(FakeTransport):
+    async def invoke(self, conn_info, method, path, *, body, timeout):
+        response = await super().invoke(
+            conn_info,
+            method,
+            path,
+            body=body,
+            timeout=timeout,
+        )
+        if path.endswith("/activate"):
+            response["data"] = {
+                "committed": True,
+                "status": "FUTURE_STATUS",
+                "evidence": {"source": "newer-engine"},
+            }
+        return response
 
 
 @pytest.mark.asyncio
@@ -93,7 +119,8 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
         mappings=mappings,
     )
 
-    assert cutover["committed"] is True
+    assert cutover.committed
+    assert cutover.status is PoolCutoverStatus.COMMITTED
     assert published
     assert verified
     assert resolver.calls == [
@@ -106,3 +133,28 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
         "/api/skills/layout/mappings/publish",
         "/api/skills/layout/mappings/verify",
     ]
+
+
+@pytest.mark.asyncio
+async def test_pool_runtime_fails_closed_for_unknown_engine_status() -> None:
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=FutureStatusTransport(),
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.cutover(
+        bot_id="bot-1",
+        user_id="owner-1",
+        migration_generation="generation-1",
+        preparation_id="preparation-1",
+        registered_local_names=[],
+        mappings=[],
+    )
+
+    assert result.status is PoolCutoverStatus.UNKNOWN
+    assert not result.committed
+    assert result.evidence == {
+        "source": "newer-engine",
+        "raw_status": "FUTURE_STATUS",
+    }

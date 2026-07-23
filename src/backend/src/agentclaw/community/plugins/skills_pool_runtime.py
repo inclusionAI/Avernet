@@ -14,6 +14,8 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeResult,
 )
 from agentclaw.community.core.skills_pool.models import (
+    PoolCutoverResult,
+    PoolCutoverStatus,
     PoolSkillMapping,
 )
 from agentclaw.community.log import get_logger
@@ -61,7 +63,7 @@ class OpenClawSkillsPoolRuntime:
         preparation_id: str,
         registered_local_names: list[str],
         mappings: list[PoolSkillMapping],
-    ) -> dict[str, object]:
+    ) -> PoolCutoverResult:
         try:
             response = await self._invoke(
                 bot_id=bot_id,
@@ -80,15 +82,42 @@ class OpenClawSkillsPoolRuntime:
                 bot_id,
                 migration_generation,
             )
-            return {
-                "committed": False,
-                "reason": "runtime_cutover_request_failed",
-                "error_type": type(error).__name__,
-            }
+            return PoolCutoverResult(
+                committed=False,
+                status=PoolCutoverStatus.TRANSIENT_ERROR,
+                evidence={
+                    "reason": "runtime_cutover_request_failed",
+                    "error_type": type(error).__name__,
+                },
+            )
         data = response.get("data")
         if not isinstance(data, dict):
-            return {"committed": False, "reason": "runtime_cutover_response_invalid"}
-        return dict(data)
+            return PoolCutoverResult(
+                committed=False,
+                status=PoolCutoverStatus.INVALID,
+                evidence={"reason": "runtime_cutover_response_invalid"},
+            )
+        raw_status = str(data.get("status", ""))
+        try:
+            status = PoolCutoverStatus(raw_status)
+        except ValueError:
+            status = PoolCutoverStatus.UNKNOWN
+        evidence = dict(data.get("evidence") or {})
+        if status is PoolCutoverStatus.UNKNOWN:
+            evidence["raw_status"] = raw_status
+        committed = (
+            data.get("committed") is True
+            and status
+            in {
+                PoolCutoverStatus.COMMITTED,
+                PoolCutoverStatus.ALREADY_COMMITTED,
+            }
+        )
+        return PoolCutoverResult(
+            committed=committed,
+            status=status,
+            evidence=evidence,
+        )
 
     async def publish_mappings(
         self,

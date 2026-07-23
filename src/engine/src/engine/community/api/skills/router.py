@@ -17,7 +17,9 @@ from engine.community.api.skills.schemas import (
     BindPathRequest,
     CenterEnsureRequestSchema,
     CleanSymlinkRequest,
+    PoolLayoutActivateApiResponse,
     PoolLayoutActivateRequest,
+    PoolLayoutActivateResponse,
     PoolMappingVerifyRequest,
     RuntimeLayoutProbeApiResponse,
     RuntimeLayoutProbeRequest,
@@ -68,10 +70,13 @@ async def probe_runtime_skills_layout(
     )
 
 
-@router.post("/layout/activate", response_model=ApiResponse)
+@router.post(
+    "/layout/activate",
+    response_model=PoolLayoutActivateApiResponse,
+)
 async def activate_runtime_skills_layout(
     body: PoolLayoutActivateRequest,
-) -> ApiResponse:
+) -> PoolLayoutActivateApiResponse:
     """在当前容器的持久化文件系统上提交 OpenClaw Pool 数据面。"""
 
     plugin = _skills_plugin()
@@ -89,9 +94,9 @@ async def activate_runtime_skills_layout(
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
-    return ApiResponse(
+    return PoolLayoutActivateApiResponse(
         success=result.committed,
-        data=result.to_data(),
+        data=PoolLayoutActivateResponse.model_validate(result.to_data()),
         message=(
             "Skills Pool 数据面已提交"
             if result.committed

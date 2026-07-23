@@ -10,6 +10,9 @@ import os
 from pathlib import Path
 from typing import Any
 
+from engine.community.plugin_api.openclaw.skills import (
+    PoolLayoutActivationPortResult,
+)
 from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.plugins.openclaw._file import _convert_path
 from engine.community.plugins.openclaw.layout_activation import (
@@ -53,7 +56,7 @@ class _SkillsPortMixin:
 
     async def activate_pool_layout(
         self, params: dict[str, Any]
-    ) -> dict[str, Any]:
+    ) -> PoolLayoutActivationPortResult:
         result = await asyncio.to_thread(
             activate_openclaw_pool,
             migration_generation=params["migration_generation"],
@@ -63,7 +66,7 @@ class _SkillsPortMixin:
             ),
             mappings=self._pool_mappings(params),
         )
-        return result.to_data()
+        return PoolLayoutActivationPortResult(**result.to_data())
 
     async def probe_pool_layout(
         self, params: dict[str, Any]

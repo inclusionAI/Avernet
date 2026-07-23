@@ -65,6 +65,7 @@ class BotSkillLayoutState:
     last_failure_code: str | None = None
     last_failure_stage: str | None = None
     last_failure_retryable: bool | None = None
+    last_failure_evidence: dict[str, object] | None = None
     last_failure_at: datetime | None = None
     pool_activated_at: datetime | None = None
     lease_owner: str | None = None

@@ -355,6 +355,60 @@ class SkillsPoolLayoutRepository:
             )
         return affected == 1
 
+    def record_pre_cutover_failure(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        failure_code: str,
+        failure_stage: str,
+        retryable: bool,
+        evidence: dict[str, object],
+    ) -> bool:
+        """记录结构化阻塞原因，但不跨越或回退数据面切换边界。"""
+
+        evidence_json = json.dumps(evidence, ensure_ascii=False)
+        with self._database.transactional_orm_session() as session:
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase.in_(
+                        (
+                            SkillLayoutPhase.POOL_READY.value,
+                            SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER.value,
+                        )
+                    ),
+                    BotSkillLayoutStateModel.data_plane_cutover_committed == 0,
+                    BotSkillLayoutStateModel.migration_generation
+                    == migration_generation,
+                    BotSkillLayoutStateModel.lease_owner == lease_owner,
+                    BotSkillLayoutStateModel.lease_expires_at > func.now(),
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.last_failure_code: failure_code,
+                        BotSkillLayoutStateModel.last_failure_stage: (
+                            failure_stage
+                        ),
+                        BotSkillLayoutStateModel.last_failure_retryable: int(
+                            retryable
+                        ),
+                        BotSkillLayoutStateModel.last_failure_evidence: (
+                            evidence_json
+                        ),
+                        BotSkillLayoutStateModel.last_failure_at: func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
     def commit_pool_active(
         self,
         *,
@@ -423,6 +477,7 @@ class SkillsPoolLayoutRepository:
                         BotSkillLayoutStateModel.last_failure_code: None,
                         BotSkillLayoutStateModel.last_failure_stage: None,
                         BotSkillLayoutStateModel.last_failure_retryable: None,
+                        BotSkillLayoutStateModel.last_failure_evidence: None,
                         BotSkillLayoutStateModel.last_failure_at: None,
                     },
                     synchronize_session=False,

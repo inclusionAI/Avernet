@@ -177,6 +177,59 @@ def test_cutover_rejects_missing_pool_mapping_source_before_bridge(
     assert not legacy_local.is_symlink()
 
 
+def test_registered_local_missing_is_structured_data_inconsistency(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    prepared_content = (pool_local / "handmade" / "SKILL.md").read_text()
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["missing"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.DATA_INCONSISTENT
+    assert result.evidence == {
+        "reason": "registered_local_source_missing",
+        "registered_name": "missing",
+        "source": str(legacy_local / "missing"),
+    }
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == prepared_content
+
+
+def test_registered_local_unreadable_is_structured_data_inconsistency(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    skill_file = legacy_local / "handmade" / "SKILL.md"
+    prepared_content = (pool_local / "handmade" / "SKILL.md").read_text()
+    skill_file.chmod(0)
+    try:
+        result = activate_openclaw_pool(
+            migration_generation="generation-1",
+            preparation_id=PREPARATION_ID,
+            registered_local_names=["handmade"],
+            mappings=[],
+            home=home,
+            repo_is_mounted=lambda path: path == pool_repo,
+        )
+    finally:
+        skill_file.chmod(0o600)
+
+    assert result.status is PoolActivationStatus.DATA_INCONSISTENT
+    assert result.evidence["reason"] == "registered_local_source_unreadable"
+    assert result.evidence["registered_name"] == "handmade"
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == prepared_content
+
+
 def test_final_sync_materializes_skill_created_after_preparation(
     tmp_path: Path,
 ) -> None:
@@ -201,6 +254,230 @@ def test_final_sync_materializes_skill_created_after_preparation(
 
     assert result.committed
     assert (pool_local / "late-skill" / "SKILL.md").read_text() == "late"
+
+
+def test_unregistered_local_and_managed_entry_follow_filesystem_truth(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    unregistered = legacy_local / "agent-created"
+    unregistered.mkdir()
+    (unregistered / "SKILL.md").write_text("filesystem-only")
+    active_entry = legacy_local.parent / "agent-created"
+    active_entry.symlink_to(unregistered, target_is_directory=True)
+
+    activated = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    published = publish_pool_mappings(mappings=[], home=home)
+    verified = verify_skill_mappings(mappings=[], home=home)
+
+    assert activated.status is PoolActivationStatus.COMMITTED
+    assert (
+        pool_local / "agent-created" / "SKILL.md"
+    ).read_text() == "filesystem-only"
+    assert activated.evidence["local_inventory"] == {
+        "registered": 1,
+        "unregistered": 1,
+        "total": 2,
+    }
+    assert activated.evidence["active_inventory"] == {
+        "managed": 1,
+        "external": 0,
+    }
+    assert published.published
+    assert active_entry.is_symlink()
+    assert active_entry.readlink() == pool_local / "agent-created"
+    assert verified.valid
+    assert verified.evidence["managed_checked"] == 1
+
+
+def test_external_active_entry_is_ignored_and_never_rewritten(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    external_source = tmp_path / "external-skill"
+    external_source.mkdir()
+    (external_source / "SKILL.md").write_text("external")
+    external_entry = legacy_local.parent / "external-skill"
+    external_entry.symlink_to(external_source, target_is_directory=True)
+    requested = SkillMapping(
+        source=str(pool_local / "handmade"),
+        target=str(external_entry),
+    )
+
+    activated = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[requested],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    published = publish_pool_mappings(mappings=[requested], home=home)
+    verified = verify_skill_mappings(mappings=[requested], home=home)
+
+    assert activated.status is PoolActivationStatus.COMMITTED
+    assert activated.evidence["active_inventory"] == {
+        "managed": 0,
+        "external": 1,
+    }
+    assert published.published
+    assert published.evidence["external_ignored"] == [str(external_entry)]
+    assert verified.valid
+    assert verified.evidence["external_ignored"] == 1
+    assert external_entry.readlink() == external_source
+
+
+def test_competing_managed_sources_block_before_atomic_cutover(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    other = legacy_local / "other"
+    other.mkdir()
+    (other / "SKILL.md").write_text("other")
+    active_entry = legacy_local.parent / "shared-name"
+    active_entry.symlink_to(other, target_is_directory=True)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(active_entry),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.ACTIVE_ENTRY_CONFLICT
+    assert result.evidence == {
+        "reason": "managed_active_entry_conflict",
+        "conflicts": [
+            {
+                "target": str(active_entry),
+                "requested_source": str(pool_local / "handmade"),
+                "existing_source": str(pool_local / "other"),
+            }
+        ],
+    }
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
+    assert active_entry.readlink() == other
+
+
+def test_occupied_managed_target_blocks_before_atomic_cutover(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    occupied = legacy_local.parent / "handmade"
+    occupied.mkdir()
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(occupied),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.ACTIVE_ENTRY_CONFLICT
+    assert result.evidence == {
+        "reason": "managed_active_entry_conflict",
+        "conflicts": [
+            {
+                "target": str(occupied),
+                "requested_source": str(pool_local / "handmade"),
+                "existing_source": "<occupied-non-symlink>",
+            }
+        ],
+    }
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
+    assert occupied.is_dir()
+
+
+def test_broken_managed_active_source_blocks_as_data_inconsistent(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    active_entry = legacy_local.parent / "missing-managed"
+    active_entry.symlink_to(
+        pool_local / "missing-managed",
+        target_is_directory=True,
+    )
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.DATA_INCONSISTENT
+    assert result.evidence["reason"] == "managed_active_source_invalid"
+    assert result.evidence["failures"] == [
+        {
+            "source": str(pool_local / "missing-managed"),
+            "target": str(active_entry),
+            "reason": "managed_source_missing",
+        }
+    ]
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
+
+
+@pytest.mark.parametrize("source_kind", ["traversal", "symlink_escape"])
+def test_mapping_source_cannot_escape_canonical_pool_root(
+    tmp_path: Path,
+    source_kind: str,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    external = pool_local.parent.parent / "external"
+    external.mkdir()
+    if source_kind == "traversal":
+        source = pool_local / ".." / ".." / "external"
+        expected_reason = "source_outside_pool"
+    else:
+        source = pool_repo / "escape"
+        source.symlink_to(external, target_is_directory=True)
+        expected_reason = "source_escapes_pool"
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(source),
+                target=str(legacy_local.parent / "escape"),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.INVALID
+    assert result.evidence["reason"] == "mapping_source_invalid"
+    assert result.evidence["failures"][0]["reason"] == expected_reason
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
 
 
 def test_post_exchange_sync_captures_write_after_initial_copy(
@@ -228,6 +505,63 @@ def test_post_exchange_sync_captures_write_after_initial_copy(
     assert (
         pool_local / "handmade" / "created-during-cutover.txt"
     ).read_text() == "must-survive"
+
+
+def test_post_exchange_sync_captures_new_unregistered_skill_root(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+
+    def create_skill_then_exchange(left: Path, right: Path) -> bool:
+        late_skill = left / "created-during-cutover"
+        late_skill.mkdir()
+        (late_skill / "SKILL.md").write_text("must-survive")
+        return atomic_exchange_paths(left, right)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        exchange_paths=create_skill_then_exchange,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert (
+        pool_local / "created-during-cutover" / "SKILL.md"
+    ).read_text() == "must-survive"
+    assert result.evidence["post_sync"]["applied"] == [
+        "created-during-cutover",
+        "created-during-cutover/SKILL.md",
+    ]
+
+
+def test_post_exchange_sync_captures_existing_file_update_before_exchange(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+
+    def update_then_exchange(left: Path, right: Path) -> bool:
+        (left / "handmade" / "SKILL.md").write_text("updated-before-exchange")
+        return atomic_exchange_paths(left, right)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        exchange_paths=update_then_exchange,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == (
+        "updated-before-exchange"
+    )
+    assert result.evidence["post_sync"]["applied"] == ["handmade/SKILL.md"]
 
 
 def test_post_exchange_sync_preserves_new_pool_write_on_same_file(
@@ -258,6 +592,52 @@ def test_post_exchange_sync_preserves_new_pool_write_on_same_file(
     assert result.evidence["post_sync"]["conflicts_preserved_in_pool"] == [
         "handmade/SKILL.md"
     ]
+
+
+def test_atomic_file_exchange_preserves_write_at_replacement_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import layout_sync
+
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+
+    def update_then_exchange(left: Path, right: Path) -> bool:
+        (left / "handmade" / "SKILL.md").write_text("legacy-window")
+        return atomic_exchange_paths(left, right)
+
+    real_exchange = layout_sync.atomic_exchange_paths
+    exchange_count = 0
+
+    def write_pool_at_exchange(left: Path, right: Path) -> bool:
+        nonlocal exchange_count
+        if exchange_count == 0:
+            right.write_text("pool-at-exchange")
+        exchange_count += 1
+        return real_exchange(left, right)
+
+    monkeypatch.setattr(
+        layout_sync,
+        "atomic_exchange_paths",
+        write_pool_at_exchange,
+    )
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        exchange_paths=update_then_exchange,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == (
+        "pool-at-exchange"
+    )
+    assert result.evidence["post_sync"][
+        "conflicts_preserved_in_pool"
+    ] == ["handmade/SKILL.md"]
 
 
 def test_post_exchange_new_file_uses_atomic_no_clobber(
@@ -370,7 +750,7 @@ def test_retry_after_exchange_finishes_quarantine_move(tmp_path: Path) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
     write_baseline_manifest(
         pool_local=pool_local,
-        registered_local_names=["handmade"],
+        local_names=["handmade"],
         manifest_path=pool_local.parent
         / ".cutover-baseline-generation-1.json",
     )
@@ -429,7 +809,6 @@ def test_cutover_stays_legacy_when_atomic_exchange_is_unavailable(
         ("bad generation", PREPARATION_ID, ["handmade"], "migration_generation_invalid"),
         ("generation-1", "stale-preparation", ["handmade"], "runtime_layout_not_ready"),
         ("generation-1", PREPARATION_ID, ["../escape"], "registered_local_name_invalid"),
-        ("generation-1", PREPARATION_ID, ["missing"], "registered_local_source_invalid"),
     ],
 )
 def test_cutover_rejects_invalid_inputs(
@@ -583,7 +962,7 @@ def test_mapping_verifier_reports_each_drift_class(tmp_path: Path) -> None:
         "source_missing",
         "target_invalid",
         "target_not_symlink",
-        "target_mismatch",
+        "managed_source_conflict",
     }
 
 
@@ -610,6 +989,19 @@ def test_mapping_publisher_validates_updates_and_occupied_targets(
         mappings=[SkillMapping(str(source), str(target))],
     )
     assert updated.published
+    assert updated.evidence["external_ignored"] == [str(target)]
+    assert target.readlink() == tmp_path / "old"
+
+    target.unlink()
+    target.symlink_to(
+        legacy_local / "handmade",
+        target_is_directory=True,
+    )
+    updated = publish_pool_mappings(
+        home=home,
+        mappings=[SkillMapping(str(source), str(target))],
+    )
+    assert updated.published
     assert updated.evidence["updated"] == [str(target)]
 
     kept = publish_pool_mappings(
@@ -626,7 +1018,7 @@ def test_mapping_publisher_validates_updates_and_occupied_targets(
         mappings=[SkillMapping(str(source), str(target))],
     )
     assert not occupied.published
-    assert occupied.evidence["reason"] == "managed_target_occupied"
+    assert occupied.evidence["reason"] == "managed_active_entry_conflict"
 
 
 @pytest.mark.asyncio
