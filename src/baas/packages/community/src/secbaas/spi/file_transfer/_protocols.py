@@ -105,7 +105,12 @@ class FileTransferBackend(Protocol):
         """
         ...
 
-    def generate_download_url(self, staging_path: str, expire_seconds: int) -> str:
+    def generate_download_url(
+        self,
+        staging_path: str,
+        expire_seconds: int,
+        response_params: dict | None = None,
+    ) -> str:
         """Generate a presigned GET URL for downloading a file from the staging path.
 
         The staging_path is a complete OSS object key constructed by the
@@ -114,6 +119,10 @@ class FileTransferBackend(Protocol):
         Args:
             staging_path: Complete OSS object key.
             expire_seconds: URL validity duration in seconds.
+            response_params: Optional dict of additional query parameters for
+                the presigned URL (e.g. ``{"response-content-disposition": "attachment"}``
+                for forced download).  Default None.  Backward compatible —
+                Bot callers do not pass this arg.
 
         Returns:
             Presigned GET URL string.
