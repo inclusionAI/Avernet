@@ -94,13 +94,7 @@ class FileTransferPoller:
                 # if a ticket gets stuck after status transition but before
                 # the operation completes (e.g. pull_file fails after
                 # update_status), the next poller cycle can retry it.
-                statuses=[
-                    "CREATED",
-                    "UPLOADING",
-                    "UPLOAD_COMPLETED",
-                    "PULLING",
-                    "PUSHING",
-                ],
+                statuses=["CREATED", "UPLOADING", "UPLOAD_COMPLETED", "PULLING", "PUSHING"],
                 limit=10000,
             )
             # UPLOAD direction: CREATED/UPLOADING/UPLOAD_COMPLETED
@@ -266,11 +260,9 @@ class FileTransferPoller:
                     return "retention_done"
 
                 # Normal path: UPLOAD_COMPLETED -> PULLING -> pull_file -> DONE
-                # Recovery: if ticket is already UPLOAD_COMPLETED or PULLING
-                # (stuck from a previous cycle), skip the redundant transition.
-                # PULLING must be excluded here because PULLING → UPLOAD_COMPLETED
-                # is not a valid transition (backward rollback not allowed).
-                if ticket.status not in ("UPLOAD_COMPLETED", "PULLING"):
+                # Recovery: if ticket is already UPLOAD_COMPLETED (stuck from
+                # a previous cycle), skip the redundant transition.
+                if ticket.status != "UPLOAD_COMPLETED":
                     self._ticket_repo.update_status(
                         transfer_id, "UPLOAD_COMPLETED", None
                     )
@@ -281,7 +273,9 @@ class FileTransferPoller:
                 # transition), skip the redundant status update and retry
                 # pull_file directly.
                 if ticket.status != "PULLING":
-                    self._ticket_repo.update_status(transfer_id, "PULLING", None)
+                    self._ticket_repo.update_status(
+                        transfer_id, "PULLING", None
+                    )
 
                 download_url = await asyncio.to_thread(
                     self._file_backend.generate_download_url,
