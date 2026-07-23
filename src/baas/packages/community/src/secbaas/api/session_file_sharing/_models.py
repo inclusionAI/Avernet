@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+
 # ============================================================================
 # Upload URL models
 # ============================================================================
@@ -39,7 +40,6 @@ class SessionGetUploadUrlRequest(BaseModel):
     )
     staging_subdir: str | None = Field(
         default=None,
-        max_length=256,
         description="Optional subdirectory grouping for file organisation",
     )
     file_size: int = Field(
