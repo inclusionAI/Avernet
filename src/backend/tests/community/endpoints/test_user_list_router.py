@@ -18,8 +18,8 @@ _ENTITY_ID = "caller_rollout_user"
 _OTHER_ENTITY_ID = "another_user"
 _USER_LIST_TYPE = "caller_identity"
 _CORRECTION_TARGET = "corrected_rollout_user"
-_CORRECTION_ACTOR = "first_authenticated_corrector"
-_SECOND_CORRECTION_ACTOR = "second_authenticated_corrector"
+_CORRECTION_OPERATOR = "330429"
+_SECOND_CORRECTION_OPERATOR = "61256"
 
 
 def _seed_user(world) -> None:
@@ -59,12 +59,12 @@ def _seed_other_scope_members(world) -> None:
         )
 
 
-def _seed_correction_actor(world) -> None:
-    make_staff_user(world, user_id=_CORRECTION_ACTOR)
+def _seed_correction_operator(world) -> None:
+    make_staff_user(world, user_id=_CORRECTION_OPERATOR)
 
 
-def _seed_second_correction_actor_with_member(world) -> None:
-    make_staff_user(world, user_id=_SECOND_CORRECTION_ACTOR)
+def _seed_second_correction_operator_with_member(world) -> None:
+    make_staff_user(world, user_id=_SECOND_CORRECTION_OPERATOR)
     with world.get(DatabasePlugin).orm_session() as session:
         session.add(
             EntityUserListModel(
@@ -213,53 +213,53 @@ def user_list_check_requires_an_entity_id():
 @endpoint_test(
     method="PUT",
     path="/api/v1/user-lists/correct",
-    scenario="authenticated_user_adds_member",
+    scenario="authorized_operator_adds_member",
     input=CaseInput(
         query_params={"ctoken": "opaque-gateway-compatibility-value"},
-        headers={"x-user-id": _CORRECTION_ACTOR},
+        headers={"x-user-id": _CORRECTION_OPERATOR},
         json_body={
             "entity_id": _CORRECTION_TARGET,
             "user_list_type": _USER_LIST_TYPE,
             "in_whitelist": True,
         },
     ),
-    seed=_seed_correction_actor,
+    seed=_seed_correction_operator,
     expect=ExpectSuccess(
         status=200,
         json_contains={"success": True, "data": {"in_whitelist": True}},
     ),
     extra_assertions=(_assert_ctoken_not_exposed,),
 )
-def user_list_correction_allows_an_authenticated_user_to_add():
-    """An authenticated user may enable a current-environment entry."""
+def user_list_correction_allows_the_first_authorized_operator_to_add():
+    """The first explicitly authorized user may enable a current-env entry."""
 
 
 @endpoint_test(
     method="PUT",
     path="/api/v1/user-lists/correct",
-    scenario="authenticated_user_removes_member",
+    scenario="authorized_operator_removes_member",
     input=CaseInput(
-        headers={"x-user-id": _SECOND_CORRECTION_ACTOR},
+        headers={"x-user-id": _SECOND_CORRECTION_OPERATOR},
         json_body={
             "entity_id": _CORRECTION_TARGET,
             "user_list_type": _USER_LIST_TYPE,
             "in_whitelist": False,
         },
     ),
-    seed=_seed_second_correction_actor_with_member,
+    seed=_seed_second_correction_operator_with_member,
     expect=ExpectSuccess(
         status=200,
         json_contains={"success": True, "data": {"in_whitelist": False}},
     ),
 )
-def user_list_correction_allows_another_authenticated_user_to_remove():
-    """Another authenticated user may disable an exact entry."""
+def user_list_correction_allows_the_second_authorized_operator_to_remove():
+    """The second explicitly authorized user may disable an exact entry."""
 
 
 @endpoint_test(
     method="PUT",
     path="/api/v1/user-lists/correct",
-    scenario="any_authenticated_user_adds_member",
+    scenario="rejects_unlisted_operator",
     input=CaseInput(
         headers={"x-user-id": _ENTITY_ID},
         json_body={
@@ -269,13 +269,10 @@ def user_list_correction_allows_another_authenticated_user_to_remove():
         },
     ),
     seed=_seed_non_correction_user,
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"success": True, "data": {"in_whitelist": True}},
-    ),
+    expect=ExpectError(status=403),
 )
-def user_list_correction_allows_every_authenticated_user():
-    """The correction endpoint has no user-number-specific authorization."""
+def user_list_correction_rejects_non_operator_users():
+    """Only the two explicitly authorized identities may correct membership."""
 
 
 @endpoint_test(
@@ -283,7 +280,7 @@ def user_list_correction_allows_every_authenticated_user():
     path="/api/v1/user-lists/correct",
     scenario="rejects_extra_body_field",
     input=CaseInput(
-        headers={"x-user-id": _CORRECTION_ACTOR},
+        headers={"x-user-id": _CORRECTION_OPERATOR},
         json_body={
             "entity_id": _CORRECTION_TARGET,
             "user_list_type": _USER_LIST_TYPE,
@@ -291,7 +288,7 @@ def user_list_correction_allows_every_authenticated_user():
             "unexpected": "rejected",
         },
     ),
-    seed=_seed_correction_actor,
+    seed=_seed_correction_operator,
     expect=ExpectError(status=422),
 )
 def user_list_correction_rejects_extra_request_fields():

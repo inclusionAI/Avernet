@@ -1,7 +1,10 @@
-"""Delegation rules for authenticated user-list corrections."""
+"""Authorization and delegation rules for user-list corrections."""
 
 from __future__ import annotations
 
+import pytest
+
+from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.user_list.service import UserListService
 
 
@@ -23,12 +26,13 @@ class _Repository:
         self.calls.append((entity_id, user_list_type, in_whitelist))
 
 
-def test_correction_allows_any_authenticated_actor():
+@pytest.mark.parametrize("actor_id", ["330429", "61256"])
+def test_correction_allows_only_the_two_named_operators(actor_id):
     repository = _Repository()
     service = UserListService(repository=repository)
 
     result = service.correct_membership(
-        actor_id="any_authenticated_actor",
+        actor_id=actor_id,
         entity_id="target",
         user_list_type="caller_identity",
         in_whitelist=True,
@@ -38,16 +42,16 @@ def test_correction_allows_any_authenticated_actor():
     assert repository.calls == [("target", "caller_identity", True)]
 
 
-def test_correction_allows_another_authenticated_actor_to_remove():
+def test_correction_rejects_other_authenticated_users_before_writing():
     repository = _Repository()
     service = UserListService(repository=repository)
 
-    result = service.correct_membership(
-        actor_id="another_authenticated_actor",
-        entity_id="target",
-        user_list_type="caller_identity",
-        in_whitelist=False,
-    )
+    with pytest.raises(Forbidden):
+        service.correct_membership(
+            actor_id="not-authorized",
+            entity_id="target",
+            user_list_type="caller_identity",
+            in_whitelist=False,
+        )
 
-    assert result is False
-    assert repository.calls == [("target", "caller_identity", False)]
+    assert repository.calls == []
