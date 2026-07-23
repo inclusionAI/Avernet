@@ -49,7 +49,7 @@
 mod agentpass;
 mod oauth;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
@@ -61,7 +61,7 @@ use serde_json::json;
 use tracing::{Level, debug, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
-use bcs_cli::BcsClient;
+use bcs_cli::{BcsClient, CreateCustomGroupOptions};
 use bcs_protocol::{BCS_PROTOCOL_VERSION, BotConnectParams};
 
 // disable agentpass, agentpass token should be auto injected into the http headers
@@ -806,6 +806,113 @@ fn parse_skills_input(input: &str) -> Vec<bcs_protocol::Skill> {
         .collect()
 }
 
+fn parse_custom_group_bindings(
+    values: &[String],
+) -> Result<BTreeMap<String, bcs_protocol::ParticipantBindingInfo>> {
+    let mut bindings = BTreeMap::new();
+    for value in values {
+        let (raw_binding, raw_bot_id) = value.split_once('=').ok_or_else(|| {
+            anyhow!("Invalid --binding '{}'; expected ROLE=BOT_UUID", value)
+        })?;
+        let binding = raw_binding.trim();
+        let bot_id = raw_bot_id.trim();
+        if binding.is_empty() || bot_id.is_empty() {
+            return Err(anyhow!(
+                "Invalid --binding '{}'; role and bot UUID must not be empty",
+                value
+            ));
+        }
+        if bindings.contains_key(binding) {
+            return Err(anyhow!("Duplicate --binding role: {binding}"));
+        }
+        bindings.insert(
+            binding.to_string(),
+            bcs_protocol::ParticipantBindingInfo {
+                source: "manual".to_string(),
+                bot_ids: vec![bot_id.to_string()],
+            },
+        );
+    }
+    Ok(bindings)
+}
+
+fn validate_custom_group_bindings(
+    bindings: &BTreeMap<String, bcs_protocol::ParticipantBindingInfo>,
+    validation: &serde_json::Value,
+    driver: &str,
+) -> Result<()> {
+    let slots = validation
+        .get("participants")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| anyhow!("Validation response is missing participants"))?;
+    let declared = slots
+        .iter()
+        .filter_map(|slot| slot.get("binding").and_then(serde_json::Value::as_str))
+        .collect::<BTreeSet<_>>();
+    for binding in bindings.keys() {
+        if !declared.contains(binding.as_str()) {
+            return Err(anyhow!("--binding references undeclared participant role: {binding}"));
+        }
+    }
+    for slot in slots {
+        let Some(binding) = slot.get("binding").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let needs_binding = slot
+            .get("required")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            || slot
+                .get("assigned")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+        if needs_binding && !bindings.contains_key(binding) {
+            return Err(anyhow!("Missing --binding for participant role: {binding}"));
+        }
+    }
+    if !bindings
+        .values()
+        .flat_map(|binding| &binding.bot_ids)
+        .any(|bot_id| bot_id == driver)
+    {
+        return Err(anyhow!(
+            "Driver bot must appear in at least one --binding: {driver}"
+        ));
+    }
+    Ok(())
+}
+
+fn emit_collaboration_validation(validation: &serde_json::Value, structured_mode: bool) {
+    if structured_mode {
+        println!(
+            "{}",
+            serde_json::to_string(validation).unwrap_or_else(|_| "{}".to_string())
+        );
+        return;
+    }
+    if validation.get("valid").and_then(serde_json::Value::as_bool) == Some(true) {
+        let summary = validation.get("summary").cloned().unwrap_or_default();
+        println!("VALID");
+        println!(
+            "  Participants: {}",
+            summary.get("participants").and_then(serde_json::Value::as_u64).unwrap_or(0)
+        );
+        println!(
+            "  Nodes: {}",
+            summary.get("nodes").and_then(serde_json::Value::as_u64).unwrap_or(0)
+        );
+    } else if let Some(errors) = validation.get("errors").and_then(serde_json::Value::as_array) {
+        for error in errors {
+            println!(
+                "{} {}: {}",
+                error.get("code").and_then(serde_json::Value::as_str).unwrap_or("INVALID"),
+                error.get("path").and_then(serde_json::Value::as_str).unwrap_or("$"),
+                error.get("message").and_then(serde_json::Value::as_str).unwrap_or("validation failed")
+            );
+        }
+    }
+}
+
 /// Skill→BCS interactive debug
 macro_rules! skill_debug_request {
     ($debug:expr, $method:expr, $endpoint:expr, $body:expr) => {
@@ -1011,6 +1118,16 @@ enum Commands {
         /// Group topic (sets the group label)
         #[arg(long)]
         topic: Option<String>,
+    },
+
+    /// Validate definitions and create custom collaboration groups
+    Collaboration {
+        /// Authentication token (auto-discovered if not provided)
+        #[arg(short, long)]
+        token: Option<String>,
+
+        #[command(subcommand)]
+        command: CollaborationCommands,
     },
 
     /// Get group info
@@ -1221,6 +1338,45 @@ enum Commands {
 
         #[command(subcommand)]
         command: ServiceCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum CollaborationCommands {
+    /// Validate a custom collaboration definition against the current BCS server
+    Validate {
+        /// YAML file to validate
+        file: PathBuf,
+    },
+
+    /// Create a custom collaboration group from a validated definition
+    Create {
+        /// YAML file containing the custom collaboration definition
+        file: PathBuf,
+
+        /// Group ID (optional, auto-generated if not provided)
+        #[arg(short, long)]
+        id: Option<String>,
+
+        /// Driver bot UUID; it must appear in at least one participant binding
+        #[arg(long)]
+        driver: String,
+
+        /// Logical participant binding in ROLE=BOT_UUID form; repeat for each role
+        #[arg(long = "binding", value_name = "ROLE=BOT_UUID", required = true)]
+        bindings: Vec<String>,
+
+        /// Group context describing the collaboration goal
+        #[arg(long)]
+        context: Option<String>,
+
+        /// Group topic
+        #[arg(long)]
+        topic: Option<String>,
+
+        /// Auto-start the workflow for later service invocations
+        #[arg(long, default_value_t = false)]
+        auto_start_on_service_invocation: bool,
     },
 }
 
@@ -2509,7 +2665,8 @@ async fn main() -> Result<()> {
                     "mode": &result.mode,
                     "driver_bot": &result.driver_bot,
                     "participants": &result.participants,
-                    "chat_url": &result.chat_url
+                    "chat_url": &result.chat_url,
+                    "session_id": &result.session_id
                 })
             );
 
@@ -2525,6 +2682,9 @@ async fn main() -> Result<()> {
                 println!("  Participants: {}", result.participants.join(", "));
                 if let Some(ref chat_url) = result.chat_url {
                     println!("  Chat URL: {}", chat_url);
+                }
+                if let Some(ref session_id) = result.session_id {
+                    println!("  Session: {}", session_id);
                 }
             }
         }
@@ -2610,15 +2770,18 @@ async fn main() -> Result<()> {
                 json!({
                     "id": &result.id,
                     "driver_bot": &result.driver_bot,
-                    "participants": &result.participants
+                    "participants": &result.participants,
+                    "chat_url": &result.chat_url,
+                    "session_id": &result.session_id
                 })
             );
 
             // Surface the session the server auto-creates as part of group
-            // creation (see commit ddd6ca7b4 — group_management always seeds
-            // a "新会话"). Best-effort: a failed lookup must NOT unwind the
-            // successful group creation.
-            let auto_session: Option<serde_json::Value> = {
+            // creation. New servers return it directly; retain a best-effort
+            // lookup for compatibility with older servers.
+            let auto_session_id = if result.session_id.is_some() {
+                result.session_id.clone()
+            } else {
                 debug_request!(
                     debug,
                     "GET",
@@ -2634,7 +2797,13 @@ async fn main() -> Result<()> {
                         v.get("items")
                             .and_then(|x| x.as_array())
                             .and_then(|arr| arr.first())
-                            .cloned()
+                            .and_then(|session| {
+                                session
+                                    .get("session_id")
+                                    .or_else(|| session.get("id"))
+                                    .and_then(|value| value.as_str())
+                            })
+                            .map(str::to_string)
                     }
                     Err(e) => {
                         eprintln!(
@@ -2653,15 +2822,150 @@ async fn main() -> Result<()> {
             if let Some(chat_url) = &result.chat_url {
                 println!("  Chat URL: {}", chat_url);
             }
-            if let Some(sess) = auto_session {
-                let sid = sess
-                    .get("session_id")
-                    .or_else(|| sess.get("id"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                println!("  Session: {}", sid);
+            if let Some(session_id) = auto_session_id {
+                println!("  Session: {}", session_id);
             }
         }
+
+        Commands::Collaboration { token, command } => match command {
+            CollaborationCommands::Validate { file } => {
+                let definition_yaml = std::fs::read_to_string(&file).map_err(|error| {
+                    anyhow!("Failed to read YAML file {}: {error}", file.display())
+                })?;
+                let token = get_token(token.as_deref())?;
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+
+                debug_request!(
+                    debug,
+                    "POST",
+                    "/collaboration/definitions/validate",
+                    json!({ "definition_yaml": &definition_yaml })
+                );
+                let validation = client
+                    .validate_collaboration_definition(&definition_yaml)
+                    .await?;
+                debug_response!(debug, "200", &validation);
+                let valid = validation
+                    .get("valid")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                emit_collaboration_validation(&validation, structured_mode);
+                if !valid {
+                    std::process::exit(1);
+                }
+            }
+
+            CollaborationCommands::Create {
+                file,
+                id,
+                driver,
+                bindings,
+                context,
+                topic,
+                auto_start_on_service_invocation,
+            } => {
+                let definition_yaml = std::fs::read_to_string(&file).map_err(|error| {
+                    anyhow!("Failed to read YAML file {}: {error}", file.display())
+                })?;
+                let participant_bindings = parse_custom_group_bindings(&bindings)?;
+                let token = get_token(token.as_deref())?;
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+
+                debug_request!(
+                    debug,
+                    "POST",
+                    "/collaboration/definitions/validate",
+                    json!({ "definition_yaml": &definition_yaml })
+                );
+                let validation = client
+                    .validate_collaboration_definition(&definition_yaml)
+                    .await?;
+                debug_response!(debug, "200", &validation);
+                if validation
+                    .get("valid")
+                    .and_then(serde_json::Value::as_bool)
+                    != Some(true)
+                {
+                    emit_collaboration_validation(&validation, structured_mode);
+                    std::process::exit(1);
+                }
+                validate_custom_group_bindings(&participant_bindings, &validation, &driver)?;
+
+                debug_request!(
+                    debug,
+                    "POST",
+                    "/groups",
+                    json!({
+                        "id": &id,
+                        "driver_bot": &driver,
+                        "participant_bindings": &participant_bindings,
+                        "context": &context,
+                        "topic": &topic,
+                        "group_strategy": "state_machine",
+                        "auto_start_on_service_invocation": auto_start_on_service_invocation,
+                        "collaboration_definition_yaml": &definition_yaml
+                    })
+                );
+                let result = client
+                    .create_custom_group(CreateCustomGroupOptions {
+                        id,
+                        driver_bot: driver,
+                        participant_bindings,
+                        definition_yaml,
+                        context,
+                        topic,
+                        auto_start_on_service_invocation,
+                    })
+                    .await?;
+                debug_response!(
+                    debug,
+                    "200",
+                    json!({
+                        "id": &result.id,
+                        "driver_bot": &result.driver_bot,
+                        "participants": &result.participants,
+                        "chat_url": &result.chat_url,
+                        "session_id": &result.session_id
+                    })
+                );
+
+                if structured_mode {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "id": result.id,
+                            "driver_bot": result.driver_bot,
+                            "participants": result.participants,
+                            "chat_url": result.chat_url,
+                            "session_id": result.session_id,
+                            "group_kind": result.group_kind,
+                            "created": result.created
+                        }))?
+                    );
+                } else {
+                    println!("Custom collaboration group created:");
+                    println!("  ID: {}", result.id);
+                    println!("  Driver: {}", result.driver_bot);
+                    println!("  Participants: {}", result.participants.join(", "));
+                    if let Some(chat_url) = result.chat_url {
+                        println!("  Chat URL: {chat_url}");
+                    }
+                    if let Some(session_id) = result.session_id {
+                        println!("  Session: {session_id}");
+                    }
+                }
+            }
+        },
 
         Commands::GetGroup { token, id } => {
             let token = get_token(token.as_deref())?;
@@ -4068,6 +4372,99 @@ mod tests {
         };
 
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn collaboration_validate_command_parses_yaml_path() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "collaboration",
+            "validate",
+            "/tmp/workflow.yaml",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Collaboration {
+                token: None,
+                command: CollaborationCommands::Validate { file },
+            } => assert_eq!(file, PathBuf::from("/tmp/workflow.yaml")),
+            _ => panic!("expected collaboration validate command"),
+        }
+    }
+
+    #[test]
+    fn collaboration_create_command_parses_repeated_bindings() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "collaboration",
+            "--token",
+            "test-token",
+            "create",
+            "/tmp/workflow.yaml",
+            "--driver",
+            "bot-driver",
+            "--binding",
+            "planner=bot-driver",
+            "--binding",
+            "writer=20260412_abc:100005",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Collaboration {
+                token: Some(token),
+                command:
+                    CollaborationCommands::Create {
+                        file,
+                        driver,
+                        bindings,
+                        ..
+                    },
+            } => {
+                assert_eq!(token, "test-token");
+                assert_eq!(file, PathBuf::from("/tmp/workflow.yaml"));
+                assert_eq!(driver, "bot-driver");
+                assert_eq!(
+                    bindings,
+                    vec!["planner=bot-driver", "writer=20260412_abc:100005"]
+                );
+            }
+            _ => panic!("expected collaboration create command"),
+        }
+    }
+
+    #[test]
+    fn custom_group_binding_parser_preserves_bot_uuid_colons() {
+        let bindings = parse_custom_group_bindings(&[
+            "planner=bot-driver".to_string(),
+            "writer=20260412_abc:100005".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(bindings["planner"].bot_ids, vec!["bot-driver"]);
+        assert_eq!(bindings["writer"].bot_ids, vec!["20260412_abc:100005"]);
+    }
+
+    #[test]
+    fn custom_group_binding_validation_requires_assigned_slots_and_driver() {
+        let validation = serde_json::json!({
+            "participants": [
+                {"binding": "planner", "required": true, "assigned": true},
+                {"binding": "writer", "required": false, "assigned": true}
+            ]
+        });
+        let bindings = parse_custom_group_bindings(&[
+            "planner=bot-driver".to_string(),
+            "writer=bot-writer".to_string(),
+        ])
+        .unwrap();
+        validate_custom_group_bindings(&bindings, &validation, "bot-driver").unwrap();
+
+        let missing = parse_custom_group_bindings(&["planner=bot-driver".to_string()]).unwrap();
+        let error = validate_custom_group_bindings(&missing, &validation, "bot-driver")
+            .unwrap_err();
+        assert!(error.to_string().contains("writer"));
     }
 
     #[test]

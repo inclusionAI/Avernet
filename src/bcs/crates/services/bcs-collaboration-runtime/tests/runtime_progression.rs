@@ -926,7 +926,7 @@ async fn start_run_uses_group_participant_bindings_for_template_definition() {
 }
 
 #[tokio::test]
-async fn start_run_rejects_multi_bot_slot_with_single_assignee_in_mvp() {
+async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime() {
     let group = Arc::new(GroupStore::new());
     let mut seeded_group = test_group();
     seeded_group.participants.push(Participant {
@@ -982,7 +982,7 @@ async fn start_run_rejects_multi_bot_slot_with_single_assignee_in_mvp() {
             caller_id: None,
         })
         .await
-        .expect_err("multi bot slot is not supported by single assignee MVP");
+        .expect_err("multi bot slot is not supported by the current single-assignee runtime");
 
     assert!(error.to_string().contains("exactly one bot"));
 }
@@ -1928,6 +1928,9 @@ runtime:
           type: bot_binding
           binding: driver
         instruction: Review revised answer.
+        transitions:
+          complete:
+            targets: [publish]
 "#
     .to_string()
 }

@@ -16,6 +16,56 @@ use crate::port::JudgeDecision;
 
 pub const MAX_COLLABORATION_DEFINITION_YAML_BYTES: usize = 256 * 1024;
 
+#[derive(Debug, Clone)]
+pub struct ValidateCollaborationDefinitionYamlCommand {
+    pub definition_yaml: String,
+    pub judge_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CollaborationDefinitionValidationOutcome {
+    pub valid: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<CollaborationDefinitionValidationDiagnostic>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<CollaborationDefinitionValidationDiagnostic>,
+    pub summary: CollaborationDefinitionValidationSummary,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub participants: Vec<CollaborationDefinitionParticipantSlot>,
+    #[serde(skip_serializing)]
+    pub definition: Option<CollaborationDefinition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollaborationDefinitionValidationDiagnostic {
+    pub code: String,
+    pub path: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollaborationDefinitionValidationSummary {
+    pub participants: usize,
+    pub nodes: usize,
+    #[serde(default)]
+    pub initial_nodes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_output_node: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollaborationDefinitionParticipantSlot {
+    pub binding: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub required: bool,
+    pub assigned: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CollaborationRuntimeError {
     #[error("state machine run not found: {0}")]
@@ -226,6 +276,16 @@ pub struct HandleBotTerminalEventOutcome {
 
 #[async_trait]
 pub trait CollaborationRuntimeService: Send + Sync {
+    async fn validate_definition_yaml(
+        &self,
+        cmd: ValidateCollaborationDefinitionYamlCommand,
+    ) -> Result<CollaborationDefinitionValidationOutcome, CollaborationRuntimeError> {
+        let _ = cmd;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "collaboration definition YAML validation is not implemented".to_string(),
+        ))
+    }
+
     async fn start_state_machine_run(
         &self,
         cmd: StartStateMachineRunCommand,

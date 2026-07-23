@@ -102,6 +102,85 @@ _story_cli_direct_onboard() {
     require_status "removed CLI-onboarded agent returns 404" "404" || return
 }
 
+# User story: An operator validates a custom workflow and creates its group through bcs-cli.
+#
+# Flow:
+#   Author YAML -> validate against the live BCS runtime -> bind logical roles
+#   -> create the state-machine group -> inspect it -> clean up the fixture.
+#
+# Critical assertions:
+#   - Validation returns the participant slots and graph summary from BCS.
+#   - Group creation binds logical roles without embedding Bot UUIDs in YAML.
+#   - The created group uses the state-machine strategy and contains both bound bots.
+story_cli_operator_creates_custom_collaboration() {
+    info "Story: an operator validates and creates a custom collaboration through bcs-cli"
+    local yaml_file group_id
+    yaml_file="$(mktemp -t bcs-custom-collaboration.XXXXXX 2>/dev/null || mktemp)"
+    printf '%s\n' "name: CLI custom release workflow
+participants:
+  planner:
+    display_name: Release planner
+    required: true
+  reviewer:
+    display_name: Engineering reviewer
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      plan:
+        kind: bot_task
+        display_name: Plan release
+        assignee:
+          type: bot_binding
+          binding: planner
+        instruction: Produce a concise release plan.
+        transitions:
+          complete:
+            targets: [review]
+      review:
+        kind: bot_task
+        display_name: Review release
+        assignee:
+          type: bot_binding
+          binding: reviewer
+        instruction: Review the plan and produce the final recommendation.
+        final_output: true" > "$yaml_file"
+
+    _cli_story_run "operator validates custom collaboration YAML" "" \
+        collaboration validate "$yaml_file" || {
+        rm -f "$yaml_file"
+        return
+    }
+    assert_json_eq "custom collaboration YAML is valid" "$BCS_CLI_STDOUT" "valid" "true"
+    assert_json_eq "custom collaboration exposes two roles" "$BCS_CLI_STDOUT" "summary.participants" "2"
+    assert_json_eq "custom collaboration exposes two nodes" "$BCS_CLI_STDOUT" "summary.nodes" "2"
+
+    _cli_story_run "operator creates the custom collaboration group" PM \
+        collaboration create "$yaml_file" --driver "$BOT_PM_UUID" \
+        --binding "planner=$BOT_PM_UUID" --binding "reviewer=$BOT_ENG_UUID" \
+        --context "Review release readiness through a custom workflow" \
+        --topic "CLI custom release workflow" || {
+        rm -f "$yaml_file"
+        return
+    }
+    group_id=$(json_path "$BCS_CLI_STDOUT" "id")
+    assert_not_empty "custom collaboration group returns an id" "$group_id"
+    assert_contains "custom collaboration group contains its driver" "$BCS_CLI_STDOUT" "$BOT_PM_UUID"
+    assert_contains "custom collaboration group contains its reviewer" "$BCS_CLI_STDOUT" "$BOT_ENG_UUID"
+    rm -f "$yaml_file"
+    [[ -n "$group_id" ]] || return
+
+    api_get "/groups/${group_id}"
+    require_status "operator reads the custom collaboration group" "200" || return
+    assert_json_eq "custom collaboration group uses state-machine strategy" "$RESPONSE" "group_strategy" "state_machine"
+
+    api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+    require_status "custom collaboration fixture is cleaned up" "200" || return
+}
+
 # User story: An operator establishes trust and coordinates a release team entirely through bcs-cli.
 #
 # Flow:

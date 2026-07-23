@@ -1,6 +1,6 @@
 # Avernet BCS 自定义协作 YAML schema
 
-自定义协作在 BCS 中通过 `state_machine` 实现。使用本参考编写当前 BCS MVP runtime 和随附校验器接受的 YAML。
+自定义协作在 BCS 中通过 `state_machine` 实现。使用本参考编写当前 BCS 运行时和 `bcs-cli collaboration validate` 接受的 YAML。
 
 ## 目录
 
@@ -8,6 +8,7 @@
 - [Participants](#participants)
 - [State machine](#state-machine)
 - [Bot task node](#bot-task-node)
+- [LLM judge node](#llm-judge-node)
 - [Parallel fan-out and join](#parallel-fan-out-and-join)
 - [Runtime input and artifacts](#runtime-input-and-artifacts)
 - [Validation errors](#validation-errors)
@@ -33,17 +34,17 @@ runtime:
 - Reject any other top-level key, including spelling variants such as `apiVersion`, `verion`, or `verions`.
 - Do keep the nested `runtime.state_machine.version: 1`; it is a different field with different semantics.
 - Do not put runtime Bot UUIDs in the definition.
-- Let BCS infer `requires`; omit it for the current MVP authoring subset.
+- Let BCS infer `requires`; omit it from authoring YAML.
 - Keep `metadata.description` as a string, `metadata.labels` as a
   string-to-string mapping, and every `extensions` field as a mapping.
 
-The bundled validator follows the source validation chain in this order:
+`bcs-cli collaboration validate` 通过当前 BCS 实例的 `POST /collaboration/definitions/validate` 接口执行三层校验：
 
-1. Enforce the 256 KiB request limit and parse exactly one YAML document with unique keys.
-2. Enforce the authoring top-level boundary used by group creation.
-3. Validate the `CollaborationDefinition`/state-machine fields accepted by the domain types.
-4. Apply the MVP checks from `bcs-collaboration-runtime::definition::validate_definition`.
-5. Apply the create-group participant restrictions needed by this logical-binding workflow.
+1. Authoring shape: enforce the 256 KiB request limit, parse one YAML document, reject duplicate or unknown keys, and enforce the group-creation top-level boundary.
+2. Runtime contract: deserialize the definition, reject fields not implemented by the current runtime, and enforce graph, participant and node invariants.
+3. Deployment capability: accept `judge` only when the current BCS instance has an LLM provider configured.
+
+校验成功时返回 participant slots 和 graph summary，供后续 `bcs-cli collaboration create` 绑定逻辑角色。
 
 ## Participants
 
@@ -80,10 +81,11 @@ runtime:
 - If projection is present, use only `default_visibility: private` or
   `default_visibility: shared`.
 - Use only `bot_task` nodes.
-- Do not use `initial_node`, `variables`, `events`, actions, output contracts,
-  runtime actors, guards, or judges in the current MVP authoring subset. Judge
-  is excluded by this Skill's demo-safe authoring and validation boundary; BCS
-  runtime can execute an LLM judge when a judge provider is configured.
+- Do not use `initial_node`, `input_schema`, `variables`, `events`, actions,
+  output contracts, runtime actors, or guards; the current runtime rejects them.
+- A node may use an LLM `judge` only when the current BCS instance has an LLM
+  provider configured. Declare every judge outcome and give each outcome a
+  transition.
 - Use one zero-in-degree entry node and one final-output sink.
 - Keep every node reachable from the entry and able to reach the final node.
 
@@ -112,7 +114,36 @@ nodes:
 - Ordinary transitions may use only `complete`.
 - Every non-final node needs at least one target.
 - A final node has `final_output: true` and no transitions.
-- Timeouts and attempt counts must be positive integers.
+- `node_timeout_ms: 0` disables the timeout. `max_attempts` values below 1 are
+  normalized to 1 by the current runtime; prefer explicit positive values for
+  readable authoring YAML.
+
+## LLM judge node
+
+```yaml
+nodes:
+  review:
+    kind: bot_task
+    display_name: 审核内容
+    assignee:
+      type: bot_binding
+      binding: reviewer
+    instruction: 审核上游产物。
+    judge:
+      type: llm
+      criteria:
+        - 内容是否完整且事实准确
+      outcomes:
+        - approved
+        - revise
+    transitions:
+      approved:
+        targets: [publish]
+      revise:
+        targets: [rewrite]
+```
+
+`judge.type` 只能为 `llm`，`criteria` 和 `outcomes` 不能为空。未配置 LLM provider 的 BCS 实例会返回 `UNAVAILABLE_FEATURE`。
 
 ## Parallel fan-out and join
 
@@ -133,11 +164,7 @@ BCS includes the original run `[Input]` in every node prompt and includes each d
 - `YAML_PARSE` or `DUPLICATE_KEY`: repair YAML syntax or duplicate mapping keys.
 - `FORBIDDEN_AUTHORING_FIELD`: remove top-level `api_version`, `id`, or `version`; BCS owns those values during group creation.
 - `UNKNOWN_KEY`: remove a misspelled or unsupported field.
-- `UNSUPPORTED_FEATURE`: replace a non-MVP feature with ordinary bot tasks and complete transitions.
-- `MISSING_BINDING`: declare the participant or fix the assignee binding.
-- `UNKNOWN_TARGET`: fix the transition target node ID.
-- `CYCLE`: remove the back edge; current MVP graphs must be acyclic.
-- `UNREACHABLE_NODE`: connect or remove the isolated node.
-- `FINAL_OUTPUT_COUNT`: leave exactly one final-output node.
+- `INVALID_DEFINITION`: fix unsupported runtime fields, participant bindings, transition targets, graph reachability, entry/final counts, cycles, or invalid node settings according to the message.
+- `UNAVAILABLE_FEATURE`: the definition uses `judge`, but the current BCS instance has no LLM provider configured.
 
-Treat validator output as authoritative for the current MVP subset. Do not bypass an error because the YAML looks plausible.
+Treat `bcs-cli collaboration validate` output as authoritative for the current BCS instance. Do not bypass an error because the YAML looks plausible. The command exits non-zero and returns structured `errors` when validation fails.
