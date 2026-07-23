@@ -669,7 +669,7 @@ async fn bot_chat_async_marks_unauthorized_content_untrusted_without_business_at
     assert_span_string_attribute(span, "http.route", "/bots/{id}/chat-async");
     assert!(span.events.events.is_empty());
     assert_span_bool_attribute(span, "bcn.content.untrusted", true);
-    assert_span_attribute_contains(span, "gen_ai.input.messages", message);
+    assert_gen_ai_input_message(span, message);
 }
 
 #[tokio::test]
@@ -704,7 +704,7 @@ async fn bot_chat_async_marks_authenticated_content_trusted() {
     assert_span_string_attribute(span, "bcn.target.bot_id", "target-bot");
     assert!(span.events.events.is_empty());
     assert_span_bool_attribute(span, "bcn.content.untrusted", false);
-    assert_span_attribute_contains(span, "gen_ai.input.messages", "trusted-content");
+    assert_gen_ai_input_message(span, "trusted-content");
 }
 
 #[tokio::test]
@@ -744,11 +744,7 @@ async fn bot_chat_async_marks_service_authorization_failure_untrusted() {
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
     assert!(span.events.events.is_empty());
     assert_span_bool_attribute(span, "bcn.content.untrusted", true);
-    assert_span_attribute_contains(
-        span,
-        "gen_ai.input.messages",
-        "authorization-failure-content",
-    );
+    assert_gen_ai_input_message(span, "authorization-failure-content");
 }
 
 #[tokio::test]
@@ -788,7 +784,7 @@ async fn bot_chat_async_marks_service_forbidden_failure_untrusted() {
     assert!(!span.attributes.iter().any(|attr| attr.key.as_str() == "bcn.run.id"));
     assert!(span.events.events.is_empty());
     assert_span_bool_attribute(span, "bcn.content.untrusted", true);
-    assert_span_attribute_contains(span, "gen_ai.input.messages", "forbidden-content");
+    assert_gen_ai_input_message(span, "forbidden-content");
 }
 
 #[tokio::test]
@@ -825,7 +821,7 @@ async fn bot_chat_async_records_trusted_content_after_auth_when_session_is_inval
     assert_span_string_attribute(span, "bcn.auth.result", "success");
     assert!(span.events.events.is_empty());
     assert_span_bool_attribute(span, "bcn.content.untrusted", false);
-    assert_span_attribute_contains(span, "gen_ai.input.messages", "invalid-session-content");
+    assert_gen_ai_input_message(span, "invalid-session-content");
 }
 
 async fn capture_otel_spans<F, T>(future: F) -> (T, Vec<opentelemetry_sdk::trace::SpanData>)
@@ -870,15 +866,25 @@ fn assert_span_bool_attribute(
     }));
 }
 
-fn assert_span_attribute_contains(
-    span: &opentelemetry_sdk::trace::SpanData,
-    key: &str,
-    expected: &str,
-) {
-    assert!(span.attributes.iter().any(|attr| {
-        attr.key.as_str() == key
-            && matches!(&attr.value, opentelemetry::Value::String(value) if value.as_str().contains(expected))
-    }));
+fn assert_gen_ai_input_message(span: &opentelemetry_sdk::trace::SpanData, expected: &str) {
+    let value = span
+        .attributes
+        .iter()
+        .find_map(|attr| match &attr.value {
+            opentelemetry::Value::String(value)
+                if attr.key.as_str() == "gen_ai.input.messages" =>
+            {
+                Some(value.as_str())
+            }
+            _ => None,
+        })
+        .expect("gen_ai.input.messages string attribute");
+    let messages: Value = serde_json::from_str(value).expect("schema-compliant input messages JSON");
+    assert_eq!(messages.as_array().map(Vec::len), Some(1));
+    assert_eq!(messages[0]["role"], "user");
+    assert_eq!(messages[0]["parts"].as_array().map(Vec::len), Some(1));
+    assert_eq!(messages[0]["parts"][0]["type"], "text");
+    assert_eq!(messages[0]["parts"][0]["content"], expected);
 }
 
 #[tokio::test]
