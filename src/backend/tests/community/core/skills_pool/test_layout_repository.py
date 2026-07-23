@@ -366,6 +366,37 @@ def test_pre_cutover_failure_evidence_survives_an_ordinary_retry() -> None:
     )
 
 
+def test_invalid_runtime_probe_can_be_recorded_while_pool_is_preparing() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+
+    recorded = repository.record_pre_cutover_failure(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        failure_code="INVALID",
+        failure_stage="runtime_probe",
+        retryable=False,
+        evidence={"reason": "marker_contract_mismatch"},
+    )
+
+    assert recorded
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_PREPARING
+    assert state.last_failure_code == "INVALID"
+    assert state.last_failure_stage == "runtime_probe"
+    assert state.last_failure_retryable is False
+    assert state.last_failure_evidence == {"reason": "marker_contract_mismatch"}
+
+
 def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
@@ -469,14 +500,8 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
             for row in session.query(Skill).order_by(Skill.id).all()
         }
     assert paths == {
-        1: (
-            "local:///home/admin/.openclaw/workspace/"
-            "skills-pool/skills-local/local-a"
-        ),
-        2: (
-            "local:///home/admin/.openclaw/workspace/"
-            "skills-pool/skills-local/local-b"
-        ),
+        1: ("local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-a"),
+        2: ("local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"),
         3: "git://business/repo",
         4: "local:///legacy/other-bot",
         5: "local:///legacy/other-env",

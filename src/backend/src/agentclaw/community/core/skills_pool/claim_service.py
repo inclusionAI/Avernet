@@ -43,6 +43,7 @@ class MigrationClaimOutcome(StrEnum):
     INVALID_BOT_RECORD = "invalid_bot_record"
     ENVIRONMENT_MISMATCH = "environment_mismatch"
     RUNTIME_NOT_EDITABLE = "runtime_not_editable"
+    TRANSIENT_ERROR = "transient_error"
     CLAIM_RACE_LOST = "claim_race_lost"
 
 
@@ -97,7 +98,7 @@ class SkillsPoolMigrationClaimService:
                 publish_bot_id=scope.bot_id,
                 env=scope.env,
             )
-        except Exception:
+        except Exception as error:
             logger.exception(
                 "[skills_pool.claim] service draft lookup failed "
                 "env=%s entity_id=%s bot_id=%s",
@@ -105,7 +106,7 @@ class SkillsPoolMigrationClaimService:
                 scope.entity_id,
                 scope.bot_id,
             )
-            return None
+            raise _RuntimeFormLookupError from error
         if draft is None:
             return None
         if (
@@ -129,7 +130,7 @@ class SkillsPoolMigrationClaimService:
         """首次命中 gate 时提交 generation；已认领状态不再重读白名单。"""
 
         current = self._layout_repository.get(scope)
-        if self._has_pool_migration(current):
+        if current.active_layout is SkillLayout.POOL:
             return MigrationClaimResult(
                 outcome=MigrationClaimOutcome.ALREADY_CLAIMED,
                 state=current,
@@ -151,10 +152,21 @@ class SkillsPoolMigrationClaimService:
                 state=current,
             )
 
-        runtime_form = self._resolve_runtime_form(bot=bot, scope=scope)
+        try:
+            runtime_form = self._resolve_runtime_form(bot=bot, scope=scope)
+        except _RuntimeFormLookupError:
+            return MigrationClaimResult(
+                outcome=MigrationClaimOutcome.TRANSIENT_ERROR,
+                state=current,
+            )
         if runtime_form is None:
             return MigrationClaimResult(
                 outcome=MigrationClaimOutcome.RUNTIME_NOT_EDITABLE,
+                state=current,
+            )
+        if self._has_pool_migration(current):
+            return MigrationClaimResult(
+                outcome=MigrationClaimOutcome.ALREADY_CLAIMED,
                 state=current,
             )
 
@@ -212,3 +224,7 @@ class SkillsPoolMigrationClaimService:
             state=raced,
             rollout_decision=decision,
         )
+
+
+class _RuntimeFormLookupError(RuntimeError):
+    """Current service-draft facts could not be read temporarily."""

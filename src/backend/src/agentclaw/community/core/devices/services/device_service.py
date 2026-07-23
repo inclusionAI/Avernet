@@ -1059,6 +1059,24 @@ class DeviceService:
             f"is_first_active={prev_status == DeviceBindingStatus.PENDING.value}"
         )
 
+        if record.status == DeviceBindingStatus.PENDING.value:
+            # Required durable consumers run before the ACTIVE commit.  If
+            # enqueue fails, the exception propagates and the binding remains
+            # PENDING, so the runtime retry redelivers this one-shot signal.
+            from agentclaw.community.core.events.bus import get_event_bus
+            from agentclaw.community.core.events.types import DeviceAliveEvent
+
+            get_event_bus().publish(
+                DeviceAliveEvent(
+                    device_id=device_id,
+                    binding_id=record.id,
+                    entity_id=record.entity_id,
+                    entity_type=record.entity_type,
+                    device_provider=record.device_provider,
+                    sandbox_id=(record.device_props or {}).get("sandbox_id"),
+                )
+            )
+
         self._repo.update_status_and_alive_at(binding_id=record.id, status=new_status)
 
         # If status changed from PENDING to ACTIVE, sync bot status and trigger callbacks

@@ -1,10 +1,14 @@
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceBindingStatus
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
-from agentclaw.community.core.devices.services.baas_device_service import BaasDeviceService
+from agentclaw.community.core.devices.services.baas_device_service import (
+    BaasDeviceService,
+)
 from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
     BAAS_CREATE_INIT_TASK,
     BAAS_CREATE_PUBLISH_POLL_TASK,
@@ -17,6 +21,8 @@ from agentclaw.community.core.devices.services.baas_publish_task_handlers import
     build_create_publish_poll_payload,
     build_restart_publish_poll_payload,
 )
+from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
+from agentclaw.community.core.events.types import BaasPublishCompletedEvent
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule, Retry
 
@@ -613,7 +619,9 @@ def test_restart_poll_reschedules_when_pending():
         "template_type": "applicationCoding",
         "ext": {},
     }
-    baas_device_service.poll_publish_once.return_value = DeviceBindingStatus.PENDING.value
+    baas_device_service.poll_publish_once.return_value = (
+        DeviceBindingStatus.PENDING.value
+    )
 
     outcome = handler.handle(
         {
@@ -666,7 +674,9 @@ def test_restart_poll_marks_active_and_clears_old_baas_failure_ext_on_success():
         },
     }
     template_service.get_template_config.return_value = {"token": encrypted_token}
-    baas_device_service.poll_publish_once.return_value = DeviceBindingStatus.ACTIVE.value
+    baas_device_service.poll_publish_once.return_value = (
+        DeviceBindingStatus.ACTIVE.value
+    )
     baas_device_service.refresh_codefuse_token_on_publish_success.return_value = None
 
     outcome = handler.handle(
@@ -723,7 +733,9 @@ def test_restart_poll_marks_failed_with_current_publish_id_on_failure():
         "ext": {"keep": "value"},
     }
     bot_repository.get_by_id_and_owner.return_value = {"ext": {"keep": "value"}}
-    baas_device_service.poll_publish_once.return_value = DeviceBindingStatus.FAILED.value
+    baas_device_service.poll_publish_once.return_value = (
+        DeviceBindingStatus.FAILED.value
+    )
 
     outcome = handler.handle(
         {
@@ -958,11 +970,14 @@ def test_create_init_reads_codefuse_token_from_template_service_and_writes_conta
     service._sync_bot_config_when_device_active = MagicMock()
     service._sync_mcps_when_device_active = MagicMock()
 
-    with patch(
-        "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
-    ), patch(
-        "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas",
-    ) as writer:
+    with (
+        patch(
+            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
+        ),
+        patch(
+            "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas",
+        ) as writer,
+    ):
         ok, message = service.run_create_init_once(
             binding_id=42,
             bot_id="bot-001",
@@ -1015,7 +1030,9 @@ def test_create_init_marks_failed_when_init_fails():
     )
     repo.get_by_id.return_value = binding
     baas_device_service = _make_baas_device_service(repo=repo)
-    baas_device_service.run_create_init_once = MagicMock(return_value=(False, "init boom"))
+    baas_device_service.run_create_init_once = MagicMock(
+        return_value=(False, "init boom")
+    )
     handler = BaasCreateInitTaskHandler(
         binding_repository=repo,
         baas_device_service=baas_device_service,
@@ -1296,7 +1313,9 @@ def test_restart_poll_retries_on_transient_status_and_direct_unexpected_status()
         status=DeviceBindingStatus.PENDING.value,
         device_props={"restart_publish_id": 1001},
     )
-    bot_repository.get_by_binding_id.return_value = {"status": DeviceBindingStatus.PENDING.value}
+    bot_repository.get_by_binding_id.return_value = {
+        "status": DeviceBindingStatus.PENDING.value
+    }
     payload = {
         "binding_id": 42,
         "bot_id": "bot-001",
@@ -1406,3 +1425,234 @@ def test_baas_publish_task_lifecycle_registers_all_handlers():
         registry.get(BAAS_RESTART_PUBLISH_POLL_TASK),
         BaasRestartPublishPollHandler,
     )
+
+
+def test_create_init_success_publishes_baas_reconciliation_wakeup():
+    reset_event_bus()
+    received: list[BaasPublishCompletedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, received.append)
+    try:
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"publish_id": 1001},
+        )
+        baas_device_service = MagicMock()
+        baas_device_service.run_create_init_once.return_value = (True, "ok")
+        handler = BaasCreateInitTaskHandler(
+            binding_repository=repo,
+            baas_device_service=baas_device_service,
+        )
+
+        outcome = handler.handle(
+            build_create_init_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1001,
+            )
+        )
+
+        assert outcome == Complete()
+        assert received == [
+            BaasPublishCompletedEvent(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1001,
+                publish_kind="create",
+            )
+        ]
+    finally:
+        reset_event_bus()
+
+
+def test_create_init_replay_after_active_reemits_reconciliation_wakeup():
+    reset_event_bus()
+    received: list[BaasPublishCompletedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, received.append)
+    try:
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"publish_id": 1001},
+        )
+        baas_device_service = MagicMock()
+        handler = BaasCreateInitTaskHandler(
+            binding_repository=repo,
+            baas_device_service=baas_device_service,
+        )
+
+        outcome = handler.handle(
+            build_create_init_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1001,
+            )
+        )
+
+        assert outcome == Complete()
+        baas_device_service.run_create_init_once.assert_not_called()
+        assert received == [
+            BaasPublishCompletedEvent(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1001,
+                publish_kind="create",
+            )
+        ]
+    finally:
+        reset_event_bus()
+
+
+def test_restart_success_publishes_baas_reconciliation_wakeup():
+    reset_event_bus()
+    received: list[BaasPublishCompletedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, received.append)
+    try:
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"restart_publish_id": 1002},
+        )
+        bot_repository = MagicMock()
+        bot_repository.get_by_binding_id.return_value = {
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+        }
+        bot_repository.get_by_id_and_owner.return_value = {
+            "ext": {},
+        }
+        baas_device_service = MagicMock()
+        baas_device_service.poll_publish_once.return_value = (
+            DeviceBindingStatus.ACTIVE.value
+        )
+        baas_device_service.refresh_codefuse_token_on_publish_success.return_value = (
+            None
+        )
+        handler, _ = _make_restart_handler(
+            repo=repo,
+            bot_repository=bot_repository,
+            baas_device_service=baas_device_service,
+        )
+
+        outcome = handler.handle(
+            build_restart_publish_poll_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                started_at_epoch_s=190.0,
+                bot_uuid="baas-bot-1",
+            )
+        )
+
+        assert outcome == Complete()
+        assert received == [
+            BaasPublishCompletedEvent(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                publish_kind="restart",
+            )
+        ]
+    finally:
+        reset_event_bus()
+
+
+def test_restart_persist_failure_does_not_publish_completion() -> None:
+    reset_event_bus()
+    received: list[BaasPublishCompletedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, received.append)
+    try:
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"restart_publish_id": 1002},
+        )
+        repo.update_status.side_effect = RuntimeError("database unavailable")
+        bot_repository = MagicMock()
+        bot_repository.get_by_binding_id.return_value = {
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+        }
+        bot_repository.get_by_id_and_owner.return_value = {"ext": {}}
+        baas_device_service = MagicMock()
+        baas_device_service.poll_publish_once.return_value = (
+            DeviceBindingStatus.ACTIVE.value
+        )
+        baas_device_service.refresh_codefuse_token_on_publish_success.return_value = (
+            None
+        )
+        handler, _ = _make_restart_handler(
+            repo=repo,
+            bot_repository=bot_repository,
+            baas_device_service=baas_device_service,
+        )
+
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            handler.handle(
+                build_restart_publish_poll_payload(
+                    binding_id=42,
+                    bot_id="bot-001",
+                    owner_id="owner-001",
+                    publish_id=1002,
+                    started_at_epoch_s=190.0,
+                    bot_uuid="baas-bot-1",
+                )
+            )
+
+        assert received == []
+    finally:
+        reset_event_bus()
+
+
+def test_restart_replay_after_active_reemits_reconciliation_wakeup():
+    reset_event_bus()
+    received: list[BaasPublishCompletedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, received.append)
+    try:
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"restart_publish_id": 1002},
+        )
+        bot_repository = MagicMock()
+        baas_device_service = MagicMock()
+        handler, _ = _make_restart_handler(
+            repo=repo,
+            bot_repository=bot_repository,
+            baas_device_service=baas_device_service,
+        )
+
+        outcome = handler.handle(
+            build_restart_publish_poll_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                started_at_epoch_s=190.0,
+                bot_uuid="baas-bot-1",
+            )
+        )
+
+        assert outcome == Complete()
+        baas_device_service.poll_publish_once.assert_not_called()
+        assert received == [
+            BaasPublishCompletedEvent(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                publish_kind="restart",
+            )
+        ]
+    finally:
+        reset_event_bus()

@@ -181,7 +181,8 @@ class SkillsPoolLayoutRepository:
                     *self._scope_filter(scope),
                     BotSkillLayoutStateModel.migration_generation
                     == migration_generation,
-                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.POOL.value,
                     or_(
                         BotSkillLayoutStateModel.lease_expires_at.is_(None),
                         BotSkillLayoutStateModel.lease_expires_at <= func.now(),
@@ -213,8 +214,7 @@ class SkillsPoolLayoutRepository:
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.migration_generation
                     == migration_generation,
                     BotSkillLayoutStateModel.lease_owner == lease_owner,
@@ -380,6 +380,7 @@ class SkillsPoolLayoutRepository:
                     == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase.in_(
                         (
+                            SkillLayoutPhase.POOL_PREPARING.value,
                             SkillLayoutPhase.POOL_READY.value,
                             SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER.value,
                         )

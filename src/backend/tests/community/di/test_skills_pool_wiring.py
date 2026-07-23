@@ -12,6 +12,12 @@ from agentclaw.community.core.skills_pool.rollout_gate import (
 from agentclaw.community.core.skills_pool.reconcile_service import (
     SkillsPoolReconcileService,
 )
+from agentclaw.community.core.skills_pool.reconcile_task import (
+    SKILLS_POOL_RECONCILE_TASK,
+    SkillsPoolReconcileTaskHandler,
+    SkillsPoolReconcileWakeupListener,
+)
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.skills_pool.ports import (
     SkillsPoolRuntimeProtocol,
     SkillsPoolSkillRepositoryProtocol,
@@ -50,4 +56,26 @@ def test_skills_pool_control_plane_bindings_resolve() -> None:
     assert isinstance(
         injector.get(SkillsPoolReconcileService),
         SkillsPoolReconcileService,
+    )
+    assert isinstance(
+        injector.get(SkillsPoolReconcileTaskHandler),
+        SkillsPoolReconcileTaskHandler,
+    )
+    assert isinstance(
+        injector.get(SkillsPoolReconcileWakeupListener),
+        SkillsPoolReconcileWakeupListener,
+    )
+
+
+def test_skills_pool_reconcile_handler_registers_during_bootstrap() -> None:
+    import asyncio
+
+    injector = build_injector(profile=DeployProfile.TEST)
+    listener = injector.get(SkillsPoolReconcileWakeupListener)
+
+    asyncio.run(listener.bootstrap())
+
+    assert isinstance(
+        injector.get(HandlerRegistry).get(SKILLS_POOL_RECONCILE_TASK),
+        SkillsPoolReconcileTaskHandler,
     )

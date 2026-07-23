@@ -44,6 +44,11 @@ class FakeBotPublishRepository:
         return self.draft
 
 
+class FailingBotPublishRepository:
+    def get_draft_by_publish_bot_id(self, publish_bot_id: str, env: str):
+        raise RuntimeError("database unavailable")
+
+
 class FakeLayoutRepository:
     def __init__(self) -> None:
         self.state: BotSkillLayoutState | None = None
@@ -180,6 +185,64 @@ def test_claim_is_sticky_after_whitelist_removal() -> None:
     assert repeated.state == first.state
     assert len(gate.calls) == 1
     assert layouts.claim_calls == 1
+
+
+def test_claimed_service_generation_stops_when_draft_is_no_longer_editable() -> None:
+    bot = {**personal_bot(), "bot_type": "service"}
+    drafts = FakeBotPublishRepository(
+        SimpleNamespace(
+            source_bot_pk=bot["id"],
+            source_bot_id=bot["bot_id"],
+            publish_bot_id=bot["bot_id"],
+            status="draft",
+            env=bot["env"],
+        )
+    )
+    layouts = FakeLayoutRepository()
+    gate = RecordingGate(eligible_decision())
+    service = SkillsPoolMigrationClaimService(
+        FakeBotRepository(bot),
+        drafts,
+        layouts,
+        gate,
+    )
+
+    first = claim(service)
+    drafts.draft = None
+    repeated = claim(service)
+
+    assert first.outcome is MigrationClaimOutcome.CLAIMED
+    assert repeated.outcome is MigrationClaimOutcome.RUNTIME_NOT_EDITABLE
+    assert repeated.state == first.state
+    assert len(gate.calls) == 1
+
+
+def test_claimed_service_generation_retries_current_draft_lookup_failure() -> None:
+    bot = {**personal_bot(), "bot_type": "service"}
+    layouts = FakeLayoutRepository()
+    layouts.state = BotSkillLayoutState(
+        scope=BotSkillLayoutScope(
+            env="pre",
+            entity_id="entity-1",
+            bot_id="bot-1",
+        ),
+        active_layout=SkillLayout.LEGACY,
+        target_layout=SkillLayout.POOL,
+        phase=SkillLayoutPhase.POOL_PREPARING,
+        migration_generation="generation-1",
+        persisted=True,
+    )
+    service = SkillsPoolMigrationClaimService(
+        FakeBotRepository(bot),
+        FailingBotPublishRepository(),
+        layouts,
+        RecordingGate(eligible_decision()),
+    )
+
+    result = claim(service)
+
+    assert result.outcome is MigrationClaimOutcome.TRANSIENT_ERROR
+    assert result.state == layouts.state
 
 
 def test_ineligible_bot_does_not_persist_layout_state() -> None:

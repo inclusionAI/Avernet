@@ -46,7 +46,9 @@ def _make_record(
         device_id=device_id,
         device_provider=device_provider,
         env="dev",
-        device_props=device_props if device_props is not None else {"callback_token": "tok123"},
+        device_props=device_props
+        if device_props is not None
+        else {"callback_token": "tok123"},
         status=status,
         apply_reason=None,
         applied_by=entity_id,
@@ -108,11 +110,13 @@ def _make_service(
 class TestSafeB64Decode:
     def test_normal_padding(self):
         import base64
+
         data = base64.b64encode(b"hello world").decode()
         assert DeviceService.safe_b64decode(data) == b"hello world"
 
     def test_missing_padding_1(self):
         import base64
+
         raw = b"ab"
         encoded = base64.b64encode(raw).decode().rstrip("=")
         # remove padding to simulate missing padding
@@ -121,6 +125,7 @@ class TestSafeB64Decode:
 
     def test_missing_padding_2(self):
         import base64
+
         raw = b"abc"
         encoded = base64.b64encode(raw).decode().rstrip("=")
         result = DeviceService.safe_b64decode(encoded)
@@ -579,7 +584,9 @@ class TestGetDeviceConnection:
             )
 
     def test_other_user_public_bot_allowed(self):
-        record = _make_record(entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value)
+        record = _make_record(
+            entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value
+        )
         repo = MagicMock()
         repo.get_by_id.return_value = record
         bot_query = MagicMock()
@@ -593,7 +600,9 @@ class TestGetDeviceConnection:
         assert isinstance(conn, DeviceConnectionInfo)
 
     def test_other_user_non_public_bot_denied(self):
-        record = _make_record(entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value)
+        record = _make_record(
+            entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value
+        )
         repo = MagicMock()
         repo.get_by_id.return_value = record
         bot_query = MagicMock()
@@ -607,7 +616,9 @@ class TestGetDeviceConnection:
             )
 
     def test_other_user_bot_query_exception_denied(self):
-        record = _make_record(entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value)
+        record = _make_record(
+            entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value
+        )
         repo = MagicMock()
         repo.get_by_id.return_value = record
         bot_query = MagicMock()
@@ -622,7 +633,9 @@ class TestGetDeviceConnection:
 
     def test_other_user_collaborator_allowed(self):
         """协作者可以获取设备连接信息。"""
-        record = _make_record(entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value)
+        record = _make_record(
+            entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value
+        )
         repo = MagicMock()
         repo.get_by_id.return_value = record
         bot_query = MagicMock()
@@ -658,7 +671,9 @@ class TestGetDeviceConnection:
 
     def test_collaborator_permission_check_failed_still_denied(self):
         """协作者权限检查失败（返回无权限）仍然拒绝访问。"""
-        record = _make_record(entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value)
+        record = _make_record(
+            entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value
+        )
         repo = MagicMock()
         repo.get_by_id.return_value = record
         bot_query = MagicMock()
@@ -687,7 +702,9 @@ class TestGetDeviceConnection:
 
     def test_bot_not_found_raises_error(self):
         """Bot 不存在时抛出异常。"""
-        record = _make_record(entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value)
+        record = _make_record(
+            entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value
+        )
         repo = MagicMock()
         repo.get_by_id.return_value = record
         bot_query = MagicMock()
@@ -703,7 +720,9 @@ class TestGetDeviceConnection:
 
     def test_bot_info_incomplete_raises_error(self):
         """Bot 信息不完整（缺少 bot_id 或 owner_id）时抛出异常。"""
-        record = _make_record(entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value)
+        record = _make_record(
+            entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value
+        )
         repo = MagicMock()
         repo.get_by_id.return_value = record
         bot_query = MagicMock()
@@ -723,7 +742,9 @@ class TestGetDeviceConnection:
 
     def test_collaborator_service_unavailable_raises_error(self):
         """协作者服务不可用时抛出异常。"""
-        record = _make_record(entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value)
+        record = _make_record(
+            entity_id="bot_owner", status=DeviceBindingStatus.ACTIVE.value
+        )
         repo = MagicMock()
         repo.get_by_id.return_value = record
         bot_query = MagicMock()
@@ -874,6 +895,81 @@ class TestReportDeviceAlive:
         assert received == []
         reset_event_bus()
 
+    def test_device_alive_event_is_not_inserted_for_active_heartbeat(self):
+        from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
+        from agentclaw.community.core.events.types import DeviceAliveEvent
+
+        reset_event_bus()
+        received: list[DeviceAliveEvent] = []
+        get_event_bus().subscribe(DeviceAliveEvent, received.append)
+
+        record = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider="arca",
+            device_props={"callback_token": "tok123", "sandbox_id": "sbx-current"},
+        )
+        updated = _make_record(status=DeviceBindingStatus.ACTIVE.value)
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = updated
+        svc = _make_service(repo=repo)
+
+        svc.report_device_alive(device_id="staff_u001_default", token="tok123")
+
+        assert received == []
+        reset_event_bus()
+
+    def test_required_alive_handoff_failure_keeps_pending_for_retry(self):
+        from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
+        from agentclaw.community.core.events.types import DeviceAliveEvent
+
+        reset_event_bus()
+        attempts = 0
+
+        def enqueue_once_available(_event):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("queue unavailable")
+
+        get_event_bus().subscribe(
+            DeviceAliveEvent,
+            enqueue_once_available,
+            required=True,
+        )
+        record = _make_record(
+            status=DeviceBindingStatus.PENDING.value,
+            device_provider="arca",
+            device_props={"callback_token": "tok123", "sandbox_id": "sbx-current"},
+        )
+        updated = _make_record(status=DeviceBindingStatus.ACTIVE.value)
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = updated
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = None
+        svc = _make_service(repo=repo, bot_query=bot_query)
+
+        with pytest.raises(RuntimeError, match="required handler failed"):
+            svc.report_device_alive(
+                device_id="staff_u001_default",
+                token="tok123",
+            )
+        repo.update_status_and_alive_at.assert_not_called()
+
+        result = svc.report_device_alive(
+            device_id="staff_u001_default",
+            token="tok123",
+        )
+
+        assert result is updated
+        assert attempts == 2
+        repo.update_status_and_alive_at.assert_called_once_with(
+            binding_id=record.id,
+            status=DeviceBindingStatus.ACTIVE.value,
+        )
+        reset_event_bus()
+
     def test_event_publish_failure_does_not_break_report_alive(self):
         from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
         from agentclaw.community.core.events.types import DeviceActivatedEvent
@@ -961,7 +1057,10 @@ class TestReportDeviceStatus:
 
         with pytest.raises(InvalidDeviceStatusError, match="invalid token"):
             svc.report_device_status(
-                device_id="staff_u001_default", status="STARTING", message=None, token="wrong"
+                device_id="staff_u001_default",
+                status="STARTING",
+                message=None,
+                token="wrong",
             )
 
     def test_released_device_raises(self):
@@ -1031,6 +1130,7 @@ class TestExecShell:
 class TestBatchSetEnv:
     def test_batch_update(self):
         from dataclasses import replace as dc_replace
+
         repo = MagicMock()
         repo.batch_update_env.return_value = 2
 
@@ -1089,7 +1189,9 @@ class TestListConnectableDevices:
         ]
         svc = _make_service(repo=repo, bot_query=bot_query)
         # Return a valid conn from _compose_device_conn_info
-        fake_conn = DeviceConnectionInfo(type="local", target="localhost:20003", token="", engine_type="openclaw")
+        fake_conn = DeviceConnectionInfo(
+            type="local", target="localhost:20003", token="", engine_type="openclaw"
+        )
         svc._compose_device_conn_info = MagicMock(return_value=fake_conn)
 
         total, items = svc.list_connectable_devices(
@@ -1110,7 +1212,9 @@ class TestListConnectableDevices:
         )
         repo = MagicMock()
         repo.get_by_ids.return_value = [record]
-        repo.get_by_id.return_value = None  # causes DeviceNotFoundError inside get_device_connection
+        repo.get_by_id.return_value = (
+            None  # causes DeviceNotFoundError inside get_device_connection
+        )
         bot_query = MagicMock()
         bot_query.list_active_bots_by_entity.return_value = [
             {"bot_id": "b1", "binding_id": 1, "owner_id": "u001"}
@@ -1166,8 +1270,11 @@ class TestListConnectableDevices:
     def test_filters_by_env(self):
         """测试 env 过滤."""
         from dataclasses import replace as dc_replace
+
         record1 = _make_record(id=1, status=DeviceBindingStatus.ACTIVE.value)
-        record2 = dc_replace(_make_record(id=2, status=DeviceBindingStatus.ACTIVE.value), env="prod")
+        record2 = dc_replace(
+            _make_record(id=2, status=DeviceBindingStatus.ACTIVE.value), env="prod"
+        )
         repo = MagicMock()
         repo.get_by_ids.return_value = [record1, record2]
         bot_query = MagicMock()
@@ -1212,12 +1319,16 @@ class TestListConnectableDevices:
 
     def test_pagination(self):
         """测试分页."""
-        records = [_make_record(id=i, status=DeviceBindingStatus.ACTIVE.value) for i in range(1, 6)]
+        records = [
+            _make_record(id=i, status=DeviceBindingStatus.ACTIVE.value)
+            for i in range(1, 6)
+        ]
         repo = MagicMock()
         repo.get_by_ids.return_value = records
         bot_query = MagicMock()
         bot_query.list_active_bots_by_entity.return_value = [
-            {"bot_id": f"b{i}", "binding_id": i, "owner_id": "u001"} for i in range(1, 6)
+            {"bot_id": f"b{i}", "binding_id": i, "owner_id": "u001"}
+            for i in range(1, 6)
         ]
         svc = _make_service(repo=repo, bot_query=bot_query)
 
@@ -1315,8 +1426,12 @@ class TestApplyDevice:
         )
         svc._setup_directory = MagicMock(return_value=[])
 
-        with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"):
-            with patch("agentclaw.community.core.devices.services.device_service.threading.Thread") as thread_cls:
+        with patch(
+            "agentclaw.community.utils.env_utils.get_current_env", return_value="dev"
+        ):
+            with patch(
+                "agentclaw.community.core.devices.services.device_service.threading.Thread"
+            ) as thread_cls:
                 result = svc.apply_device(
                     apply_reason="create bot",
                     entity_id="u001",
@@ -1330,11 +1445,15 @@ class TestApplyDevice:
         assert svc.after_binding_args["binding_id"] == record.id
         assert svc.after_binding_args["bot_id"] == "bot1"
         assert svc.after_binding_args["owner_id"] == "owner-001"
-        assert svc.after_binding_args["device_props"]["provider_key"] == "provider_value"
+        assert (
+            svc.after_binding_args["device_props"]["provider_key"] == "provider_value"
+        )
         assert svc.start_called is False
         thread_cls.assert_not_called()
 
-    def test_apply_device_runs_generic_start_when_provider_hook_does_not_claim_lifecycle(self):
+    def test_apply_device_runs_generic_start_when_provider_hook_does_not_claim_lifecycle(
+        self,
+    ):
         repo = MagicMock()
         repo.exists_device_id.return_value = False
         repo.get_released_binding.return_value = None
@@ -1352,7 +1471,9 @@ class TestApplyDevice:
 
         thread = MagicMock()
 
-        with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"):
+        with patch(
+            "agentclaw.community.utils.env_utils.get_current_env", return_value="dev"
+        ):
             with patch(
                 "agentclaw.community.core.devices.services.device_service.threading.Thread",
                 return_value=thread,
@@ -1387,7 +1508,9 @@ class TestApplyDevice:
         repo.get_by_id.return_value = record
         svc = _make_service(repo=repo)
 
-        with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"):
+        with patch(
+            "agentclaw.community.utils.env_utils.get_current_env", return_value="dev"
+        ):
             result = svc.apply_device(
                 apply_reason="test",
                 entity_id="u001",
@@ -1408,7 +1531,9 @@ class TestApplyDevice:
         repo.get_by_id.return_value = record
         svc = _make_service(repo=repo)
 
-        with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"):
+        with patch(
+            "agentclaw.community.utils.env_utils.get_current_env", return_value="dev"
+        ):
             result = svc.apply_device(
                 apply_reason="reuse test",
                 entity_id="u001",
@@ -1428,7 +1553,9 @@ class TestApplyDevice:
         repo.get_by_id.return_value = None
         svc = _make_service(repo=repo)
 
-        with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"):
+        with patch(
+            "agentclaw.community.utils.env_utils.get_current_env", return_value="dev"
+        ):
             result = svc.apply_device(
                 apply_reason=None,
                 entity_id="u001",
@@ -1456,7 +1583,9 @@ class TestGetDeviceConnectionV2:
         svc = _make_service(repo=repo)
         # Local type now routes through BaaS invoke-http (same as desktop)
         fake_conn = DeviceConnectionInfo(
-            type="local", target="10.0.0.1:20003", token="mytoken",
+            type="local",
+            target="10.0.0.1:20003",
+            token="mytoken",
             engine_type="openclaw",
             baas_base_url="http://baas.test",
             bot_uuid="bot-001",
@@ -1486,14 +1615,20 @@ class TestGetDeviceConnectionV2:
         repo.get_by_id.return_value = record
         svc = _make_service(repo=repo)
         fake_conn = DeviceConnectionInfo(
-            type="arca", target="sb-abc123.proxy.net", token="mytoken", engine_type="openclaw"
+            type="arca",
+            target="sb-abc123.proxy.net",
+            token="mytoken",
+            engine_type="openclaw",
         )
         svc._compose_device_conn_info = MagicMock(return_value=fake_conn)
 
         # The ARCA proxy target is served by the mocked SandboxRuntimeClient seam
         # (``_make_sandbox_client``), not corp ``arca_io`` (B6 devendoring), so this
         # is corp-free — only the community proxy-base config is patched.
-        with patch("agentclaw.community.core.config.sofa.sofa_config.user_config", {"agentclawproxy": {"base_url": "https://proxy.example.com"}}):
+        with patch(
+            "agentclaw.community.core.config.sofa.sofa_config.user_config",
+            {"agentclawproxy": {"base_url": "https://proxy.example.com"}},
+        ):
             result = svc.get_device_connection_v2(
                 user_id="u001", nick_name="User", binding_id=1
             )
@@ -1508,6 +1643,7 @@ class TestGetDeviceConnectionV2:
         svc = _make_service(repo=repo)
 
         from agentclaw.community.core.devices.errors import DeviceServiceError
+
         with pytest.raises(DeviceServiceError):
             svc.get_device_connection_v2(user_id="u001", nick_name="User", binding_id=1)
 
@@ -1671,7 +1807,9 @@ class TestEffectiveBindingStatusUsesStoredColumn:
         svc = _make_service(repo=repo, bot_query=bot_query)
 
         total, items = svc.list_connectable_devices(
-            entity_id="u001", entity_type="staff", env=None,
+            entity_id="u001",
+            entity_type="staff",
+            env=None,
         )
         assert total == 1 and items[0].record is binding
 
@@ -1684,6 +1822,8 @@ class TestEffectiveBindingStatusUsesStoredColumn:
         svc = _make_service(repo=repo, bot_query=bot_query)
 
         total, items = svc.list_connectable_devices(
-            entity_id="u001", entity_type="staff", env=None,
+            entity_id="u001",
+            entity_type="staff",
+            env=None,
         )
         assert total == 0 and items == []

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    LAYOUT_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
     RuntimeLayoutProbeStatus,
+)
+from agentclaw.community.core.skills_pool.claim_service import (
+    MigrationClaimOutcome,
+    MigrationClaimResult,
 )
 from agentclaw.community.core.skills_pool.models import (
     OpenClawPoolPaths,
@@ -20,12 +26,18 @@ from agentclaw.community.core.skills_pool.reconcile_service import (
     SkillsPoolReconcileOutcome,
     SkillsPoolReconcileService,
 )
+from agentclaw.community.core.skills_pool.reconcile_task import (
+    SkillsPoolReconcileTaskHandler,
+    build_skills_pool_reconcile_payload,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
     SkillLayout,
     SkillLayoutPhase,
 )
+from agentclaw.community.core.task_queue.types import Complete, Retry
+from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
 
 
 SCOPE = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
@@ -69,12 +81,21 @@ class FakeLayoutRepository:
         self.events: list[str] = []
         self.committed_locators: dict[int, str] | None = None
         self.lease_valid = True
+        self.fail_once_at: str | None = None
+
+    def _should_fail(self, stage: str) -> bool:
+        if self.fail_once_at != stage:
+            return False
+        self.fail_once_at = None
+        return True
 
     def get(self, scope: BotSkillLayoutScope) -> BotSkillLayoutState:
         assert scope == SCOPE
         return self.state
 
     def record_ready_probe(self, **kwargs: object) -> bool:
+        if self._should_fail("ready"):
+            return False
         if not self._owns(kwargs):
             return False
         self.events.append("ready")
@@ -90,6 +111,8 @@ class FakeLayoutRepository:
         return self.lease_valid and self._owns(kwargs)
 
     def record_cutover_committed(self, **kwargs: object) -> bool:
+        if self._should_fail("cutover_commit"):
+            return False
         if not self._owns(kwargs):
             return False
         self.events.append("cutover")
@@ -101,6 +124,8 @@ class FakeLayoutRepository:
         return True
 
     def begin_cutover(self, **kwargs: object) -> bool:
+        if self._should_fail("begin"):
+            return False
         if not self._owns(kwargs):
             return False
         self.events.append("begin")
@@ -129,6 +154,8 @@ class FakeLayoutRepository:
         local_locators: dict[int, str],
         **kwargs: object,
     ) -> bool:
+        if self._should_fail("database"):
+            return False
         if not self._owns(kwargs):
             return False
         self.events.append("database")
@@ -142,11 +169,17 @@ class FakeLayoutRepository:
         )
         return True
 
+    def renew_lease(self, **kwargs: object) -> bool:
+        return self._owns(kwargs)
+
+    def try_acquire_lease(self, **kwargs: object) -> bool:
+        return False
+
     def _owns(self, values: dict[str, object]) -> bool:
         return (
             values["scope"] == SCOPE
             and values["migration_generation"] == GENERATION
-            and values["lease_owner"] == "worker-1"
+            and values["lease_owner"] == self.state.lease_owner
         )
 
 
@@ -196,6 +229,8 @@ class FakeRuntime:
     def __init__(self) -> None:
         self.events: list[str] = []
         self.publish_success = True
+        self.verify_success = True
+        self.physical_cutovers = 0
         self.cutover_result = PoolCutoverResult(
             committed=True,
             status=PoolCutoverStatus.COMMITTED,
@@ -228,6 +263,11 @@ class FakeRuntime:
             f"{OpenClawPoolPaths().pool_local}/local-b",
             f"{OpenClawPoolPaths().pool_repo}/business/repo-skill",
         ]
+        if (
+            self.cutover_result.committed
+            and self.cutover_result.status is PoolCutoverStatus.COMMITTED
+        ):
+            self.physical_cutovers += 1
         return self.cutover_result
 
     async def publish_mappings(self, **kwargs: object) -> bool:
@@ -236,7 +276,7 @@ class FakeRuntime:
 
     async def verify_mappings(self, **kwargs: object) -> bool:
         self.events.append("verify")
-        return True
+        return self.verify_success
 
 
 def build_service(
@@ -266,12 +306,10 @@ async def test_ready_claimed_bot_completes_pool_activation() -> None:
     assert layouts.events == ["ready", "begin", "cutover", "database"]
     assert layouts.committed_locators == {
         11: (
-            "local:///home/admin/.openclaw/workspace/"
-            "skills-pool/skills-local/local-a"
+            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-a"
         ),
         12: (
-            "local:///home/admin/.openclaw/workspace/"
-            "skills-pool/skills-local/local-b"
+            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"
         ),
     }
 
@@ -399,6 +437,83 @@ async def test_non_ready_runtime_keeps_legacy_without_data_plane_changes() -> No
 
 
 @pytest.mark.asyncio
+async def test_invalid_probe_is_persisted_as_non_retryable_blocker() -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        preparation_id=None,
+        evidence={"reason": "marker_contract_mismatch"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.retryable is False
+    assert layouts.events == ["failure"]
+    assert layouts.state.last_failure_code == "INVALID"
+    assert layouts.state.last_failure_stage == "runtime_probe"
+    assert layouts.state.last_failure_retryable is False
+    assert layouts.state.last_failure_evidence == {"reason": "marker_contract_mismatch"}
+    assert runtime.events == ["probe"]
+
+
+@pytest.mark.asyncio
+async def test_ready_probe_contract_mismatch_is_persisted_as_blocker() -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        layout_contract_version="future-contract",
+        evidence={"reason": "contract_drift"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.retryable is False
+    assert layouts.events == ["failure"]
+    assert layouts.state.last_failure_code == "INVALID"
+    assert layouts.state.last_failure_stage == "runtime_probe"
+    assert layouts.state.last_failure_evidence == {"reason": "contract_drift"}
+    assert runtime.events == ["probe"]
+
+
+@pytest.mark.asyncio
+async def test_post_cutover_invalid_probe_blocks_without_pre_cutover_write() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        preparation_id=None,
+        evidence={"reason": "post_cutover_probe_invalid"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.retryable is False
+    assert layouts.events == []
+    assert runtime.events == ["probe"]
+
+
+@pytest.mark.asyncio
 async def test_stale_generation_or_lease_cannot_continue_activation() -> None:
     layouts = FakeLayoutRepository(
         claimed_state(lease_owner="another-worker"),
@@ -427,3 +542,224 @@ async def test_expired_lease_cannot_probe_or_publish_mappings() -> None:
 
     assert result.outcome is SkillsPoolReconcileOutcome.LEASE_NOT_HELD
     assert runtime.events == []
+
+
+class StickyClaimService:
+    """Expose the real reconciliation service through the durable task seam."""
+
+    def __init__(self, layouts: FakeLayoutRepository) -> None:
+        self._layouts = layouts
+        self._calls = 0
+
+    def claim(self, **kwargs: object) -> MigrationClaimResult:
+        self._calls += 1
+        if self._calls == 1:
+            self._layouts.state = replace(
+                self._layouts.state,
+                lease_owner=str(kwargs["lease_owner"]),
+            )
+        return MigrationClaimResult(
+            (
+                MigrationClaimOutcome.CLAIMED
+                if self._calls == 1
+                else MigrationClaimOutcome.ALREADY_CLAIMED
+            ),
+            self._layouts.state,
+        )
+
+
+def build_task_handler(
+    layouts: FakeLayoutRepository,
+    runtime: FakeRuntime,
+) -> SkillsPoolReconcileTaskHandler:
+    return SkillsPoolReconcileTaskHandler(
+        claim_service=StickyClaimService(layouts),
+        layout_repository=layouts,
+        reconcile_service=build_service(layouts, runtime),
+    )
+
+
+def task_payload() -> dict[str, object]:
+    return build_skills_pool_reconcile_payload(
+        scope=SCOPE,
+        source="test",
+        signal_identity={"binding_id": 1},
+        wakeup_id="wakeup-1",
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "transient_probe",
+        "ready_state_race",
+        "begin_state_race",
+        "retryable_cutover",
+        "cutover_ledger_state_race",
+        "mapping",
+        "verify",
+        "database",
+    ],
+)
+def test_real_reconciliation_retry_resumes_same_generation_without_repeating_cutover(
+    failure: str,
+) -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    original_generation = layouts.state.migration_generation
+
+    if failure == "transient_probe":
+        ready = runtime.probe_result
+        runtime.probe_result = replace(
+            ready,
+            status=RuntimeLayoutProbeStatus.TRANSIENT_ERROR,
+            preparation_id=None,
+        )
+    elif failure == "ready_state_race":
+        layouts.fail_once_at = "ready"
+    elif failure == "begin_state_race":
+        layouts.fail_once_at = "begin"
+    elif failure == "retryable_cutover":
+        runtime.cutover_result = PoolCutoverResult(
+            committed=False,
+            status=PoolCutoverStatus.TRANSIENT_ERROR,
+            evidence={"reason": "runtime unavailable"},
+        )
+    elif failure == "cutover_ledger_state_race":
+        layouts.fail_once_at = "cutover_commit"
+    elif failure == "mapping":
+        runtime.publish_success = False
+    elif failure == "verify":
+        runtime.verify_success = False
+    elif failure == "database":
+        layouts.fail_once_at = "database"
+
+    handler = build_task_handler(layouts, runtime)
+    first = handler.handle(task_payload())
+    cutovers_after_first = runtime.events.count("cutover")
+
+    runtime.probe_result = RuntimeLayoutProbeResult(
+        status=RuntimeLayoutProbeStatus.READY,
+        engine="openclaw",
+        layout_contract_version=LAYOUT_CONTRACT_VERSION,
+        preparation_id=PREPARATION_ID,
+        evidence={"marker": "valid"},
+    )
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=(
+            PoolCutoverStatus.ALREADY_COMMITTED
+            if failure == "cutover_ledger_state_race"
+            else PoolCutoverStatus.COMMITTED
+        ),
+        evidence={"local_inventory": {"registered": 2}},
+    )
+    runtime.publish_success = True
+    runtime.verify_success = True
+
+    second = handler.handle(task_payload())
+
+    assert isinstance(first, Retry)
+    assert second == Complete()
+    assert layouts.state.migration_generation == original_generation
+    assert layouts.state.active_layout is SkillLayout.POOL
+    if failure in {"mapping", "verify", "database"}:
+        assert cutovers_after_first == 1
+        assert runtime.events.count("cutover") == 1
+    if failure == "cutover_ledger_state_race":
+        assert cutovers_after_first == 1
+        assert runtime.events.count("cutover") == 2
+        assert runtime.physical_cutovers == 1
+
+
+class CurrentBindingResolver:
+    def __init__(self) -> None:
+        self.current_binding = "binding-new"
+        self.calls: list[tuple[str, str]] = []
+
+    def resolve_for_bot(self, bot_id: str, user_id: str):
+        self.calls.append((bot_id, user_id))
+        return SimpleNamespace(
+            conn_info={"binding": self.current_binding},
+        )
+
+
+class RecordingTransport:
+    def __init__(self) -> None:
+        self.bindings: list[str] = []
+
+    async def invoke(
+        self,
+        conn_info,
+        method,
+        path,
+        *,
+        body,
+        timeout,
+    ):
+        self.bindings.append(conn_info["binding"])
+        if path.endswith("/activate"):
+            return {
+                "success": True,
+                "data": {
+                    "committed": True,
+                    "status": "COMMITTED",
+                    "evidence": {},
+                },
+            }
+        if path.endswith("/publish"):
+            return {"success": True}
+        return {"success": True, "data": {"valid": True}}
+
+
+class ReadyProbeService:
+    async def probe_bot(self, **kwargs):
+        return RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus.READY,
+            engine="openclaw",
+            layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            preparation_id=PREPARATION_ID,
+            evidence={"marker": "valid"},
+        )
+
+
+def test_stale_signal_uses_current_resolved_binding_for_real_mutations() -> None:
+    layouts = FakeLayoutRepository()
+    resolver = CurrentBindingResolver()
+    transport = RecordingTransport()
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=resolver,
+        adapter_transport=transport,
+        probe_service=ReadyProbeService(),
+    )
+    reconcile = SkillsPoolReconcileService(
+        bot_repository=FakeBotRepository(),
+        layout_repository=layouts,
+        skill_repository=FakeSkillRepository(),
+        runtime=runtime,
+    )
+    handler = SkillsPoolReconcileTaskHandler(
+        claim_service=StickyClaimService(layouts),
+        layout_repository=layouts,
+        reconcile_service=reconcile,
+    )
+    payload = build_skills_pool_reconcile_payload(
+        scope=SCOPE,
+        source="arca_device_alive",
+        signal_identity={
+            "binding_id": 7,
+            "device_id": "device-old",
+            "sandbox_id": "sandbox-old",
+        },
+        wakeup_id="stale-wakeup",
+    )
+
+    outcome = handler.handle(payload)
+
+    assert outcome == Complete()
+    assert resolver.calls == [
+        ("bot-1", "owner-1"),
+        ("bot-1", "owner-1"),
+        ("bot-1", "owner-1"),
+    ]
+    assert transport.bindings == ["binding-new", "binding-new", "binding-new"]
