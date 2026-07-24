@@ -27,6 +27,7 @@ from secbaas.community.api.session_file_sharing import (
     SessionShareLinkResponse,
     SourceTransferNotFoundError,
     SourceTransferNotReadyError,
+    StagingObjectNotFoundError,
     TransferNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,
@@ -311,8 +312,8 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 ticket.fileservice_staging_path,
             )
             if not exists:
-                raise ValueError(
-                    f"OSS object not found at {ticket.fileservice_staging_path}"
+                raise StagingObjectNotFoundError(
+                    staging_path=ticket.fileservice_staging_path
                 )
 
         # Session goes directly to DONE — no UPLOAD_COMPLETED intermediate
@@ -384,7 +385,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 )
             except Exception as _abort_err:
                 _msg = str(_abort_err)
-                if "NoSuchUpload" in _msg or "not found" in _msg.lower():
+                if "NoSuchUpload" in _msg:
                     logger.info(
                         "dispatch_cancel_upload: multipart session already "
                         "gone for transfer_id=%s (concurrent complete?), "
