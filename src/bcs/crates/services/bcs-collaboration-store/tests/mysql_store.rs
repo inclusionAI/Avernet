@@ -416,6 +416,39 @@ async fn mysql_human_activation_uses_empty_assignee_sentinel_and_persisted_deadl
 }
 
 #[tokio::test]
+async fn mysql_human_response_is_atomically_persisted_once() {
+    let db = Arc::new(RecordingDb::default());
+    let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
+
+    let recorded = store
+        .record_human_response_if_running(
+            "sm-run-1",
+            "review",
+            0,
+            "请补充风险说明".to_string(),
+            "human_1001".to_string(),
+        )
+        .await
+        .expect("record Human response");
+
+    assert!(recorded);
+    let executes = db.executes.lock().await;
+    assert_eq!(executes.len(), 1);
+    assert!(
+        executes[0]
+            .sql()
+            .contains("SET artifact_text = ?, responded_by = ?")
+    );
+    assert!(executes[0].sql().contains("AND artifact_text IS NULL"));
+    assert_eq!(
+        executes[0].params()[0],
+        DbValue::from("请补充风险说明")
+    );
+    assert_eq!(executes[0].params()[1], DbValue::from("human_1001"));
+    assert_eq!(executes[0].params()[5], DbValue::from(0));
+}
+
+#[tokio::test]
 async fn mysql_runtime_delivery_correlation_and_events_are_persistent() {
     let correlation = test_correlation();
     let db = Arc::new(RecordingDb {
@@ -491,7 +524,7 @@ async fn mysql_runtime_delivery_correlation_and_events_are_persistent() {
 #[tokio::test]
 async fn mysql_runtime_cas_failures_return_false() {
     let db = Arc::new(RecordingDb {
-        execute_affected_rows: Mutex::new(VecDeque::from([0, 0, 0, 0, 0])),
+        execute_affected_rows: Mutex::new(VecDeque::from([0, 0, 0, 0, 0, 0])),
         ..RecordingDb::default()
     });
     let store = MySqlCollaborationStore::new(db, "dev".to_string());
@@ -517,6 +550,16 @@ async fn mysql_runtime_cas_failures_return_false() {
         )
         .await
         .expect("record node artifact");
+    let human_response_recorded = store
+        .record_human_response_if_running(
+            "sm-run-1",
+            "review",
+            1,
+            "response".to_string(),
+            "human_1001".to_string(),
+        )
+        .await
+        .expect("record Human response");
     let failed = store
         .fail_node_attempt("sm-run-1", "answer", 1, "error".to_string(), 2_000)
         .await
@@ -539,6 +582,7 @@ async fn mysql_runtime_cas_failures_return_false() {
 
     assert!(!completed);
     assert!(!artifact_recorded);
+    assert!(!human_response_recorded);
     assert!(!failed);
     assert!(!retry_scheduled);
     assert!(!run_updated);

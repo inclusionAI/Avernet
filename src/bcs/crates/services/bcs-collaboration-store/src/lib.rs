@@ -490,6 +490,31 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         Ok(true)
     }
 
+    async fn record_human_response_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+        responded_by: String,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, run_id)? {
+            return Ok(false);
+        }
+        let node = node_mut(&mut inner, run_id, node_id)?;
+        if node.status != StateMachineNodeStatus::Running
+            || node.attempt != attempt
+            || node.artifact_text.is_some()
+        {
+            return Ok(false);
+        }
+        node.artifact_text = Some(artifact_text);
+        node.responded_by = Some(responded_by);
+        node.error = None;
+        Ok(true)
+    }
+
     async fn fail_node_attempt(
         &self,
         run_id: &str,
@@ -1771,6 +1796,49 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             .map_err(|error| {
                 ServiceError::InternalError(format!(
                     "state machine node record artifact: {error}"
+                ))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn record_human_response_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+        responded_by: String,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET artifact_text = ?, responded_by = ?, error_message = NULL, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status = 'running' AND artifact_text IS NULL \
+               AND record_status = 'active' \
+               AND EXISTS ( \
+                 SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env \
+                   AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active' \
+               )",
+            self.flavor.set_modified_now()
+        );
+        let result = self.db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(artifact_text),
+                    DbValue::from(responded_by),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "state machine human response record: {error}"
                 ))
             })?;
         Ok(result.affected_rows > 0)

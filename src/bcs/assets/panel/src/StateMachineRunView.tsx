@@ -1715,7 +1715,7 @@ function getStatusLabel(status?: string) {
   }
 
   if (normalized === 'awaiting_response') {
-    return 'Awaiting bot response';
+    return 'Awaiting response';
   }
 
   if (normalized === 'retry_scheduled') {
@@ -1739,7 +1739,8 @@ function getActiveHumanNodeId(graph: StateMachineRunGraph) {
     graph.nodes.find(
       (node) =>
         node.kind === 'human_input' &&
-        normalizeStatus(node.status) === 'running',
+        normalizeStatus(node.status) === 'running' &&
+        normalizeStatus(node.sub_status) !== 'judging',
     )?.node_id || ''
   );
 }
@@ -3409,7 +3410,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
 
         {selectedNodeSubStatus === 'judging' ? (
           <InlineNotice>
-            Bot response received. Judging is in progress.
+            Response received. Judging is in progress.
           </InlineNotice>
         ) : null}
 

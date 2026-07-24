@@ -1910,6 +1910,21 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let group = self.groups.get(&run.group_id).await.ok_or_else(|| {
             CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", run.group_id))
         })?;
+        if !self
+            .runs
+            .record_human_response_if_running(
+                &run.run_id,
+                &cmd.node_id,
+                node.attempt,
+                content.clone(),
+                cmd.caller_actor_id.clone(),
+            )
+            .await?
+        {
+            return Err(CollaborationRuntimeError::Conflict(
+                "human node is no longer accepting responses".to_string(),
+            ));
+        }
         match self
             .evaluate_node_outcome(&compiled, &run, &cmd.node_id, node.attempt, &content)
             .await?
@@ -2007,7 +2022,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         };
         let mut pending = Vec::new();
         for node_run in self.runs.list_node_runs(&run.run_id).await? {
-            if node_run.status != StateMachineNodeStatus::Running {
+            if node_run.status != StateMachineNodeStatus::Running
+                || node_run.artifact_text.is_some()
+            {
                 continue;
             }
             if !state_machine

@@ -27,12 +27,13 @@ use bcs_service_api::{
     JudgeDecision, JudgeEvaluatorPort, JudgeRequest, ListPendingHumanNodesCommand,
     PatchGroupCollaborationDefinitionCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome,
     ServiceError, ServiceResult, ServiceSpec, SessionManagementService,
-    StartStateMachineRunCommand, StateMachineDefinitionRepoPort,
+    StartStateMachineRunCommand, StateMachineDefinitionRepoPort, StateMachineNodeSubStatus,
+    StateMachineRunRepoPort,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use serde_json::{Value, json};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 #[derive(Clone, Default)]
 struct SharedLogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -332,6 +333,156 @@ async fn human_input_uses_the_same_judge_contract_as_bot_output() {
     assert_eq!(node.artifact_text.as_deref(), Some("看起来还行"));
     assert_eq!(run.status, StateMachineRunStatus::Completed);
     assert_eq!(judge.requests.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn human_input_is_persisted_and_no_longer_pending_while_judging() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let judge = Arc::new(BlockingJudge::new("approved"));
+    let runtime = Arc::new(CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        judge.clone(),
+    ));
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(judged_human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "ship it"}),
+            caller_id: Some("human_1001".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("start judged Human run");
+    let run_id = started.view.run.run_id.clone();
+
+    let response_task = tokio::spawn({
+        let runtime = runtime.clone();
+        let run_id = run_id.clone();
+        async move {
+            runtime
+                .respond_human_node(RespondHumanNodeCommand {
+                    run_id,
+                    node_id: "review".to_string(),
+                    caller_actor_id: "human_1001".to_string(),
+                    content: "看起来还行".to_string(),
+                    source: HumanResponseSource::Http,
+                })
+                .await
+        }
+    });
+    judge.started.notified().await;
+
+    let judging = runtime
+        .get_state_machine_node_run(&run_id, "review")
+        .await
+        .expect("load judging Human node")
+        .expect("Human node exists");
+    assert_eq!(judging.node.status, StateMachineNodeStatus::Running);
+    assert_eq!(judging.node.artifact_text.as_deref(), Some("看起来还行"));
+    assert_eq!(judging.node.responded_by.as_deref(), Some("human_1001"));
+    assert_eq!(judging.sub_status, Some(StateMachineNodeSubStatus::Judging));
+    let pending = runtime
+        .list_pending_human_nodes(ListPendingHumanNodesCommand {
+            run_id: run_id.clone(),
+            caller_actor_id: "human_1001".to_string(),
+        })
+        .await
+        .expect("list pending Human nodes while judging");
+    assert!(pending.is_empty());
+
+    let duplicate = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: run_id.clone(),
+            node_id: "review".to_string(),
+            caller_actor_id: "human_1001".to_string(),
+            content: "第二次提交".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect_err("Judging Human node must reject duplicate responses");
+    assert!(matches!(duplicate, CollaborationRuntimeError::Conflict(_)));
+
+    judge.release.notify_one();
+    let completed = response_task
+        .await
+        .expect("Human response task should join")
+        .expect("Judge should complete the Human node");
+    assert_eq!(completed.node.status, StateMachineNodeStatus::Completed);
+    assert_eq!(completed.node.artifact_text.as_deref(), Some("看起来还行"));
+}
+
+#[tokio::test]
+async fn human_input_remains_persisted_when_judge_fails() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let judge = Arc::new(RecordingJudge::with_error("judge provider unavailable"));
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        group,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        judge,
+    );
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(judged_human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "ship it"}),
+            caller_id: Some("human_1001".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("start judged Human run");
+
+    let error = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: started.view.run.run_id.clone(),
+            node_id: "review".to_string(),
+            caller_actor_id: "human_1001".to_string(),
+            content: "请补充风险说明".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect_err("Judge failure should fail the Human response request");
+    assert!(matches!(
+        error,
+        CollaborationRuntimeError::JudgeUnavailable(_)
+    ));
+
+    let failed = store
+        .get_node_run(&started.view.run.run_id, "review")
+        .await
+        .expect("load failed Human node")
+        .expect("Human node exists");
+    assert_eq!(failed.status, StateMachineNodeStatus::Failed);
+    assert_eq!(failed.artifact_text.as_deref(), Some("请补充风险说明"));
+    assert_eq!(failed.responded_by.as_deref(), Some("human_1001"));
 }
 
 #[tokio::test]
@@ -2081,6 +2232,41 @@ impl JudgeEvaluatorPort for RecordingJudge {
         if let Some(error) = &self.error {
             return Err(ServiceError::InternalError(error.clone()));
         }
+        Ok(JudgeDecision {
+            outcome: self.outcome.clone(),
+            reason: "mock decision".to_string(),
+            confidence: 1.0,
+            checked_criteria: Vec::new(),
+            retry_instruction: String::new(),
+            raw_response: None,
+        })
+    }
+}
+
+struct BlockingJudge {
+    outcome: String,
+    requests: Mutex<Vec<JudgeRequest>>,
+    started: Notify,
+    release: Notify,
+}
+
+impl BlockingJudge {
+    fn new(outcome: &str) -> Self {
+        Self {
+            outcome: outcome.to_string(),
+            requests: Mutex::new(Vec::new()),
+            started: Notify::new(),
+            release: Notify::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl JudgeEvaluatorPort for BlockingJudge {
+    async fn judge(&self, request: JudgeRequest) -> Result<JudgeDecision, ServiceError> {
+        self.requests.lock().await.push(request);
+        self.started.notify_one();
+        self.release.notified().await;
         Ok(JudgeDecision {
             outcome: self.outcome.clone(),
             reason: "mock decision".to_string(),

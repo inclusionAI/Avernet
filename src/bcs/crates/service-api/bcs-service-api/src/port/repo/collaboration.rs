@@ -165,6 +165,18 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         artifact_text: String,
     ) -> ServiceResult<bool>;
 
+    /// Atomically accept the first Human response while the node remains
+    /// running. The accepted response stays available during Judge evaluation
+    /// and after a Judge failure.
+    async fn record_human_response_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+        responded_by: String,
+    ) -> ServiceResult<bool>;
+
     async fn mark_human_node_running_if_run_active(
         &self,
         command: MarkHumanNodeRunningCommand,
