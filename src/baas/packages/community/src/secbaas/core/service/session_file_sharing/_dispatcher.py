@@ -27,7 +27,6 @@ from secbaas.api.session_file_sharing import (
     SessionShareLinkResponse,
     SourceTransferNotFoundError,
     SourceTransferNotReadyError,
-    StagingObjectNotFoundError,
     TransferNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,
@@ -52,7 +51,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
     constructor — no bot/device resolution needed.
 
     Six methods cover the full Session transfer lifecycle:
-    get-upload-url -> complete/cancel -> share-link / status / delete.
+    get-upload-url → complete/cancel → share-link / status / delete.
     """
 
     # v1.5 multipart routing thresholds
@@ -129,17 +128,17 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             subdir=staging_subdir,
         )
 
-        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
+        expires_at = (
+            datetime.now(UTC) + timedelta(seconds=expire_seconds)
+        ).isoformat()
 
         # SINGLE / MULTIPART routing
         if file_size >= self.MULTIPART_THRESHOLD:
             # ---- MULTIPART path ----
-            effective_part_size = (
-                part_size if part_size is not None else self.DEFAULT_PART_SIZE
-            )
+            effective_part_size = part_size if part_size else self.DEFAULT_PART_SIZE
             if effective_part_size <= 0:
                 raise ValueError(
-                    f"part_size must be positive, got {effective_part_size}"
+                    f"part_size must be positive, got {part_size}"
                 )
             part_count = -(-file_size // effective_part_size)  # ceil division
 
@@ -196,7 +195,9 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 operator=operator,
             )
 
-            logger.info("Ticket created (MULTIPART): transfer_id=%s", transfer_id)
+            logger.info(
+                "Ticket created (MULTIPART): transfer_id=%s", transfer_id
+            )
 
             return SessionGetUploadUrlResponse(
                 type="MULTIPART",
@@ -234,7 +235,9 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 operator=operator,
             )
 
-            logger.info("Ticket created (SINGLE): transfer_id=%s", transfer_id)
+            logger.info(
+                "Ticket created (SINGLE): transfer_id=%s", transfer_id
+            )
 
             return SessionGetUploadUrlResponse(
                 upload_url=upload_url,
@@ -252,15 +255,11 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         self,
         transfer_id: str,
         tenant: str | None = None,
-        session_id: str | None = None,
     ) -> SessionCompleteUploadResponse:
         """Complete an upload: validate and finalize SINGLE or MULTIPART.
 
         SINGLE:  check_object_exists -> status -> DONE.
         MULTIPART: list_parts + complete_multipart_upload -> DONE.
-
-        Validates session_id ownership when provided (per D-05 — don't
-        reveal existence to other sessions).
 
         Session goes directly to DONE (no UPLOAD_COMPLETED intermediate).
         DONE tickets are idempotent on re-call.
@@ -271,14 +270,8 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             tenant,
         )
 
-        ticket = await asyncio.to_thread(
-            self._ticket_repo.get_by_transfer_id, transfer_id, tenant=tenant
-        )
+        ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
         if ticket is None:
-            raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
-
-        # Ownership validation (per D-05 — don't reveal existence)
-        if session_id is not None and ticket.session_id != session_id:
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Idempotency / terminal-state guard
@@ -302,7 +295,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             )
             if not parts:
                 raise ValueError(
-                    f"No parts uploaded for transfer {transfer_id} — "
+                    f"No parts uploaded for transfer {transfer_id} -- "
                     "cannot complete an empty multipart upload"
                 )
             await asyncio.to_thread(
@@ -318,26 +311,22 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 ticket.fileservice_staging_path,
             )
             if not exists:
-                raise StagingObjectNotFoundError(
-                    staging_path=ticket.fileservice_staging_path
+                raise ValueError(
+                    f"OSS object not found at {ticket.fileservice_staging_path}"
                 )
 
         # Session goes directly to DONE -- no UPLOAD_COMPLETED intermediate
         try:
-            await asyncio.to_thread(
-                self._ticket_repo.update_status, transfer_id, "DONE"
-            )
+            self._ticket_repo.update_status(transfer_id, "DONE")
         except TransferStateConflictError:
-            # CAS failed — a concurrent operation may have transitioned
+            # CAS failed -- a concurrent operation may have transitioned
             # this ticket.  Re-read and return success if already DONE.
-            ticket = await asyncio.to_thread(
-                self._ticket_repo.get_by_transfer_id,
-                transfer_id,
-                tenant=tenant,
+            ticket = self._ticket_repo.get_by_transfer_id(
+                transfer_id, tenant=tenant
             )
             if ticket is not None and ticket.status == "DONE":
                 logger.info(
-                    "dispatch_complete_upload: CAS conflict resolved — "
+                    "dispatch_complete_upload: CAS conflict resolved -- "
                     "ticket already DONE (transfer_id=%s)",
                     transfer_id,
                 )
@@ -360,16 +349,12 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         self,
         transfer_id: str,
         tenant: str | None = None,
-        session_id: str | None = None,
     ) -> SessionCancelUploadResponse:
         """Cancel an in-progress Session upload.
 
         Aborts the OSS multipart session (if any) and transitions the
         ticket to CANCELLED.  Already-terminal tickets return idempotent
         success.
-
-        Validates session_id ownership when provided (per D-05 — don't
-        reveal existence to other sessions).
         """
         logger.info(
             "dispatch_cancel_upload: transfer_id=%s, tenant=%s",
@@ -377,14 +362,8 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             tenant,
         )
 
-        ticket = await asyncio.to_thread(
-            self._ticket_repo.get_by_transfer_id, transfer_id, tenant=tenant
-        )
+        ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
         if ticket is None:
-            raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
-
-        # Ownership validation (per D-05 — don't reveal existence)
-        if session_id is not None and ticket.session_id != session_id:
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Idempotency / terminal-state guard
@@ -417,14 +396,10 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
 
         # CAS-aware status update
         try:
-            await asyncio.to_thread(
-                self._ticket_repo.update_status, transfer_id, "CANCELLED"
-            )
+            self._ticket_repo.update_status(transfer_id, "CANCELLED")
         except TransferStateConflictError:
-            ticket = await asyncio.to_thread(
-                self._ticket_repo.get_by_transfer_id,
-                transfer_id,
-                tenant=tenant,
+            ticket = self._ticket_repo.get_by_transfer_id(
+                transfer_id, tenant=tenant
             )
             if ticket is not None and ticket.status in (
                 "CANCELLED",
@@ -444,7 +419,9 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 )
             raise
 
-        return SessionCancelUploadResponse(transfer_id=transfer_id, status="CANCELLED")
+        return SessionCancelUploadResponse(
+            transfer_id=transfer_id, status="CANCELLED"
+        )
 
     # ------------------------------------------------------------------
     # dispatch_get_share_link
@@ -478,9 +455,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         )
 
         # Look up ticket with tenant filter (ownership validation per D-05)
-        ticket = await asyncio.to_thread(
-            self._ticket_repo.get_by_transfer_id, transfer_id, tenant=tenant
-        )
+        ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
         if ticket is None:
             raise SourceTransferNotFoundError(transfer_id=transfer_id)
 
@@ -499,7 +474,9 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         # show=False -> attachment (download); show=True -> inline (preview)
         response_params = None
         if not show:
-            response_params = {"response-content-disposition": "attachment"}
+            response_params = {
+                "response-content-disposition": "attachment"
+            }
 
         share_url = await asyncio.to_thread(
             self._file_transfer_backend.generate_download_url,
@@ -508,17 +485,9 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             response_params,
         )
 
-        logger.info(
-            "share-link audit: operator=%s transfer_id=%s session_id=%s "
-            "expire_seconds=%d show=%s",
-            operator or "unknown",
-            transfer_id,
-            session_id,
-            expire_seconds,
-            show,
-        )
-
-        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
+        expires_at = (
+            datetime.now(UTC) + timedelta(seconds=expire_seconds)
+        ).isoformat()
 
         return SessionShareLinkResponse(
             share_url=share_url,
@@ -543,14 +512,14 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         the transfer_id exists for another session.
         """
         logger.info(
-            "dispatch_get_transfer_status: transfer_id=%s, tenant=%s, session_id=%s",
+            "dispatch_get_transfer_status: transfer_id=%s, tenant=%s, "
+            "session_id=%s",
             transfer_id,
             tenant,
             session_id,
         )
 
-        record = await asyncio.to_thread(
-            self._ticket_repo.get_by_transfer_id,
+        record = self._ticket_repo.get_by_transfer_id(
             transfer_id,
             tenant=tenant,
         )
@@ -562,7 +531,9 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Conditional fields per status
-        error_message = record.error_message if record.status == "FAILED" else None
+        error_message = (
+            record.error_message if record.status == "FAILED" else None
+        )
 
         return SessionGetTransferStatusResponse(
             transfer_id=record.transfer_id,
@@ -583,7 +554,6 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         self,
         transfer_id: str,
         tenant: str | None = None,
-        session_id: str | None = None,
     ) -> SessionDeleteTransferResponse:
         """Delete a Session transfer ticket and its OSS staging object.
 
@@ -591,9 +561,6 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         can be deleted.  Already-DELETED tickets return idempotent success.
         OSS deletion tolerates ``NoSuchKey`` -- lifecycle policies may have
         already cleaned up the object.
-
-        Validates session_id ownership when provided (per D-05 -- don't
-        reveal existence to other sessions).
         """
         logger.info(
             "dispatch_delete_transfer: transfer_id=%s, tenant=%s",
@@ -601,17 +568,12 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             tenant,
         )
 
-        ticket = await asyncio.to_thread(
-            self._ticket_repo.get_by_transfer_id,
+        ticket = self._ticket_repo.get_by_transfer_id(
             transfer_id,
             tenant=tenant,
         )
 
         if ticket is None:
-            raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
-
-        # Ownership validation (per D-05 -- don't reveal existence)
-        if session_id is not None and ticket.session_id != session_id:
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Terminal state validation (per D-04)
@@ -641,14 +603,10 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
 
         # CAS-aware status update
         try:
-            await asyncio.to_thread(
-                self._ticket_repo.update_status, ticket.transfer_id, "DELETED"
-            )
+            self._ticket_repo.update_status(ticket.transfer_id, "DELETED")
         except TransferStateConflictError:
-            ticket = await asyncio.to_thread(
-                self._ticket_repo.get_by_transfer_id,
-                ticket.transfer_id,
-                tenant=tenant,
+            ticket = self._ticket_repo.get_by_transfer_id(
+                ticket.transfer_id, tenant=tenant
             )
             if ticket is not None and ticket.status == "DELETED":
                 logger.info(
