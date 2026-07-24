@@ -1781,9 +1781,9 @@ fn session_history_error_to_response(e: &bcs_service_api::GroupUseCaseError) -> 
 // ---------------------------------------------------------------
 // DELETE /sessions/{sid}
 //
-// Auth: bot_id query param must be the session creator, or if
-// bot_id is a human, any bot owned by that human must be the
-// session creator.
+// Auth: bot_id query param must be the session creator, the group's driver
+// bot, or — for a human caller — a bot they own that is the session creator
+// or the group's driver bot.
 // ---------------------------------------------------------------
 
 pub async fn delete_session(
@@ -1804,13 +1804,24 @@ pub async fn delete_session(
 
     let caller_id = &query.bot_id;
     let session_creator = sess.created_by.as_deref().unwrap_or("");
+    let driver_bot = state
+        .services
+        .group
+        .get(&sess.group_id)
+        .await
+        .map(|g| g.driver_bot);
+    let driver_bot = driver_bot.as_deref().unwrap_or("");
 
-    let authorized = if session_creator == caller_id {
+    // The session creator, the driver bot, or a human who owns the creator or
+    // driver bot may delete the session.
+    let authorized = if caller_id == session_creator || caller_id == driver_bot {
         true
     } else if caller_id.starts_with("human_") {
         let staff_no = caller_id.trim_start_matches("human_");
         let owned_bots = state.services.registry.list_bots_by_creator(staff_no).await;
-        owned_bots.iter().any(|b| b.bot_uuid == session_creator)
+        owned_bots
+            .iter()
+            .any(|b| b.bot_uuid == session_creator || b.bot_uuid == driver_bot)
     } else {
         false
     };
