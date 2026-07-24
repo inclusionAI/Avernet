@@ -12,8 +12,9 @@ forwarding table and no whitelist**. The gateway needs only:
 
 At request time a single catch-all resolves the domain from the leading path
 segment (unknown domain → deny), authenticates via the existing `Authenticator`,
-signs the established principal, and forwards the path **verbatim** to the
-resolved server. The served `/openapi.json` is generated from the backend's own
+and forwards the path **verbatim** to the resolved server. (Signing the
+established principal for the downstream call is the auth workstream's seam — it
+plugs in at the forwarder; this feature does not build it.) The served `/openapi.json` is generated from the backend's own
 published description (shapes from the backend, presented at verbatim paths) and
 kept fresh by a **background refresh** that auto-adopts the latest published
 version with a **last-known-good** fallback. The schema is a **doc-only** input —
@@ -34,8 +35,9 @@ release CI), so an incompatible description never reaches the store.
   former groups become per-agent sub-paths (no `bots/bots`).
 - **Exposure model.** No gateway whitelist. Two gates remain: (a) the domain must
   be configured or the request is denied; (b) every `/openapi/v1` endpoint verifies
-  the gateway-signed JWT, so direct/unsigned access is rejected. The invariant
-  "`/openapi/v1/**` is external-only" is enforced by a backend-side test.
+  the gateway-signed JWT, so direct/unsigned access is rejected — **that JWT
+  sign/verify is delivered by the auth workstream, not this feature.** The
+  invariant "`/openapi/v1/**` is external-only" is enforced by a backend-side test.
 - **Auth = existing prefix rules, reused as-is.** New endpoints inherit the
   domain default automatically; only non-default auth adds a rule. (Note the
   per-op-auth "fold" considered earlier is **not** done — `route_security.yaml`
@@ -50,17 +52,15 @@ release CI), so an incompatible description never reaches the store.
   matcher/specificity in `core/authn/_route_security.py`) and the OpenAPI
   generator.
 - `src/gateway/…/spi/` + `plugins/` (new) — `Forwarder` SPI (bare = httpx);
-  `SchemaCatalog` SPI (bare = local file, enterprise flavor = OSS + refresh);
-  `PrincipalSigner` seam used on the forward path (bare = HMAC per auth-design
-  §7.1).
-- `src/gateway/…/bootstrap/` — compose forwarder, domain map, schema catalog,
-  signer; keep the existing `Authenticator` wiring.
+  `SchemaCatalog` SPI (bare = local file, enterprise flavor = OSS + refresh).
+- `src/gateway/…/bootstrap/` — compose forwarder, domain map, schema catalog;
+  keep the existing `Authenticator` wiring.
 - `src/gateway/configs/` — new `upstreams.yaml` (domain→server + schema source).
   `route_security.yaml` stays (auth prefix rules). No per-op forwarding file.
-- `src/backend/…/adapters/http/` — **move externally-exposed routers to serve
-  `/openapi/v1/bots/…` directly**; add a CI `dump_openapi()`; add the
-  `/openapi/v1` = external-only invariant test; **verify the gateway JWT** on
-  those routes (backend side of §7.1).
+- `src/backend/…/adapters/http/` — **move ALL externally-exposed routers (the
+  seven #389 groups) to serve under `/openapi/v1/bots/…` directly**; add a CI
+  `dump_openapi()`; add the `/openapi/v1` = external-only invariant test. (JWT
+  verification on those routes is the auth workstream's, not this feature's.)
 - `src/backend` release CI — publish `app.openapi()` to the store after the
   publish-time backward-compat gate passes.
 
@@ -87,9 +87,10 @@ servers:
 non-default overrides only.
 
 **Runtime request path** — one catch-all: leading segment → domain (no match →
-`404`, not an open proxy) → `Authenticator.authenticate` (fail-closed) → sign
-principal → forward path **verbatim** to `server.base_url` with the JWT → stream
-response through the standard envelope.
+`404`, not an open proxy) → `Authenticator.authenticate` (fail-closed) → forward
+path **verbatim** to `server.base_url` → stream response through the standard
+envelope. (The auth workstream's signer attaches the principal token at the
+forwarder seam.)
 
 **Doc path** — `GET /openapi.json` served from the in-memory description (filtered
 to `/openapi/v1/<domain>` paths, `x-avernet-security` attached from the auth
@@ -97,8 +98,9 @@ rules). A background task re-reads the source every `refresh_seconds`; on failur
 or malformed content it keeps the last-known-good copy.
 
 **No change** to `Principal` establishment/enforcement (`core/authn/_runner.py`,
-strategies). The forward path newly *uses* the signing seam; key
-management/rotation (§7.1) stays a separate workstream.
+strategies). Downstream principal conveyance (signing/verification, §7.1) is the
+auth workstream's; the forwarder exposes the seam but this feature does not build
+it.
 
 ## Key Files & Functions
 
@@ -107,21 +109,21 @@ management/rotation (§7.1) stays a separate workstream.
 - `core/forwarding/_openapi.py` (new) — `generate_openapi(description, rules) ->
   dict`: keep `/openapi/v1/<domain>` paths, attach security, return the doc.
 - `spi/forwarder/…` + `plugins/forwarder/bare/…` (new) — `Forwarder.forward(request,
-  target, principal_token) -> Response`, httpx streaming.
+  target) -> Response`, httpx streaming.
 - `spi/schema_catalog/…` + `plugins/schema_catalog/bare/…` (new) —
   `SchemaCatalog.current(domain) -> dict`; bare = local file; background refresher
   holds last-known-good.
-- `spi/signer/…` + `plugins/signer/bare/…` (new) — `PrincipalSigner.sign(principal)
-  -> str` (bare HMAC).
 - `adapters/web/_forward.py` (new) — catch-all route (depends on `require_principal`)
   + envelope mapping.
 - `adapters/web/app.py:74` — drop `include_all`; mount the catch-all; override
   `app.openapi` to serve the generated doc; start the refresher on lifespan.
 - `adapters/web/routers/**` — **deleted** (the seven #389 stub groups).
-- `src/backend/.../adapters/http/app.py` — `dump_openapi()`; router prefix move;
-  gateway-JWT verification dependency.
+- `src/backend/.../adapters/http/app.py` + the seven exposed routers —
+  `dump_openapi()`; move **all** exposed group router prefixes under
+  `/openapi/v1/bots/…`.
 - `src/backend/tests/community/contracts/gateway/test_public_namespace.py` (new) —
-  assert no `/openapi/v1` route lacks the auth/verification marker.
+  assert every `/openapi/v1` route lies within the `/openapi/v1/bots` surface (no
+  stray/internal leak).
 - backend release CI step — compat-gate then publish `app.openapi()`.
 
 ## Dependencies
@@ -141,10 +143,11 @@ management/rotation (§7.1) stays a separate workstream.
   internal route under `/openapi/v1`), the domain-must-be-configured gate, and the
   mandatory gateway-JWT verification on every such route (unsigned/direct access
   rejected).
-- **Risk:** Signing is load-bearing now — if the backend doesn't verify the JWT,
-  the exposure argument collapses. **Mitigation:** the backend-side verifier is a
-  hard **sequencing dependency** (Rollout); forwarding does not go live until it is
-  in place.
+- **Risk:** JWT sign/verify is load-bearing for the exposure argument but is owned
+  by the **auth workstream**, not this feature. **Mitigation:** treat it as a hard
+  **cross-team sequencing dependency** (Rollout) — forwarding does not go live until
+  the signer (gateway) and verifier (backend) are in place; the forwarder exposes
+  the seam so it drops in without touching this code.
 - **Risk:** Runtime proxy edge cases (SSE/streaming, timeouts, hop-by-hop headers,
   large uploads). **Mitigation:** bare forwarder streams both directions;
   timeout/retry is a per-server config field; SSE + upload each get an explicit test.
@@ -164,7 +167,7 @@ management/rotation (§7.1) stays a separate workstream.
 - **Per-operation whitelist (the earlier version of this plan).** Safer default
   exposure, but every new API needs a gateway config change + release — the exact
   cost we set out to remove. Rejected in favor of domain-transparent forwarding +
-  the namespace invariant + JWT.
+  the namespace invariant + the (separately-owned) JWT.
 - **Committed pin read at boot.** Simple, but the doc only updates on a gateway
   redeploy. Rejected for the auto-refresh store.
 - **Gateway fetches the *live* backend `/openapi.json`.** Adds a boot/runtime
@@ -175,11 +178,12 @@ management/rotation (§7.1) stays a separate workstream.
 
 ## Rollout
 
-- Sequence: **(1)** backend serves `/openapi/v1/bots/…` (dual-mounted with `/api/…`),
-  verifies the gateway JWT, and publishes its description; **(2)** gateway lands the
-  domain map, forwarder, signer, and background-refreshed doc; **(3)** cut over —
-  catch-all + generated doc go live, then the #389 stub routers are deleted. (2)/(3)
-  must not precede the backend JWT verification in (1).
+- Sequence: **(1)** backend serves the whole `bots` surface under `/openapi/v1/bots/…`
+  (dual-mounted with `/api/…`) and publishes its description; **(2)** gateway lands the
+  domain map, forwarder, and background-refreshed doc; **(3)** cut over — catch-all +
+  generated doc go live, then the #389 stub routers are deleted. The JWT sign/verify
+  from the auth workstream is a **cross-team gate on going live** — steps land behind
+  it but public traffic waits for verification to be in place.
 - Single domain (`bots`) wired; the map admits more domains without code change.
 - Parity: the generated `/openapi/v1` doc ⊇ the #389 operation set for carried-over
   ops (snapshot check).
@@ -190,10 +194,10 @@ management/rotation (§7.1) stays a separate workstream.
 - **Unit:** domain resolution (unknown domain → deny); verbatim forward target;
   OpenAPI generator (namespace filter, security attach); background refresh adopts
   a new version and falls back to last-known-good on failure; compatibility checker
-  (additive passes, each breaking class fails); signer round-trip.
+  (additive passes, each breaking class fails).
 - **Integration:** catch-all against a stub upstream (httpx transport mock) — auth
-  reject-before-forward, unknown-domain 404, JWT attached on forward, envelope on
-  success/error, one SSE and one upload path.
+  reject-before-forward, unknown-domain 404, envelope on success/error, one SSE and
+  one upload path.
 - **Contract/CI (backend):** `app.openapi()` dumps deterministically; the
   namespace-invariant test; the publish-time compat gate (additive vs breaking).
 - Must stay green: `ruff`, `mypy --strict`, `pytest -m "not e2e"`.

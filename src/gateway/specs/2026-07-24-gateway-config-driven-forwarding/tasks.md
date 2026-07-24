@@ -2,6 +2,11 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
+> **Out of this feature's scope:** principal signing/verification (the
+> gateway↔backend JWT) is owned by the auth workstream. Forwarding integrates with
+> that seam but does not implement it; the live cutover depends on it (see Rollout
+> in `plan.md`).
+
 ## Task 1: Domain map config + resolver
 - **Goal:** Load `upstreams.yaml` and resolve a request's leading path segment to a target server (unknown domain → no match).
 - **Files:** `src/gateway/src/gateway/community/core/forwarding/_domains.py` (new), `src/gateway/configs/upstreams.yaml` (new)
@@ -15,22 +20,13 @@
 - **Goal:** A streaming HTTP forwarder behind an SPI so flavors can swap.
 - **Files:** `src/gateway/src/gateway/community/spi/forwarder/{_protocols,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/forwarder/bare/_plugin.py` (new), `pyproject.toml`
 - **Done when:**
-  - [ ] `Forwarder.forward(request, target, principal_token) -> Response` protocol defined.
-  - [ ] Bare plugin issues the upstream call with `httpx`, streaming request and response bodies, propagating method/headers/query (dropping hop-by-hop headers) and attaching the principal token header.
+  - [ ] `Forwarder.forward(request, target) -> Response` protocol defined.
+  - [ ] Bare plugin issues the upstream call with `httpx`, streaming request and response bodies, propagating method/headers/query and dropping hop-by-hop headers. (Downstream principal conveyance/signing is added by the auth workstream at this seam; not built here.)
   - [ ] `httpx` promoted to a runtime dependency; `mypy --strict` clean.
   - [ ] Unit test against a mocked httpx transport (status, headers, streamed body).
 - **Depends on:** —
 
-## Task 3: PrincipalSigner seam + bare HMAC plugin
-- **Goal:** Sign the established principal for the downstream call (the seam forwarding relies on; §7.1).
-- **Files:** `src/gateway/src/gateway/community/spi/signer/{_protocols,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/signer/bare/_plugin.py` (new)
-- **Done when:**
-  - [ ] `PrincipalSigner.sign(principal) -> str` protocol defined.
-  - [ ] Bare plugin emits a short-TTL HMAC JWT carrying the serialized principal (claims per §7.1: `iss`/`aud`/`iat`/`exp`).
-  - [ ] Unit test: sign → decode round-trip; TTL/`aud` present.
-- **Depends on:** —
-
-## Task 4: SchemaCatalog SPI + file loader + background refresh
+## Task 3: SchemaCatalog SPI + file loader + background refresh
 - **Goal:** Provide the current published description per domain, refreshed in the background with last-known-good.
 - **Files:** `src/gateway/src/gateway/community/spi/schema_catalog/{_protocols,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/schema_catalog/bare/_plugin.py` (new)
 - **Done when:**
@@ -40,52 +36,52 @@
   - [ ] Unit tests: adopts a changed source; keeps last-known-good on failure.
 - **Depends on:** —
 
-## Task 5: OpenAPI generator
+## Task 4: OpenAPI generator
 - **Goal:** Produce the served doc from a published description — filter to the domain namespace and attach auth metadata.
 - **Files:** `src/gateway/src/gateway/community/core/forwarding/_openapi.py` (new)
 - **Done when:**
   - [ ] `generate_openapi(description, rules) -> dict` keeps only `/openapi/v1/<domain>` paths and their referenced `components`.
   - [ ] Each operation carries `x-avernet-security` resolved from the prefix auth rules.
   - [ ] Unit tests: namespace filter, component collection, security attach.
-- **Depends on:** Task 4
+- **Depends on:** Task 3
 
-## Task 6: Catch-all forwarding entrypoint
-- **Goal:** One route that authenticates, signs, and forwards verbatim — the runtime request path.
+## Task 5: Catch-all forwarding entrypoint
+- **Goal:** One route that authenticates and forwards verbatim — the runtime request path.
 - **Files:** `src/gateway/src/gateway/community/adapters/web/_forward.py` (new)
 - **Done when:**
   - [ ] Resolves the domain (unknown → `404`, never open-proxy); authenticates via `require_principal` (fail-closed) before any forward.
-  - [ ] Signs the principal and forwards the path **verbatim** to the resolved server via `Forwarder`; response returns through the standard envelope.
-  - [ ] Integration tests (mocked upstream transport): auth reject-before-forward, unknown-domain 404, JWT attached, success/error envelope, one SSE path, one upload path.
-- **Depends on:** Tasks 1, 2, 3
+  - [ ] Forwards the path **verbatim** to the resolved server via `Forwarder`; response returns through the standard envelope. (The auth workstream attaches the signed principal at the forwarder seam.)
+  - [ ] Integration tests (mocked upstream transport): auth reject-before-forward, unknown-domain 404, success/error envelope, one SSE path, one upload path.
+- **Depends on:** Tasks 1, 2
 
-## Task 7: Wire gateway + retire #389 stub routers
+## Task 6: Wire gateway + retire #389 stub routers
 - **Goal:** Compose the pieces and cut over the app to config-driven serving.
 - **Files:** `src/gateway/src/gateway/community/bootstrap/` , `src/gateway/src/gateway/community/adapters/web/app.py`, `src/gateway/src/gateway/community/adapters/web/routers/**` (deleted)
 - **Done when:**
-  - [ ] Bootstrap composes forwarder, domain map, schema catalog (+ refresher), and signer; existing `Authenticator` wiring preserved.
+  - [ ] Bootstrap composes forwarder, domain map, and schema catalog (+ refresher); existing `Authenticator` wiring preserved.
   - [ ] `app.py` mounts the catch-all, overrides `app.openapi` to serve the generated doc, starts the refresher on lifespan, and drops `include_all`.
   - [ ] The seven `routers/<group>/` stub packages are deleted; `ruff` + `mypy --strict` + `pytest -m "not e2e"` green.
   - [ ] Snapshot test: generated `/openapi/v1` doc ⊇ the #389 operation set for carried-over ops.
-- **Depends on:** Tasks 5, 6
+- **Depends on:** Tasks 4, 5
 
-## Task 8: Backend — move exposed routers under `/openapi/v1/bots` + verify gateway JWT
-- **Goal:** The backend serves the client-facing paths directly and rejects unsigned/direct access.
-- **Files:** `src/backend/src/agentclaw/community/adapters/http/app.py` and the exposed routers under `src/backend/src/agentclaw/community/adapters/http/**`
+## Task 7: Backend — move ALL exposed routers under `/openapi/v1/bots`
+- **Goal:** Every externally-exposed backend group (the seven #389 groups — bots, channels, identity, mcp, resources, routines, skills) is the `bots` component and serves under the `/openapi/v1/bots` prefix directly.
+- **Files:** `src/backend/src/agentclaw/community/adapters/http/app.py` and the exposed routers under `src/backend/src/agentclaw/community/adapters/http/**` (e.g. `channel/router.py`, `identity/router.py`, `cron/router.py`, …)
 - **Done when:**
-  - [ ] Externally-exposed routers are dual-mounted at `/openapi/v1/bots/…` alongside the existing `/api/…` (transition).
-  - [ ] A dependency on the `/openapi/v1` routes verifies the gateway-signed JWT (HMAC bare) and rejects missing/invalid tokens.
-  - [ ] Existing backend tests stay green; a test covers reject-without-JWT.
-- **Depends on:** Task 3 (shared HMAC seam/contract)
+  - [ ] Each exposed group's router prefix is changed/dual-mounted so its routes live under `/openapi/v1/bots/…` (alongside the existing `/api/…` during transition).
+  - [ ] The mapping from each #389 group's intended public path to its `/openapi/v1/bots/…` path is applied consistently (no group left as a `/openapi/v1/<group>` sibling).
+  - [ ] Existing backend tests stay green.
+- **Depends on:** —
 
-## Task 9: Backend — `dump_openapi()` + namespace-invariant test
-- **Goal:** Deterministic OpenAPI dump for publishing, and enforce `/openapi/v1` = external-only.
+## Task 8: Backend — `dump_openapi()` + public-namespace test
+- **Goal:** Deterministic OpenAPI dump for publishing, and enforce that the public namespace holds only the intended `bots` surface.
 - **Files:** `src/backend/src/agentclaw/community/adapters/http/app.py`, `src/backend/tests/community/contracts/gateway/test_public_namespace.py` (new)
 - **Done when:**
   - [ ] `dump_openapi()` writes `app.openapi()` deterministically (stable ordering) to a file.
-  - [ ] The test fails if any `/openapi/v1` route lacks the gateway-JWT verification marker (no internal route leaks into the public namespace).
-- **Depends on:** Task 8
+  - [ ] The test fails if any route under `/openapi/v1` falls outside the `/openapi/v1/bots` surface (no stray/internal route leaks into the public namespace).
+- **Depends on:** Task 7
 
-## Task 10: Backward-compatibility checker (in-repo)
+## Task 9: Backward-compatibility checker (in-repo)
 - **Goal:** A focused checker that classifies two OpenAPI descriptions as compatible or breaking.
 - **Files:** `src/gateway/src/gateway/community/core/forwarding/_compat.py` (new) (or a shared tools module), plus unit tests
 - **Done when:**
@@ -93,35 +89,36 @@
   - [ ] Unit tests cover each breaking class and the additive-passes case.
 - **Depends on:** —
 
-## Task 11: Backend release CI — compat-gate then publish
+## Task 10: Backend release CI — compat-gate then publish
 - **Goal:** On release, block breaking changes and publish the description for the gateway to auto-adopt.
 - **Files:** backend release CI config/scripts; the single-box committed description file the bare catalog reads
 - **Done when:**
   - [ ] CI runs `dump_openapi()` → `check_compatible(published, new)`; a breaking change fails the release unless an explicit new major.
   - [ ] On pass, the description is published to the store (OSS) and the committed single-box file is updated.
-- **Depends on:** Tasks 9, 10
+  - [ ] (If the release pipeline lives outside this repo, deliver the dump+gate+publish script and document the wiring hand-off.)
+- **Depends on:** Tasks 8, 9
 
-## Task 12: Tests & Verification
+## Task 11: Tests & Verification
 - **Goal:** Ensure the feature meets the spec acceptance criteria end-to-end.
 - **Files:** the test suites above
 - **Done when:**
   - [ ] Every spec acceptance criterion checks off (domain-transparent forward, deny unknown domain, fail-closed prefix auth, namespace invariant, verbatim serve, auto-adopt latest + last-known-good, doc-only degradation, publish-time compat gate, pluggable source, no hand-written endpoints/whitelist).
   - [ ] `ruff`, `mypy --strict`, `pytest -m "not e2e"` all green across gateway and backend.
-- **Depends on:** Tasks 7, 11
+- **Depends on:** Tasks 6, 10
 
 ---
 
 ## Groups
 
-- **Group A — Forwarding core:** Tasks 1, 2, 3
-  - Theme: Domain resolution, the streaming forwarder, and the principal signer — the pieces the request path needs.
-- **Group B — Doc generation:** Tasks 4, 5
+- **Group A — Forwarding core:** Tasks 1, 2
+  - Theme: Domain resolution and the streaming forwarder — the pieces the request path needs.
+- **Group B — Doc generation:** Tasks 3, 4
   - Theme: Publish-fed schema catalog (with last-known-good refresh) and the OpenAPI generator.
-- **Group C — Gateway wiring + cutover:** Tasks 6, 7
+- **Group C — Gateway wiring + cutover:** Tasks 5, 6
   - Theme: The catch-all entrypoint, full composition, and deleting the #389 stubs — the gateway serves config-driven.
-- **Group D — Backend alignment:** Tasks 8, 9
-  - Theme: Backend serves the public paths, verifies the JWT, dumps its OpenAPI, and enforces the namespace invariant.
-- **Group E — Compatibility gate + publish:** Tasks 10, 11
+- **Group D — Backend alignment:** Tasks 7, 8
+  - Theme: The backend serves the whole `bots` surface under `/openapi/v1/bots`, dumps its OpenAPI, and enforces the namespace invariant.
+- **Group E — Compatibility gate + publish:** Tasks 9, 10
   - Theme: The compat checker and the release-time gate-then-publish flow.
-- **Group F — Verification:** Task 12
+- **Group F — Verification:** Task 11
   - Theme: Final spec acceptance check.
