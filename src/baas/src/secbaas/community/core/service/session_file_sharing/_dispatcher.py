@@ -385,7 +385,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 )
             except Exception as _abort_err:
                 _msg = str(_abort_err)
-                if "NoSuchUpload" in _msg:
+                if "NoSuchUpload" in _msg or "not found" in _msg.lower():
                     logger.info(
                         "dispatch_cancel_upload: multipart session already "
                         "gone for transfer_id=%s (concurrent complete?), "
