@@ -17,6 +17,7 @@ from gateway.community.spi.forwarder import (
     ForwardRequest,
     ForwardResponse,
     strip_hop_by_hop,
+    strip_hop_by_hop_items,
 )
 
 Scope = dict[str, Any]
@@ -29,6 +30,25 @@ def test_strip_hop_by_hop_removes_connection_headers() -> None:
         {"Connection": "keep-alive", "Transfer-Encoding": "chunked", "X-Keep": "1"}
     )
     assert cleaned == {"X-Keep": "1"}
+
+
+def test_strip_hop_by_hop_drops_connection_named_headers() -> None:
+    # A header named in the Connection value is connection-scoped (RFC 7230 §6.1).
+    cleaned = strip_hop_by_hop(
+        {"Connection": "X-Internal", "X-Internal": "secret", "X-Keep": "1"}
+    )
+    assert cleaned == {"X-Keep": "1"}
+
+
+def test_strip_hop_by_hop_items_preserves_duplicate_headers() -> None:
+    kept = strip_hop_by_hop_items(
+        [
+            ("set-cookie", "a=1"),
+            ("connection", "close"),
+            ("set-cookie", "b=2"),
+        ]
+    )
+    assert kept == [("set-cookie", "a=1"), ("set-cookie", "b=2")]
 
 
 def _app(
@@ -115,9 +135,30 @@ async def test_response_hop_by_hop_headers_stripped() -> None:
         async with forwarder.forward(
             ForwardRequest(method="GET", url="http://up/openapi/v1/bots")
         ) as response:
-            assert "connection" not in {k.lower() for k in response.headers}
-            assert response.headers["content-type"] == "application/json"
+            names = {k.lower() for k, _ in response.headers}
+            assert "connection" not in names
+            assert ("content-type", "application/json") in response.headers
             _ = [chunk async for chunk in response.body]
+
+
+async def test_response_preserves_duplicate_set_cookie() -> None:
+    seen: dict[str, str] = {}
+    app = _app(
+        seen,
+        resp_headers=[
+            (b"content-type", b"application/json"),
+            (b"set-cookie", b"session=abc"),
+            (b"set-cookie", b"csrf=xyz"),
+        ],
+    )
+    async with _client(app) as client:
+        forwarder = BareForwarder(client=client)
+        async with forwarder.forward(
+            ForwardRequest(method="GET", url="http://up/openapi/v1/bots")
+        ) as response:
+            cookies = [v for k, v in response.headers if k.lower() == "set-cookie"]
+            _ = [chunk async for chunk in response.body]
+    assert cookies == ["session=abc", "csrf=xyz"]
 
 
 async def test_bare_forwarder_creates_and_closes_own_client() -> None:
