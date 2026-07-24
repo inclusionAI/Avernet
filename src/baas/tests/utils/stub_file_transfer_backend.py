@@ -341,6 +341,53 @@ class StubFileTransferBackend(FileTransferBackend):
         subdir_part = f"{subdir}/" if subdir else ""
         return f"{root}/{tenant}/{subdir_part}{transfer_id}/{filename}"
 
+    def build_session_staging_path(
+        self,
+        tenant: str,
+        session_id: str,
+        transfer_id: str,
+        filename: str,
+        subdir: str | None = None,
+    ) -> str:
+        """Construct OSS object key for Session file transfer staging.
+
+        Pattern:
+        ``{staging_root}/{env}/{tenant}/{session_id}/[{subdir}/]{transfer_id}/{filename}``
+
+        The ``env`` component is resolved via ``get_current_env()`` for
+        multi-environment isolation (dev/pre/prod) per D-01.
+
+        Args:
+            tenant: Tenant identifier for scoping.
+            session_id: Session identifier for scoping within the tenant.
+            transfer_id: Transfer ticket ID for uniqueness.
+            filename: Target filename on the OSS object.
+            subdir: Optional subdirectory under the session scope.
+
+        Returns:
+            Complete OSS object key string.
+
+        Raises:
+            ValueError: If any input field contains ``..`` (path traversal).
+        """
+        from secbaas.community.core.utils.env_utils import get_current_env
+
+        # Path traversal guard: reject components containing ".."
+        for name, value in [
+            ("tenant", tenant),
+            ("session_id", session_id),
+            ("transfer_id", transfer_id),
+            ("subdir", subdir),
+            ("filename", filename),
+        ]:
+            if value is not None and ".." in value:
+                raise ValueError(f"Path traversal detected in {name}: {value!r}")
+
+        env = get_current_env()
+        root = self._staging_root_path
+        subdir_part = f"{subdir}/" if subdir else ""
+        return f"{root}/{env}/{tenant}/{session_id}/{subdir_part}{transfer_id}/{filename}"
+
     def build_staging_prefix(
         self,
         tenant: str,
