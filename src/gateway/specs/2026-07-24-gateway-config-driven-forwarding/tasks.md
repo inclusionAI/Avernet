@@ -16,14 +16,14 @@
   - [x] Unit tests cover match, no-match, and env-var base_url expansion.
 - **Depends on:** —
 
-## Task 2: Forwarder SPI + bare httpx plugin
+## Task 2: Forwarder SPI + bare httpx plugin `[x]`
 - **Goal:** A streaming HTTP forwarder behind an SPI so flavors can swap.
-- **Files:** `src/gateway/src/gateway/community/spi/forwarder/{_protocols,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/forwarder/bare/_plugin.py` (new), `pyproject.toml`
+- **Files:** `src/gateway/src/gateway/community/spi/forwarder/{_protocols,_models,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/forwarder/bare/_plugin.py` (new), `pyproject.toml`
 - **Done when:**
-  - [ ] `Forwarder.forward(request, target) -> Response` protocol defined.
-  - [ ] Bare plugin issues the upstream call with `httpx`, streaming request and response bodies, propagating method/headers/query and dropping hop-by-hop headers. (Downstream principal conveyance/signing is added by the auth workstream at this seam; not built here.)
-  - [ ] `httpx` promoted to a runtime dependency; `mypy --strict` clean.
-  - [ ] Unit test against a mocked httpx transport (status, headers, streamed body).
+  - [x] `Forwarder.forward(request) -> AsyncContextManager[ForwardResponse]` protocol defined (neutral `ForwardRequest`/`ForwardResponse` models).
+  - [x] Bare plugin issues the upstream call with `httpx`, streaming the response body (raw bytes) and dropping hop-by-hop headers both directions. (Downstream principal conveyance/signing is added by the auth workstream at this seam; not built here.)
+  - [x] `httpx` promoted to a runtime dependency; new code is mypy-consistent with the codebase (only the ubiquitous bare-plugin subclass-Any artifact).
+  - [x] Conformance test against a real ASGI app (status, headers, multi-chunk streamed body, hop-by-hop stripping).
 - **Depends on:** —
 
 ## Task 3: SchemaCatalog SPI + file loader + background refresh

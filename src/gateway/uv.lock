@@ -339,6 +339,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-instrumentation-asgi" },
     { name = "opentelemetry-sdk" },
@@ -359,7 +360,6 @@ dev = [
     { name = "coverage" },
     { name = "debugpy" },
     { name = "greenlet" },
-    { name = "httpx" },
     { name = "httpx2" },
     { name = "mypy" },
     { name = "pre-commit" },
@@ -375,6 +375,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "fastapi", specifier = ">=0.100.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otlp'", specifier = ">=1.42.1" },
     { name = "opentelemetry-instrumentation-asgi", specifier = ">=0.63b1" },
@@ -392,7 +393,6 @@ dev = [
     { name = "coverage", specifier = ">=7.6.0" },
     { name = "debugpy", specifier = ">=1.8.0" },
     { name = "greenlet", specifier = ">=3.5.3" },
-    { name = "httpx", specifier = ">=0.27.0" },
     { name = "httpx2", specifier = ">=2.7.0" },
     { name = "mypy", specifier = ">=1.20.2" },
     { name = "pre-commit", specifier = ">=3.6.0" },
