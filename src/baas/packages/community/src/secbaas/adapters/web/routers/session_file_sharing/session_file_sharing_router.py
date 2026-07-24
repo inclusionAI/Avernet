@@ -7,9 +7,9 @@ deletion.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 
-from secbaas.api import ApiResponse
+from secbaas.api import ApiResponse, DomainError
 from secbaas.api.session_file_sharing import (
     SessionCancelUploadResponse,
     SessionCompleteUploadResponse,
@@ -96,17 +96,23 @@ async def get_upload_url(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "INVALID_PARAMETER", "message": str(e)},
+            detail={"error_code": "INVALID_PARAMETER", "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+            detail={"error_code": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except DomainError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={"error_code": e.error_code, "message": str(e)},
         )
     except Exception as e:
+        logger.exception(f"Unhandled error in get_upload_url: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+            detail={"error_code": "INTERNAL_ERROR", "message": "Internal server error"},
         )
 
 
@@ -145,19 +151,20 @@ async def complete_upload(
         result = await dispatcher.dispatch_complete_upload(
             transfer_id=transfer_id,
             tenant=tenant,
+            session_id=session_id,
         )
         return ApiResponse(data=result)
 
     except TransferNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
+            detail={"error_code": "TRANSFER_NOT_FOUND", "message": str(e)},
         )
     except StagingObjectNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "error": e.error_code,
+                "error_code": e.error_code,
                 "message": str(e),
                 "transfer_id": transfer_id,
             },
@@ -165,22 +172,28 @@ async def complete_upload(
     except TransferStateConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "TRANSFER_STATE_CONFLICT", "message": str(e)},
+            detail={"error_code": e.error_code, "message": str(e)},
         )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "INVALID_TRANSITION", "message": str(e)},
+            detail={"error_code": "INVALID_TRANSITION", "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+            detail={"error_code": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except DomainError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={"error_code": e.error_code, "message": str(e)},
         )
     except Exception as e:
+        logger.exception(f"Unhandled error in complete_upload: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+            detail={"error_code": "INTERNAL_ERROR", "message": "Internal server error"},
         )
 
 
@@ -213,33 +226,40 @@ async def cancel_upload(
         result = await dispatcher.dispatch_cancel_upload(
             transfer_id=transfer_id,
             tenant=tenant,
+            session_id=session_id,
         )
         return ApiResponse(data=result)
 
     except TransferNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
+            detail={"error_code": "TRANSFER_NOT_FOUND", "message": str(e)},
         )
     except TransferStateConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "TRANSFER_STATE_CONFLICT", "message": str(e)},
+            detail={"error_code": e.error_code, "message": str(e)},
         )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "INVALID_TRANSITION", "message": str(e)},
+            detail={"error_code": "INVALID_TRANSITION", "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+            detail={"error_code": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except DomainError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={"error_code": e.error_code, "message": str(e)},
         )
     except Exception as e:
+        logger.exception(f"Unhandled error in cancel_upload: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+            detail={"error_code": "INTERNAL_ERROR", "message": "Internal server error"},
         )
 
 
@@ -290,7 +310,7 @@ async def generate_share_link(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
-                "error": e.error_code,
+                "error_code": e.error_code,
                 "message": str(e),
                 "transfer_id": e.transfer_id,
             },
@@ -299,7 +319,7 @@ async def generate_share_link(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "error": e.error_code,
+                "error_code": e.error_code,
                 "message": str(e),
                 "transfer_id": e.transfer_id,
                 "current_status": e.current_status,
@@ -308,17 +328,23 @@ async def generate_share_link(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": "INVALID_TRANSITION", "message": str(e)},
+            detail={"error_code": "INVALID_TRANSITION", "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+            detail={"error_code": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except DomainError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={"error_code": e.error_code, "message": str(e)},
         )
     except Exception as e:
+        logger.exception(f"Unhandled error in generate_share_link: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+            detail={"error_code": "INTERNAL_ERROR", "message": "Internal server error"},
         )
 
 
@@ -357,13 +383,18 @@ async def get_transfer_status(
     except TransferNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
+            detail={"error_code": "TRANSFER_NOT_FOUND", "message": str(e)},
+        )
+    except DomainError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={"error_code": e.error_code, "message": str(e)},
         )
     except Exception as e:
-        logger.error(f"Error querying transfer status: {e}")
+        logger.exception(f"Unhandled error in get_transfer_status: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+            detail={"error_code": "INTERNAL_ERROR", "message": "Internal server error"},
         )
 
 
@@ -400,19 +431,20 @@ async def delete_transfer(
         result = await dispatcher.dispatch_delete_transfer(
             transfer_id=transfer_id,
             tenant=tenant,
+            session_id=session_id,
         )
         return ApiResponse(data=result)
 
     except TransferNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
+            detail={"error_code": "TRANSFER_NOT_FOUND", "message": str(e)},
         )
     except TransferNotTerminalError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "error": e.error_code,
+                "error_code": e.error_code,
                 "message": str(e),
                 "transfer_id": e.transfer_id,
             },
@@ -420,19 +452,21 @@ async def delete_transfer(
     except TransferStateConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": e.error_code,
-                "message": str(e),
-                "transfer_id": getattr(e, "transfer_id", None),
-            },
+            detail={"error_code": e.error_code, "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+            detail={"error_code": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except DomainError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={"error_code": e.error_code, "message": str(e)},
         )
     except Exception as e:
+        logger.exception(f"Unhandled error in delete_transfer: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+            detail={"error_code": "INTERNAL_ERROR", "message": "Internal server error"},
         )
