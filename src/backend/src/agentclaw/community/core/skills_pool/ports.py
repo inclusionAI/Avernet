@@ -13,6 +13,9 @@ from agentclaw.community.core.skills_pool.models import (
     RegisteredSkillAsset,
     SkillMappingSourceLayout,
 )
+from agentclaw.community.core.skills_pool.quarantine import (
+    RuntimeQuarantineCleanupResult,
+)
 
 
 @runtime_checkable
@@ -21,8 +24,7 @@ class SkillsPoolSkillRepositoryProtocol(Protocol):
 
     def list_bot_local_assets(
         self, *, env: str, bot_id: str
-    ) -> list[RegisteredSkillAsset]:
-        ...
+    ) -> list[RegisteredSkillAsset]: ...
 
     def list_bot_active_assets(
         self,
@@ -31,8 +33,7 @@ class SkillsPoolSkillRepositoryProtocol(Protocol):
         bot_id: str,
         user_id: str,
         engine: str,
-    ) -> list[RegisteredSkillAsset]:
-        ...
+    ) -> list[RegisteredSkillAsset]: ...
 
 
 @runtime_checkable
@@ -45,8 +46,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         bot_id: str,
         user_id: str,
         engine: str,
-    ) -> RuntimeLayoutProbeResult:
-        ...
+    ) -> RuntimeLayoutProbeResult: ...
 
     async def cutover(
         self,
@@ -57,8 +57,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         preparation_id: str,
         registered_local_names: list[str],
         mappings: list[PoolSkillMapping],
-    ) -> PoolCutoverResult:
-        ...
+    ) -> PoolCutoverResult: ...
 
     async def rollback_to_legacy(
         self,
@@ -67,8 +66,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         user_id: str,
         rollback_generation: str,
         registered_local_names: list[str],
-    ) -> PoolCutoverResult:
-        ...
+    ) -> PoolCutoverResult: ...
 
     async def cleanup_quarantine(
         self,
@@ -77,8 +75,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         user_id: str,
         engine: str,
         migration_generation: str,
-    ) -> dict[str, object]:
-        ...
+    ) -> RuntimeQuarantineCleanupResult: ...
 
     async def publish_mappings(
         self,
@@ -87,8 +84,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         user_id: str,
         mappings: list[PoolSkillMapping],
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
     async def verify_mappings(
         self,
@@ -97,8 +93,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         user_id: str,
         mappings: list[PoolSkillMapping],
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
 
 __all__ = [

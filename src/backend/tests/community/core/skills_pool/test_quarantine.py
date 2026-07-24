@@ -10,9 +10,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentclaw.community.core.skills_pool.quarantine import (
+    QUARANTINE_RETENTION,
     QuarantineBlocker,
     QuarantineRecord,
     QuarantineStatus,
+    RuntimeQuarantineCleanupResult,
+    RuntimeQuarantineCleanupStatus,
+    RuntimeReconciliationStatus,
     SkillsPoolQuarantineService,
 )
 from agentclaw.community.core.skills_pool.types import (
@@ -41,6 +45,7 @@ def _record(**changes: object) -> QuarantineRecord:
         pool_activated_at=NOW - timedelta(days=8),
         source_evidence={"cutover": "COMMITTED"},
         runtime_reconciled_at=NOW - timedelta(days=1),
+        runtime_reconciliation_status=RuntimeReconciliationStatus.READY,
         runtime_evidence={"source": "arca_device_alive"},
     )
     return replace(value, **changes)
@@ -86,6 +91,21 @@ def test_eligibility_requires_post_activation_runtime_reconciliation() -> None:
     assert decision.blockers == (QuarantineBlocker.RUNTIME_EVIDENCE_MISSING,)
 
 
+def test_latest_failed_runtime_reconciliation_revokes_cleanup_eligibility() -> None:
+    decision = SkillsPoolQuarantineService.evaluate(
+        _record(
+            runtime_reconciled_at=NOW - timedelta(hours=1),
+            runtime_reconciliation_status=RuntimeReconciliationStatus.FAILED,
+            runtime_evidence={"outcome": "invalid"},
+        ),
+        _layout(),
+        now=NOW,
+    )
+
+    assert decision.eligible is False
+    assert decision.blockers == (QuarantineBlocker.RUNTIME_RECONCILIATION_FAILED,)
+
+
 def test_eligibility_rejects_an_old_generation_after_remigration() -> None:
     decision = SkillsPoolQuarantineService.evaluate(
         _record(),
@@ -127,10 +147,10 @@ def test_cleanup_is_idempotent_and_audited() -> None:
     layouts.get.return_value = _layout()
     runtime = MagicMock()
     runtime.cleanup_quarantine = AsyncMock(
-        return_value={
-            "status": "CLEANED",
-            "evidence": {"path_absent": True},
-        }
+        return_value=RuntimeQuarantineCleanupResult(
+            status=RuntimeQuarantineCleanupStatus.CLEANED,
+            evidence={"path_absent": True},
+        )
     )
     service = SkillsPoolQuarantineService(
         quarantine_repository=records,
@@ -146,6 +166,30 @@ def test_cleanup_is_idempotent_and_audited() -> None:
     records.mark_cleaned.assert_called_once()
 
 
+def test_failed_probe_between_eligibility_and_claim_prevents_runtime_delete() -> None:
+    records = MagicMock()
+    records.get_quarantine.return_value = _record()
+    records.claim_cleanup.return_value = False
+    layouts = MagicMock()
+    layouts.get.return_value = _layout()
+    runtime = MagicMock()
+    runtime.cleanup_quarantine = AsyncMock()
+    service = SkillsPoolQuarantineService(
+        quarantine_repository=records,
+        layout_repository=layouts,
+        runtime=runtime,
+        now=lambda: NOW,
+    )
+
+    result = service.cleanup(SCOPE, "generation-1")
+
+    assert result.status is QuarantineStatus.RETAINED
+    assert records.claim_cleanup.call_args.kwargs["eligible_before"] == (
+        NOW - QUARANTINE_RETENTION
+    )
+    runtime.cleanup_quarantine.assert_not_awaited()
+
+
 def test_cleanup_timeout_keeps_cleanup_fence_until_lease_expires() -> None:
     records = MagicMock()
     records.get_quarantine.return_value = _record()
@@ -154,9 +198,12 @@ def test_cleanup_timeout_keeps_cleanup_fence_until_lease_expires() -> None:
     layouts.get.return_value = _layout()
     runtime = MagicMock()
 
-    async def slow_cleanup(**_: object) -> dict[str, object]:
+    async def slow_cleanup(**_: object) -> RuntimeQuarantineCleanupResult:
         await asyncio.sleep(1)
-        return {"status": "CLEANED", "evidence": {}}
+        return RuntimeQuarantineCleanupResult(
+            status=RuntimeQuarantineCleanupStatus.CLEANED,
+            evidence={},
+        )
 
     runtime.cleanup_quarantine = AsyncMock(side_effect=slow_cleanup)
     service = SkillsPoolQuarantineService(

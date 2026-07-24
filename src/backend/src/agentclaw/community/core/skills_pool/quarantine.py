@@ -15,7 +15,12 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
-from agentclaw.community.core.task_queue.types import Complete, Reschedule, Retry, TaskOutcome
+from agentclaw.community.core.task_queue.types import (
+    Complete,
+    Reschedule,
+    Retry,
+    TaskOutcome,
+)
 
 QUARANTINE_RETENTION = timedelta(days=7)
 SKILLS_POOL_QUARANTINE_CLEANUP_TASK = "skills_pool.quarantine.cleanup"
@@ -29,9 +34,28 @@ class QuarantineStatus(StrEnum):
     CLEANUP_FAILED = "cleanup_failed"
 
 
+class RuntimeReconciliationStatus(StrEnum):
+    READY = "ready"
+    FAILED = "failed"
+
+
+class RuntimeQuarantineCleanupStatus(StrEnum):
+    CLEANED = "CLEANED"
+    ALREADY_ABSENT = "ALREADY_ABSENT"
+    TRANSIENT_ERROR = "TRANSIENT_ERROR"
+    INVALID = "INVALID"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeQuarantineCleanupResult:
+    status: RuntimeQuarantineCleanupStatus
+    evidence: dict[str, object]
+
+
 class QuarantineBlocker(StrEnum):
     RETENTION_PERIOD = "retention_period"
     RUNTIME_EVIDENCE_MISSING = "runtime_evidence_missing"
+    RUNTIME_RECONCILIATION_FAILED = "runtime_reconciliation_failed"
     LAYOUT_UNHEALTHY = "layout_unhealthy"
     ALREADY_CLEANED = "already_cleaned"
     CLEANUP_IN_PROGRESS = "cleanup_in_progress"
@@ -48,6 +72,7 @@ class QuarantineRecord:
     pool_activated_at: datetime
     source_evidence: dict[str, object]
     runtime_reconciled_at: datetime | None = None
+    runtime_reconciliation_status: RuntimeReconciliationStatus | None = None
     runtime_evidence: dict[str, object] | None = None
     cleaned_at: datetime | None = None
     cleanup_evidence: dict[str, object] | None = None
@@ -100,6 +125,7 @@ class QuarantineRepositoryProtocol(Protocol):
         migration_generation: str,
         cleanup_owner: str,
         lease_seconds: int,
+        eligible_before: datetime,
     ) -> bool: ...
 
     def mark_cleanup_failed(
@@ -133,7 +159,7 @@ class QuarantineRuntimeProtocol(Protocol):
         user_id: str,
         engine: str,
         migration_generation: str,
-    ) -> dict[str, object]: ...
+    ) -> RuntimeQuarantineCleanupResult: ...
 
 
 class SkillsPoolQuarantineService:
@@ -178,6 +204,11 @@ class SkillsPoolQuarantineService:
             or record.runtime_reconciled_at <= record.pool_activated_at
         ):
             blockers.append(QuarantineBlocker.RUNTIME_EVIDENCE_MISSING)
+        elif (
+            record.runtime_reconciliation_status
+            is not RuntimeReconciliationStatus.READY
+        ):
+            blockers.append(QuarantineBlocker.RUNTIME_RECONCILIATION_FAILED)
         if (
             layout.active_layout is not SkillLayout.POOL
             or layout.phase is not SkillLayoutPhase.POOL_ACTIVE
@@ -202,10 +233,11 @@ class SkillsPoolQuarantineService:
                 status=QuarantineStatus.CLEANED,
                 evidence={"reason": "record_absent"},
             )
+        now = self._now()
         eligibility = self.evaluate(
             record,
             self._layouts.get(scope),
-            now=self._now(),
+            now=now,
         )
         if not eligibility.eligible:
             return QuarantineCleanupResult(
@@ -221,12 +253,14 @@ class SkillsPoolQuarantineService:
             migration_generation=migration_generation,
             cleanup_owner=cleanup_owner,
             lease_seconds=60 * 60,
+            eligible_before=now - QUARANTINE_RETENTION,
         ):
             return QuarantineCleanupResult(
                 status=QuarantineStatus.RETAINED,
                 evidence={"blockers": ["layout_or_cleanup_state_changed"]},
             )
-        async def invoke_runtime() -> dict[str, object]:
+
+        async def invoke_runtime() -> RuntimeQuarantineCleanupResult:
             return await asyncio.wait_for(
                 self._runtime.cleanup_quarantine(
                     bot_id=scope.bot_id,
@@ -242,13 +276,15 @@ class SkillsPoolQuarantineService:
             response = asyncio.run(invoke_runtime())
         except TimeoutError:
             cleanup_uncertain = True
-            response = {
-                "status": "TRANSIENT_ERROR",
-                "evidence": {"reason": "runtime_cleanup_outcome_unknown"},
-            }
-        raw_status = str(response.get("status", ""))
-        evidence = dict(response.get("evidence") or {})
-        if raw_status not in {"CLEANED", "ALREADY_ABSENT"}:
+            response = RuntimeQuarantineCleanupResult(
+                status=RuntimeQuarantineCleanupStatus.TRANSIENT_ERROR,
+                evidence={"reason": "runtime_cleanup_outcome_unknown"},
+            )
+        evidence = response.evidence
+        if response.status not in {
+            RuntimeQuarantineCleanupStatus.CLEANED,
+            RuntimeQuarantineCleanupStatus.ALREADY_ABSENT,
+        }:
             cleanup_uncertain = cleanup_uncertain or evidence.get("reason") in {
                 "runtime_cleanup_outcome_unknown",
                 "invalid_runtime_response",

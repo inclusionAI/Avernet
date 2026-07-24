@@ -10,6 +10,9 @@ from agentclaw.community.core.skills_pool.models import (
     PoolCutoverStatus,
     PoolSkillMapping,
 )
+from agentclaw.community.core.skills_pool.quarantine import (
+    RuntimeQuarantineCleanupStatus,
+)
 from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
 
 
@@ -81,6 +84,28 @@ class FutureStatusTransport(FakeTransport):
         return response
 
 
+class QuarantineTransport(FakeTransport):
+    def __init__(self, status: str) -> None:
+        super().__init__()
+        self.status = status
+
+    async def invoke(self, conn_info, method, path, *, body, timeout):
+        await super().invoke(
+            conn_info,
+            method,
+            path,
+            body=body,
+            timeout=timeout,
+        )
+        return {
+            "success": True,
+            "data": {
+                "status": self.status,
+                "evidence": {"generation_scoped": True},
+            },
+        }
+
+
 @pytest.mark.asyncio
 async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None:
     resolver = FakeResolver()
@@ -92,10 +117,7 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
     )
     mappings = [
         PoolSkillMapping(
-            source=(
-                "/home/admin/.openclaw/workspace/"
-                "skills-pool/skills-local/a"
-            ),
+            source=("/home/admin/.openclaw/workspace/skills-pool/skills-local/a"),
             target="/home/admin/.openclaw/workspace/skills/a",
         )
     ]
@@ -166,5 +188,47 @@ async def test_pool_runtime_fails_closed_for_unknown_engine_status() -> None:
     assert not result.committed
     assert result.evidence == {
         "source": "newer-engine",
+        "raw_status": "FUTURE_STATUS",
+    }
+
+
+@pytest.mark.asyncio
+async def test_pool_runtime_returns_typed_quarantine_cleanup_result() -> None:
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=QuarantineTransport("CLEANED"),
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.cleanup_quarantine(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        migration_generation="generation-1",
+    )
+
+    assert result.status is RuntimeQuarantineCleanupStatus.CLEANED
+    assert result.evidence == {"generation_scoped": True}
+
+
+@pytest.mark.asyncio
+async def test_pool_runtime_fails_closed_for_unknown_cleanup_status() -> None:
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=QuarantineTransport("FUTURE_STATUS"),
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.cleanup_quarantine(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        migration_generation="generation-1",
+    )
+
+    assert result.status is RuntimeQuarantineCleanupStatus.INVALID
+    assert result.evidence == {
+        "generation_scoped": True,
+        "reason": "invalid_runtime_response",
         "raw_status": "FUTURE_STATUS",
     }

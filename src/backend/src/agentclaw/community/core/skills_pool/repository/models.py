@@ -15,6 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.sql import func
+from sqlalchemy.dialects import mysql
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.skills_pool.types import (
@@ -27,6 +28,7 @@ from agentclaw.community.core.skills_pool.types import (
 from agentclaw.community.core.skills_pool.quarantine import (
     QuarantineRecord,
     QuarantineStatus,
+    RuntimeReconciliationStatus,
 )
 from agentclaw.community.plugin_api.models import AutoIncrementBigInteger
 
@@ -172,7 +174,11 @@ class SkillMigrationQuarantineModel(Base):
     )
     source_evidence = Column(Text, nullable=False)
     pool_activated_at = Column(DateTime, nullable=True)
-    runtime_reconciled_at = Column(DateTime, nullable=True)
+    runtime_reconciled_at = Column(
+        DateTime().with_variant(mysql.DATETIME(fsp=6), "mysql"),
+        nullable=True,
+    )
+    runtime_reconciliation_status = Column(String(16), nullable=True)
     runtime_evidence = Column(Text, nullable=True)
     cleaned_at = Column(DateTime, nullable=True)
     cleanup_evidence = Column(Text, nullable=True)
@@ -223,18 +229,19 @@ class SkillMigrationQuarantineModel(Base):
                 if self.runtime_reconciled_at
                 else None
             ),
-            runtime_evidence=(
-                json.loads(self.runtime_evidence)
-                if self.runtime_evidence
+            runtime_reconciliation_status=(
+                RuntimeReconciliationStatus(self.runtime_reconciliation_status)
+                if self.runtime_reconciliation_status
                 else None
+            ),
+            runtime_evidence=(
+                json.loads(self.runtime_evidence) if self.runtime_evidence else None
             ),
             cleaned_at=(
                 self.cleaned_at.replace(tzinfo=UTC) if self.cleaned_at else None
             ),
             cleanup_evidence=(
-                json.loads(self.cleanup_evidence)
-                if self.cleanup_evidence
-                else None
+                json.loads(self.cleanup_evidence) if self.cleanup_evidence else None
             ),
             cleanup_lease_expires_at=(
                 self.cleanup_lease_expires_at.replace(tzinfo=UTC)
