@@ -23,6 +23,9 @@ pub use bcs_storage_api::{
     StoragePlugin, UploadHandle, UploadPrepareRequest,
 };
 
+pub mod factory;
+pub use factory::LocalStoragePluginFactory;
+
 /// Configuration for the local filesystem storage plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalStorageConfig {
