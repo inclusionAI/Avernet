@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from ._models import (
+from secbaas.community.api.session_file_sharing._models import (
     SessionCancelUploadResponse,
     SessionCompleteUploadResponse,
     SessionDeleteTransferResponse,
@@ -70,16 +70,11 @@ class SessionFileSharingDispatcher(Protocol):
         self,
         transfer_id: str,
         tenant: str | None = None,
-        session_id: str | None = None,
     ) -> SessionCompleteUploadResponse:
         """Validate and finalize a SINGLE or MULTIPART Session upload.
 
         SINGLE: checks OSS object existence → status → DONE.
         MULTIPART: lists uploaded parts, assembles them → status → DONE.
-
-        When ``session_id`` is provided, validates that the ticket belongs
-        to the given session (raises ``TransferNotFoundError`` on mismatch
-        — does not reveal existence to other sessions).
 
         Session goes directly to DONE (no ``UPLOAD_COMPLETED`` /
         ``PULLING`` intermediate states).  DONE tickets are idempotent
@@ -91,17 +86,12 @@ class SessionFileSharingDispatcher(Protocol):
         self,
         transfer_id: str,
         tenant: str | None = None,
-        session_id: str | None = None,
     ) -> SessionCancelUploadResponse:
         """Cancel an in-progress Session upload.
 
         Aborts the OSS multipart session (if any) and transitions the
         ticket to CANCELLED.  Already-terminal tickets return idempotent
         success.
-
-        When ``session_id`` is provided, validates that the ticket belongs
-        to the given session (raises ``TransferNotFoundError`` on mismatch
-        — does not reveal existence to other sessions).
         """
         ...
 
@@ -142,7 +132,6 @@ class SessionFileSharingDispatcher(Protocol):
         self,
         transfer_id: str,
         tenant: str | None = None,
-        session_id: str | None = None,
     ) -> SessionDeleteTransferResponse:
         """Delete a Session transfer ticket and its OSS staging object.
 
@@ -150,9 +139,5 @@ class SessionFileSharingDispatcher(Protocol):
         can be deleted.  Already-DELETED tickets return idempotent success.
         OSS deletion tolerates ``NoSuchKey`` — lifecycle policies may have
         already cleaned up the object.
-
-        When ``session_id`` is provided, validates that the ticket belongs
-        to the given session (raises ``TransferNotFoundError`` on mismatch
-        — does not reveal existence to other sessions).
         """
         ...
