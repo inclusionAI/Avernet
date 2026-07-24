@@ -36,13 +36,13 @@
   - [x] Unit tests: adopts a changed source; keeps last-known-good on failure (malformed, missing, non-mapping); background loop adopts then stops.
 - **Depends on:** —
 
-## Task 4: OpenAPI generator
+## Task 4: OpenAPI generator `[x]`
 - **Goal:** Produce the served doc from a published description — filter to the domain namespace and attach auth metadata.
 - **Files:** `src/gateway/src/gateway/community/core/forwarding/_openapi.py` (new)
 - **Done when:**
-  - [ ] `generate_openapi(description, rules) -> dict` keeps only `/openapi/v1/<domain>` paths and their referenced `components`.
-  - [ ] Each operation carries `x-avernet-security` resolved from the prefix auth rules.
-  - [ ] Unit tests: namespace filter, component collection, security attach.
+  - [x] `generate_openapi(description, rules) -> dict` keeps only `/openapi/v1` paths and their transitively-referenced `components`.
+  - [x] Each operation carries `x-avernet-security` resolved from the prefix auth rules.
+  - [x] Unit tests: namespace filter, transitive component collection, security attach (default + specific), input not mutated.
 - **Depends on:** Task 3
 
 ## Task 5: Catch-all forwarding entrypoint
