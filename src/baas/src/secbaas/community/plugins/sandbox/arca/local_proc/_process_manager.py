@@ -267,6 +267,11 @@ class LocalProcessManager:
 
         oc_config.setdefault("gateway", {})["port"] = openclaw_port
         oc_config["gateway"]["mode"] = "local"
+        # A singlebox gateway is only consumed by local BaaS/backend/adapter
+        # processes.  Be explicit instead of relying on OpenClaw's
+        # environment-dependent default: in a container it defaults to
+        # ``auto`` (0.0.0.0), which OpenClaw correctly rejects without auth.
+        oc_config["gateway"]["bind"] = "loopback"
         oc_config["gateway"].setdefault("auth", {})["mode"] = "none"
         oc_config.setdefault("agents", {}).setdefault("defaults", {})["workspace"] = (
             str(workspace_dir)
