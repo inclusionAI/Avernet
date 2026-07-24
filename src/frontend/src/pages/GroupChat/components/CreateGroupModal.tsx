@@ -40,6 +40,8 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   EyeOff,
   Globe,
@@ -64,6 +66,7 @@ import {
   MANAGER_WORKER_DEFAULT_WORKER_TIP,
   MANAGER_WORKER_ENGINE_SUPPORT_TIP,
 } from '../constants';
+import { useCollaborationYamlValidation } from '../hooks/useCollaborationYamlValidation';
 import { useGroups } from '../hooks/useGroups';
 import type {
   CreateGroupParams,
@@ -71,6 +74,12 @@ import type {
   GroupMemberRole,
   GroupStrategy,
 } from '../types';
+import {
+  buildCollaborationParticipantDefinitions,
+  formatCollaborationValidationErrors,
+  getCollaborationParticipantLabel,
+  type CollaborationParticipantDefinition,
+} from '../utils/collaborationValidation';
 import PrivateBotHint from './PrivateBotHint';
 
 /** 最大可选成员 Bot 数量 */
@@ -81,11 +90,6 @@ type MemberTab = 'friends' | 'collaborate';
 
 /** 二层 Tab 类型（仅在可协作Bot下显示）：按名称筛选 / 按画像筛选 */
 type FilterMode = 'name' | 'profile';
-
-type CollaborationParticipantDefinition = {
-  key: string;
-  required: boolean;
-};
 
 type InviteCandidateStatus = {
   dynamic_status?: DynamicStatus;
@@ -187,7 +191,7 @@ const yamlEditorExtensions = [
 ];
 
 const YAML_EDITOR_PLACEHOLDER =
-  'api_version: bcs.collaboration/v1\nid: sm_example\nversion: 1\nname: Structured Collaboration\nparticipants:\n  speaker:\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    nodes: {}';
+  'name: 自定义协作\nparticipants:\n  assistant:\n    display_name: 助手\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    nodes:\n      answer:\n        kind: bot_task\n        display_name: 输出结果\n        assignee:\n          type: bot_binding\n          binding: assistant\n        instruction: 请根据用户输入输出最终结果。\n        final_output: true';
 
 const FREE_COLLABORATION_TEMPLATE_ID = '__free__';
 
@@ -205,123 +209,6 @@ const formatAutoGroupLabel = (names: string[], fallback: string) => {
   return validNames.length > 5
     ? `${validNames.slice(0, 5).join('、')}等`
     : validNames.join('、');
-};
-
-const stripYamlComment = (line: string) => {
-  let quote: '"' | "'" | null = null;
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    const prev = line[i - 1];
-    if (char === '"' && quote !== "'" && prev !== '\\') {
-      quote = quote === '"' ? null : '"';
-    } else if (char === "'" && quote !== '"') {
-      quote = quote === "'" ? null : "'";
-    } else if (char === '#' && !quote) {
-      return line.slice(0, i);
-    }
-  }
-  return line;
-};
-
-const getYamlIndent = (line: string) => line.match(/^ */)?.[0].length || 0;
-
-const unwrapYamlScalar = (value: string) => {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-};
-
-const parseYamlRequiredValue = (value: string) => {
-  const normalized = unwrapYamlScalar(value).toLowerCase();
-  return normalized !== 'false' && normalized !== 'no' && normalized !== 'off';
-};
-
-const parseYamlKeyValueLine = (line: string) => {
-  const sanitized = stripYamlComment(line);
-  const trimmed = sanitized.trim();
-  if (!trimmed || trimmed.startsWith('-')) return null;
-  const match = trimmed.match(/^([^:]+):(.*)$/);
-  if (!match) return null;
-  return {
-    key: unwrapYamlScalar(match[1]),
-    value: match[2].trim(),
-  };
-};
-
-const parseCollaborationParticipants = (
-  yaml: string,
-): CollaborationParticipantDefinition[] => {
-  const lines = yaml.replace(/\r\n/g, '\n').split('\n');
-  const participantsLineIndex = lines.findIndex((line) => {
-    const parsed = parseYamlKeyValueLine(line);
-    return parsed?.key === 'participants';
-  });
-
-  if (participantsLineIndex < 0) {
-    throw new Error('YAML 中未找到 participants 字段');
-  }
-
-  const participantsLine = lines[participantsLineIndex];
-  const participantsIndent = getYamlIndent(participantsLine);
-  const participantsHeader = parseYamlKeyValueLine(participantsLine);
-  if (participantsHeader?.value) {
-    throw new Error('participants 请使用缩进对象形式定义');
-  }
-
-  const definitions: CollaborationParticipantDefinition[] = [];
-  let childIndent: number | null = null;
-  let current: CollaborationParticipantDefinition | null = null;
-
-  for (let i = participantsLineIndex + 1; i < lines.length; i += 1) {
-    const rawLine = lines[i];
-    const sanitized = stripYamlComment(rawLine);
-    if (!sanitized.trim()) continue;
-
-    const indent = getYamlIndent(rawLine);
-    if (indent <= participantsIndent) break;
-
-    if (childIndent === null) {
-      childIndent = indent;
-    }
-
-    const parsed = parseYamlKeyValueLine(rawLine);
-    if (!parsed) continue;
-
-    if (indent === childIndent) {
-      if (!parsed.key) {
-        throw new Error('participants 中存在空 key');
-      }
-      current = {
-        key: parsed.key,
-        required: true,
-      };
-      definitions.push(current);
-      continue;
-    }
-
-    if (current && indent > childIndent && parsed.key === 'required') {
-      current.required = parseYamlRequiredValue(parsed.value);
-    }
-  }
-
-  if (!definitions.length) {
-    throw new Error('participants 至少需要定义一个角色');
-  }
-
-  const seen = new Set<string>();
-  for (const item of definitions) {
-    if (seen.has(item.key)) {
-      throw new Error(`participants 中存在重复 key：${item.key}`);
-    }
-    seen.add(item.key);
-  }
-
-  return definitions;
 };
 
 interface CreateGroupModalProps {
@@ -374,6 +261,10 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const [participantBindings, setParticipantBindings] = useState<
     Record<string, string[]>
   >({});
+  const [canScrollParticipantTabsLeft, setCanScrollParticipantTabsLeft] =
+    useState(false);
+  const [canScrollParticipantTabsRight, setCanScrollParticipantTabsRight] =
+    useState(false);
   const [masterBot, setMasterBot] = useState<string>('');
   const [masterBotDropdownOpen, setMasterBotDropdownOpen] = useState(false);
   const masterBotDropdownRef = useRef<HTMLDivElement>(null);
@@ -388,6 +279,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const collaborationYamlRequestIdRef = useRef(0);
   const collaborationYamlTemplateRef = useRef('');
   const collaborationDefinitionYamlRef = useRef('');
+  const participantTabsRef = useRef<HTMLDivElement>(null);
+  const participantTabButtonRefs = useRef(new Map<string, HTMLButtonElement>());
 
   // 埋点 tracker - 弹窗打开时创建，关闭后失效
   const trackerRef = useRef<BotRecommendTracker | null>(null);
@@ -458,6 +351,11 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   // Actor hook（用于替换 discoverBots）
   const { loadActors, searchActors } = useActor();
+  const {
+    validateCollaborationYaml,
+    cancelCollaborationYamlValidation,
+    isValidatingCollaborationYaml,
+  } = useCollaborationYamlValidation();
 
   const originatorStatus =
     originator?.status ??
@@ -540,19 +438,92 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       ),
     [participantBindings],
   );
+  const boundParticipantCount = useMemo(
+    () =>
+      participantDefinitions.filter(
+        (definition) => (participantBindings[definition.key] || []).length > 0,
+      ).length,
+    [participantBindings, participantDefinitions],
+  );
   const isOriginatorBoundToParticipant =
     !!originator?.bot_uuid && allBoundBotIds.includes(originator.bot_uuid);
-  const missingRequiredParticipantKeys = useMemo(
+  const missingParticipantBindingLabels = useMemo(
     () =>
       participantDefinitions
         .filter(
           (definition) =>
-            definition.required &&
+            (definition.required || definition.assigned) &&
             !(participantBindings[definition.key] || []).length,
         )
-        .map((definition) => definition.key),
+        .map(getCollaborationParticipantLabel),
     [participantDefinitions, participantBindings],
   );
+  const updateParticipantTabsScrollState = useCallback(() => {
+    const container = participantTabsRef.current;
+    if (!container) {
+      setCanScrollParticipantTabsLeft(false);
+      setCanScrollParticipantTabsRight(false);
+      return;
+    }
+
+    const scrollEnd = container.scrollLeft + container.clientWidth;
+    setCanScrollParticipantTabsLeft(container.scrollLeft > 1);
+    setCanScrollParticipantTabsRight(scrollEnd < container.scrollWidth - 1);
+  }, []);
+  const scrollParticipantTabs = useCallback(
+    (direction: 'previous' | 'next') => {
+      const container = participantTabsRef.current;
+      if (!container) return;
+
+      const pageWidth = Math.max(container.clientWidth - 176, 176);
+      container.scrollBy({
+        left: direction === 'previous' ? -pageWidth : pageWidth,
+        behavior: 'smooth',
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(
+      updateParticipantTabsScrollState,
+    );
+    window.addEventListener('resize', updateParticipantTabsScrollState);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', updateParticipantTabsScrollState);
+    };
+  }, [participantDefinitions.length, updateParticipantTabsScrollState]);
+
+  useEffect(() => {
+    if (!activeParticipantKey) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      const container = participantTabsRef.current;
+      const activeButton =
+        participantTabButtonRefs.current.get(activeParticipantKey);
+      if (!container || !activeButton) return;
+
+      const buttonStart = activeButton.offsetLeft;
+      const buttonEnd = buttonStart + activeButton.offsetWidth;
+      const visibleStart = container.scrollLeft;
+      const visibleEnd = visibleStart + container.clientWidth;
+
+      if (buttonStart < visibleStart) {
+        container.scrollTo({
+          left: buttonStart,
+          behavior: 'smooth',
+        });
+      } else if (buttonEnd > visibleEnd) {
+        container.scrollTo({
+          left: buttonEnd - container.clientWidth,
+          behavior: 'smooth',
+        });
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeParticipantKey, participantDefinitions.length]);
 
   // 内部调用 hook 获取群组相关数据和方法
   const {
@@ -1100,6 +1071,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     setFriendBots([]);
     collaborationTemplatesRequestIdRef.current += 1;
     collaborationYamlRequestIdRef.current += 1;
+    cancelCollaborationYamlValidation();
     setAutoReply(false);
     setGroupStrategy('chat');
     collaborationYamlTemplateRef.current = '';
@@ -1147,11 +1119,12 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const getBotName = (botId: string) => getBotInfo(botId)?.bot_name || botId;
 
   const clearCollaborationYamlBindingState = useCallback(() => {
+    cancelCollaborationYamlValidation();
     setValidatedCollaborationYaml('');
     setParticipantDefinitions([]);
     setActiveParticipantKey('');
     setParticipantBindings({});
-  }, []);
+  }, [cancelCollaborationYamlValidation]);
 
   useEffect(() => {
     if (!canCreateStateMachineGroup && groupStrategy === 'state_machine') {
@@ -1355,21 +1328,47 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const handleCollaborationYamlChange = (value: string) => {
     collaborationDefinitionYamlRef.current = value;
     setCollaborationDefinitionYaml(value);
-    if (validatedCollaborationYaml && value !== validatedCollaborationYaml) {
+    if (value !== validatedCollaborationYaml) {
+      clearCollaborationYamlBindingState();
       setError('');
     }
   };
 
-  const handleValidateCollaborationYaml = () => {
-    if (!collaborationDefinitionYaml.trim()) {
+  const handleValidateCollaborationYaml = async () => {
+    const definitionYaml = collaborationDefinitionYaml;
+    if (!definitionYaml.trim()) {
       setError('请输入自定义协作 YAML');
       return;
     }
 
+    setError('');
+    setValidatedCollaborationYaml('');
     try {
-      const definitions = parseCollaborationParticipants(
-        collaborationDefinitionYaml,
+      const response = await validateCollaborationYaml(definitionYaml);
+      if (
+        !response ||
+        collaborationDefinitionYamlRef.current !== definitionYaml
+      ) {
+        return;
+      }
+
+      if (!response.valid) {
+        clearCollaborationYamlBindingState();
+        setIsEditingCollaborationYaml(true);
+        setError(formatCollaborationValidationErrors(response.errors));
+        return;
+      }
+
+      const definitions = buildCollaborationParticipantDefinitions(
+        response.participants,
       );
+      if (!definitions.length) {
+        clearCollaborationYamlBindingState();
+        setIsEditingCollaborationYaml(true);
+        setError('YAML 校验通过，但未返回可绑定的 participant');
+        return;
+      }
+
       setParticipantDefinitions(definitions);
       setParticipantBindings((prev) => {
         const next: Record<string, string[]> = {};
@@ -1383,16 +1382,16 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           ? prev
           : definitions[0].key,
       );
-      setValidatedCollaborationYaml(collaborationDefinitionYaml);
+      setValidatedCollaborationYaml(definitionYaml);
       setIsEditingCollaborationYaml(false);
       setError('');
-    } catch (err: any) {
-      setValidatedCollaborationYaml('');
+    } catch (err) {
+      if (collaborationDefinitionYamlRef.current !== definitionYaml) {
+        return;
+      }
+      clearCollaborationYamlBindingState();
       setIsEditingCollaborationYaml(true);
-      setParticipantDefinitions([]);
-      setActiveParticipantKey('');
-      setParticipantBindings({});
-      setError(err?.message || 'YAML participants 解析失败');
+      setError(err instanceof Error ? err.message : 'YAML 校验请求失败');
     }
   };
 
@@ -1551,8 +1550,11 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       return;
     }
 
-    if (isStateMachine && isCollaborationTemplateLoading) {
-      setError('协作模板加载中，请稍后再试');
+    if (
+      isStateMachine &&
+      (isCollaborationTemplateLoading || isValidatingCollaborationYaml)
+    ) {
+      setError('协作 YAML 处理中，请稍后再试');
       return;
     }
 
@@ -1567,9 +1569,9 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     }
 
     if (isStateMachine) {
-      if (missingRequiredParticipantKeys.length > 0) {
+      if (missingParticipantBindingLabels.length > 0) {
         setError(
-          `请先为必填 participant 绑定 Bot：${missingRequiredParticipantKeys.join(
+          `请先为流程所需 participant 绑定 Bot：${missingParticipantBindingLabels.join(
             '、',
           )}`,
         );
@@ -2681,21 +2683,29 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                         )}
                       <button
                         type="button"
-                        onClick={handleValidateCollaborationYaml}
+                        onClick={() => void handleValidateCollaborationYaml()}
                         disabled={
                           isLoadingCollaborationYaml ||
+                          isValidatingCollaborationYaml ||
                           !collaborationDefinitionYaml.trim()
                         }
                         className={cn(
                           'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all border',
                           !isLoadingCollaborationYaml &&
+                            !isValidatingCollaborationYaml &&
                             collaborationDefinitionYaml.trim()
                             ? 'bg-lavender-50 text-lavender-600 hover:bg-lavender-100 border-lavender-200'
                             : 'bg-slate-100 text-slate-400 cursor-not-allowed border-transparent',
                         )}
                       >
-                        <Check className="w-3.5 h-3.5" />
-                        校验 YAML
+                        {isValidatingCollaborationYaml ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Check className="w-3.5 h-3.5" />
+                        )}
+                        {isValidatingCollaborationYaml
+                          ? '校验中...'
+                          : '校验 YAML'}
                       </button>
                     </div>
                   </div>
@@ -2753,9 +2763,11 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                             发起方未绑定
                           </span>
                         )}
-                      {allBoundBotIds.length > 0 && (
+                      {boundParticipantCount > 0 && (
                         <span className="text-xs font-medium px-2 py-0.5 rounded-full text-lavender-600 bg-lavender-50">
-                          已绑定 {allBoundBotIds.length} 个 Bot
+                          已绑定 {boundParticipantCount} /{' '}
+                          {participantDefinitions.length} 个角色，共{' '}
+                          {allBoundBotIds.length} 个 Bot
                         </span>
                       )}
                     </div>
@@ -2768,50 +2780,110 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   ) : (
                     <>
                       <div className="p-2 border-b border-slate-100 flex-shrink-0">
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 max-h-28 overflow-y-auto">
-                          {participantDefinitions.map((definition) => {
-                            const boundCount = (
-                              participantBindings[definition.key] || []
-                            ).slice(0, 1).length;
-                            const isActive =
-                              definition.key === activeParticipantKey;
-                            const needsBinding =
-                              definition.required && boundCount === 0;
-                            return (
-                              <button
-                                key={definition.key}
-                                type="button"
-                                onClick={() =>
-                                  setActiveParticipantKey(definition.key)
-                                }
-                                className={cn(
-                                  'flex items-center gap-2 min-w-0 px-2 py-1.5 rounded-lg border text-left transition-all',
-                                  isActive
-                                    ? 'border-lavender-300 bg-lavender-50'
-                                    : needsBinding
-                                    ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50'
-                                    : 'border-slate-100 hover:bg-slate-50',
-                                )}
-                              >
-                                <span className="flex-1 min-w-0 truncate text-xs font-medium text-slate-700">
-                                  {definition.key}
-                                </span>
-                                <span
+                        <div className="relative">
+                          <button
+                            type="button"
+                            aria-label="查看上一组角色"
+                            title="上一组角色"
+                            disabled={!canScrollParticipantTabsLeft}
+                            onClick={() => scrollParticipantTabs('previous')}
+                            className={cn(
+                              'absolute left-0 inset-y-0 z-10 w-8 rounded-lg border flex items-center justify-center backdrop-blur-[1px] transition-colors',
+                              canScrollParticipantTabsLeft
+                                ? 'bg-white/70 border-slate-200 text-slate-500 hover:bg-white/90 hover:text-slate-700'
+                                : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed',
+                            )}
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <div
+                            ref={participantTabsRef}
+                            onScroll={updateParticipantTabsScrollState}
+                            className="hide-scrollbar flex min-w-0 gap-1.5 overflow-x-auto overscroll-x-contain px-9"
+                            role="group"
+                            aria-label="协作角色"
+                          >
+                            {participantDefinitions.map((definition) => {
+                              const boundCount = (
+                                participantBindings[definition.key] || []
+                              ).slice(0, 1).length;
+                              const isActive =
+                                definition.key === activeParticipantKey;
+                              const needsBinding =
+                                (definition.required || definition.assigned) &&
+                                boundCount === 0;
+                              const requiresBinding =
+                                definition.required || definition.assigned;
+                              return (
+                                <button
+                                  key={definition.key}
+                                  ref={(node) => {
+                                    if (node) {
+                                      participantTabButtonRefs.current.set(
+                                        definition.key,
+                                        node,
+                                      );
+                                    } else {
+                                      participantTabButtonRefs.current.delete(
+                                        definition.key,
+                                      );
+                                    }
+                                  }}
+                                  type="button"
+                                  title={definition.name}
+                                  aria-pressed={isActive}
+                                  onClick={() =>
+                                    setActiveParticipantKey(definition.key)
+                                  }
                                   className={cn(
-                                    'flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full',
-                                    definition.required
-                                      ? needsBinding
-                                        ? 'bg-amber-100 text-amber-700'
-                                        : 'bg-green-50 text-green-600'
-                                      : 'bg-slate-100 text-slate-500',
+                                    'flex items-center gap-2 w-44 flex-shrink-0 px-2 py-1.5 rounded-lg border text-left transition-all',
+                                    isActive
+                                      ? 'border-lavender-300 bg-lavender-50'
+                                      : needsBinding
+                                      ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50'
+                                      : 'border-slate-100 hover:bg-slate-50',
                                   )}
                                 >
-                                  {definition.required ? '必填' : '可选'}
-                                  {boundCount > 0 ? ` ${boundCount}` : ''}
-                                </span>
-                              </button>
-                            );
-                          })}
+                                  <span className="flex-1 min-w-0 truncate text-xs font-medium text-slate-700">
+                                    {getCollaborationParticipantLabel(
+                                      definition,
+                                    )}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      'flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full',
+                                      requiresBinding
+                                        ? needsBinding
+                                          ? 'bg-amber-100 text-amber-700'
+                                          : 'bg-green-50 text-green-600'
+                                        : 'bg-slate-100 text-slate-500',
+                                    )}
+                                  >
+                                    {boundCount > 0
+                                      ? '已绑定'
+                                      : requiresBinding
+                                      ? '需绑定'
+                                      : '可选'}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <button
+                            type="button"
+                            aria-label="查看下一组角色"
+                            title="下一组角色"
+                            disabled={!canScrollParticipantTabsRight}
+                            onClick={() => scrollParticipantTabs('next')}
+                            className={cn(
+                              'absolute right-0 inset-y-0 z-10 w-8 rounded-lg border flex items-center justify-center backdrop-blur-[1px] transition-colors',
+                              canScrollParticipantTabsRight
+                                ? 'bg-white/70 border-slate-200 text-slate-500 hover:bg-white/90 hover:text-slate-700'
+                                : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed',
+                            )}
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
 
@@ -2855,61 +2927,69 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                           </div>
                         )}
 
-                        <div className="flex items-center bg-slate-100 rounded-lg p-0.5 mb-2 flex-shrink-0 w-fit">
-                          <button
-                            type="button"
-                            onClick={() => setMemberTab('friends')}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-md transition-all',
-                              memberTab === 'friends'
-                                ? 'bg-white text-slate-800 shadow-sm'
-                                : 'text-slate-500 hover:text-slate-700',
-                            )}
-                          >
-                            {actorKind === 'human' ? '我的 Bot' : '我的好友'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setMemberTab('collaborate')}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-md transition-all',
-                              memberTab === 'collaborate'
-                                ? 'bg-white text-slate-800 shadow-sm'
-                                : 'text-slate-500 hover:text-slate-700',
-                            )}
-                          >
-                            可协作Bot
-                          </button>
-                        </div>
-
-                        {memberTab === 'collaborate' && (
-                          <div className="flex items-center bg-slate-50 rounded-lg p-0.5 border border-slate-100 mb-2 flex-shrink-0 w-fit">
+                        <div className="flex items-center gap-2 mb-2 flex-shrink-0 min-w-0 overflow-x-auto">
+                          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
                             <button
                               type="button"
-                              onClick={() => setFilterMode('name')}
+                              onClick={() => setMemberTab('friends')}
                               className={cn(
-                                'px-2.5 py-1 text-xs rounded-md transition-all whitespace-nowrap',
-                                filterMode === 'name'
+                                'px-3 py-1 text-xs font-medium rounded-md transition-all',
+                                memberTab === 'friends'
                                   ? 'bg-white text-slate-800 shadow-sm'
                                   : 'text-slate-500 hover:text-slate-700',
                               )}
                             >
-                              按名称筛选
+                              {actorKind === 'human' ? '我的 Bot' : '我的好友'}
                             </button>
                             <button
                               type="button"
-                              onClick={() => setFilterMode('profile')}
+                              onClick={() => setMemberTab('collaborate')}
                               className={cn(
-                                'px-2.5 py-1 text-xs rounded-md transition-all whitespace-nowrap',
-                                filterMode === 'profile'
+                                'px-3 py-1 text-xs font-medium rounded-md transition-all',
+                                memberTab === 'collaborate'
                                   ? 'bg-white text-slate-800 shadow-sm'
                                   : 'text-slate-500 hover:text-slate-700',
                               )}
                             >
-                              按画像筛选
+                              可协作Bot
                             </button>
                           </div>
-                        )}
+
+                          {memberTab === 'collaborate' && (
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                              <span className="text-[11px] font-medium text-slate-400 whitespace-nowrap">
+                                筛选方式
+                              </span>
+                              <div className="flex items-center bg-slate-50 rounded-lg p-0.5 border border-slate-100">
+                                <button
+                                  type="button"
+                                  onClick={() => setFilterMode('name')}
+                                  className={cn(
+                                    'px-2.5 py-1 text-xs rounded-md transition-all whitespace-nowrap',
+                                    filterMode === 'name'
+                                      ? 'bg-white text-slate-800 shadow-sm'
+                                      : 'text-slate-500 hover:text-slate-700',
+                                  )}
+                                >
+                                  按名称筛选
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setFilterMode('profile')}
+                                  className={cn(
+                                    'px-2.5 py-1 text-xs rounded-md transition-all whitespace-nowrap',
+                                    filterMode === 'profile'
+                                      ? 'bg-white text-slate-800 shadow-sm'
+                                      : 'text-slate-500 hover:text-slate-700',
+                                  )}
+                                >
+                                  按画像筛选
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
 
                         <div className="relative mb-2 flex-shrink-0">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -2952,7 +3032,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                         <div
                           ref={listRef}
                           onScroll={handleListScroll}
-                          className="flex-1 min-h-0 border border-slate-200/60 rounded-xl overflow-auto scroll-pb-6"
+                          className="flex-1 min-h-[120px] border border-slate-200/60 rounded-xl overflow-auto scroll-pb-6"
                         >
                           {actorKind === 'bot' &&
                           (!originator?.is_online ||
@@ -3554,9 +3634,10 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                 (groupStrategy === 'state_machine'
                   ? !description.trim() ||
                     isCollaborationTemplateLoading ||
+                    isValidatingCollaborationYaml ||
                     !collaborationDefinitionYaml.trim() ||
                     !isCollaborationYamlValidated ||
-                    missingRequiredParticipantKeys.length > 0 ||
+                    missingParticipantBindingLabels.length > 0 ||
                     allBoundBotIds.length === 0 ||
                     !isOriginatorBoundToParticipant
                   : false) ||

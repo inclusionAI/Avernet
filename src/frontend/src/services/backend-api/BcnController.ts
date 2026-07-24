@@ -65,6 +65,40 @@ export interface CollaborationTemplatesResponse {
   supported_languages: string[];
 }
 
+/** 自定义协作 YAML 校验诊断 */
+export interface CollaborationDefinitionValidationDiagnostic {
+  code: string;
+  path: string;
+  message: string;
+  hint?: string;
+}
+
+/** 自定义协作 YAML 校验后的参与者槽位 */
+export interface CollaborationDefinitionParticipantSlot {
+  binding: string;
+  display_name?: string;
+  description?: string;
+  required: boolean;
+  assigned: boolean;
+}
+
+/** 自定义协作 YAML 校验摘要 */
+export interface CollaborationDefinitionValidationSummary {
+  participants: number;
+  nodes: number;
+  initial_nodes: string[];
+  final_output_node?: string;
+}
+
+/** 自定义协作 YAML 校验响应 */
+export interface CollaborationDefinitionValidationResponse {
+  valid: boolean;
+  errors?: CollaborationDefinitionValidationDiagnostic[];
+  warnings?: CollaborationDefinitionValidationDiagnostic[];
+  summary: CollaborationDefinitionValidationSummary;
+  participants?: CollaborationDefinitionParticipantSlot[];
+}
+
 /** 创建群聊响应 */
 export interface CreateGroupResponse {
   context_injected: number;
@@ -305,6 +339,28 @@ export async function getCollaborationTemplateYaml(
   );
 
   return typeof response === 'string' ? response : String(response ?? '');
+}
+
+/**
+ * 校验自定义协作 YAML
+ * POST /bcnproxy/collaboration/definitions/validate
+ */
+export async function validateCollaborationDefinitionYaml(
+  params: { definition_yaml: string },
+  options?: { [key: string]: any },
+) {
+  return request<CollaborationDefinitionValidationResponse>(
+    '/bcnproxy/collaboration/definitions/validate',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      data: params,
+      skipErrorHandler: true,
+      ...(options || {}),
+    },
+  );
 }
 
 // === Bot 管理接口 ===
@@ -1256,7 +1312,6 @@ export async function getRegisterToken(options?: { [key: string]: any }) {
     ...(options || {}),
   });
 }
-
 
 // === OAuth 登录接口（一期 BCN 开源） ===
 
