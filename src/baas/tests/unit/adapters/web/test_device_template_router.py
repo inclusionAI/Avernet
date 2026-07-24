@@ -31,7 +31,6 @@ from secbaas.community.adapters.web.routers.config_management.device_template_ro
     transition_template_status,
     update_template,
 )
-from secbaas.community.api import OperationContext
 from secbaas.community.api.template_manage import (
     DeviceTemplateResponse,
     TemplateCreate,
@@ -42,8 +41,6 @@ from secbaas.community.api.template_manage import (
 from secbaas.community.api.template_manage._models import ArcaTemplateConfig
 
 # ==================== Helpers ====================
-
-_OP_CTX = OperationContext(operator="test_user", env="dev")
 
 
 def _make_template_response(
@@ -147,9 +144,7 @@ class TestListTemplates:
         expected = TemplateListResponse(items=[], total=0, page=1, page_size=20)
         mock_svc.list_templates.return_value = expected
 
-        result = await list_templates(
-            tenant="test_tenant", op_ctx=_OP_CTX, service=mock_svc
-        )
+        result = await list_templates(tenant="test_tenant", service=mock_svc)
 
         assert result.code == 0
         assert result.data == expected
@@ -170,7 +165,6 @@ class TestListTemplates:
         result = await list_templates(
             tenant="test_tenant",
             status=TemplateStatus.ONLINE,
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -193,7 +187,6 @@ class TestListTemplates:
             tenant="test_tenant",
             page=3,
             page_size=10,
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -213,9 +206,7 @@ class TestListTemplates:
         expected = TemplateListResponse(items=[tmpl], total=1, page=1, page_size=20)
         mock_svc.list_templates.return_value = expected
 
-        result = await list_templates(
-            tenant="test_tenant", op_ctx=_OP_CTX, service=mock_svc
-        )
+        result = await list_templates(tenant="test_tenant", service=mock_svc)
 
         assert result.code == 0
         assert result.data is not None
@@ -238,9 +229,7 @@ class TestListOnlineTemplates:
         expected = TemplateListResponse(items=[tmpl], total=1, page=1, page_size=20)
         mock_svc.list_online_templates.return_value = expected
 
-        result = await list_online_templates(
-            tenant="test_tenant", op_ctx=_OP_CTX, service=mock_svc
-        )
+        result = await list_online_templates(tenant="test_tenant", service=mock_svc)
 
         assert result.code == 0
         assert result.data == expected
@@ -261,7 +250,6 @@ class TestListOnlineTemplates:
             tenant="test_tenant",
             page=2,
             page_size=50,
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -279,9 +267,7 @@ class TestListOnlineTemplates:
         expected = TemplateListResponse(items=[], total=0, page=1, page_size=20)
         mock_svc.list_online_templates.return_value = expected
 
-        result = await list_online_templates(
-            tenant="empty_tenant", op_ctx=_OP_CTX, service=mock_svc
-        )
+        result = await list_online_templates(tenant="empty_tenant", service=mock_svc)
 
         assert result.code == 0
         assert result.data is not None
@@ -302,9 +288,7 @@ class TestGetTemplateById:
         expected = _make_template_response(id=42, template_id=999)
         mock_svc.get_by_template_id.return_value = expected
 
-        result = await get_template_by_id(
-            template_id=999, op_ctx=_OP_CTX, service=mock_svc
-        )
+        result = await get_template_by_id(template_id=999, service=mock_svc)
 
         assert result.code == 0
         assert result.data == expected
@@ -317,9 +301,7 @@ class TestGetTemplateById:
         mock_svc.get_by_template_id.return_value = None
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_template_by_id(
-                template_id=99999, op_ctx=_OP_CTX, service=mock_svc
-            )
+            await get_template_by_id(template_id=99999, service=mock_svc)
 
         assert exc_info.value.status_code == 404
         detail = exc_info.value.detail
@@ -333,9 +315,7 @@ class TestGetTemplateById:
         expected = _make_template_response(template_id=0)
         mock_svc.get_by_template_id.return_value = expected
 
-        result = await get_template_by_id(
-            template_id=0, op_ctx=_OP_CTX, service=mock_svc
-        )
+        result = await get_template_by_id(template_id=0, service=mock_svc)
 
         assert result.code == 0
         mock_svc.get_by_template_id.assert_called_once_with(0)
@@ -354,9 +334,7 @@ class TestResolveTemplate:
         expected = _make_template_response(template_uuid="DEFAULT-xyz")
         mock_svc.get_default_or_explicit_template.return_value = expected
 
-        result = await resolve_template(
-            tenant="test_tenant", op_ctx=_OP_CTX, service=mock_svc
-        )
+        result = await resolve_template(tenant="test_tenant", service=mock_svc)
 
         assert result.code == 0
         assert result.data == expected
@@ -375,7 +353,6 @@ class TestResolveTemplate:
         result = await resolve_template(
             tenant="test_tenant",
             template_uuid="EXPLICIT-abc",
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -395,9 +372,7 @@ class TestResolveTemplate:
         )
 
         with pytest.raises(HTTPException) as exc_info:
-            await resolve_template(
-                tenant="bad_tenant", op_ctx=_OP_CTX, service=mock_svc
-            )
+            await resolve_template(tenant="bad_tenant", service=mock_svc)
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail["error_code"] == "TEMPLATE_NOT_FOUND"
@@ -415,7 +390,6 @@ class TestResolveTemplate:
             await resolve_template(
                 tenant="test_tenant",
                 template_uuid="MISSING",
-                op_ctx=_OP_CTX,
                 service=mock_svc,
             )
 
@@ -439,7 +413,6 @@ class TestGetTemplate:
         result = await get_template(
             template_uuid="UUID-12345",
             tenant="test_tenant",
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -459,7 +432,6 @@ class TestGetTemplate:
             await get_template(
                 template_uuid="MISSING",
                 tenant="test_tenant",
-                op_ctx=_OP_CTX,
                 service=mock_svc,
             )
 
@@ -477,7 +449,6 @@ class TestGetTemplate:
             await get_template(
                 template_uuid="UUID-12345",
                 tenant="other_tenant",
-                op_ctx=_OP_CTX,
                 service=mock_svc,
             )
 
@@ -502,7 +473,6 @@ class TestCreateTemplate:
         result = await create_template(
             request=request,
             tenant="test_tenant",
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -524,7 +494,6 @@ class TestCreateTemplate:
         result = await create_template(
             request=request,
             tenant="test_tenant",
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -560,7 +529,6 @@ class TestCreateTemplate:
         result = await create_template(
             request=request,
             tenant="prod_tenant",
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -590,7 +558,6 @@ class TestUpdateTemplate:
             request=request,
             tenant="test_tenant",
             status=TemplateStatus.ONLINE,
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -615,7 +582,6 @@ class TestUpdateTemplate:
             template_uuid="UUID-12345",
             request=request,
             tenant="test_tenant",
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -638,7 +604,6 @@ class TestUpdateTemplate:
                 template_uuid="MISSING",
                 request=_make_update_request(),
                 tenant="test_tenant",
-                op_ctx=_OP_CTX,
                 service=mock_svc,
             )
 
@@ -659,7 +624,6 @@ class TestUpdateTemplate:
             request=request,
             tenant="test_tenant",
             status=TemplateStatus.OFFLINE,
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -693,7 +657,6 @@ class TestTransitionTemplateStatus:
             template_uuid="UUID-12345",
             request=request,
             tenant="test_tenant",
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -721,7 +684,6 @@ class TestTransitionTemplateStatus:
             template_uuid="UUID-12345",
             request=request,
             tenant="test_tenant",
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -749,7 +711,6 @@ class TestTransitionTemplateStatus:
                 template_uuid="MISSING",
                 request=request,
                 tenant="test_tenant",
-                op_ctx=_OP_CTX,
                 service=mock_svc,
             )
 
@@ -771,7 +732,6 @@ class TestTransitionTemplateStatus:
             template_uuid="UUID-12345",
             request=request,
             tenant="test_tenant",
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -795,12 +755,13 @@ class TestDeleteTemplate:
         """Test deleting a template successfully."""
         mock_svc = MagicMock()
         mock_svc.soft_delete_template.return_value = True
+        request = DeleteTemplateRequest(operator="admin")
 
         result = await delete_template(
             template_uuid="UUID-12345",
+            request=request,
             tenant="test_tenant",
             status=TemplateStatus.ONLINE,
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -812,7 +773,7 @@ class TestDeleteTemplate:
             tenant="test_tenant",
             template_uuid="UUID-12345",
             status=TemplateStatus.ONLINE,
-            operator="test_user",
+            operator="admin",
         )
 
     @pytest.mark.asyncio
@@ -820,13 +781,14 @@ class TestDeleteTemplate:
         """Test delete_template returns 404 when not found."""
         mock_svc = MagicMock()
         mock_svc.soft_delete_template.return_value = False
+        request = DeleteTemplateRequest(operator="admin")
 
         with pytest.raises(HTTPException) as exc_info:
             await delete_template(
                 template_uuid="MISSING",
+                request=request,
                 tenant="test_tenant",
                 status=TemplateStatus.OFFLINE,
-                op_ctx=_OP_CTX,
                 service=mock_svc,
             )
 
@@ -839,12 +801,13 @@ class TestDeleteTemplate:
         """Test deleting an OFFLINE template."""
         mock_svc = MagicMock()
         mock_svc.soft_delete_template.return_value = True
+        request = DeleteTemplateRequest(operator="cleanup_bot")
 
         result = await delete_template(
             template_uuid="UUID-OFF",
+            request=request,
             tenant="test_tenant",
             status=TemplateStatus.OFFLINE,
-            op_ctx=_OP_CTX,
             service=mock_svc,
         )
 
@@ -853,5 +816,5 @@ class TestDeleteTemplate:
             tenant="test_tenant",
             template_uuid="UUID-OFF",
             status=TemplateStatus.OFFLINE,
-            operator="test_user",
+            operator="cleanup_bot",
         )
