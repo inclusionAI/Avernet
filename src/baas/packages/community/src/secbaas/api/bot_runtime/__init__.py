@@ -19,6 +19,9 @@ from ._file_transfer_models import (
     ShareLinkResponse,
     TransferNotFoundError,
 )
+from ._protocols import (
+    BotFileTransferDispatcher,
+)
 
 __all__ = [
     # Exceptions
@@ -40,4 +43,6 @@ __all__ = [
     "ShareLinkRequest",
     "ShareLinkResponse",
     "TransferNotFoundError",
+    # Protocols
+    "BotFileTransferDispatcher",
 ]

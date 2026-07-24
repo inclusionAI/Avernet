@@ -134,6 +134,8 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         transfer_id = uuid.uuid4().hex
         if device_path is not None and ".." in device_path:
             raise ValueError("device_path contains invalid path traversal")
+        if filename is not None and ".." in filename:
+            raise ValueError("filename contains invalid path traversal")
         resolved_filename = filename or (
             Path(device_path).name if device_path else "untitled"
         )

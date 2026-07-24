@@ -240,7 +240,8 @@ class StubFileTransferBackend(FileTransferBackend):
         Args:
             key: Full storage key to delete.
         """
-        self._storage.pop(key, None)
+        transfer_id = self._extract_transfer_id(key)
+        self._storage.pop(transfer_id, None)
 
     # ── Test helper methods ─────────────────────────────────────────
 
