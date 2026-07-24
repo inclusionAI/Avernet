@@ -5,6 +5,7 @@ from ._exceptions import (
     BotServiceError,
     NoActiveDevicesError,
     NoDevicesFoundError,
+    StagingObjectNotFoundError,
     SessionClosedError,
     SessionError,
     SessionNotFoundError,
