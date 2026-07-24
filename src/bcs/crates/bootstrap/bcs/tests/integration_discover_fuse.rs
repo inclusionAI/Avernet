@@ -107,7 +107,7 @@ async fn discover_with_fuse_unreachable_degrades_to_registry_only() {
     bot2.send_heartbeat().await;
 
     // Discover with q — fuse recommend will fail (unreachable), should degrade
-    let client = bot1.http_client(addr);
+    let client = bot2.http_client(addr);
     let result = client.discover_bots(Some("architecture")).await;
 
     assert!(result.is_ok(), "Discover should succeed even when fuse is unreachable: {:?}", result.err());
@@ -132,7 +132,7 @@ async fn discover_without_fuse_returns_registry_results() {
     bot2.register("DBABot", &["database"], addr).await;
     bot2.send_heartbeat().await;
 
-    let client = bot1.http_client(addr);
+    let client = bot2.http_client(addr);
     let result = client.discover_bots(Some("architecture")).await;
 
     assert!(result.is_ok(), "Discover should succeed: {:?}", result.err());
@@ -167,7 +167,7 @@ async fn discover_by_name_returns_matching_bots() {
     let url = format!("http://{}/bots/discover?name=arch", addr);
     let response: serde_json::Value = reqwest::Client::new()
         .get(&url)
-        .header("Authorization", format!("Bearer {}", bot1.token.as_str()))
+        .header("Authorization", format!("Bearer {}", bot2.token.as_str()))
         .send()
         .await
         .expect("Failed to call discover")
@@ -202,11 +202,15 @@ async fn discover_by_name_does_not_trigger_fuse() {
     bot1.register("TestBot", &["testing"], addr).await;
     bot1.send_heartbeat().await;
 
+    let mut bot2 = MockBot::connect(addr).await;
+    bot2.register("ObserverBot", &["observation"], addr).await;
+    bot2.send_heartbeat().await;
+
     // name search should NOT call fuse recommend — should succeed even with fuse unreachable
     let url = format!("http://{}/bots/discover?name=test", addr);
     let response = reqwest::Client::new()
         .get(&url)
-        .header("Authorization", format!("Bearer {}", bot1.token.as_str()))
+        .header("Authorization", format!("Bearer {}", bot2.token.as_str()))
         .send()
         .await
         .expect("Failed to call discover");

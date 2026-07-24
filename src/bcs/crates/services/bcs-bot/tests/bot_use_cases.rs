@@ -770,6 +770,7 @@ async fn discover_bots_applies_visibility_and_friend_matrix() {
         .discover_bots(BotDiscoveryCommand {
             q: Some("planner".to_string()),
             collaborate_bot: Some("driver".to_string()),
+            requester_bot_id: Some("driver".to_string()),
             ..Default::default()
         })
         .await
@@ -780,7 +781,7 @@ async fn discover_bots_applies_visibility_and_friend_matrix() {
         .iter()
         .map(|entry| (entry.bot_uuid.as_str(), entry.is_friend))
         .collect::<Vec<_>>();
-    assert!(ids.contains(&("driver", Some(false))));
+    assert!(!ids.iter().any(|(id, _)| *id == "driver"));
     assert!(ids.contains(&("protected-friend", Some(true))));
     assert!(!ids.iter().any(|(id, _)| *id == "protected-stranger"));
     assert!(!ids.iter().any(|(id, _)| *id == "private-planner"));
@@ -858,7 +859,7 @@ async fn organization_scoped_discovery_filters_effective_members_and_attaches_me
     let fixture = RegistryFixture::new();
     let registry: Arc<dyn BotRegistryCoreService> = fixture.registry.clone();
     let organization = Arc::new(StaticOrganizationCoreService::with_members(vec![
-        org_member("bot-a", "planner"),
+        org_member("bot-a", "traffic_analyst"),
         org_member("bot-b", "traffic_analyst"),
         org_member("bot-c", "traffic_analyst"),
         org_member("bot-d", "traffic_analyst"),
@@ -870,7 +871,7 @@ async fn organization_scoped_discovery_filters_effective_members_and_attaches_me
     .with_bot_core(fixture.registry.clone())
     .with_organization(organization);
 
-    register_bot(&fixture.registry, "bot-a", caps(Some("Requester"), Some("planner"), "public"), None).await;
+    register_bot(&fixture.registry, "bot-a", caps(Some("Requester"), Some("traffic"), "public"), None).await;
     register_bot(&fixture.registry, "bot-b", caps(Some("Traffic Public"), Some("traffic"), "protected"), None).await;
     register_bot(&fixture.registry, "bot-c", caps(Some("Traffic Private"), Some("traffic"), "private"), None).await;
     register_bot(&fixture.registry, "bot-d", caps(Some("Traffic Friend"), Some("traffic"), "private"), None).await;
