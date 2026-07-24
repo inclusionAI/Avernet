@@ -8,7 +8,7 @@ error codes with shared semantics are re-exported without a SESSION_ prefix
 """
 
 from ._errors import (
-    OssObjectNotFoundError,
+    StagingObjectNotFoundError,
     SessionFileSharingError,
     SourceTransferNotFoundError,
     SourceTransferNotReadyError,
@@ -30,7 +30,7 @@ from ._protocols import SessionFileSharingDispatcher
 
 __all__ = [
     # Errors
-    "OssObjectNotFoundError",
+    "StagingObjectNotFoundError",
     "SessionFileSharingError",
     "SourceTransferNotFoundError",
     "SourceTransferNotReadyError",
