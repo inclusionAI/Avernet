@@ -4,9 +4,9 @@ use std::{
 };
 
 use async_trait::async_trait;
-use bcs_collaboration_store::MySqlCollaborationStore;
+use bcs_collaboration_store::{MemoryCollaborationStore, MySqlCollaborationStore};
 use bcs_db_api::{
-    DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
+    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult, DbValue,
 };
 use bcs_domain::{
@@ -602,6 +602,283 @@ async fn mysql_runtime_register_delivery_alias_errors_when_correlation_missing()
         .expect_err("missing correlation should error");
 
     assert!(err.to_string().contains("delivery correlation not found"));
+}
+
+#[tokio::test]
+async fn memory_runtime_rejects_updates_for_missing_runs_nodes_and_correlations() {
+    let store = MemoryCollaborationStore::new();
+
+    assert!(
+        store
+            .update_run_status(
+                "missing-run",
+                StateMachineRunStatus::Failed,
+                None,
+                Some("failed".to_string()),
+                2_000,
+                Some(2_000),
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .mark_node_running(
+                "missing-run",
+                "missing-node",
+                0,
+                "delivery-1".to_string(),
+                1_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .register_delivery_alias("missing-delivery", "bot-run-1".to_string())
+            .await
+            .is_err()
+    );
+
+    store
+        .create_run(test_run(), Vec::new())
+        .await
+        .expect("seed run without nodes");
+    assert!(
+        store
+            .mark_node_running(
+                "sm-run-1",
+                "missing-node",
+                0,
+                "delivery-1".to_string(),
+                1_000,
+            )
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn mysql_runtime_propagates_database_failures_across_repository_operations() {
+    let store = MySqlCollaborationStore::new(Arc::new(AlwaysFailDb), "dev".to_string());
+    let definition = test_definition();
+    let run = test_run();
+    let node = test_node();
+
+    assert!(
+        StateMachineDefinitionRepoPort::upsert(&store, definition.clone())
+            .await
+            .is_err()
+    );
+    assert!(
+        StateMachineDefinitionRepoPort::get(&store, &definition.id, definition.version)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .save_run_snapshot(&run, run.group_version, &definition, None)
+            .await
+            .is_err()
+    );
+    assert!(store.get_run_snapshot(&run.run_id).await.is_err());
+    assert!(
+        GroupRuntimeBindingRepoPort::get(&store, &run.group_id)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .bind_default_definition(&run.group_id, run.group_version, None, None, false)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .create_run(run.clone(), vec![node.clone()])
+            .await
+            .is_err()
+    );
+    assert!(store.get_run(&run.run_id).await.is_err());
+    assert!(store.get_run_by_session_id(&run.session_id).await.is_err());
+    assert!(store.list_node_runs(&run.run_id).await.is_err());
+    assert!(
+        store
+            .get_node_run(&run.run_id, &node.node_id)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .mark_node_running(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "delivery-failed".to_string(),
+                1_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .mark_human_node_running_if_run_active(MarkHumanNodeRunningCommand {
+                run_id: run.run_id.clone(),
+                node_id: "review".to_string(),
+                attempt: 0,
+                started_at_ms: 1_000,
+                timeout_deadline_ms: 61_000,
+            })
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .record_node_artifact_if_running(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "artifact".to_string(),
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .record_human_response_if_running(
+                &run.run_id,
+                "review",
+                0,
+                "response".to_string(),
+                "human_1001".to_string(),
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .complete_node_attempt(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "complete".to_string(),
+                "artifact".to_string(),
+                None,
+                2_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .fail_node_attempt(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "failed".to_string(),
+                2_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .schedule_node_retry(&run.run_id, &node.node_id, node.attempt, node.attempt + 1)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .skip_node(&run.run_id, &node.node_id, 2_000)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .update_run_status(
+                &run.run_id,
+                StateMachineRunStatus::Failed,
+                None,
+                Some("failed".to_string()),
+                2_000,
+                Some(2_000),
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .upsert_delivery_correlation(test_correlation())
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .register_delivery_alias("delivery-1", "bot-run-1".to_string())
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .lookup_delivery_correlation("delivery-1")
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .list_expired_running_node_runs(10_000, 0, 10)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .append_event(
+                &run.run_id,
+                Some(&node.node_id),
+                Some(node.attempt),
+                "test.event",
+                json!({"ok": true}),
+                2_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .list_events_by_run_and_type(&run.run_id, "test.event")
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .list_events_by_run_node_and_type(&run.run_id, &node.node_id, "test.event")
+            .await
+            .is_err()
+    );
+}
+
+struct AlwaysFailDb;
+
+#[async_trait]
+impl DbPlugin for AlwaysFailDb {
+    async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        Err(DbError::Backend("forced query failure".to_string()))
+    }
+
+    async fn execute(&self, _statement: DbStatement) -> DbResult<DbExecuteResult> {
+        Err(DbError::Backend("forced execute failure".to_string()))
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        Err(DbError::Backend("forced transaction failure".to_string()))
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Err(DbError::Backend("forced health failure".to_string()))
+    }
 }
 
 #[derive(Default)]

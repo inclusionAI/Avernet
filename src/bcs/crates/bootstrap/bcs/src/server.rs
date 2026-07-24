@@ -3612,6 +3612,59 @@ mod tests {
     use tokio::time::{Duration, timeout};
     use tower::ServiceExt;
 
+    #[derive(Default)]
+    struct RecordingSessionChannelOutbound {
+        events: tokio::sync::Mutex<Vec<HumanInputReadyEvent>>,
+    }
+
+    #[async_trait]
+    impl SessionChannelOutboundPort for RecordingSessionChannelOutbound {
+        async fn publish_human_input_ready(
+            &self,
+            event: HumanInputReadyEvent,
+        ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+            self.events.lock().await.push(event);
+            Ok(SessionChannelDeliveryOutcome::Delivered)
+        }
+    }
+
+    #[tokio::test]
+    async fn deferred_session_channel_outbound_is_inert_until_initialized() {
+        let (slot, deferred) = deferred_session_channel_outbound();
+        let event = HumanInputReadyEvent {
+            event_id: "event-1".to_string(),
+            group_id: "group-1".to_string(),
+            session_id: "session-1".to_string(),
+            run_id: "run-1".to_string(),
+            node_id: "review".to_string(),
+            display_name: "Review".to_string(),
+            instruction: "Review the draft".to_string(),
+            response_ref: "run-1/review".to_string(),
+            upstream_artifacts: Vec::new(),
+            judge_outcomes: vec!["approved".to_string()],
+            timeout_deadline_ms: Some(60_000),
+        };
+
+        assert_eq!(
+            deferred
+                .publish_human_input_ready(event.clone())
+                .await
+                .expect("uninitialized outbound"),
+            SessionChannelDeliveryOutcome::NotApplicable
+        );
+
+        let recording = Arc::new(RecordingSessionChannelOutbound::default());
+        assert!(slot.set(recording.clone()).is_ok());
+        assert_eq!(
+            deferred
+                .publish_human_input_ready(event)
+                .await
+                .expect("initialized outbound"),
+            SessionChannelDeliveryOutcome::Delivered
+        );
+        assert_eq!(recording.events.lock().await.len(), 1);
+    }
+
     async fn response_json(response: Response) -> serde_json::Value {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice(&body).unwrap()

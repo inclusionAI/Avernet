@@ -1067,6 +1067,52 @@ async fn human_state_machine_routes_forward_authenticated_actor_and_output() {
 }
 
 #[tokio::test]
+async fn human_state_machine_routes_reject_requests_without_human_identity() {
+    let (app, _recorder, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+
+    let pending_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/state-machine-runs/run-1/pending-human-nodes")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pending_response.status(), StatusCode::UNAUTHORIZED);
+
+    let respond_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/state-machine-runs/run-1/nodes/human_review/respond")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"content":"looks good"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(respond_response.status(), StatusCode::UNAUTHORIZED);
+    assert!(
+        collaboration_runtime
+            .pending_human_commands
+            .lock()
+            .await
+            .is_empty()
+    );
+    assert!(
+        collaboration_runtime
+            .respond_human_commands
+            .lock()
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn post_groups_with_state_machine_yaml_rejects_multi_bot_assigned_slot_before_create() {
     let (app, recorder, collaboration_runtime, _temp_dir) =
         test_app_with_collaboration_runtime().await;

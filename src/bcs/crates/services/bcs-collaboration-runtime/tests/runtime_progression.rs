@@ -23,10 +23,11 @@ use bcs_service_api::{
     CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, DefinitionYamlSource, FrontendDeliveryCommand,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
-    HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanResponseSource,
-    JudgeDecision, JudgeEvaluatorPort, JudgeRequest, ListPendingHumanNodesCommand,
-    PatchGroupCollaborationDefinitionCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome,
-    ServiceError, ServiceResult, ServiceSpec, SessionManagementService,
+    HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanInputReadyEvent,
+    HumanResponseSource, HumanRunAccessCommand, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
+    ListPendingHumanNodesCommand, PatchGroupCollaborationDefinitionCommand,
+    RespondHumanNodeCommand, RespondHumanNodeOutcome, ServiceError, ServiceResult, ServiceSpec,
+    SessionChannelDeliveryOutcome, SessionChannelOutboundPort, SessionManagementService,
     StartStateMachineRunCommand, StateMachineDefinitionRepoPort, StateMachineNodeSubStatus,
     StateMachineRunAccessCommand, StateMachineRunRepoPort,
 };
@@ -93,6 +94,22 @@ fn test_sessions() -> Arc<SessionManagementServiceImpl> {
         Arc::new(MemorySessionRepo::new()),
         Arc::new(MemoryGroupRepo::new()),
     ))
+}
+
+#[derive(Default)]
+struct RecordingSessionChannelOutbound {
+    events: Mutex<Vec<HumanInputReadyEvent>>,
+}
+
+#[async_trait]
+impl SessionChannelOutboundPort for RecordingSessionChannelOutbound {
+    async fn publish_human_input_ready(
+        &self,
+        event: HumanInputReadyEvent,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        self.events.lock().await.push(event);
+        Ok(SessionChannelDeliveryOutcome::Delivered)
+    }
 }
 
 fn assert_inferred_default_requires(definition: &CollaborationDefinition) {
@@ -177,6 +194,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
+    let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
     let runtime = CollaborationRuntime::new(
         store.clone(),
         store.clone(),
@@ -186,7 +204,8 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
         sessions,
         delivery.clone(),
         noop_judge(),
-    );
+    )
+    .with_session_channel_outbound(channel_outbound.clone());
 
     let started = runtime
         .start_state_machine_run(StartStateMachineRunCommand {
@@ -224,6 +243,68 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
     );
     assert!(started.view.nodes[0].assignee_bot_id.is_none());
     assert!(started.view.nodes[0].delivery_request_id.is_none());
+    let channel_events = channel_outbound.events.lock().await;
+    assert_eq!(channel_events.len(), 1);
+    assert_eq!(channel_events[0].run_id, started.view.run.run_id);
+    assert_eq!(channel_events[0].node_id, "review");
+    assert_eq!(
+        channel_events[0].response_ref,
+        format!("{}/review", started.view.run.run_id)
+    );
+    assert_eq!(channel_events[0].display_name, "Review");
+    assert_eq!(
+        channel_events[0].instruction,
+        "请用自然语言给出你的意见。"
+    );
+    assert!(channel_events[0].upstream_artifacts.is_empty());
+    drop(channel_events);
+
+    let human_access = HumanRunAccessCommand {
+        run_id: started.view.run.run_id.clone(),
+        caller_actor_id: "human_1001".to_string(),
+    };
+    assert!(
+        runtime
+            .get_state_machine_run_for_human(human_access.clone())
+            .await
+            .expect("Human reads run")
+            .is_some()
+    );
+    assert!(
+        runtime
+            .get_state_machine_node_run_for_human(human_access.clone(), "review")
+            .await
+            .expect("Human reads node")
+            .is_some()
+    );
+    assert!(
+        runtime
+            .get_state_machine_run_graph_for_human(human_access.clone())
+            .await
+            .expect("Human reads graph")
+            .is_some()
+    );
+    let authenticated_access = StateMachineRunAccessCommand {
+        run_id: started.view.run.run_id.clone(),
+        authenticated_human: Some(AuthenticatedHumanCaller {
+            actor_id: "human_1001".to_string(),
+            display_name: Some("Reviewer".to_string()),
+        }),
+    };
+    assert!(
+        runtime
+            .get_state_machine_node_run_with_access(authenticated_access.clone(), "review")
+            .await
+            .expect("authenticated Human reads node")
+            .is_some()
+    );
+    assert!(
+        runtime
+            .get_state_machine_run_graph_with_access(authenticated_access)
+            .await
+            .expect("authenticated Human reads graph")
+            .is_some()
+    );
     let pending = runtime
         .list_pending_human_nodes(ListPendingHumanNodesCommand {
             run_id: started.view.run.run_id.clone(),
@@ -244,6 +325,23 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
         .await
         .expect_err("non-participant must not inspect pending Human nodes");
     assert!(matches!(forbidden, CollaborationRuntimeError::Forbidden(_)));
+
+    for content in ["   ".to_string(), "x".repeat(64 * 1024 + 1)] {
+        let invalid = runtime
+            .respond_human_node(RespondHumanNodeCommand {
+                run_id: started.view.run.run_id.clone(),
+                node_id: "review".to_string(),
+                caller_actor_id: "human_1001".to_string(),
+                content,
+                source: HumanResponseSource::Http,
+            })
+            .await
+            .expect_err("invalid Human response must be rejected");
+        assert!(matches!(
+            invalid,
+            CollaborationRuntimeError::InvalidRequest(_)
+        ));
+    }
 
     let completed = runtime
         .handle_session_human_input(HandleSessionHumanInputCommand {
@@ -281,6 +379,14 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
     assert_eq!(human_message.message_type, GroupMessageType::Bot);
     assert_eq!(human_message.role, MessageRole::User);
     assert_eq!(human_message.bot_name.as_deref(), Some("Reviewer"));
+    let no_longer_pending = runtime
+        .list_pending_human_nodes(ListPendingHumanNodesCommand {
+            run_id: run.run_id,
+            caller_actor_id: "human_1001".to_string(),
+        })
+        .await
+        .expect("completed Human run has no pending nodes");
+    assert!(no_longer_pending.is_empty());
 }
 
 #[tokio::test]
@@ -331,7 +437,245 @@ async fn state_machine_session_rejects_message_without_pending_human_input() {
         .await
         .expect_err("state-machine chat must reject input while no HumanInput is pending");
     assert!(matches!(error, CollaborationRuntimeError::Conflict(_)));
+    let non_human_node = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: started.view.run.run_id,
+            node_id: "answer".to_string(),
+            caller_actor_id: "human_1001".to_string(),
+            content: "不能直接响应 bot 节点".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect_err("Human response endpoint must reject bot_task nodes");
+    assert!(matches!(
+        non_human_node,
+        CollaborationRuntimeError::InvalidRequest(_)
+    ));
     assert_eq!(delivery.commands.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn human_run_owner_can_cancel_through_human_access_api() {
+    let group = Arc::new(GroupStore::new());
+    group
+        .upsert(state_machine_test_group())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    );
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "cancel it"}),
+            caller_id: Some("human_1001".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("start Human run");
+
+    let cancelled = runtime
+        .cancel_state_machine_run_for_human(
+            HumanRunAccessCommand {
+                run_id: started.view.run.run_id,
+                caller_actor_id: "human_1001".to_string(),
+            },
+            Some("user cancelled".to_string()),
+        )
+        .await
+        .expect("run owner cancels Human run");
+
+    assert_eq!(cancelled.run.status, StateMachineRunStatus::Aborted);
+    assert_eq!(cancelled.nodes[0].status, StateMachineNodeStatus::Running);
+}
+
+#[tokio::test]
+async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
+    let group = Arc::new(GroupStore::new());
+    group
+        .upsert(state_machine_test_group())
+        .await
+        .expect("seed state-machine group");
+    let mut second_state_machine_group = state_machine_test_group();
+    second_state_machine_group.id = "group-2".to_string();
+    group
+        .upsert(second_state_machine_group)
+        .await
+        .expect("seed second state-machine group");
+    let mut regular_group = test_group();
+    regular_group.id = "group-regular".to_string();
+    group
+        .upsert(regular_group)
+        .await
+        .expect("seed regular group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    );
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "validate errors"}),
+            caller_id: Some("human_1001".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("start Human run");
+
+    let not_state_machine = runtime
+        .handle_session_human_input(HandleSessionHumanInputCommand {
+            group_id: "group-regular".to_string(),
+            session_id: None,
+            caller_actor_id: "human_1001".to_string(),
+            content: "regular chat".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect("regular group remains outside state-machine input routing");
+    assert!(matches!(
+        not_state_machine,
+        HandleSessionHumanInputOutcome::NotStateMachine
+    ));
+
+    for (session_id, expected_fragment) in [
+        (None, "require a session id"),
+        (Some("missing-session".to_string()), "has no active run"),
+        (
+            Some(started.view.run.session_id.clone()),
+            "does not belong to the target group",
+        ),
+    ] {
+        let group_id = if expected_fragment.contains("target group") {
+            "group-2"
+        } else {
+            "group-1"
+        };
+        let error = runtime
+            .handle_session_human_input(HandleSessionHumanInputCommand {
+                group_id: group_id.to_string(),
+                session_id,
+                caller_actor_id: "human_1001".to_string(),
+                content: "invalid context".to_string(),
+                source: HumanResponseSource::Http,
+            })
+            .await
+            .expect_err("invalid state-machine input context must be rejected");
+        assert!(error.to_string().contains(expected_fragment));
+    }
+
+    let missing_run = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: "missing-run".to_string(),
+            node_id: "review".to_string(),
+            caller_actor_id: "human_1001".to_string(),
+            content: "approve".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect_err("missing run must be rejected");
+    assert!(matches!(
+        missing_run,
+        CollaborationRuntimeError::RunNotFound(_)
+    ));
+
+    let missing_node = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: started.view.run.run_id.clone(),
+            node_id: "missing-node".to_string(),
+            caller_actor_id: "human_1001".to_string(),
+            content: "approve".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect_err("missing Human node must be rejected");
+    assert!(matches!(
+        missing_node,
+        CollaborationRuntimeError::NodeNotFound { .. }
+    ));
+
+    let missing_access = HumanRunAccessCommand {
+        run_id: "missing-run".to_string(),
+        caller_actor_id: "human_1001".to_string(),
+    };
+    assert!(
+        runtime
+            .get_state_machine_run_for_human(missing_access.clone())
+            .await
+            .expect("missing run lookup")
+            .is_none()
+    );
+    assert!(
+        runtime
+            .get_state_machine_node_run_for_human(missing_access.clone(), "review")
+            .await
+            .expect("missing node run lookup")
+            .is_none()
+    );
+    assert!(
+        runtime
+            .get_state_machine_run_graph_for_human(missing_access)
+            .await
+            .expect("missing graph lookup")
+            .is_none()
+    );
+
+    runtime
+        .cancel_state_machine_run_for_human(
+            HumanRunAccessCommand {
+                run_id: started.view.run.run_id.clone(),
+                caller_actor_id: "human_1001".to_string(),
+            },
+            None,
+        )
+        .await
+        .expect("cancel Human run");
+    let late_response = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: started.view.run.run_id,
+            node_id: "review".to_string(),
+            caller_actor_id: "human_1001".to_string(),
+            content: "too late".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect_err("aborted run must reject Human responses");
+    assert!(matches!(
+        late_response,
+        CollaborationRuntimeError::Conflict(_)
+    ));
 }
 
 #[tokio::test]
