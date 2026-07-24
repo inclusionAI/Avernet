@@ -4,9 +4,9 @@ use std::{
 };
 
 use async_trait::async_trait;
-use bcs_collaboration_store::MySqlCollaborationStore;
+use bcs_collaboration_store::{MemoryCollaborationStore, MySqlCollaborationStore};
 use bcs_db_api::{
-    DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
+    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult, DbValue,
 };
 use bcs_domain::{
@@ -15,8 +15,8 @@ use bcs_domain::{
     StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
 use bcs_service_api::{
-    CollaborationEventRepoPort, GroupRuntimeBindingRepoPort, StateMachineDefinitionRepoPort,
-    StateMachineRunRepoPort,
+    CollaborationEventRepoPort, GroupRuntimeBindingRepoPort, MarkHumanNodeRunningCommand,
+    StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
 };
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -85,8 +85,78 @@ async fn mysql_definition_upsert_rejects_same_id_version_with_different_content(
         .await
         .expect_err("different content should conflict");
 
-    assert!(err.to_string().contains("already exists with different content"));
+    assert!(
+        err.to_string()
+            .contains("already exists with different content")
+    );
     assert!(db.transactions.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn mysql_definition_upsert_with_yaml_records_yaml_source_format() {
+    let definition = test_definition();
+    let db = Arc::new(RecordingDb {
+        definition_metadata_rows: Mutex::new(VecDeque::from([None])),
+        ..RecordingDb::default()
+    });
+    let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
+
+    StateMachineDefinitionRepoPort::upsert_with_source_yaml(
+        &store,
+        definition,
+        "name: source yaml".to_string(),
+    )
+    .await
+    .expect("upsert definition with source YAML");
+
+    let transactions = db.transactions.lock().await;
+    let DbTransactionStep::Execute(statement) = &transactions[0][1] else {
+        panic!("expected definition execute step");
+    };
+    assert_eq!(statement.params()[5], DbValue::from("yaml"));
+    assert_eq!(statement.params()[8], DbValue::from("name: source yaml"));
+}
+
+#[tokio::test]
+async fn mysql_definition_and_snapshot_reads_reject_invalid_persisted_json() {
+    let db = Arc::new(RecordingDb {
+        definition_json: Mutex::new(Some("{invalid".to_string())),
+        snapshot_json: Mutex::new(Some("{invalid".to_string())),
+        ..RecordingDb::default()
+    });
+    let store = MySqlCollaborationStore::new(db, "dev".to_string());
+
+    assert!(
+        StateMachineDefinitionRepoPort::get(&store, "invalid", 1)
+            .await
+            .is_err()
+    );
+    assert!(store.get_run_snapshot("invalid-run").await.is_err());
+}
+
+#[tokio::test]
+async fn mysql_binding_rejects_missing_definition_metadata() {
+    let definition = test_definition();
+    let db = Arc::new(RecordingDb {
+        definition_metadata_rows: Mutex::new(VecDeque::from([None])),
+        ..RecordingDb::default()
+    });
+    let store = MySqlCollaborationStore::new(db, "dev".to_string());
+
+    let error = store
+        .bind_default_definition(
+            "group-1",
+            1,
+            Some(CollaborationDefinitionRef {
+                id: definition.id,
+                version: definition.version,
+            }),
+            None,
+            false,
+        )
+        .await
+        .expect_err("missing definition metadata must reject binding");
+    assert!(error.to_string().contains("not found for binding"));
 }
 
 #[tokio::test]
@@ -194,7 +264,10 @@ async fn mysql_definition_snapshot_writes_run_definition_snapshot_table() {
     let executes = db.executes.lock().await;
     assert_eq!(executes.len(), 1);
     let stmt = &executes[0];
-    assert!(stmt.sql().contains("bcs_state_machine_definition_snapshots"));
+    assert!(
+        stmt.sql()
+            .contains("bcs_state_machine_definition_snapshots")
+    );
     assert!(stmt.sql().contains("ON DUPLICATE KEY UPDATE"));
     assert!(stmt.sql().contains("env=env"));
     assert_eq!(stmt.params()[1], DbValue::from("sm-run-1"));
@@ -225,7 +298,11 @@ async fn mysql_definition_snapshot_reads_run_definition_snapshot_table() {
     assert_eq!(loaded.id, "sm_e2e_single");
     assert_eq!(loaded.version, 3);
     let queries = db.queries.lock().await;
-    assert!(queries[0].sql().contains("bcs_state_machine_definition_snapshots"));
+    assert!(
+        queries[0]
+            .sql()
+            .contains("bcs_state_machine_definition_snapshots")
+    );
     assert_eq!(queries[0].params()[1], DbValue::from("sm-run-1"));
 }
 
@@ -296,10 +373,7 @@ async fn mysql_runtime_reads_run_and_node_rows() {
         .expect("run row");
     assert_eq!(loaded_by_session.run_id, "sm-run-1");
 
-    let nodes = store
-        .list_node_runs("sm-run-1")
-        .await
-        .expect("list nodes");
+    let nodes = store.list_node_runs("sm-run-1").await.expect("list nodes");
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes[0].node_timeout_ms, Some(120_000));
     assert_eq!(nodes[0].timeout_deadline_ms, Some(121_000));
@@ -315,13 +389,7 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
     let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
 
     store
-        .mark_node_running(
-            "sm-run-1",
-            "answer",
-            1,
-            "delivery-1".to_string(),
-            1_000,
-        )
+        .mark_node_running("sm-run-1", "answer", 1, "delivery-1".to_string(), 1_000)
         .await
         .expect("mark running");
     let artifact_recorded = store
@@ -338,7 +406,9 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
             "sm-run-1",
             "answer",
             1,
+            "complete".to_string(),
             "done".to_string(),
+            None,
             2_000,
         )
         .await
@@ -378,13 +448,71 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
     assert_eq!(executes[1].params()[0], DbValue::from("candidate"));
     assert_eq!(executes[1].params()[4], DbValue::from(1));
     assert!(executes[2].sql().contains("AND attempt = ? AND status = 'running'"));
-    assert_eq!(executes[2].params()[5], DbValue::from(1));
+    assert_eq!(executes[2].params()[7], DbValue::from(1));
     assert!(executes[3].sql().contains("status NOT IN ('completed', 'failed', 'aborted')"));
     assert!(executes[4].sql().contains("AND attempt = ? AND status = 'failed'"));
     assert_eq!(executes[4].params()[4], DbValue::from(1));
     assert!(executes[5].sql().contains("SET status = 'skipped'"));
     assert!(executes[5].sql().contains("AND status = 'pending'"));
     assert_eq!(executes[5].params()[0], DbValue::from(2_200_u64));
+}
+
+#[tokio::test]
+async fn mysql_human_activation_uses_empty_assignee_sentinel_and_persisted_deadline() {
+    let db = Arc::new(RecordingDb::default());
+    let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
+
+    let marked = store
+        .mark_human_node_running_if_run_active(MarkHumanNodeRunningCommand {
+            run_id: "sm-run-1".to_string(),
+            node_id: "review".to_string(),
+            attempt: 0,
+            started_at_ms: 1_000,
+            timeout_deadline_ms: 61_000,
+        })
+        .await
+        .expect("mark Human node running");
+
+    assert!(marked);
+    let executes = db.executes.lock().await;
+    assert_eq!(executes.len(), 1);
+    assert!(executes[0].sql().contains("assignee_bot_id = ''"));
+    assert_eq!(executes[0].params()[0], DbValue::from(1_000_u64));
+    assert_eq!(executes[0].params()[1], DbValue::from(61_000_u64));
+    assert_eq!(executes[0].params()[4], DbValue::from("review"));
+}
+
+#[tokio::test]
+async fn mysql_human_response_is_atomically_persisted_once() {
+    let db = Arc::new(RecordingDb::default());
+    let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
+
+    let recorded = store
+        .record_human_response_if_running(
+            "sm-run-1",
+            "review",
+            0,
+            "请补充风险说明".to_string(),
+            "human_1001".to_string(),
+        )
+        .await
+        .expect("record Human response");
+
+    assert!(recorded);
+    let executes = db.executes.lock().await;
+    assert_eq!(executes.len(), 1);
+    assert!(
+        executes[0]
+            .sql()
+            .contains("SET artifact_text = ?, responded_by = ?")
+    );
+    assert!(executes[0].sql().contains("AND artifact_text IS NULL"));
+    assert_eq!(
+        executes[0].params()[0],
+        DbValue::from("请补充风险说明")
+    );
+    assert_eq!(executes[0].params()[1], DbValue::from("human_1001"));
+    assert_eq!(executes[0].params()[5], DbValue::from(0));
 }
 
 #[tokio::test]
@@ -450,7 +578,11 @@ async fn mysql_runtime_delivery_correlation_and_events_are_persistent() {
     assert_eq!(transactions[0].len(), 2);
     let executes = db.executes.lock().await;
     assert_eq!(executes.len(), 2);
-    assert!(executes[0].sql().contains("bcs_state_machine_delivery_correlations"));
+    assert!(
+        executes[0]
+            .sql()
+            .contains("bcs_state_machine_delivery_correlations")
+    );
     assert!(executes[1].sql().contains("bcs_collaboration_events"));
     assert_eq!(executes[1].params()[2], DbValue::from("answer"));
     assert_eq!(executes[1].params()[3], DbValue::from(1));
@@ -459,7 +591,7 @@ async fn mysql_runtime_delivery_correlation_and_events_are_persistent() {
 #[tokio::test]
 async fn mysql_runtime_cas_failures_return_false() {
     let db = Arc::new(RecordingDb {
-        execute_affected_rows: Mutex::new(VecDeque::from([0, 0, 0, 0, 0])),
+        execute_affected_rows: Mutex::new(VecDeque::from([0, 0, 0, 0, 0, 0])),
         ..RecordingDb::default()
     });
     let store = MySqlCollaborationStore::new(db, "dev".to_string());
@@ -469,7 +601,9 @@ async fn mysql_runtime_cas_failures_return_false() {
             "sm-run-1",
             "answer",
             1,
+            "complete".to_string(),
             "done".to_string(),
+            None,
             2_000,
         )
         .await
@@ -483,14 +617,18 @@ async fn mysql_runtime_cas_failures_return_false() {
         )
         .await
         .expect("record node artifact");
-    let failed = store
-        .fail_node_attempt(
+    let human_response_recorded = store
+        .record_human_response_if_running(
             "sm-run-1",
-            "answer",
+            "review",
             1,
-            "error".to_string(),
-            2_000,
+            "response".to_string(),
+            "human_1001".to_string(),
         )
+        .await
+        .expect("record Human response");
+    let failed = store
+        .fail_node_attempt("sm-run-1", "answer", 1, "error".to_string(), 2_000)
         .await
         .expect("fail node");
     let retry_scheduled = store
@@ -511,6 +649,7 @@ async fn mysql_runtime_cas_failures_return_false() {
 
     assert!(!completed);
     assert!(!artifact_recorded);
+    assert!(!human_response_recorded);
     assert!(!failed);
     assert!(!retry_scheduled);
     assert!(!run_updated);
@@ -530,6 +669,349 @@ async fn mysql_runtime_register_delivery_alias_errors_when_correlation_missing()
         .expect_err("missing correlation should error");
 
     assert!(err.to_string().contains("delivery correlation not found"));
+}
+
+#[tokio::test]
+async fn memory_runtime_rejects_updates_for_missing_runs_nodes_and_correlations() {
+    let store = MemoryCollaborationStore::new();
+
+    assert!(
+        store
+            .update_run_status(
+                "missing-run",
+                StateMachineRunStatus::Failed,
+                None,
+                Some("failed".to_string()),
+                2_000,
+                Some(2_000),
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .mark_node_running(
+                "missing-run",
+                "missing-node",
+                0,
+                "delivery-1".to_string(),
+                1_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .register_delivery_alias("missing-delivery", "bot-run-1".to_string())
+            .await
+            .is_err()
+    );
+
+    store
+        .create_run(test_run(), Vec::new())
+        .await
+        .expect("seed run without nodes");
+    assert!(
+        store
+            .mark_node_running(
+                "sm-run-1",
+                "missing-node",
+                0,
+                "delivery-1".to_string(),
+                1_000,
+            )
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn mysql_runtime_propagates_database_failures_across_repository_operations() {
+    let store = MySqlCollaborationStore::new(Arc::new(AlwaysFailDb), "dev".to_string());
+    let definition = test_definition();
+    let run = test_run();
+    let node = test_node();
+
+    assert!(
+        StateMachineDefinitionRepoPort::upsert(&store, definition.clone())
+            .await
+            .is_err()
+    );
+    assert!(
+        StateMachineDefinitionRepoPort::get(&store, &definition.id, definition.version)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .save_run_snapshot(&run, run.group_version, &definition, None)
+            .await
+            .is_err()
+    );
+    assert!(store.get_run_snapshot(&run.run_id).await.is_err());
+    assert!(
+        GroupRuntimeBindingRepoPort::get(&store, &run.group_id)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .bind_default_definition(&run.group_id, run.group_version, None, None, false)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .bind_default_definition_if_current(
+                &run.group_id,
+                run.group_version,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .create_run(run.clone(), vec![node.clone()])
+            .await
+            .is_err()
+    );
+    assert!(store.get_run(&run.run_id).await.is_err());
+    assert!(store.get_run_by_session_id(&run.session_id).await.is_err());
+    assert!(store.list_node_runs(&run.run_id).await.is_err());
+    assert!(
+        store
+            .get_node_run(&run.run_id, &node.node_id)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .mark_node_running(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "delivery-failed".to_string(),
+                1_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .mark_node_running_if_run_active(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "delivery-cas-failed".to_string(),
+                1_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .mark_human_node_running_if_run_active(MarkHumanNodeRunningCommand {
+                run_id: run.run_id.clone(),
+                node_id: "review".to_string(),
+                attempt: 0,
+                started_at_ms: 1_000,
+                timeout_deadline_ms: 61_000,
+            })
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .record_node_artifact_if_running(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "artifact".to_string(),
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .record_human_response_if_running(
+                &run.run_id,
+                "review",
+                0,
+                "response".to_string(),
+                "human_1001".to_string(),
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .complete_node_attempt(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "complete".to_string(),
+                "artifact".to_string(),
+                None,
+                2_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .fail_node_attempt(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "failed".to_string(),
+                2_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .schedule_node_retry(&run.run_id, &node.node_id, node.attempt, node.attempt + 1)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .skip_node(&run.run_id, &node.node_id, 2_000)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .update_run_status(
+                &run.run_id,
+                StateMachineRunStatus::Failed,
+                None,
+                Some("failed".to_string()),
+                2_000,
+                Some(2_000),
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .upsert_delivery_correlation(test_correlation())
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .register_delivery_alias("delivery-1", "bot-run-1".to_string())
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .lookup_delivery_correlation("delivery-1")
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .list_expired_running_node_runs(10_000, 0, 10)
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .append_event(
+                &run.run_id,
+                Some(&node.node_id),
+                Some(node.attempt),
+                "test.event",
+                json!({"ok": true}),
+                2_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .list_events_by_run_and_type(&run.run_id, "test.event")
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .list_events_by_run_node_and_type(&run.run_id, &node.node_id, "test.event")
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn mysql_alias_lookup_propagates_second_query_failure() {
+    let store =
+        MySqlCollaborationStore::new(Arc::new(AliasLookupFailDb), "dev".to_string());
+
+    assert!(
+        store
+            .lookup_delivery_correlation("bot-run-1")
+            .await
+            .is_err()
+    );
+}
+
+struct AlwaysFailDb;
+
+#[async_trait]
+impl DbPlugin for AlwaysFailDb {
+    async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        Err(DbError::Backend("forced query failure".to_string()))
+    }
+
+    async fn execute(&self, _statement: DbStatement) -> DbResult<DbExecuteResult> {
+        Err(DbError::Backend("forced execute failure".to_string()))
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        Err(DbError::Backend("forced transaction failure".to_string()))
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Err(DbError::Backend("forced health failure".to_string()))
+    }
+}
+
+struct AliasLookupFailDb;
+
+#[async_trait]
+impl DbPlugin for AliasLookupFailDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        if statement.sql().contains("delivery_request_id = ?") {
+            Ok(Vec::new())
+        } else {
+            Err(DbError::Backend("forced alias lookup failure".to_string()))
+        }
+    }
+
+    async fn execute(&self, _statement: DbStatement) -> DbResult<DbExecuteResult> {
+        unreachable!("alias lookup test does not execute statements")
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        unreachable!("alias lookup test does not execute transactions")
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Ok(DbHealth::healthy())
+    }
 }
 
 #[derive(Default)]
@@ -567,7 +1049,11 @@ impl RecordingDb {
                     continue;
                 }
                 let content_hash = stmt.params().get(6)?.as_str()?.to_string();
-                let blob_id = stmt.params().get(7).and_then(DbValue::as_str).map(str::to_string);
+                let blob_id = stmt
+                    .params()
+                    .get(7)
+                    .and_then(DbValue::as_str)
+                    .map(str::to_string);
                 return Some((content_hash, blob_id));
             }
         }
@@ -594,11 +1080,17 @@ impl DbPlugin for RecordingDb {
         if statement.sql().contains("normalized_json") {
             let definition_json = self.definition_json.lock().await.clone().unwrap();
             return Ok(vec![DbRow::new(BTreeMap::from([
-                ("normalized_json".to_string(), DbValue::from(definition_json)),
+                (
+                    "normalized_json".to_string(),
+                    DbValue::from(definition_json),
+                ),
                 ("yaml_text".to_string(), DbValue::Null),
             ]))]);
         }
-        if statement.sql().contains("FROM bcs_state_machine_definition_snapshots") {
+        if statement
+            .sql()
+            .contains("FROM bcs_state_machine_definition_snapshots")
+        {
             return Ok(self
                 .snapshot_json
                 .lock()
@@ -614,13 +1106,28 @@ impl DbPlugin for RecordingDb {
                 .collect());
         }
         if statement.sql().contains("FROM bcs_state_machine_runs") {
-            return Ok(self.runtime_run_row.lock().await.clone().into_iter().collect());
+            return Ok(self
+                .runtime_run_row
+                .lock()
+                .await
+                .clone()
+                .into_iter()
+                .collect());
         }
         if statement.sql().contains("FROM bcs_state_machine_node_runs") {
             return Ok(self.runtime_node_rows.lock().await.clone());
         }
-        if statement.sql().contains("FROM bcs_state_machine_delivery_correlations") {
-            return Ok(self.correlation_row.lock().await.clone().into_iter().collect());
+        if statement
+            .sql()
+            .contains("FROM bcs_state_machine_delivery_correlations")
+        {
+            return Ok(self
+                .correlation_row
+                .lock()
+                .await
+                .clone()
+                .into_iter()
+                .collect());
         }
         if statement.sql().contains("FROM bcs_collaboration_events") {
             return Ok(self.event_rows.lock().await.clone());
@@ -692,7 +1199,9 @@ fn test_node() -> StateMachineNodeRun {
         node_timeout_ms: Some(120_000),
         timeout_deadline_ms: Some(121_000),
         max_attempts: 2,
-        assignee_bot_id: "bot_sm_e2e_driver".to_string(),
+        assignee_bot_id: Some("bot_sm_e2e_driver".to_string()),
+        outcome: None,
+        responded_by: None,
         delivery_request_id: Some("delivery-1".to_string()),
         bot_delivery_run_id: Some("bot-run-1".to_string()),
         artifact_text: None,
@@ -716,14 +1225,32 @@ fn test_correlation() -> StateMachineDeliveryCorrelation {
 fn run_row(run: &StateMachineRun) -> DbRow {
     DbRow::new(BTreeMap::from([
         ("run_id".to_string(), DbValue::from(run.run_id.as_str())),
-        ("definition_id".to_string(), DbValue::from(run.definition_id.as_str())),
-        ("definition_version".to_string(), DbValue::from(run.definition_version)),
+        (
+            "definition_id".to_string(),
+            DbValue::from(run.definition_id.as_str()),
+        ),
+        (
+            "definition_version".to_string(),
+            DbValue::from(run.definition_version),
+        ),
         ("group_id".to_string(), DbValue::from(run.group_id.as_str())),
-        ("group_version".to_string(), DbValue::from(run.group_version)),
-        ("session_id".to_string(), DbValue::from(run.session_id.as_str())),
-        ("created_by".to_string(), DbValue::from(run.created_by.as_deref())),
+        (
+            "group_version".to_string(),
+            DbValue::from(run.group_version),
+        ),
+        (
+            "session_id".to_string(),
+            DbValue::from(run.session_id.as_str()),
+        ),
+        (
+            "created_by".to_string(),
+            DbValue::from(run.created_by.as_deref()),
+        ),
         ("status".to_string(), DbValue::from("running")),
-        ("input_json".to_string(), DbValue::from(run.input.to_string())),
+        (
+            "input_json".to_string(),
+            DbValue::from(run.input.to_string()),
+        ),
         ("output_text".to_string(), DbValue::Null),
         ("error_message".to_string(), DbValue::Null),
         ("created_at_ms".to_string(), DbValue::from(run.created_at)),
@@ -739,11 +1266,31 @@ fn node_row(node: &StateMachineNodeRun) -> DbRow {
         ("status".to_string(), DbValue::from("running")),
         ("attempt".to_string(), DbValue::from(node.attempt)),
         ("node_timeout_ms".to_string(), DbValue::from(120_000_u64)),
-        ("timeout_deadline_ms".to_string(), DbValue::from(121_000_u64)),
+        (
+            "timeout_deadline_ms".to_string(),
+            DbValue::from(121_000_u64),
+        ),
         ("max_attempts".to_string(), DbValue::from(node.max_attempts)),
-        ("assignee_bot_id".to_string(), DbValue::from(node.assignee_bot_id.as_str())),
-        ("delivery_request_id".to_string(), DbValue::from("delivery-1")),
-        ("bot_delivery_run_id".to_string(), DbValue::from("bot-run-1")),
+        (
+            "assignee_bot_id".to_string(),
+            DbValue::from(node.assignee_bot_id.as_deref()),
+        ),
+        (
+            "outcome".to_string(),
+            DbValue::from(node.outcome.as_deref()),
+        ),
+        (
+            "responded_by".to_string(),
+            DbValue::from(node.responded_by.as_deref()),
+        ),
+        (
+            "delivery_request_id".to_string(),
+            DbValue::from("delivery-1"),
+        ),
+        (
+            "bot_delivery_run_id".to_string(),
+            DbValue::from("bot-run-1"),
+        ),
         ("artifact_text".to_string(), DbValue::Null),
         ("error_message".to_string(), DbValue::Null),
         ("started_at_ms".to_string(), DbValue::from(1_000_u64)),
@@ -757,7 +1304,10 @@ fn correlation_row(correlation: &StateMachineDeliveryCorrelation) -> DbRow {
             "state_machine_run_id".to_string(),
             DbValue::from(correlation.state_machine_run_id.as_str()),
         ),
-        ("node_id".to_string(), DbValue::from(correlation.node_id.as_str())),
+        (
+            "node_id".to_string(),
+            DbValue::from(correlation.node_id.as_str()),
+        ),
         ("attempt".to_string(), DbValue::from(correlation.attempt)),
         (
             "assignee_bot_id".to_string(),
@@ -785,9 +1335,15 @@ fn collaboration_event_row(
     DbRow::new(BTreeMap::from([
         ("state_machine_run_id".to_string(), DbValue::from(run_id)),
         ("node_id".to_string(), DbValue::from(node_id)),
-        ("attempt".to_string(), attempt.map(DbValue::from).unwrap_or(DbValue::Null)),
+        (
+            "attempt".to_string(),
+            attempt.map(DbValue::from).unwrap_or(DbValue::Null),
+        ),
         ("event_type".to_string(), DbValue::from(event_type)),
-        ("payload_json".to_string(), DbValue::from(payload.to_string())),
+        (
+            "payload_json".to_string(),
+            DbValue::from(payload.to_string()),
+        ),
         ("created_at_ms".to_string(), DbValue::from(created_at)),
     ]))
 }

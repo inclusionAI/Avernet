@@ -701,6 +701,16 @@ print(json.dumps({
     assert_json_eq "node detail identifies answer node" "$RESPONSE" "node.node_id" "answer"
     assert_json_eq "node detail belongs to active run" "$RESPONSE" "node.run_id" "$run_id"
 
+    api_get "/state-machine-runs/${run_id}/pending-human-nodes"
+    require_status "user checks whether the workflow needs Human input" "200" || return
+    assert_eq "bot-only workflow has no pending Human input" "$RESPONSE" "[]"
+
+    api_post "/state-machine-runs/${run_id}/nodes/answer/respond" \
+        '{"content":"this endpoint only accepts HumanInput nodes"}'
+    require_status "Human response endpoint rejects a bot task node" "400" || return
+    assert_contains "Human response rejection identifies the node kind" \
+        "$RESPONSE" "not a human_input node"
+
     api_post "/state-machine-runs/${run_id}/cancel" '{"reason":"E2E fixture completed"}'
     require_status "user cancels the state-machine run" "200" || return
     assert_json_eq "cancelled state-machine run is aborted" "$RESPONSE" "run.status" "aborted"

@@ -125,6 +125,21 @@ export interface StateMachineRunGraph {
   edges: StateMachineEdge[];
 }
 
+export interface PendingHumanNodeArtifact {
+  node_id: string;
+  text: string;
+}
+
+export interface PendingHumanNode {
+  node_id: string;
+  display_name: string;
+  instruction: string;
+  response_ref: string;
+  judge_outcomes: string[];
+  timeout_deadline_ms?: number;
+  upstream_artifacts: PendingHumanNodeArtifact[];
+}
+
 export interface StateMachineRunViewData {
   runId?: string;
   stateMachineRunId?: string;
@@ -168,6 +183,7 @@ interface GraphLayout {
 const DEFAULT_BASE_URL = '/bcnproxy';
 const DEFAULT_POLLING_INTERVAL = 3000;
 const MAX_TRANSIENT_RETRIES = 3;
+const MAX_HUMAN_RESPONSE_BYTES = 64 * 1024;
 const NODE_WIDTH = 188;
 const NODE_HEIGHT = 58;
 const LEVEL_GAP = 56;
@@ -559,6 +575,261 @@ const Panel = styled.aside`
   backdrop-filter: blur(8px);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03),
     0 4px 12px rgba(15, 23, 42, 0.02);
+`;
+
+const HumanInputStatusNotice = styled.div`
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #fde68a;
+  border-radius: 9px;
+  padding: 9px 11px;
+  color: #78350f;
+  background: #fffbeb;
+`;
+
+const HumanInputStatusIcon = styled.span`
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #d97706;
+  font-size: 13px;
+  font-weight: 800;
+`;
+
+const HumanInputStatusBody = styled.div`
+  min-width: 0;
+`;
+
+const HumanInputStatusTitle = styled.div`
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+`;
+
+const HumanInputStatusHint = styled.div`
+  margin-top: 1px;
+  overflow-wrap: anywhere;
+  color: #a16207;
+  font-size: 11px;
+  line-height: 1.45;
+`;
+
+const HumanInputCard = styled.section`
+  border: 1px solid #fbbf24;
+  border-radius: 12px;
+  padding: 15px;
+  background: linear-gradient(145deg, #fffbeb 0%, #ffffff 72%);
+  box-shadow: 0 4px 14px rgba(217, 119, 6, 0.08);
+`;
+
+const HumanInputHeader = styled.div`
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+`;
+
+const HumanInputHeading = styled.div`
+  min-width: 0;
+`;
+
+const HumanInputTitle = styled.h3`
+  margin: 0;
+  color: #92400e;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.4;
+`;
+
+const HumanInputNodeName = styled.div`
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.5;
+`;
+
+const HumanInputBadge = styled.span`
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  border: 1px solid #fcd34d;
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: #92400e;
+  background: #fef3c7;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.2;
+`;
+
+const HumanInputLead = styled.p`
+  margin: 12px 0 0;
+  color: #78350f;
+  font-size: 13px;
+  line-height: 1.65;
+`;
+
+const HumanInstruction = styled.div`
+  margin-top: 10px;
+  border-left: 3px solid #f59e0b;
+  border-radius: 0 8px 8px 0;
+  padding: 9px 11px;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+`;
+
+const HumanInputMeta = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+`;
+
+const HumanOutcomeList = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+`;
+
+const HumanOutcomeTag = styled.span`
+  display: inline-flex;
+  border: 1px solid #fde68a;
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #92400e;
+  background: #fffbeb;
+  font-weight: 700;
+`;
+
+const HumanArtifactList = styled.div`
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+`;
+
+const HumanArtifactLabel = styled.div`
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+`;
+
+const HumanArtifactBlock = styled.pre`
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 10px;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.82);
+  font-family: 'SF Mono', 'JetBrains Mono', Consolas, 'Liberation Mono',
+    monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+`;
+
+const HumanResponseForm = styled.form`
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+`;
+
+const HumanResponseLabel = styled.label`
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 750;
+`;
+
+const HumanResponseTextarea = styled.textarea`
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 104px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  padding: 10px 11px;
+  color: #0f172a;
+  background: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+
+  &::placeholder {
+    color: #94a3b8;
+  }
+
+  &:focus {
+    border-color: #f59e0b;
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.13);
+  }
+
+  &:disabled {
+    color: #64748b;
+    background: #f8fafc;
+    cursor: not-allowed;
+  }
+`;
+
+const HumanResponseHint = styled.div`
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+`;
+
+const HumanResponseActions = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+`;
+
+const HumanResponseSubmitButton = styled.button`
+  border: 1px solid #d97706;
+  border-radius: 8px;
+  padding: 8px 14px;
+  color: #ffffff;
+  background: #d97706;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: background 150ms ease, box-shadow 150ms ease,
+    transform 150ms ease;
+
+  &:hover:not(:disabled) {
+    background: #b45309;
+    box-shadow: 0 3px 10px rgba(180, 83, 9, 0.2);
+    transform: translateY(-1px);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  &:disabled {
+    border-color: #d1d5db;
+    color: #94a3b8;
+    background: #e5e7eb;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
 `;
 
 const DetailSection = styled.section`
@@ -1444,7 +1715,7 @@ function getStatusLabel(status?: string) {
   }
 
   if (normalized === 'awaiting_response') {
-    return 'Awaiting bot response';
+    return 'Awaiting response';
   }
 
   if (normalized === 'retry_scheduled') {
@@ -1461,6 +1732,17 @@ function getNodeDisplayStatus(
   return normalizeStatus(status) === 'running' && subStatus
     ? subStatus
     : status;
+}
+
+function getActiveHumanNodeId(graph: StateMachineRunGraph) {
+  return (
+    graph.nodes.find(
+      (node) =>
+        node.kind === 'human_input' &&
+        normalizeStatus(node.status) === 'running' &&
+        normalizeStatus(node.sub_status) !== 'judging',
+    )?.node_id || ''
+  );
 }
 
 function getStatusTone(status?: string): StatusTone {
@@ -2271,6 +2553,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
   const baseUrl = resolveBaseUrl(props);
   const pollingInterval = props.pollingInterval || DEFAULT_POLLING_INTERVAL;
   const autoRefresh = props.autoRefresh !== false;
+  const humanResponseInputId = React.useId();
   const [graph, setGraph] = useState<StateMachineRunGraph | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -2284,14 +2567,109 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
   const [nodeArtifactExpanded, setNodeArtifactExpanded] = useState(true);
   const [judgeOutputsExpanded, setJudgeOutputsExpanded] = useState(false);
   const [copiedTarget, setCopiedTarget] = useState<CopyTarget>(null);
+  const [pendingHumanNodes, setPendingHumanNodes] = useState<
+    PendingHumanNode[]
+  >([]);
+  const [pendingHumanLoading, setPendingHumanLoading] = useState(false);
+  const [pendingHumanError, setPendingHumanError] = useState<string | null>(
+    null,
+  );
+  const [humanResponseText, setHumanResponseText] = useState('');
+  const [humanResponseSubmitting, setHumanResponseSubmitting] = useState(false);
+  const [humanResponseError, setHumanResponseError] = useState<string | null>(
+    null,
+  );
   const abortRef = useRef<AbortController | null>(null);
   const nodeDetailAbortRef = useRef<AbortController | null>(null);
+  const pendingHumanAbortRef = useRef<AbortController | null>(null);
+  const humanResponseAbortRef = useRef<AbortController | null>(null);
+  const pendingHumanNodeIdRef = useRef('');
   const nodeDetailPollInFlightRef = useRef(false);
   const requestedNodeDetailIdRef = useRef<string | null>(null);
   const graphRef = useRef<StateMachineRunGraph | null>(null);
   const transientRetryCountRef = useRef(0);
   const copyResetTimerRef = useRef<number | null>(null);
   const [transientRetrySignal, setTransientRetrySignal] = useState(0);
+  const pendingHumanNode =
+    pendingHumanNodes.length === 1 ? pendingHumanNodes[0] : null;
+
+  const fetchPendingHumanNodes = useCallback(
+    async (expectedNodeId: string) => {
+      if (!runId || !expectedNodeId) {
+        return;
+      }
+
+      pendingHumanAbortRef.current?.abort();
+
+      const abortController = new AbortController();
+      pendingHumanAbortRef.current = abortController;
+      setPendingHumanLoading(true);
+      setPendingHumanError(null);
+
+      try {
+        const response = await fetch(
+          joinUrl(
+            baseUrl,
+            `/state-machine-runs/${encodeURIComponent(
+              runId,
+            )}/pending-human-nodes`,
+          ),
+          {
+            credentials: 'include',
+            signal: abortController.signal,
+          },
+        );
+
+        if (!response.ok) {
+          throw await createRequestError(response);
+        }
+
+        const data = (await response.json()) as PendingHumanNode[];
+
+        if (pendingHumanAbortRef.current !== abortController) {
+          return;
+        }
+
+        const nextNodeId = data.length === 1 ? data[0].node_id : '';
+        if (
+          nextNodeId &&
+          pendingHumanNodeIdRef.current &&
+          nextNodeId !== pendingHumanNodeIdRef.current
+        ) {
+          setHumanResponseText('');
+          setHumanResponseError(null);
+        }
+        if (nextNodeId) {
+          pendingHumanNodeIdRef.current = nextNodeId;
+        }
+        setPendingHumanNodes(data);
+        if (data.length > 1) {
+          setPendingHumanError(
+            '检测到多个待处理的 Human input，当前版本不支持并发人工输入。',
+          );
+        } else if (data.length === 1 && data[0].node_id !== expectedNodeId) {
+          setPendingHumanError(
+            '待处理的 Human input 与当前运行节点不一致，请刷新后重试。',
+          );
+        }
+      } catch (requestError) {
+        if (
+          (requestError as Error).name !== 'AbortError' &&
+          pendingHumanAbortRef.current === abortController
+        ) {
+          const normalizedError = normalizeRequestError(requestError);
+          setPendingHumanError(
+            normalizedError.message || '加载 Human input 信息失败',
+          );
+        }
+      } finally {
+        if (pendingHumanAbortRef.current === abortController) {
+          setPendingHumanLoading(false);
+        }
+      }
+    },
+    [baseUrl, runId],
+  );
 
   const fetchGraph = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
@@ -2332,6 +2710,19 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
         transientRetryCountRef.current = 0;
         setTransientRetrySignal(0);
         setGraph(data);
+        const activeHumanNodeId = getActiveHumanNodeId(data);
+        if (activeHumanNodeId) {
+          void fetchPendingHumanNodes(activeHumanNodeId);
+        } else {
+          pendingHumanAbortRef.current?.abort();
+          pendingHumanAbortRef.current = null;
+          setPendingHumanNodes([]);
+          setPendingHumanLoading(false);
+          setPendingHumanError(null);
+          setHumanResponseText('');
+          setHumanResponseError(null);
+          pendingHumanNodeIdRef.current = '';
+        }
         setSelectedNodeId((current) => {
           if (current && data.nodes.some((node) => node.node_id === current)) {
             return current;
@@ -2372,7 +2763,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
         setRefreshing(false);
       }
     },
-    [baseUrl, runId],
+    [baseUrl, fetchPendingHumanNodes, runId],
   );
 
   const fetchNodeDetail = useCallback(
@@ -2437,6 +2828,89 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
     [baseUrl, runId],
   );
 
+  const handleHumanResponseSubmit = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+
+      const content = humanResponseText.trim();
+      if (!pendingHumanNode || !content || humanResponseSubmitting) {
+        return;
+      }
+
+      if (new TextEncoder().encode(content).length > MAX_HUMAN_RESPONSE_BYTES) {
+        setHumanResponseError(
+          `人工输入不能超过 ${MAX_HUMAN_RESPONSE_BYTES} UTF-8 bytes。`,
+        );
+        return;
+      }
+
+      humanResponseAbortRef.current?.abort();
+
+      const abortController = new AbortController();
+      humanResponseAbortRef.current = abortController;
+      setHumanResponseSubmitting(true);
+      setHumanResponseError(null);
+
+      try {
+        const response = await fetch(
+          joinUrl(
+            baseUrl,
+            `/state-machine-runs/${encodeURIComponent(
+              runId,
+            )}/nodes/${encodeURIComponent(pendingHumanNode.node_id)}/respond`,
+          ),
+          {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ content }),
+            signal: abortController.signal,
+          },
+        );
+
+        if (!response.ok) {
+          throw await createRequestError(response);
+        }
+
+        if (humanResponseAbortRef.current !== abortController) {
+          return;
+        }
+
+        pendingHumanAbortRef.current?.abort();
+        pendingHumanAbortRef.current = null;
+        setHumanResponseText('');
+        setPendingHumanNodes([]);
+        pendingHumanNodeIdRef.current = '';
+        await fetchGraph('refresh');
+      } catch (requestError) {
+        if (
+          (requestError as Error).name !== 'AbortError' &&
+          humanResponseAbortRef.current === abortController
+        ) {
+          const normalizedError = normalizeRequestError(requestError);
+          setHumanResponseError(
+            normalizedError.message || '提交 Human input 失败',
+          );
+          void fetchGraph('refresh');
+        }
+      } finally {
+        if (humanResponseAbortRef.current === abortController) {
+          setHumanResponseSubmitting(false);
+        }
+      }
+    },
+    [
+      baseUrl,
+      fetchGraph,
+      humanResponseSubmitting,
+      humanResponseText,
+      pendingHumanNode,
+      runId,
+    ],
+  );
+
   useEffect(() => {
     setGraph(null);
     setSelectedNodeId(null);
@@ -2448,8 +2922,19 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
     setNodeArtifactExpanded(true);
     setJudgeOutputsExpanded(false);
     setCopiedTarget(null);
+    setPendingHumanNodes([]);
+    setPendingHumanLoading(false);
+    setPendingHumanError(null);
+    setHumanResponseText('');
+    setHumanResponseSubmitting(false);
+    setHumanResponseError(null);
     nodeDetailAbortRef.current?.abort();
     nodeDetailAbortRef.current = null;
+    pendingHumanAbortRef.current?.abort();
+    pendingHumanAbortRef.current = null;
+    humanResponseAbortRef.current?.abort();
+    humanResponseAbortRef.current = null;
+    pendingHumanNodeIdRef.current = '';
     nodeDetailPollInFlightRef.current = false;
     requestedNodeDetailIdRef.current = null;
     if (copyResetTimerRef.current) {
@@ -2500,6 +2985,10 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
       abortRef.current?.abort();
       nodeDetailAbortRef.current?.abort();
       nodeDetailAbortRef.current = null;
+      pendingHumanAbortRef.current?.abort();
+      pendingHumanAbortRef.current = null;
+      humanResponseAbortRef.current?.abort();
+      humanResponseAbortRef.current = null;
       if (copyResetTimerRef.current) {
         window.clearTimeout(copyResetTimerRef.current);
         copyResetTimerRef.current = null;
@@ -2550,6 +3039,15 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
 
     return graph.nodes.find((node) => node.node_id === selectedNodeId) || null;
   }, [graph, selectedNodeId]);
+
+  const activeHumanNode = useMemo(() => {
+    if (!graph) {
+      return null;
+    }
+
+    const nodeId = getActiveHumanNodeId(graph);
+    return graph.nodes.find((node) => node.node_id === nodeId) || null;
+  }, [graph]);
 
   const nodeById = useMemo(() => {
     return new Map(graph?.nodes.map((node) => [node.node_id, node]) || []);
@@ -2703,8 +3201,115 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
     setNodeDetailModalOpen(false);
   }, []);
 
+  const humanInputEditor = activeHumanNode ? (
+    <HumanInputCard aria-live="polite">
+      <HumanInputHeader>
+        <HumanInputHeading>
+          <HumanInputTitle>等待人工输入</HumanInputTitle>
+          <HumanInputNodeName>
+            当前节点：
+            {pendingHumanNode?.display_name ||
+              activeHumanNode.display_name ||
+              activeHumanNode.node_id}
+          </HumanInputNodeName>
+        </HumanInputHeading>
+        <HumanInputBadge>需要你处理</HumanInputBadge>
+      </HumanInputHeader>
+
+      <HumanInputLead>
+        请阅读审核说明并输入你的意见，提交后 Judge 会判定结果并继续执行。
+      </HumanInputLead>
+
+      {pendingHumanNode?.instruction ? (
+        <HumanInstruction>{pendingHumanNode.instruction}</HumanInstruction>
+      ) : null}
+
+      {pendingHumanNode?.judge_outcomes.length ? (
+        <HumanInputMeta>
+          <span>Judge 可判定：</span>
+          <HumanOutcomeList>
+            {pendingHumanNode.judge_outcomes.map((outcome) => (
+              <HumanOutcomeTag key={outcome}>{outcome}</HumanOutcomeTag>
+            ))}
+          </HumanOutcomeList>
+        </HumanInputMeta>
+      ) : null}
+
+      {pendingHumanNode?.timeout_deadline_ms ? (
+        <HumanInputMeta>
+          请在 {formatTime(pendingHumanNode.timeout_deadline_ms)} 前提交
+        </HumanInputMeta>
+      ) : null}
+
+      {pendingHumanLoading && !pendingHumanNode ? (
+        <HumanResponseHint>正在加载人工输入信息…</HumanResponseHint>
+      ) : null}
+
+      {pendingHumanError ? (
+        <InlineNotice $danger>{pendingHumanError}</InlineNotice>
+      ) : null}
+
+      {pendingHumanNode && !pendingHumanError ? (
+        <HumanResponseForm onSubmit={handleHumanResponseSubmit}>
+          <HumanResponseLabel htmlFor={humanResponseInputId}>
+            你的输入
+          </HumanResponseLabel>
+          <HumanResponseTextarea
+            id={humanResponseInputId}
+            disabled={humanResponseSubmitting}
+            maxLength={MAX_HUMAN_RESPONSE_BYTES}
+            placeholder="请直接用自然语言输入审核意见，例如：同意发布，或请补充风险说明。"
+            value={humanResponseText}
+            onChange={(event) => {
+              setHumanResponseText(event.target.value);
+              if (humanResponseError) {
+                setHumanResponseError(null);
+              }
+            }}
+          />
+          <HumanResponseHint>
+            无需手动填写 approved / rejected，Judge
+            会根据你的自然语言输入进行判定。
+          </HumanResponseHint>
+          {humanResponseError ? (
+            <InlineNotice $danger>{humanResponseError}</InlineNotice>
+          ) : null}
+          <HumanResponseActions>
+            <HumanResponseSubmitButton
+              disabled={
+                humanResponseSubmitting || !humanResponseText.trim()
+              }
+              type="submit"
+            >
+              {humanResponseSubmitting
+                ? '正在提交并判定…'
+                : '提交人工输入'}
+            </HumanResponseSubmitButton>
+          </HumanResponseActions>
+        </HumanResponseForm>
+      ) : null}
+
+      {pendingHumanNode?.upstream_artifacts.length ? (
+        <HumanArtifactList>
+          {pendingHumanNode.upstream_artifacts.map((artifact) => (
+            <div key={artifact.node_id}>
+              <HumanArtifactLabel>
+                上游输出 · {artifact.node_id}
+              </HumanArtifactLabel>
+              <HumanArtifactBlock>{artifact.text}</HumanArtifactBlock>
+            </div>
+          ))}
+        </HumanArtifactList>
+      ) : null}
+    </HumanInputCard>
+  ) : null;
+
   const nodeDetailContent = selectedNode ? (
     <>
+      {selectedNode.node_id === activeHumanNode?.node_id ? (
+        <DetailSection>{humanInputEditor}</DetailSection>
+      ) : null}
+
       <DetailSection>
         <NodeDetailHero>
           <NodeTagRow>
@@ -2805,7 +3410,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
 
         {selectedNodeSubStatus === 'judging' ? (
           <InlineNotice>
-            Bot response received. Judging is in progress.
+            Response received. Judging is in progress.
           </InlineNotice>
         ) : null}
 
@@ -3420,6 +4025,26 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
               </GraphShell>
 
               <Panel>
+                {activeHumanNode ? (
+                  <DetailSection>
+                    <HumanInputStatusNotice aria-live="polite" role="status">
+                      <HumanInputStatusIcon>!</HumanInputStatusIcon>
+                      <HumanInputStatusBody>
+                        <HumanInputStatusTitle>
+                          等待人工输入
+                        </HumanInputStatusTitle>
+                        <HumanInputStatusHint>
+                          点击图中的“
+                          {pendingHumanNode?.display_name ||
+                            activeHumanNode.display_name ||
+                            activeHumanNode.node_id}
+                          ”节点进行处理
+                        </HumanInputStatusHint>
+                      </HumanInputStatusBody>
+                    </HumanInputStatusNotice>
+                  </DetailSection>
+                ) : null}
+
                 <DetailSection>
                   <SectionHeader>
                     <SectionTitle>Task output</SectionTitle>

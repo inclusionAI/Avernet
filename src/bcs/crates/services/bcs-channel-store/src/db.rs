@@ -486,6 +486,35 @@ impl ConversationSessionRepoPort for DbConversationSessionStore {
         .await?;
         Ok(())
     }
+
+    async fn delete_if_session(
+        &self,
+        binding_id: &str,
+        im_conversation_id: &str,
+        session_scope: SessionScope,
+        im_user_id: Option<&str>,
+        expected_bcs_session_id: &str,
+    ) -> ServiceResult<bool> {
+        let affected = self
+            .execute(
+                "delete_conversation_if_session",
+                DbStatement::with_params(
+                    "DELETE FROM bcs_channel_conversations \
+                     WHERE binding_id = ? AND im_conversation_id = ? \
+                       AND session_scope = ? AND im_user_id = ? \
+                       AND bcs_session_id = ?",
+                    vec![
+                        DbValue::from(binding_id),
+                        DbValue::from(im_conversation_id),
+                        DbValue::from(session_scope_to_str(session_scope)),
+                        DbValue::from(im_user_id_value(im_user_id)),
+                        DbValue::from(expected_bcs_session_id),
+                    ],
+                ),
+            )
+            .await?;
+        Ok(affected == 1)
+    }
 }
 
 pub struct DbImParticipantStore {
@@ -602,7 +631,9 @@ fn row_to_binding(row: &DbRow) -> ServiceResult<ChannelBinding> {
         channel_type: required_string(row, "channel_type")?,
         account_ref: required_string(row, "account_ref")?,
         target: serde_json::from_str::<BindingTarget>(&target_json)?,
-        group_chat_scope: parse_group_chat_scope(optional_string(row, "group_chat_scope").as_deref())?,
+        group_chat_scope: parse_group_chat_scope(
+            optional_string(row, "group_chat_scope").as_deref(),
+        )?,
         outbound_visibility: parse_visibility(&required_string(row, "visibility")?)?,
         env: required_string(row, "env")?,
         status: parse_binding_status(&required_string(row, "status")?)?,
@@ -661,10 +692,7 @@ fn row_u64(row: &DbRow, column: &'static str) -> ServiceResult<u64> {
 }
 
 fn im_user_id_value(im_user_id: Option<&str>) -> &str {
-    match im_user_id {
-        Some(value) => value,
-        None => "",
-    }
+    im_user_id.unwrap_or_default()
 }
 
 fn group_chat_scope_to_str(scope: GroupChatScope) -> &'static str {
@@ -765,8 +793,7 @@ mod tests {
     }
 
     async fn sqlite_db() -> ServiceResult<Arc<LocalSqliteDbPlugin>> {
-        let db = LocalSqliteDbPlugin::new()
-            .map_err(|err| test_db_error("open sqlite", err))?;
+        let db = LocalSqliteDbPlugin::new().map_err(|err| test_db_error("open sqlite", err))?;
 
         execute_schema(
             &db,
@@ -911,7 +938,10 @@ mod tests {
         let active = binding_repo
             .find_active_by_account("dingtalk".to_string(), "robot_1")
             .await?;
-        assert_eq!(active.as_ref().map(|binding| binding.id.as_str()), Some("binding_1"));
+        assert_eq!(
+            active.as_ref().map(|binding| binding.id.as_str()),
+            Some("binding_1")
+        );
 
         binding_repo.set_status("binding_1", false).await?;
 
@@ -1057,9 +1087,16 @@ mod tests {
 
         binding_repo.create(binding()).await?;
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_1", 100))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_1",
+                100,
+            ))
             .await?;
-        participant_repo.upsert(participant("actor_1", "Alice")).await?;
+        participant_repo
+            .upsert(participant("actor_1", "Alice"))
+            .await?;
 
         for table in [
             "bcs_channel_bindings",
@@ -1136,7 +1173,10 @@ mod tests {
 
         force_old_modified(db_plugin.as_ref(), "bcs_channel_bindings").await?;
         binding_repo
-            .set_config("binding_1", serde_json::json!({"send_mode": {"mode": "normal"}}))
+            .set_config(
+                "binding_1",
+                serde_json::json!({"send_mode": {"mode": "normal"}}),
+            )
             .await?;
         assert_ne!(
             query_string(
@@ -1149,11 +1189,21 @@ mod tests {
         );
 
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_old", 100))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_old",
+                100,
+            ))
             .await?;
         force_old_modified(db_plugin.as_ref(), "bcs_channel_conversations").await?;
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_new", 200))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_new",
+                200,
+            ))
             .await?;
         assert_ne!(
             query_string(
@@ -1166,9 +1216,13 @@ mod tests {
             "2000-01-01 00:00:00"
         );
 
-        participant_repo.upsert(participant("actor_1", "Alice")).await?;
+        participant_repo
+            .upsert(participant("actor_1", "Alice"))
+            .await?;
         force_old_modified(db_plugin.as_ref(), "bcs_channel_im_participants").await?;
-        participant_repo.upsert(participant("actor_2", "Alice New")).await?;
+        participant_repo
+            .upsert(participant("actor_2", "Alice New"))
+            .await?;
         assert_ne!(
             query_string(
                 db_plugin.as_ref(),
@@ -1188,14 +1242,29 @@ mod tests {
         let (_, conversation_repo, _) = sqlite_stores().await?;
 
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_old", 100))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_old",
+                100,
+            ))
             .await?;
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_new", 200))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_new",
+                200,
+            ))
             .await?;
 
         let shared = conversation_repo
-            .get("binding_1", "conversation_1", SessionScope::Conversation, None)
+            .get(
+                "binding_1",
+                "conversation_1",
+                SessionScope::Conversation,
+                None,
+            )
             .await?;
         match shared {
             Some(shared) => {

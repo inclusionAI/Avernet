@@ -1156,6 +1156,13 @@ impl CollaborationRuntimeService for NoopCollaborationRuntimeService {
         Ok(None)
     }
 
+    async fn handle_session_human_input(
+        &self,
+        _cmd: HandleSessionHumanInputCommand,
+    ) -> Result<HandleSessionHumanInputOutcome, CollaborationRuntimeError> {
+        Ok(HandleSessionHumanInputOutcome::NotStateMachine)
+    }
+
     async fn get_state_machine_session_history(
         &self,
         _session_id: &str,

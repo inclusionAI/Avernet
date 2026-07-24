@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HumanInput 节点设计 Review</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b1020;
+        --panel: #121a2d;
+        --panel-soft: #172238;
+        --text: #edf2ff;
+        --muted: #9aabc8;
+        --line: #2a3957;
+        --accent: #76a9ff;
+        --green: #52d3a2;
+        --orange: #ffbd73;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at 12% 0%, #182746 0, var(--bg) 38%);
+        color: var(--text);
+        font: 15px/1.7 Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main { width: min(1100px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 80px; }
+      h1 { margin: 0 0 10px; font-size: clamp(32px, 5vw, 54px); line-height: 1.15; }
+      h2 { margin: 0 0 18px; font-size: 24px; }
+      h3 { margin: 0 0 10px; font-size: 17px; }
+      p { margin: 8px 0; }
+      code { color: #bed5ff; }
+      .eyebrow { color: var(--accent); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+      .lead { max-width: 820px; color: #c6d2e8; font-size: 18px; }
+      .meta { margin-top: 18px; color: var(--muted); }
+      section {
+        margin-top: 28px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 26px;
+        background: rgba(18, 26, 45, .92);
+        box-shadow: 0 18px 55px rgba(0, 0, 0, .2);
+      }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+      .card { border: 1px solid var(--line); border-radius: 14px; padding: 18px; background: var(--panel-soft); }
+      .card p, li { color: #c6d2e8; }
+      .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 12px; align-items: center; }
+      .step { min-height: 116px; border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: #101a30; }
+      .arrow { color: var(--accent); font-size: 28px; }
+      .good { color: var(--green); }
+      .warn { color: var(--orange); }
+      pre { overflow: auto; margin: 14px 0 0; border-radius: 12px; padding: 16px; background: #090f1d; color: #d9e6ff; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid var(--line); padding: 12px 10px; text-align: left; vertical-align: top; }
+      th { color: var(--muted); }
+      .decision { border-left: 4px solid var(--green); }
+      footer { margin-top: 28px; color: var(--muted); text-align: center; }
+      @media (max-width: 760px) {
+        .grid { grid-template-columns: 1fr; }
+        .flow { grid-template-columns: 1fr; }
+        .arrow { transform: rotate(90deg); text-align: center; }
+        section { padding: 20px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="eyebrow">State Machine · Design Review</div>
+        <h1>HumanInput 节点</h1>
+        <p class="lead">第一版只解决一次性的人工输入：Human 提供文本，后续 Judge、outcome 和 DAG progression 与 Bot 节点完全一致。</p>
+        <p class="meta">DAG-only · Workbench + IM Channel · 最后更新 2026-07-22</p>
+      </header>
+
+      <section class="decision">
+        <h2>核心决定</h2>
+        <div class="flow">
+          <div class="step"><h3>产生文本</h3><p>BotTask 来自 Bot final；HumanInput 来自有权限的 Human。</p></div>
+          <div class="arrow">→</div>
+          <div class="step"><h3>统一 Judge</h3><p>都调用现有 Judge。无 Judge 时都得到 <code>complete</code>。</p></div>
+          <div class="arrow">→</div>
+          <div class="step"><h3>统一推进</h3><p>通用 completion CAS、branch 选择与 DAG progression。</p></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>第一版的边界</h2>
+        <div class="grid">
+          <div class="card">
+            <h3 class="good">本期实现</h3>
+            <ul>
+              <li>HumanInput 激活后进入 Running 等待。</li>
+              <li>Workbench 与 IM 都可提交自然语言。</li>
+              <li>Human 原文直接成为 artifact。</li>
+              <li>Present Human session 权限检查。</li>
+              <li>持久化 deadline 与通用 timeout scanner。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3 class="warn">本期不实现</h3>
+            <ul>
+              <li>YAML cyclic graph 与多次驳回循环。</li>
+              <li>Human-only clarification loop。</li>
+              <li>response claim、Judge lease 和 heartbeat。</li>
+              <li>Human-ready 持久化重投与 recovery scanner。</li>
+              <li>跨实例 exactly-once 协调。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>YAML 示例</h2>
+        <pre><code>review:
+  kind: human_input
+  display_name: 人工审核
+  instruction: 请审核上游结果，并说明是否允许发布
+  node_timeout_ms: 86400000
+  judge:
+    type: llm
+    criteria: [是否明确允许发布]
+    outcomes: [approved, rejected]
+  transitions:
+    approved: { targets: [publish] }
+    rejected: { targets: [] }</code></pre>
+        <p>HumanInput 不配置 Bot assignee；<code>node_timeout_ms</code> 必填；<code>max_attempts</code> 固定为 1；所有回边继续被 topology validator 拒绝。</p>
+      </section>
+
+      <section>
+        <h2>响应路径</h2>
+        <table>
+          <thead><tr><th>步骤</th><th>行为</th></tr></thead>
+          <tbody>
+            <tr><td>1. 输入校验</td><td>非空、最多 64 KiB。</td></tr>
+            <tr><td>2. 权限</td><td>调用者必须是 run session 中的 Present Human。</td></tr>
+            <tr><td>3. 状态</td><td>run/node 必须仍是 Running，deadline 尚未到。</td></tr>
+            <tr><td>4. Judge</td><td>Human 文本直接调用 Bot 已有的 Judge 路径。</td></tr>
+            <tr><td>5. 完成</td><td>通用 CAS 写 outcome、原始 artifact 和 responded_by。</td></tr>
+            <tr><td>6. 推进</td><td>复用现有 branch、dispatch 与 run completion。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>并发与超时</h2>
+        <div class="grid">
+          <div class="card"><h3>并发响应</h3><p>两个请求可能都调用 Judge，但只有一个能赢得通用 completion CAS；另一方得到 409。第一版接受这项成本。</p></div>
+          <div class="card"><h3>Human timeout</h3><p>使用数据库中的 <code>timeout_deadline_ms</code> 和现有 scanner。Human max_attempts=1，因此失败后不进入 Bot retry。</p></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>IM Channel</h2>
+        <p>复用现有 binding、conversation-session mapping 和 participant mapping。Human-ready 通过 SessionChannelOutboundPort best-effort 推送；inbound 文本带着可信 Human identity 回到同一个 Runtime API。Channel 不解释 approve/reject。</p>
+      </section>
+
+      <section>
+        <h2>数据库</h2>
+        <pre><code>ALTER TABLE bcs_state_machine_node_runs
+  ADD COLUMN outcome VARCHAR(128) DEFAULT NULL,
+  ADD COLUMN responded_by VARCHAR(256) DEFAULT NULL;</code></pre>
+        <p><code>assignee_bot_id</code> 在 Domain 中允许 None；数据库暂保留 NOT NULL，由 Store 使用空字符串 sentinel。Runtime 永远不能把 sentinel 当作 Bot delivery target。</p>
+      </section>
+
+      <section>
+        <h2>为什么循环要后续统一实现</h2>
+        <p>真正的 revise → review 回边需要 execution identity、artifact 版本、join 语义、最大迭代次数、timeout/cancel/recovery 和多轮 history。只重新打开 Human 节点会制造不完整的 Human-only runtime，因此本期保持 DAG-only。</p>
+      </section>
+
+      <footer>Source: docs/superpowers/specs/2026-01-08-human-node-design.md</footer>
+    </main>
+  </body>
+</html>

@@ -62,6 +62,16 @@ pub trait ConversationSessionRepoPort: Send + Sync {
         bcs_session_id: &str,
     ) -> ServiceResult<Vec<ConversationSessionMap>>;
     async fn upsert(&self, map: ConversationSessionMap) -> ServiceResult<()>;
+    /// Delete the mapping only when it still points at `expected_bcs_session_id`.
+    /// This CAS cleanup prevents a failed start from deleting a newer mapping.
+    async fn delete_if_session(
+        &self,
+        binding_id: &str,
+        im_conversation_id: &str,
+        session_scope: SessionScope,
+        im_user_id: Option<&str>,
+        expected_bcs_session_id: &str,
+    ) -> ServiceResult<bool>;
 }
 
 /// IM 用户 → Human actor 映射持久化。键 (channel_type, account_ref, im_user_id)。

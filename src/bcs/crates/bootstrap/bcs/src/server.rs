@@ -24,24 +24,30 @@ use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{debug, info, warn};
 
-use crate::auth_wiring::AuthPluginFactory;
 use crate::Result;
+use crate::auth_wiring::AuthPluginFactory;
 use crate::config::{BcsConfig, CollaborationTemplateStorageKind, LlmConfig, LlmProviderType};
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
-    build_registered_channel_provider,
-    build_registered_leader_election, build_registered_llm_provider,
-    build_registered_security_gateway, build_registered_user_directory,
+    build_registered_channel_provider, build_registered_leader_election,
+    build_registered_llm_provider, build_registered_security_gateway,
+    build_registered_user_directory,
 };
 use bcs_bot::{Bot, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
-use bcs_bot_store::{DbProviderStore, PersistentBotRepo, MemoryBotRepo, MemoryProviderStore};
+use bcs_bot_store::{DbProviderStore, MemoryBotRepo, MemoryProviderStore, PersistentBotRepo};
 use bcs_channel::{BcsChannelService, ChannelServiceInboundSink};
 use bcs_channel_api::{ChannelHttpIngressRegistry, ChannelProvider, ChannelProviderRegistry};
 use bcs_channel_store::{
     DbChannelBindingStore, DbConversationSessionStore, DbImParticipantStore,
     MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryImParticipantRepo,
 };
+use bcs_collaboration_runtime::CollaborationRuntime;
+use bcs_collaboration_store::{
+    DbCollaborationTemplateRepo, MemoryCollaborationStore, MySqlCollaborationStore,
+};
+use bcs_collaboration_template::{CollaborationTemplateServiceImpl, FileCollaborationTemplateRepo};
+use bcs_db_api::DbSqlFlavor;
 use bcs_friend::{FriendCore, FriendRequestCore};
 use bcs_friend_store::{
     DbFriendRequestStore, DbFriendStore, MemoryFriendRepo, MemoryFriendRequestRepo,
@@ -59,45 +65,35 @@ use bcs_leader_election::StandaloneLeaderElection;
 use bcs_llm_api::LlmChatCompletionPort;
 use bcs_llm_openai_compatible::OpenAiCompatibleLlmClient;
 use bcs_message::MessageService;
-use bcs_message_flow::{
-    A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessageFlow,
-};
+use bcs_message_flow::{A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessageFlow};
 use bcs_message_store::{MemoryMessageRepo, MySqlMessageStore};
 use bcs_organization::{OrganizationCore, OrganizationManagement};
 use bcs_organization_store::{DbOrganizationStore, MemoryOrganizationRepo};
-use bcs_collaboration_runtime::CollaborationRuntime;
-use bcs_collaboration_store::{
-    DbCollaborationTemplateRepo, MemoryCollaborationStore, MySqlCollaborationStore,
-};
-use bcs_collaboration_template::{
-    CollaborationTemplateServiceImpl, FileCollaborationTemplateRepo,
-};
-use bcs_db_api::DbSqlFlavor;
 use bcs_proposal::{GroupProposalUseCases, GroupProposalUseCasesConfig, ProposalStore};
 use bcs_relation::RelationCore;
 use bcs_relation_store::DbRelationStore;
+use bcs_route_security::OutboundUrlGuard;
 use bcs_routing::MessageRouter;
 use bcs_routing::security::SecurityInterceptor;
-use bcs_security_gateway_local::NoopSecurityGateway;
-use bcs_route_security::OutboundUrlGuard;
-use bcs_service_api::interceptor::InterceptorChain;
 use bcs_security_gateway_api::SecurityGatewayPort;
+use bcs_security_gateway_local::NoopSecurityGateway;
+use bcs_service_api::interceptor::InterceptorChain;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotDeliveryPort, BotDeliveryTarget, BotRegistryCoreService,
     BotMetricsSnapshotPort, BotRunContextPort, BotTerminalObserverPort, ChannelBindingCleanupPort,
-    ChannelService,
-    CollaborationTemplateService,
+    ChannelService, CollaborationTemplateService,
     DirectChatClientKind, DirectChatRunEvent, DirectChatRunLifecycleHook,
     DirectChatRunReason, DirectChatRunSnapshotPort, FrontendDeliveryPort, GroupCoreService,
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
     GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
-    JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService, MetricsResult,
+    HumanInputReadyEvent, JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService, MetricsResult,
     OrganizationCoreService, OrganizationManagementService, OrganizationRepoPort,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderBotEventService, ProviderCoreService,
     ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort, ProviderStreamGrayList,
-    RoutingCoreService, SessionManagementService, WsCloseReason, WsErrorKind,
-    WsLifecycleInstrumentationHook, WsPeer,
+    ServiceResult, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    SessionManagementService, WsCloseReason, WsErrorKind, WsLifecycleInstrumentationHook, WsPeer,
+    RoutingCoreService,
     port::repo::{
         ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort,
         MessageRepoPort, SessionRepoPort,
@@ -109,8 +105,7 @@ use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
 use bcs_system_message::{
     SystemMessageDispatcherImpl, SystemMessageServiceImpl,
     producers::bot_hidden_notice::BotHiddenNoticeProducer,
-    producers::bot_joined::BotJoinedMessageProducer,
-    producers::bot_left::BotLeftMessageProducer,
+    producers::bot_joined::BotJoinedMessageProducer, producers::bot_left::BotLeftMessageProducer,
     producers::generic::GenericNotificationMessageProducer,
     producers::human_joined::HumanJoinedMessageProducer,
     producers::participant_mode_changed::ParticipantModeChangedMessageProducer,
@@ -266,6 +261,34 @@ fn build_file_collaboration_template_service_with_judge_templates(
 }
 
 type ChannelSlot = Arc<OnceLock<Arc<dyn ChannelService>>>;
+type SessionChannelOutboundSlot = Arc<OnceLock<Arc<dyn SessionChannelOutboundPort>>>;
+
+struct DeferredSessionChannelOutbound {
+    slot: SessionChannelOutboundSlot,
+}
+
+#[async_trait]
+impl SessionChannelOutboundPort for DeferredSessionChannelOutbound {
+    async fn publish_human_input_ready(
+        &self,
+        event: HumanInputReadyEvent,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        let Some(outbound) = self.slot.get() else {
+            return Ok(SessionChannelDeliveryOutcome::NotApplicable);
+        };
+        outbound.publish_human_input_ready(event).await
+    }
+}
+
+fn deferred_session_channel_outbound() -> (
+    SessionChannelOutboundSlot,
+    Arc<dyn SessionChannelOutboundPort>,
+) {
+    let slot = Arc::new(OnceLock::new());
+    let outbound: Arc<dyn SessionChannelOutboundPort> =
+        Arc::new(DeferredSessionChannelOutbound { slot: slot.clone() });
+    (slot, outbound)
+}
 
 #[derive(Default)]
 struct DeferredChannelBindingCleanupPort {
@@ -333,9 +356,11 @@ impl ChannelService for DisabledChannelService {
         bcs_domain::ChannelBinding,
         bcs_service_api::application::channel::ChannelUseCaseError,
     > {
-        Err(bcs_service_api::application::channel::ChannelUseCaseError::InvalidParams(
-            "channel bridge is disabled".to_string(),
-        ))
+        Err(
+            bcs_service_api::application::channel::ChannelUseCaseError::InvalidParams(
+                "channel bridge is disabled".to_string(),
+            ),
+        )
     }
 
     async fn list_bindings(
@@ -435,11 +460,9 @@ async fn channel_repos_with_storage(
                 Arc::new(DbImParticipantStore::mysql(db_plugin)),
             ))
         }
-        DbPluginKind::External(provider) => {
-            Err(crate::BcsError::StorageInitError(format!(
-                "external database plugin '{provider}' has no channel storage wiring"
-            )))
-        }
+        DbPluginKind::External(provider) => Err(crate::BcsError::StorageInitError(format!(
+            "external database plugin '{provider}' has no channel storage wiring"
+        ))),
     }
 }
 
@@ -448,6 +471,7 @@ fn build_channel_runtime(
     config: &BcsConfig,
     channel_slot: ChannelSlot,
     channel_binding_cleanup: Arc<DeferredChannelBindingCleanupPort>,
+    session_channel_outbound_slot: SessionChannelOutboundSlot,
     channel_repos: ChannelRepos,
     session_repo: Arc<dyn SessionRepoPort>,
     message_flow: Arc<dyn MessageFlowService>,
@@ -469,10 +493,7 @@ fn build_channel_runtime(
     }
 
     let (channel_bindings, channel_conversations, channel_im_participants) = channel_repos;
-    let providers = build_configured_channel_providers(
-        config,
-        channel_bindings.clone(),
-    )?;
+    let providers = build_configured_channel_providers(config, channel_bindings.clone())?;
     let provider_registry = Arc::new(
         ChannelProviderRegistry::new(providers.clone())
             .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?,
@@ -492,13 +513,21 @@ fn build_channel_runtime(
         Arc::new(now_ms),
         Arc::new(|| uuid::Uuid::new_v4().to_string()),
     ));
-    let channel_service: Arc<dyn ChannelService> = channel_service_impl.clone();
+    let channel_service_port: Arc<dyn ChannelService> = channel_service_impl.clone();
+    let session_channel_outbound: Arc<dyn SessionChannelOutboundPort> =
+        channel_service_impl.clone();
     channel_binding_cleanup.set(channel_service_impl);
-    if channel_slot.set(channel_service.clone()).is_err() {
+    if channel_slot.set(channel_service_port.clone()).is_err() {
         warn!("message-flow channel slot already initialized");
     }
+    if session_channel_outbound_slot
+        .set(session_channel_outbound)
+        .is_err()
+    {
+        warn!("state-machine channel outbound slot already initialized");
+    }
     let sink: Arc<dyn bcs_channel_api::ChannelInboundSink> =
-        Arc::new(ChannelServiceInboundSink::new(channel_service.clone()));
+        Arc::new(ChannelServiceInboundSink::new(channel_service_port.clone()));
     let ingress = Arc::new(
         ChannelHttpIngressRegistry::new(providers.clone(), sink.clone())
             .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?,
@@ -516,7 +545,7 @@ fn build_channel_runtime(
     }
 
     Ok(ChannelRuntime {
-        service: channel_service,
+        service: channel_service_port,
         http_ingress,
         lifecycles,
     })
@@ -574,10 +603,12 @@ fn build_collaboration_template_service_with_storage(
     match config.collaboration.templates.storage_type {
         CollaborationTemplateStorageKind::File => {
             info!("Using file-backed collaboration template catalog");
-            Ok(build_file_collaboration_template_service_with_judge_templates(
-                config,
-                judge_templates_enabled,
-            ))
+            Ok(
+                build_file_collaboration_template_service_with_judge_templates(
+                    config,
+                    judge_templates_enabled,
+                ),
+            )
         }
         CollaborationTemplateStorageKind::Mysql => {
             let db_plugin = infrastructure_plugins.db().ok_or_else(|| {
@@ -747,7 +778,10 @@ impl std::fmt::Debug for BcsServerState {
             .field("provider_stream_gray_list", &"<ProviderStreamGrayList>")
             .field("channel_http_ingress", &self.channel_http_ingress.is_some())
             .field("group_metrics_snapshot", &"<GroupMetricsSnapshotPort>")
-            .field("group_session_metrics_snapshot", &"<GroupSessionMetricsSnapshotPort>")
+            .field(
+                "group_session_metrics_snapshot",
+                &"<GroupSessionMetricsSnapshotPort>",
+            )
             .field("bot_metrics_snapshot", &"<BotMetricsSnapshotPort>")
             .field("direct_chat_run_snapshot", &"<DirectChatRunSnapshotPort>")
             .field("metrics", &"<MetricsRuntime>")
@@ -793,7 +827,10 @@ fn db_sql_flavor(db_kind: &DbPluginKind) -> DbSqlFlavor {
         DbPluginKind::LocalSqlite => DbSqlFlavor::Sqlite,
         DbPluginKind::Mysql => DbSqlFlavor::Mysql,
         DbPluginKind::External(provider) => {
-            panic!("external database plugin '{}' has no SQL flavor wiring", provider)
+            panic!(
+                "external database plugin '{}' has no SQL flavor wiring",
+                provider
+            )
         }
     }
 }
@@ -806,7 +843,10 @@ fn db_provider_repos(
         DbPluginKind::LocalSqlite => Arc::new(DbProviderStore::sqlite(db_plugin)),
         DbPluginKind::Mysql => Arc::new(DbProviderStore::mysql(db_plugin)),
         DbPluginKind::External(provider) => {
-            panic!("external database plugin '{}' has no provider store wiring", provider)
+            panic!(
+                "external database plugin '{}' has no provider store wiring",
+                provider
+            )
         }
     };
     ProviderRepoBundle {
@@ -936,7 +976,11 @@ fn create_user_directory_plugin(
             )
         })?;
 
-    let provider_config = directory.providers.get(provider).cloned().unwrap_or_default();
+    let provider_config = directory
+        .providers
+        .get(provider)
+        .cloned()
+        .unwrap_or_default();
     build_registered_user_directory(config, provider, provider_config)?
         .ok_or_else(|| {
             crate::BcsError::InvalidConfig(format!(
@@ -978,8 +1022,8 @@ impl Default for BcsServerState {
         // F.1/F.2 dual-write wiring: relation store must be created BEFORE
         // friend_store and provider_management so it can be injected into both.
         let relation_store: Arc<RelationCore> = Arc::new(RelationCore::memory());
-        let user_directory = create_user_directory_plugin(&config)
-            .expect("default user directory config is valid");
+        let user_directory =
+            create_user_directory_plugin(&config).expect("default user directory config is valid");
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,
@@ -1013,9 +1057,8 @@ impl Default for BcsServerState {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
             )
             .with_connection_control(
-                bot_connections.clone()
-                    as Arc<dyn bcs_service_api::BotConnectionControlPort>,
-        );
+                bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>
+            );
         if let Some(user_directory) = user_directory.clone() {
             bot_use_cases = bot_use_cases.with_user_directory(user_directory);
         }
@@ -1027,16 +1070,11 @@ impl Default for BcsServerState {
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
-            bcs_provider_http::HttpProviderTransport::with_url_guard(
-                outbound_url_guard.clone(),
-            ),
+            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone()),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
-            bcs_provider_http::BotTransportMux::new(
-                ws_bot_delivery,
-                provider_transport.clone(),
-            ),
+            bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()),
         );
         let bot_delivery = maybe_wrap_bot_delivery(&config, raw_bot_delivery);
         let raw_frontend_delivery: Arc<dyn FrontendDeliveryPort> =
@@ -1113,9 +1151,7 @@ impl Default for BcsServerState {
                 .with_bot_run_context(bot_run_context.clone())
                 .with_message_repo(message_repo.clone())
                 .with_provider_stream_gray_list(provider_stream_gray_list.clone())
-                .register(BotJoinedMessageProducer::new(
-                    group_message_history.clone(),
-                ))
+                .register(BotJoinedMessageProducer::new(group_message_history.clone()))
                 .register(HumanJoinedMessageProducer::new())
                 .register(ParticipantModeChangedMessageProducer)
                 .register(GenericNotificationMessageProducer)
@@ -1185,8 +1221,9 @@ impl Default for BcsServerState {
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         provider_transport.set_ingest(message_flow.clone(), bot_run_context.clone());
         let collaboration_store = Arc::new(MemoryCollaborationStore::new());
-        let judge_evaluator: Arc<dyn JudgeEvaluatorPort> =
-            Arc::new(NoopJudgeEvaluator::default());
+        let judge_evaluator: Arc<dyn JudgeEvaluatorPort> = Arc::new(NoopJudgeEvaluator::default());
+        let (session_channel_outbound_slot, session_channel_outbound) =
+            deferred_session_channel_outbound();
         let collaboration_runtime = Arc::new(
             CollaborationRuntime::new(
                 collaboration_store.clone(),
@@ -1200,12 +1237,14 @@ impl Default for BcsServerState {
             )
             .with_bot_registry(bot_registry.clone())
             .with_callback_url_guard(outbound_url_guard.clone())
+            .with_session_channel_outbound(session_channel_outbound)
             .with_frontend_delivery(frontend_delivery.clone()),
         );
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
             channel_binding_cleanup,
+            session_channel_outbound_slot,
             memory_channel_repos(None),
             session_repo.clone(),
             message_flow.clone(),
@@ -1427,7 +1466,11 @@ async fn create_configured_leader_election(
             )
         })?;
 
-    let provider_config = election.providers.get(provider).cloned().unwrap_or_default();
+    let provider_config = election
+        .providers
+        .get(provider)
+        .cloned()
+        .unwrap_or_default();
 
     build_registered_leader_election(config, provider, provider_config)
         .await?
@@ -1564,13 +1607,11 @@ fn build_use_case_bundle(
             .with_frontend_delivery(frontend_delivery.clone())
             .with_bot_run_context(bot_run_context)
             .with_provider_stream_gray_list(provider_stream_gray_list.clone())
-            .register(BotJoinedMessageProducer::new(
-                group_message_history.clone(),
-            ))
+            .register(BotJoinedMessageProducer::new(group_message_history.clone()))
             .register(HumanJoinedMessageProducer::new())
             .register(ParticipantModeChangedMessageProducer)
             .register(GenericNotificationMessageProducer)
-.register(BotLeftMessageProducer)
+            .register(BotLeftMessageProducer)
             .register(SessionContextMessageProducer)
             .register(BotHiddenNoticeProducer);
         if let Some(repo) = &message_repo {
@@ -1696,16 +1737,22 @@ fn create_interceptor_chain(config: &BcsConfig) -> crate::Result<Arc<Interceptor
     #[cfg(feature = "prometheus-metrics")]
     {
         if config.metrics.enabled {
-            chain.set_block_hook(Arc::new(crate::metrics::MetricsDeliveryPolicyBlockHook::new(
-                Arc::from(bcs_config::resolve_env_str()),
-            )));
+            chain.set_block_hook(Arc::new(
+                crate::metrics::MetricsDeliveryPolicyBlockHook::new(Arc::from(
+                    bcs_config::resolve_env_str(),
+                )),
+            ));
         }
     }
 
     let sg = &config.security_gateway;
     let provider = sg.provider.trim();
     let gateway: Arc<dyn SecurityGatewayPort> = if provider.is_empty() || provider == "noop" {
-        info!(provider = "noop", dry_run = sg.dry_run, "Initializing noop security gateway interceptor");
+        info!(
+            provider = "noop",
+            dry_run = sg.dry_run,
+            "Initializing noop security gateway interceptor"
+        );
         Arc::new(NoopSecurityGateway)
     } else {
         let provider_config = sg.providers.get(provider).cloned().unwrap_or_default();
@@ -1740,9 +1787,7 @@ fn select_judge_llm_provider(config: &BcsConfig) -> crate::Result<JudgeLlmProvid
     }
 }
 
-fn create_public_judge_evaluator(
-    config: &BcsConfig,
-) -> crate::Result<Arc<dyn JudgeEvaluatorPort>> {
+fn create_public_judge_evaluator(config: &BcsConfig) -> crate::Result<Arc<dyn JudgeEvaluatorPort>> {
     match select_judge_llm_provider(config)? {
         JudgeLlmProviderKind::None => Ok(Arc::new(NoopJudgeEvaluator::default())),
         JudgeLlmProviderKind::OpenAiCompatible => {
@@ -2208,10 +2253,7 @@ impl BcsServer {
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
-            bcs_provider_http::BotTransportMux::new(
-                ws_bot_delivery,
-                provider_transport.clone(),
-            ),
+            bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()),
         );
         let bot_delivery = maybe_wrap_bot_delivery(&config, raw_bot_delivery);
         let raw_frontend_delivery: Arc<dyn FrontendDeliveryPort> =
@@ -2330,6 +2372,8 @@ impl BcsServer {
                 );
                 Arc::new(NoopJudgeEvaluator::default())
             });
+        let (session_channel_outbound_slot, session_channel_outbound) =
+            deferred_session_channel_outbound();
         let collaboration_runtime = Arc::new(
             CollaborationRuntime::new(
                 collaboration_store.clone(),
@@ -2343,6 +2387,7 @@ impl BcsServer {
             )
             .with_bot_registry(bot_registry.clone())
             .with_callback_url_guard(callback_url_guard.clone())
+            .with_session_channel_outbound(session_channel_outbound)
             .with_frontend_delivery(frontend_delivery.clone()),
         );
 
@@ -2353,6 +2398,7 @@ impl BcsServer {
             &config,
             channel_slot,
             channel_binding_cleanup,
+            session_channel_outbound_slot,
             memory_channel_repos(None),
             session_repo.clone(),
             message_flow.clone(),
@@ -2401,7 +2447,10 @@ impl BcsServer {
             .provider_management(provider_management)
             .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
-            .group_management(maybe_wrap_group_management(&config, use_cases.group_management))
+            .group_management(maybe_wrap_group_management(
+                &config,
+                use_cases.group_management,
+            ))
             .group_query(use_cases.group_query)
             .workbench_sessions(use_cases.workbench_sessions)
             .group_proposals(use_cases.group_proposals)
@@ -2520,10 +2569,7 @@ impl BcsServer {
                 let report = crate::migrations::run_sqlite_migrations_with_report(db.as_ref())
                     .await
                     .map_err(|err| {
-                        crate::BcsError::StorageInitError(format!(
-                            "run sqlite migrations: {}",
-                            err
-                        ))
+                        crate::BcsError::StorageInitError(format!("run sqlite migrations: {}", err))
                     })?;
                 tracing::info!(
                     current_version = ?report.current_version,
@@ -2585,7 +2631,10 @@ impl BcsServer {
                 }
                 DbPluginKind::Mysql => Arc::new(MySqlGroupStore::new(db_plugin.clone(), env)),
                 DbPluginKind::External(provider) => {
-                    panic!("external database plugin '{}' has no group store wiring", provider)
+                    panic!(
+                        "external database plugin '{}' has no group store wiring",
+                        provider
+                    )
                 }
             };
             (
@@ -2647,12 +2696,14 @@ impl BcsServer {
                 DbPluginKind::LocalSqlite => Arc::new(DbFriendStore::sqlite(db_plugin.clone())),
                 DbPluginKind::Mysql => Arc::new(DbFriendStore::mysql(db_plugin.clone())),
                 DbPluginKind::External(provider) => {
-                    panic!("external database plugin '{}' has no friend store wiring", provider)
+                    panic!(
+                        "external database plugin '{}' has no friend store wiring",
+                        provider
+                    )
                 }
             };
-            let friend_store: Arc<dyn bcs_service_api::FriendCoreService> = Arc::new(
-                FriendCore::with_repo(friend_repo).with_relation(relation_svc.clone()),
-            );
+            let friend_store: Arc<dyn bcs_service_api::FriendCoreService> =
+                Arc::new(FriendCore::with_repo(friend_repo).with_relation(relation_svc.clone()));
             let friend_request_repo = match db_kind {
                 DbPluginKind::LocalSqlite => {
                     Arc::new(DbFriendRequestStore::sqlite(db_plugin.clone()))
@@ -2680,12 +2731,10 @@ impl BcsServer {
                 .with_bot_core(bot_core_arc.clone())
                 .with_organization(organization_core.clone())
                 .with_connection_control(
-                    bot_connections.clone()
-                        as Arc<dyn bcs_service_api::BotConnectionControlPort>,
+                    bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>
                 );
         if let Some(user_directory) = user_directory.clone() {
-            bot_runtime_for_session =
-                bot_runtime_for_session.with_user_directory(user_directory);
+            bot_runtime_for_session = bot_runtime_for_session.with_user_directory(user_directory);
         }
         let bot_runtime_for_session: Arc<dyn bcs_service_api::BotRuntimeConnectionService> =
             Arc::new(bot_runtime_for_session);
@@ -2694,16 +2743,11 @@ impl BcsServer {
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
-            bcs_provider_http::HttpProviderTransport::with_url_guard(
-                outbound_url_guard.clone(),
-            ),
+            bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone()),
         );
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
-            bcs_provider_http::BotTransportMux::new(
-                ws_bot_delivery,
-                provider_transport.clone(),
-            ),
+            bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()),
         );
         let bot_delivery = maybe_wrap_bot_delivery(&config, raw_bot_delivery);
         let raw_frontend_delivery: Arc<dyn FrontendDeliveryPort> =
@@ -2716,12 +2760,7 @@ impl BcsServer {
         let cutoff_timestamp = config.message_history.cutoff_timestamp;
         let manager_worker_cutoff_timestamp =
             config.message_history.manager_worker_cutoff_timestamp;
-        let (
-            session_repo,
-            session_management,
-            group_session_metrics_snapshot,
-            message_repo,
-        ): (
+        let (session_repo, session_management, group_session_metrics_snapshot, message_repo): (
             Arc<dyn SessionRepoPort>,
             Arc<dyn SessionManagementService>,
             Arc<dyn GroupSessionMetricsSnapshotPort>,
@@ -2733,7 +2772,9 @@ impl BcsServer {
                 DbPluginKind::LocalSqlite => {
                     Arc::new(MySqlSessionStore::sqlite(db_plugin.clone(), env.clone()))
                 }
-                DbPluginKind::Mysql => Arc::new(MySqlSessionStore::new(db_plugin.clone(), env.clone())),
+                DbPluginKind::Mysql => {
+                    Arc::new(MySqlSessionStore::new(db_plugin.clone(), env.clone()))
+                }
                 DbPluginKind::External(provider) => {
                     panic!(
                         "external database plugin '{}' has no session store wiring",
@@ -2854,6 +2895,8 @@ impl BcsServer {
             .await;
 
         let judge_evaluator = create_judge_evaluator(&config, &extensions)?;
+        let (session_channel_outbound_slot, session_channel_outbound) =
+            deferred_session_channel_outbound();
         let collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService> = {
             let env = crate::env::resolve_env();
             info!(env = %env, db_plugin = %db_kind, "DB-backed collaboration storage initialized");
@@ -2884,6 +2927,7 @@ impl BcsServer {
                 )
                 .with_bot_registry(bot_registry.clone())
                 .with_callback_url_guard(outbound_url_guard.clone())
+                .with_session_channel_outbound(session_channel_outbound)
                 .with_frontend_delivery(frontend_delivery.clone()),
             )
         };
@@ -2900,6 +2944,7 @@ impl BcsServer {
             &config,
             channel_slot,
             channel_binding_cleanup,
+            session_channel_outbound_slot,
             channel_repos,
             session_repo.clone(),
             message_flow.clone(),
@@ -2952,7 +2997,10 @@ impl BcsServer {
             .provider_management(provider_management)
             .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
-            .group_management(maybe_wrap_group_management(&config, use_cases.group_management))
+            .group_management(maybe_wrap_group_management(
+                &config,
+                use_cases.group_management,
+            ))
             .group_query(use_cases.group_query)
             .workbench_sessions(use_cases.workbench_sessions)
             .group_proposals(use_cases.group_proposals)
@@ -2999,13 +3047,15 @@ impl BcsServer {
             )),
             None => Some(crate::identity_wiring::memory_user_identity_port()),
         };
-        let auth_chain = Arc::new(crate::auth_wiring::try_build_auth_chain_with_factories(
-            &auth_config,
-            bot_registry.clone(),
-            user_identity_port.clone(),
-            &extensions.auth_plugin_factories,
-        )
-        .map_err(crate::BcsError::InvalidConfig)?);
+        let auth_chain = Arc::new(
+            crate::auth_wiring::try_build_auth_chain_with_factories(
+                &auth_config,
+                bot_registry.clone(),
+                user_identity_port.clone(),
+                &extensions.auth_plugin_factories,
+            )
+            .map_err(crate::BcsError::InvalidConfig)?,
+        );
         let state = Arc::new(BcsServerState {
             config: config.clone(),
             services,
@@ -3248,9 +3298,8 @@ impl BcsServer {
                             warn!(error = %err, "chat_run: cleanup_expired failed");
                         }
                     }
-                    let removed_contexts = bot_run_context
-                        .cleanup_expired(now_ms, retention_ms)
-                        .await;
+                    let removed_contexts =
+                        bot_run_context.cleanup_expired(now_ms, retention_ms).await;
                     if removed_contexts > 0 {
                         info!(
                             removed = removed_contexts,
@@ -3346,8 +3395,8 @@ impl BcsServer {
                 listener,
                 app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
             )
-                .await
-                .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()));
+            .await
+            .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()));
             if let Err(error) = lifecycle.lock().await.shutdown_all().await {
                 warn!(error = %error, "service lifecycle shutdown failed");
             }
@@ -3485,6 +3534,7 @@ fn bot_ws_dispatch_state(state: &Arc<BcsServerState>) -> Arc<bcs_ws::bot::BotDis
 fn web_ws_dispatch_state(state: &Arc<BcsServerState>) -> Arc<bcs_ws::web::WebDispatchState> {
     Arc::new(bcs_ws::web::WebDispatchState {
         message_flow: state.services.message_flow.clone(),
+        collaboration_runtime: state.services.collaboration_runtime.clone(),
         workbench_sessions: state.services.workbench_sessions.clone(),
         frontend_connections: state.frontend_connections.clone(),
         run_channels: state.frontend_run_channels.clone(),
@@ -3561,6 +3611,59 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::time::{Duration, timeout};
     use tower::ServiceExt;
+
+    #[derive(Default)]
+    struct RecordingSessionChannelOutbound {
+        events: tokio::sync::Mutex<Vec<HumanInputReadyEvent>>,
+    }
+
+    #[async_trait]
+    impl SessionChannelOutboundPort for RecordingSessionChannelOutbound {
+        async fn publish_human_input_ready(
+            &self,
+            event: HumanInputReadyEvent,
+        ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+            self.events.lock().await.push(event);
+            Ok(SessionChannelDeliveryOutcome::Delivered)
+        }
+    }
+
+    #[tokio::test]
+    async fn deferred_session_channel_outbound_is_inert_until_initialized() {
+        let (slot, deferred) = deferred_session_channel_outbound();
+        let event = HumanInputReadyEvent {
+            event_id: "event-1".to_string(),
+            group_id: "group-1".to_string(),
+            session_id: "session-1".to_string(),
+            run_id: "run-1".to_string(),
+            node_id: "review".to_string(),
+            display_name: "Review".to_string(),
+            instruction: "Review the draft".to_string(),
+            response_ref: "run-1/review".to_string(),
+            upstream_artifacts: Vec::new(),
+            judge_outcomes: vec!["approved".to_string()],
+            timeout_deadline_ms: Some(60_000),
+        };
+
+        assert_eq!(
+            deferred
+                .publish_human_input_ready(event.clone())
+                .await
+                .expect("uninitialized outbound"),
+            SessionChannelDeliveryOutcome::NotApplicable
+        );
+
+        let recording = Arc::new(RecordingSessionChannelOutbound::default());
+        assert!(slot.set(recording.clone()).is_ok());
+        assert_eq!(
+            deferred
+                .publish_human_input_ready(event)
+                .await
+                .expect("initialized outbound"),
+            SessionChannelDeliveryOutcome::Delivered
+        );
+        assert_eq!(recording.events.lock().await.len(), 1);
+    }
 
     async fn response_json(response: Response) -> serde_json::Value {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();

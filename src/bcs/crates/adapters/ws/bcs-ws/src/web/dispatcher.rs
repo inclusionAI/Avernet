@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use bcs_protocol::{BcsFrame, ErrorShape, RequestFrame, ResponseFrame};
 use bcs_service_api::{
-    CallerContext, ChatAbortCommand, HumanActor, MessageFlowService, ServiceError, WebSendCommand,
+    CallerContext, ChatAbortCommand, CollaborationRuntimeError, CollaborationRuntimeService,
+    HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanActor,
+    HumanResponseSource, MessageFlowService, ServiceError, WebSendCommand,
     WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchSessionService,
 };
 use serde::{Deserialize, Serialize};
@@ -12,6 +14,8 @@ use tracing::{debug, info, warn};
 
 use crate::shared::RunChannelManager;
 use crate::web::WorkbenchConnectionRegistry;
+
+const STATE_MACHINE_EVENT_BOT_UUID: &str = "bcs_state_machine";
 
 pub type Result<T> = std::result::Result<T, WebWsDispatchError>;
 
@@ -37,6 +41,7 @@ pub enum WebDispatchOutcome {
 
 pub struct WebDispatchState {
     pub message_flow: Arc<dyn MessageFlowService>,
+    pub collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     pub workbench_sessions: Arc<dyn WorkbenchSessionService>,
     pub frontend_connections: Arc<WorkbenchConnectionRegistry>,
     pub run_channels: Arc<RunChannelManager>,
@@ -46,6 +51,7 @@ impl std::fmt::Debug for WebDispatchState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WebDispatchState")
             .field("message_flow", &"<MessageFlowService>")
+            .field("collaboration_runtime", &"<CollaborationRuntimeService>")
             .field("workbench_sessions", &"<WorkbenchSessionService>")
             .field("frontend_connections", &"<WorkbenchConnectionRegistry>")
             .field("run_channels", &"<RunChannelManager>")
@@ -295,6 +301,59 @@ async fn handle_chat_send(
         return Ok(());
     }
 
+    // COSEC: Human identity comes only from the authenticated WebSocket
+    // connection. Never trust bot_id/bot_uuid from the chat.send payload as
+    // the responder identity for a HumanInput node.
+    match state
+        .collaboration_runtime
+        .handle_session_human_input(HandleSessionHumanInputCommand {
+            group_id: params.group_id.clone(),
+            session_id: session_id.clone(),
+            caller_actor_id: bound_actor_id.unwrap_or_default().to_string(),
+            content: params.message.clone(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+    {
+        Ok(HandleSessionHumanInputOutcome::NotStateMachine) => {}
+        Ok(HandleSessionHumanInputOutcome::Consumed { response }) => {
+            let run_id = response.run.run_id;
+            let response = ChatSendResponse {
+                run_id: run_id.clone(),
+                status: "accepted".to_string(),
+            };
+            send_ok(tx, &req.id, serde_json::to_value(response)?).await?;
+            send_empty_human_input_final(
+                tx,
+                &params.group_id,
+                session_id.as_deref(),
+                &run_id,
+            )
+            .await?;
+            return Ok(());
+        }
+        Err(error) => {
+            warn!(
+                group_id = %params.group_id,
+                session_id = ?session_id,
+                error = %error,
+                "chat.send rejected by state-machine HumanInput routing"
+            );
+            let error_code = collaboration_error_code(&error);
+            let error_message = error.to_string();
+            send_error(tx, &req.id, error_code, &error_message).await?;
+            send_human_input_error_event(
+                tx,
+                &params.group_id,
+                session_id.as_deref(),
+                error_code,
+                &error_message,
+            )
+            .await?;
+            return Ok(());
+        }
+    }
+
     let sender_subscription_key = session_id.as_deref().unwrap_or(&params.group_id);
     let sender_conn_id = connection_state
         .subscribed_sessions
@@ -380,6 +439,22 @@ fn resolve_bcs_session_id(params: &ChatSendParams) -> Option<String> {
     })
 }
 
+fn collaboration_error_code(error: &CollaborationRuntimeError) -> &'static str {
+    match error {
+        CollaborationRuntimeError::RunNotFound(_)
+        | CollaborationRuntimeError::NodeNotFound { .. }
+        | CollaborationRuntimeError::DefinitionNotFound(_, _) => "not_found",
+        CollaborationRuntimeError::InvalidDefinition(_) => "invalid_definition",
+        CollaborationRuntimeError::InvalidParticipantBinding(_)
+        | CollaborationRuntimeError::InvalidRequest(_) => "invalid_request",
+        CollaborationRuntimeError::Unauthenticated => "unauthorized",
+        CollaborationRuntimeError::Forbidden(_) => "forbidden",
+        CollaborationRuntimeError::JudgeUnavailable(_) => "judge_unavailable",
+        CollaborationRuntimeError::Conflict(_) => "conflict",
+        CollaborationRuntimeError::Internal(_) => "internal_error",
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct ChatAbortResult {
     ok: bool,
@@ -455,6 +530,81 @@ async fn send_ok(tx: &mpsc::Sender<String>, req_id: &str, payload: Value) -> Res
     let json = serde_json::to_string(&frame)?;
     tx.send(json).await.map_err(|e| {
         WebWsDispatchError::WsProtocolError(format!("Failed to send response: {}", e))
+    })?;
+    Ok(())
+}
+
+async fn send_empty_human_input_final(
+    tx: &mpsc::Sender<String>,
+    group_id: &str,
+    session_id: Option<&str>,
+    run_id: &str,
+) -> Result<()> {
+    // HumanInput consumes this chat.send without dispatching a Bot run. Emit a
+    // terminal chat event on the same connection so the current frontend can
+    // close its pending request without rendering an assistant message.
+    let event = serde_json::json!({
+        "type": "event",
+        "event": "chat",
+        "group_id": group_id,
+        "bot_uuid": STATE_MACHINE_EVENT_BOT_UUID,
+        "payload": {
+            "run_id": run_id,
+            "bcs_group_id": group_id,
+            "bcs_session_id": session_id,
+            "state": "final",
+            "message": {
+                "role": "assistant",
+                "content": [],
+            },
+        },
+    });
+    let json = serde_json::to_string(&event)?;
+    tx.send(json).await.map_err(|error| {
+        WebWsDispatchError::WsProtocolError(format!(
+            "Failed to send HumanInput completion event: {}",
+            error
+        ))
+    })?;
+    Ok(())
+}
+
+async fn send_human_input_error_event(
+    tx: &mpsc::Sender<String>,
+    group_id: &str,
+    session_id: Option<&str>,
+    error_code: &str,
+    error_message: &str,
+) -> Result<()> {
+    // The current group-chat SDK does not render ResponseFrame errors because
+    // they have no bot_uuid. Keep the protocol response and add a chat error
+    // event so the frontend can render the rejection and close its request.
+    let event = serde_json::json!({
+        "type": "event",
+        "event": "chat",
+        "group_id": group_id,
+        "bot_uuid": STATE_MACHINE_EVENT_BOT_UUID,
+        "payload": {
+            "bcs_group_id": group_id,
+            "bcs_session_id": session_id,
+            "state": "error",
+            "errorCode": error_code,
+            "errorMessage": error_message,
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": error_message,
+                }],
+            },
+        },
+    });
+    let json = serde_json::to_string(&event)?;
+    tx.send(json).await.map_err(|error| {
+        WebWsDispatchError::WsProtocolError(format!(
+            "Failed to send HumanInput error event: {}",
+            error
+        ))
     })?;
     Ok(())
 }

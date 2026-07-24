@@ -276,7 +276,13 @@ impl ConversationSessionRepoPort for MemoryConversationSessionRepo {
         Ok(maps
             .iter()
             .find(|map| {
-                Self::key_matches(map, binding_id, im_conversation_id, session_scope, im_user_id)
+                Self::key_matches(
+                    map,
+                    binding_id,
+                    im_conversation_id,
+                    session_scope,
+                    im_user_id,
+                )
             })
             .cloned())
     }
@@ -320,6 +326,34 @@ impl ConversationSessionRepoPort for MemoryConversationSessionRepo {
             maps.push(map);
         }
         self.save_to_disk().await
+    }
+
+    async fn delete_if_session(
+        &self,
+        binding_id: &str,
+        im_conversation_id: &str,
+        session_scope: SessionScope,
+        im_user_id: Option<&str>,
+        expected_bcs_session_id: &str,
+    ) -> ServiceResult<bool> {
+        let deleted = {
+            let mut maps = self.maps.write().await;
+            let before = maps.len();
+            maps.retain(|map| {
+                !(Self::key_matches(
+                    map,
+                    binding_id,
+                    im_conversation_id,
+                    session_scope,
+                    im_user_id,
+                ) && map.bcs_session_id == expected_bcs_session_id)
+            });
+            maps.len() != before
+        };
+        if deleted {
+            self.save_to_disk().await?;
+        }
+        Ok(deleted)
     }
 }
 
@@ -500,7 +534,10 @@ mod tests {
         let active = repo
             .find_active_by_account("dingtalk".to_string(), "robot_active")
             .await?;
-        assert_eq!(active.as_ref().map(|binding| binding.id.as_str()), Some("binding_active"));
+        assert_eq!(
+            active.as_ref().map(|binding| binding.id.as_str()),
+            Some("binding_active")
+        );
 
         let disabled = repo
             .find_active_by_account("dingtalk".to_string(), "robot_disabled")
@@ -514,8 +551,12 @@ mod tests {
     async fn delete_removes_binding() -> ServiceResult<()> {
         let repo = MemoryChannelBindingRepo::new("dev");
 
-        repo.create(binding("binding_delete", "robot_delete", BindingStatus::Active))
-            .await?;
+        repo.create(binding(
+            "binding_delete",
+            "robot_delete",
+            BindingStatus::Active,
+        ))
+        .await?;
 
         let created = repo.get("binding_delete").await?;
         assert_eq!(
@@ -555,7 +596,12 @@ mod tests {
         .await?;
 
         let shared = repo
-            .get("binding_1", "conversation_1", SessionScope::Conversation, None)
+            .get(
+                "binding_1",
+                "conversation_1",
+                SessionScope::Conversation,
+                None,
+            )
             .await?;
         assert_eq!(
             shared.as_ref().map(|map| map.bcs_session_id.as_str()),

@@ -866,6 +866,22 @@ impl GroupManagementService for GroupManagement {
             ),
             GroupStrategy::Chat | GroupStrategy::ManagerWorker => None,
         };
+        let mut initial_session_participants = group.participants.clone();
+        if requested_strategy == GroupStrategy::StateMachine
+            && let Some(human_actor_id) = cmd
+                .caller_actor_id
+                .as_deref()
+                .filter(|actor_id| actor_id.starts_with("human_"))
+        {
+            // COSEC: caller_actor_id is supplied by the authenticated application
+            // boundary. Do not derive this participant from request YAML or bindings.
+            initial_session_participants
+                .retain(|participant| participant.bot_uuid != human_actor_id);
+            let mut participant =
+                Participant::human(human_actor_id, ParticipantRole::Observer);
+            participant.mode = Some(ParticipantMode::Present);
+            initial_session_participants.push(participant);
+        }
         let initial_session_id;
         let context_injected = match self
             .session_management
@@ -874,7 +890,7 @@ impl GroupManagementService for GroupManagement {
                 session_id: None,
                 params: bcs_service_api::NewSessionParams {
                     session_kind: initial_session_kind,
-                    participants: group.participants.clone(),
+                    participants: initial_session_participants,
                     group_version: Some(group.version),
                     input: initial_session_input,
                     session_title: initial_session_title,

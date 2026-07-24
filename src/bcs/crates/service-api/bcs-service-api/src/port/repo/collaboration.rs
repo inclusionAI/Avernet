@@ -3,10 +3,18 @@ use async_trait::async_trait;
 use crate::types::{
     CollaborationDefinition, CollaborationDefinitionRef, GroupRuntimeBinding,
     ResolvedParticipantBinding, RuntimeParticipantBinding, ServiceResult,
-    StateMachineDeliveryCorrelation, StateMachineNodeRun,
-    StateMachineRun, StateMachineRunStatus,
+    StateMachineDeliveryCorrelation, StateMachineNodeRun, StateMachineRun, StateMachineRunStatus,
 };
 use std::collections::BTreeMap;
+
+#[derive(Debug, Clone)]
+pub struct MarkHumanNodeRunningCommand {
+    pub run_id: String,
+    pub node_id: String,
+    pub attempt: i32,
+    pub started_at_ms: u64,
+    pub timeout_deadline_ms: u64,
+}
 
 #[derive(Debug, Clone)]
 pub struct CollaborationDefinitionRecord {
@@ -33,12 +41,15 @@ pub trait StateMachineDefinitionRepoPort: Send + Sync {
         id: &str,
         version: i32,
     ) -> ServiceResult<Option<CollaborationDefinitionRecord>> {
-        Ok(self.get(id, version).await?.map(|definition| CollaborationDefinitionRecord {
-            definition,
-            source_format: None,
-            yaml_text: None,
-            content_hash: None,
-        }))
+        Ok(self
+            .get(id, version)
+            .await?
+            .map(|definition| CollaborationDefinitionRecord {
+                definition,
+                source_format: None,
+                yaml_text: None,
+                content_hash: None,
+            }))
     }
     async fn save_run_snapshot(
         &self,
@@ -138,7 +149,9 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         run_id: &str,
         node_id: &str,
         attempt: i32,
+        outcome: String,
         artifact_text: String,
+        responded_by: Option<String>,
         completed_at: u64,
     ) -> ServiceResult<bool>;
 
@@ -150,6 +163,23 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         node_id: &str,
         attempt: i32,
         artifact_text: String,
+    ) -> ServiceResult<bool>;
+
+    /// Atomically accept the first Human response while the node remains
+    /// running. The accepted response stays available during Judge evaluation
+    /// and after a Judge failure.
+    async fn record_human_response_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+        responded_by: String,
+    ) -> ServiceResult<bool>;
+
+    async fn mark_human_node_running_if_run_active(
+        &self,
+        command: MarkHumanNodeRunningCommand,
     ) -> ServiceResult<bool>;
 
     async fn fail_node_attempt(
@@ -169,12 +199,7 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         next_attempt: i32,
     ) -> ServiceResult<bool>;
 
-    async fn skip_node(
-        &self,
-        run_id: &str,
-        node_id: &str,
-        skipped_at: u64,
-    ) -> ServiceResult<bool>;
+    async fn skip_node(&self, run_id: &str, node_id: &str, skipped_at: u64) -> ServiceResult<bool>;
 
     async fn update_run_status(
         &self,

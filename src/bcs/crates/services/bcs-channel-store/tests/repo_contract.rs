@@ -44,7 +44,9 @@ async fn conversation_repo_round_trips_and_reverse_lookups_session() -> ServiceR
 
     let by_session = repo.find_by_session("binding_1", "session_new").await?;
     assert_eq!(
-        by_session.as_ref().map(|map| map.im_conversation_id.as_str()),
+        by_session
+            .as_ref()
+            .map(|map| map.im_conversation_id.as_str()),
         Some("conv_1")
     );
     let by_bcs_session = repo.list_by_bcs_session("session_new").await?;
@@ -56,8 +58,8 @@ async fn conversation_repo_round_trips_and_reverse_lookups_session() -> ServiceR
 }
 
 #[tokio::test]
-async fn conversation_repo_isolates_per_sender_scope_for_same_im_conversation(
-) -> ServiceResult<()> {
+async fn conversation_repo_isolates_per_sender_scope_for_same_im_conversation() -> ServiceResult<()>
+{
     let repo = MemoryConversationSessionRepo::new();
 
     repo.upsert(conversation_map(
@@ -125,8 +127,55 @@ async fn conversation_repo_isolates_per_sender_scope_for_same_im_conversation(
 }
 
 #[tokio::test]
-async fn im_participant_repo_round_trips_and_replaces_external_identity(
-) -> ServiceResult<()> {
+async fn conversation_repo_cleanup_only_deletes_expected_session() -> ServiceResult<()> {
+    let repo = MemoryConversationSessionRepo::new();
+    repo.upsert(conversation_map(
+        "binding_1",
+        "conv_1",
+        SessionScope::Conversation,
+        None,
+        "session_new",
+        2,
+    ))
+    .await?;
+
+    assert!(
+        !repo
+            .delete_if_session(
+                "binding_1",
+                "conv_1",
+                SessionScope::Conversation,
+                None,
+                "session_old",
+            )
+            .await?
+    );
+    assert!(
+        repo.get("binding_1", "conv_1", SessionScope::Conversation, None)
+            .await?
+            .is_some()
+    );
+    assert!(
+        repo.delete_if_session(
+            "binding_1",
+            "conv_1",
+            SessionScope::Conversation,
+            None,
+            "session_new",
+        )
+        .await?
+    );
+    assert!(
+        repo.get("binding_1", "conv_1", SessionScope::Conversation, None)
+            .await?
+            .is_none()
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn im_participant_repo_round_trips_and_replaces_external_identity() -> ServiceResult<()> {
     let repo = MemoryImParticipantRepo::new();
 
     repo.upsert(participant("staff_1", "human_old", Some("Old Name")))
@@ -360,11 +409,7 @@ fn conversation_map(
     }
 }
 
-fn participant(
-    im_user_id: &str,
-    actor_id: &str,
-    display_name: Option<&str>,
-) -> ImParticipantMap {
+fn participant(im_user_id: &str, actor_id: &str, display_name: Option<&str>) -> ImParticipantMap {
     ImParticipantMap {
         channel_type: "dingtalk".to_string(),
         account_ref: "robot_1".to_string(),

@@ -9,6 +9,10 @@ The open-source v1 baseline starts from a single MySQL/OceanBase init schema:
 | 001 | `mysql/001_init_schema.sql` | Create the full BCS schema for a fresh MySQL/OceanBase database |
 | 002 | `mysql/002_add_owner_bot_id.sql` | Add message ownership metadata and its lookup index |
 | 003 | `mysql/003_add_organizations.sql` | Add organizations and organization membership tables |
+| 004 | `mysql/004_add_session_collection.sql` | Add session collection state |
+| 005 | `mysql/005_add_session_collection_timestamp.sql` | Add session collection timestamp |
+| 006 | `mysql/006_session_files.sql` | Add session file metadata |
+| 007 | `mysql/007_add_human_input_runtime.sql` | Add generic node outcome and HumanInput responder metadata |
 
 The previous internal incremental SQL files were removed from the public
 migration path and replaced by the v1 baseline. New public migrations should be
@@ -76,12 +80,11 @@ The startup runner executes SQLite schema work in this order:
 Each migration is recorded only after all of its steps succeed. Re-running
 startup must be idempotent, and checksum mismatches fail startup.
 
-The current SQLite migrations are `001_init_schema`,
-`002_channel_binding_audit_timestamps`, and `003_add_organizations`. The
-version-3 body is a no-op because startup creates missing organization tables
-before recording the version. Future schema changes should add later migration
-versions. Do not add pre-open-source local schema repairs to the baseline
-migration.
+The current SQLite migration chain records versions `001` through `007`.
+Versions whose schema is already created by the startup bootstrap record
+progress as no-ops; version `007` repairs the HumanInput output metadata on
+existing databases. Future schema changes should use later numeric versions.
+Do not add pre-open-source local schema repairs to the baseline migration.
 Pre-baseline local SQLite files are not a compatibility target; recreate them
 from the current bootstrap schema if needed.
 

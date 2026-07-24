@@ -1,4 +1,7 @@
-use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use bcs_db_api::{
@@ -8,14 +11,13 @@ use bcs_db_api::{
 use bcs_domain::{
     CollaborationDefinition, CollaborationDefinitionRef, GroupRuntimeBinding,
     ResolvedParticipantBinding, RuntimeParticipantBinding, StateMachineDeliveryCorrelation,
-    StateMachineNodeRun, StateMachineNodeStatus,
-    StateMachineRun, StateMachineRunStatus,
+    StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
 use bcs_service_api::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     CollaborationTemplateEntry, CollaborationTemplateRepoPort, GroupRuntimeBindingRepoPort,
-    ServiceError, ServiceResult,
-    StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
+    MarkHumanNodeRunningCommand, ServiceError, ServiceResult, StateMachineDefinitionRepoPort,
+    StateMachineRunRepoPort,
 };
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
@@ -25,8 +27,9 @@ const SM_RUN_SELECT_COLS: &str = "run_id, definition_id, definition_version, gro
     group_version, session_id, created_by, status, input_json, output_text, error_message, \
     created_at_ms, updated_at_ms, completed_at_ms";
 const SM_NODE_SELECT_COLS: &str = "run_id, node_id, status, attempt, node_timeout_ms, \
-    timeout_deadline_ms, max_attempts, assignee_bot_id, delivery_request_id, \
-    bot_delivery_run_id, artifact_text, error_message, started_at_ms, completed_at_ms";
+    timeout_deadline_ms, max_attempts, assignee_bot_id, outcome, responded_by, \
+    delivery_request_id, bot_delivery_run_id, artifact_text, error_message, \
+    started_at_ms, completed_at_ms";
 const SM_CORRELATION_SELECT_COLS: &str = "state_machine_run_id, node_id, attempt, \
     assignee_bot_id, delivery_request_id, bot_delivery_run_id";
 
@@ -35,7 +38,8 @@ struct StoreInner {
     definitions: BTreeMap<(String, i32), CollaborationDefinition>,
     definition_sources: BTreeMap<(String, i32), DefinitionSourceRecord>,
     run_snapshots: BTreeMap<String, CollaborationDefinition>,
-    run_resolved_participant_bindings: BTreeMap<String, BTreeMap<String, ResolvedParticipantBinding>>,
+    run_resolved_participant_bindings:
+        BTreeMap<String, BTreeMap<String, ResolvedParticipantBinding>>,
     bindings: BTreeMap<String, GroupRuntimeBinding>,
     runs: BTreeMap<String, StateMachineRun>,
     nodes: BTreeMap<(String, String), StateMachineNodeRun>,
@@ -80,19 +84,25 @@ impl StateMachineDefinitionRepoPort for MemoryCollaborationStore {
                     &incoming_hash,
                 ));
             }
-            inner.definition_sources.entry(key).or_insert(DefinitionSourceRecord {
-                source_format: "json".to_string(),
-                yaml_text: None,
-                content_hash: incoming_hash,
-            });
+            inner
+                .definition_sources
+                .entry(key)
+                .or_insert(DefinitionSourceRecord {
+                    source_format: "json".to_string(),
+                    yaml_text: None,
+                    content_hash: incoming_hash,
+                });
             return Ok(());
         }
         inner.definitions.insert(key.clone(), definition);
-        inner.definition_sources.insert(key, DefinitionSourceRecord {
-            source_format: "json".to_string(),
-            yaml_text: None,
-            content_hash: incoming_hash,
-        });
+        inner.definition_sources.insert(
+            key,
+            DefinitionSourceRecord {
+                source_format: "json".to_string(),
+                yaml_text: None,
+                content_hash: incoming_hash,
+            },
+        );
         Ok(())
     }
 
@@ -126,19 +136,25 @@ impl StateMachineDefinitionRepoPort for MemoryCollaborationStore {
                     }
                 }
             }
-            inner.definition_sources.insert(key, DefinitionSourceRecord {
-                source_format: "yaml".to_string(),
-                yaml_text: Some(source_yaml),
-                content_hash: incoming_hash,
-            });
+            inner.definition_sources.insert(
+                key,
+                DefinitionSourceRecord {
+                    source_format: "yaml".to_string(),
+                    yaml_text: Some(source_yaml),
+                    content_hash: incoming_hash,
+                },
+            );
             return Ok(());
         }
         inner.definitions.insert(key.clone(), definition);
-        inner.definition_sources.insert(key, DefinitionSourceRecord {
-            source_format: "yaml".to_string(),
-            yaml_text: Some(source_yaml),
-            content_hash: incoming_hash,
-        });
+        inner.definition_sources.insert(
+            key,
+            DefinitionSourceRecord {
+                source_format: "yaml".to_string(),
+                yaml_text: Some(source_yaml),
+                content_hash: incoming_hash,
+            },
+        );
         Ok(())
     }
 
@@ -348,6 +364,8 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.status = StateMachineNodeStatus::Running;
         node.attempt = attempt;
         node.delivery_request_id = Some(delivery_request_id);
+        node.outcome = None;
+        node.responded_by = None;
         node.started_at = Some(started_at);
         node.artifact_text = None;
         node.error = None;
@@ -382,6 +400,8 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         }
         node.status = StateMachineNodeStatus::Running;
         node.delivery_request_id = Some(delivery_request_id);
+        node.outcome = None;
+        node.responded_by = None;
         node.started_at = Some(started_at);
         node.artifact_text = None;
         node.error = None;
@@ -397,7 +417,9 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         run_id: &str,
         node_id: &str,
         attempt: i32,
+        outcome: String,
         artifact_text: String,
+        responded_by: Option<String>,
         completed_at: u64,
     ) -> ServiceResult<bool> {
         let mut inner = self.inner.write().await;
@@ -409,9 +431,42 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             return Ok(false);
         }
         node.status = StateMachineNodeStatus::Completed;
+        node.outcome = Some(outcome);
+        node.responded_by = responded_by;
         node.artifact_text = Some(artifact_text);
         node.error = None;
         node.completed_at = Some(completed_at);
+        node.timeout_deadline_ms = None;
+        Ok(true)
+    }
+
+    async fn mark_human_node_running_if_run_active(
+        &self,
+        command: MarkHumanNodeRunningCommand,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, &command.run_id)? {
+            return Ok(false);
+        }
+        let node = node_mut(&mut inner, &command.run_id, &command.node_id)?;
+        if !matches!(
+            node.status,
+            StateMachineNodeStatus::Pending | StateMachineNodeStatus::Ready
+        ) || node.attempt != command.attempt
+        {
+            return Ok(false);
+        }
+        node.status = StateMachineNodeStatus::Running;
+        node.assignee_bot_id = None;
+        node.delivery_request_id = None;
+        node.bot_delivery_run_id = None;
+        node.outcome = None;
+        node.responded_by = None;
+        node.artifact_text = None;
+        node.error = None;
+        node.started_at = Some(command.started_at_ms);
+        node.completed_at = None;
+        node.timeout_deadline_ms = Some(command.timeout_deadline_ms);
         Ok(true)
     }
 
@@ -431,6 +486,31 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             return Ok(false);
         }
         node.artifact_text = Some(artifact_text);
+        node.error = None;
+        Ok(true)
+    }
+
+    async fn record_human_response_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+        responded_by: String,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, run_id)? {
+            return Ok(false);
+        }
+        let node = node_mut(&mut inner, run_id, node_id)?;
+        if node.status != StateMachineNodeStatus::Running
+            || node.attempt != attempt
+            || node.artifact_text.is_some()
+        {
+            return Ok(false);
+        }
+        node.artifact_text = Some(artifact_text);
+        node.responded_by = Some(responded_by);
         node.error = None;
         Ok(true)
     }
@@ -476,6 +556,8 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.attempt = next_attempt;
         node.delivery_request_id = None;
         node.bot_delivery_run_id = None;
+        node.outcome = None;
+        node.responded_by = None;
         node.artifact_text = None;
         node.error = None;
         node.started_at = None;
@@ -484,12 +566,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         Ok(true)
     }
 
-    async fn skip_node(
-        &self,
-        run_id: &str,
-        node_id: &str,
-        skipped_at: u64,
-    ) -> ServiceResult<bool> {
+    async fn skip_node(&self, run_id: &str, node_id: &str, skipped_at: u64) -> ServiceResult<bool> {
         let mut inner = self.inner.write().await;
         if !run_is_running(&inner, run_id)? {
             return Ok(false);
@@ -513,10 +590,9 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         completed_at: Option<u64>,
     ) -> ServiceResult<bool> {
         let mut inner = self.inner.write().await;
-        let run = inner
-            .runs
-            .get_mut(run_id)
-            .ok_or_else(|| ServiceError::InternalError(format!("state machine run not found: {run_id}")))?;
+        let run = inner.runs.get_mut(run_id).ok_or_else(|| {
+            ServiceError::InternalError(format!("state machine run not found: {run_id}"))
+        })?;
         if is_terminal(run.status) {
             return Ok(false);
         }
@@ -549,9 +625,11 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             .correlations
             .get(delivery_request_id)
             .cloned()
-            .ok_or_else(|| ServiceError::InternalError(format!(
-                "delivery correlation not found: {delivery_request_id}"
-            )))?;
+            .ok_or_else(|| {
+                ServiceError::InternalError(format!(
+                    "delivery correlation not found: {delivery_request_id}"
+                ))
+            })?;
         correlation.bot_delivery_run_id = Some(bot_delivery_run_id.clone());
         inner
             .correlations
@@ -588,9 +666,9 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             .values()
             .filter(|node| {
                 node.status == StateMachineNodeStatus::Running
-                    && node.timeout_deadline_ms.is_some_and(|deadline| {
-                        deadline.saturating_add(timeout_grace_ms) <= now_ms
-                    })
+                    && node
+                        .timeout_deadline_ms
+                        .is_some_and(|deadline| deadline.saturating_add(timeout_grace_ms) <= now_ms)
                     && inner
                         .runs
                         .get(&node.run_id)
@@ -642,8 +720,7 @@ impl CollaborationEventRepoPort for MemoryCollaborationStore {
             .events
             .iter()
             .filter(|event| {
-                event.state_machine_run_id == state_machine_run_id
-                    && event.event_type == event_type
+                event.state_machine_run_id == state_machine_run_id && event.event_type == event_type
             })
             .cloned()
             .collect())
@@ -678,11 +755,19 @@ pub struct MySqlCollaborationStore {
 
 impl MySqlCollaborationStore {
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self { db, env, flavor: DbSqlFlavor::Mysql }
+        Self {
+            db,
+            env,
+            flavor: DbSqlFlavor::Mysql,
+        }
     }
 
     pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self { db, env, flavor: DbSqlFlavor::Sqlite }
+        Self {
+            db,
+            env,
+            flavor: DbSqlFlavor::Sqlite,
+        }
     }
 
     async fn upsert_definition_internal(
@@ -691,15 +776,17 @@ impl MySqlCollaborationStore {
         source_yaml: Option<String>,
     ) -> ServiceResult<()> {
         let normalized_json = definition_json(&definition)?;
-        let metadata_json = serde_json::to_string(&definition.metadata)
-            .map_err(|error| ServiceError::InternalError(format!("definition metadata serialize: {error}")))?;
+        let metadata_json = serde_json::to_string(&definition.metadata).map_err(|error| {
+            ServiceError::InternalError(format!("definition metadata serialize: {error}"))
+        })?;
         let content_hash = sha256_hex(normalized_json.as_bytes());
         let definition_ref = CollaborationDefinitionRef {
             id: definition.id.clone(),
             version: definition.version,
         };
-        if let Some((existing_hash, _, existing_yaml)) =
-            self.find_definition_record_metadata(&definition_ref).await?
+        if let Some((existing_hash, _, existing_yaml)) = self
+            .find_definition_record_metadata(&definition_ref)
+            .await?
         {
             if existing_hash != content_hash {
                 return Err(definition_conflict_error(
@@ -738,9 +825,11 @@ impl MySqlCollaborationStore {
                             ],
                         ))
                         .await
-                        .map_err(|error| ServiceError::InternalError(format!(
-                            "collaboration definition source backfill: {error}"
-                        )))?;
+                        .map_err(|error| {
+                            ServiceError::InternalError(format!(
+                                "collaboration definition source backfill: {error}"
+                            ))
+                        })?;
                 }
             }
             return Ok(());
@@ -752,10 +841,20 @@ impl MySqlCollaborationStore {
             &content_hash[..16]
         );
         let description = definition.metadata.description.as_deref();
-        let source_format = if source_yaml.is_some() { "yaml" } else { "json" };
+        let source_format = if source_yaml.is_some() {
+            "yaml"
+        } else {
+            "json"
+        };
         let blob_upsert = self.flavor.on_conflict_update(
             &["env", "blob_id"],
-            &["content_hash", "content_encoding", "content_size", "content", "external_uri"],
+            &[
+                "content_hash",
+                "content_encoding",
+                "content_size",
+                "content",
+                "external_uri",
+            ],
             &[("gmt_modified", self.flavor.now())],
         );
         let blob_sql = format!(
@@ -803,8 +902,13 @@ impl MySqlCollaborationStore {
                 )),
             ])
             .await
-            .map_err(|error| ServiceError::InternalError(format!("collaboration definition upsert: {error}")))?;
-        let Some((stored_hash, _, _)) = self.find_definition_record_metadata(&definition_ref).await? else {
+            .map_err(|error| {
+                ServiceError::InternalError(format!("collaboration definition upsert: {error}"))
+            })?;
+        let Some((stored_hash, _, _)) = self
+            .find_definition_record_metadata(&definition_ref)
+            .await?
+        else {
             return Err(ServiceError::InternalError(format!(
                 "collaboration definition insert did not create row: {}@{}",
                 definition.id, definition.version
@@ -851,7 +955,9 @@ impl MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("collaboration definition lookup: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("collaboration definition lookup: {error}"))
+            })?;
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
         };
@@ -868,12 +974,14 @@ impl MySqlCollaborationStore {
         &self,
         definition: &CollaborationDefinitionRef,
     ) -> ServiceResult<(String, Option<String>)> {
-        self.find_definition_metadata(definition).await?.ok_or_else(|| {
-            ServiceError::InternalError(format!(
-                "collaboration definition not found for binding: {}@{}",
-                definition.id, definition.version
-            ))
-        })
+        self.find_definition_metadata(definition)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::InternalError(format!(
+                    "collaboration definition not found for binding: {}@{}",
+                    definition.id, definition.version
+                ))
+            })
     }
 }
 
@@ -888,11 +996,15 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
         definition: CollaborationDefinition,
         source_yaml: String,
     ) -> ServiceResult<()> {
-        self.upsert_definition_internal(definition, Some(source_yaml)).await
+        self.upsert_definition_internal(definition, Some(source_yaml))
+            .await
     }
 
     async fn get(&self, id: &str, version: i32) -> ServiceResult<Option<CollaborationDefinition>> {
-        Ok(self.get_record(id, version).await?.map(|record| record.definition))
+        Ok(self
+            .get_record(id, version)
+            .await?
+            .map(|record| record.definition))
     }
 
     async fn get_record(
@@ -916,7 +1028,9 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("collaboration definition get: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("collaboration definition get: {error}"))
+            })?;
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
         };
@@ -929,11 +1043,13 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
         let normalized_json: Option<String> = db_get_column_opt(&row, "normalized_json")
             .map_err(|error| ServiceError::InternalError(format!("normalized_json: {error}")))?;
         let definition = if let Some(raw) = normalized_json.filter(|raw| !raw.is_empty()) {
-            serde_json::from_str(&raw)
-                .map_err(|error| ServiceError::InternalError(format!("definition json parse: {error}")))?
+            serde_json::from_str(&raw).map_err(|error| {
+                ServiceError::InternalError(format!("definition json parse: {error}"))
+            })?
         } else if let Some(raw) = yaml_text.as_deref().filter(|raw| !raw.is_empty()) {
-            serde_yaml::from_str(raw)
-                .map_err(|error| ServiceError::InternalError(format!("definition yaml parse: {error}")))?
+            serde_yaml::from_str(raw).map_err(|error| {
+                ServiceError::InternalError(format!("definition yaml parse: {error}"))
+            })?
         } else {
             return Ok(None);
         };
@@ -955,10 +1071,13 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
         let snapshot_json = definition_json(definition)?;
         let content_hash = sha256_hex(snapshot_json.as_bytes());
         let resolved_participant_bindings_json = match resolved_participant_bindings {
-            Some(bindings) if !bindings.is_empty() => Some(
-                serde_json::to_string(bindings)
-                    .map_err(|error| ServiceError::InternalError(format!("resolved participant bindings json: {error}")))?,
-            ),
+            Some(bindings) if !bindings.is_empty() => {
+                Some(serde_json::to_string(bindings).map_err(|error| {
+                    ServiceError::InternalError(format!(
+                        "resolved participant bindings json: {error}"
+                    ))
+                })?)
+            }
             _ => None,
         };
         let snapshot_upsert = self.flavor.on_conflict_nothing(&["env", "run_id"]);
@@ -987,7 +1106,9 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("definition snapshot upsert: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("definition snapshot upsert: {error}"))
+            })?;
         Ok(())
     }
 
@@ -1006,16 +1127,18 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
                 vec![DbValue::from(self.env.as_str()), DbValue::from(run_id)],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("definition snapshot get: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("definition snapshot get: {error}"))
+            })?;
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
         };
         let snapshot_json: Option<String> = db_get_column_opt(&row, "snapshot_json")
             .map_err(|error| ServiceError::InternalError(format!("snapshot_json: {error}")))?;
         match snapshot_json {
-            Some(raw) if !raw.is_empty() => serde_json::from_str(&raw)
-                .map(Some)
-                .map_err(|error| ServiceError::InternalError(format!("definition snapshot parse: {error}"))),
+            Some(raw) if !raw.is_empty() => serde_json::from_str(&raw).map(Some).map_err(|error| {
+                ServiceError::InternalError(format!("definition snapshot parse: {error}"))
+            }),
             _ => Ok(None),
         }
     }
@@ -1024,15 +1147,14 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
 #[async_trait]
 impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
     async fn upsert(&self, binding: GroupRuntimeBinding) -> ServiceResult<()> {
-        self
-            .bind_default_definition(
-                &binding.group_id,
-                binding.group_version,
-                binding.default_definition,
-                Some(binding.participant_bindings),
-                binding.auto_start_on_service_invocation,
-            )
-            .await
+        self.bind_default_definition(
+            &binding.group_id,
+            binding.group_version,
+            binding.default_definition,
+            Some(binding.participant_bindings),
+            binding.auto_start_on_service_invocation,
+        )
+        .await
     }
 
     async fn get(&self, group_id: &str) -> ServiceResult<Option<GroupRuntimeBinding>> {
@@ -1054,31 +1176,38 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("group runtime binding get: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("group runtime binding get: {error}"))
+            })?;
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
         };
         let group_version: i32 = db_get_column(&row, "group_version")
             .map_err(|error| ServiceError::InternalError(format!("group_version: {error}")))?;
         let definition_id: Option<String> = db_get_column_opt(&row, "default_definition_id")
-            .map_err(|error| ServiceError::InternalError(format!("default_definition_id: {error}")))?;
-        let definition_version: Option<i32> =
-            db_get_column_opt(&row, "default_definition_version")
-                .map_err(|error| ServiceError::InternalError(format!("default_definition_version: {error}")))?;
-        let auto_start_on_service_invocation = db_get_column_opt::<i32>(
-            &row,
-            "auto_start_on_service_invocation",
-        )
-        .map_err(|error| ServiceError::InternalError(format!("auto_start_on_service_invocation: {error}")))?
-        .map_or(false, |value| value != 0);
-        let participant_bindings_json: Option<String> = db_get_column_opt(
-            &row,
-            "participant_bindings_json",
-        )
-        .map_err(|error| ServiceError::InternalError(format!("participant_bindings_json: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("default_definition_id: {error}"))
+            })?;
+        let definition_version: Option<i32> = db_get_column_opt(&row, "default_definition_version")
+            .map_err(|error| {
+                ServiceError::InternalError(format!("default_definition_version: {error}"))
+            })?;
+        let auto_start_on_service_invocation =
+            db_get_column_opt::<i32>(&row, "auto_start_on_service_invocation")
+                .map_err(|error| {
+                    ServiceError::InternalError(format!(
+                        "auto_start_on_service_invocation: {error}"
+                    ))
+                })?
+                .map_or(false, |value| value != 0);
+        let participant_bindings_json: Option<String> =
+            db_get_column_opt(&row, "participant_bindings_json").map_err(|error| {
+                ServiceError::InternalError(format!("participant_bindings_json: {error}"))
+            })?;
         let participant_bindings = match participant_bindings_json {
-            Some(raw) if !raw.is_empty() => serde_json::from_str(&raw)
-                .map_err(|error| ServiceError::InternalError(format!("participant bindings parse: {error}")))?,
+            Some(raw) if !raw.is_empty() => serde_json::from_str(&raw).map_err(|error| {
+                ServiceError::InternalError(format!("participant bindings parse: {error}"))
+            })?,
             _ => BTreeMap::new(),
         };
         let default_definition = match (definition_id, definition_version) {
@@ -1115,10 +1244,11 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
             None => (None, None, None, None),
         };
         let participant_bindings_json = match participant_bindings {
-            Some(bindings) if !bindings.is_empty() => Some(
-                serde_json::to_string(&bindings)
-                    .map_err(|error| ServiceError::InternalError(format!("participant bindings json: {error}")))?,
-            ),
+            Some(bindings) if !bindings.is_empty() => {
+                Some(serde_json::to_string(&bindings).map_err(|error| {
+                    ServiceError::InternalError(format!("participant bindings json: {error}"))
+                })?)
+            }
             _ => None,
         };
         let close_previous = format!(
@@ -1140,7 +1270,10 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
                 "participant_bindings_json",
                 "updated_by",
             ],
-            &[("record_status", "'active'"), ("gmt_modified", self.flavor.now())],
+            &[
+                ("record_status", "'active'"),
+                ("gmt_modified", self.flavor.now()),
+            ],
         );
         let upsert_current = format!(
             "INSERT INTO bcs_group_runtime_bindings \
@@ -1172,7 +1305,9 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
                         DbValue::from(group_version),
                         DbValue::from(CURRENT_GROUP_VERSION_SENTINEL),
                         DbValue::from(definition_id.as_deref()),
-                        definition_version.map(DbValue::from).unwrap_or(DbValue::Null),
+                        definition_version
+                            .map(DbValue::from)
+                            .unwrap_or(DbValue::Null),
                         DbValue::from(content_hash.as_deref()),
                         DbValue::from(blob_id.as_deref()),
                         DbValue::from(auto_start_on_service_invocation),
@@ -1181,7 +1316,9 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
                 )),
             ])
             .await
-            .map_err(|error| ServiceError::InternalError(format!("group runtime binding upsert: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("group runtime binding upsert: {error}"))
+            })?;
         Ok(())
     }
 
@@ -1207,14 +1344,19 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
             None => (None, None, None, None),
         };
         let participant_bindings_json = match participant_bindings {
-            Some(bindings) if !bindings.is_empty() => Some(
-                serde_json::to_string(&bindings)
-                    .map_err(|error| ServiceError::InternalError(format!("participant bindings json: {error}")))?,
-            ),
+            Some(bindings) if !bindings.is_empty() => {
+                Some(serde_json::to_string(&bindings).map_err(|error| {
+                    ServiceError::InternalError(format!("participant bindings json: {error}"))
+                })?)
+            }
             _ => None,
         };
-        let expected_definition_id = expected_definition.as_ref().map(|definition| definition.id.as_str());
-        let expected_definition_version = expected_definition.as_ref().map(|definition| definition.version);
+        let expected_definition_id = expected_definition
+            .as_ref()
+            .map(|definition| definition.id.as_str());
+        let expected_definition_version = expected_definition
+            .as_ref()
+            .map(|definition| definition.version);
         let sql = format!(
             "UPDATE bcs_group_runtime_bindings \
                    SET default_definition_id = ?, default_definition_version = ?, \
@@ -1229,12 +1371,15 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
                      )",
             self.flavor.set_modified_now()
         );
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
                     DbValue::from(definition_id.as_deref()),
-                    definition_version.map(DbValue::from).unwrap_or(DbValue::Null),
+                    definition_version
+                        .map(DbValue::from)
+                        .unwrap_or(DbValue::Null),
                     DbValue::from(content_hash.as_deref()),
                     DbValue::from(blob_id.as_deref()),
                     DbValue::from(auto_start_on_service_invocation),
@@ -1244,11 +1389,15 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
                     DbValue::from(CURRENT_GROUP_VERSION_SENTINEL),
                     DbValue::from(expected_definition_id),
                     DbValue::from(expected_definition_id),
-                    expected_definition_version.map(DbValue::from).unwrap_or(DbValue::Null),
+                    expected_definition_version
+                        .map(DbValue::from)
+                        .unwrap_or(DbValue::Null),
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("group runtime binding CAS update: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("group runtime binding CAS update: {error}"))
+            })?;
         Ok(result.affected_rows > 0)
     }
 }
@@ -1286,16 +1435,17 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 optional_u64_value(run.completed_at),
             ],
         ))];
-        if let Some((node_sql, node_params)) = build_node_runs_insert(&self.env, &run.run_id, &nodes) {
+        if let Some((node_sql, node_params)) =
+            build_node_runs_insert(&self.env, &run.run_id, &nodes)
+        {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
                 node_sql,
                 node_params,
             )));
         }
-        self.db
-            .transaction(steps)
-            .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine run create: {error}")))?;
+        self.db.transaction(steps).await.map_err(|error| {
+            ServiceError::InternalError(format!("state machine run create: {error}"))
+        })?;
         Ok(())
     }
 
@@ -1313,8 +1463,13 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 vec![DbValue::from(self.env.as_str()), DbValue::from(run_id)],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine run get: {error}")))?;
-        rows.into_iter().next().map(row_to_state_machine_run).transpose()
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine run get: {error}"))
+            })?;
+        rows.into_iter()
+            .next()
+            .map(row_to_state_machine_run)
+            .transpose()
     }
 
     async fn get_run_by_session_id(
@@ -1335,8 +1490,13 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine run get by session: {error}")))?;
-        rows.into_iter().next().map(row_to_state_machine_run).transpose()
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine run get by session: {error}"))
+            })?;
+        rows.into_iter()
+            .next()
+            .map(row_to_state_machine_run)
+            .transpose()
     }
 
     async fn list_node_runs(&self, run_id: &str) -> ServiceResult<Vec<StateMachineNodeRun>> {
@@ -1353,8 +1513,12 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 vec![DbValue::from(self.env.as_str()), DbValue::from(run_id)],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node list: {error}")))?;
-        rows.into_iter().map(row_to_state_machine_node_run).collect()
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node list: {error}"))
+            })?;
+        rows.into_iter()
+            .map(row_to_state_machine_node_run)
+            .collect()
     }
 
     async fn get_node_run(
@@ -1379,8 +1543,13 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node get: {error}")))?;
-        rows.into_iter().next().map(row_to_state_machine_node_run).transpose()
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node get: {error}"))
+            })?;
+        rows.into_iter()
+            .next()
+            .map(row_to_state_machine_node_run)
+            .transpose()
     }
 
     async fn mark_node_running(
@@ -1394,7 +1563,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let sql = format!(
             "UPDATE bcs_state_machine_node_runs \
              SET status = 'running', attempt = ?, delivery_request_id = ?, \
-                 bot_delivery_run_id = NULL, artifact_text = NULL, \
+                 bot_delivery_run_id = NULL, outcome = NULL, responded_by = NULL, \
+                 artifact_text = NULL, \
                  error_message = NULL, started_at_ms = ?, completed_at_ms = NULL, \
                  timeout_deadline_ms = CASE \
                    WHEN node_timeout_ms IS NULL THEN NULL \
@@ -1419,7 +1589,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node mark running: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node mark running: {error}"))
+            })?;
         Ok(())
     }
 
@@ -1435,7 +1607,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             DbSqlFlavor::Mysql => format!(
                 "UPDATE bcs_state_machine_node_runs n \
                  SET n.status = 'running', n.delivery_request_id = ?, \
-                     n.bot_delivery_run_id = NULL, n.artifact_text = NULL, \
+                     n.bot_delivery_run_id = NULL, n.outcome = NULL, \
+                     n.responded_by = NULL, n.artifact_text = NULL, \
                      n.error_message = NULL, n.started_at_ms = ?, n.completed_at_ms = NULL, \
                      n.timeout_deadline_ms = CASE \
                        WHEN n.node_timeout_ms IS NULL THEN NULL \
@@ -1455,7 +1628,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             DbSqlFlavor::Sqlite => format!(
                 "UPDATE bcs_state_machine_node_runs \
                  SET status = 'running', delivery_request_id = ?, \
-                     bot_delivery_run_id = NULL, artifact_text = NULL, \
+                     bot_delivery_run_id = NULL, outcome = NULL, responded_by = NULL, \
+                     artifact_text = NULL, \
                      error_message = NULL, started_at_ms = ?, completed_at_ms = NULL, \
                      timeout_deadline_ms = CASE \
                        WHEN node_timeout_ms IS NULL THEN NULL \
@@ -1474,7 +1648,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 self.flavor.set_modified_now(),
             ),
         };
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
@@ -1488,7 +1663,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node mark running CAS: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node mark running CAS: {error}"))
+            })?;
         Ok(result.affected_rows > 0)
     }
 
@@ -1497,12 +1674,15 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         run_id: &str,
         node_id: &str,
         attempt: i32,
+        outcome: String,
         artifact_text: String,
+        responded_by: Option<String>,
         completed_at: u64,
     ) -> ServiceResult<bool> {
         let sql = format!(
             "UPDATE bcs_state_machine_node_runs \
-             SET status = 'completed', artifact_text = ?, error_message = NULL, \
+             SET status = 'completed', outcome = ?, responded_by = ?, artifact_text = ?, \
+                 error_message = NULL, \
                  completed_at_ms = ?, timeout_deadline_ms = NULL, {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
                AND attempt = ? AND status = 'running' \
@@ -1515,10 +1695,13 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                )",
             self.flavor.set_modified_now()
         );
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
+                    DbValue::from(outcome),
+                    DbValue::from(responded_by.as_deref()),
                     DbValue::from(artifact_text),
                     DbValue::from(completed_at),
                     DbValue::from(self.env.as_str()),
@@ -1528,7 +1711,52 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node complete: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node complete: {error}"))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn mark_human_node_running_if_run_active(
+        &self,
+        command: MarkHumanNodeRunningCommand,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET status = 'running', delivery_request_id = NULL, \
+                 bot_delivery_run_id = NULL, outcome = NULL, responded_by = NULL, \
+                 artifact_text = NULL, error_message = NULL, started_at_ms = ?, \
+                 completed_at_ms = NULL, timeout_deadline_ms = ?, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
+               AND status IN ('pending', 'ready') AND assignee_bot_id = '' \
+               AND record_status = 'active' \
+               AND EXISTS ( \
+                 SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env \
+                   AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active' \
+               )",
+            self.flavor.set_modified_now()
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(command.started_at_ms),
+                    DbValue::from(command.timeout_deadline_ms),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.run_id),
+                    DbValue::from(command.node_id),
+                    DbValue::from(command.attempt),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "state machine human node mark running: {error}"
+                ))
+            })?;
         Ok(result.affected_rows > 0)
     }
 
@@ -1573,6 +1801,49 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         Ok(result.affected_rows > 0)
     }
 
+    async fn record_human_response_if_running(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        attempt: i32,
+        artifact_text: String,
+        responded_by: String,
+    ) -> ServiceResult<bool> {
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs \
+             SET artifact_text = ?, responded_by = ?, error_message = NULL, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? \
+               AND attempt = ? AND status = 'running' AND artifact_text IS NULL \
+               AND record_status = 'active' \
+               AND EXISTS ( \
+                 SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env \
+                   AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active' \
+               )",
+            self.flavor.set_modified_now()
+        );
+        let result = self.db
+            .execute(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(artifact_text),
+                    DbValue::from(responded_by),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                    DbValue::from(attempt),
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "state machine human response record: {error}"
+                ))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
     async fn fail_node_attempt(
         &self,
         run_id: &str,
@@ -1596,7 +1867,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                )",
             self.flavor.set_modified_now()
         );
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
@@ -1609,7 +1881,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node fail: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node fail: {error}"))
+            })?;
         Ok(result.affected_rows > 0)
     }
 
@@ -1638,7 +1912,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                )",
             self.flavor.set_modified_now()
         );
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
@@ -1650,16 +1925,13 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node retry: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node retry: {error}"))
+            })?;
         Ok(result.affected_rows > 0)
     }
 
-    async fn skip_node(
-        &self,
-        run_id: &str,
-        node_id: &str,
-        skipped_at: u64,
-    ) -> ServiceResult<bool> {
+    async fn skip_node(&self, run_id: &str, node_id: &str, skipped_at: u64) -> ServiceResult<bool> {
         let sql = format!(
             "UPDATE bcs_state_machine_node_runs \
              SET status = 'skipped', completed_at_ms = ?, \
@@ -1674,7 +1946,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                )",
             self.flavor.set_modified_now()
         );
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
@@ -1685,7 +1958,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine node skip: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine node skip: {error}"))
+            })?;
         Ok(result.affected_rows > 0)
     }
 
@@ -1706,7 +1981,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                AND status NOT IN ('completed', 'failed', 'aborted')",
             self.flavor.set_modified_now()
         );
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
@@ -1720,7 +1996,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("state machine run status update: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine run status update: {error}"))
+            })?;
         Ok(result.affected_rows > 0)
     }
 
@@ -1735,7 +2013,13 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         };
         let correlation_upsert = self.flavor.on_conflict_update(
             &["env", "delivery_request_id"],
-            &["state_machine_run_id", "node_id", "attempt", "assignee_bot_id", "updated_at_ms"],
+            &[
+                "state_machine_run_id",
+                "node_id",
+                "attempt",
+                "assignee_bot_id",
+                "updated_at_ms",
+            ],
             &[
                 ("bot_delivery_run_id", coalesce_bot_run),
                 ("record_status", "'active'"),
@@ -1766,7 +2050,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("delivery correlation upsert: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("delivery correlation upsert: {error}"))
+            })?;
         Ok(())
     }
 
@@ -1791,7 +2077,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                AND record_status = 'active'",
             self.flavor.set_modified_now()
         );
-        let results = self.db
+        let results = self
+            .db
             .transaction(vec![
                 DbTransactionStep::Execute(DbStatement::with_params(
                     correlation_sql,
@@ -1812,7 +2099,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 )),
             ])
             .await
-            .map_err(|error| ServiceError::InternalError(format!("delivery correlation alias: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("delivery correlation alias: {error}"))
+            })?;
         let correlation_affected = match results.first() {
             Some(DbTransactionStepResult::Executed(result)) => result.affected_rows,
             _ => 0,
@@ -1839,13 +2128,12 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             .db
             .query(DbStatement::with_params(
                 request_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(run_id),
-                ],
+                vec![DbValue::from(self.env.as_str()), DbValue::from(run_id)],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("delivery correlation lookup: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("delivery correlation lookup: {error}"))
+            })?;
         if let Some(row) = rows.into_iter().next() {
             return row_to_delivery_correlation(row).map(Some);
         }
@@ -1860,14 +2148,16 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             .db
             .query(DbStatement::with_params(
                 bot_run_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(run_id),
-                ],
+                vec![DbValue::from(self.env.as_str()), DbValue::from(run_id)],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("delivery correlation alias lookup: {error}")))?;
-        rows.into_iter().next().map(row_to_delivery_correlation).transpose()
+            .map_err(|error| {
+                ServiceError::InternalError(format!("delivery correlation alias lookup: {error}"))
+            })?;
+        rows.into_iter()
+            .next()
+            .map(row_to_delivery_correlation)
+            .transpose()
     }
 
     async fn list_expired_running_node_runs(
@@ -1902,8 +2192,12 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("expired state machine node list: {error}")))?;
-        rows.into_iter().map(row_to_state_machine_node_run).collect()
+            .map_err(|error| {
+                ServiceError::InternalError(format!("expired state machine node list: {error}"))
+            })?;
+        rows.into_iter()
+            .map(row_to_state_machine_node_run)
+            .collect()
     }
 }
 
@@ -1936,7 +2230,9 @@ impl CollaborationEventRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("collaboration event append: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("collaboration event append: {error}"))
+            })?;
         Ok(())
     }
 
@@ -1962,7 +2258,9 @@ impl CollaborationEventRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("collaboration event list: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("collaboration event list: {error}"))
+            })?;
         rows.into_iter().map(row_to_collaboration_event).collect()
     }
 
@@ -1990,7 +2288,9 @@ impl CollaborationEventRepoPort for MySqlCollaborationStore {
                 ],
             ))
             .await
-            .map_err(|error| ServiceError::InternalError(format!("collaboration event list by node: {error}")))?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("collaboration event list by node: {error}"))
+            })?;
         rows.into_iter().map(row_to_collaboration_event).collect()
     }
 }
@@ -2045,18 +2345,18 @@ fn build_node_runs_insert(
     }
     let placeholders = nodes
         .iter()
-        .map(|_| "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')")
+        .map(|_| "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')")
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(
         "INSERT INTO bcs_state_machine_node_runs \
          (env, run_id, node_id, status, attempt, node_timeout_ms, \
-          timeout_deadline_ms, max_attempts, assignee_bot_id, delivery_request_id, \
-          bot_delivery_run_id, artifact_text, error_message, started_at_ms, \
-          completed_at_ms, record_status) \
+          timeout_deadline_ms, max_attempts, assignee_bot_id, outcome, responded_by, \
+          delivery_request_id, bot_delivery_run_id, artifact_text, error_message, \
+          started_at_ms, completed_at_ms, record_status) \
          VALUES {placeholders}"
     );
-    let mut params = Vec::with_capacity(nodes.len() * 15);
+    let mut params = Vec::with_capacity(nodes.len() * 17);
     for node in nodes {
         params.push(DbValue::from(env));
         params.push(DbValue::from(run_id));
@@ -2066,7 +2366,9 @@ fn build_node_runs_insert(
         params.push(optional_u64_value(node.node_timeout_ms));
         params.push(optional_u64_value(node.timeout_deadline_ms));
         params.push(DbValue::from(node.max_attempts));
-        params.push(DbValue::from(node.assignee_bot_id.as_str()));
+        params.push(DbValue::from(node.assignee_bot_id.as_deref().unwrap_or("")));
+        params.push(DbValue::from(node.outcome.as_deref()));
+        params.push(DbValue::from(node.responded_by.as_deref()));
         params.push(DbValue::from(node.delivery_request_id.as_deref()));
         params.push(DbValue::from(node.bot_delivery_run_id.as_deref()));
         params.push(DbValue::from(node.artifact_text.as_deref()));
@@ -2109,7 +2411,9 @@ fn row_to_state_machine_node_run(row: DbRow) -> ServiceResult<StateMachineNodeRu
         node_timeout_ms: db_optional_u64(&row, "node_timeout_ms")?,
         timeout_deadline_ms: db_optional_u64(&row, "timeout_deadline_ms")?,
         max_attempts: db_i32(&row, "max_attempts")?,
-        assignee_bot_id: db_string(&row, "assignee_bot_id")?,
+        assignee_bot_id: db_assignee_bot_id(&row)?,
+        outcome: db_optional_string(&row, "outcome")?,
+        responded_by: db_optional_string(&row, "responded_by")?,
         delivery_request_id: db_optional_string(&row, "delivery_request_id")?,
         bot_delivery_run_id: db_optional_string(&row, "bot_delivery_run_id")?,
         artifact_text: db_optional_string(&row, "artifact_text")?,
@@ -2341,7 +2645,9 @@ impl DbCollaborationTemplateRepo {
 }
 
 fn collect_string_column(rows: Vec<DbRow>, column: &str) -> ServiceResult<Vec<String>> {
-    rows.into_iter().map(|row| db_string(&row, column)).collect()
+    rows.into_iter()
+        .map(|row| db_string(&row, column))
+        .collect()
 }
 
 fn template_priority_from_row(row: &DbRow) -> ServiceResult<u32> {
@@ -2354,7 +2660,9 @@ fn template_priority_from_row(row: &DbRow) -> ServiceResult<u32> {
 }
 
 fn placeholders(count: usize) -> String {
-    std::iter::repeat_n("?", count).collect::<Vec<_>>().join(", ")
+    std::iter::repeat_n("?", count)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn env_and_ids_params(env: &str, ids: &[String]) -> Vec<DbValue> {
@@ -2373,6 +2681,11 @@ fn db_string(row: &DbRow, column: &str) -> ServiceResult<String> {
         .map_err(|error| ServiceError::InternalError(format!("{column}: {error}")))
 }
 
+fn db_assignee_bot_id(row: &DbRow) -> ServiceResult<Option<String>> {
+    let value = db_string(row, "assignee_bot_id")?;
+    Ok((!value.is_empty()).then_some(value))
+}
+
 fn db_optional_string(row: &DbRow, column: &str) -> ServiceResult<Option<String>> {
     db_get_column_opt(row, column)
         .map_err(|error| ServiceError::InternalError(format!("{column}: {error}")))
@@ -2389,9 +2702,8 @@ fn db_optional_i32(row: &DbRow, column: &str) -> ServiceResult<Option<i32>> {
 }
 
 fn db_u64(row: &DbRow, column: &str) -> ServiceResult<u64> {
-    db_optional_u64(row, column)?.ok_or_else(|| {
-        ServiceError::InternalError(format!("{column}: column is missing or NULL"))
-    })
+    db_optional_u64(row, column)?
+        .ok_or_else(|| ServiceError::InternalError(format!("{column}: column is missing or NULL")))
 }
 
 fn db_optional_u64(row: &DbRow, column: &str) -> ServiceResult<Option<u64>> {
@@ -2472,16 +2784,15 @@ fn node_mut<'a>(
     inner
         .nodes
         .get_mut(&(run_id.to_string(), node_id.to_string()))
-        .ok_or_else(|| ServiceError::InternalError(format!(
-            "state machine node not found: {run_id}/{node_id}"
-        )))
+        .ok_or_else(|| {
+            ServiceError::InternalError(format!("state machine node not found: {run_id}/{node_id}"))
+        })
 }
 
 fn run_is_running(inner: &StoreInner, run_id: &str) -> ServiceResult<bool> {
-    let run = inner
-        .runs
-        .get(run_id)
-        .ok_or_else(|| ServiceError::InternalError(format!("state machine run not found: {run_id}")))?;
+    let run = inner.runs.get(run_id).ok_or_else(|| {
+        ServiceError::InternalError(format!("state machine run not found: {run_id}"))
+    })?;
     Ok(run.status == StateMachineRunStatus::Running)
 }
 
@@ -2504,8 +2815,7 @@ mod tests {
     };
 
     async fn sqlite_template_repo()
-        -> Result<(Arc<dyn DbPlugin>, DbCollaborationTemplateRepo), Box<dyn std::error::Error>>
-    {
+    -> Result<(Arc<dyn DbPlugin>, DbCollaborationTemplateRepo), Box<dyn std::error::Error>> {
         let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new()?);
         db.execute(DbStatement::new(
             "CREATE TABLE bcs_collaboration_templates (
@@ -2543,8 +2853,7 @@ mod tests {
     }
 
     async fn sqlite_state_machine_store()
-        -> Result<(Arc<dyn DbPlugin>, MySqlCollaborationStore), Box<dyn std::error::Error>>
-    {
+    -> Result<(Arc<dyn DbPlugin>, MySqlCollaborationStore), Box<dyn std::error::Error>> {
         let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new()?);
         db.execute(DbStatement::new(
             "CREATE TABLE bcs_state_machine_runs (
@@ -2585,6 +2894,8 @@ mod tests {
                 timeout_deadline_ms INTEGER DEFAULT NULL,
                 max_attempts INTEGER NOT NULL DEFAULT 1,
                 assignee_bot_id TEXT NOT NULL,
+                outcome TEXT DEFAULT NULL,
+                responded_by TEXT DEFAULT NULL,
                 delivery_request_id TEXT DEFAULT NULL,
                 bot_delivery_run_id TEXT DEFAULT NULL,
                 artifact_text TEXT DEFAULT NULL,
@@ -2597,12 +2908,15 @@ mod tests {
         ))
         .await?;
 
-        Ok((db.clone(), MySqlCollaborationStore::sqlite(db, "dev".to_string())))
+        Ok((
+            db.clone(),
+            MySqlCollaborationStore::sqlite(db, "dev".to_string()),
+        ))
     }
 
     #[tokio::test]
-    async fn sqlite_store_marks_node_running_with_cas_sql(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn sqlite_store_marks_node_running_with_cas_sql() -> Result<(), Box<dyn std::error::Error>>
+    {
         let (_db, store) = sqlite_state_machine_store().await?;
         let run = StateMachineRun {
             run_id: "run-sqlite-cas".to_string(),
@@ -2628,7 +2942,9 @@ mod tests {
             node_timeout_ms: Some(120_000),
             timeout_deadline_ms: None,
             max_attempts: 2,
-            assignee_bot_id: "bot-a".to_string(),
+            assignee_bot_id: Some("bot-a".to_string()),
+            outcome: None,
+            responded_by: None,
             delivery_request_id: None,
             bot_delivery_run_id: None,
             artifact_text: None,
@@ -2739,8 +3055,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn template_repo_reads_only_active_public_templates(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn template_repo_reads_only_active_public_templates()
+    -> Result<(), Box<dyn std::error::Error>> {
         let (db, repo) = sqlite_template_repo().await?;
         insert_template(db.as_ref(), "public-template", "public", 10, "active").await?;
         insert_template(db.as_ref(), "private-template", "private", 20, "active").await?;
@@ -2793,9 +3109,21 @@ mod tests {
             repo.available_languages("private-template").await?,
             Vec::<String>::new()
         );
-        assert!(repo.get_raw_yaml("public-template", "zh-CN").await?.is_some());
-        assert!(repo.get_raw_yaml("private-template", "zh-CN").await?.is_none());
-        assert!(repo.get_raw_yaml("deleted-template", "zh-CN").await?.is_none());
+        assert!(
+            repo.get_raw_yaml("public-template", "zh-CN")
+                .await?
+                .is_some()
+        );
+        assert!(
+            repo.get_raw_yaml("private-template", "zh-CN")
+                .await?
+                .is_none()
+        );
+        assert!(
+            repo.get_raw_yaml("deleted-template", "zh-CN")
+                .await?
+                .is_none()
+        );
 
         Ok(())
     }
@@ -2864,7 +3192,9 @@ runtime:
             node_timeout_ms: Some(100),
             timeout_deadline_ms: Some(100),
             max_attempts: 1,
-            assignee_bot_id: "bot-a".to_string(),
+            assignee_bot_id: Some("bot-a".to_string()),
+            outcome: None,
+            responded_by: None,
             delivery_request_id: Some("delivery-a".to_string()),
             bot_delivery_run_id: None,
             artifact_text: None,
@@ -2891,16 +3221,12 @@ runtime:
             )
             .await
             .unwrap();
-        assert!(!store
-            .fail_node_attempt(
-                &run.run_id,
-                "node-a",
-                0,
-                "too late".to_string(),
-                900,
-            )
-            .await
-            .unwrap());
+        assert!(
+            !store
+                .fail_node_attempt(&run.run_id, "node-a", 0, "too late".to_string(), 900,)
+                .await
+                .unwrap()
+        );
         let expired_after_terminal = store
             .list_expired_running_node_runs(900, 500, 10)
             .await

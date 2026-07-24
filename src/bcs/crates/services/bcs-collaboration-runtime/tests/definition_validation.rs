@@ -246,11 +246,30 @@ runtime:
 
     let compiled = validate_definition(definition).expect("minimal definition should validate");
     assert_eq!(compiled.initial_nodes, vec!["answer".to_string()]);
-    let requires = compiled.definition.requires.expect("requires should be inferred");
-    assert!(requires.server_features.contains(&"state_machine.graph_mode.acyclic".to_string()));
-    assert!(requires.server_features.contains(&"state_machine.node.kind.bot_task".to_string()));
-    assert!(requires.server_features.contains(&"state_machine.transitions.complete".to_string()));
-    assert!(requires.bot_runtime_features.contains(&"delivery.chat_send_task_compat".to_string()));
+    let requires = compiled
+        .definition
+        .requires
+        .expect("requires should be inferred");
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.graph_mode.acyclic".to_string())
+    );
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.node.kind.bot_task".to_string())
+    );
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.transitions.complete".to_string())
+    );
+    assert!(
+        requires
+            .bot_runtime_features
+            .contains(&"delivery.chat_send_task_compat".to_string())
+    );
 }
 
 #[test]
@@ -262,7 +281,10 @@ fn validates_transition_based_risk_review_definition() {
     assert_eq!(compiled.initial_nodes, vec!["understand".to_string()]);
     assert_eq!(
         compiled.upstreams["synthesize"],
-        vec!["compliance_review".to_string(), "strategy_review".to_string()]
+        vec![
+            "compliance_review".to_string(),
+            "strategy_review".to_string()
+        ]
     );
 }
 
@@ -312,13 +334,18 @@ fn rejects_custom_outcome_transition_without_judge() {
         CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
         _ => panic!("expected state machine"),
     };
-    state_machine.nodes.get_mut("understand").expect("node").transitions.insert(
-        "approved".to_string(),
-        bcs_domain::StateMachineTransition {
-            targets: vec!["synthesize".to_string()],
-            guard: None,
-        },
-    );
+    state_machine
+        .nodes
+        .get_mut("understand")
+        .expect("node")
+        .transitions
+        .insert(
+            "approved".to_string(),
+            bcs_domain::StateMachineTransition {
+                targets: vec!["synthesize".to_string()],
+                guard: None,
+            },
+        );
 
     let error = validate_definition(definition).expect_err("custom outcomes are not executable");
     assert!(error.to_string().contains("transitions.complete"));
@@ -389,9 +416,20 @@ runtime:
         vec!["revise".to_string(), "synthesize".to_string()]
     );
     assert_eq!(compiled.upstreams["revise"], vec!["synthesize".to_string()]);
-    let requires = compiled.definition.requires.expect("requires should be inferred");
-    assert!(requires.server_features.contains(&"state_machine.node.judge".to_string()));
-    assert!(requires.server_features.contains(&"state_machine.outcome_transitions".to_string()));
+    let requires = compiled
+        .definition
+        .requires
+        .expect("requires should be inferred");
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.node.judge".to_string())
+    );
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.outcome_transitions".to_string())
+    );
 }
 
 #[test]
@@ -401,19 +439,334 @@ fn infers_judge_requires_without_capability_declaration() {
         CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
         _ => panic!("expected state machine"),
     };
-    state_machine.nodes.get_mut("understand").expect("node").judge =
-        Some(bcs_domain::JudgePolicy {
-            judge_type: Some("llm".to_string()),
-            criteria: vec!["是否完成理解".to_string()],
-            outcomes: vec!["complete".to_string()],
-            extensions: Default::default(),
-        });
+    state_machine
+        .nodes
+        .get_mut("understand")
+        .expect("node")
+        .judge = Some(bcs_domain::JudgePolicy {
+        judge_type: Some("llm".to_string()),
+        criteria: vec!["是否完成理解".to_string()],
+        outcomes: vec!["complete".to_string()],
+        extensions: Default::default(),
+    });
 
     let compiled = validate_definition(definition).expect("judge requires should be inferred");
-    let requires = compiled.definition.requires.expect("requires should be inferred");
+    let requires = compiled
+        .definition
+        .requires
+        .expect("requires should be inferred");
 
-    assert!(requires.server_features.contains(&"state_machine.node.judge".to_string()));
-    assert!(requires.server_features.contains(&"state_machine.outcome_transitions".to_string()));
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.node.judge".to_string())
+    );
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.outcome_transitions".to_string())
+    );
+}
+
+#[test]
+fn validates_human_input_with_natural_language_judge_outcomes() {
+    let compiled = validate_definition(human_review_definition())
+        .expect("human input definition should validate");
+
+    assert_eq!(compiled.initial_nodes, vec!["review".to_string()]);
+    let requires = compiled
+        .definition
+        .requires
+        .expect("requires should be inferred");
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.node.kind.human_input".to_string())
+    );
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.outcome_transitions".to_string())
+    );
+}
+
+#[test]
+fn validates_human_input_without_judge_uses_complete_transition() {
+    let mut definition = human_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine.nodes.remove("revise");
+    let review = state_machine.nodes.get_mut("review").expect("review node");
+    review.judge = None;
+    review.transitions.clear();
+    review.transitions.insert(
+        "complete".to_string(),
+        bcs_domain::StateMachineTransition {
+            targets: vec!["publish".to_string()],
+            guard: None,
+        },
+    );
+
+    validate_definition(definition).expect("judge-less human input should validate");
+}
+
+#[test]
+fn validates_multiple_human_inputs_with_explicit_dependency_order() {
+    let definition: CollaborationDefinition = serde_yaml::from_str(
+        r#"
+name: Sequential Human Review
+participants:
+  driver:
+    bot_id: risk_driver_bot
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    nodes:
+      first_review:
+        kind: human_input
+        display_name: 第一次评审
+        instruction: 请完成第一次评审。
+        node_timeout_ms: 60000
+        transitions:
+          complete: { targets: [second_review] }
+      second_review:
+        kind: human_input
+        display_name: 第二次评审
+        instruction: 请完成第二次评审。
+        node_timeout_ms: 60000
+        transitions:
+          complete: { targets: [publish] }
+      publish:
+        kind: bot_task
+        display_name: 发布
+        assignee:
+          type: bot_binding
+          binding: driver
+        instruction: 发布结果。
+        final_output: true
+"#,
+    )
+    .expect("fixture should parse");
+
+    validate_definition(definition).expect("ordered HumanInput nodes should validate");
+}
+
+#[test]
+fn rejects_human_inputs_that_may_wait_concurrently() {
+    let definition: CollaborationDefinition = serde_yaml::from_str(
+        r#"
+name: Parallel Human Review
+participants:
+  driver:
+    bot_id: risk_driver_bot
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    nodes:
+      prepare:
+        kind: bot_task
+        display_name: 准备材料
+        assignee:
+          type: bot_binding
+          binding: driver
+        instruction: 准备评审材料。
+        transitions:
+          complete: { targets: [review_a, review_b] }
+      review_a:
+        kind: human_input
+        display_name: A 评审
+        instruction: 完成 A 评审。
+        node_timeout_ms: 60000
+        transitions:
+          complete: { targets: [publish] }
+      review_b:
+        kind: human_input
+        display_name: B 评审
+        instruction: 完成 B 评审。
+        node_timeout_ms: 60000
+        transitions:
+          complete: { targets: [publish] }
+      publish:
+        kind: bot_task
+        display_name: 发布
+        assignee:
+          type: bot_binding
+          binding: driver
+        instruction: 发布结果。
+        final_output: true
+"#,
+    )
+    .expect("fixture should parse");
+
+    let error = validate_definition(definition)
+        .expect_err("parallel HumanInput nodes must be rejected in MVP");
+    assert!(error.to_string().contains("may wait concurrently"));
+}
+
+#[test]
+fn rejects_human_input_bot_assignee() {
+    let mut definition = human_review_definition();
+    human_node_mut(&mut definition).assignee = Some(bcs_domain::StateMachineAssignee::BotBinding {
+        binding: "driver".to_string(),
+    });
+
+    let error = validate_definition(definition).expect_err("human assignee must be rejected");
+    assert!(error.to_string().contains("must not define assignee"));
+}
+
+#[test]
+fn rejects_human_input_without_explicit_timeout() {
+    let mut definition = human_review_definition();
+    human_node_mut(&mut definition).node_timeout_ms = None;
+
+    let error = validate_definition(definition).expect_err("human timeout is required");
+    assert!(error.to_string().contains("node_timeout_ms is required"));
+}
+
+#[test]
+fn rejects_human_input_attempts_and_final_output() {
+    let mut with_attempts = human_review_definition();
+    human_node_mut(&mut with_attempts).max_attempts = Some(2);
+    let error = validate_definition(with_attempts).expect_err("human attempts must be rejected");
+    assert!(error.to_string().contains("must not define max_attempts"));
+
+    let mut final_output = human_review_definition();
+    human_node_mut(&mut final_output).final_output = true;
+    let error = validate_definition(final_output).expect_err("human final output must be rejected");
+    assert!(error.to_string().contains("must not be final_output"));
+}
+
+#[test]
+fn rejects_duplicate_or_mismatched_human_judge_outcomes() {
+    let mut duplicate = human_review_definition();
+    human_node_mut(&mut duplicate)
+        .judge
+        .as_mut()
+        .expect("judge")
+        .outcomes
+        .push("approved".to_string());
+    let error = validate_definition(duplicate).expect_err("duplicate outcome must be rejected");
+    assert!(error.to_string().contains("duplicate judge outcome"));
+
+    let mut missing_transition = human_review_definition();
+    human_node_mut(&mut missing_transition)
+        .transitions
+        .remove("rejected");
+    let error =
+        validate_definition(missing_transition).expect_err("missing transition must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("judge outcome has no transition")
+    );
+
+    let mut undeclared_transition = human_review_definition();
+    human_node_mut(&mut undeclared_transition)
+        .transitions
+        .insert(
+            "manual".to_string(),
+            bcs_domain::StateMachineTransition::default(),
+        );
+    let error = validate_definition(undeclared_transition)
+        .expect_err("undeclared transition must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("transition outcome is not declared")
+    );
+}
+
+#[test]
+fn human_input_does_not_bypass_cycle_rejection() {
+    let mut definition = human_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine
+        .nodes
+        .get_mut("revise")
+        .expect("revise")
+        .transitions
+        .insert(
+            "complete".to_string(),
+            bcs_domain::StateMachineTransition {
+                targets: vec!["review".to_string()],
+                guard: None,
+            },
+        );
+
+    let error = validate_definition(definition).expect_err("cycle must still be rejected");
+    assert!(error.to_string().contains("must be acyclic"));
+}
+
+fn human_node_mut(
+    definition: &mut CollaborationDefinition,
+) -> &mut bcs_domain::StateMachineNodeDefinition {
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine.nodes.get_mut("review").expect("review node")
+}
+
+fn human_review_definition() -> CollaborationDefinition {
+    serde_yaml::from_str(
+        r#"
+api_version: bcs.collaboration/v1
+id: human_review
+version: 1
+name: Human Review
+participants:
+  driver:
+    bot_id: risk_driver_bot
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 3
+    nodes:
+      review:
+        kind: human_input
+        display_name: 人工评审
+        instruction: 请直接回复自然语言评审意见。
+        node_timeout_ms: 60000
+        judge:
+          type: llm
+          criteria:
+            - 是否可以发布
+          outcomes: [approved, rejected]
+        transitions:
+          approved: { targets: [publish] }
+          rejected: { targets: [revise] }
+      publish:
+        kind: bot_task
+        display_name: 发布
+        assignee:
+          type: bot_binding
+          binding: driver
+        instruction: 发布结果。
+        final_output: true
+      revise:
+        kind: bot_task
+        display_name: 修订
+        assignee:
+          type: bot_binding
+          binding: driver
+        instruction: 根据人工意见修订一次。
+        transitions:
+          complete: { targets: [publish] }
+"#,
+    )
+    .expect("human review fixture should parse")
 }
 
 #[test]
