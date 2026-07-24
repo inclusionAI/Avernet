@@ -14,6 +14,8 @@ use bytes::Bytes;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 
+pub use bcs_domain::ActorRef;
+
 pub type ByteStream = Box<dyn ByteStreamTrait + Send + Unpin>;
 
 pub trait ByteStreamTrait: Stream<Item = Result<Bytes, std::io::Error>> + Send + Unpin {}
@@ -124,7 +126,7 @@ pub trait StoragePlugin: Send + Sync + 'static {
     /// Cheap, sync, no IO. Returns a value precomputed at construction.
     fn capabilities(&self) -> StorageCapabilities;
 
-    async fn prepare_upload(&self, req: UploadPrepareRequest) -> Result<PreparedUpload, StorageError>;
+    async fn prepare_upload(&self, req: UploadPrepareRequest, caller: Option<&ActorRef>) -> Result<PreparedUpload, StorageError>;
     async fn stream_upload(
         &self,
         handle: &UploadHandle,
@@ -139,6 +141,7 @@ pub trait StoragePlugin: Send + Sync + 'static {
         &self,
         handle: &StorageHandle,
         ttl_secs: u64,
+        caller: Option<&ActorRef>,
     ) -> Result<PresignGetTicket, StorageError>;
     async fn delete(&self, handle: &StorageHandle) -> Result<(), StorageError>;
 

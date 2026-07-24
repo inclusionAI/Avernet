@@ -1,3 +1,4 @@
+use bcs_domain::{ActorKind, ActorRef};
 use bcs_storage_api::{ClientUploadTarget, StoragePlugin, UploadMode, UploadPrepareRequest};
 use bcs_storage_baas::{config::BaasConfig, BaasStoragePlugin};
 use serde_json::json;
@@ -44,7 +45,7 @@ async fn prepare_single_returns_direct_url_and_transfer_id() {
         .await;
 
     let p = plugin(server.uri());
-    let r = p.prepare_upload(req(5)).await.unwrap();
+    let r = p.prepare_upload(req(5), None).await.unwrap();
     assert_eq!(r.handle.backend, "baas");
     // backend_handle only durable locator (no upload_url persisted)
     assert_eq!(r.handle.backend_handle["transfer_id"], "t-single");
@@ -83,7 +84,7 @@ async fn prepare_multipart_returns_parts_and_null_top_url() {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let r = p.prepare_upload(req(20 * 1024 * 1024)).await.unwrap();
+    let r = p.prepare_upload(req(20 * 1024 * 1024), None).await.unwrap();
     assert_eq!(r.handle.backend_handle["transfer_id"], "t-multi");
     assert_eq!(r.handle.backend_handle["type"], "MULTIPART");
     // Fixture sends expires_at: null → fallback must be an absolute future
@@ -140,7 +141,33 @@ async fn prepare_session_id_with_colon_is_percent_encoded() {
     // session_id_from_key takes 3rd segment "bcs_grp_abc:cdf28232";
     // percent_encode_path encodes ':'→"%3A" but keeps '_', 'a-z' →
     // "bcs_grp_abc%3Acdf28232" (matching the mock path).
-    let res = p.prepare_upload(r).await.unwrap();
+    let res = p.prepare_upload(r, None).await.unwrap();
     // Only assert the request path was correct (mock match enforces it; 404 otherwise).
     assert_eq!(res.handle.backend_handle["transfer_id"], "t");
+}
+
+#[tokio::test]
+async fn prepare_passes_caller_as_operator() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/sessions/teamclaw/sid/files/upload-url"))
+        .and(body_partial_json(
+            json!({"operator": "human:human_123"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "code":0,"message":"success","data":{
+                "upload_url":"https://oss/x","transfer_id":"t-operator",
+                "http_method":"PUT","expires_at":"2026-07-23T12:00:00Z","type":"SINGLE"
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let p = plugin(server.uri());
+    let caller = Some(&ActorRef {
+        actor_kind: ActorKind::Human,
+        actor_id: "human_123".into(),
+    });
+    let r = p.prepare_upload(req(5), caller).await.unwrap();
+    assert_eq!(r.handle.backend_handle["transfer_id"], "t-operator");
 }

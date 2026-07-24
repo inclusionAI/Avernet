@@ -12,6 +12,7 @@ pub use factory::BaasStoragePluginFactory;
 pub use handle::{BaasPendingHandle, BaasReadyHandle};
 
 use async_trait::async_trait;
+use bcs_domain::{ActorKind, ActorRef};
 use bcs_storage_api::{
     ByteStream, ClientUploadTarget, PresignGetTicket, PreparedUpload, StorageCapabilities,
     StorageError, StorageHandle, StorageHealth, StorageObjectMeta, StoragePlugin, UploadHandle,
@@ -181,13 +182,27 @@ fn now_unix_secs() -> u64 {
         .unwrap_or(0)
 }
 
+fn actor_kind_str(kind: ActorKind) -> &'static str {
+    match kind {
+        ActorKind::Bot => "bot",
+        ActorKind::Human => "human",
+    }
+}
+
+fn operator_str(caller: Option<&ActorRef>) -> String {
+    match caller {
+        Some(a) => format!("{}:{}", actor_kind_str(a.actor_kind), a.actor_id),
+        None => "bcs".to_string(),
+    }
+}
+
 #[async_trait]
 impl StoragePlugin for BaasStoragePlugin {
     fn backend_name(&self) -> &'static str { "baas" }
 
     fn capabilities(&self) -> StorageCapabilities { self.caps }
 
-    async fn prepare_upload(&self, req: UploadPrepareRequest) -> Result<PreparedUpload, StorageError> {
+    async fn prepare_upload(&self, req: UploadPrepareRequest, caller: Option<&ActorRef>) -> Result<PreparedUpload, StorageError> {
         let session_id = session_id_from_key(&req.key);
         let base = self.base_for_session(session_id);
         let body = serde_json::json!({
@@ -195,7 +210,7 @@ impl StoragePlugin for BaasStoragePlugin {
             "file_size": req.size,
             "expire_seconds": req.ttl_secs,
             "staging_subdir": serde_json::Value::Null,
-            "operator": "bcs",
+            "operator": operator_str(caller),
         });
         let resp = self
             .auth(self.http.post(format!("{base}/upload-url")).json(&body))
@@ -283,14 +298,14 @@ impl StoragePlugin for BaasStoragePlugin {
     async fn get_stream(&self, _h: &StorageHandle) -> Result<ByteStream, StorageError> {
         Err(StorageError::Unsupported("baas")) // presign_download backend: 302 path used instead
     }
-    async fn presign_get(&self, handle: &StorageHandle, ttl_secs: u64) -> Result<PresignGetTicket, StorageError> {
+    async fn presign_get(&self, handle: &StorageHandle, ttl_secs: u64, caller: Option<&ActorRef>) -> Result<PresignGetTicket, StorageError> {
         let ready: BaasReadyHandle = serde_json::from_value(handle.backend_handle.clone())
             .or_else(|_| serde_json::from_value::<BaasPendingHandle>(handle.backend_handle.clone())
                         .map(|p| BaasReadyHandle { transfer_id: p.transfer_id }))
             .map_err(|e| StorageError::Backend(e.into()))?;
         let session_id = session_id_from_key(&handle.key);
         let base = self.base_for_session(session_id);
-        let body = serde_json::json!({ "expire_seconds": ttl_secs, "operator": "bcs" });
+        let body = serde_json::json!({ "expire_seconds": ttl_secs, "operator": operator_str(caller) });
         let resp = self.auth(self.http.post(format!("{base}/transfers/{}/share-link",
                     percent_encode_path(&ready.transfer_id))).json(&body)).send().await
             .map_err(|e| StorageError::Backend(e.into()))?;

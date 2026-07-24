@@ -18,7 +18,7 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 
 pub use bcs_storage_api::{
-    ByteStream, ByteStreamTrait, ClientUploadTarget, PreparedUpload, PresignGetTicket,
+    ActorRef, ByteStream, ByteStreamTrait, ClientUploadTarget, PreparedUpload, PresignGetTicket,
     StorageCapabilities, StorageError, StorageHandle, StorageHealth, StorageObjectMeta,
     StoragePlugin, UploadHandle, UploadPrepareRequest,
 };
@@ -128,7 +128,7 @@ impl StoragePlugin for LocalStoragePlugin {
         self.caps
     }
 
-    async fn prepare_upload(&self, req: UploadPrepareRequest) -> Result<PreparedUpload, StorageError> {
+    async fn prepare_upload(&self, req: UploadPrepareRequest, _caller: Option<&ActorRef>) -> Result<PreparedUpload, StorageError> {
         let final_path = self.final_path(&req.key);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -400,6 +400,7 @@ impl StoragePlugin for LocalStoragePlugin {
         &self,
         _handle: &StorageHandle,
         _ttl_secs: u64,
+        _caller: Option<&ActorRef>,
     ) -> Result<PresignGetTicket, StorageError> {
         Err(StorageError::Unsupported("local"))
     }
@@ -491,7 +492,7 @@ mod tests {
     #[tokio::test]
     async fn multipart_missing_part_yields_conflict() {
         let (p, _dir) = plugin();
-        let prep = p.prepare_upload(req("k1", 6)).await.unwrap();
+        let prep = p.prepare_upload(req("k1", 6), None).await.unwrap();
         // Upload part 1 only — part 2 never arrives.
         p.stream_upload(&prep.handle, Some(1), stream_of(Bytes::from_static(b"abc")))
             .await
@@ -503,7 +504,7 @@ mod tests {
     #[tokio::test]
     async fn abort_removes_temp_files() {
         let (p, _dir) = plugin();
-        let prep = p.prepare_upload(req("k2", 3)).await.unwrap();
+        let prep = p.prepare_upload(req("k2", 3), None).await.unwrap();
         p.stream_upload(&prep.handle, None, stream_of(Bytes::from_static(b"abc")))
             .await
             .unwrap();
@@ -521,7 +522,7 @@ mod tests {
             key: "k3".into(),
             backend_handle: serde_json::Value::Null,
         };
-        let err = p.presign_get(&h, 300).await.unwrap_err();
+        let err = p.presign_get(&h, 300, None).await.unwrap_err();
         assert!(matches!(err, StorageError::Unsupported("local")));
     }
 
@@ -545,7 +546,7 @@ mod tests {
         // scan dir is a nested path that was never created.
         let (p, _dir) = plugin();
         let prepared = p
-            .prepare_upload(req("session-files/test/sid/fid/free_chat.png", 100))
+            .prepare_upload(req("session-files/test/sid/fid/free_chat.png", 100), None)
             .await
             .unwrap();
         assert!(p.abort_upload(&prepared.handle).await.is_ok());
@@ -559,7 +560,7 @@ mod tests {
         // dir is a state conflict (no parts), not a backend error.
         let (p, _dir) = plugin();
         let prepared = p
-            .prepare_upload(req("session-files/test/sid/fid/no-parts.bin", 100))
+            .prepare_upload(req("session-files/test/sid/fid/no-parts.bin", 100), None)
             .await
             .unwrap();
         let err = p.complete_upload(&prepared.handle).await.unwrap_err();
@@ -592,7 +593,7 @@ mod tests {
         let body = Bytes::from_static(b"hello slashed key");
         let size = body.len() as u64;
 
-        let prep = p.prepare_upload(req(key, size)).await.unwrap();
+        let prep = p.prepare_upload(req(key, size), None).await.unwrap();
         p.stream_upload(&prep.handle, None, stream_of(body.clone()))
             .await
             .unwrap();
@@ -668,7 +669,7 @@ mod tests {
     async fn stream_upload_rejects_oversize() {
         let (p, _dir) = plugin();
         // Prepare size 5, stream 6 bytes.
-        let prep = p.prepare_upload(req("k-oversize", 5)).await.unwrap();
+        let prep = p.prepare_upload(req("k-oversize", 5), None).await.unwrap();
         let err = p
             .stream_upload(
                 &prep.handle,

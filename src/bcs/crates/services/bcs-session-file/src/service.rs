@@ -254,7 +254,7 @@ impl SessionFileService for SessionFileServiceImpl {
         let prepared: PreparedUpload = self
             .cfg
             .storage
-            .prepare_upload(req)
+            .prepare_upload(req, Some(&cmd.caller))
             .await
             .map_err(map_storage_err)?;
         let handle_json = serde_json::to_string(&prepared.handle)
@@ -556,7 +556,11 @@ impl SessionFileService for SessionFileServiceImpl {
             let ticket: PresignGetTicket = self
                 .cfg
                 .storage
-                .presign_get(&handle, ttl)
+                // share/in-session download has no caller at this layer (share
+                // path is unauthenticated); baas falls back to operator "bcs".
+                // Wiring caller into download_route would cascade through
+                // SessionFileService trait — deferred.
+                .presign_get(&handle, ttl, None)
                 .await
                 .map_err(map_storage_err)?;
             Ok((row, DownloadRoute { presign: Some(ticket) }))
@@ -1687,8 +1691,9 @@ mod tests {
         async fn prepare_upload(
             &self,
             req: UploadPrepareRequest,
+            caller: Option<&ActorRef>,
         ) -> Result<PreparedUpload, StorageError> {
-            self.inner.prepare_upload(req).await
+            self.inner.prepare_upload(req, caller).await
         }
         async fn stream_upload(
             &self,
@@ -1714,8 +1719,9 @@ mod tests {
             &self,
             handle: &StorageHandle,
             ttl_secs: u64,
+            caller: Option<&ActorRef>,
         ) -> Result<PresignGetTicket, StorageError> {
-            self.inner.presign_get(handle, ttl_secs).await
+            self.inner.presign_get(handle, ttl_secs, caller).await
         }
         async fn delete(&self, _handle: &StorageHandle) -> Result<(), StorageError> {
             Err(StorageError::Backend(anyhow::anyhow!("forced delete failure")))
@@ -1750,6 +1756,7 @@ mod tests {
         async fn prepare_upload(
             &self,
             req: UploadPrepareRequest,
+            _caller: Option<&ActorRef>,
         ) -> Result<PreparedUpload, StorageError> {
             Ok(PreparedUpload {
                 handle: UploadHandle {
@@ -1795,6 +1802,7 @@ mod tests {
             &self,
             _: &StorageHandle,
             t: u64,
+            _caller: Option<&ActorRef>,
         ) -> Result<PresignGetTicket, StorageError> {
             Ok(PresignGetTicket {
                 download_url: "x".into(),

@@ -8,6 +8,7 @@ publish     = false
 [dependencies]
 async-trait      = { workspace = true }
 anyhow           = { workspace = true }
+bcs-domain       = { workspace = true }
 bcs-storage-api  = { workspace = true }
 reqwest          = { workspace = true }
 serde            = { workspace = true }
