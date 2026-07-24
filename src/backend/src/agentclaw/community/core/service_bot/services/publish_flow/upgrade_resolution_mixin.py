@@ -21,6 +21,20 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+# BaaS bot statuses under which the previous online bot is NOT a valid in-place
+# UPGRADE (UPDATE) target — the bot is gone or not live, so re-publish must take
+# the first-release (CREATE) path instead.
+#
+# The critical case is ``STOPPED``: offlining a SUCCESS publish tears down the
+# online bot via a BaaS STOP, which for a TeClaw device physically destroys the
+# underlying bot and leaves ``baas_bot.status = STOPPED`` (not ``RELEASED``).
+# Treating only ``RELEASED`` as "gone" let a ``STOPPED`` previous bot slip
+# through as an UPGRADE target, so the re-publish issued an UPDATE against the
+# destroyed device and failed permanently with ``DEVICE_NOT_FOUND``.
+_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES = frozenset(
+    {"RELEASED", "STOPPED", "STOPPING", "FAILED"}
+)
+
 
 class UpgradeResolutionMixin:
     """Decide first-release vs. upgrade for the verify and online stages."""
@@ -107,6 +121,10 @@ class UpgradeResolutionMixin:
         1. The current publish record has a valid last_pub_id
         2. The previous publish record exists
         3. The previous publish record's status is released (i.e. PublishStatus.SUCCESS)
+        4. The previous online bot is still live in BaaS — its ``baas_bot_status``
+           is not one of the gone/not-live statuses in
+           ``_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES`` (notably ``STOPPED``, which
+           is what an offline teardown leaves behind on a destroyed TeClaw bot).
 
         Otherwise, uniformly treat it as a first release and create a new online Bot.
         """
@@ -142,7 +160,12 @@ class UpgradeResolutionMixin:
 
         baas_status_result = self.get_publish_bot_status(last_pub_id, PublishStage.ONLINE)
         baas_status = baas_status_result.get("baas_bot_status")
-        if baas_status == "RELEASED":
+        if baas_status in _ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES:
+            logger.info(
+                f"[PublishFlowService._should_upgrade_online] "
+                f"Previous online bot is gone/not live, fallback to first release: "
+                f"last_pub_id={last_pub_id}, baas_bot_status={baas_status}"
+            )
             return False
 
         return True

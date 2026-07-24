@@ -59,6 +59,16 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+# Error codes for which BaaS is telling us an upgrade's target bot is gone, so
+# the deploy atom must self-heal with a fresh first release rather than fail.
+# ``BOT_NOT_FOUND``: the bot record is gone. ``DEVICE_NOT_FOUND``: the
+# underlying device is gone — e.g. a TeClaw bot whose device was physically
+# destroyed by an offline STOP. Kept in sync with ``BOT_GONE_ERROR_CODES`` in
+# ``publish_flow.operation_runner`` (which classifies the returned result);
+# duplicated locally to keep this lower-level service free of a dependency on
+# the publish-flow orchestration package.
+_BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
+
 
 class BotBuildServiceError(Exception):
     """Bot build service error."""
@@ -1108,9 +1118,15 @@ class BotBuildService:
         except Exception as e:
             error_info = self._extract_baas_error_info(e)
             error_code = error_info.get("error_code")
-            if error_code == "BOT_NOT_FOUND":
+            # BaaS signals a gone upgrade target as either BOT_NOT_FOUND (bot
+            # record gone) or DEVICE_NOT_FOUND (underlying device gone — e.g. a
+            # TeClaw bot whose device was destroyed by an offline STOP). Surface
+            # both as a structured failure so the deploy atom classifies it and
+            # the caller self-heals with a fresh first release, instead of
+            # letting DEVICE_NOT_FOUND raise and fail the publish outright.
+            if error_code in _BOT_GONE_ERROR_CODES:
                 logger.warning(
-                    f"[BotBuildService.upgrade] Upgrade hit BOT_NOT_FOUND: "
+                    f"[BotBuildService.upgrade] Upgrade hit {error_code}: "
                     f"bot_uuid={bot_uuid}, error_info={error_info}"
                 )
                 return {

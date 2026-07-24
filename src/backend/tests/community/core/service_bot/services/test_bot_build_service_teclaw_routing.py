@@ -267,6 +267,39 @@ def test_upgrade_teclaw_with_no_artifact_raises():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("error_code", ["BOT_NOT_FOUND", "DEVICE_NOT_FOUND"])
+def test_upgrade_teclaw_gone_bot_returns_structured_failure(error_code):
+    """Regression (#435): a teclaw upgrade against a destroyed device answers
+    with ``DEVICE_NOT_FOUND`` (a STOP physically destroys the TeClaw bot). Both
+    that and ``BOT_NOT_FOUND`` must surface as a structured ``success: False``
+    result — not a raised ``BotBuildServiceError`` — so the deploy atom
+    classifies it and self-heals with a fresh first release."""
+    from agentclaw.community.core.service_bot.services.baas_service import (
+        BaasServiceError,
+    )
+
+    svc, baas = _svc("teclaw")
+    err = BaasServiceError(f"BaaS API error: 404 - {error_code}")
+    err.response = MagicMock()
+    err.response.json.return_value = {
+        "detail": {"error_code": error_code, "message": "bot not found"}
+    }
+    baas.update_teclaw_bot.side_effect = err
+
+    result = svc.upgrade(
+        "BOT-t", _BOT, user_id="u1", migration_path="",
+        publish_stage=PublishStage.ONLINE, delivery=DeliveryArtifact(_ARTIFACT),
+    )
+
+    assert result == {
+        "success": False,
+        "error_code": error_code,
+        "message": "bot not found",
+        "bot_uuid": "BOT-t",
+    }
+
+
+@pytest.mark.unit
 def test_upgrade_routes_arca_to_upgrade_bot_unchanged():
     svc, baas = _svc("baas")
     svc.upgrade(

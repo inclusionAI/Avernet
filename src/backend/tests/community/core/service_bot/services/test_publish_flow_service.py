@@ -297,6 +297,27 @@ def test_should_upgrade_online_requires_last_publish_success():
     assert svc._should_upgrade_online(publish_record) is False
 
 
+@pytest.mark.parametrize("baas_status", ["RELEASED", "STOPPED", "STOPPING", "FAILED"])
+def test_should_upgrade_online_forces_first_release_when_prev_bot_gone(baas_status):
+    """Regression (#435): an offlined SUCCESS publish leaves its online bot
+    ``STOPPED`` (a TeClaw STOP physically destroys the device), not
+    ``RELEASED``. The upgrade guard must treat every gone/not-live status —
+    not only ``RELEASED`` — as first-release, or the re-publish issues an
+    UPDATE against the destroyed bot and fails with ``DEVICE_NOT_FOUND``."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(last_pub_id=10)
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=10,
+        status=PublishStatus.RELEASED.value,
+    )
+    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': baas_status})
+    assert svc._should_upgrade_online(publish_record) is False
+
+
 # (#197 all-auto) approve_baas_publish was removed — every BaaS mutation is
 # auto-approved server-side, so there is no client approve method to test.
 
@@ -323,6 +344,47 @@ async def test_execute_release_phase_falls_back_to_first_release_when_last_publi
 
     # DI refactor replaced the module-level get_bot_service() shim with
     # the injected self._bot_service; set it directly instead of patching.
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    svc._bot_service = bot_service
+    svc._execute_first_release = AsyncMock(return_value='FIRST')
+    svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
+
+    result = await svc.execute_release_phase(publish_record, operator='u1')
+
+    assert result == 'FIRST'
+    svc._execute_first_release.assert_awaited_once()
+    svc._execute_upgrade_release.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_release_phase_first_release_when_offlined_online_bot_stopped():
+    """Regression (#435): the full offline→re-publish cycle. Offlining a SUCCESS
+    publish marks it RELEASED and tears its online bot down via a BaaS STOP —
+    which physically destroys the TeClaw device but leaves ``baas_bot`` STOPPED.
+    The re-publish's online stage must resolve to a fresh CREATE (first release),
+    not an UPDATE against the destroyed bot (which would 404 DEVICE_NOT_FOUND)."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    # The re-publish record (v2) points back at the offlined publish (5724 → id=10).
+    publish_record = _make_publish_record(
+        id=2,
+        status=PublishStatus.VALIDATING.value,
+        source_bot_id='bot-source',
+        last_pub_id=10,
+        ext={'migration_path': '/tmp/migration'},
+    )
+    # The previous publish is RELEASED (offline flipped SUCCESS→RELEASED)...
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=10,
+        status=PublishStatus.RELEASED.value,
+    )
+    # ...and its online bot is STOPPED, not RELEASED (the offline STOP leaves it so).
+    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': 'STOPPED'})
+
     bot_service = Mock()
     bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
     svc._bot_service = bot_service
