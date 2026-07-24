@@ -22,7 +22,7 @@ from secbaas.community.api.bot_runtime import (
     GetUploadUrlResponse,
     NoActiveDevicesError,
     NoDevicesFoundError,
-    OssObjectNotFoundError,
+    StagingObjectNotFoundError,
     ShareLinkRequest,
     ShareLinkResponse,
     TransferNotFoundError,
@@ -290,7 +290,7 @@ async def complete_upload(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
         )
-    except OssObjectNotFoundError as e:
+    except StagingObjectNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
