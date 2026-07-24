@@ -98,6 +98,21 @@ class _Layout:
 
     @classmethod
     def for_engine(cls, engine: str, home: Path) -> "_Layout":
+        if engine == "hermes":
+            workspace = home / ".hermes" / "workspace"
+            legacy_root = home / ".hermes" / "skills"
+            legacy_local = workspace / "skills" / "skills-local"
+            pool_root = workspace / "skills-pool"
+            return cls(
+                legacy_root=legacy_root,
+                legacy_local=legacy_local,
+                pool_root=pool_root,
+                pool_local=pool_root / "skills-local",
+                pool_repo=pool_root / "skills-repo",
+                legacy_repo=home / ".hermes" / "skills-repo",
+                local_bridge=legacy_root / "skills-local",
+                repo_bridge=home / ".hermes" / "skills-repo",
+            )
         if engine == "aicoding":
             workspace = home / ".aicoding" / "workspace"
             legacy_root = home / ".claude" / "skills"
@@ -255,7 +270,13 @@ def _mapping_plan(
         if not reason and (
             not target.is_absolute()
             or target.parent != layout.legacy_root
-            or target in {layout.legacy_local, layout.legacy_repo}
+            or target
+            in {
+                layout.legacy_local,
+                layout.legacy_repo,
+                layout.local_bridge,
+                layout.repo_bridge,
+            }
         ):
             reason = "target_invalid"
         elif not reason and target in desired and desired[target] != source:
@@ -689,6 +710,30 @@ def activate_aicoding_pool(
     )
 
 
+def activate_hermes_pool(
+    *,
+    migration_generation: str,
+    preparation_id: str,
+    registered_local_names: list[str],
+    mappings: list[SkillMapping],
+    home: str | Path = "/home/admin",
+    repo_is_mounted: Callable[[Path], bool] | None = None,
+    exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+    before_post_sync: Callable[[], None] | None = None,
+) -> PoolActivationResult:
+    return _activate_pool(
+        engine="hermes",
+        migration_generation=migration_generation,
+        preparation_id=preparation_id,
+        registered_local_names=registered_local_names,
+        mappings=mappings,
+        home=home,
+        repo_is_mounted=repo_is_mounted,
+        exchange_paths=exchange_paths,
+        before_post_sync=before_post_sync,
+    )
+
+
 def verify_skill_mappings(
     *,
     mappings: list[SkillMapping],
@@ -805,6 +850,7 @@ __all__ = [
     "SkillMapping",
     "activate_aicoding_pool",
     "activate_claude_code_pool",
+    "activate_hermes_pool",
     "activate_openclaw_pool",
     "atomic_exchange_paths",
     "publish_pool_mappings",

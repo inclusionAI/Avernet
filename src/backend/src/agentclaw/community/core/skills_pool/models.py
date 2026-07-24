@@ -36,7 +36,19 @@ class AICodingPoolPaths:
     pool_repo: str = "/home/admin/.aicoding/workspace/skills-pool/skills-repo"
 
 
-PoolPaths = OpenClawPoolPaths | ClaudeCodePoolPaths | AICodingPoolPaths
+@dataclass(frozen=True, slots=True)
+class HermesPoolPaths:
+    """Hermes P3 的容器视角路径契约。"""
+
+    active: str = "/home/admin/.hermes/skills"
+    legacy_local: str = "/home/admin/.hermes/workspace/skills/skills-local"
+    pool_local: str = "/home/admin/.hermes/workspace/skills-pool/skills-local"
+    pool_repo: str = "/home/admin/.hermes/workspace/skills-pool/skills-repo"
+
+
+PoolPaths = (
+    OpenClawPoolPaths | ClaudeCodePoolPaths | AICodingPoolPaths | HermesPoolPaths
+)
 
 
 def pool_paths_for_engine(engine: str) -> PoolPaths:
@@ -48,6 +60,8 @@ def pool_paths_for_engine(engine: str) -> PoolPaths:
         return ClaudeCodePoolPaths()
     if engine == "aicoding":
         return AICodingPoolPaths()
+    if engine == "hermes":
+        return HermesPoolPaths()
     raise ValueError(f"engine Pool layout not implemented: {engine}")
 
 
@@ -104,6 +118,7 @@ class PoolCutoverResult:
 __all__ = [
     "AICodingPoolPaths",
     "ClaudeCodePoolPaths",
+    "HermesPoolPaths",
     "OpenClawPoolPaths",
     "PoolPaths",
     "PoolCutoverResult",

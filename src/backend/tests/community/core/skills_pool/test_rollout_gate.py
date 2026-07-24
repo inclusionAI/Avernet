@@ -178,7 +178,7 @@ def test_non_pool_engine_never_matches(engine_type: str) -> None:
     )
 
 
-@pytest.mark.parametrize("engine_type", ["openclaw", "aicoding"])
+@pytest.mark.parametrize("engine_type", ["openclaw", "aicoding", "hermes"])
 def test_service_draft_is_editable_but_published_service_is_not(
     engine_type: str,
 ) -> None:
