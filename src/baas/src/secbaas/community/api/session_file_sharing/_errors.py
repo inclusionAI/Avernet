@@ -24,10 +24,6 @@ class SessionFileSharingError(DomainError):
     error_code = "SESSION_FILE_SHARING_ERROR"
     http_status = 400
 
-    def __init__(self, message: str = ""):
-        self.message = message
-        super().__init__(message)
-
 
 class SourceTransferNotFoundError(SessionFileSharingError):
     """The source transfer referenced in a share-link request does not exist.
@@ -70,7 +66,7 @@ class SourceTransferNotReadyError(SessionFileSharingError):
 # ---------------------------------------------------------------------------
 
 from secbaas.community.api.bot_runtime import (  # noqa: E402
-    OssObjectNotFoundError,
+    StagingObjectNotFoundError,
     TransferNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,
