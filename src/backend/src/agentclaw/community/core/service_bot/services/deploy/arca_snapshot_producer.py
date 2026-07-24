@@ -67,10 +67,9 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                     "successful service build is missing build_target_path"
                 )
             # This manifest only describes the Skills slice frozen inside the
-            # full build target. It augments — never replaces — build_target_path.
+            # service version. It augments — never replaces — build_target_path.
             ext["skills_manifest"] = self._skills_manifest_builder.finalize(
                 captured=captured_layout,
-                build_target_path=str(build_target_path),
             )
 
         return DeployArtifact(

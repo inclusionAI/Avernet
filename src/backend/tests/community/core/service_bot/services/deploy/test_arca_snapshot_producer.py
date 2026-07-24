@@ -11,6 +11,7 @@ from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     ServiceSkillsManifestBuilder,
     ServiceSkillsManifestError,
+    service_skills_env_from_ext,
     service_skills_manifest_env,
     validate_service_skills_manifest_for_release,
 )
@@ -101,25 +102,8 @@ def test_missing_paths_are_omitted_from_ext() -> None:
 def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
     tmp_path,
 ) -> None:
-    """The producer seam freezes layout metadata beside the physical snapshot."""
+    """The versioned manifest freezes policy, not engine-specific paths."""
     target = tmp_path / "openclaw"
-    active = target / "workspace" / "skills"
-    local = target / "workspace" / "skills-pool" / "skills-local"
-    repo = target / "workspace" / "skills-pool" / "skills-repo"
-    local_skill = local / "my-local"
-    repo_skill = repo / "shared"
-    local_skill.mkdir(parents=True)
-    repo_skill.mkdir(parents=True)
-    (local_skill / "SKILL.md").write_text("local-v1", encoding="utf-8")
-    (repo_skill / "SKILL.md").write_text("shared-v1", encoding="utf-8")
-    active.mkdir(parents=True)
-    (active / "my-local").symlink_to(
-        "/home/admin/.openclaw/workspace/skills-pool/skills-local/my-local"
-    )
-    (active / "shared").symlink_to(
-        "/home/admin/.openclaw/workspace/skills-pool/skills-repo/shared"
-    )
-    (active / "external-unmanaged").symlink_to("/workspace/custom-skill")
 
     state = BotSkillLayoutState(
         scope=BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
@@ -158,42 +142,11 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
         "engine": "openclaw",
         "active_layout": "pool",
         "layout_contract_version": "skills-pool-p3-v1",
-        "local_snapshot": {
-            "relative_path": "workspace/skills-pool/skills-local",
-            "file_count": 1,
-            "sha256": (
-                "3deafc9a97efe5093b78052079684ad429ca30048a809e2369bd11ed1dff9ab6"
-            ),
-        },
-        "managed_entries": [
-            {
-                "name": "my-local",
-                "target": (
-                    "/home/admin/.openclaw/workspace/skills-pool/"
-                    "skills-local/my-local"
-                ),
-            },
-            {
-                "name": "shared",
-                "target": (
-                    "/home/admin/.openclaw/workspace/skills-pool/"
-                    "skills-repo/shared"
-                ),
-            },
-        ],
-        "repo": {
-            "delivery": "runtime_mount",
-            "included_in_local_snapshot": False,
-            "target": (
-                "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
-            ),
-        },
     }
     assert layout_repository.scopes == [
         BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
         BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
     ]
-    assert not repo.exists()
 
 
 class _LayoutRepository:
@@ -336,47 +289,22 @@ def test_legacy_draft_builds_a_legacy_artifact_without_pool_contract(
     )
 
     frozen = artifact.ext["skills_manifest"]
-    assert frozen["active_layout"] == "legacy"
-    assert frozen["layout_contract_version"] is None
-    assert frozen["local_snapshot"]["relative_path"] == (
-        "workspace/skills/skills-local"
-    )
-    assert frozen["repo"]["target"] == (
-        "/home/admin/.openclaw/workspace/skills/skills-repo"
-    )
+    assert frozen == {
+        "schema_version": 1,
+        "engine": "openclaw",
+        "active_layout": "legacy",
+        "layout_contract_version": None,
+    }
 
 
 @pytest.mark.unit
-def test_build_fails_when_the_selected_local_snapshot_is_missing(tmp_path) -> None:
-    target = tmp_path / "openclaw"
-    (target / "workspace" / "skills").mkdir(parents=True)
-    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
-    producer = ArcaSnapshotProducer(
-        _RecordingBuild(
-            {
-                "success": True,
-                "migration_path": "/snapshot/1/openclaw",
-                "build_target_path": str(target),
-            }
-        ),
-        ServiceSkillsManifestBuilder(
-            _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
-        ),
-    )
-
-    with pytest.raises(
-        ServiceSkillsManifestError,
-        match="local Skills snapshot directory is missing",
-    ):
-        producer.produce_artifact(
-            {
-                "bot_id": "b1",
-                "entity_id": "u1",
-                "env": "dev",
-                "active_engine": "openclaw",
-            },
-            1,
-        )
+def test_historical_publish_without_manifest_is_explicitly_legacy() -> None:
+    assert service_skills_env_from_ext(
+        {},
+        {"active_engine": "openclaw"},
+    ) == {
+        "AGENTCLAW_SKILLS_LAYOUT": "legacy",
+    }
 
 
 @pytest.mark.unit
