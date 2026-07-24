@@ -19,8 +19,8 @@ use bcs_protocol::{
 };
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::{
-    BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryTarget,
-    BotRegistryCoreService, CancelStateMachineRunCommand, ChatEventState,
+    AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
+    BotDeliveryTarget, BotRegistryCoreService, CancelStateMachineRunCommand, ChatEventState,
     CollaborationDefinitionRecord, CollaborationDefinitionValidationOutcome,
     CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand,
@@ -37,7 +37,8 @@ use bcs_service_api::{
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDefinitionRepoPort,
     StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
     StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
-    StateMachineRunGraphView, StateMachineRunRepoPort, StateMachineRunView,
+    StateMachineRunAccessCommand, StateMachineRunGraphView, StateMachineRunRepoPort,
+    StateMachineRunView,
     UpgradeGroupCollaborationDefinitionCommand, ValidateCollaborationDefinitionYamlCommand,
     MAX_COLLABORATION_DEFINITION_YAML_BYTES, MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET,
     message_log_json,
@@ -305,6 +306,22 @@ impl CollaborationRuntime {
             ));
         }
         Ok(())
+    }
+
+    async fn authorize_run_access(
+        &self,
+        run: &StateMachineRun,
+        authenticated_human: Option<&AuthenticatedHumanCaller>,
+    ) -> Result<bool, CollaborationRuntimeError> {
+        let compiled = validate_definition(self.load_run_definition(run).await?)?;
+        // COSEC: unauthenticated legacy access is retained only for Bot-only
+        // runs; any run containing HumanInput remains identity-protected.
+        if !compiled_has_human_input(&compiled) {
+            return Ok(false);
+        }
+        let human = authenticated_human.ok_or(CollaborationRuntimeError::Unauthenticated)?;
+        self.authorize_human_for_run(run, &human.actor_id).await?;
+        Ok(true)
     }
 
     async fn pending_human_node_view(
@@ -1623,6 +1640,11 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let definition = &compiled.definition;
         let authenticated_human = cmd.authenticated_human.clone();
         let has_human_input = compiled_has_human_input(&compiled);
+        // COSEC: caller_id is not proof of Human identity. HumanInput runs
+        // require identity established by the server-side authentication port.
+        if has_human_input && authenticated_human.is_none() {
+            return Err(CollaborationRuntimeError::Unauthenticated);
+        }
         let resolved_participant_bindings =
             resolve_participant_bindings(&group, &compiled, group_binding.as_ref())?;
         if should_upsert_definition {
@@ -2055,6 +2077,18 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         self.run_view(&cmd.run_id).await
     }
 
+    async fn get_state_machine_run_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&cmd.run_id).await? else {
+            return Ok(None);
+        };
+        self.authorize_run_access(&run, cmd.authenticated_human.as_ref())
+            .await?;
+        self.run_view(&cmd.run_id).await
+    }
+
     async fn get_state_machine_node_run_for_human(
         &self,
         cmd: HumanRunAccessCommand,
@@ -2068,6 +2102,19 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         self.get_state_machine_node_run(&cmd.run_id, node_id).await
     }
 
+    async fn get_state_machine_node_run_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+        node_id: &str,
+    ) -> Result<Option<StateMachineNodeRunView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&cmd.run_id).await? else {
+            return Ok(None);
+        };
+        self.authorize_run_access(&run, cmd.authenticated_human.as_ref())
+            .await?;
+        self.get_state_machine_node_run(&cmd.run_id, node_id).await
+    }
+
     async fn get_state_machine_run_graph_for_human(
         &self,
         cmd: HumanRunAccessCommand,
@@ -2076,6 +2123,18 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             return Ok(None);
         };
         self.authorize_human_for_run(&run, &cmd.caller_actor_id)
+            .await?;
+        self.get_state_machine_run_graph(&cmd.run_id).await
+    }
+
+    async fn get_state_machine_run_graph_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+    ) -> Result<Option<StateMachineRunGraphView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&cmd.run_id).await? else {
+            return Ok(None);
+        };
+        self.authorize_run_access(&run, cmd.authenticated_human.as_ref())
             .await?;
         self.get_state_machine_run_graph(&cmd.run_id).await
     }
@@ -2093,6 +2152,34 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         self.authorize_human_for_run(&run, &cmd.caller_actor_id)
             .await?;
         if run.created_by.as_deref() != Some(cmd.caller_actor_id.as_str()) {
+            return Err(CollaborationRuntimeError::Forbidden(
+                "only the Human who started the run can cancel it".to_string(),
+            ));
+        }
+        self.cancel_state_machine_run(CancelStateMachineRunCommand {
+            run_id: cmd.run_id,
+            reason,
+        })
+        .await
+    }
+
+    async fn cancel_state_machine_run_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+        reason: Option<String>,
+    ) -> Result<StateMachineRunView, CollaborationRuntimeError> {
+        let run = self
+            .runs
+            .get_run(&cmd.run_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id.clone()))?;
+        let human_access_required = self
+            .authorize_run_access(&run, cmd.authenticated_human.as_ref())
+            .await?;
+        if human_access_required
+            && let Some(human) = cmd.authenticated_human.as_ref()
+            && run.created_by.as_deref() != Some(human.actor_id.as_str())
+        {
             return Err(CollaborationRuntimeError::Forbidden(
                 "only the Human who started the run can cancel it".to_string(),
             ));

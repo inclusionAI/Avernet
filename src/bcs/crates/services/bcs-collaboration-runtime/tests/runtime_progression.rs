@@ -28,7 +28,7 @@ use bcs_service_api::{
     PatchGroupCollaborationDefinitionCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome,
     ServiceError, ServiceResult, ServiceSpec, SessionManagementService,
     StartStateMachineRunCommand, StateMachineDefinitionRepoPort, StateMachineNodeSubStatus,
-    StateMachineRunRepoPort,
+    StateMachineRunAccessCommand, StateMachineRunRepoPort,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -123,6 +123,51 @@ fn assert_inferred_default_requires(definition: &CollaborationDefinition) {
 }
 
 #[tokio::test]
+async fn human_input_requires_authenticated_human_before_persisting_run_state() {
+    let group = Arc::new(GroupStore::new());
+    group
+        .upsert(state_machine_test_group())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        group,
+        sessions,
+        delivery.clone(),
+        noop_judge(),
+    );
+
+    let error = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "ship it"}),
+            caller_id: Some("human_untrusted".to_string()),
+            authenticated_human: None,
+        })
+        .await
+        .expect_err("HumanInput must require authenticated Human identity");
+
+    assert!(matches!(error, CollaborationRuntimeError::Unauthenticated));
+    assert!(
+        StateMachineDefinitionRepoPort::get(&*store, "human_input_single", 1)
+            .await
+            .expect("query definition")
+            .is_none()
+    );
+    assert!(delivery.commands.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn human_input_waits_without_bot_delivery_and_completes_from_natural_language() {
     let group = Arc::new(GroupStore::new());
     group
@@ -159,6 +204,18 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
         })
         .await
         .expect("start human run");
+
+    let unauthenticated_read = runtime
+        .get_state_machine_run_with_access(StateMachineRunAccessCommand {
+            run_id: started.view.run.run_id.clone(),
+            authenticated_human: None,
+        })
+        .await
+        .expect_err("HumanInput run must reject unauthenticated reads");
+    assert!(matches!(
+        unauthenticated_read,
+        CollaborationRuntimeError::Unauthenticated
+    ));
 
     assert!(delivery.commands.lock().await.is_empty());
     assert_eq!(

@@ -11,8 +11,8 @@ use super::{reject_judge_definition_value_when_unavailable, reject_judge_yaml_wh
 use crate::state::HttpAppState;
 use bcs_service_api::{
     AuthenticatedHumanCaller, CollaborationDefinitionRef, CollaborationRuntimeError,
-    HumanResponseSource, HumanRunAccessCommand, ListPendingHumanNodesCommand,
-    RespondHumanNodeCommand, StartStateMachineRunCommand,
+    HumanResponseSource, ListPendingHumanNodesCommand, RespondHumanNodeCommand,
+    StartStateMachineRunCommand, StateMachineRunAccessCommand,
 };
 
 #[derive(Debug, Deserialize)]
@@ -47,10 +47,7 @@ pub async fn start_state_machine_run(
     OriginalUri(uri): OriginalUri,
     Json(body): Json<StartStateMachineRunRequest>,
 ) -> Response {
-    let authenticated_human = match authenticated_human(&state, &headers, &uri).await {
-        Ok(human) => human,
-        Err(response) => return response,
-    };
+    let authenticated_human = optional_authenticated_human(&state, &headers, &uri).await;
     if let Some(definition_yaml) = body.definition_yaml.as_deref() {
         if let Err(error) =
             reject_judge_yaml_when_unavailable(&state, definition_yaml, "definition_yaml")
@@ -76,8 +73,10 @@ pub async fn start_state_machine_run(
             definition: body.definition,
             definition_ref: body.definition_ref,
             input: body.input,
-            caller_id: Some(authenticated_human.actor_id.clone()),
-            authenticated_human: Some(authenticated_human),
+            caller_id: authenticated_human
+                .as_ref()
+                .map(|human| human.actor_id.clone()),
+            authenticated_human,
         })
         .await
     {
@@ -92,16 +91,13 @@ pub async fn get_state_machine_run(
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
 ) -> Response {
-    let human = match authenticated_human(&state, &headers, &uri).await {
-        Ok(human) => human,
-        Err(response) => return response,
-    };
+    let authenticated_human = optional_authenticated_human(&state, &headers, &uri).await;
     match state
         .services
         .collaboration_runtime
-        .get_state_machine_run_for_human(HumanRunAccessCommand {
+        .get_state_machine_run_with_access(StateMachineRunAccessCommand {
             run_id,
-            caller_actor_id: human.actor_id,
+            authenticated_human,
         })
         .await
     {
@@ -121,16 +117,13 @@ pub async fn get_state_machine_run_graph(
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
 ) -> Response {
-    let human = match authenticated_human(&state, &headers, &uri).await {
-        Ok(human) => human,
-        Err(response) => return response,
-    };
+    let authenticated_human = optional_authenticated_human(&state, &headers, &uri).await;
     match state
         .services
         .collaboration_runtime
-        .get_state_machine_run_graph_for_human(HumanRunAccessCommand {
+        .get_state_machine_run_graph_with_access(StateMachineRunAccessCommand {
             run_id,
-            caller_actor_id: human.actor_id,
+            authenticated_human,
         })
         .await
     {
@@ -150,17 +143,14 @@ pub async fn get_state_machine_node_run(
     headers: HeaderMap,
     OriginalUri(uri): OriginalUri,
 ) -> Response {
-    let human = match authenticated_human(&state, &headers, &uri).await {
-        Ok(human) => human,
-        Err(response) => return response,
-    };
+    let authenticated_human = optional_authenticated_human(&state, &headers, &uri).await;
     match state
         .services
         .collaboration_runtime
-        .get_state_machine_node_run_for_human(
-            HumanRunAccessCommand {
+        .get_state_machine_node_run_with_access(
+            StateMachineRunAccessCommand {
                 run_id,
-                caller_actor_id: human.actor_id,
+                authenticated_human,
             },
             &node_id,
         )
@@ -183,17 +173,14 @@ pub async fn cancel_state_machine_run(
     OriginalUri(uri): OriginalUri,
     Json(body): Json<CancelStateMachineRunRequest>,
 ) -> Response {
-    let human = match authenticated_human(&state, &headers, &uri).await {
-        Ok(human) => human,
-        Err(response) => return response,
-    };
+    let authenticated_human = optional_authenticated_human(&state, &headers, &uri).await;
     match state
         .services
         .collaboration_runtime
-        .cancel_state_machine_run_for_human(
-            HumanRunAccessCommand {
+        .cancel_state_machine_run_with_access(
+            StateMachineRunAccessCommand {
                 run_id,
-                caller_actor_id: human.actor_id,
+                authenticated_human,
             },
             body.reason,
         )
@@ -261,18 +248,26 @@ async fn authenticated_human(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<AuthenticatedHumanCaller, Response> {
+    optional_authenticated_human(state, headers, uri)
+        .await
+        .ok_or_else(unauthenticated_response)
+}
+
+async fn optional_authenticated_human(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+) -> Option<AuthenticatedHumanCaller> {
+    // COSEC: Human identity is derived only from the server-side identity
+    // extractor; request payloads cannot assert a Human actor ID.
     let identity = state.user_identity.extract(headers, uri).await;
-    let Some(identity) = identity else {
-        return Err(unauthenticated_response());
-    };
-    let Some(staff_no) = identity.staff_no.filter(|value| !value.trim().is_empty()) else {
-        return Err(unauthenticated_response());
-    };
+    let identity = identity?;
+    let staff_no = identity.staff_no.filter(|value| !value.trim().is_empty())?;
     let display_name = identity
         .nick_name
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
-    Ok(AuthenticatedHumanCaller {
+    Some(AuthenticatedHumanCaller {
         actor_id: format!("human_{staff_no}"),
         display_name,
     })

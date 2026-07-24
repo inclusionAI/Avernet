@@ -69,7 +69,7 @@ pub use application::collaboration_runtime::{
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineGraphDefinitionView,
     StateMachineGraphEdgeView, StateMachineGraphNodeView, StateMachineRunGraphView,
     StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
-    StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
+    StateMachineRunAccessCommand, StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
     ValidateCollaborationDefinitionYamlCommand,
 };
 pub use application::collaboration_template::{

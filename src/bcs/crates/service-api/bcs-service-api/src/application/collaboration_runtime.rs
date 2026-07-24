@@ -193,6 +193,12 @@ pub struct HumanRunAccessCommand {
 }
 
 #[derive(Debug, Clone)]
+pub struct StateMachineRunAccessCommand {
+    pub run_id: String,
+    pub authenticated_human: Option<AuthenticatedHumanCaller>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ConfigureGroupRuntimeCommand {
     pub group_id: String,
     pub definition_yaml: Option<String>,
@@ -429,6 +435,22 @@ pub trait CollaborationRuntimeService: Send + Sync {
         ))
     }
 
+    async fn get_state_machine_run_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        match cmd.authenticated_human {
+            Some(human) => {
+                self.get_state_machine_run_for_human(HumanRunAccessCommand {
+                    run_id: cmd.run_id,
+                    caller_actor_id: human.actor_id,
+                })
+                .await
+            }
+            None => self.get_state_machine_run(&cmd.run_id).await,
+        }
+    }
+
     async fn get_state_machine_node_run_for_human(
         &self,
         cmd: HumanRunAccessCommand,
@@ -438,6 +460,26 @@ pub trait CollaborationRuntimeService: Send + Sync {
         Err(CollaborationRuntimeError::InvalidRequest(
             "human state machine node access is not implemented".to_string(),
         ))
+    }
+
+    async fn get_state_machine_node_run_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+        node_id: &str,
+    ) -> Result<Option<StateMachineNodeRunView>, CollaborationRuntimeError> {
+        match cmd.authenticated_human {
+            Some(human) => {
+                self.get_state_machine_node_run_for_human(
+                    HumanRunAccessCommand {
+                        run_id: cmd.run_id,
+                        caller_actor_id: human.actor_id,
+                    },
+                    node_id,
+                )
+                .await
+            }
+            None => self.get_state_machine_node_run(&cmd.run_id, node_id).await,
+        }
     }
 
     async fn get_state_machine_run_graph_for_human(
@@ -450,6 +492,22 @@ pub trait CollaborationRuntimeService: Send + Sync {
         ))
     }
 
+    async fn get_state_machine_run_graph_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+    ) -> Result<Option<StateMachineRunGraphView>, CollaborationRuntimeError> {
+        match cmd.authenticated_human {
+            Some(human) => {
+                self.get_state_machine_run_graph_for_human(HumanRunAccessCommand {
+                    run_id: cmd.run_id,
+                    caller_actor_id: human.actor_id,
+                })
+                .await
+            }
+            None => self.get_state_machine_run_graph(&cmd.run_id).await,
+        }
+    }
+
     async fn cancel_state_machine_run_for_human(
         &self,
         cmd: HumanRunAccessCommand,
@@ -459,6 +517,32 @@ pub trait CollaborationRuntimeService: Send + Sync {
         Err(CollaborationRuntimeError::InvalidRequest(
             "human state machine cancellation is not implemented".to_string(),
         ))
+    }
+
+    async fn cancel_state_machine_run_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+        reason: Option<String>,
+    ) -> Result<StateMachineRunView, CollaborationRuntimeError> {
+        match cmd.authenticated_human {
+            Some(human) => {
+                self.cancel_state_machine_run_for_human(
+                    HumanRunAccessCommand {
+                        run_id: cmd.run_id,
+                        caller_actor_id: human.actor_id,
+                    },
+                    reason,
+                )
+                .await
+            }
+            None => {
+                self.cancel_state_machine_run(CancelStateMachineRunCommand {
+                    run_id: cmd.run_id,
+                    reason,
+                })
+                .await
+            }
+        }
     }
 
     async fn get_state_machine_node_run(

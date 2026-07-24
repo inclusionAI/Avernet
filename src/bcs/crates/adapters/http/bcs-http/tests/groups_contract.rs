@@ -901,6 +901,59 @@ runtime:
 }
 
 #[tokio::test]
+async fn start_bot_only_state_machine_run_without_human_identity_reaches_runtime() {
+    let (app, _recorder, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+    let definition_yaml = r#"
+api_version: bcs.collaboration/v1
+id: bot_only
+version: 1
+name: Bot Only
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      write:
+        kind: bot_task
+        display_name: Write
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Write.
+        final_output: true
+"#;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups/group-bot-only/state-machine-runs")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "definition_yaml": definition_yaml,
+                        "input": {"question": "hello"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let commands = collaboration_runtime.start_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert!(commands[0].caller_id.is_none());
+    assert!(commands[0].authenticated_human.is_none());
+}
+
+#[tokio::test]
 async fn start_state_machine_run_rejects_inline_judge_yaml_when_llm_disabled() {
     let (app, _recorder, collaboration_runtime, _temp_dir) =
         test_app_with_collaboration_runtime_and_human_identity().await;
