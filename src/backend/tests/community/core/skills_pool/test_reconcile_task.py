@@ -279,6 +279,7 @@ class FakeLayouts:
         self.renew_result = True
         self.acquire_result = False
         self.runtime_reconciliation_calls: list[dict[str, object]] = []
+        self.runtime_reconciliation_failure_calls: list[dict[str, object]] = []
 
     def renew_lease(self, **kwargs: object) -> bool:
         self.renew_calls.append(kwargs)
@@ -295,6 +296,10 @@ class FakeLayouts:
 
     def record_runtime_reconciliation(self, **kwargs: object) -> bool:
         self.runtime_reconciliation_calls.append(kwargs)
+        return True
+
+    def record_runtime_reconciliation_failure(self, **kwargs: object) -> bool:
+        self.runtime_reconciliation_failure_calls.append(kwargs)
         return True
 
 
@@ -445,7 +450,7 @@ def test_claimed_generation_renews_without_rechecking_rollout_gate() -> None:
     assert len(reconcile.calls) == 1
 
 
-def test_pool_active_wakeup_records_runtime_reconciliation_without_probe() -> None:
+def test_pool_active_wakeup_records_runtime_reconciliation_after_ready_probe() -> None:
     state = _claimed_state(active_layout=SkillLayout.POOL)
     handler, _, layouts, reconcile = _handler(
         claim_results=[
@@ -460,7 +465,7 @@ def test_pool_active_wakeup_records_runtime_reconciliation_without_probe() -> No
     outcome = handler.handle(_payload())
 
     assert outcome == Complete()
-    assert reconcile.calls == []
+    assert reconcile.calls == [{"scope": SCOPE, "lease_owner": "skills-pool:wakeup-1"}]
     assert layouts.runtime_reconciliation_calls[0]["scope"] == SCOPE
     assert (
         layouts.runtime_reconciliation_calls[0]["migration_generation"]
@@ -469,6 +474,42 @@ def test_pool_active_wakeup_records_runtime_reconciliation_without_probe() -> No
     assert layouts.runtime_reconciliation_calls[0]["evidence"]["source"] == (
         "arca_device_alive"
     )
+    assert layouts.runtime_reconciliation_calls[0]["evidence"]["probe"] is None
+
+
+def test_pool_active_wakeup_does_not_record_failed_runtime_probe() -> None:
+    state = _claimed_state(active_layout=SkillLayout.POOL)
+    handler, _, layouts, _ = _handler(
+        claim_results=[
+            MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)
+        ],
+        reconcile_results=[
+            SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.INVALID,
+                evidence={"reason": "bridge_invalid"},
+                retryable=False,
+            )
+        ],
+        state=state,
+    )
+
+    outcome = handler.handle(_payload())
+
+    assert outcome == Fail("skills pool reconciliation blocked: invalid")
+    assert layouts.runtime_reconciliation_calls == []
+    failure = layouts.runtime_reconciliation_failure_calls[0]
+    assert failure["scope"] == SCOPE
+    assert failure["migration_generation"] == "generation-1"
+    assert failure["evidence"] == {
+        "source": "arca_device_alive",
+        "signal_identity": {
+            "binding_id": 7,
+            "device_id": "stale-device",
+        },
+        "wakeup_id": "wakeup-1",
+        "outcome": "invalid",
+        "probe": {"reason": "bridge_invalid"},
+    }
 
 
 def test_busy_generation_reschedules_until_lease_can_be_acquired() -> None:

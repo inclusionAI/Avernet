@@ -188,6 +188,17 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """Record a qualified post-activation runtime lifecycle signal."""
         ...
 
+    def record_runtime_reconciliation_failure(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        observed_at: datetime,
+        evidence: dict[str, object],
+    ) -> bool:
+        """Invalidate older READY evidence with a newer unhealthy runtime fact."""
+        ...
+
     def begin_legacy_rollback(
         self,
         *,

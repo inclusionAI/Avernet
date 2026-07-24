@@ -9,11 +9,16 @@ from pathlib import Path
 from threading import Barrier
 
 from sqlalchemy import create_engine, func, text
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.schema import CreateTable
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.skills_pool.quarantine import QuarantineStatus
+from agentclaw.community.core.skills_pool.quarantine import (
+    QuarantineStatus,
+    RuntimeReconciliationStatus,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     RolloutEvidence,
@@ -68,6 +73,16 @@ class FileSqliteDB(InMemorySqliteDB):
         )
         Base.metadata.create_all(engine)
         self._session_factory = sessionmaker(bind=engine, autoflush=False)
+
+
+def test_quarantine_runtime_timestamp_preserves_mysql_microseconds() -> None:
+    ddl = str(
+        CreateTable(SkillMigrationQuarantineModel.__table__).compile(
+            dialect=mysql.dialect()
+        )
+    )
+
+    assert "runtime_reconciled_at DATETIME(6)" in ddl
 
 
 def rollout_evidence() -> RolloutEvidence:
@@ -444,10 +459,7 @@ def test_post_cutover_failure_remains_forward_only_and_auditable() -> None:
             "evidence": {"bridge": "valid"},
         },
     )
-    assert (
-        repository.get(scope).phase
-        is SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER
-    )
+    assert repository.get(scope).phase is SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER
     assert repository.record_cutover_committed(
         scope=scope,
         migration_generation="generation-1",
@@ -745,20 +757,60 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
     assert quarantine is not None
     assert quarantine.engine == "openclaw"
     assert quarantine.source_evidence["evidence"]["bridge"] == "valid"
+    ready_observed_at = datetime.now(UTC) + timedelta(seconds=1)
     assert repository.record_runtime_reconciliation(
         scope=scope,
         migration_generation="generation-1",
-        observed_at=datetime.now(UTC) + timedelta(seconds=1),
+        observed_at=ready_observed_at,
         evidence={"source": "arca_device_alive"},
     )
     reconciled = repository.get_quarantine(scope, "generation-1")
     assert reconciled is not None
+    assert reconciled.runtime_reconciliation_status is RuntimeReconciliationStatus.READY
     assert reconciled.runtime_evidence == {"source": "arca_device_alive"}
+    failed_observed_at = ready_observed_at + timedelta(seconds=1)
+    assert repository.record_runtime_reconciliation_failure(
+        scope=scope,
+        migration_generation="generation-1",
+        observed_at=failed_observed_at,
+        evidence={"outcome": "invalid"},
+    )
+    failed = repository.get_quarantine(scope, "generation-1")
+    assert failed is not None
+    assert failed.runtime_reconciliation_status is RuntimeReconciliationStatus.FAILED
+    assert failed.runtime_evidence == {"outcome": "invalid"}
+    assert not repository.record_runtime_reconciliation(
+        scope=scope,
+        migration_generation="generation-1",
+        observed_at=failed_observed_at,
+        evidence={"source": "stale_retry"},
+    )
+    assert not repository.claim_cleanup(
+        scope=scope,
+        migration_generation="generation-1",
+        cleanup_owner="cleanup-before-ready",
+        lease_seconds=60,
+        eligible_before=datetime.now(UTC),
+    )
+    assert repository.record_runtime_reconciliation(
+        scope=scope,
+        migration_generation="generation-1",
+        observed_at=failed_observed_at + timedelta(microseconds=1),
+        evidence={"source": "new_runtime"},
+    )
+    assert not repository.claim_cleanup(
+        scope=scope,
+        migration_generation="generation-1",
+        cleanup_owner="cleanup-before-retention",
+        lease_seconds=60,
+        eligible_before=datetime.now(UTC) - timedelta(days=7),
+    )
     assert repository.claim_cleanup(
         scope=scope,
         migration_generation="generation-1",
         cleanup_owner="cleanup-1",
         lease_seconds=60,
+        eligible_before=datetime.now(UTC),
     )
     assert repository.record_cleanup_uncertain(
         scope=scope,
@@ -782,8 +834,7 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
         session.query(SkillMigrationQuarantineModel).update(
             {
                 SkillMigrationQuarantineModel.cleanup_lease_expires_at: (
-                    datetime.now(UTC).replace(tzinfo=None)
-                    - timedelta(seconds=1)
+                    datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
                 )
             }
         )
@@ -982,10 +1033,7 @@ def test_explicit_rollback_is_fenced_and_commits_locator_atomically() -> None:
         lease_seconds=60,
     )
 
-    locator = (
-        "local:///home/admin/.openclaw/workspace/"
-        "skills/skills-local/local-a"
-    )
+    locator = "local:///home/admin/.openclaw/workspace/skills/skills-local/local-a"
     assert repository.commit_legacy_active(
         scope=scope,
         rollback_generation="rollback-1",
@@ -1018,9 +1066,7 @@ def test_explicit_rollback_rejects_partial_local_locator_commit() -> None:
                 phase=SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED.value,
                 migration_generation="rollback-1",
                 lease_owner="rollback-worker",
-                lease_expires_at=func.datetime(
-                    func.now(), text("'+60 seconds'")
-                ),
+                lease_expires_at=func.datetime(func.now(), text("'+60 seconds'")),
             )
         )
         for skill_id, name in ((101, "local-a"), (102, "local-b")):
@@ -1040,13 +1086,7 @@ def test_explicit_rollback_rejects_partial_local_locator_commit() -> None:
         rollback_generation="rollback-1",
         lease_owner="rollback-worker",
         local_locators={
-            101: (
-                "local:///home/admin/.openclaw/workspace/"
-                "skills/skills-local/local-a"
-            )
+            101: ("local:///home/admin/.openclaw/workspace/skills/skills-local/local-a")
         },
     )
-    assert (
-        repository.get(scope).phase
-        is SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED
-    )
+    assert repository.get(scope).phase is SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED

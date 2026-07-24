@@ -19,6 +19,10 @@ from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     SkillMappingSourceLayout,
 )
+from agentclaw.community.core.skills_pool.quarantine import (
+    RuntimeQuarantineCleanupResult,
+    RuntimeQuarantineCleanupStatus,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
@@ -213,7 +217,7 @@ class SkillsPoolRuntime:
         user_id: str,
         engine: str,
         migration_generation: str,
-    ) -> dict[str, object]:
+    ) -> RuntimeQuarantineCleanupResult:
         try:
             response = await self._invoke(
                 bot_id=bot_id,
@@ -228,23 +232,35 @@ class SkillsPoolRuntime:
                 bot_id,
                 migration_generation,
             )
-            return {
-                "status": "TRANSIENT_ERROR",
-                "evidence": {
+            return RuntimeQuarantineCleanupResult(
+                status=RuntimeQuarantineCleanupStatus.TRANSIENT_ERROR,
+                evidence={
                     "reason": "runtime_cleanup_outcome_unknown",
                     "error_type": type(error).__name__,
                 },
-            }
+            )
         data = response.get("data")
         if not isinstance(data, dict):
-            return {
-                "status": "TRANSIENT_ERROR",
-                "evidence": {"reason": "invalid_runtime_response"},
-            }
-        return {
-            "status": str(data.get("status", "TRANSIENT_ERROR")),
-            "evidence": dict(data.get("evidence") or {}),
-        }
+            return RuntimeQuarantineCleanupResult(
+                status=RuntimeQuarantineCleanupStatus.TRANSIENT_ERROR,
+                evidence={"reason": "invalid_runtime_response"},
+            )
+        raw_status = str(data.get("status", ""))
+        try:
+            status = RuntimeQuarantineCleanupStatus(raw_status)
+        except ValueError:
+            return RuntimeQuarantineCleanupResult(
+                status=RuntimeQuarantineCleanupStatus.INVALID,
+                evidence={
+                    **dict(data.get("evidence") or {}),
+                    "reason": "invalid_runtime_response",
+                    "raw_status": raw_status,
+                },
+            )
+        return RuntimeQuarantineCleanupResult(
+            status=status,
+            evidence=dict(data.get("evidence") or {}),
+        )
 
     async def verify_mappings(
         self,

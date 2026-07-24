@@ -30,6 +30,7 @@ from agentclaw.community.core.skills_pool.repository.protocol import (
 )
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
+    BotSkillLayoutState,
     SkillLayout,
     SkillLayoutPhase,
 )
@@ -99,10 +100,7 @@ class SkillsPoolReconcileService:
                 retryable=False,
             )
         if state.active_layout is SkillLayout.POOL:
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.ALREADY_ACTIVE,
-                preparation_id=state.preparation_id,
-            )
+            return await self._verify_active_runtime(scope=scope, state=state)
         if (
             not state.persisted
             or state.target_layout is not SkillLayout.POOL
@@ -225,12 +223,8 @@ class SkillsPoolReconcileService:
                 retryable=False,
             )
 
-        cutover_finalizing = (
-            state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
-        )
-        repair_evidence_refresh = (
-            state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
-        )
+        cutover_finalizing = state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+        repair_evidence_refresh = state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
         if (
             not state.data_plane_cutover_committed
             or cutover_finalizing
@@ -269,8 +263,7 @@ class SkillsPoolReconcileService:
             if not cutover.committed:
                 evidence = cutover.to_dict()
                 if (
-                    cutover.status
-                    is PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING
+                    cutover.status is PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING
                     or cutover_finalizing
                 ):
                     recorded = self._layouts.record_cutover_finalizing(
@@ -476,6 +469,58 @@ class SkillsPoolReconcileService:
             failure_stage=failure_stage,
             retryable=retryable,
             evidence=evidence,
+        )
+
+    async def _verify_active_runtime(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        state: BotSkillLayoutState,
+    ) -> SkillsPoolReconcileResult:
+        """Verify the current runtime before accepting post-activation evidence."""
+
+        bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
+        if bot is None:
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_NOT_FOUND)
+        engine = bot.get("active_engine")
+        if bot.get("env") != scope.env or not isinstance(engine, str):
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+        try:
+            pool_paths_for_engine(engine)
+        except ValueError:
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+        owner_id = bot.get("owner_id")
+        if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+
+        probe = await self._runtime.probe(
+            bot_id=scope.bot_id,
+            user_id=str(owner_id),
+            engine=engine,
+        )
+        if probe.status is not RuntimeLayoutProbeStatus.READY:
+            return SkillsPoolReconcileResult(
+                self._probe_outcome(probe.status),
+                evidence=probe.evidence,
+                retryable=(probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR),
+            )
+        if (
+            probe.preparation_id is None
+            or probe.preparation_id != state.preparation_id
+            or probe.layout_contract_version != state.layout_contract_version
+        ):
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.INVALID,
+                evidence={
+                    **(probe.evidence or {}),
+                    "reason": "active_runtime_identity_mismatch",
+                },
+                retryable=False,
+            )
+        return SkillsPoolReconcileResult(
+            SkillsPoolReconcileOutcome.ALREADY_ACTIVE,
+            preparation_id=probe.preparation_id,
+            evidence=probe.evidence,
         )
 
     @staticmethod

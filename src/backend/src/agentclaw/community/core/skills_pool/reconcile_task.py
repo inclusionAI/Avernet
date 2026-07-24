@@ -148,8 +148,16 @@ class SkillsPoolReconcileTaskHandler:
             return Retry("skills pool migration claim returned no state")
         if claim.state.active_layout is SkillLayout.POOL:
             generation = claim.state.migration_generation
-            if generation is not None:
-                self._layouts.record_runtime_reconciliation(
+            if generation is None:
+                return Fail("pool-active layout has no migration generation")
+            verification = asyncio.run(
+                self._reconcile.reconcile(
+                    scope=scope,
+                    lease_owner=lease_owner,
+                )
+            )
+            if verification.outcome is not SkillsPoolReconcileOutcome.ALREADY_ACTIVE:
+                self._layouts.record_runtime_reconciliation_failure(
                     scope=scope,
                     migration_generation=generation,
                     observed_at=observed_at,
@@ -157,13 +165,29 @@ class SkillsPoolReconcileTaskHandler:
                         "source": source,
                         "signal_identity": signal_identity,
                         "wakeup_id": wakeup_id,
+                        "outcome": verification.outcome.value,
+                        "probe": verification.evidence,
                     },
                 )
-                self._schedule_quarantine_cleanup(
-                    scope=scope,
-                    migration_generation=generation,
-                    delay_seconds=0,
-                )
+                return self._task_outcome(verification)
+            recorded = self._layouts.record_runtime_reconciliation(
+                scope=scope,
+                migration_generation=generation,
+                observed_at=observed_at,
+                evidence={
+                    "source": source,
+                    "signal_identity": signal_identity,
+                    "wakeup_id": wakeup_id,
+                    "probe": verification.evidence,
+                },
+            )
+            if not recorded:
+                return Retry("skills pool runtime reconciliation evidence race lost")
+            self._schedule_quarantine_cleanup(
+                scope=scope,
+                migration_generation=generation,
+                delay_seconds=0,
+            )
             return Complete()
 
         lease_outcome = self._ensure_lease(

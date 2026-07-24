@@ -208,6 +208,7 @@ class FakeLayoutRepository:
             target_layout=None,
             phase=SkillLayoutPhase.POOL_ACTIVE,
             lease_owner=None,
+            preparation_id=PREPARATION_ID,
         )
         return True
 
@@ -805,6 +806,57 @@ async def test_expired_lease_cannot_probe_or_publish_mappings() -> None:
 
     assert result.outcome is SkillsPoolReconcileOutcome.LEASE_NOT_HELD
     assert runtime.events == []
+
+
+@pytest.mark.asyncio
+async def test_pool_active_reconciliation_probes_current_runtime() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+        )
+    )
+    runtime = FakeRuntime()
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
+    assert result.evidence == {"marker": "valid"}
+    assert runtime.events == ["probe"]
+
+
+@pytest.mark.asyncio
+async def test_pool_active_reconciliation_rejects_invalid_current_runtime() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        preparation_id=None,
+        evidence={"reason": "bridge_invalid"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.evidence == {"reason": "bridge_invalid"}
+    assert runtime.events == ["probe"]
 
 
 class StickyClaimService:

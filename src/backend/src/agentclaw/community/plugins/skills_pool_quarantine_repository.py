@@ -7,7 +7,10 @@ from datetime import datetime
 
 from sqlalchemy import exists, func, or_, text
 
-from agentclaw.community.core.skills_pool.quarantine import QuarantineRecord
+from agentclaw.community.core.skills_pool.quarantine import (
+    QuarantineRecord,
+    RuntimeReconciliationStatus,
+)
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
     SkillMigrationQuarantineModel,
@@ -131,7 +134,52 @@ class SkillsPoolQuarantineRepositoryMixin:
         observed_at: datetime,
         evidence: dict[str, object],
     ) -> bool:
+        return self._record_runtime_reconciliation_result(
+            scope=scope,
+            migration_generation=migration_generation,
+            observed_at=observed_at,
+            status=RuntimeReconciliationStatus.READY,
+            evidence=evidence,
+        )
+
+    def record_runtime_reconciliation_failure(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        observed_at: datetime,
+        evidence: dict[str, object],
+    ) -> bool:
+        return self._record_runtime_reconciliation_result(
+            scope=scope,
+            migration_generation=migration_generation,
+            observed_at=observed_at,
+            status=RuntimeReconciliationStatus.FAILED,
+            evidence=evidence,
+        )
+
+    def _record_runtime_reconciliation_result(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        observed_at: datetime,
+        status: RuntimeReconciliationStatus,
+        evidence: dict[str, object],
+    ) -> bool:
         observed_at = observed_at.replace(tzinfo=None)
+        timestamp_order = (
+            SkillMigrationQuarantineModel.runtime_reconciled_at <= observed_at
+            if status is RuntimeReconciliationStatus.FAILED
+            else or_(
+                SkillMigrationQuarantineModel.runtime_reconciled_at < observed_at,
+                (SkillMigrationQuarantineModel.runtime_reconciled_at == observed_at)
+                & (
+                    SkillMigrationQuarantineModel.runtime_reconciliation_status
+                    == RuntimeReconciliationStatus.READY.value
+                ),
+            )
+        )
         with self._database.transactional_orm_session() as session:
             current = (
                 session.query(BotSkillLayoutStateModel.id)
@@ -139,8 +187,7 @@ class SkillsPoolQuarantineRepositoryMixin:
                     BotSkillLayoutStateModel.env == scope.env,
                     BotSkillLayoutStateModel.entity_id == scope.entity_id,
                     BotSkillLayoutStateModel.bot_id == scope.bot_id,
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase
                     == SkillLayoutPhase.POOL_ACTIVE.value,
                     BotSkillLayoutStateModel.migration_generation
@@ -161,10 +208,18 @@ class SkillsPoolQuarantineRepositoryMixin:
                     == migration_generation,
                     SkillMigrationQuarantineModel.pool_activated_at < observed_at,
                     SkillMigrationQuarantineModel.cleaned_at.is_(None),
+                    SkillMigrationQuarantineModel.status != "cleaning",
+                    or_(
+                        SkillMigrationQuarantineModel.runtime_reconciled_at.is_(None),
+                        timestamp_order,
+                    ),
                 )
                 .update(
                     {
                         SkillMigrationQuarantineModel.runtime_reconciled_at: observed_at,
+                        SkillMigrationQuarantineModel.runtime_reconciliation_status: (
+                            status.value
+                        ),
                         SkillMigrationQuarantineModel.runtime_evidence: json.dumps(
                             evidence,
                             ensure_ascii=False,
@@ -182,7 +237,9 @@ class SkillsPoolQuarantineRepositoryMixin:
         migration_generation: str,
         cleanup_owner: str,
         lease_seconds: int,
+        eligible_before: datetime,
     ) -> bool:
+        eligible_before = eligible_before.replace(tzinfo=None)
         with self._database.transactional_orm_session() as session:
             current = (
                 session.query(BotSkillLayoutStateModel)
@@ -190,8 +247,7 @@ class SkillsPoolQuarantineRepositoryMixin:
                     BotSkillLayoutStateModel.env == scope.env,
                     BotSkillLayoutStateModel.entity_id == scope.entity_id,
                     BotSkillLayoutStateModel.bot_id == scope.bot_id,
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase
                     == SkillLayoutPhase.POOL_ACTIVE.value,
                     BotSkillLayoutStateModel.migration_generation
@@ -211,6 +267,11 @@ class SkillsPoolQuarantineRepositoryMixin:
                     SkillMigrationQuarantineModel.migration_generation
                     == migration_generation,
                     SkillMigrationQuarantineModel.cleaned_at.is_(None),
+                    SkillMigrationQuarantineModel.pool_activated_at <= eligible_before,
+                    SkillMigrationQuarantineModel.runtime_reconciled_at
+                    > SkillMigrationQuarantineModel.pool_activated_at,
+                    SkillMigrationQuarantineModel.runtime_reconciliation_status
+                    == RuntimeReconciliationStatus.READY.value,
                     or_(
                         SkillMigrationQuarantineModel.status.in_(
                             ("retained", "cleanup_failed")
@@ -248,10 +309,8 @@ class SkillsPoolQuarantineRepositoryMixin:
                 BotSkillLayoutStateModel.entity_id == scope.entity_id,
                 BotSkillLayoutStateModel.bot_id == scope.bot_id,
                 BotSkillLayoutStateModel.active_layout == SkillLayout.POOL.value,
-                BotSkillLayoutStateModel.phase
-                == SkillLayoutPhase.POOL_ACTIVE.value,
-                BotSkillLayoutStateModel.migration_generation
-                == migration_generation,
+                BotSkillLayoutStateModel.phase == SkillLayoutPhase.POOL_ACTIVE.value,
+                BotSkillLayoutStateModel.migration_generation == migration_generation,
             )
             .with_for_update()
             .first()
@@ -280,10 +339,8 @@ class SkillsPoolQuarantineRepositoryMixin:
                 SkillMigrationQuarantineModel.migration_generation
                 == migration_generation,
                 SkillMigrationQuarantineModel.status == "cleaning",
-                SkillMigrationQuarantineModel.cleanup_lease_owner
-                == cleanup_owner,
-                SkillMigrationQuarantineModel.cleanup_lease_expires_at
-                > func.now(),
+                SkillMigrationQuarantineModel.cleanup_lease_owner == cleanup_owner,
+                SkillMigrationQuarantineModel.cleanup_lease_expires_at > func.now(),
             )
             affected = query.filter(
                 SkillMigrationQuarantineModel.cleaned_at.is_(None)
@@ -328,10 +385,8 @@ class SkillsPoolQuarantineRepositoryMixin:
                     SkillMigrationQuarantineModel.migration_generation
                     == migration_generation,
                     SkillMigrationQuarantineModel.status == "cleaning",
-                    SkillMigrationQuarantineModel.cleanup_lease_owner
-                    == cleanup_owner,
-                    SkillMigrationQuarantineModel.cleanup_lease_expires_at
-                    > func.now(),
+                    SkillMigrationQuarantineModel.cleanup_lease_owner == cleanup_owner,
+                    SkillMigrationQuarantineModel.cleanup_lease_expires_at > func.now(),
                 )
                 .update(
                     {
@@ -373,10 +428,8 @@ class SkillsPoolQuarantineRepositoryMixin:
                     SkillMigrationQuarantineModel.migration_generation
                     == migration_generation,
                     SkillMigrationQuarantineModel.status == "cleaning",
-                    SkillMigrationQuarantineModel.cleanup_lease_owner
-                    == cleanup_owner,
-                    SkillMigrationQuarantineModel.cleanup_lease_expires_at
-                    > func.now(),
+                    SkillMigrationQuarantineModel.cleanup_lease_owner == cleanup_owner,
+                    SkillMigrationQuarantineModel.cleanup_lease_expires_at > func.now(),
                 )
                 .update(
                     {
