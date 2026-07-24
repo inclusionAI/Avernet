@@ -60,15 +60,16 @@ third-party developers without paying the double-write cost on every change.
       domain's server requires no change to any client-facing path.
 - [ ] Auth is resolved from **prefix rules with a fail-closed default**: every
       request resolves to an auth requirement via the most-specific matching rule
-      (ultimately the `/**` default), is authenticated before forwarding, and the
-      established identity is conveyed downstream via the gateway's signed
-      principal (JWT). A new endpoint therefore inherits its domain's auth
-      requirement automatically; only endpoints needing **non-default** auth add a
-      rule.
+      (ultimately the `/**` default) and is authenticated before forwarding. A new
+      endpoint therefore inherits its domain's auth requirement automatically; only
+      endpoints needing **non-default** auth add a rule. (Conveying the established
+      identity downstream — the signed-principal / JWT seam — is owned by the auth
+      workstream, not delivered here.)
 - [ ] The public path namespace (`/openapi/v1/**`) is, by invariant, the
       **external contract only**: the backend never mounts internal-only routes
-      there, and this is enforced by a backend-side check. This invariant — not a
-      gateway whitelist — is the exposure gate.
+      there, and this is enforced by a backend-side check. This invariant — together
+      with the auth workstream's JWT verification on those routes — is the exposure
+      gate, not a gateway whitelist.
 - [ ] The gateway serves a single OpenAPI document whose request/response shapes
       come from the backend's own published API description (not authored on the
       gateway) and are presented at their verbatim paths. An operation with an
@@ -99,7 +100,8 @@ third-party developers without paying the double-write cost on every change.
 - The domain → server mapping configuration and domain-transparent route
   resolution (deny requests to unknown domains).
 - The prefix-based, fail-closed auth resolution (default rule + non-default
-  overrides), and signing the established principal for the downstream call.
+  overrides). The forwarder exposes the seam where the auth workstream's signer
+  attaches the downstream principal token.
 - Generating the served public API document from the backend's published API
   description, presented at verbatim paths (with an optional upstream override).
 - The publish-and-refresh mechanism: backend release CI publishes the generated
@@ -127,8 +129,10 @@ third-party developers without paying the double-write cost on every change.
   are not delivered here.
 - Onboarding a **second** backend server / domain beyond `bots`; the design must
   allow it, but only `bots` is wired up now.
-- Hardened **principal signing key management / rotation** (auth-design §7.1) — the
-  signing seam is used, but key distribution/rotation policy is a separate effort.
+- **Principal signing/verification (the gateway↔backend JWT), incl. key
+  management/rotation** (auth-design §7.1) — owned by the auth workstream. This
+  feature exposes the forwarder seam it plugs into and depends on it for go-live,
+  but does not implement it.
 
 ## Resolved Decisions
 
