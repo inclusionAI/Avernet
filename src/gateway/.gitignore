@@ -20,3 +20,6 @@ htmlcov/
 *.log
 logs/
 openspec
+
+# Generated OpenAPI artifacts (produced by dump_openapi / pulled from OSS)
+configs/schemas/*.openapi.json

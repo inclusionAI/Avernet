@@ -1,0 +1,67 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "backend", "version": "1.0" },
+  "paths": {
+    "/openapi/v1/bots": {
+      "get": {
+        "operationId": "list_bots",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BotList" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_bot",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BotCreate" }
+            }
+          }
+        },
+        "responses": { "201": { "description": "created" } }
+      }
+    },
+    "/openapi/v1/bots/{id}": {
+      "get": {
+        "operationId": "get_bot",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Bot" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/debug": {
+      "get": { "operationId": "debug", "responses": {} }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Bot": { "type": "object", "properties": { "id": { "type": "string" } } },
+      "BotList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Bot" }
+          }
+        }
+      },
+      "BotCreate": {
+        "type": "object",
+        "properties": { "name": { "type": "string" } }
+      },
+      "Unused": { "type": "object" }
+    }
+  }
+}
