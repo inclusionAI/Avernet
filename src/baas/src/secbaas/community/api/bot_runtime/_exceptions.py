@@ -97,7 +97,7 @@ class NoDevicesFoundError(BotServiceError):
 
 class NoActiveDevicesError(BotServiceError):
     error_code = "NO_ACTIVE_DEVICES"
-    http_status = 503
+    http_status = 404
 
     def __init__(self, bot_uuid: str = ""):
         self.bot_uuid = bot_uuid
