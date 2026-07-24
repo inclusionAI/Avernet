@@ -50,9 +50,12 @@ third-party developers without paying the double-write cost on every change.
       forwarded operation; forwarded operations are described entirely by
       configuration.
 - [ ] Each forwarded operation's configuration comprehensively specifies: the
-      auth requirement, the target domain, the public request path (and method),
-      the upstream request path (and method) when it differs, and whether the
-      operation appears in the published document.
+      auth requirement, the client-facing (gateway) request path and method, the
+      upstream request path and method it forwards to, and whether the operation
+      appears in the published document. The operation entry does **not** name a
+      server or a domain — the domain is the top-level segment of its gateway
+      path, and the server is resolved from that domain through the separate
+      domain→server map (below).
 - [ ] A separate configuration maps each **domain** (the top-level path segment)
       to a target backend server; changing a domain's server requires no change
       to any operation's client-facing path.
@@ -66,7 +69,9 @@ third-party developers without paying the double-write cost on every change.
 - [ ] The gateway serves a single OpenAPI document that covers all publicly
       exposed forwarded operations. Its per-operation request/response shapes come
       from the backend's own published API description — they are not authored on
-      the gateway.
+      the gateway — while each operation is presented under its **client-facing
+      gateway path** (resolved from the config's gateway↔upstream path mapping),
+      not the upstream path.
 - [ ] The published document includes an operation **only if** its configuration
       marks it public; a backend operation that exists but is not configured as
       public does not appear.
