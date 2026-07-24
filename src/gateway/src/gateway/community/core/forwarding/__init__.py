@@ -6,12 +6,13 @@ No web framework here (Rule 7).
 """
 
 from ._domains import Domain, DomainMap, SchemaSource, Server
-from ._openapi import generate_openapi
+from ._openapi import build_served_openapi, generate_openapi
 
 __all__ = [
     "Domain",
     "DomainMap",
     "SchemaSource",
     "Server",
+    "build_served_openapi",
     "generate_openapi",
 ]

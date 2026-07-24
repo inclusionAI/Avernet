@@ -6,8 +6,11 @@ constructing plugins themselves.
 """
 
 from ._authn import Authenticator, build_authenticator
+from ._forwarding import Forwarding, build_forwarding
 
 __all__ = [
     "Authenticator",
+    "Forwarding",
     "build_authenticator",
+    "build_forwarding",
 ]

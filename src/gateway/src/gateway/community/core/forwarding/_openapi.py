@@ -9,6 +9,7 @@ client-facing paths. Pure logic (Rule 7) — no web framework.
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from gateway.community.core.authn import RouteSecurity
@@ -18,6 +19,37 @@ _HTTP_METHODS = frozenset(
     {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
 )
 _DEFAULT_BASE_PATH = "/openapi/v1"
+
+
+def build_served_openapi(
+    domains: Iterable[str],
+    describe: Callable[[str], dict[str, Any]],
+    rules: RouteSecurity,
+    *,
+    title: str,
+    version: str,
+    description: str = "",
+    base_path: str = _DEFAULT_BASE_PATH,
+) -> dict[str, Any]:
+    """Merge every domain's generated doc into the single served document.
+
+    ``describe(domain)`` returns that domain's latest published description (from
+    the schema catalog). Domains with no description yet contribute nothing.
+    """
+    paths: dict[str, Any] = {}
+    components: dict[str, Any] = {}
+    for domain in domains:
+        doc = generate_openapi(describe(domain), rules, base_path)
+        paths.update(doc.get("paths", {}))
+        for section, items in doc.get("components", {}).items():
+            components.setdefault(section, {}).update(items)
+    info: dict[str, Any] = {"title": title, "version": version}
+    if description:
+        info["description"] = description
+    served: dict[str, Any] = {"openapi": "3.1.0", "info": info, "paths": paths}
+    if components:
+        served["components"] = components
+    return served
 
 
 def generate_openapi(
