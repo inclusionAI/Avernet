@@ -703,6 +703,7 @@ impl ChannelService for BcsChannelService {
                     attachments: msg.attachments,
                     thinking: None,
                     idempotency_key: Some(dispatch_msg_id.clone()),
+                    source_im_message_id: Some(dispatch_msg_id.clone()),
                     sender_conn_id: None,
                 })
                 .await
@@ -855,6 +856,7 @@ impl ChannelService for BcsChannelService {
                     text: msg.text.clone(),
                     raw_payload: msg.raw_payload.clone(),
                     render_hint: msg.render_hint,
+                    source_im_message_id: msg.source_im_message_id.clone(),
                 })
                 .await
             {
@@ -2371,6 +2373,15 @@ mod tests {
         assert_eq!(web_sends.len(), 2);
         assert_eq!(web_sends[0].from_actor_id, "human_u1");
         assert_eq!(web_sends[0].session_id.as_deref(), Some(conv_a.bcs_session_id.as_str()));
+        assert_eq!(web_sends[0].idempotency_key.as_deref(), Some("msg_a"));
+        assert_eq!(
+            web_sends[0].source_im_message_id.as_deref(),
+            Some("msg_a")
+        );
+        assert_eq!(
+            web_sends[1].source_im_message_id.as_deref(),
+            Some("msg_b")
+        );
 
         let added = harness.session_repo.added_participants.lock().await;
         assert_eq!(added.len(), 2);
@@ -3267,17 +3278,16 @@ mod tests {
             })
             .await?;
 
-        harness
-            .service
-            .try_outbound(outbound(
-                "group_1:00000001",
-                ParticipantRole::Worker,
-                false,
-            ))
-            .await?;
+        let mut msg = outbound("group_1:00000001", ParticipantRole::Worker, false);
+        msg.source_im_message_id = Some("source-msg-1".to_string());
+        harness.service.try_outbound(msg).await?;
         let events = harness.delivery.events.lock().await;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].im_conversation_id, "conv_a");
+        assert_eq!(
+            events[0].source_im_message_id.as_deref(),
+            Some("source-msg-1")
+        );
         assert!(events[0].render_sender_label);
         drop(events);
 
@@ -3778,6 +3788,7 @@ mod tests {
             text: Some("done".to_string()),
             raw_payload: serde_json::json!({"type": "chat.final"}),
             render_hint: ChannelRenderHint::Render,
+            source_im_message_id: None,
             source_is_channel,
         }
     }

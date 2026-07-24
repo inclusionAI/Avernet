@@ -565,6 +565,7 @@ fn web_send_cmd() -> WebSendCommand {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     }
 }

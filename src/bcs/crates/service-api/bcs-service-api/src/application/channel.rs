@@ -143,6 +143,8 @@ pub struct OutboundMessage {
     pub text: Option<String>,
     pub raw_payload: serde_json::Value,
     pub render_hint: ChannelRenderHint,
+    /// Original IM message id when this run was started by a channel message.
+    pub source_im_message_id: Option<String>,
     /// 该消息是否来自 IM(防回环:来自 IM 的不再转发回去)。
     pub source_is_channel: bool,
 }

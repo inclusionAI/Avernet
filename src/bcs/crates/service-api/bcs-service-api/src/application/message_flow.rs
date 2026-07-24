@@ -34,6 +34,8 @@ pub struct WebSendCommand {
     pub attachments: Option<Vec<Attachment>>,
     pub thinking: Option<String>,
     pub idempotency_key: Option<String>,
+    /// Original IM message id when this command came from a channel ingress.
+    pub source_im_message_id: Option<String>,
     pub sender_conn_id: Option<u64>,
 }
 
