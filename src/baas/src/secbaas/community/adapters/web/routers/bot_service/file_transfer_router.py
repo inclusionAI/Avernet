@@ -22,6 +22,7 @@ from secbaas.community.api.bot_runtime import (
     GetUploadUrlResponse,
     NoActiveDevicesError,
     NoDevicesFoundError,
+    StagingObjectNotFoundError,
     ShareLinkRequest,
     ShareLinkResponse,
     StagingObjectNotFoundError,
