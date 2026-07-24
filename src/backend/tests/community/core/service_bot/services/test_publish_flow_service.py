@@ -125,7 +125,9 @@ def _arca_router(build_service=None):
         DeployArtifactProducerRouter,
     )
 
-    arca = ArcaSnapshotProducer(build_service or Mock())
+    skills_builder = Mock()
+    skills_builder.capture.return_value = None
+    arca = ArcaSnapshotProducer(build_service or Mock(), skills_builder)
     return DeployArtifactProducerRouter(
         providers={"arca": arca, "baas": arca}, default_provider_key="baas"
     )

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -70,7 +71,11 @@ def test_arca_snapshot_producer_delegates_to_build() -> None:
                 "build_target_path": "/data/3/target",
             }
 
-    artifact = ArcaSnapshotProducer(_StubBuild()).produce_artifact({"bot_id": "b"}, 3)
+    skills_builder = Mock()
+    skills_builder.capture.return_value = None
+    artifact = ArcaSnapshotProducer(
+        _StubBuild(), skills_builder
+    ).produce_artifact({"bot_id": "b"}, 3)
     assert artifact.success is True
     assert artifact.ext == {
         "migration_path": "/home/admin/nfs/bot-data/3/mig",

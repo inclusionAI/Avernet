@@ -124,7 +124,9 @@ def _arca_router(build_service):
     from agentclaw.community.core.service_bot.services.deploy.producer import (
         DeployArtifactProducerRouter,
     )
-    arca = ArcaSnapshotProducer(build_service)
+    skills_builder = Mock()
+    skills_builder.capture.return_value = None
+    arca = ArcaSnapshotProducer(build_service, skills_builder)
     return DeployArtifactProducerRouter(
         providers={"arca": arca, "baas": arca}, default_provider_key="baas"
     )
