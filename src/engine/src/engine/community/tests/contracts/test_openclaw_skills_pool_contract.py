@@ -11,6 +11,7 @@ from engine.community.core.skills.models import (
     PoolLayoutActivateRequest,
     PoolLayoutActivationStatus,
     PoolLayoutRollbackRequest,
+    PoolQuarantineCleanupRequest,
 )
 
 
@@ -139,3 +140,24 @@ async def test_unknown_rollback_status_fails_closed_and_preserves_raw_value() ->
         "source": "newer-plugin",
         "raw_status": "FUTURE_STATUS",
     }
+
+
+@pytest.mark.asyncio
+async def test_quarantine_cleanup_contract_forwards_exact_generation() -> None:
+    port = MagicMock()
+    port.cleanup_pool_quarantine = AsyncMock(
+        return_value={
+            "status": "CLEANED",
+            "evidence": {"path_absent": True},
+        }
+    )
+
+    result = await OpenClawSkillsAdapter(port).cleanup_pool_quarantine(
+        PoolQuarantineCleanupRequest(migration_generation="generation-1")
+    )
+
+    assert result.status == "CLEANED"
+    assert result.evidence == {"path_absent": True}
+    port.cleanup_pool_quarantine.assert_awaited_once_with(
+        {"migration_generation": "generation-1"}
+    )

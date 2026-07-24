@@ -14,6 +14,7 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeRequest,
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
+    PoolQuarantineCleanupRequest,
     SymlinkItem,
 )
 
@@ -32,6 +33,12 @@ def _port() -> SimpleNamespace:
                 "committed": True,
                 "status": "COMMITTED",
                 "evidence": {"source": "current_pool"},
+            }
+        ),
+        cleanup_pool_quarantine=AsyncMock(
+            return_value={
+                "status": "CLEANED",
+                "evidence": {"path_absent": True},
             }
         ),
         probe_pool_layout=AsyncMock(
@@ -81,6 +88,9 @@ async def test_claude_code_adapter_exposes_complete_pool_runtime_contract() -> N
             registered_local_names=["handmade"],
         )
     )
+    cleaned = await adapter.cleanup_pool_quarantine(
+        PoolQuarantineCleanupRequest(migration_generation="generation-1")
+    )
     published = await adapter.publish_pool_mappings([mapping])
     verified = await adapter.verify_pool_mappings([mapping])
 
@@ -90,6 +100,8 @@ async def test_claude_code_adapter_exposes_complete_pool_runtime_contract() -> N
     assert activated.committed is True
     assert rolled_back.status is PoolLayoutActivationStatus.COMMITTED
     assert rolled_back.committed is True
+    assert cleaned.status == "CLEANED"
+    assert cleaned.evidence == {"path_absent": True}
     assert published.published is True
     assert verified.valid is True
     port.probe_pool_layout.assert_awaited_once_with(
@@ -116,6 +128,9 @@ async def test_claude_code_adapter_exposes_complete_pool_runtime_contract() -> N
             "rollback_generation": "rollback-1",
             "registered_local_names": ["handmade"],
         }
+    )
+    port.cleanup_pool_quarantine.assert_awaited_once_with(
+        {"migration_generation": "generation-1"}
     )
     port.publish_pool_mappings.assert_awaited_once_with(
         {
