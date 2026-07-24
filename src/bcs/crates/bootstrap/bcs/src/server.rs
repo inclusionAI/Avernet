@@ -151,7 +151,7 @@ fn default_bootstrap_secret_service() -> Arc<dyn bcs_service_api::SecretService>
 /// `session_files.share.token_secret` is unset, bootstrap logs a warning and
 /// generates a random 32-byte secret that does NOT survive a restart (prod
 /// must set it explicitly). Mirrors the invite secret fallback contract.
-fn build_session_files_service(
+async fn build_session_files_service(
     config: &BcsConfig,
     env: String,
     db: Option<Arc<dyn bcs_db_api::DbPlugin>>,
@@ -193,20 +193,10 @@ fn build_session_files_service(
         bots_base_dir: config.bots_base_dir.display().to_string(),
         backend: toml_table_to_json_map(&config.session_files.backend),
     };
-    // Build the storage plugin on a dedicated OS thread so the sync signature
-    // stays compatible with all callers (tests, standalone default, production
-    // composition root) regardless of whether a tokio runtime is active on the
-    // current thread.
-    let storage: Arc<dyn StoragePlugin> = std::thread::scope(|s| {
-        s.spawn(|| {
-            tokio::runtime::Runtime::new()
-                .expect("create temp tokio runtime for storage build")
-                .block_on(factory.build(&backend_cfg))
-        })
-        .join()
-        .expect("storage build thread panicked")
-        .expect("storage backend build failed at bootstrap")
-    });
+    let storage: Arc<dyn StoragePlugin> = factory
+        .build(&backend_cfg)
+        .await
+        .expect("storage backend build failed at bootstrap");
 
     let file_repo: Arc<dyn SessionFileRepoPort> = match db {
         Some(db) => {
@@ -243,6 +233,36 @@ fn build_session_files_service(
         share_link_ttl: config.session_files.share_link_ttl,
         share_base_url: config.session_files.share.share_base_url.clone(),
     }))
+}
+
+/// Blocking bridge for sync entry points (`Default::default()` and
+/// `new_with_outbound_url_guards`) that cannot `.await`.  Spawns a
+/// dedicated OS thread to hold the temp tokio runtime so this works even
+/// when the calling thread already runs a tokio runtime (e.g. tests).
+/// The production path (`new_with_infrastructure`) is already async and
+/// calls [`build_session_files_service`] directly, without this overhead.
+fn build_session_files_service_blocking(
+    config: &BcsConfig,
+    env: String,
+    db: Option<Arc<dyn bcs_db_api::DbPlugin>>,
+    db_flavor: Option<DbSqlFlavor>,
+    session_repo: Arc<dyn SessionRepoPort>,
+) -> Arc<dyn bcs_service_api::application::session_files::SessionFileService> {
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            tokio::runtime::Runtime::new()
+                .expect("temp runtime for storage build")
+                .block_on(build_session_files_service(
+                    config,
+                    env,
+                    db,
+                    db_flavor,
+                    session_repo,
+                ))
+        })
+        .join()
+        .expect("storage build thread panicked")
+    })
 }
 
 /// Convert a `toml::Table` (config pass-through) into a `serde_json::Map`.
@@ -1342,7 +1362,7 @@ impl Default for BcsServerState {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
-            .session_files(build_session_files_service(
+            .session_files(build_session_files_service_blocking(
                 &config,
                 crate::env::resolve_env(),
                 None,
@@ -2503,7 +2523,7 @@ impl BcsServer {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
-            .session_files(build_session_files_service(
+            .session_files(build_session_files_service_blocking(
                 &config,
                 crate::env::resolve_env(),
                 None,
@@ -3059,7 +3079,7 @@ impl BcsServer {
                 infrastructure_plugins.db(),
                 Some(db_flavor),
                 session_repo.clone(),
-            ))
+            ).await)
             .build()
             .expect("services must be fully wired");
 
