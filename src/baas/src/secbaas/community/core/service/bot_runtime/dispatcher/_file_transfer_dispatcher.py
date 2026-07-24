@@ -499,10 +499,10 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             )
             if not exists:
                 from secbaas.community.api.bot_runtime import (
-                    OssObjectNotFoundError,
+                    StagingObjectNotFoundError,
                 )
 
-                raise OssObjectNotFoundError(
+                raise StagingObjectNotFoundError(
                     staging_path=ticket.fileservice_staging_path,
                 )
 
