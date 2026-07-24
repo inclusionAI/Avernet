@@ -59,10 +59,17 @@ pub struct PrepareUploadResult {
     pub expires_at: u64,
 }
 
-/// Mutate (delete/share) authz is done ENTIRELY in the service, fed by values
-/// the HTTP layer pre-resolves (caller_identities + session_creator + driver_bot).
-/// HTTP fetches `session.created_by` (session_repo via session_management) and
-/// `group.driver_bot` (group_management) before constructing this command.
+/// Mutate authz is done ENTIRELY in the service, fed by values the HTTP layer
+/// pre-resolves (so the service stays transport-agnostic and free of group/bot
+/// repo dependencies).
+///
+/// Delete authz uses `caller_identities + session_creator + driver_bot`: HTTP
+/// fetches `session.created_by` (session_repo via session_management) and
+/// `group.driver_bot` (group_management) before constructing `DeleteFileCommand`.
+///
+/// Share authz uses `caller_identities + session_participants`: any session
+/// member may share. HTTP resolves `session_participants` from the session's
+/// own `participants` (the same set `ensure_session_member` gates on).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteFileCommand {
     pub session_id: String,
@@ -80,8 +87,9 @@ pub struct ShareMintCommand {
     pub caller: ActorRef,
     pub ttl_seconds: Option<u64>,
     pub caller_identities: Vec<String>,
-    pub session_creator: Option<String>,
-    pub driver_bot: Option<String>,
+    /// session 自身 participants 的 bot_uuid/actor_id，由 HTTP 从 `sess.participants`
+    /// 解析（与 `ensure_session_member` 同源）。分享鉴权 = caller 是否为 session 成员。
+    pub session_participants: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

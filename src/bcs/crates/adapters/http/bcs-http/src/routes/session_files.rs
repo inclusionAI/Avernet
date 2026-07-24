@@ -284,36 +284,54 @@ async fn caller_identities(state: &HttpAppState, caller: &GroupChatCaller) -> Ve
     }
 }
 
-/// Verify the caller is a member of the session's group: the session must
-/// exist, the group must exist, and the caller (bot or human) must be a
-/// participant or own a participating bot.
+/// Verify the caller is a member of the session and return the loaded session
+/// for reuse. Returns `None` when the session or its parent group is missing,
+/// or the caller is not a member (handler should 403).
+///
+/// Membership is judged against the session's *own* participants, not the
+/// group's seed: session participants are seeded from the group at creation
+/// and then evolve independently (see `Session::participants`). A participant
+/// may be added to a session without joining the parent group
+/// (`add_session_participant`), and the group's list may change without
+/// affecting an in-flight session. Checking `group.participants` here would
+/// wrongly deny a session-only participant or drift once the session diverges.
+///
+/// Returning the session lets mutate handlers (e.g. share) reuse the already
+/// loaded `participants` for service-layer authz instead of fetching again.
 async fn ensure_session_member(
     state: &HttpAppState,
     sid: &str,
     caller: &GroupChatCaller,
-) -> bool {
+) -> Option<bcs_service_api::Session> {
     let sess = match state.services.session_management.get(sid).await {
         Ok(Some(s)) => s,
-        _ => return false,
+        _ => return None,
     };
-    let group = match state.services.group.get(&sess.group_id).await {
-        Some(g) => g,
-        None => return false,
-    };
-    match caller {
-        GroupChatCaller::Bot { bot_uuid } => group
+    // The session is always scoped to a parent group; require it to still
+    // exist. Membership, however, is judged against the session's own
+    // participants — not the group's seed.
+    if state.services.group.get(&sess.group_id).await.is_none() {
+        return None;
+    }
+    let is_member = match caller {
+        GroupChatCaller::Bot { bot_uuid } => sess
             .participants
             .iter()
             .any(|p| &p.bot_uuid == bot_uuid),
         GroupChatCaller::Human(h) => {
-            crate::routes::sessions::human_has_group_access(
+            crate::routes::sessions::human_has_session_access(
                 state,
-                &group,
+                &sess,
                 &h.actor_id,
                 &h.staff_no,
             )
             .await
         }
+    };
+    if is_member {
+        Some(sess)
+    } else {
+        None
     }
 }
 
@@ -354,7 +372,7 @@ pub async fn prepare_upload(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if !ensure_session_member(&state, &sid, &caller).await {
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
         return forbidden_not_participant();
     }
     let cmd = PrepareUploadCommand {
@@ -389,7 +407,7 @@ pub async fn upload_bytes(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if !ensure_session_member(&state, &sid, &caller).await {
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
         return forbidden_not_participant();
     }
     let part = uri
@@ -431,7 +449,7 @@ pub async fn complete_upload(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if !ensure_session_member(&state, &sid, &caller).await {
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
         return forbidden_not_participant();
     }
     match state
@@ -459,7 +477,7 @@ pub async fn delete_file(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if !ensure_session_member(&state, &sid, &caller).await {
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
         return forbidden_not_participant();
     }
     let (session_creator, driver_bot) = resolve_mutate_authz(&state, &sid).await;
@@ -488,7 +506,7 @@ pub async fn list_files(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if !ensure_session_member(&state, &sid, &caller).await {
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
         return forbidden_not_participant();
     }
     let status: Option<FileStatus> = match q.status.as_deref() {
@@ -530,7 +548,7 @@ pub async fn get_file(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if !ensure_session_member(&state, &sid, &caller).await {
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
         return forbidden_not_participant();
     }
     match state.services.session_files.get(&sid, &file_id).await {
@@ -549,7 +567,7 @@ pub async fn capabilities(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if !ensure_session_member(&state, &sid, &caller).await {
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
         return forbidden_not_participant();
     }
     let c: CapabilitiesView = state.services.session_files.capabilities().await;
@@ -571,7 +589,7 @@ pub async fn download_content(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if !ensure_session_member(&state, &sid, &caller).await {
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
         return forbidden_not_participant();
     }
     download_file_by_id(&state, &sid, &file_id, q.ttl).await
@@ -636,18 +654,21 @@ pub async fn share_mint(
         Ok(c) => c,
         Err(_) => return unauthorized(),
     };
-    if !ensure_session_member(&state, &sid, &caller).await {
-        return forbidden_not_participant();
-    }
-    let (session_creator, driver_bot) = resolve_mutate_authz(&state, &sid).await;
+    let sess = match ensure_session_member(&state, &sid, &caller).await {
+        Some(s) => s,
+        None => return forbidden_not_participant(),
+    };
     let cmd = ShareMintCommand {
         session_id: sid,
         file_id,
         caller: caller_to_actor_ref(&caller),
         ttl_seconds: body.ttl_seconds,
         caller_identities: caller_identities(&state, &caller).await,
-        session_creator,
-        driver_bot,
+        session_participants: sess
+            .participants
+            .iter()
+            .map(|p| p.bot_uuid.clone())
+            .collect(),
     };
     match state.services.session_files.share_mint(cmd).await {
         Ok(r) => (
