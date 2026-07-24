@@ -18,7 +18,6 @@ from agentclaw.community.adapters.http.openapi_v1._contracts import (
     NameCheck,
     Page,
     PageParamsDep,
-    requires_user_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1._deps import Principal
 
@@ -26,11 +25,10 @@ from ._schemas import Preview, Resource, ResourceCreate, ResourceType, ResourceU
 
 router = APIRouter(prefix="/openapi/v1/bots/resources", tags=["resources"])
 
-_SEC = requires_user_principal()
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
-@router.get("", response_model=Envelope[Page[Resource]], openapi_extra=_SEC)
+@router.get("", response_model=Envelope[Page[Resource]])
 async def list_resources(
     page: PageParamsDep,
     principal: PrincipalDep,
@@ -41,7 +39,7 @@ async def list_resources(
     raise NotImplementedError
 
 
-@router.get("/check-name", response_model=Envelope[NameCheck], openapi_extra=_SEC)
+@router.get("/check-name", response_model=Envelope[NameCheck])
 async def check_resource_name(
     name: str, principal: PrincipalDep
 ) -> Envelope[NameCheck]:
@@ -49,7 +47,7 @@ async def check_resource_name(
     raise NotImplementedError
 
 
-@router.post("", status_code=201, response_model=Envelope[Resource], openapi_extra=_SEC)
+@router.post("", status_code=201, response_model=Envelope[Resource])
 async def create_resource(
     body: ResourceCreate, principal: PrincipalDep
 ) -> Envelope[Resource]:
@@ -57,9 +55,7 @@ async def create_resource(
     raise NotImplementedError
 
 
-@router.post(
-    "/upload", status_code=201, response_model=Envelope[Resource], openapi_extra=_SEC
-)
+@router.post("/upload", status_code=201, response_model=Envelope[Resource])
 async def upload_resource(
     principal: PrincipalDep,
     name: str,
@@ -69,13 +65,13 @@ async def upload_resource(
     raise NotImplementedError
 
 
-@router.get("/{resource_id}", response_model=Envelope[Resource], openapi_extra=_SEC)
+@router.get("/{resource_id}", response_model=Envelope[Resource])
 async def get_resource(resource_id: str, principal: PrincipalDep) -> Envelope[Resource]:
     """Get a resource."""
     raise NotImplementedError
 
 
-@router.put("/{resource_id}", response_model=Envelope[Resource], openapi_extra=_SEC)
+@router.put("/{resource_id}", response_model=Envelope[Resource])
 async def update_resource(
     resource_id: str, body: ResourceUpdate, principal: PrincipalDep
 ) -> Envelope[Resource]:
@@ -83,7 +79,7 @@ async def update_resource(
     raise NotImplementedError
 
 
-@router.delete("/{resource_id}", response_model=Envelope[Deleted], openapi_extra=_SEC)
+@router.delete("/{resource_id}", response_model=Envelope[Deleted])
 async def delete_resource(
     resource_id: str, principal: PrincipalDep
 ) -> Envelope[Deleted]:
@@ -93,7 +89,6 @@ async def delete_resource(
 
 @router.get(
     "/{resource_id}/download",
-    openapi_extra=_SEC,
     responses={200: {"content": {"application/octet-stream": {}}}},
 )
 async def download_resource(resource_id: str, principal: PrincipalDep) -> Response:
@@ -101,9 +96,7 @@ async def download_resource(resource_id: str, principal: PrincipalDep) -> Respon
     raise NotImplementedError
 
 
-@router.get(
-    "/{resource_id}/preview", response_model=Envelope[Preview], openapi_extra=_SEC
-)
+@router.get("/{resource_id}/preview", response_model=Envelope[Preview])
 async def preview_resource(
     resource_id: str, principal: PrincipalDep
 ) -> Envelope[Preview]:

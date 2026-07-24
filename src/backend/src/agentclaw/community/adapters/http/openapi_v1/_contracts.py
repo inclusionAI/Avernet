@@ -1,14 +1,13 @@
 """Shared HTTP contract primitives for the public ``/openapi/v1/bots`` API.
 
 The response envelope, pagination controls, and small shared payloads that every
-public route reuses, plus the ``x-avernet-security`` marker. These are contract
-definitions consumed by OpenAPI generation; handlers are stubs (a later pass
-wires them to services).
+public route reuses. These are contract definitions consumed by OpenAPI
+generation; handlers are stubs (a later pass wires them to services).
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import Depends, Query
 from pydantic import BaseModel, Field
@@ -74,8 +73,3 @@ class PageParams:
 
 
 PageParamsDep = Annotated[PageParams, Depends()]
-
-
-def requires_user_principal() -> dict[str, Any]:
-    """OpenAPI extra marking a route as requiring an authenticated user principal."""
-    return {"x-avernet-security": [{"first_party_user": {}}]}
