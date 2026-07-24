@@ -495,3 +495,8 @@ app.include_router(enums_router)
 from agentclaw.community.di.optional_routers import OptionalRouters  # noqa: E402
 for _r in injector.get(OptionalRouters).routers:
     app.include_router(_r)
+
+# 3. Public /openapi/v1/bots surface — the same handlers as above, re-mounted
+# under the gateway-facing prefix (path move only; see adapters/http/openapi_v1).
+from agentclaw.community.adapters.http.openapi_v1 import build_public_router  # noqa: E402
+app.include_router(build_public_router())
