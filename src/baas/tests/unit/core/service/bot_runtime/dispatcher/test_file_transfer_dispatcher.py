@@ -12,7 +12,7 @@ from secbaas.community.api.bot_runtime import (
     DeleteTransferResponse,
     GetDownloadUrlResponse,
     GetUploadUrlResponse,
-    OssObjectNotFoundError,
+    StagingObjectNotFoundError,
     ShareLinkResponse,
     TransferNotFoundError,
     TransferNotTerminalError,
@@ -358,7 +358,7 @@ class TestDispatchCompleteUpload:
         ticket = _make_ticket(status="CREATED")
         ticket_repo.get_by_transfer_id.return_value = ticket
         file_backend.check_object_exists.return_value = False
-        with pytest.raises(OssObjectNotFoundError):
+        with pytest.raises(StagingObjectNotFoundError):
             await dispatcher.dispatch_complete_upload("tf-001")
 
     @pytest.mark.asyncio

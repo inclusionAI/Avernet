@@ -29,7 +29,7 @@ from secbaas.community.api.bot_runtime import (
     GetUploadUrlResponse,
     NoActiveDevicesError,
     NoDevicesFoundError,
-    OssObjectNotFoundError,
+    StagingObjectNotFoundError,
     ShareLinkResponse,
     TransferNotFoundError,
     TransferStateConflictError,
@@ -352,9 +352,9 @@ async def test_complete_upload_transfer_not_found(mock_dispatcher):
 
 
 @pytest.mark.asyncio
-async def test_complete_upload_oss_object_not_found(mock_dispatcher):
-    """POST complete upload with OssObjectNotFoundError returns 409."""
-    mock_dispatcher.dispatch_complete_upload.side_effect = OssObjectNotFoundError(
+async def test_complete_upload_staging_object_not_found(mock_dispatcher):
+    """POST complete upload with StagingObjectNotFoundError returns 409."""
+    mock_dispatcher.dispatch_complete_upload.side_effect = StagingObjectNotFoundError(
         staging_path="oss://missing",
     )
     resp = await _post(
@@ -362,7 +362,7 @@ async def test_complete_upload_oss_object_not_found(mock_dispatcher):
     )
 
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"] == "OSS_OBJECT_NOT_FOUND"
+    assert resp.json()["detail"]["error"] == "STAGING_OBJECT_NOT_FOUND"
 
 
 @pytest.mark.asyncio
