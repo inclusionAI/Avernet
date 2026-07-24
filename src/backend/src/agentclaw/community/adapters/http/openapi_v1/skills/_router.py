@@ -17,7 +17,6 @@ from agentclaw.community.adapters.http.openapi_v1._contracts import (
     Envelope,
     Page,
     PageParamsDep,
-    requires_user_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1._deps import Principal
 
@@ -25,11 +24,10 @@ from ._schemas import BotSkill, Skill, SkillDetail, SkillInstall
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["skills"])
 
-_SEC = requires_user_principal()
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
-@router.get("/skills", response_model=Envelope[Page[Skill]], openapi_extra=_SEC)
+@router.get("/skills", response_model=Envelope[Page[Skill]])
 async def list_skills(
     page: PageParamsDep, principal: PrincipalDep, keyword: str | None = None
 ) -> Envelope[Page[Skill]]:
@@ -37,9 +35,7 @@ async def list_skills(
     raise NotImplementedError
 
 
-@router.get(
-    "/skills/{skill_id}", response_model=Envelope[SkillDetail], openapi_extra=_SEC
-)
+@router.get("/skills/{skill_id}", response_model=Envelope[SkillDetail])
 async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[SkillDetail]:
     """Get a skill's detail."""
     raise NotImplementedError
@@ -48,7 +44,6 @@ async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[SkillDet
 @router.get(
     "/{bot_id}/skills",
     response_model=Envelope[list[BotSkill]],
-    openapi_extra=_SEC,
 )
 async def list_bot_skills(
     bot_id: str, principal: PrincipalDep
@@ -61,7 +56,6 @@ async def list_bot_skills(
     "/{bot_id}/skills",
     status_code=201,
     response_model=Envelope[BotSkill],
-    openapi_extra=_SEC,
 )
 async def install_bot_skill(
     bot_id: str, body: SkillInstall, principal: PrincipalDep
@@ -73,7 +67,6 @@ async def install_bot_skill(
 @router.delete(
     "/{bot_id}/skills/{skill_id}",
     response_model=Envelope[Deleted],
-    openapi_extra=_SEC,
 )
 async def remove_bot_skill(
     bot_id: str, skill_id: str, principal: PrincipalDep

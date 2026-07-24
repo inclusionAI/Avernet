@@ -16,7 +16,6 @@ from agentclaw.community.adapters.http.openapi_v1._contracts import (
     Envelope,
     Page,
     PageParamsDep,
-    requires_user_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1._deps import Principal
 
@@ -31,11 +30,10 @@ from ._schemas import (
 
 router = APIRouter(prefix="/openapi/v1/bots/mcp", tags=["mcp"])
 
-_SEC = requires_user_principal()
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
-@router.get("/servers", response_model=Envelope[Page[McpServer]], openapi_extra=_SEC)
+@router.get("/servers", response_model=Envelope[Page[McpServer]])
 async def list_mcp_servers(
     page: PageParamsDep, principal: PrincipalDep, keyword: str | None = None
 ) -> Envelope[Page[McpServer]]:
@@ -43,7 +41,7 @@ async def list_mcp_servers(
     raise NotImplementedError
 
 
-@router.get("/tenants", response_model=Envelope[list[McpTenant]], openapi_extra=_SEC)
+@router.get("/tenants", response_model=Envelope[list[McpTenant]])
 async def list_mcp_tenants(principal: PrincipalDep) -> Envelope[list[McpTenant]]:
     """List MCP tenants."""
     raise NotImplementedError
@@ -52,7 +50,6 @@ async def list_mcp_tenants(principal: PrincipalDep) -> Envelope[list[McpTenant]]
 @router.get(
     "/servers/{server_code}",
     response_model=Envelope[McpServerDetail],
-    openapi_extra=_SEC,
 )
 async def get_mcp_server(
     server_code: str, principal: PrincipalDep
@@ -64,7 +61,6 @@ async def get_mcp_server(
 @router.get(
     "/servers/{server_code}/permissions",
     response_model=Envelope[McpPermission],
-    openapi_extra=_SEC,
 )
 async def check_mcp_permission(
     server_code: str, principal: PrincipalDep
@@ -76,7 +72,6 @@ async def check_mcp_permission(
 @router.get(
     "/servers/{server_code}/config",
     response_model=Envelope[McpConfig],
-    openapi_extra=_SEC,
 )
 async def get_mcp_config(
     server_code: str, principal: PrincipalDep
@@ -88,7 +83,6 @@ async def get_mcp_config(
 @router.put(
     "/servers/{server_code}/config",
     response_model=Envelope[McpConfig],
-    openapi_extra=_SEC,
 )
 async def update_mcp_config(
     server_code: str, body: McpConfigWrite, principal: PrincipalDep

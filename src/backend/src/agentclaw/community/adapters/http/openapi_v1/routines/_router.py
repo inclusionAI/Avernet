@@ -17,7 +17,6 @@ from agentclaw.community.adapters.http.openapi_v1._contracts import (
     Envelope,
     Page,
     PageParamsDep,
-    requires_user_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1._deps import Principal
 
@@ -25,11 +24,10 @@ from ._schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate
 
 router = APIRouter(prefix="/openapi/v1/bots/routines", tags=["routines"])
 
-_SEC = requires_user_principal()
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
-@router.get("", response_model=Envelope[Page[Routine]], openapi_extra=_SEC)
+@router.get("", response_model=Envelope[Page[Routine]])
 async def list_routines(
     page: PageParamsDep,
     principal: PrincipalDep,
@@ -40,7 +38,7 @@ async def list_routines(
     raise NotImplementedError
 
 
-@router.post("", status_code=201, response_model=Envelope[Routine], openapi_extra=_SEC)
+@router.post("", status_code=201, response_model=Envelope[Routine])
 async def create_routine(
     body: RoutineCreate, principal: PrincipalDep
 ) -> Envelope[Routine]:
@@ -48,13 +46,13 @@ async def create_routine(
     raise NotImplementedError
 
 
-@router.get("/{routine_id}", response_model=Envelope[Routine], openapi_extra=_SEC)
+@router.get("/{routine_id}", response_model=Envelope[Routine])
 async def get_routine(routine_id: str, principal: PrincipalDep) -> Envelope[Routine]:
     """Get a routine."""
     raise NotImplementedError
 
 
-@router.patch("/{routine_id}", response_model=Envelope[Routine], openapi_extra=_SEC)
+@router.patch("/{routine_id}", response_model=Envelope[Routine])
 async def update_routine(
     routine_id: str, body: RoutineUpdate, principal: PrincipalDep
 ) -> Envelope[Routine]:
@@ -62,15 +60,13 @@ async def update_routine(
     raise NotImplementedError
 
 
-@router.delete("/{routine_id}", response_model=Envelope[Deleted], openapi_extra=_SEC)
+@router.delete("/{routine_id}", response_model=Envelope[Deleted])
 async def delete_routine(routine_id: str, principal: PrincipalDep) -> Envelope[Deleted]:
     """Delete a routine."""
     raise NotImplementedError
 
 
-@router.post(
-    "/{routine_id}/run", response_model=Envelope[RoutineRun], openapi_extra=_SEC
-)
+@router.post("/{routine_id}/run", response_model=Envelope[RoutineRun])
 async def run_routine(routine_id: str, principal: PrincipalDep) -> Envelope[RoutineRun]:
     """Run a routine now."""
     raise NotImplementedError
@@ -79,7 +75,6 @@ async def run_routine(routine_id: str, principal: PrincipalDep) -> Envelope[Rout
 @router.get(
     "/{routine_id}/runs",
     response_model=Envelope[Page[RoutineRun]],
-    openapi_extra=_SEC,
 )
 async def list_routine_runs(
     routine_id: str, page: PageParamsDep, principal: PrincipalDep

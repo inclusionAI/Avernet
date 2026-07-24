@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends
 from agentclaw.community.adapters.http.openapi_v1._deps import require_principal
 from agentclaw.community.adapters.http.openapi_v1._contracts import (
     Envelope,
-    requires_user_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1._deps import Principal
 
@@ -27,13 +26,10 @@ from ._schemas import (
 
 router = APIRouter(prefix="/openapi/v1/bots/identity", tags=["identity"])
 
-_SEC = requires_user_principal()
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
-@router.get(
-    "/bot/{bot_id}", response_model=Envelope[IdentityFileList], openapi_extra=_SEC
-)
+@router.get("/bot/{bot_id}", response_model=Envelope[IdentityFileList])
 async def list_bot_identity_files(
     bot_id: str, principal: PrincipalDep
 ) -> Envelope[IdentityFileList]:
@@ -44,7 +40,6 @@ async def list_bot_identity_files(
 @router.get(
     "/bot/{bot_id}/{file_type}",
     response_model=Envelope[IdentityFile],
-    openapi_extra=_SEC,
 )
 async def get_bot_identity_file(
     bot_id: str, file_type: IdentityFileType, principal: PrincipalDep
@@ -56,7 +51,6 @@ async def get_bot_identity_file(
 @router.put(
     "/bot/{bot_id}/{file_type}",
     response_model=Envelope[IdentityFileRef],
-    openapi_extra=_SEC,
 )
 async def update_bot_identity_file(
     bot_id: str,
