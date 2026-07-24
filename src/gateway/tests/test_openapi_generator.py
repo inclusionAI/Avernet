@@ -98,6 +98,43 @@ def test_referenced_components_kept_transitively() -> None:
     }  # Owner via Bot; Unused dropped
 
 
+def test_discriminator_mapping_refs_are_kept() -> None:
+    # A schema reachable only via discriminator.mapping (bare ref strings, not
+    # a `$ref` key) must not be pruned, or the served doc dangles.
+    description: dict[str, Any] = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/openapi/v1/bots/events": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Event"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "Event": {
+                    "oneOf": [{"$ref": "#/components/schemas/Created"}],
+                    "discriminator": {
+                        "propertyName": "kind",
+                        "mapping": {"created": "#/components/schemas/Created"},
+                    },
+                },
+                "Created": {"type": "object"},
+            }
+        },
+    }
+    doc = generate_openapi(description, _RULES)
+    assert set(doc["components"]["schemas"]) == {"Event", "Created"}
+
+
 def test_input_description_not_mutated() -> None:
     description = _description()
     generate_openapi(description, _RULES)
