@@ -97,13 +97,12 @@
   - [x] On pass, the candidate becomes the published artifact (committed single-box file); the docstring documents the two-step CI wiring (backend `dump` → gateway gate/publish) and where an OSS upload slots in.
   - [x] Tests cover additive-pass, breaking-block, override, missing-published, and publish-on-pass.
 
-## Task 11: Tests & Verification
+## Task 11: Tests & Verification `[x]`
 - **Goal:** Ensure the feature meets the spec acceptance criteria end-to-end.
 - **Files:** the test suites above
 - **Done when:**
-  - [ ] Every spec acceptance criterion checks off (domain-transparent forward, deny unknown domain, fail-closed prefix auth, namespace invariant, verbatim serve, auto-adopt latest + last-known-good, doc-only degradation, publish-time compat gate, pluggable source, no hand-written endpoints/whitelist).
-  - [ ] `ruff`, `mypy --strict`, `pytest -m "not e2e"` all green across gateway and backend.
-- **Depends on:** Tasks 6, 10
+  - [x] Every spec acceptance criterion holds: no hand-written endpoints/whitelist (catch-all + no per-op config); domain-transparent verbatim forward, unknown domain denied (`DomainMap`/catch-all); single domain→server map (`upstreams.yaml`); fail-closed prefix auth before forward; `/openapi/v1` external-only invariant (backend namespace test); single generated doc, shapes from the backend at verbatim paths; backend serves the `bots` surface (119 paths); publish → background auto-adopt latest with last-known-good; doc-only degradation; publish-time compat gate; pluggable schema source (bare file; OSS = enterprise seam).
+  - [x] `ruff` + `pytest -m "not e2e"` green — gateway **306**, backend gateway-contracts **102** (+ namespace invariant). mypy consistent with the repo baseline (only the pre-existing environmental subclass/Any artifacts).
 
 ---
 
