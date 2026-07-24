@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 import yaml
-
 from secbaas.logger import get_logger
 
 from ._models import Config
