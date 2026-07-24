@@ -6,6 +6,7 @@
 //! reuse — covering single + multipart paths.
 
 pub mod contract;
+pub mod factory;
 pub mod fake;
 
 use async_trait::async_trait;

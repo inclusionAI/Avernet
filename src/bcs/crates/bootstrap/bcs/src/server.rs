@@ -167,22 +167,51 @@ fn build_session_files_service(
     use bcs_session_file::{SessionFileServiceConfig, SessionFileServiceImpl};
     use bcs_session_file_store::{MemorySessionFileRepo, MySqlSessionFileStore};
     use bcs_storage_api::StoragePlugin;
-    use bcs_storage_local::{LocalStorageConfig, LocalStoragePlugin};
+    use bcs_storage_api::factory::{StorageBackendConfig, StoragePluginFactory};
+    use bcs_storage_local::LocalStoragePluginFactory;
+    use bcs_storage_baas::BaasStoragePluginFactory;
 
-    // Resolve data dir: explicit config > {bots_base_dir}/session-files.
-    let data_dir = std::path::PathBuf::from(
-        config
-            .session_files
-            .data_dir
-            .clone()
-            .unwrap_or_else(|| format!("{}/session-files", config.bots_base_dir.display())),
-    );
-    let _ = std::fs::create_dir_all(&data_dir);
+    // Backend-agnostic storage assembly: select a factory by storage_backend,
+    // build the plugin from the backend pass-through table. server.rs is
+    // otherwise ignorant of the backend roster (adding OSS/NAS later is one
+    // factory arm here + its crate). See design-baas-plugin §「落地前置改造」.
 
-    let storage: Arc<dyn StoragePlugin> = Arc::new(LocalStoragePlugin::new(LocalStorageConfig {
-        data_dir,
-        max_object_size: config.session_files.max_file_size,
-    }));
+    // Prefer the configured external endpoint, then bind:port, mirroring
+    // `proposal_base_url` above.
+    let bcs_base_url = config
+        .bcs_endpoint
+        .clone()
+        .unwrap_or_else(|| format!("http://{}:{}", config.bind, config.port));
+
+    let factory: Arc<dyn StoragePluginFactory> = match config.session_files.storage_backend.as_str() {
+        "local" => Arc::new(LocalStoragePluginFactory),
+        "baas" => Arc::new(BaasStoragePluginFactory),
+        other => panic!("unknown storage_backend '{other}'"),
+    };
+
+    let backend_cfg = StorageBackendConfig {
+        env: env.clone(),
+        max_file_size: config.session_files.max_file_size,
+        multipart_threshold: config.session_files.multipart_threshold,
+        share_link_ttl: config.session_files.share_link_ttl,
+        bcs_base_url: bcs_base_url.clone(),
+        bots_base_dir: config.bots_base_dir.display().to_string(),
+        backend: toml_table_to_json_map(&config.session_files.backend),
+    };
+    // Build the storage plugin on a dedicated OS thread so the sync signature
+    // stays compatible with all callers (tests, standalone default, production
+    // composition root) regardless of whether a tokio runtime is active on the
+    // current thread.
+    let storage: Arc<dyn StoragePlugin> = std::thread::scope(|s| {
+        s.spawn(|| {
+            tokio::runtime::Runtime::new()
+                .expect("create temp tokio runtime for storage build")
+                .block_on(factory.build(&backend_cfg))
+        })
+        .join()
+        .expect("storage build thread panicked")
+        .expect("storage backend build failed at bootstrap")
+    });
 
     let file_repo: Arc<dyn SessionFileRepoPort> = match db {
         Some(db) => {
@@ -206,13 +235,6 @@ fn build_session_files_service(
             (0..32).map(|_| fastrand::u8(..)).collect()
         });
 
-    // Prefer the configured external endpoint, then bind:port, mirroring
-    // `proposal_base_url` above.
-    let bcs_base_url = config
-        .bcs_endpoint
-        .clone()
-        .unwrap_or_else(|| format!("http://{}:{}", config.bind, config.port));
-
     Arc::new(SessionFileServiceImpl::new(SessionFileServiceConfig {
         storage,
         repo: file_repo,
@@ -223,8 +245,30 @@ fn build_session_files_service(
         bcs_base_url,
         share_secret,
         share_default_ttl: config.session_files.share.default_ttl_seconds,
+        share_link_ttl: config.session_files.share_link_ttl,
         share_base_url: config.session_files.share.share_base_url.clone(),
     }))
+}
+
+/// Convert a `toml::Table` (config pass-through) into a `serde_json::Map`.
+fn toml_table_to_json_map(table: &toml::Table) -> serde_json::Map<String, serde_json::Value> {
+    let mut out = serde_json::Map::new();
+    for (k, v) in table {
+        out.insert(k.clone(), toml_value_to_json(v));
+    }
+    out
+}
+
+fn toml_value_to_json(v: &toml::Value) -> serde_json::Value {
+    match v {
+        toml::Value::String(s) => serde_json::Value::String(s.clone()),
+        toml::Value::Integer(i) => serde_json::Value::Number((*i).into()),
+        toml::Value::Float(f) => serde_json::json!(f),
+        toml::Value::Boolean(b) => serde_json::Value::Bool(*b),
+        toml::Value::Table(t) => serde_json::Value::Object(toml_table_to_json_map(t)),
+        toml::Value::Array(a) => serde_json::Value::Array(a.iter().map(toml_value_to_json).collect()),
+        toml::Value::Datetime(d) => serde_json::Value::String(d.to_string()),
+    }
 }
 
 /// Spawn the Pending-sweep background task for the session-file workspace.
@@ -3850,7 +3894,13 @@ mod tests {
 
     #[tokio::test]
     async fn chat_run_events_registered_by_http_are_visible_to_frontend_fallback() {
-        let server = BcsServer::new(BcsConfig::default());
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let mut config = BcsConfig::default();
+        config.session_files.backend.insert(
+            "data_dir".to_string(),
+            toml::Value::String(tmp.path().to_string_lossy().into_owned()),
+        );
+        let server = BcsServer::new(config);
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
         server
@@ -3894,7 +3944,13 @@ mod tests {
 
     #[tokio::test]
     async fn bot_ws_dispatch_state_reuses_coordination_dedup_store_for_reconnects() {
-        let server = BcsServer::new(BcsConfig::default());
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let mut config = BcsConfig::default();
+        config.session_files.backend.insert(
+            "data_dir".to_string(),
+            toml::Value::String(tmp.path().to_string_lossy().into_owned()),
+        );
+        let server = BcsServer::new(config);
 
         let first = bot_ws_dispatch_state(&server.state);
         let second = bot_ws_dispatch_state(&server.state);
@@ -3912,7 +3968,12 @@ mod tests {
             "http://{}/admin-terminal",
             callback_listener.local_addr().unwrap()
         );
+        let _tmp = tempfile::TempDir::new().expect("temp dir");
         let mut config = BcsConfig::default();
+        config.session_files.backend.insert(
+            "data_dir".to_string(),
+            toml::Value::String(_tmp.path().to_string_lossy().into_owned()),
+        );
         config.async_chat_run_timeout_ms = 5_000;
         let server = BcsServer::new_allowing_private_outbound_for_tests(config);
 
