@@ -16,10 +16,10 @@ from fastapi.testclient import TestClient
 from engine.community.api.skills.router import router as skills_router
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
-from engine.community.core.engine.registry import EngineRegistry
 from engine.community.core.engine.exceptions import (
     CapabilityNotSupportedError,
 )
+from engine.community.core.engine.registry import EngineRegistry
 from engine.community.core.skills.models import (
     CleanSymlinksResult,
     PoolLayoutActivationResult,
@@ -27,7 +27,9 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeResult,
     PoolLayoutProbeStatus,
     PoolMappingPublishResult,
+    PoolMappingSourceLayout,
     PoolMappingVerificationResult,
+    SymlinkItem,
     SyncSymlinksResult,
 )
 from engine.community.manager import EngineManager
@@ -305,11 +307,11 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
     )
     published = client.post(
         "/api/skills/layout/mappings/publish",
-        json={"mappings": mappings},
+        json={"mappings": mappings, "source_layout": "legacy"},
     )
     verified = client.post(
         "/api/skills/layout/mappings/verify",
-        json={"mappings": mappings},
+        json={"mappings": mappings, "source_layout": "legacy"},
     )
 
     assert activation.json()["data"]["committed"] is True
@@ -318,8 +320,18 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
     assert verified.json()["data"]["valid"] is True
     plugin.activate_pool_layout.assert_awaited_once()
     plugin.rollback_pool_layout.assert_awaited_once()
-    plugin.publish_pool_mappings.assert_awaited_once()
-    plugin.verify_pool_mappings.assert_awaited_once()
+    plugin.publish_pool_mappings.assert_awaited_once_with(
+        [
+            SymlinkItem(source="/pool/a", target="/skills/a"),
+        ],
+        source_layout=PoolMappingSourceLayout.LEGACY,
+    )
+    plugin.verify_pool_mappings.assert_awaited_once_with(
+        [
+            SymlinkItem(source="/pool/a", target="/skills/a"),
+        ],
+        source_layout=PoolMappingSourceLayout.LEGACY,
+    )
 
 
 @pytest.mark.parametrize(

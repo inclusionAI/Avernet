@@ -17,6 +17,7 @@ from agentclaw.community.core.skills_pool.models import (
     PoolCutoverResult,
     PoolCutoverStatus,
     RegisteredSkillAsset,
+    SkillMappingSourceLayout,
 )
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SKILLS_POOL_RECONCILE_TASK,
@@ -66,6 +67,7 @@ class _Layouts:
                 else SkillLayoutPhase.POOL_READY
             ),
             data_plane_cutover_committed=committed,
+            last_failure_code="MANUAL_REPAIR_RESOLVED",
         )
         return True
 
@@ -73,6 +75,7 @@ class _Layouts:
 class _Queue:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.fail_next = False
 
     def enqueue(
         self,
@@ -82,6 +85,9 @@ class _Queue:
         *,
         delay_seconds: int = 0,
     ) -> object:
+        if self.fail_next:
+            self.fail_next = False
+            raise RuntimeError("queue unavailable")
         self.calls.append(
             {
                 "task_type": task_type,
@@ -155,6 +161,36 @@ def test_non_manual_or_stale_generation_is_not_retriggered() -> None:
     assert result.outcome is SkillsPoolRecoveryOutcome.NOT_REPAIR_REQUIRED
     assert layouts.resolutions == []
     assert queue.calls == []
+
+
+def test_resolved_manual_repair_can_retry_a_failed_durable_enqueue() -> None:
+    layouts = _Layouts(_manual_state())
+    queue = _Queue()
+    queue.fail_next = True
+    service = SkillsPoolRecoveryService(
+        layout_repository=layouts,
+        task_queue_service=queue,
+    )
+
+    first = service.resolve_repair_state(
+        scope=SCOPE,
+        migration_generation="generation-1",
+        operator="oncall-1",
+        note="verified",
+        resolution=ManualRepairResolution.POOL_COMMITTED,
+    )
+    second = service.resolve_repair_state(
+        scope=SCOPE,
+        migration_generation="generation-1",
+        operator="oncall-1",
+        note="retry enqueue",
+        resolution=ManualRepairResolution.POOL_COMMITTED,
+    )
+
+    assert first.outcome is SkillsPoolRecoveryOutcome.RETRIGGER_FAILED
+    assert second.outcome is SkillsPoolRecoveryOutcome.RETRIGGERED
+    assert len(layouts.resolutions) == 1
+    assert len(queue.calls) == 1
 
 
 def _pool_state() -> BotSkillLayoutState:
@@ -248,6 +284,13 @@ class _Bots:
         }
 
 
+class _ChangedBots:
+    def get_by_id_and_entity(
+        self, bot_id: str, entity_id: str
+    ) -> dict[str, object] | None:
+        return None
+
+
 class _Skills:
     local = [
         RegisteredSkillAsset(
@@ -281,6 +324,7 @@ class _RollbackRuntime:
     def __init__(self) -> None:
         self.events: list[str] = []
         self.publish_results = [True, False]
+        self.mapping_layouts: list[SkillMappingSourceLayout] = []
 
     async def rollback_to_legacy(self, **kwargs: object) -> PoolCutoverResult:
         self.events.append("rollback")
@@ -293,6 +337,7 @@ class _RollbackRuntime:
 
     async def publish_mappings(self, **kwargs: object) -> bool:
         self.events.append("mapping")
+        self.mapping_layouts.append(kwargs["source_layout"])
         mappings = kwargs["mappings"]
         assert [item.source for item in mappings] == [
             "/home/admin/.openclaw/workspace/skills/skills-local/local-a",
@@ -302,6 +347,15 @@ class _RollbackRuntime:
 
     async def verify_mappings(self, **kwargs: object) -> bool:
         self.events.append("verify")
+        self.mapping_layouts.append(kwargs["source_layout"])
+        return True
+
+
+class _EditGuard:
+    def acquire_for_rollback(self, **kwargs: object) -> object:
+        return object()
+
+    def release(self, lease: object) -> bool:
         return True
 
 
@@ -314,6 +368,7 @@ async def test_explicit_rollback_only_moves_forward_and_preserves_pool_writes() 
         layout_repository=layouts,
         skill_repository=_Skills(),
         runtime=runtime,
+        edit_guard=_EditGuard(),
     )
 
     first = await service.rollback(
@@ -332,6 +387,11 @@ async def test_explicit_rollback_only_moves_forward_and_preserves_pool_writes() 
         "verify",
         "rollback",
         "mapping",
+    ]
+    assert runtime.mapping_layouts == [
+        SkillMappingSourceLayout.LEGACY,
+        SkillMappingSourceLayout.LEGACY,
+        SkillMappingSourceLayout.LEGACY,
     ]
 
     runtime.publish_results = [True]
@@ -355,3 +415,25 @@ async def test_explicit_rollback_only_moves_forward_and_preserves_pool_writes() 
             "skills/skills-local/local-a"
         )
     }
+
+
+@pytest.mark.asyncio
+async def test_rollback_bot_validation_failure_is_persisted() -> None:
+    layouts = _RollbackLayouts()
+    result = await SkillsPoolRollbackService(
+        bot_repository=_ChangedBots(),
+        layout_repository=layouts,
+        skill_repository=_Skills(),
+        runtime=_RollbackRuntime(),
+        edit_guard=_EditGuard(),
+    ).rollback(
+        scope=SCOPE,
+        rollback_generation="rollback-1",
+        lease_owner="operator-task-1",
+        operator="oncall-1",
+        note="业务确认回滚",
+    )
+
+    assert result.outcome is SkillsPoolRollbackOutcome.BOT_CHANGED
+    assert layouts.events == ["begin", "failure"]
+    assert layouts.state.last_failure_stage == "rollback_bot_validation"

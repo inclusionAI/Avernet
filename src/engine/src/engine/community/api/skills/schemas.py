@@ -102,24 +102,25 @@ class PoolLayoutActivateApiResponse(ApiResponse):
 
 class PoolMappingVerifyRequest(BaseModel):
     mappings: list[SymlinkItem]
+    source_layout: Literal["pool", "legacy"] = "pool"
 
 
 __all__ = [
-    "SymlinkItem",
-    "SyncSymlinkRequest",
-    "CleanSymlinkRequest",
     "BindPathItem",
     "BindPathRequest",
+    "CenterEnsureFailureSchema",
     "CenterEnsureItemSchema",
     "CenterEnsureRequestSchema",
-    "CenterEnsureFailureSchema",
     "CenterEnsureResponseSchema",
+    "CleanSymlinkRequest",
+    "PoolLayoutActivateApiResponse",
+    "PoolLayoutActivateRequest",
+    "PoolLayoutActivateResponse",
+    "PoolLayoutRollbackRequest",
+    "PoolMappingVerifyRequest",
+    "RuntimeLayoutProbeApiResponse",
     "RuntimeLayoutProbeRequest",
     "RuntimeLayoutProbeResponse",
-    "RuntimeLayoutProbeApiResponse",
-    "PoolLayoutActivateRequest",
-    "PoolLayoutRollbackRequest",
-    "PoolLayoutActivateResponse",
-    "PoolLayoutActivateApiResponse",
-    "PoolMappingVerifyRequest",
+    "SymlinkItem",
+    "SyncSymlinkRequest",
 ]

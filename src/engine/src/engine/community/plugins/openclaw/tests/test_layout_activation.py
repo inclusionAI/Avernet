@@ -16,6 +16,7 @@ from engine.community.core.skills.models import (
 )
 from engine.community.plugins.openclaw.layout_activation import (
     MappingPublishResult,
+    MappingSourceLayout,
     MappingVerificationResult,
     PoolActivationResult,
     PoolActivationStatus,
@@ -26,16 +27,15 @@ from engine.community.plugins.openclaw.layout_activation import (
     rollback_openclaw_pool,
     verify_skill_mappings,
 )
-from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
-from engine.community.plugins.openclaw.layout_probe import LAYOUT_CONTRACT_VERSION
 from engine.community.plugins.openclaw.layout_probe import (
+    LAYOUT_CONTRACT_VERSION,
     RuntimeLayoutInspection,
     RuntimeLayoutInspectionStatus,
 )
 from engine.community.plugins.openclaw.layout_sync import (
     write_baseline_manifest,
 )
-
+from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
 
@@ -207,6 +207,43 @@ def test_explicit_rollback_rebuilds_legacy_from_current_pool_content(
         home=home,
     )
     assert repeated.status is PoolActivationStatus.ALREADY_COMMITTED
+
+
+def test_legacy_mapping_can_replace_pool_mapping_during_explicit_rollback(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    target = legacy_local.parent / "handmade"
+    pool_mapping = SkillMapping(source=str(pool_local / "handmade"), target=str(target))
+    activated = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[pool_mapping],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+    assert publish_pool_mappings(mappings=[pool_mapping], home=home).published
+
+    legacy_mapping = SkillMapping(
+        source=str(legacy_local / "handmade"),
+        target=str(target),
+    )
+    published = publish_pool_mappings(
+        mappings=[legacy_mapping],
+        source_layout=MappingSourceLayout.LEGACY,
+        home=home,
+    )
+    verified = verify_skill_mappings(
+        mappings=[legacy_mapping],
+        source_layout=MappingSourceLayout.LEGACY,
+        home=home,
+    )
+
+    assert published.published
+    assert target.readlink() == legacy_local / "handmade"
+    assert verified.valid
 
 
 def test_cutover_rejects_missing_pool_mapping_source_before_bridge(

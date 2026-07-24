@@ -141,17 +141,20 @@ class SkillsPoolReconcileService:
             engine=engine,
         )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
-            if (
-                probe.status is RuntimeLayoutProbeStatus.INVALID
-                and not state.data_plane_cutover_committed
-            ):
-                recorded = self._layouts.record_pre_cutover_failure(
+            if probe.status in {
+                RuntimeLayoutProbeStatus.INVALID,
+                RuntimeLayoutProbeStatus.TRANSIENT_ERROR,
+            }:
+                recorded = self._record_failure_for_boundary(
                     scope=scope,
-                    migration_generation=generation,
+                    generation=generation,
                     lease_owner=lease_owner,
-                    failure_code="INVALID",
+                    cutover_committed=state.data_plane_cutover_committed,
+                    failure_code=probe.status.value,
                     failure_stage="runtime_probe",
-                    retryable=False,
+                    retryable=(
+                        probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR
+                    ),
                     evidence=probe.evidence,
                 )
                 if not recorded:
@@ -167,20 +170,20 @@ class SkillsPoolReconcileService:
             probe.preparation_id is None
             or probe.layout_contract_version != state.layout_contract_version
         ):
-            if not state.data_plane_cutover_committed:
-                recorded = self._layouts.record_pre_cutover_failure(
-                    scope=scope,
-                    migration_generation=generation,
-                    lease_owner=lease_owner,
-                    failure_code="INVALID",
-                    failure_stage="runtime_probe",
-                    retryable=False,
-                    evidence=probe.evidence,
+            recorded = self._record_failure_for_boundary(
+                scope=scope,
+                generation=generation,
+                lease_owner=lease_owner,
+                cutover_committed=state.data_plane_cutover_committed,
+                failure_code="INVALID",
+                failure_stage="runtime_probe",
+                retryable=False,
+                evidence=probe.evidence,
+            )
+            if not recorded:
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.STATE_RACE_LOST
                 )
-                if not recorded:
-                    return SkillsPoolReconcileResult(
-                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
-                    )
             return SkillsPoolReconcileResult(
                 SkillsPoolReconcileOutcome.INVALID,
                 evidence=probe.evidence,
@@ -201,9 +204,25 @@ class SkillsPoolReconcileService:
             local_names = [self._local_name(asset) for asset in local_assets]
             mappings = self._build_pool_mappings(active_assets, paths=paths)
         except ValueError as error:
+            evidence = {"reason": str(error)}
+            recorded = self._record_failure_for_boundary(
+                scope=scope,
+                generation=generation,
+                lease_owner=lease_owner,
+                cutover_committed=state.data_plane_cutover_committed,
+                failure_code="MAPPING_DATA_INVALID",
+                failure_stage="mapping_build",
+                retryable=False,
+                evidence=evidence,
+            )
+            if not recorded:
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                )
             return SkillsPoolReconcileResult(
                 SkillsPoolReconcileOutcome.INVALID,
-                evidence={"reason": str(error)},
+                evidence=evidence,
+                retryable=False,
             )
 
         cutover_finalizing = (
@@ -423,6 +442,33 @@ class SkillsPoolReconcileService:
             preparation_id=preparation_id,
             evidence=evidence,
             retryable=True,
+        )
+
+    def _record_failure_for_boundary(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        generation: str,
+        lease_owner: str,
+        cutover_committed: bool,
+        failure_code: str,
+        failure_stage: str,
+        retryable: bool,
+        evidence: dict[str, object],
+    ) -> bool:
+        recorder = (
+            self._layouts.record_post_cutover_failure
+            if cutover_committed
+            else self._layouts.record_pre_cutover_failure
+        )
+        return recorder(
+            scope=scope,
+            migration_generation=generation,
+            lease_owner=lease_owner,
+            failure_code=failure_code,
+            failure_stage=failure_stage,
+            retryable=retryable,
+            evidence=evidence,
         )
 
     @staticmethod

@@ -261,6 +261,13 @@ class PoolLayoutActivationStatus(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class PoolMappingSourceLayout(StrEnum):
+    """Layout whose canonical roots mapping sources must use."""
+
+    POOL = "pool"
+    LEGACY = "legacy"
+
+
 @dataclass
 class PoolMappingPublishResult:
     """Pool mapping 全量发布结果。"""
@@ -291,13 +298,14 @@ __all__ = [
     "CleanSymlinksRequest",
     "CleanSymlinksResult",
     "PoolLayoutActivateRequest",
-    "PoolLayoutRollbackRequest",
     "PoolLayoutActivationResult",
     "PoolLayoutActivationStatus",
     "PoolLayoutProbeRequest",
     "PoolLayoutProbeResult",
     "PoolLayoutProbeStatus",
+    "PoolLayoutRollbackRequest",
     "PoolMappingPublishResult",
+    "PoolMappingSourceLayout",
     "PoolMappingVerificationResult",
     "Skill",
     "SkillConfig",

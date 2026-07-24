@@ -11,6 +11,7 @@ from agentclaw.community.core.skills_pool.models import (
     PoolCutoverResult,
     PoolSkillMapping,
     RegisteredSkillAsset,
+    SkillMappingSourceLayout,
 )
 
 
@@ -75,6 +76,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool:
         ...
 
@@ -84,6 +86,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool:
         ...
 

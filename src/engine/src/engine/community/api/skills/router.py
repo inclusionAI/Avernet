@@ -33,12 +33,19 @@ from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
     CleanSymlinksRequest,
-    PoolLayoutActivateRequest as PoolLayoutActivateCommand,
-    PoolLayoutRollbackRequest as PoolLayoutRollbackCommand,
-    PoolLayoutProbeRequest as PoolLayoutProbeCommand,
+    PoolMappingSourceLayout,
     SymlinkItem,
     SyncBindPathsRequest,
     SyncSymlinksRequest,
+)
+from engine.community.core.skills.models import (
+    PoolLayoutActivateRequest as PoolLayoutActivateCommand,
+)
+from engine.community.core.skills.models import (
+    PoolLayoutProbeRequest as PoolLayoutProbeCommand,
+)
+from engine.community.core.skills.models import (
+    PoolLayoutRollbackRequest as PoolLayoutRollbackCommand,
 )
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
@@ -144,12 +151,18 @@ async def verify_runtime_skill_mappings(
     """验证当前受管入口与 Pool source 一致。"""
 
     plugin = _skills_plugin()
+    layout_kwargs = (
+        {"source_layout": PoolMappingSourceLayout.LEGACY}
+        if body.source_layout == PoolMappingSourceLayout.LEGACY.value
+        else {}
+    )
     try:
         result = await plugin.verify_pool_mappings(
             [
                 SymlinkItem(source=item.source, target=item.target)
                 for item in body.mappings
             ],
+            **layout_kwargs,
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
@@ -167,12 +180,18 @@ async def publish_runtime_skill_mappings(
     """全量发布 Pool 受管 mapping，保留结构桥和外部入口。"""
 
     plugin = _skills_plugin()
+    layout_kwargs = (
+        {"source_layout": PoolMappingSourceLayout.LEGACY}
+        if body.source_layout == PoolMappingSourceLayout.LEGACY.value
+        else {}
+    )
     try:
         result = await plugin.publish_pool_mappings(
             [
                 SymlinkItem(source=item.source, target=item.target)
                 for item in body.mappings
             ],
+            **layout_kwargs,
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error

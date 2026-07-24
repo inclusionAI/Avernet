@@ -701,6 +701,30 @@ async def test_invalid_probe_is_persisted_as_non_retryable_blocker() -> None:
 
 
 @pytest.mark.asyncio
+async def test_transient_probe_failure_is_persisted_as_retryable() -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.TRANSIENT_ERROR,
+        preparation_id=None,
+        evidence={"reason": "runtime_unreachable"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.TRANSIENT_ERROR
+    assert result.retryable is True
+    assert layouts.events == ["failure"]
+    assert layouts.state.last_failure_code == "TRANSIENT_ERROR"
+    assert layouts.state.last_failure_stage == "runtime_probe"
+    assert layouts.state.last_failure_retryable is True
+
+
+@pytest.mark.asyncio
 async def test_ready_probe_contract_mismatch_is_persisted_as_blocker() -> None:
     layouts = FakeLayoutRepository()
     runtime = FakeRuntime()
@@ -725,7 +749,7 @@ async def test_ready_probe_contract_mismatch_is_persisted_as_blocker() -> None:
 
 
 @pytest.mark.asyncio
-async def test_post_cutover_invalid_probe_blocks_without_pre_cutover_write() -> None:
+async def test_post_cutover_invalid_probe_records_forward_only_failure() -> None:
     layouts = FakeLayoutRepository(
         claimed_state(
             phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
@@ -747,7 +771,8 @@ async def test_post_cutover_invalid_probe_blocks_without_pre_cutover_write() -> 
 
     assert result.outcome is SkillsPoolReconcileOutcome.INVALID
     assert result.retryable is False
-    assert layouts.events == []
+    assert layouts.events == ["post_failure"]
+    assert layouts.state.last_failure_stage == "runtime_probe"
     assert runtime.events == ["probe"]
 
 

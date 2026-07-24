@@ -45,6 +45,7 @@ class HermesPoolPaths:
 
     active: str = "/home/admin/.hermes/skills"
     legacy_local: str = "/home/admin/.hermes/workspace/skills/skills-local"
+    legacy_repo: str = "/home/admin/.hermes/skills-repo"
     pool_local: str = "/home/admin/.hermes/workspace/skills-pool/skills-local"
     pool_repo: str = "/home/admin/.hermes/workspace/skills-pool/skills-repo"
 
@@ -52,6 +53,7 @@ class HermesPoolPaths:
 PoolPaths = (
     OpenClawPoolPaths | ClaudeCodePoolPaths | AICodingPoolPaths | HermesPoolPaths
 )
+FILESYSTEM_POOL_ENGINES = ("openclaw", "claude_code", "aicoding", "hermes")
 
 
 def pool_paths_for_engine(engine: str) -> PoolPaths:
@@ -68,6 +70,16 @@ def pool_paths_for_engine(engine: str) -> PoolPaths:
     raise ValueError(f"engine Pool layout not implemented: {engine}")
 
 
+def local_locator_prefixes(*, pool: bool) -> tuple[str, ...]:
+    """Return every supported engine's canonical local locator prefix."""
+
+    attribute = "pool_local" if pool else "legacy_local"
+    return tuple(
+        f"local://{getattr(pool_paths_for_engine(engine), attribute)}/"
+        for engine in FILESYSTEM_POOL_ENGINES
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RegisteredSkillAsset:
     """Backend 中属于一个 Bot 的技能来源记录。"""
@@ -79,13 +91,20 @@ class RegisteredSkillAsset:
 
 @dataclass(frozen=True, slots=True)
 class PoolSkillMapping:
-    """显式以目标 Pool layout 构造的运行时 mapping。"""
+    """显式以声明 source layout 构造的运行时 mapping。"""
 
     source: str
     target: str
 
     def to_dict(self) -> dict[str, str]:
         return {"source": self.source, "target": self.target}
+
+
+class SkillMappingSourceLayout(StrEnum):
+    """运行时 mapping source 所属的权威 layout。"""
+
+    POOL = "pool"
+    LEGACY = "legacy"
 
 
 class PoolCutoverStatus(StrEnum):
@@ -120,6 +139,7 @@ class PoolCutoverResult:
 
 __all__ = [
     "AICodingPoolPaths",
+    "FILESYSTEM_POOL_ENGINES",
     "ClaudeCodePoolPaths",
     "HermesPoolPaths",
     "OpenClawPoolPaths",
@@ -128,5 +148,7 @@ __all__ = [
     "PoolCutoverStatus",
     "PoolSkillMapping",
     "RegisteredSkillAsset",
+    "SkillMappingSourceLayout",
+    "local_locator_prefixes",
     "pool_paths_for_engine",
 ]

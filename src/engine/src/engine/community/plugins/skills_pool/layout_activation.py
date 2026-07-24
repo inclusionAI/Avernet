@@ -37,6 +37,13 @@ class PoolActivationStatus(StrEnum):
     NOT_ATOMIC = "NOT_ATOMIC"
 
 
+class MappingSourceLayout(StrEnum):
+    """Authority layout that mapping sources must belong to."""
+
+    POOL = "pool"
+    LEGACY = "legacy"
+
+
 @dataclass(frozen=True, slots=True)
 class SkillMapping:
     source: str
@@ -200,18 +207,23 @@ def _canonical_pool_source(layout: _Layout, source: Path) -> Path | None:
     return None
 
 
-def _pool_source_failure(layout: _Layout, source: Path) -> str | None:
-    """证明 source 是 canonical Pool root 内真实、可读的技能目录。"""
+def _managed_source_failure(
+    source: Path,
+    *,
+    roots: tuple[Path, ...],
+    outside_reason: str,
+) -> str | None:
+    """证明 source 是指定 layout root 内真实、可读的技能目录。"""
 
     normalized = Path(os.path.abspath(source))
     containing_root: Path | None = None
-    for root in (layout.pool_local, layout.pool_repo):
+    for root in roots:
         normalized_root = Path(os.path.abspath(root))
         if normalized.is_relative_to(normalized_root):
             containing_root = normalized_root
             break
     if containing_root is None:
-        return "source_outside_pool"
+        return outside_reason
     if not normalized.exists():
         return "source_missing"
     try:
@@ -227,6 +239,44 @@ def _pool_source_failure(layout: _Layout, source: Path) -> str | None:
     if unreadable is not None:
         return "source_unreadable"
     return None
+
+
+def _source_failure(
+    layout: _Layout,
+    source: Path,
+    *,
+    source_layout: MappingSourceLayout,
+) -> str | None:
+    if source_layout is MappingSourceLayout.LEGACY:
+        return _managed_source_failure(
+            source,
+            roots=(layout.legacy_local, layout.legacy_repo),
+            outside_reason="source_outside_legacy",
+        )
+    return _managed_source_failure(
+        source,
+        roots=(layout.pool_local, layout.pool_repo),
+        outside_reason="source_outside_pool",
+    )
+
+
+def _source_for_layout(
+    layout: _Layout,
+    pool_source: Path,
+    *,
+    source_layout: MappingSourceLayout,
+) -> Path:
+    if source_layout is MappingSourceLayout.POOL:
+        return pool_source
+    normalized = Path(os.path.abspath(pool_source))
+    for pool_root, legacy_root in (
+        (layout.pool_local, layout.legacy_local),
+        (layout.pool_repo, layout.legacy_repo),
+    ):
+        normalized_pool_root = Path(os.path.abspath(pool_root))
+        if normalized.is_relative_to(normalized_pool_root):
+            return legacy_root / normalized.relative_to(normalized_pool_root)
+    return pool_source
 
 
 def _active_entry_inventory(
@@ -254,6 +304,7 @@ def _mapping_plan(
     *,
     layout: _Layout,
     mappings: list[SkillMapping],
+    source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
 ) -> _MappingPlan:
     desired: dict[Path, Path] = {}
     failures: list[dict[str, str]] = []
@@ -264,9 +315,20 @@ def _mapping_plan(
         target = Path(mapping.target)
         reason = ""
         if not source_input.is_absolute():
-            reason = "source_outside_pool"
+            reason = (
+                "source_outside_legacy"
+                if source_layout is MappingSourceLayout.LEGACY
+                else "source_outside_pool"
+            )
         else:
-            reason = _pool_source_failure(layout, source) or ""
+            reason = (
+                _source_failure(
+                    layout,
+                    source,
+                    source_layout=source_layout,
+                )
+                or ""
+            )
         if not reason and (
             not target.is_absolute()
             or target.parent != layout.legacy_root
@@ -296,8 +358,17 @@ def _mapping_plan(
             desired[target] = source
 
     discovered, external, occupied = _active_entry_inventory(layout)
-    for target, source in discovered.items():
-        reason = _pool_source_failure(layout, source)
+    for target, pool_source in discovered.items():
+        source = _source_for_layout(
+            layout,
+            pool_source,
+            source_layout=source_layout,
+        )
+        reason = _source_failure(
+            layout,
+            source,
+            source_layout=source_layout,
+        )
         if reason:
             failures.append(
                 {
@@ -307,7 +378,11 @@ def _mapping_plan(
                 }
             )
             continue
-        if target in desired and desired[target] != source:
+        if (
+            source_layout is MappingSourceLayout.POOL
+            and target in desired
+            and desired[target] != source
+        ):
             conflicts.append(
                 {
                     "target": str(target),
@@ -315,7 +390,8 @@ def _mapping_plan(
                     "existing_source": str(source),
                 }
             )
-        desired[target] = source
+        if source_layout is MappingSourceLayout.POOL or target not in desired:
+            desired[target] = source
     for target in occupied:
         if target in desired:
             conflicts.append(
@@ -907,16 +983,37 @@ def rollback_aicoding_pool(
     )
 
 
+def rollback_hermes_pool(
+    *,
+    rollback_generation: str,
+    registered_local_names: list[str],
+    home: str | Path = "/home/admin",
+    exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+) -> PoolActivationResult:
+    return _rollback_pool(
+        engine="hermes",
+        rollback_generation=rollback_generation,
+        registered_local_names=registered_local_names,
+        home=home,
+        exchange_paths=exchange_paths,
+    )
+
+
 def verify_skill_mappings(
     *,
     mappings: list[SkillMapping],
     home: str | Path = "/home/admin",
     engine: str = "openclaw",
+    source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
 ) -> MappingVerificationResult:
-    """验证受管激活入口精确解析到请求中的 Pool source。"""
+    """验证受管激活入口精确解析到声明 layout 的 source。"""
 
     layout = _Layout.for_engine(engine, Path(home))
-    plan = _mapping_plan(layout=layout, mappings=mappings)
+    plan = _mapping_plan(
+        layout=layout,
+        mappings=mappings,
+        source_layout=source_layout,
+    )
     failures: list[dict[str, str]] = []
     failures.extend(plan.failures)
     for conflict in plan.conflicts:
@@ -947,11 +1044,16 @@ def publish_pool_mappings(
     mappings: list[SkillMapping],
     home: str | Path = "/home/admin",
     engine: str = "openclaw",
+    source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
 ) -> MappingPublishResult:
-    """按文件系统事实对齐全部受管 Pool mapping，并保留外部入口。"""
+    """按声明 layout 对齐全部受管 mapping，并保留外部入口。"""
 
     layout = _Layout.for_engine(engine, Path(home))
-    plan = _mapping_plan(layout=layout, mappings=mappings)
+    plan = _mapping_plan(
+        layout=layout,
+        mappings=mappings,
+        source_layout=source_layout,
+    )
     if plan.conflicts:
         return MappingPublishResult(
             published=False,
@@ -1016,8 +1118,9 @@ def publish_pool_mappings(
 
 
 __all__ = [
-    "MappingVerificationResult",
     "MappingPublishResult",
+    "MappingSourceLayout",
+    "MappingVerificationResult",
     "PoolActivationResult",
     "PoolActivationStatus",
     "SkillMapping",
@@ -1029,6 +1132,7 @@ __all__ = [
     "publish_pool_mappings",
     "rollback_aicoding_pool",
     "rollback_claude_code_pool",
+    "rollback_hermes_pool",
     "rollback_openclaw_pool",
     "verify_skill_mappings",
 ]

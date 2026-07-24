@@ -82,6 +82,11 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditGuard,
+    SkillsPoolEditPausedError,
+)
+from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.skill_center.services.repositories import (
     SkillRepository,
     SkillSetRepository,
@@ -318,6 +323,7 @@ async def upload_skill(
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
+    edit_guard: SkillsPoolEditGuard = Injected(SkillsPoolEditGuard),
 ) -> UploadSkillResponse:
     """Upload a new skill from files.
 
@@ -422,7 +428,21 @@ async def upload_skill(
         effective_user_id = user_id or ctx.user_id
 
         # Call the service method (async)
-        skill = await service.upload_skill(uploaded_files, user_id=effective_user_id, bolt_id=effective_bot_id)
+        edit_lease = edit_guard.acquire_for_edit(
+            scope=BotSkillLayoutScope(
+                env=str(bot["env"]),
+                entity_id=str(bot["entity_id"]),
+                bot_id=effective_bot_id,
+            )
+        )
+        try:
+            skill = await service.upload_skill(
+                uploaded_files,
+                user_id=effective_user_id,
+                bolt_id=effective_bot_id,
+            )
+        finally:
+            edit_guard.release(edit_lease)
 
         logger.info(f"[skills.upload_skill] Success: skill_id={skill.get('id')}, name={skill.get('name')}")
 
@@ -449,6 +469,8 @@ async def upload_skill(
             ),
             message="Skill uploaded successfully"
         )
+    except SkillsPoolEditPausedError as e:
+        return UploadSkillResponse(success=False, message=str(e))
     except ValueError as e:
         error_msg = str(e)
         logger.error(f"[skills.upload_skill] Validation error: {error_msg}")
@@ -1900,6 +1922,7 @@ async def delete_skill(
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
+    edit_guard: SkillsPoolEditGuard = Injected(SkillsPoolEditGuard),
 ) -> MessageResponse:
     """Delete a skill.
 
@@ -1933,11 +1956,11 @@ async def delete_skill(
     )
     is_desktop = False
     try:
-        _bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
-        if _bot and _bot.get("bot_type") == "desktop":
+        bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
+        if bot and bot.get("bot_type") == "desktop":
             is_desktop = True
     except Exception:
-        pass
+        bot = None
 
     # teclaw deletes the skill files from the (draft) container; resolve provider
     # so the device-fs path is the workspace-namespace form.
@@ -1954,10 +1977,24 @@ async def delete_skill(
         local_skill_path_adapter=local_skill_adapter,
     )
     try:
-        success = await service.delete_skill(skill_id, user_id=current_user_id)
+        if bot is None:
+            raise HTTPException(status_code=404, detail="Bot not found")
+        edit_lease = edit_guard.acquire_for_edit(
+            scope=BotSkillLayoutScope(
+                env=str(bot["env"]),
+                entity_id=str(bot["entity_id"]),
+                bot_id=effective_bot_id,
+            )
+        )
+        try:
+            success = await service.delete_skill(skill_id, user_id=current_user_id)
+        finally:
+            edit_guard.release(edit_lease)
         if not success:
             raise HTTPException(status_code=404, detail="Skill not found")
         return MessageResponse(success=True, message="Skill deleted successfully")
+    except SkillsPoolEditPausedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         error_msg = str(e)
         # 权限错误返回 403
