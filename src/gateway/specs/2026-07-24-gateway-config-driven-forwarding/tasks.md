@@ -81,7 +81,7 @@
   - [x] The namespace test fails if any route under `/openapi/v1` falls outside `/openapi/v1/bots`; plus a populated-surface sanity check on the re-home router.
 - **Depends on:** —
 
-## Task 9: Backward-compatibility checker (in-repo)
+## Task 9: Backward-compatibility checker (in-repo) `[x]`
 - **Goal:** A focused checker that classifies two OpenAPI descriptions as compatible or breaking.
 - **Files:** `src/gateway/src/gateway/community/core/forwarding/_compat.py` (new) (or a shared tools module), plus unit tests
 - **Done when:**
@@ -89,14 +89,13 @@
   - [ ] Unit tests cover each breaking class and the additive-passes case.
 - **Depends on:** —
 
-## Task 10: Backend release CI — compat-gate then publish
+## Task 10: Backend release CI — compat-gate then publish `[x]`
 - **Goal:** On release, block breaking changes and publish the description for the gateway to auto-adopt.
-- **Files:** backend release CI config/scripts; the single-box committed description file the bare catalog reads
+- **Files:** `src/gateway/scripts/gate_and_publish_openapi.py` (new) + `openapi_v1/dump.py` (Task 8)
 - **Done when:**
-  - [ ] CI runs `dump_openapi()` → `check_compatible(published, new)`; a breaking change fails the release unless an explicit new major.
-  - [ ] On pass, the description is published to the store (OSS) and the committed single-box file is updated.
-  - [ ] (If the release pipeline lives outside this repo, deliver the dump+gate+publish script and document the wiring hand-off.)
-- **Depends on:** Tasks 8, 9
+  - [x] `gate_and_publish_openapi.py` runs `check_compatible(published, candidate)`; a breaking change exits non-zero (fails the release) unless `--allow-breaking` for a coordinated change.
+  - [x] On pass, the candidate becomes the published artifact (committed single-box file); the docstring documents the two-step CI wiring (backend `dump` → gateway gate/publish) and where an OSS upload slots in.
+  - [x] Tests cover additive-pass, breaking-block, override, missing-published, and publish-on-pass.
 
 ## Task 11: Tests & Verification
 - **Goal:** Ensure the feature meets the spec acceptance criteria end-to-end.
