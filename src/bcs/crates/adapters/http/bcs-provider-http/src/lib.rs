@@ -35,6 +35,9 @@ const SSE_IDLE_TIMEOUT_MS: u64 = 15 * 60 * 1_000;
 /// Maximum time for an SSE request to receive response headers. Body liveness
 /// is governed separately by `SSE_IDLE_TIMEOUT_MS` after the stream is accepted.
 const SSE_RESPONSE_HEADER_TIMEOUT_MS: u64 = 125_000;
+/// Maximum time to read the finite JSON acknowledgement when an SSE-preferred
+/// request falls back to `application/json`.
+const JSON_FALLBACK_BODY_TIMEOUT_MS: u64 = SSE_RESPONSE_HEADER_TIMEOUT_MS;
 /// Bounded retry for resolving run context after `deliver()` returns but before
 /// `put_context` lands (#2 put_context race): ~50ms * 20 ≈ 1s.
 const SSE_CTX_RETRY_INTERVAL_MS: u64 = 50;
@@ -44,6 +47,23 @@ const SSE_CTX_RETRY_MAX: u32 = 20;
 /// it recovers below the threshold. Edge-triggered so a sustained backlog logs
 /// twice (enter + recover), not once per frame.
 const SSE_LAG_ALERT_MS: u64 = 5_000;
+
+#[derive(Debug)]
+enum ProviderAckBodyError {
+    Decode(reqwest::Error),
+    Timeout,
+}
+
+async fn read_provider_ack_body(
+    response: reqwest::Response,
+    timeout: Duration,
+) -> Result<ProviderAckResponse, ProviderAckBodyError> {
+    match tokio::time::timeout(timeout, response.json::<ProviderAckResponse>()).await {
+        Ok(Ok(ack)) => Ok(ack),
+        Ok(Err(error)) => Err(ProviderAckBodyError::Decode(error)),
+        Err(_) => Err(ProviderAckBodyError::Timeout),
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ProviderClientPolicy {
@@ -267,10 +287,10 @@ impl BotDeliveryPort for HttpProviderTransport {
             //     events are honored is gated by submit_event's protocol_version
             //     check (Capability B). We do NOT require SSE for send anymore.
             let status = resp.status();
-            let ack = resp
-                .json::<ProviderAckResponse>()
-                .await
-                .map_err(|error| {
+            let json_body_timeout = Duration::from_millis(JSON_FALLBACK_BODY_TIMEOUT_MS);
+            let ack = match read_provider_ack_body(resp, json_body_timeout).await {
+                Ok(ack) => ack,
+                Err(ProviderAckBodyError::Decode(error)) => {
                     warn!(
                         target_bot_id = %target_bot_id,
                         provider_id = %provider_id,
@@ -280,8 +300,26 @@ impl BotDeliveryPort for HttpProviderTransport {
                         error = %error,
                         "provider downlink: 2.0 JSON ack decode failed"
                     );
-                    ServiceError::InternalError(format!("decode 2.0 json ack: {error}"))
-                })?;
+                    return Err(ServiceError::InternalError(format!(
+                        "decode 2.0 json ack: {error}"
+                    )));
+                }
+                Err(ProviderAckBodyError::Timeout) => {
+                    warn!(
+                        target_bot_id = %target_bot_id,
+                        provider_id = %provider_id,
+                        method = %method,
+                        run_id = %run_id,
+                        status = %status.as_u16(),
+                        json_body_timeout_ms = %json_body_timeout.as_millis(),
+                        "provider downlink: 2.0 JSON ack body timeout"
+                    );
+                    return Err(ServiceError::InternalError(format!(
+                        "provider 2.0 JSON ack body timeout after {}ms",
+                        json_body_timeout.as_millis()
+                    )));
+                }
+            };
             if ack.ok {
                 info!(
                     target_bot_id = %target_bot_id,
@@ -1582,6 +1620,29 @@ mod client_policy_tests {
         addr
     }
 
+    async fn spawn_stalled_json_body_server(delay: Duration) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\n\
+Content-Type: application/json\r\n\
+Content-Length: 64\r\n\
+Connection: keep-alive\r\n\
+\r\n\
+{\"ok\":",
+                )
+                .await
+                .unwrap();
+            tokio::time::sleep(delay).await;
+        });
+        addr
+    }
+
     #[test]
     fn sse_policy_is_http2_only_without_total_timeout() {
         let policy = ProviderClientPolicy::for_request(true);
@@ -1663,6 +1724,25 @@ mod client_policy_tests {
         assert!(error.to_string().contains(
             "provider response header timeout after 10ms"
         ));
+    }
+
+    #[tokio::test]
+    async fn json_fallback_body_timeout_bounds_incomplete_response() {
+        let addr = spawn_stalled_json_body_server(Duration::from_secs(1)).await;
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}"))
+            .send()
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(250),
+            read_provider_ack_body(response, Duration::from_millis(10)),
+        )
+        .await
+        .expect("ack body reader must not remain pending");
+
+        assert!(matches!(result, Err(ProviderAckBodyError::Timeout)));
     }
 
     #[test]
