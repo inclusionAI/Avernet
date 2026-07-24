@@ -6,6 +6,22 @@ general engine-layout descriptor.
 
 ## Contract v1
 
+Each new service publish record freezes only this engine-agnostic layout
+declaration:
+
+```json
+{
+  "schema_version": 1,
+  "engine": "openclaw",
+  "active_layout": "pool",
+  "layout_contract_version": "skills-pool-p3-v1"
+}
+```
+
+The manifest does not contain engine filesystem paths, copied file digests, or
+managed symlink entries. Engine build providers own the physical snapshot, and
+the container image owns the mapping from this declaration to runtime paths.
+
 The Backend derives these immutable environment variables from the target
 publish record's `skills_manifest` on first release, update, restart, rollback,
 and recreate:
@@ -25,7 +41,9 @@ Rules:
    `pool` and the contract version is exactly `skills-pool-p3-v1`.
 4. A Pool declaration with a missing or unknown contract falls back to the
    Legacy mount and cannot advertise Pool readiness.
-5. `legacy` always selects the Legacy repo. When both variables are absent, the
+5. `legacy` always selects the Legacy repo. A service publish record created
+   before this contract has no manifest; a new Backend emits explicit
+   `AGENTCLAW_SKILLS_LAYOUT=legacy` for it. When both variables are absent, the
    image retains the pre-contract filesystem heuristic for old Backend and
    non-service compatibility.
 6. Old images may ignore these added environment variables. Consequently a new

@@ -1,21 +1,16 @@
-"""Describe a service draft's frozen Skills layout within its publish artifact.
+"""Freeze a service draft's Skills layout declaration for one publish version.
 
 This module deliberately owns only the service-publish contract.  It does not
-resolve the rollout whitelist and it is not a general engine-layout descriptor:
-the editable draft's persisted active layout is the sole input, while the
-versioned build directory remains the physical content snapshot.
+resolve the rollout whitelist or engine-specific filesystem paths.  The
+editable draft's persisted active layout is the sole input; the engine build
+provider remains responsible for the physical versioned snapshot.
 """
 
 from __future__ import annotations
 
-import hashlib
-import os
-import shutil
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
 )
@@ -28,15 +23,6 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 
 @dataclass(frozen=True, slots=True)
-class _ServiceLayoutPaths:
-    active_relative: str
-    legacy_local_relative: str
-    pool_local_relative: str
-    legacy_repo_target: str
-    snapshot_repo_relatives: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class CapturedServiceSkillsLayout:
     """The draft layout decision captured before physical snapshotting starts."""
 
@@ -46,34 +32,7 @@ class CapturedServiceSkillsLayout:
     layout_contract_version: str | None
 
 
-_SERVICE_LAYOUTS = {
-    "openclaw": _ServiceLayoutPaths(
-        active_relative="workspace/skills",
-        legacy_local_relative="workspace/skills/skills-local",
-        pool_local_relative="workspace/skills-pool/skills-local",
-        legacy_repo_target="/home/admin/.openclaw/workspace/skills/skills-repo",
-        snapshot_repo_relatives=(
-            "workspace/skills/skills-repo",
-            "workspace/skills-pool/skills-repo",
-        ),
-    ),
-    "claude_code": _ServiceLayoutPaths(
-        active_relative="claude/skills",
-        legacy_local_relative="workspace/skills/skills-local",
-        pool_local_relative="workspace/skills-pool/skills-local",
-        legacy_repo_target="/home/admin/.claude_code/skills-repo",
-        snapshot_repo_relatives=(
-            "skills-repo",
-            "workspace/skills/skills-repo",
-            "workspace/skills-pool/skills-repo",
-            "claude/skills/skills-repo",
-        ),
-    ),
-}
-
-_RESERVED_ACTIVE_ENTRIES = frozenset(
-    {"skills-local", "skills-repo", "skills-center"}
-)
+_SERVICE_MANIFEST_ENGINES = frozenset({"openclaw", "claude_code"})
 SERVICE_SKILLS_POOL_CONTRACT_VERSION = "skills-pool-p3-v1"
 
 
@@ -117,8 +76,7 @@ class ServiceSkillsManifestBuilder:
             # native Hermes manifest contract, so do not falsely stamp one.
             return None
 
-        paths = _SERVICE_LAYOUTS.get(engine)
-        if paths is None:
+        if engine not in _SERVICE_MANIFEST_ENGINES:
             raise ServiceSkillsManifestError(
                 f"service Skills manifest is not supported for engine: {engine}"
             )
@@ -146,7 +104,6 @@ class ServiceSkillsManifestBuilder:
         self,
         *,
         captured: CapturedServiceSkillsLayout,
-        build_target_path: str,
     ) -> dict[str, Any]:
         engine = captured.engine
         current = self._layout_repository.get(captured.scope)
@@ -162,47 +119,12 @@ class ServiceSkillsManifestBuilder:
             raise ServiceSkillsManifestError(
                 "draft Skills layout changed during service build"
             )
-        paths = _SERVICE_LAYOUTS[engine]
-        is_pool = captured.active_layout is SkillLayout.POOL
-        local_relative = (
-            paths.pool_local_relative
-            if is_pool
-            else paths.legacy_local_relative
-        )
-        engine_paths = pool_paths_for_engine(engine)
-        local_target = (
-            engine_paths.pool_local if is_pool else engine_paths.legacy_local
-        )
-        repo_target = (
-            engine_paths.pool_repo if is_pool else paths.legacy_repo_target
-        )
-        target = Path(build_target_path)
-        _prune_shared_repo_content(target, paths.snapshot_repo_relatives)
-        local_snapshot = target / local_relative
-        active_root = target / paths.active_relative
-        _require_snapshot_directory(local_snapshot, label="local Skills")
-        _require_snapshot_directory(active_root, label="active Skills")
-        digest, file_count = _digest_tree(local_snapshot)
 
         return {
             "schema_version": 1,
             "engine": engine,
             "active_layout": captured.active_layout.value,
             "layout_contract_version": captured.layout_contract_version,
-            "local_snapshot": {
-                "relative_path": local_relative,
-                "file_count": file_count,
-                "sha256": digest,
-            },
-            "managed_entries": _managed_entries(
-                active_root,
-                managed_roots=(local_target, repo_target),
-            ),
-            "repo": {
-                "delivery": "runtime_mount",
-                "included_in_local_snapshot": False,
-                "target": repo_target,
-            },
         }
 
 
@@ -256,96 +178,13 @@ def service_skills_manifest_env(
 def service_skills_env_from_ext(
     ext: dict[str, Any] | None,
     bot: dict[str, Any],
-) -> dict[str, str] | None:
-    """Return the immutable runtime layout declaration from a publish ext."""
+) -> dict[str, str]:
+    """Return the immutable layout declaration, defaulting old versions to Legacy."""
 
     manifest = (ext or {}).get("skills_manifest")
     if manifest is None:
-        return None
+        return {"AGENTCLAW_SKILLS_LAYOUT": SkillLayout.LEGACY.value}
     return service_skills_manifest_env(manifest, bot)
-
-
-def _require_snapshot_directory(path: Path, *, label: str) -> None:
-    if path.is_symlink() or not path.is_dir():
-        raise ServiceSkillsManifestError(
-            f"{label} snapshot directory is missing or invalid: {path}"
-        )
-
-
-def _managed_entries(
-    active_root: Path,
-    *,
-    managed_roots: tuple[str, str],
-) -> list[dict[str, str]]:
-    if not active_root.is_dir():
-        return []
-
-    entries: list[dict[str, str]] = []
-    for child in sorted(active_root.iterdir(), key=lambda path: path.name):
-        if child.name in _RESERVED_ACTIVE_ENTRIES or not child.is_symlink():
-            continue
-        link_target = os.readlink(child)
-        normalized_relative = link_target.removeprefix("./")
-        is_relative_managed = (
-            not link_target.startswith("/")
-            and normalized_relative.split("/", 1)[0]
-            in {"skills-local", "skills-repo"}
-        )
-        is_absolute_managed = any(
-            link_target == root or link_target.startswith(f"{root}/")
-            for root in managed_roots
-        )
-        if not is_relative_managed and not is_absolute_managed:
-            continue
-        entries.append({"name": child.name, "target": link_target})
-    return entries
-
-
-def _prune_shared_repo_content(
-    target: Path,
-    relative_paths: tuple[str, ...],
-) -> None:
-    """Remove stale copied repo directories while preserving bridge symlinks."""
-
-    for relative_path in relative_paths:
-        candidate = target / relative_path
-        if candidate.is_symlink() or not candidate.exists():
-            continue
-        if candidate.is_dir():
-            shutil.rmtree(candidate)
-        else:
-            candidate.unlink()
-
-
-def _digest_tree(root: Path) -> tuple[str, int]:
-    """Hash names, types, link targets and file bytes without following links."""
-
-    digest = hashlib.sha256()
-    file_count = 0
-    if not root.exists():
-        digest.update(b"missing\0")
-        return digest.hexdigest(), 0
-
-    def visit(directory: Path) -> None:
-        nonlocal file_count
-        for child in sorted(directory.iterdir(), key=lambda path: path.name):
-            relative = child.relative_to(root).as_posix().encode()
-            if child.is_symlink():
-                digest.update(b"L\0" + relative + b"\0")
-                digest.update(os.readlink(child).encode() + b"\0")
-            elif child.is_dir():
-                digest.update(b"D\0" + relative + b"\0")
-                visit(child)
-            elif child.is_file():
-                file_count += 1
-                digest.update(b"F\0" + relative + b"\0")
-                with child.open("rb") as source:
-                    while chunk := source.read(1024 * 1024):
-                        digest.update(chunk)
-                digest.update(b"\0")
-
-    visit(root)
-    return digest.hexdigest(), file_count
 
 
 __all__ = [
