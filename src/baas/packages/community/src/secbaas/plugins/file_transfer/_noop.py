@@ -89,3 +89,16 @@ class NoopFileTransferBackend(FileTransferBackend):
             "File transfer is not configured. "
             "Set config.plugins.file_transfer to 'real' to enable."
         )
+
+    def build_session_staging_path(
+        self,
+        tenant: str,
+        session_id: str,
+        transfer_id: str,
+        filename: str,
+        subdir: str | None = None,
+    ) -> str:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'real' to enable."
+        )
