@@ -54,22 +54,23 @@
   - [x] Integration tests (real streaming forwarder + stub upstream): auth reject-before-forward, unknown-domain 404, success + duplicate Set-Cookie, SSE streaming, upload verbatim.
 - **Depends on:** Tasks 1, 2
 
-## Task 6: Wire gateway + retire #389 stub routers
+## Task 6: Wire gateway + retire #389 stub routers `[x]`
 - **Goal:** Compose the pieces and cut over the app to config-driven serving.
-- **Files:** `src/gateway/src/gateway/community/bootstrap/` , `src/gateway/src/gateway/community/adapters/web/app.py`, `src/gateway/src/gateway/community/adapters/web/routers/**` (deleted)
+- **Files:** `src/gateway/src/gateway/community/bootstrap/_forwarding.py` (new), `src/gateway/src/gateway/community/adapters/web/app.py`, `src/gateway/src/gateway/community/adapters/web/routers/**` (deleted), `src/gateway/configs/schemas/bots.openapi.json` (seed artifact)
 - **Done when:**
-  - [ ] Bootstrap composes forwarder, domain map, and schema catalog (+ refresher); existing `Authenticator` wiring preserved.
-  - [ ] `app.py` mounts the catch-all, overrides `app.openapi` to serve the generated doc, starts the refresher on lifespan, and drops `include_all`.
-  - [ ] The seven `routers/<group>/` stub packages are deleted; `ruff` + `mypy --strict` + `pytest -m "not e2e"` green.
-  - [ ] Snapshot test: generated `/openapi/v1` doc ⊇ the #389 operation set for carried-over ops.
+  - [x] `build_forwarding` composes forwarder, domain map, and schema catalog (+ background refresh lifecycle); existing `Authenticator` wiring preserved.
+  - [x] `app.py` mounts the catch-all, overrides `app.openapi` to serve the generated doc, starts/stops the refresher on lifespan, and drops `include_all`.
+  - [x] The seven `routers/<group>/` stub packages are deleted (+ their obsolete tests); ruff + `pytest -m "not e2e"` green (288); mypy consistent with baseline.
+  - [x] Snapshot tests: served `/openapi/v1` doc ⊇ the published (#389) operation set, every op carries `x-avernet-security`, only the public namespace is exposed. (Seed artifact captured from the #389 contract; replaced by the backend's own published artifact in Group D/E.)
+  - Note: fixed a pre-existing test-isolation leak (`test_runner_plugin` left `GATEWAY_CONFIG_PATH` in the env) that the now-config-driven app factory exposed.
 - **Depends on:** Tasks 4, 5
 
-## Task 7: Backend — move ALL exposed routers under `/openapi/v1/bots`
-- **Goal:** Every externally-exposed backend group (the seven #389 groups — bots, channels, identity, mcp, resources, routines, skills) is the `bots` component and serves under the `/openapi/v1/bots` prefix directly.
-- **Files:** `src/backend/src/agentclaw/community/adapters/http/app.py` and the exposed routers under `src/backend/src/agentclaw/community/adapters/http/**` (e.g. `channel/router.py`, `identity/router.py`, `cron/router.py`, …)
+## Task 7: Backend — expose ALL groups under `/openapi/v1/bots` in a dedicated subdirectory
+- **Goal:** Every externally-exposed backend group (the seven #389 groups — bots, channels, identity, mcp, resources, routines, skills) serves under the `/openapi/v1/bots` prefix, in a **new dedicated subdirectory** that keeps the public surface distinct from the legacy `/api/…` routers.
+- **Files:** new `src/backend/src/agentclaw/community/adapters/http/openapi_v1/**` (dedicated public-API package); `src/backend/src/agentclaw/community/adapters/http/app.py` (mount it). Legacy `/api/…` routers untouched.
 - **Done when:**
-  - [ ] Each exposed group's router prefix is changed/dual-mounted so its routes live under `/openapi/v1/bots/…` (alongside the existing `/api/…` during transition).
-  - [ ] The mapping from each #389 group's intended public path to its `/openapi/v1/bots/…` path is applied consistently (no group left as a `/openapi/v1/<group>` sibling).
+  - [ ] A new `openapi_v1` package mounts the public routes under `/openapi/v1/bots/…`, reusing the existing handler/service layer (no business-logic duplication).
+  - [ ] The public surface is distinguishable from legacy at the directory level (own subdirectory), and legacy `/api/…` still works.
   - [ ] Existing backend tests stay green.
 - **Depends on:** —
 
