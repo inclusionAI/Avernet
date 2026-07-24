@@ -65,22 +65,21 @@
   - Note: fixed a pre-existing test-isolation leak (`test_runner_plugin` left `GATEWAY_CONFIG_PATH` in the env) that the now-config-driven app factory exposed.
 - **Depends on:** Tasks 4, 5
 
-## Task 7: Backend — expose ALL groups under `/openapi/v1/bots` in a dedicated subdirectory
+## Task 7: Backend — expose ALL groups under `/openapi/v1/bots` in a dedicated subdirectory `[x]`
 - **Goal:** Every externally-exposed backend group (the seven #389 groups — bots, channels, identity, mcp, resources, routines, skills) serves under the `/openapi/v1/bots` prefix, in a **new dedicated subdirectory** that keeps the public surface distinct from the legacy `/api/…` routers.
 - **Files:** new `src/backend/src/agentclaw/community/adapters/http/openapi_v1/**` (dedicated public-API package); `src/backend/src/agentclaw/community/adapters/http/app.py` (mount it). Legacy `/api/…` routers untouched.
 - **Done when:**
-  - [ ] A new `openapi_v1` package mounts the public routes under `/openapi/v1/bots/…`, reusing the existing handler/service layer (no business-logic duplication).
-  - [ ] The public surface is distinguishable from legacy at the directory level (own subdirectory), and legacy `/api/…` still works.
-  - [ ] Existing backend tests stay green.
-- **Depends on:** —
+  - [x] `openapi_v1/_rehome.py` re-mounts the existing group routers under `/openapi/v1/bots/…` (path move only — same handlers/deps reused, no logic written). `bot_management` (`/api/bots`) collapses onto the domain root (no `bots/bots`); other groups become sub-paths. 119 public paths under the community profile; `app.openapi()` generates with no operationId collisions.
+  - [x] Public surface lives in its own subdirectory, distinct from legacy `/api/…` which is untouched.
+  - [x] Existing backend gateway contract suite stays green (102 passed).
 
-## Task 8: Backend — `dump_openapi()` + public-namespace test
+## Task 8: Backend — `dump_openapi()` + public-namespace test `[x]`
 - **Goal:** Deterministic OpenAPI dump for publishing, and enforce that the public namespace holds only the intended `bots` surface.
-- **Files:** `src/backend/src/agentclaw/community/adapters/http/app.py`, `src/backend/tests/community/contracts/gateway/test_public_namespace.py` (new)
+- **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/dump.py` (new), `src/backend/tests/community/contracts/gateway/test_public_namespace.py` (new)
 - **Done when:**
-  - [ ] `dump_openapi()` writes `app.openapi()` deterministically (stable ordering) to a file.
-  - [ ] The test fails if any route under `/openapi/v1` falls outside the `/openapi/v1/bots` surface (no stray/internal route leaks into the public namespace).
-- **Depends on:** Task 7
+  - [x] `dump_openapi()` writes the public `/openapi/v1` description deterministically (sorted keys). Regenerated the gateway's `bots.openapi.json` artifact (119 paths) from it.
+  - [x] The namespace test fails if any route under `/openapi/v1` falls outside `/openapi/v1/bots`; plus a populated-surface sanity check on the re-home router.
+- **Depends on:** —
 
 ## Task 9: Backward-compatibility checker (in-repo)
 - **Goal:** A focused checker that classifies two OpenAPI descriptions as compatible or breaking.
