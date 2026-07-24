@@ -50,12 +50,15 @@ third-party developers without paying the double-write cost on every change.
       forwarded operation; forwarded operations are described entirely by
       configuration.
 - [ ] Each forwarded operation's configuration comprehensively specifies: the
-      auth requirement, the client-facing (gateway) request path and method, the
-      upstream request path and method it forwards to, and whether the operation
-      appears in the published document. The operation entry does **not** name a
-      server or a domain — the domain is the top-level segment of its gateway
-      path, and the server is resolved from that domain through the separate
-      domain→server map (below).
+      auth requirement, the request path and method, and whether the operation
+      appears in the published document. By default the path is forwarded to the
+      upstream **verbatim** (identity mapping, including the domain segment) — the
+      backend serves the same paths it is exposed under. An **optional** upstream
+      override may be given for the exceptional operation whose backend path
+      genuinely differs and cannot be moved. The operation entry does **not** name
+      a server or a domain — the domain is the top-level segment of the path, and
+      the server is resolved from that domain through the separate domain→server
+      map (below).
 - [ ] A separate configuration maps each **domain** (the top-level path segment)
       to a target backend server; changing a domain's server requires no change
       to any operation's client-facing path.
@@ -69,13 +72,16 @@ third-party developers without paying the double-write cost on every change.
 - [ ] The gateway serves a single OpenAPI document that covers all publicly
       exposed forwarded operations. Its per-operation request/response shapes come
       from the backend's own published API description — they are not authored on
-      the gateway — while each operation is presented under its **client-facing
-      gateway path** (resolved from the config's gateway↔upstream path mapping),
-      not the upstream path.
+      the gateway. Because paths are forwarded verbatim by default, the backend's
+      paths are the client-facing paths and are presented as-is; only an
+      operation carrying an explicit upstream override is re-keyed to its
+      client-facing path.
 - [ ] The published document includes an operation **only if** its configuration
       marks it public; a backend operation that exists but is not configured as
       public does not appear.
-- [ ] The backend's operations are exposed under a single **`bots`** domain.
+- [ ] The backend's operations are exposed under a single **`bots`** domain, and
+      the backend **serves those same paths** (so no per-operation path rewrite is
+      needed for the default case).
 - [ ] The gateway obtains a backend's API description as a **versioned, pinned
       artifact** produced when the backend is released; the gateway does not
       require the backend to be reachable at request time in order to route,
@@ -91,15 +97,17 @@ third-party developers without paying the double-write cost on every change.
 
 ## In Scope
 
-- The declarative configuration format for forwarded operations (auth, routing,
-  path mapping, public exposure).
+- The declarative configuration format for forwarded operations (auth, public
+  exposure, and an optional upstream-path override; paths forward verbatim by
+  default).
 - The domain → server mapping configuration and domain-based route resolution.
 - Generating the served public API document from configuration + the pinned
   backend API description.
 - The mechanism by which a backend's API description becomes a pinned artifact the
   gateway consumes, and the CI gates that (a) detect breaking changes to
   referenced operations and (b) detect config/backend drift.
-- Collapsing the backend's exposed operations under the `bots` domain.
+- Collapsing the backend's exposed operations under the `bots` domain, including
+  moving the backend's routes so it serves those client-facing paths directly.
 - Retiring the hand-written per-operation endpoint stubs that exist only to
   generate documentation.
 
