@@ -8,10 +8,10 @@ error codes with shared semantics are re-exported without a SESSION_ prefix
 """
 
 from ._errors import (
-    StagingObjectNotFoundError,
     SessionFileSharingError,
     SourceTransferNotFoundError,
     SourceTransferNotReadyError,
+    StagingObjectNotFoundError,
     TransferNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,

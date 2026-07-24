@@ -104,9 +104,7 @@ class TestDispatchCompleteUploadSingle:
         assert result.status == "DONE"
 
     @pytest.mark.asyncio
-    async def test_transfer_not_found_raises(
-        self, dispatcher, ticket_repo
-    ):
+    async def test_transfer_not_found_raises(self, dispatcher, ticket_repo):
         """When ticket is not found, raise TransferNotFoundError."""
         ticket_repo.get_by_transfer_id.return_value = None
 
