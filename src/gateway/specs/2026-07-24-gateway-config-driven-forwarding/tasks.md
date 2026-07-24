@@ -26,14 +26,14 @@
   - [x] Conformance test against a real ASGI app (status, headers, multi-chunk streamed body, hop-by-hop stripping).
 - **Depends on:** —
 
-## Task 3: SchemaCatalog SPI + file loader + background refresh
+## Task 3: SchemaCatalog SPI + file loader + background refresh `[x]`
 - **Goal:** Provide the current published description per domain, refreshed in the background with last-known-good.
 - **Files:** `src/gateway/src/gateway/community/spi/schema_catalog/{_protocols,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/schema_catalog/bare/_plugin.py` (new)
 - **Done when:**
-  - [ ] `SchemaCatalog.current(domain) -> dict` protocol defined.
-  - [ ] Bare plugin reads a local file (single-box); a refresher re-reads the source every `refresh_seconds` and swaps the in-memory copy.
-  - [ ] On read failure or malformed/unparseable content, the previous copy is retained (last-known-good); no exception escapes.
-  - [ ] Unit tests: adopts a changed source; keeps last-known-good on failure.
+  - [x] `SchemaCatalog.current(domain) -> dict` protocol defined.
+  - [x] Bare plugin reads a local file (single-box); `refresh_loop` re-reads every `refresh_seconds` and swaps the in-memory copy.
+  - [x] On read failure or malformed/unparseable content, the previous copy is retained (last-known-good); no exception escapes.
+  - [x] Unit tests: adopts a changed source; keeps last-known-good on failure (malformed, missing, non-mapping); background loop adopts then stops.
 - **Depends on:** —
 
 ## Task 4: OpenAPI generator

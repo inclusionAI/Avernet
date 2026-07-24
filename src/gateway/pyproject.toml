@@ -46,6 +46,9 @@ bare = "gateway.community.plugins.database.bare:BareDatabasePlugin"
 [project.entry-points."gateway.forwarder"]
 bare = "gateway.community.plugins.forwarder.bare:BareForwarder"
 
+[project.entry-points."gateway.schema_catalog"]
+bare = "gateway.community.plugins.schema_catalog.bare:BareSchemaCatalog"
+
 # --- 包索引配置（开源：阿里云公共镜像） ---
 [[tool.uv.index]]
 default = true
