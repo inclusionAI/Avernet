@@ -555,6 +555,33 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
         .await
         .expect("start Human run");
 
+    for (group_id, session_id, expected_fragment) in [
+        ("missing-group", None, "group not found"),
+        (
+            "group-1",
+            Some("missing-session".to_string()),
+            "session not found",
+        ),
+    ] {
+        let error = runtime
+            .start_state_machine_run(StartStateMachineRunCommand {
+                group_id: group_id.to_string(),
+                session_id,
+                definition_yaml: Some(human_input_yaml()),
+                definition: None,
+                definition_ref: None,
+                input: json!({"proposal": "invalid start"}),
+                caller_id: Some("human_1001".to_string()),
+                authenticated_human: Some(AuthenticatedHumanCaller {
+                    actor_id: "human_1001".to_string(),
+                    display_name: Some("Reviewer".to_string()),
+                }),
+            })
+            .await
+            .expect_err("invalid run context must reject start");
+        assert!(error.to_string().contains(expected_fragment));
+    }
+
     let not_state_machine = runtime
         .handle_session_human_input(HandleSessionHumanInputCommand {
             group_id: "group-regular".to_string(),

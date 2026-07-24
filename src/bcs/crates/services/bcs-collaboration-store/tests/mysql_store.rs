@@ -93,6 +93,73 @@ async fn mysql_definition_upsert_rejects_same_id_version_with_different_content(
 }
 
 #[tokio::test]
+async fn mysql_definition_upsert_with_yaml_records_yaml_source_format() {
+    let definition = test_definition();
+    let db = Arc::new(RecordingDb {
+        definition_metadata_rows: Mutex::new(VecDeque::from([None])),
+        ..RecordingDb::default()
+    });
+    let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
+
+    StateMachineDefinitionRepoPort::upsert_with_source_yaml(
+        &store,
+        definition,
+        "name: source yaml".to_string(),
+    )
+    .await
+    .expect("upsert definition with source YAML");
+
+    let transactions = db.transactions.lock().await;
+    let DbTransactionStep::Execute(statement) = &transactions[0][1] else {
+        panic!("expected definition execute step");
+    };
+    assert_eq!(statement.params()[5], DbValue::from("yaml"));
+    assert_eq!(statement.params()[8], DbValue::from("name: source yaml"));
+}
+
+#[tokio::test]
+async fn mysql_definition_and_snapshot_reads_reject_invalid_persisted_json() {
+    let db = Arc::new(RecordingDb {
+        definition_json: Mutex::new(Some("{invalid".to_string())),
+        snapshot_json: Mutex::new(Some("{invalid".to_string())),
+        ..RecordingDb::default()
+    });
+    let store = MySqlCollaborationStore::new(db, "dev".to_string());
+
+    assert!(
+        StateMachineDefinitionRepoPort::get(&store, "invalid", 1)
+            .await
+            .is_err()
+    );
+    assert!(store.get_run_snapshot("invalid-run").await.is_err());
+}
+
+#[tokio::test]
+async fn mysql_binding_rejects_missing_definition_metadata() {
+    let definition = test_definition();
+    let db = Arc::new(RecordingDb {
+        definition_metadata_rows: Mutex::new(VecDeque::from([None])),
+        ..RecordingDb::default()
+    });
+    let store = MySqlCollaborationStore::new(db, "dev".to_string());
+
+    let error = store
+        .bind_default_definition(
+            "group-1",
+            1,
+            Some(CollaborationDefinitionRef {
+                id: definition.id,
+                version: definition.version,
+            }),
+            None,
+            false,
+        )
+        .await
+        .expect_err("missing definition metadata must reject binding");
+    assert!(error.to_string().contains("not found for binding"));
+}
+
+#[tokio::test]
 async fn mysql_binding_writes_group_version_and_denormalized_definition_snapshot() {
     let db = Arc::new(RecordingDb::with_definition(test_definition()));
     let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
@@ -695,6 +762,19 @@ async fn mysql_runtime_propagates_database_failures_across_repository_operations
     );
     assert!(
         store
+            .bind_default_definition_if_current(
+                &run.group_id,
+                run.group_version,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
             .create_run(run.clone(), vec![node.clone()])
             .await
             .is_err()
@@ -715,6 +795,18 @@ async fn mysql_runtime_propagates_database_failures_across_repository_operations
                 &node.node_id,
                 node.attempt,
                 "delivery-failed".to_string(),
+                1_000,
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        store
+            .mark_node_running_if_run_active(
+                &run.run_id,
+                &node.node_id,
+                node.attempt,
+                "delivery-cas-failed".to_string(),
                 1_000,
             )
             .await
@@ -857,6 +949,19 @@ async fn mysql_runtime_propagates_database_failures_across_repository_operations
     );
 }
 
+#[tokio::test]
+async fn mysql_alias_lookup_propagates_second_query_failure() {
+    let store =
+        MySqlCollaborationStore::new(Arc::new(AliasLookupFailDb), "dev".to_string());
+
+    assert!(
+        store
+            .lookup_delivery_correlation("bot-run-1")
+            .await
+            .is_err()
+    );
+}
+
 struct AlwaysFailDb;
 
 #[async_trait]
@@ -878,6 +983,34 @@ impl DbPlugin for AlwaysFailDb {
 
     async fn health_check(&self) -> DbResult<DbHealth> {
         Err(DbError::Backend("forced health failure".to_string()))
+    }
+}
+
+struct AliasLookupFailDb;
+
+#[async_trait]
+impl DbPlugin for AliasLookupFailDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        if statement.sql().contains("delivery_request_id = ?") {
+            Ok(Vec::new())
+        } else {
+            Err(DbError::Backend("forced alias lookup failure".to_string()))
+        }
+    }
+
+    async fn execute(&self, _statement: DbStatement) -> DbResult<DbExecuteResult> {
+        unreachable!("alias lookup test does not execute statements")
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        unreachable!("alias lookup test does not execute transactions")
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Ok(DbHealth::healthy())
     }
 }
 
