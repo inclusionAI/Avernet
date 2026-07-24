@@ -35,19 +35,5 @@ class TransferStatus(StrEnum):
 # Failure path: UPLOADING -> FAILED
 # Delete path:  DONE/FAILED/CANCELLED -> DELETED
 # Same-state:   idempotent no-op (handled by update_status CAS logic)
-VALID_TRANSITIONS = frozenset(
-    {
-        # Upload path
-        ("CREATED", "UPLOADING"),
-        ("UPLOADING", "DONE"),
-        # Cancel path
-        ("CREATED", "CANCELLED"),
-        ("UPLOADING", "CANCELLED"),
-        # Failure path
-        ("UPLOADING", "FAILED"),
-        # Delete path (terminal states -> DELETED)
-        ("DONE", "DELETED"),
-        ("FAILED", "DELETED"),
-        ("CANCELLED", "DELETED"),
-    }
-)
+#
+# VALID_TRANSITIONS is defined in _orm_repository.py (single source of truth).

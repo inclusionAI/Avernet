@@ -304,6 +304,11 @@ async def complete_upload(
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": "TRANSFER_STATE_CONFLICT", "message": str(e)},
         )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "INVALID_TRANSITION", "message": str(e)},
+        )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -358,6 +363,11 @@ async def cancel_upload(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": "TRANSFER_STATE_CONFLICT", "message": str(e)},
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "INVALID_TRANSITION", "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(
