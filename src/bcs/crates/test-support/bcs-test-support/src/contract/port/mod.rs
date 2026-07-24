@@ -5,7 +5,8 @@ pub mod bot_terminal_observer;
 
 use bcs_service_api::{
     BotDeliveryPort, ChatRunCleanupPort, ChatRunEventPort, FrontendDeliveryPort,
-    GroupHistoryBotRequestPort, LeaderElectionPort, LeaderStatus,
+    GroupHistoryBotRequestPort, HumanInputReadyEvent, LeaderElectionPort, LeaderStatus,
+    SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
 };
 
 pub use metrics::{
@@ -44,6 +45,38 @@ pub async fn leader_election_port_contract_tests<T: LeaderElectionPort + ?Sized>
 
     let current = port.current_leader().await.expect("current_leader");
     if is_leader {
-        assert!(current.is_some(), "leader implementations must expose leader info");
+        assert!(
+            current.is_some(),
+            "leader implementations must expose leader info"
+        );
     }
+}
+
+pub async fn session_channel_outbound_port_contract_tests<
+    T: SessionChannelOutboundPort + ?Sized,
+>(
+    port: &T,
+) {
+    let outcome = port
+        .publish_human_input_ready(HumanInputReadyEvent {
+            event_id: "contract-event".to_string(),
+            group_id: "contract-group".to_string(),
+            session_id: "contract-group:00000001".to_string(),
+            run_id: "contract-run".to_string(),
+            node_id: "human-review".to_string(),
+            display_name: "Human review".to_string(),
+            instruction: "Review the upstream result".to_string(),
+            response_ref: "contract-run:human-review".to_string(),
+            upstream_artifacts: Vec::new(),
+            judge_outcomes: Vec::new(),
+            timeout_deadline_ms: None,
+        })
+        .await
+        .expect("publish without a session-channel mapping");
+
+    assert_eq!(
+        outcome,
+        SessionChannelDeliveryOutcome::NotApplicable,
+        "sessions without a channel mapping must not be treated as delivered"
+    );
 }

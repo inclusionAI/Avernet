@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::group::ParticipantRole;
@@ -429,7 +429,12 @@ pub struct StateMachineNodeRun {
     pub timeout_deadline_ms: Option<u64>,
     #[serde(default = "default_max_attempts")]
     pub max_attempts: i32,
-    pub assignee_bot_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee_bot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responded_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery_request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

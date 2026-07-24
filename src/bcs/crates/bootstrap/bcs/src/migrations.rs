@@ -24,7 +24,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         checksum TEXT NOT NULL,
         applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )",
-
     // ── bots ──────────────────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_bots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +47,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bots_bot_env ON bcs_bots(bot_uuid, env)",
     "CREATE INDEX IF NOT EXISTS idx_bots_actor_kind ON bcs_bots(actor_kind)",
     "CREATE INDEX IF NOT EXISTS idx_bots_agent_code ON bcs_bots(agent_code)",
-
     // ── friendships ───────────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_friendships (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +59,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_friendships_pair ON bcs_friendships(left_bot, right_bot)",
     "CREATE INDEX IF NOT EXISTS idx_friendships_left ON bcs_friendships(left_bot)",
     "CREATE INDEX IF NOT EXISTS idx_friendships_right ON bcs_friendships(right_bot)",
-
     // ── friend_requests ───────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_friend_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,7 +73,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_friend_requests_req ON bcs_friend_requests(request_id)",
     "CREATE INDEX IF NOT EXISTS idx_friend_requests_from ON bcs_friend_requests(from_bot, status)",
     "CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON bcs_friend_requests(to_bot, status)",
-
     // ── actor_relations ───────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_actor_relations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +89,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_relations_from_to_env ON bcs_actor_relations(from_id, to_id, env)",
     "CREATE INDEX IF NOT EXISTS idx_relations_to_env ON bcs_actor_relations(to_id, env)",
     "CREATE INDEX IF NOT EXISTS idx_relations_from_env_creator ON bcs_actor_relations(from_id, env, is_creator)",
-
     // ── providers ─────────────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_providers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,7 +148,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_provider_ref_env ON bcs_provider_bot_bindings(env, provider_id, provider_bot_ref)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bot_uuid_env ON bcs_provider_bot_bindings(env, bot_uuid)",
-
     // ── channel bindings ─────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_channel_bindings (
         id TEXT PRIMARY KEY,
@@ -170,7 +164,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         config_json TEXT NOT NULL
     )",
     "CREATE INDEX IF NOT EXISTS idx_channel_bindings_account ON bcs_channel_bindings(channel_type, account_ref, status)",
-
     // ── channel conversations ─────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_channel_conversations (
         binding_id TEXT NOT NULL,
@@ -186,7 +179,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     )",
     "CREATE INDEX IF NOT EXISTS idx_channel_conversations_session ON bcs_channel_conversations(binding_id, bcs_session_id)",
     "CREATE INDEX IF NOT EXISTS idx_channel_conversations_bcs_session ON bcs_channel_conversations(bcs_session_id, binding_id)",
-
     // ── channel IM participants ───────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_channel_im_participants (
         channel_type TEXT NOT NULL,
@@ -198,7 +190,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         display_name TEXT DEFAULT NULL,
         PRIMARY KEY (channel_type, account_ref, im_user_id)
     )",
-
     // ── provider_credentials ──────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_provider_credentials (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -212,7 +203,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_provider_cred_kind ON bcs_provider_credentials(env, provider_id, credential_kind)",
     "CREATE INDEX IF NOT EXISTS idx_credential_lookup ON bcs_provider_credentials(env, credential_kind, secret_value)",
-
     // ── user_identities ───────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_user_identities (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,7 +221,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_user_id ON bcs_user_identities(user_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_external ON bcs_user_identities(auth_source, external_user_id, env)",
     "CREATE INDEX IF NOT EXISTS idx_external ON bcs_user_identities(external_user_id, env)",
-
     // ── groups ────────────────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_groups (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -264,7 +253,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_groups_service_uuid ON bcs_groups(service_group_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_groups_label ON bcs_groups(label)",
     "CREATE INDEX IF NOT EXISTS idx_groups_visibility ON bcs_groups(visibility)",
-
     // ── group_participants ────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_group_participants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,7 +268,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_participants_env_group_bot ON bcs_group_participants(env, group_id, bot_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_participants_bot ON bcs_group_participants(bot_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_participants_group ON bcs_group_participants(group_id)",
-
     // ── group_sessions ────────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_group_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -312,7 +299,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_sessions_group_kind_status ON bcs_group_sessions(env, group_id, session_kind, status)",
     "CREATE INDEX IF NOT EXISTS idx_sessions_caller_principal ON bcs_group_sessions(env, caller_principal)",
     "CREATE INDEX IF NOT EXISTS idx_sessions_callback_status ON bcs_group_sessions(env, callback_status)",
-
     // ── session_participants ──────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_session_participants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -329,7 +315,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_session_participants_env_session_bot ON bcs_session_participants(env, session_id, bot_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_session_participants_bot ON bcs_session_participants(env, bot_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_session_participants_session ON bcs_session_participants(env, session_id)",
-
     // ── messages ──────────────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_messages (
         message_id TEXT NOT NULL PRIMARY KEY,
@@ -356,7 +341,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_messages_session_created ON bcs_messages(session_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_messages_session_sender_created ON bcs_messages(session_id, sender_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_messages_session_type_created ON bcs_messages(session_id, message_type, created_at)",
-
     // ── collaboration_definitions ─────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_collaboration_definitions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -380,7 +364,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_collab_def_hash ON bcs_collaboration_definitions(env, content_hash)",
     "CREATE INDEX IF NOT EXISTS idx_collab_def_blob ON bcs_collaboration_definitions(env, blob_id)",
     "CREATE INDEX IF NOT EXISTS idx_collab_def_status ON bcs_collaboration_definitions(env, record_status)",
-
     // ── collaboration_definition_blobs ────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_collaboration_definition_blobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -397,7 +380,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_collab_blob_id ON bcs_collaboration_definition_blobs(env, blob_id)",
     "CREATE INDEX IF NOT EXISTS idx_collab_blob_hash ON bcs_collaboration_definition_blobs(env, content_hash)",
-
     // ── collaboration_events ──────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_collaboration_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -416,7 +398,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_collab_events_run_node ON bcs_collaboration_events(env, state_machine_run_id, node_id, attempt, id)",
     "CREATE INDEX IF NOT EXISTS idx_collab_events_type_time ON bcs_collaboration_events(env, event_type, created_at_ms)",
     "CREATE INDEX IF NOT EXISTS idx_collab_events_record_status ON bcs_collaboration_events(env, record_status)",
-
     // ── collaboration_templates ───────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_collaboration_templates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -436,7 +417,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_bct_env_status_priority ON bcs_collaboration_templates(env, record_status, priority, template_id)",
     "CREATE INDEX IF NOT EXISTS idx_bct_env_visibility_priority ON bcs_collaboration_templates(env, visibility, record_status, priority, template_id)",
     "CREATE INDEX IF NOT EXISTS idx_bct_env_owner_status ON bcs_collaboration_templates(env, owner_user_id, record_status, priority, template_id)",
-
     // ── collaboration_template_contents ───────────────────
     "CREATE TABLE IF NOT EXISTS bcs_collaboration_template_contents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -457,7 +437,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bctc_template_lang ON bcs_collaboration_template_contents(env, template_id, lang)",
     "CREATE INDEX IF NOT EXISTS idx_bctc_env_lang_status ON bcs_collaboration_template_contents(env, lang, record_status, template_id)",
     "CREATE INDEX IF NOT EXISTS idx_bctc_env_hash ON bcs_collaboration_template_contents(env, yaml_sha256)",
-
     // ── collaboration_template_tags ───────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_collaboration_template_tags (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -469,7 +448,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_bctt_template_tag ON bcs_collaboration_template_tags(env, template_id, tag)",
     "CREATE INDEX IF NOT EXISTS idx_bctt_env_tag ON bcs_collaboration_template_tags(env, tag, template_id)",
-
     // ── state_machine_runs ────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_state_machine_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -499,7 +477,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_sm_runs_status_updated ON bcs_state_machine_runs(env, status, updated_at_ms)",
     "CREATE INDEX IF NOT EXISTS idx_sm_runs_definition ON bcs_state_machine_runs(env, definition_id, definition_version)",
     "CREATE INDEX IF NOT EXISTS idx_sm_runs_record_status ON bcs_state_machine_runs(env, record_status)",
-
     // ── state_machine_node_runs ───────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_state_machine_node_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -514,6 +491,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         timeout_deadline_ms INTEGER DEFAULT NULL,
         max_attempts INTEGER NOT NULL DEFAULT 1,
         assignee_bot_id TEXT NOT NULL,
+        outcome TEXT DEFAULT NULL,
+        responded_by TEXT DEFAULT NULL,
         delivery_request_id TEXT DEFAULT NULL,
         bot_delivery_run_id TEXT DEFAULT NULL,
         artifact_text TEXT DEFAULT NULL,
@@ -530,7 +509,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_sm_nodes_delivery_request ON bcs_state_machine_node_runs(env, delivery_request_id)",
     "CREATE INDEX IF NOT EXISTS idx_sm_nodes_bot_delivery_run ON bcs_state_machine_node_runs(env, bot_delivery_run_id)",
     "CREATE INDEX IF NOT EXISTS idx_sm_nodes_record_status ON bcs_state_machine_node_runs(env, record_status)",
-
     // ── state_machine_delivery_correlations ───────────────
     "CREATE TABLE IF NOT EXISTS bcs_state_machine_delivery_correlations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -552,7 +530,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_sm_corr_run_node_attempt ON bcs_state_machine_delivery_correlations(env, state_machine_run_id, node_id, attempt)",
     "CREATE INDEX IF NOT EXISTS idx_sm_corr_assignee ON bcs_state_machine_delivery_correlations(env, assignee_bot_id, created_at_ms)",
     "CREATE INDEX IF NOT EXISTS idx_sm_corr_record_status ON bcs_state_machine_delivery_correlations(env, record_status)",
-
     // ── state_machine_definition_snapshots ────────────────
     "CREATE TABLE IF NOT EXISTS bcs_state_machine_definition_snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -574,7 +551,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_def_snapshot_run ON bcs_state_machine_definition_snapshots(env, run_id)",
     "CREATE INDEX IF NOT EXISTS idx_def_snapshot_group_version ON bcs_state_machine_definition_snapshots(env, group_id, group_version)",
     "CREATE INDEX IF NOT EXISTS idx_def_snapshot_definition ON bcs_state_machine_definition_snapshots(env, definition_id, definition_version)",
-
     // ── group_runtime_bindings ────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_group_runtime_bindings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -597,7 +573,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_group_binding_current ON bcs_group_runtime_bindings(env, group_id, record_status, next_group_version)",
     "CREATE INDEX IF NOT EXISTS idx_group_binding_effective ON bcs_group_runtime_bindings(env, group_id, record_status, group_version, next_group_version)",
     "CREATE INDEX IF NOT EXISTS idx_group_binding_definition ON bcs_group_runtime_bindings(env, default_definition_id, default_definition_version)",
-
     // ── identity_links ────────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_identity_links (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -615,7 +590,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_identity_internal ON bcs_identity_links(internal_id, env)",
     "CREATE INDEX IF NOT EXISTS idx_identity_external ON bcs_identity_links(external_id, env)",
     "CREATE INDEX IF NOT EXISTS idx_identity_provider ON bcs_identity_links(provider_id, external_id, env)",
-
     // ── service_group_templates ───────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_service_group_templates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -638,7 +612,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_sgt_uuid_version ON bcs_service_group_templates(uuid, version)",
     "CREATE INDEX IF NOT EXISTS idx_sgt_uuid ON bcs_service_group_templates(uuid)",
     "CREATE INDEX IF NOT EXISTS idx_sgt_created_by ON bcs_service_group_templates(created_by)",
-
     // ── service_group_instances ───────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_service_group_instances (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -709,6 +682,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration {
         version: 6,
         name: "session_files",
+    },
+    SqliteMigration {
+        version: 7,
+        name: "human_input_output_metadata",
     },
 ];
 
@@ -815,7 +792,9 @@ pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
 }
 
 async fn ensure_sqlite_message_owner_bot_id(db: &dyn DbPlugin) -> DbResult<()> {
-    let columns = db.query(DbStatement::new("PRAGMA table_info(bcs_messages)")).await?;
+    let columns = db
+        .query(DbStatement::new("PRAGMA table_info(bcs_messages)"))
+        .await?;
     let mut has_owner_bot_id = false;
     for row in &columns {
         if row.get_string("name")?.as_deref() == Some("owner_bot_id") {
@@ -970,8 +949,28 @@ async fn apply_sqlite_migration_body(
         // session_files table is created by run_sqlite_bootstrap_tables via
         // SQLITE_DDL_STATEMENTS; version 6 only records progress.
         6 => Ok(()),
+        7 => add_sqlite_human_input_output_metadata_schema(db).await,
         _ => Ok(()),
     }
+}
+
+async fn add_sqlite_human_input_output_metadata_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    if table_exists(db, "bcs_state_machine_node_runs").await? {
+        let columns = sqlite_table_columns(db, "bcs_state_machine_node_runs").await?;
+        let additions = [
+            ("outcome", "TEXT DEFAULT NULL"),
+            ("responded_by", "TEXT DEFAULT NULL"),
+        ];
+        for (name, definition) in additions {
+            if !columns.iter().any(|column| column == name) {
+                db.execute(DbStatement::new(format!(
+                    "ALTER TABLE bcs_state_machine_node_runs ADD COLUMN {name} {definition}"
+                )))
+                .await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn repair_sqlite_channel_bindings_audit_schema(db: &dyn DbPlugin) -> DbResult<()> {
@@ -986,16 +985,9 @@ async fn repair_sqlite_channel_bindings_audit_schema(db: &dyn DbPlugin) -> DbRes
         return Ok(());
     }
 
-    let gmt_create_expr = sqlite_channel_audit_expr(
-        has_gmt_create,
-        has_created_at,
-        "gmt_create",
-    );
-    let gmt_modified_expr = sqlite_channel_audit_expr(
-        has_gmt_modified,
-        has_created_at,
-        "gmt_modified",
-    );
+    let gmt_create_expr = sqlite_channel_audit_expr(has_gmt_create, has_created_at, "gmt_create");
+    let gmt_modified_expr =
+        sqlite_channel_audit_expr(has_gmt_modified, has_created_at, "gmt_modified");
     db.transaction(vec![
         DbTransactionStep::Execute(DbStatement::new(
             "DROP TABLE IF EXISTS bcs_channel_bindings__audit_migration",
@@ -1173,13 +1165,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fresh_sqlite_migrations_create_baseline_record_and_agent_code() -> DbResult<()> {
+    async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> {
         let db = LocalSqliteDbPlugin::new()?;
 
         run_sqlite_migrations(&db).await?;
 
         let columns = column_names(&db, "bcs_bots").await?;
         assert!(columns.iter().any(|column| column == "agent_code"));
+        let node_columns = column_names(&db, "bcs_state_machine_node_runs").await?;
+        assert!(node_columns.iter().any(|column| column == "outcome"));
+        assert!(node_columns.iter().any(|column| column == "responded_by"));
         assert_eq!(
             migration_rows(&db).await?,
             vec![
@@ -1196,19 +1191,24 @@ mod tests {
                     "add_session_collection_timestamp".to_string(),
                     "sqlite".to_string()
                 ),
-                (6, "session_files".to_string(), "sqlite".to_string())
+                (6, "session_files".to_string(), "sqlite".to_string()),
+                (
+                    7,
+                    "human_input_output_metadata".to_string(),
+                    "sqlite".to_string()
+                )
             ]
         );
         Ok(())
     }
 
     #[tokio::test]
-    async fn sqlite_migration_plan_reports_init_and_channel_audit_versions() -> DbResult<()> {
+    async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
         let db = LocalSqliteDbPlugin::new()?;
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 6);
+        assert_eq!(report.pending_versions.len(), 7);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1229,6 +1229,11 @@ mod tests {
         );
         assert_eq!(report.pending_versions[5].version, 6);
         assert_eq!(report.pending_versions[5].name, "session_files");
+        assert_eq!(report.pending_versions[6].version, 7);
+        assert_eq!(
+            report.pending_versions[6].name,
+            "human_input_output_metadata"
+        );
         Ok(())
     }
 
@@ -1255,7 +1260,12 @@ mod tests {
                     "add_session_collection_timestamp".to_string(),
                     "sqlite".to_string()
                 ),
-                (6, "session_files".to_string(), "sqlite".to_string())
+                (6, "session_files".to_string(), "sqlite".to_string()),
+                (
+                    7,
+                    "human_input_output_metadata".to_string(),
+                    "sqlite".to_string()
+                )
             ]
         );
         Ok(())

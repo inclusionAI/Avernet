@@ -227,6 +227,42 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
 }
 
 #[tokio::test]
+async fn create_state_machine_group_with_human_caller_adds_present_human_to_initial_session() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", Some("alice"));
+    let session = test_session(
+        "group-under-test:abcdef12",
+        "group-under-test",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+    );
+    let session_management = Arc::new(StaticSessionManagement::new(session));
+    let service = fixture
+        .service_with_limits_and_session(5, 10, 10, session_management.clone());
+
+    let mut cmd = create_cmd(
+        Some("human_alice"),
+        "driver",
+        vec![participant("driver", Some("driver"))],
+    );
+    cmd.group_strategy = Some(GroupStrategy::StateMachine);
+
+    service.create_group(cmd).await.unwrap();
+
+    let commands = session_management.commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    let params = &commands[0].params;
+    assert_eq!(params.created_by.as_deref(), Some("driver"));
+    assert_eq!(params.caller_principal.as_deref(), Some("human_alice"));
+    let human = params
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_alice")
+        .expect("authenticated Human caller must join the initial state-machine session");
+    assert!(human.is_human());
+    assert_eq!(human.role, ParticipantRole::Observer);
+    assert_eq!(human.mode, Some(ParticipantMode::Present));
+}
+
+#[tokio::test]
 async fn query_methods_list_detail_bot_groups_and_workspace() {
     let fixture = Fixture::new()
         .with_bot("driver", "Driver", "public", Some("alice"))

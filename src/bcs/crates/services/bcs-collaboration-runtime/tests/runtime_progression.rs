@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     future::Future,
     io::{self, Write},
     sync::{Arc, OnceLock},
@@ -18,14 +18,16 @@ use bcs_group::GroupStore;
 use bcs_group_store::MemoryGroupRepo;
 use bcs_protocol::{BcsFrame, ChatSendParams};
 use bcs_service_api::{
-    BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, ChatEventState,
-    CollaborationEventRepoPort, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    DefinitionYamlSource, FrontendDeliveryCommand,
+    AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
+    BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, ChatEventState,
+    CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
+    ConfigureGroupRuntimeCommand, DefinitionYamlSource, FrontendDeliveryCommand,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
-    CallbackChannelConfig, CallbackConfig, PatchGroupCollaborationDefinitionCommand,
-    ServiceResult, ServiceSpec, SessionManagementService, StartStateMachineRunCommand,
-    StateMachineDefinitionRepoPort,
-    JudgeDecision, JudgeEvaluatorPort, JudgeRequest, ServiceError
+    HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanResponseSource,
+    JudgeDecision, JudgeEvaluatorPort, JudgeRequest, ListPendingHumanNodesCommand,
+    PatchGroupCollaborationDefinitionCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome,
+    ServiceError, ServiceResult, ServiceSpec, SessionManagementService,
+    StartStateMachineRunCommand, StateMachineDefinitionRepoPort,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -93,11 +95,306 @@ fn test_sessions() -> Arc<SessionManagementServiceImpl> {
 }
 
 fn assert_inferred_default_requires(definition: &CollaborationDefinition) {
-    let requires = definition.requires.as_ref().expect("requires should be inferred");
-    assert!(requires.server_features.contains(&"state_machine.graph_mode.acyclic".to_string()));
-    assert!(requires.server_features.contains(&"state_machine.node.kind.bot_task".to_string()));
-    assert!(requires.server_features.contains(&"state_machine.transitions.complete".to_string()));
-    assert!(requires.bot_runtime_features.contains(&"delivery.chat_send_task_compat".to_string()));
+    let requires = definition
+        .requires
+        .as_ref()
+        .expect("requires should be inferred");
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.graph_mode.acyclic".to_string())
+    );
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.node.kind.bot_task".to_string())
+    );
+    assert!(
+        requires
+            .server_features
+            .contains(&"state_machine.transitions.complete".to_string())
+    );
+    assert!(
+        requires
+            .bot_runtime_features
+            .contains(&"delivery.chat_send_task_compat".to_string())
+    );
+}
+
+#[tokio::test]
+async fn human_input_waits_without_bot_delivery_and_completes_from_natural_language() {
+    let group = Arc::new(GroupStore::new());
+    group
+        .upsert(state_machine_test_group())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        delivery.clone(),
+        noop_judge(),
+    );
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "ship it"}),
+            caller_id: Some("human_1001".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("start human run");
+
+    assert!(delivery.commands.lock().await.is_empty());
+    assert_eq!(
+        started.view.nodes[0].status,
+        StateMachineNodeStatus::Running
+    );
+    assert!(started.view.nodes[0].assignee_bot_id.is_none());
+    assert!(started.view.nodes[0].delivery_request_id.is_none());
+    let pending = runtime
+        .list_pending_human_nodes(ListPendingHumanNodesCommand {
+            run_id: started.view.run.run_id.clone(),
+            caller_actor_id: "human_1001".to_string(),
+        })
+        .await
+        .expect("list pending human nodes");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(
+        pending[0].response_ref,
+        format!("{}/review", started.view.run.run_id)
+    );
+    let forbidden = runtime
+        .list_pending_human_nodes(ListPendingHumanNodesCommand {
+            run_id: started.view.run.run_id.clone(),
+            caller_actor_id: "human_2002".to_string(),
+        })
+        .await
+        .expect_err("non-participant must not inspect pending Human nodes");
+    assert!(matches!(forbidden, CollaborationRuntimeError::Forbidden(_)));
+
+    let completed = runtime
+        .handle_session_human_input(HandleSessionHumanInputCommand {
+            group_id: "group-1".to_string(),
+            session_id: Some(started.view.run.session_id.clone()),
+            caller_actor_id: "human_1001".to_string(),
+            content: "这个方案可以发布".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect("route session message to HumanInput");
+    let HandleSessionHumanInputOutcome::Consumed {
+        response: completed,
+    } = completed
+    else {
+        panic!("state-machine session message should be consumed")
+    };
+    let RespondHumanNodeOutcome { node, run } = completed;
+    assert_eq!(node.status, StateMachineNodeStatus::Completed);
+    assert_eq!(node.outcome.as_deref(), Some("complete"));
+    assert_eq!(node.responded_by.as_deref(), Some("human_1001"));
+    assert_eq!(node.artifact_text.as_deref(), Some("这个方案可以发布"));
+    assert_eq!(run.status, StateMachineRunStatus::Completed);
+
+    let history = runtime
+        .get_state_machine_session_history(&run.session_id, 20, None)
+        .await
+        .expect("human history")
+        .expect("history result");
+    let human_message = history
+        .messages
+        .iter()
+        .find(|message| message.sender == "human_1001")
+        .expect("human history message");
+    assert_eq!(human_message.message_type, GroupMessageType::Bot);
+    assert_eq!(human_message.role, MessageRole::User);
+    assert_eq!(human_message.bot_name.as_deref(), Some("Reviewer"));
+}
+
+#[tokio::test]
+async fn state_machine_session_rejects_message_without_pending_human_input() {
+    let group = Arc::new(GroupStore::new());
+    group
+        .upsert(state_machine_test_group())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        delivery.clone(),
+        noop_judge(),
+    );
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(single_node_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"question": "wait for the bot"}),
+            caller_id: Some("human_1001".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("start bot run");
+
+    let error = runtime
+        .handle_session_human_input(HandleSessionHumanInputCommand {
+            group_id: "group-1".to_string(),
+            session_id: Some(started.view.run.session_id),
+            caller_actor_id: "human_1001".to_string(),
+            content: "这条消息不能发送给 bot".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect_err("state-machine chat must reject input while no HumanInput is pending");
+    assert!(matches!(error, CollaborationRuntimeError::Conflict(_)));
+    assert_eq!(delivery.commands.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn human_input_uses_the_same_judge_contract_as_bot_output() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let judge = Arc::new(SequencedJudge::new(vec![JudgeDecision {
+        outcome: "approved".to_string(),
+        reason: "approval".to_string(),
+        confidence: 0.4,
+        checked_criteria: Vec::new(),
+        retry_instruction: "unused by the regular judge contract".to_string(),
+        raw_response: None,
+    }]));
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        judge.clone(),
+    );
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(judged_human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "ship it"}),
+            caller_id: Some("human_1001".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("start judged Human run");
+
+    let completed = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: started.view.run.run_id.clone(),
+            node_id: "review".to_string(),
+            caller_actor_id: "human_1001".to_string(),
+            content: "看起来还行".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect("Judge outcome should complete the Human node");
+    let RespondHumanNodeOutcome { node, run } = completed;
+    assert_eq!(node.outcome.as_deref(), Some("approved"));
+    assert_eq!(node.artifact_text.as_deref(), Some("看起来还行"));
+    assert_eq!(run.status, StateMachineRunStatus::Completed);
+    assert_eq!(judge.requests.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn human_input_timeout_fails_run_without_bot_retry_and_rejects_late_response() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        delivery.clone(),
+        noop_judge(),
+    );
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(human_input_yaml().replace("60000", "1")),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "ship it"}),
+            caller_id: Some("human_1001".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("start Human timeout run");
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    let processed = runtime
+        .process_expired_node_timeouts(10, 0)
+        .await
+        .expect("scan Human timeout");
+    assert_eq!(processed, 1);
+    let view = runtime
+        .get_state_machine_run(&started.view.run.run_id)
+        .await
+        .expect("get timed out run")
+        .expect("timed out run");
+    assert_eq!(view.run.status, StateMachineRunStatus::Failed);
+    assert_eq!(view.nodes[0].status, StateMachineNodeStatus::Failed);
+    assert_eq!(view.nodes[0].attempt, 0);
+    assert!(delivery.commands.lock().await.is_empty());
+
+    let late = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: started.view.run.run_id,
+            node_id: "review".to_string(),
+            caller_actor_id: "human_1001".to_string(),
+            content: "批准".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect_err("late Human response must be rejected");
+    assert!(matches!(late, CollaborationRuntimeError::Conflict(_)));
 }
 
 #[tokio::test]
@@ -117,7 +414,8 @@ async fn single_node_run_completes_session_with_bot_final_text() {
         sessions.clone(),
         delivery.clone(),
         noop_judge(),
-    ).with_frontend_delivery(frontend_delivery.clone());
+    )
+    .with_frontend_delivery(frontend_delivery.clone());
 
     let started = runtime
         .start_state_machine_run(StartStateMachineRunCommand {
@@ -128,6 +426,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
             definition_ref: None,
             input: json!({"question": "review this"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
@@ -140,13 +439,11 @@ async fn single_node_run_completes_session_with_bot_final_text() {
         .expect("get persisted definition")
         .expect("persisted definition");
     assert_inferred_default_requires(&persisted_definition);
-    let snapshot = StateMachineDefinitionRepoPort::get_run_snapshot(
-        &*store,
-        &started.view.run.run_id,
-    )
-    .await
-    .expect("get run snapshot")
-    .expect("run snapshot");
+    let snapshot =
+        StateMachineDefinitionRepoPort::get_run_snapshot(&*store, &started.view.run.run_id)
+            .await
+            .expect("get run snapshot")
+            .expect("run snapshot");
     assert_inferred_default_requires(&snapshot);
     let command = delivery.commands.lock().await[0].clone();
     let params = chat_send_params(&command);
@@ -186,10 +483,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
     assert!(panel_text.contains("type=\"panel\""));
     assert!(panel_text.contains("params='"));
     assert!(panel_text.contains("bcsPanel.StateMachineRunView"));
-    assert!(panel_text.contains(&format!(
-        "state-machine-run-{}",
-        started.view.run.run_id
-    )));
+    assert!(panel_text.contains(&format!("state-machine-run-{}", started.view.run.run_id)));
     assert!(panel_text.contains("State Machine - Single Node"));
     drop(frontend_commands);
     assert_eq!(params.bcs_group_id, started.view.run.session_id);
@@ -232,10 +526,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
         serde_json::from_str(&frontend_commands[1].event_json).expect("delta event json");
     assert_eq!(delta_event["event"].as_str(), Some("chat"));
     assert_eq!(delta_event["bot_uuid"].as_str(), Some("driver-bot"));
-    assert_eq!(
-        delta_event["payload"]["state"].as_str(),
-        Some("delta")
-    );
+    assert_eq!(delta_event["payload"]["state"].as_str(), Some("delta"));
     assert_eq!(
         delta_event["payload"]["message"]["content"][0]["text"].as_str(),
         Some("draft")
@@ -354,10 +645,11 @@ async fn single_node_run_completes_session_with_bot_final_text() {
     assert!(history.messages[0].content.contains("<AixUI"));
     assert!(history.messages[0].content.contains("type=\"panel\""));
     assert!(history.messages[0].content.contains("params='"));
-    assert!(history.messages[0].content.contains(&format!(
-        "\"runId\":\"{}\"",
-        started.view.run.run_id
-    )));
+    assert!(
+        history.messages[0]
+            .content
+            .contains(&format!("\"runId\":\"{}\"", started.view.run.run_id))
+    );
     assert_eq!(history.messages[1].sender, "driver-bot");
     assert_eq!(history.messages[1].bot_name.as_deref(), Some("Driver"));
     assert_eq!(history.messages[1].role, MessageRole::Assistant);
@@ -399,11 +691,16 @@ async fn start_run_fails_and_marks_node_failed_when_delivery_returns_not_deliver
             definition_ref: None,
             input: json!({"question": "review this"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await;
 
     let error = result.err().expect("delivery rejection should fail start");
-    assert!(error.to_string().contains("state-machine node delivery failed"));
+    assert!(
+        error
+            .to_string()
+            .contains("state-machine node delivery failed")
+    );
     let commands = delivery.commands.lock().await;
     let delivery_id = commands[0].run_id.clone();
     drop(commands);
@@ -456,6 +753,7 @@ async fn message_less_final_fails_attempt_and_schedules_retry() {
             definition_ref: None,
             input: json!({"question": "empty final should retry"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
@@ -567,6 +865,7 @@ async fn state_machine_completion_dispatches_service_callback() {
             definition_ref: None,
             input: json!({"question": "callback after completion"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
@@ -617,6 +916,7 @@ async fn state_machine_runtime_logs_run_node_and_terminal_lifecycle() {
                 definition_ref: None,
                 input: json!({"question": "logging"}),
                 caller_id: Some("caller-1".to_string()),
+                authenticated_human: None,
             })
             .await
             .expect("start run");
@@ -701,7 +1001,10 @@ async fn start_run_uses_group_default_definition_binding() {
         .await
         .expect("configure group runtime");
 
-    assert_eq!(configured.default_definition.expect("definition").id, "single_node");
+    assert_eq!(
+        configured.default_definition.expect("definition").id,
+        "single_node"
+    );
 
     let started = runtime
         .start_state_machine_run(StartStateMachineRunCommand {
@@ -712,6 +1015,7 @@ async fn start_run_uses_group_default_definition_binding() {
             definition_ref: None,
             input: json!({"question": "use binding"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run from binding");
@@ -741,7 +1045,10 @@ async fn group_collaboration_definition_get_and_patch_preserve_source_yaml() {
         .get_group_collaboration_definition("group-1")
         .await
         .expect("get no definition");
-    assert_eq!(no_definition.yaml_source, DefinitionYamlSource::NoDefinition);
+    assert_eq!(
+        no_definition.yaml_source,
+        DefinitionYamlSource::NoDefinition
+    );
     assert!(no_definition.default_definition.is_none());
 
     let source_yaml = single_node_authoring_yaml("Source One");
@@ -761,8 +1068,14 @@ async fn group_collaboration_definition_get_and_patch_preserve_source_yaml() {
         .await
         .expect("get source definition");
     assert_eq!(current.yaml_source, DefinitionYamlSource::Original);
-    assert_eq!(current.definition_yaml.as_deref(), Some(source_yaml.as_str()));
-    let base = current.default_definition.clone().expect("default definition");
+    assert_eq!(
+        current.definition_yaml.as_deref(),
+        Some(source_yaml.as_str())
+    );
+    let base = current
+        .default_definition
+        .clone()
+        .expect("default definition");
 
     let patched_yaml = single_node_authoring_yaml("Source Two");
     let patched = runtime
@@ -778,7 +1091,10 @@ async fn group_collaboration_definition_get_and_patch_preserve_source_yaml() {
     assert_eq!(next.id, base.id);
     assert_eq!(next.version, base.version + 1);
     assert_eq!(patched.yaml_source, DefinitionYamlSource::Original);
-    assert_eq!(patched.definition_yaml.as_deref(), Some(patched_yaml.as_str()));
+    assert_eq!(
+        patched.definition_yaml.as_deref(),
+        Some(patched_yaml.as_str())
+    );
 }
 
 #[tokio::test]
@@ -823,7 +1139,10 @@ async fn group_collaboration_definition_get_generates_legacy_authoring_yaml_with
         .get_group_collaboration_definition("group-1")
         .await
         .expect("get legacy definition");
-    assert_eq!(current.yaml_source, DefinitionYamlSource::GeneratedNormalized);
+    assert_eq!(
+        current.yaml_source,
+        DefinitionYamlSource::GeneratedNormalized
+    );
     assert_eq!(
         current.definition.as_ref().expect("definition").id,
         "single_node"
@@ -871,11 +1190,15 @@ async fn group_collaboration_definition_get_generates_legacy_authoring_yaml_with
         .and_then(serde_yaml::Value::as_mapping)
         .expect("non-default defaults should remain");
     assert_eq!(
-        defaults.get("max_attempts").and_then(serde_yaml::Value::as_i64),
+        defaults
+            .get("max_attempts")
+            .and_then(serde_yaml::Value::as_i64),
         Some(2)
     );
     assert_eq!(
-        defaults.get("node_timeout_ms").and_then(serde_yaml::Value::as_i64),
+        defaults
+            .get("node_timeout_ms")
+            .and_then(serde_yaml::Value::as_i64),
         Some(120000)
     );
     let driver = root
@@ -904,7 +1227,10 @@ async fn group_collaboration_definition_get_generates_legacy_authoring_yaml_with
         .await
         .expect("patch generated legacy authoring yaml");
     assert_eq!(
-        patched.default_definition.expect("patched definition").version,
+        patched
+            .default_definition
+            .expect("patched definition")
+            .version,
         2
     );
 }
@@ -950,6 +1276,7 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
             definition_ref: None,
             input: json!({"question": "use binding without rewriting definition"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run from binding");
@@ -960,13 +1287,11 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
         1,
         "group binding runs must not rewrite persisted definition rows"
     );
-    let snapshot = StateMachineDefinitionRepoPort::get_run_snapshot(
-        &*definitions,
-        &started.view.run.run_id,
-    )
-    .await
-    .expect("get run snapshot")
-    .expect("run snapshot");
+    let snapshot =
+        StateMachineDefinitionRepoPort::get_run_snapshot(&*definitions, &started.view.run.run_id)
+            .await
+            .expect("get run snapshot")
+            .expect("run snapshot");
     assert_inferred_default_requires(&snapshot);
     assert_eq!(delivery.commands.lock().await.len(), 1);
 }
@@ -1017,11 +1342,15 @@ async fn start_run_uses_group_participant_bindings_for_template_definition() {
             definition_ref: None,
             input: json!({"question": "use participant binding"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run from binding");
 
-    assert_eq!(started.view.nodes[0].assignee_bot_id, "driver-bot");
+    assert_eq!(
+        started.view.nodes[0].assignee_bot_id.as_deref(),
+        Some("driver-bot")
+    );
     assert_eq!(delivery.commands.lock().await.len(), 1);
 }
 
@@ -1080,6 +1409,7 @@ async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime()
             definition_ref: None,
             input: json!({"question": "multi"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect_err("multi bot slot is not supported by the current single-assignee runtime");
@@ -1114,6 +1444,7 @@ async fn graph_view_returns_snapshot_edges_and_node_status() {
             definition_ref: None,
             input: json!({"question": "graph"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
@@ -1184,6 +1515,7 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
             definition_ref: None,
             input: json!({"question": "join"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
@@ -1195,14 +1527,26 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
 
     let branch_b_run_id = delivery.commands.lock().await[1].run_id.clone();
     let branch_c_run_id = delivery.commands.lock().await[2].run_id.clone();
-    complete_with_text(&runtime, &branch_b_run_id, &started.view.run.session_id, "b").await;
+    complete_with_text(
+        &runtime,
+        &branch_b_run_id,
+        &started.view.run.session_id,
+        "b",
+    )
+    .await;
     assert_eq!(
         delivery.commands.lock().await.len(),
         3,
         "join node must wait for the other upstream"
     );
 
-    complete_with_text(&runtime, &branch_c_run_id, &started.view.run.session_id, "c").await;
+    complete_with_text(
+        &runtime,
+        &branch_c_run_id,
+        &started.view.run.session_id,
+        "c",
+    )
+    .await;
     assert_eq!(delivery.commands.lock().await.len(), 4);
 
     let join_run_id = delivery.commands.lock().await[3].run_id.clone();
@@ -1245,6 +1589,7 @@ async fn judged_node_routes_selected_outcome_and_skips_unselected_branch() {
             definition_ref: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
@@ -1259,7 +1604,10 @@ async fn judged_node_routes_selected_outcome_and_skips_unselected_branch() {
     )
     .await;
     assert_eq!(delivery.commands.lock().await.len(), 2);
-    assert_eq!(judge.requests.lock().await[0].allowed_outcomes, vec!["approved", "rejected"]);
+    assert_eq!(
+        judge.requests.lock().await[0].allowed_outcomes,
+        vec!["approved", "rejected"]
+    );
     let judged_view = runtime
         .get_state_machine_run(&started.view.run.run_id)
         .await
@@ -1318,7 +1666,8 @@ async fn judged_node_publishes_bot_output_but_not_judge_message_to_workbench() {
         sessions,
         delivery.clone(),
         judge,
-    ).with_frontend_delivery(frontend_delivery.clone());
+    )
+    .with_frontend_delivery(frontend_delivery.clone());
 
     let started = runtime
         .start_state_machine_run(StartStateMachineRunCommand {
@@ -1329,6 +1678,7 @@ async fn judged_node_publishes_bot_output_but_not_judge_message_to_workbench() {
             definition_ref: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
@@ -1392,6 +1742,7 @@ async fn judged_node_failure_records_runtime_event_and_fails_run() {
             definition_ref: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
@@ -1431,8 +1782,14 @@ async fn judged_node_failure_records_runtime_event_and_fails_run() {
     .expect("list judge failure events");
     assert_eq!(failure_events.len(), 1);
     assert_eq!(failure_events[0].attempt, Some(0));
-    assert_eq!(failure_events[0].payload["error"].as_str(), Some("judge provider timed out"));
-    assert_eq!(failure_events[0].payload["reason"].as_str(), Some("judge_failed"));
+    assert_eq!(
+        failure_events[0].payload["error"].as_str(),
+        Some("judge provider timed out")
+    );
+    assert_eq!(
+        failure_events[0].payload["reason"].as_str(),
+        Some("judge_failed")
+    );
     assert_eq!(delivery.commands.lock().await.len(), 1);
 }
 
@@ -1464,6 +1821,7 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
             definition_ref: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
@@ -1503,7 +1861,10 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
     .expect("list judge failure events");
     assert_eq!(failure_events.len(), 1);
     assert_eq!(failure_events[0].attempt, Some(0));
-    assert_eq!(failure_events[0].payload["reason"].as_str(), Some("judge_timeout"));
+    assert_eq!(
+        failure_events[0].payload["reason"].as_str(),
+        Some("judge_timeout")
+    );
     assert_eq!(failure_events[0].payload["timeout_ms"].as_u64(), Some(1));
     assert_eq!(delivery.commands.lock().await.len(), 1);
 }
@@ -1535,12 +1896,19 @@ async fn judged_node_keeps_shared_merge_reachable_from_selected_branch() {
             definition_ref: None,
             input: json!({"question": "judge shared merge"}),
             caller_id: None,
+            authenticated_human: None,
         })
         .await
         .expect("start run");
 
     let review_run_id = delivery.commands.lock().await[0].run_id.clone();
-    complete_with_text(&runtime, &review_run_id, &started.view.run.session_id, "candidate").await;
+    complete_with_text(
+        &runtime,
+        &review_run_id,
+        &started.view.run.session_id,
+        "candidate",
+    )
+    .await;
     assert_eq!(delivery.commands.lock().await.len(), 2);
 
     let fast_run_id = delivery.commands.lock().await[1].run_id.clone();
@@ -1548,7 +1916,13 @@ async fn judged_node_keeps_shared_merge_reachable_from_selected_branch() {
     assert_eq!(delivery.commands.lock().await.len(), 3);
 
     let merge_run_id = delivery.commands.lock().await[2].run_id.clone();
-    let handled = complete_with_text(&runtime, &merge_run_id, &started.view.run.session_id, "merged").await;
+    let handled = complete_with_text(
+        &runtime,
+        &merge_run_id,
+        &started.view.run.session_id,
+        "merged",
+    )
+    .await;
     let view = handled.view.expect("completed run");
     assert_eq!(view.run.output.as_deref(), Some("merged"));
     let by_id = view
@@ -1587,11 +1961,7 @@ impl StateMachineDefinitionRepoPort for CountingDefinitionRepo {
         StateMachineDefinitionRepoPort::upsert(&*self.inner, definition).await
     }
 
-    async fn get(
-        &self,
-        id: &str,
-        version: i32,
-    ) -> ServiceResult<Option<CollaborationDefinition>> {
+    async fn get(&self, id: &str, version: i32) -> ServiceResult<Option<CollaborationDefinition>> {
         StateMachineDefinitionRepoPort::get(&*self.inner, id, version).await
     }
 
@@ -1657,7 +2027,9 @@ impl BotDeliveryPort for RejectingDelivery {
         Ok(BotDeliveryResult {
             target_bot_id: cmd.target_bot_id().to_string(),
             delivered: false,
-            error: Some(ServiceError::BotNotConnected(cmd.target_bot_id().to_string())),
+            error: Some(ServiceError::BotNotConnected(
+                cmd.target_bot_id().to_string(),
+            )),
         })
     }
 }
@@ -1720,6 +2092,32 @@ impl JudgeEvaluatorPort for RecordingJudge {
     }
 }
 
+struct SequencedJudge {
+    decisions: Mutex<VecDeque<JudgeDecision>>,
+    requests: Mutex<Vec<JudgeRequest>>,
+}
+
+impl SequencedJudge {
+    fn new(decisions: Vec<JudgeDecision>) -> Self {
+        Self {
+            decisions: Mutex::new(decisions.into()),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl JudgeEvaluatorPort for SequencedJudge {
+    async fn judge(&self, request: JudgeRequest) -> Result<JudgeDecision, ServiceError> {
+        self.requests.lock().await.push(request);
+        self.decisions
+            .lock()
+            .await
+            .pop_front()
+            .ok_or_else(|| ServiceError::InternalError("missing test decision".to_string()))
+    }
+}
+
 fn noop_judge() -> Arc<RecordingJudge> {
     Arc::new(RecordingJudge::with_outcome("complete"))
 }
@@ -1731,10 +2129,7 @@ struct RecordingFrontendDelivery {
 
 #[async_trait]
 impl FrontendDeliveryPort for RecordingFrontendDelivery {
-    async fn publish(
-        &self,
-        cmd: FrontendDeliveryCommand,
-    ) -> ServiceResult<FrontendDeliveryResult> {
+    async fn publish(&self, cmd: FrontendDeliveryCommand) -> ServiceResult<FrontendDeliveryResult> {
         let target = cmd.target.clone();
         self.commands.lock().await.push(cmd);
         Ok(FrontendDeliveryResult {
@@ -1774,6 +2169,12 @@ fn test_group() -> Group {
     )
 }
 
+fn state_machine_test_group() -> Group {
+    let mut group = test_group();
+    group.group_strategy = bcs_domain::GroupStrategy::StateMachine;
+    group
+}
+
 fn single_node_yaml() -> String {
     r#"
 api_version: bcs.collaboration/v1
@@ -1803,6 +2204,62 @@ runtime:
           binding: driver
         instruction: Answer the question.
         final_output: true
+"#
+    .to_string()
+}
+
+fn human_input_yaml() -> String {
+    r#"
+api_version: bcs.collaboration/v1
+id: human_input_single
+version: 1
+name: Human Review
+participants: {}
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      review:
+        kind: human_input
+        display_name: Review
+        instruction: 请用自然语言给出你的意见。
+        node_timeout_ms: 60000
+"#
+    .to_string()
+}
+
+fn judged_human_input_yaml() -> String {
+    r#"
+api_version: bcs.collaboration/v1
+id: human_input_judged
+version: 1
+name: Human Review With Judge
+participants: {}
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      review:
+        kind: human_input
+        display_name: Review
+        instruction: 请用自然语言给出你的意见。
+        node_timeout_ms: 60000
+        transitions:
+          approved:
+            targets: []
+          rejected:
+            targets: []
+        judge:
+          type: llm
+          criteria:
+            - 是否明确批准或拒绝
+          outcomes:
+            - approved
+            - rejected
 "#
     .to_string()
 }

@@ -17,7 +17,10 @@ pub fn validate_definition(
     mut definition: CollaborationDefinition,
 ) -> Result<CompiledStateMachine, CollaborationRuntimeError> {
     if definition.api_version != "bcs.collaboration/v1" {
-        return invalid(format!("unsupported api_version: {}", definition.api_version));
+        return invalid(format!(
+            "unsupported api_version: {}",
+            definition.api_version
+        ));
     }
 
     let state_machine = match &definition.runtime {
@@ -33,7 +36,11 @@ pub fn validate_definition(
         _ => return invalid("runtime.kind must be state_machine"),
     };
     for (binding_id, participant) in &definition.participants {
-        if participant.bot_id.as_deref().is_some_and(|bot_id| bot_id.trim().is_empty()) {
+        if participant
+            .bot_id
+            .as_deref()
+            .is_some_and(|bot_id| bot_id.trim().is_empty())
+        {
             return invalid(format!("participant {binding_id} bot_id must not be empty"));
         }
     }
@@ -62,7 +69,7 @@ pub fn validate_definition(
         return invalid("state_machine.nodes must not be empty");
     }
 
-    let mut final_output_count = 0;
+    let mut terminal_nodes = Vec::new();
     let mut assigned_bindings = BTreeSet::new();
     let mut upstreams: BTreeMap<String, Vec<String>> = state_machine
         .nodes
@@ -71,10 +78,11 @@ pub fn validate_definition(
         .collect();
 
     for (node_id, node) in &state_machine.nodes {
-        if node.kind != StateMachineNodeKind::BotTask {
-            return invalid(format!(
-                "node {node_id} kind is not supported by the current runtime"
-            ));
+        if !matches!(
+            node.kind,
+            StateMachineNodeKind::BotTask | StateMachineNodeKind::HumanInput
+        ) {
+            return invalid(format!("node {node_id} kind is not supported in MVP"));
         }
         if node.action.is_some() {
             return invalid(format!(
@@ -91,7 +99,16 @@ pub fn validate_definition(
             if judge.outcomes.is_empty() {
                 return invalid(format!("node {node_id} judge.outcomes must not be empty"));
             }
+            let mut unique_outcomes = BTreeSet::new();
             for outcome in &judge.outcomes {
+                if outcome.trim().is_empty() {
+                    return invalid(format!("node {node_id} judge outcome must not be empty"));
+                }
+                if !unique_outcomes.insert(outcome) {
+                    return invalid(format!(
+                        "node {node_id} has duplicate judge outcome: {outcome}"
+                    ));
+                }
                 if !node.transitions.contains_key(outcome) {
                     return invalid(format!(
                         "node {node_id} judge outcome has no transition: {outcome}"
@@ -107,37 +124,80 @@ pub fn validate_definition(
         if node.display_name.trim().is_empty() {
             return invalid(format!("node {node_id} display_name must not be empty"));
         }
-        if node.instruction.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        if node
+            .instruction
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
             return invalid(format!("node {node_id} instruction must not be empty"));
         }
-        match &node.assignee {
-            Some(StateMachineAssignee::BotBinding { binding }) => {
-                definition.participants.get(binding).ok_or_else(|| {
-                    CollaborationRuntimeError::InvalidDefinition(format!(
-                        "node {node_id} assignee binding not found: {binding}"
-                    ))
-                })?;
-                assigned_bindings.insert(binding.as_str());
+        match node.kind {
+            StateMachineNodeKind::BotTask => match &node.assignee {
+                Some(StateMachineAssignee::BotBinding { binding }) => {
+                    definition.participants.get(binding).ok_or_else(|| {
+                        CollaborationRuntimeError::InvalidDefinition(format!(
+                            "node {node_id} assignee binding not found: {binding}"
+                        ))
+                    })?;
+                    assigned_bindings.insert(binding.as_str());
+                }
+                Some(StateMachineAssignee::RuntimeActor { .. }) => {
+                    return invalid(format!(
+                        "node {node_id} runtime_actor assignee is not supported in MVP"
+                    ));
+                }
+                None => return invalid(format!("node {node_id} assignee is required")),
+            },
+            StateMachineNodeKind::HumanInput => {
+                if node.assignee.is_some() {
+                    return invalid(format!(
+                        "human_input node {node_id} must not define assignee"
+                    ));
+                }
+                if node.max_attempts.is_some() {
+                    return invalid(format!(
+                        "human_input node {node_id} must not define max_attempts"
+                    ));
+                }
+                match node.node_timeout_ms {
+                    Some(timeout_ms) if timeout_ms > 0 => {}
+                    Some(_) => {
+                        return invalid(format!(
+                            "human_input node {node_id} node_timeout_ms must be greater than zero"
+                        ));
+                    }
+                    None => {
+                        return invalid(format!(
+                            "human_input node {node_id} node_timeout_ms is required"
+                        ));
+                    }
+                }
+                if node.final_output {
+                    return invalid(format!(
+                        "human_input node {node_id} must not be final_output"
+                    ));
+                }
             }
-            Some(StateMachineAssignee::RuntimeActor { .. }) => {
-                return invalid(format!(
-                    "node {node_id} runtime_actor assignee is not supported by the current runtime"
-                ));
-            }
-            None => return invalid(format!("node {node_id} assignee is required")),
+            _ => unreachable!("unsupported node kinds were rejected above"),
         }
+        let has_transition_target = node
+            .transitions
+            .values()
+            .any(|transition| !transition.targets.is_empty());
+        let is_terminal_human =
+            node.kind == StateMachineNodeKind::HumanInput && !has_transition_target;
         if node.final_output {
-            final_output_count += 1;
+            terminal_nodes.push(node_id.clone());
             if !node.transitions.is_empty() {
                 return invalid(format!(
                     "node {node_id} is final_output and must not define transitions"
                 ));
             }
-        } else if node
-            .transitions
-            .values()
-            .all(|transition| transition.targets.is_empty())
-        {
+        } else if is_terminal_human {
+            terminal_nodes.push(node_id.clone());
+        } else if !has_transition_target {
             return invalid(format!(
                 "node {node_id} is not final_output and must define a transition target"
             ));
@@ -171,8 +231,10 @@ pub fn validate_definition(
             }
         }
     }
-    if final_output_count != 1 {
-        return invalid("state_machine must have exactly one final_output node");
+    if terminal_nodes.len() != 1 {
+        return invalid(
+            "state_machine must have exactly one terminal node (final_output or terminal human_input)",
+        );
     }
     for (binding, participant) in &definition.participants {
         if participant.required && !assigned_bindings.contains(binding.as_str()) {
@@ -192,15 +254,12 @@ pub fn validate_definition(
             }
         })
         .collect::<Vec<_>>();
+    ensure_acyclic(&state_machine.nodes, &upstreams)?;
     if initial_nodes.len() != 1 {
         return invalid("state_machine must have exactly one zero in-degree entry node");
     }
-    ensure_acyclic(&state_machine.nodes, &upstreams)?;
-    let final_node = state_machine
-        .nodes
-        .iter()
-        .find_map(|(node_id, node)| node.final_output.then_some(node_id.as_str()))
-        .expect("final_output_count was validated");
+    ensure_human_inputs_are_ordered(&state_machine.nodes)?;
+    let final_node = terminal_nodes[0].as_str();
     ensure_all_nodes_on_entry_to_final_paths(
         state_machine,
         &upstreams,
@@ -308,12 +367,15 @@ fn node_kind_feature(kind: StateMachineNodeKind) -> &'static str {
     }
 }
 
-fn validate_requires(requires: &CollaborationRequirements) -> Result<(), CollaborationRuntimeError> {
+fn validate_requires(
+    requires: &CollaborationRequirements,
+) -> Result<(), CollaborationRuntimeError> {
     for feature in &requires.server_features {
         if !matches!(
             feature.as_str(),
             "state_machine.graph_mode.acyclic"
                 | "state_machine.node.kind.bot_task"
+                | "state_machine.node.kind.human_input"
                 | "state_machine.transitions.complete"
                 | "state_machine.node.judge"
                 | "state_machine.outcome_transitions"
@@ -426,6 +488,56 @@ fn ensure_all_nodes_on_entry_to_final_paths(
         ));
     }
     Ok(())
+}
+
+fn ensure_human_inputs_are_ordered(
+    nodes: &BTreeMap<String, bcs_domain::StateMachineNodeDefinition>,
+) -> Result<(), CollaborationRuntimeError> {
+    let human_nodes = nodes
+        .iter()
+        .filter_map(|(node_id, node)| {
+            (node.kind == StateMachineNodeKind::HumanInput).then_some(node_id.as_str())
+        })
+        .collect::<Vec<_>>();
+
+    for (index, left) in human_nodes.iter().enumerate() {
+        for right in human_nodes.iter().skip(index + 1) {
+            if !node_reaches(nodes, left, right) && !node_reaches(nodes, right, left) {
+                return invalid(format!(
+                    "human_input nodes {left} and {right} may wait concurrently; MVP requires HumanInput nodes to have an explicit dependency order"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn node_reaches(
+    nodes: &BTreeMap<String, bcs_domain::StateMachineNodeDefinition>,
+    start: &str,
+    target: &str,
+) -> bool {
+    let mut queue = VecDeque::from([start]);
+    let mut visited = BTreeSet::new();
+    while let Some(node_id) = queue.pop_front() {
+        if !visited.insert(node_id) {
+            continue;
+        }
+        let Some(node) = nodes.get(node_id) else {
+            continue;
+        };
+        for next in node
+            .transitions
+            .values()
+            .flat_map(|transition| transition.targets.iter())
+        {
+            if next == target {
+                return true;
+            }
+            queue.push_back(next);
+        }
+    }
+    false
 }
 
 fn invalid<T>(message: impl Into<String>) -> Result<T, CollaborationRuntimeError> {

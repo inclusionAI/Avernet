@@ -12,6 +12,7 @@ pub mod provider_stream_gray;
 pub mod repo;
 pub mod secret;
 pub mod session_callback;
+pub mod session_channel_outbound;
 
 pub use bot_connection::{BotConnectionControlPort, KickReason};
 pub use bot_terminal_observer::{
@@ -41,25 +42,25 @@ pub use metrics::{
     DeliveryPolicyBlockInstrumentationHook, DirectChatClientKind, DirectChatRunEvent,
     DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort, DirectChatRunState,
     GroupMetricCount, GroupMetricsSnapshotPort, GroupSessionMetricCount,
-    GroupSessionMetricsSnapshotPort, MetricsResult,
-    WsCloseReason, WsErrorKind, WsLifecycleInstrumentationHook, WsPeer,
+    GroupSessionMetricsSnapshotPort, MetricsResult, WsCloseReason, WsErrorKind,
+    WsLifecycleInstrumentationHook, WsPeer,
 };
 pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{
-    BotRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
+    BotRepoPort, ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
-    ChannelBindingRepoPort, ConversationSessionRepoPort,
-    FriendRepoPort, FriendRequestRepoPort,
-    GroupRepoPort, GroupRuntimeBindingRepoPort, NewSessionParams, ProviderBotBindingRepoPort,
-    ImParticipantRepoPort,
     CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
     ListOrganizationsQuery, OrganizationCandidateReadPage, OrganizationCandidateReadPort,
     OrganizationCandidateReadQuery, OrganizationMemberPage, OrganizationRepoPort, UpdateOrganizationRecord,
-    UpsertOrganizationMemberRecord,
-    ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector, ProviderCredentialRepoPort,
-    ProviderRepoPort, RelationRepoPort, SessionRepoPort, StateMachineDefinitionRepoPort,
-    StateMachineRunRepoPort,
-    UserIdentity, UserIdentityRepoPort,
+    ConversationSessionRepoPort, FriendRepoPort, FriendRequestRepoPort, GroupRepoPort,
+    GroupRuntimeBindingRepoPort, ImParticipantRepoPort, MarkHumanNodeRunningCommand,
+    NewSessionParams, ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
+    ProviderBotDiscoverySelector, ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort,
+    SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineRunRepoPort, UserIdentity,
+    UserIdentityRepoPort, UpsertOrganizationMemberRecord,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
 pub use session_callback::SessionCallbackDispatchPort;
+pub use session_channel_outbound::{
+    HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+};

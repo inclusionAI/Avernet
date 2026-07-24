@@ -1,7 +1,7 @@
 pub mod bot;
 pub mod channel;
-pub mod collaboration_template;
 pub mod collaboration;
+pub mod collaboration_template;
 pub mod friend;
 pub mod group;
 pub mod message;
@@ -14,11 +14,12 @@ pub mod user_identity;
 
 pub use bot::BotRepoPort;
 pub use channel::{ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort};
-pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};
 pub use collaboration::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
-    GroupRuntimeBindingRepoPort, StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
+    GroupRuntimeBindingRepoPort, MarkHumanNodeRunningCommand, StateMachineDefinitionRepoPort,
+    StateMachineRunRepoPort,
 };
+pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};
 pub use friend::{FriendRepoPort, FriendRequestRepoPort};
 pub use group::GroupRepoPort;
 pub use message::{MessageRepoError, MessageRepoPort};

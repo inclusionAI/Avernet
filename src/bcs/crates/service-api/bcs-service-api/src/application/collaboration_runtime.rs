@@ -7,12 +7,12 @@ use serde_json::Value;
 use crate::application::group_message::SessionHistoryResult;
 use crate::application::message_flow::ChatEventState;
 use crate::core::ServiceError;
+use crate::port::{JudgeArtifact, JudgeDecision};
 use crate::types::{
-    CollaborationDefinition, CollaborationDefinitionRef, StateMachineDeliveryCorrelation,
-    RuntimeParticipantBinding, StateMachineAssignee, StateMachineGraphMode,
+    CollaborationDefinition, CollaborationDefinitionRef, RuntimeParticipantBinding,
+    StateMachineAssignee, StateMachineDeliveryCorrelation, StateMachineGraphMode,
     StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
 };
-use crate::port::JudgeDecision;
 
 pub const MAX_COLLABORATION_DEFINITION_YAML_BYTES: usize = 256 * 1024;
 
@@ -70,6 +70,8 @@ pub struct CollaborationDefinitionParticipantSlot {
 pub enum CollaborationRuntimeError {
     #[error("state machine run not found: {0}")]
     RunNotFound(String),
+    #[error("state machine node not found: {run_id}/{node_id}")]
+    NodeNotFound { run_id: String, node_id: String },
     #[error("collaboration definition not found: {0}@{1}")]
     DefinitionNotFound(String, i32),
     #[error("invalid collaboration definition: {0}")]
@@ -78,6 +80,12 @@ pub enum CollaborationRuntimeError {
     InvalidParticipantBinding(String),
     #[error("invalid runtime request: {0}")]
     InvalidRequest(String),
+    #[error("authentication is required")]
+    Unauthenticated,
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+    #[error("judge unavailable: {0}")]
+    JudgeUnavailable(String),
     #[error("conflict: {0}")]
     Conflict(String),
     #[error(transparent)]
@@ -107,6 +115,81 @@ pub struct StartStateMachineRunCommand {
     pub definition_ref: Option<CollaborationDefinitionRef>,
     pub input: Value,
     pub caller_id: Option<String>,
+    pub authenticated_human: Option<AuthenticatedHumanCaller>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthenticatedHumanCaller {
+    pub actor_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HumanResponseSource {
+    Http,
+    Channel {
+        binding_id: String,
+        conversation_id: String,
+        message_id: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct RespondHumanNodeCommand {
+    pub run_id: String,
+    pub node_id: String,
+    pub caller_actor_id: String,
+    pub content: String,
+    pub source: HumanResponseSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RespondHumanNodeOutcome {
+    pub node: StateMachineNodeRun,
+    pub run: StateMachineRun,
+}
+
+#[derive(Debug, Clone)]
+pub struct HandleSessionHumanInputCommand {
+    pub group_id: String,
+    pub session_id: Option<String>,
+    pub caller_actor_id: String,
+    pub content: String,
+    pub source: HumanResponseSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "disposition", rename_all = "snake_case")]
+pub enum HandleSessionHumanInputOutcome {
+    NotStateMachine,
+    Consumed { response: RespondHumanNodeOutcome },
+}
+
+#[derive(Debug, Clone)]
+pub struct ListPendingHumanNodesCommand {
+    pub run_id: String,
+    pub caller_actor_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingHumanNodeView {
+    pub node_id: String,
+    pub display_name: String,
+    pub instruction: String,
+    pub response_ref: String,
+    #[serde(default)]
+    pub judge_outcomes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_deadline_ms: Option<u64>,
+    #[serde(default)]
+    pub upstream_artifacts: Vec<JudgeArtifact>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HumanRunAccessCommand {
+    pub run_id: String,
+    pub caller_actor_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -295,6 +378,88 @@ pub trait CollaborationRuntimeService: Send + Sync {
         &self,
         run_id: &str,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError>;
+
+    async fn get_state_machine_run_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        let _ = session_id;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "state machine session lookup is not implemented".to_string(),
+        ))
+    }
+
+    async fn respond_human_node(
+        &self,
+        cmd: RespondHumanNodeCommand,
+    ) -> Result<RespondHumanNodeOutcome, CollaborationRuntimeError> {
+        let _ = cmd;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "human node response is not implemented".to_string(),
+        ))
+    }
+
+    async fn handle_session_human_input(
+        &self,
+        cmd: HandleSessionHumanInputCommand,
+    ) -> Result<HandleSessionHumanInputOutcome, CollaborationRuntimeError> {
+        let _ = cmd;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "session human input is not implemented".to_string(),
+        ))
+    }
+
+    async fn list_pending_human_nodes(
+        &self,
+        cmd: ListPendingHumanNodesCommand,
+    ) -> Result<Vec<PendingHumanNodeView>, CollaborationRuntimeError> {
+        let _ = cmd;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "pending human node lookup is not implemented".to_string(),
+        ))
+    }
+
+    async fn get_state_machine_run_for_human(
+        &self,
+        cmd: HumanRunAccessCommand,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        let _ = cmd;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "human state machine access is not implemented".to_string(),
+        ))
+    }
+
+    async fn get_state_machine_node_run_for_human(
+        &self,
+        cmd: HumanRunAccessCommand,
+        node_id: &str,
+    ) -> Result<Option<StateMachineNodeRunView>, CollaborationRuntimeError> {
+        let _ = (cmd, node_id);
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "human state machine node access is not implemented".to_string(),
+        ))
+    }
+
+    async fn get_state_machine_run_graph_for_human(
+        &self,
+        cmd: HumanRunAccessCommand,
+    ) -> Result<Option<StateMachineRunGraphView>, CollaborationRuntimeError> {
+        let _ = cmd;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "human state machine graph access is not implemented".to_string(),
+        ))
+    }
+
+    async fn cancel_state_machine_run_for_human(
+        &self,
+        cmd: HumanRunAccessCommand,
+        reason: Option<String>,
+    ) -> Result<StateMachineRunView, CollaborationRuntimeError> {
+        let _ = (cmd, reason);
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "human state machine cancellation is not implemented".to_string(),
+        ))
+    }
 
     async fn get_state_machine_node_run(
         &self,

@@ -4,14 +4,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    BotEventCommand, BotRunContext, BotRunContextPort, ChatEventState,
-    CollaborationRuntimeError, CollaborationRuntimeService, CoordinationMode,
-    HandleBotTerminalEventCommand, MessageFlowService, ProviderBotCoordinationCommand,
-    ProviderBotCoordinationOutcome, ProviderBotCoreService, ProviderBotEventCommand,
-    ProviderBotEventCredential, ProviderBotEventError, ProviderBotEventOutcome,
-    ProviderBotEventService, ProviderCoordinationEventKind, ProviderCoordinationIntent,
-    ProviderCoordinationConfig, RuntimeBotIdentity, ServiceError, TaskCompleteCommand,
-    TaskDispatchCommand, TaskMessageCommand,
+    BotEventCommand, BotRunContext, BotRunContextPort, ChatEventState, CollaborationRuntimeError,
+    CollaborationRuntimeService, CoordinationMode, HandleBotTerminalEventCommand,
+    MessageFlowService, ProviderBotCoordinationCommand, ProviderBotCoordinationOutcome,
+    ProviderBotCoreService, ProviderBotEventCommand, ProviderBotEventCredential,
+    ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
+    ProviderCoordinationConfig, ProviderCoordinationEventKind, ProviderCoordinationIntent,
+    RuntimeBotIdentity, ServiceError, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
@@ -193,14 +192,17 @@ impl ProviderBotEvents {
     ) -> Result<(), ProviderBotEventError> {
         match call.tool.as_str() {
             TOOL_ASSIGN_TASK => {
-                let target_bot_id = coordination_argument_str(call, "target_bot")
-                    .ok_or_else(|| ProviderBotEventError::InvalidRequest(
-                        "bcs_assign_task requires target_bot".to_string(),
-                    ))?;
-                let message = coordination_argument_str(call, "message")
-                    .ok_or_else(|| ProviderBotEventError::InvalidRequest(
+                let target_bot_id =
+                    coordination_argument_str(call, "target_bot").ok_or_else(|| {
+                        ProviderBotEventError::InvalidRequest(
+                            "bcs_assign_task requires target_bot".to_string(),
+                        )
+                    })?;
+                let message = coordination_argument_str(call, "message").ok_or_else(|| {
+                    ProviderBotEventError::InvalidRequest(
                         "bcs_assign_task requires message".to_string(),
-                    ))?;
+                    )
+                })?;
                 let mut payload = json!({
                     "message": message,
                 });
@@ -227,10 +229,11 @@ impl ProviderBotEvents {
                         "bcs_send_task_message requires bcs_session_id".to_string(),
                     )
                 })?;
-                let message = coordination_argument_str(call, "message")
-                    .ok_or_else(|| ProviderBotEventError::InvalidRequest(
+                let message = coordination_argument_str(call, "message").ok_or_else(|| {
+                    ProviderBotEventError::InvalidRequest(
                         "bcs_send_task_message requires message".to_string(),
-                    ))?;
+                    )
+                })?;
                 self.message_flow
                     .handle_task_message(TaskMessageCommand {
                         worker_bot_id: caller_bot_id.to_string(),
@@ -244,10 +247,11 @@ impl ProviderBotEvents {
                     .map_err(map_service_error)?;
             }
             TOOL_TASK_COMPLETE => {
-                let summary = coordination_argument_str(call, "summary")
-                    .ok_or_else(|| ProviderBotEventError::InvalidRequest(
+                let summary = coordination_argument_str(call, "summary").ok_or_else(|| {
+                    ProviderBotEventError::InvalidRequest(
                         "bcs_task_complete requires summary".to_string(),
-                    ))?;
+                    )
+                })?;
                 let mut payload = json!({
                     "group_id": context.group_id.clone(),
                     "summary": summary,
@@ -593,9 +597,7 @@ impl ProviderBotEventService for ProviderBotEvents {
             Ok(outcome) => outcome,
             Err(error) => {
                 if is_terminal {
-                    self.bot_run_context
-                        .release_terminal(&command.run_id)
-                        .await;
+                    self.bot_run_context.release_terminal(&command.run_id).await;
                 }
                 return Err(map_service_error(error));
             }
@@ -672,16 +674,10 @@ impl ProviderBotEventService for ProviderBotEvents {
             .map_err(map_service_error)?;
         let call = coordination_call_from_command(&coordination, &command)?;
 
-        let dedup_key = format!(
-            "{}:{}",
-            command.run_id.trim(),
-            command.tool_call_id.trim()
-        );
+        let dedup_key = format!("{}:{}", command.run_id.trim(), command.tool_call_id.trim());
         {
             let mut seen = self.coordination_seen.lock().await;
-            seen.retain(|_, seen_at| {
-                now.saturating_sub(*seen_at) <= COORDINATION_PROCESSED_TTL_MS
-            });
+            seen.retain(|_, seen_at| now.saturating_sub(*seen_at) <= COORDINATION_PROCESSED_TTL_MS);
             if seen.contains_key(&dedup_key) {
                 info!(
                     provider_id = %command.provider_id,
@@ -887,10 +883,7 @@ fn coordination_intent_to_call(
     })
 }
 
-fn coordination_argument_str<'a>(
-    call: &'a CoordinationCall,
-    key: &str,
-) -> Option<&'a str> {
+fn coordination_argument_str<'a>(call: &'a CoordinationCall, key: &str) -> Option<&'a str> {
     call.arguments
         .get(key)
         .and_then(|value| value.as_str())
@@ -914,7 +907,19 @@ fn map_service_error(error: ServiceError) -> ProviderBotEventError {
 
 fn map_collaboration_runtime_error(error: CollaborationRuntimeError) -> ProviderBotEventError {
     match error {
-        CollaborationRuntimeError::RunNotFound(run_id) => ProviderBotEventError::RunNotFound(run_id),
+        CollaborationRuntimeError::RunNotFound(run_id) => {
+            ProviderBotEventError::RunNotFound(run_id)
+        }
+        CollaborationRuntimeError::NodeNotFound { run_id, node_id } => {
+            ProviderBotEventError::RunNotFound(format!("{run_id}/{node_id}"))
+        }
+        CollaborationRuntimeError::Unauthenticated => {
+            ProviderBotEventError::Unauthorized("authentication is required".to_string())
+        }
+        CollaborationRuntimeError::Forbidden(message) => ProviderBotEventError::Forbidden(message),
+        CollaborationRuntimeError::JudgeUnavailable(message) => {
+            ProviderBotEventError::Internal(message)
+        }
         CollaborationRuntimeError::InvalidRequest(message)
         | CollaborationRuntimeError::InvalidDefinition(message)
         | CollaborationRuntimeError::InvalidParticipantBinding(message) => {

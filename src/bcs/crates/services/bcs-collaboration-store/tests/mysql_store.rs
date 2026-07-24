@@ -15,8 +15,8 @@ use bcs_domain::{
     StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
 use bcs_service_api::{
-    CollaborationEventRepoPort, GroupRuntimeBindingRepoPort, StateMachineDefinitionRepoPort,
-    StateMachineRunRepoPort,
+    CollaborationEventRepoPort, GroupRuntimeBindingRepoPort, MarkHumanNodeRunningCommand,
+    StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
 };
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -85,7 +85,10 @@ async fn mysql_definition_upsert_rejects_same_id_version_with_different_content(
         .await
         .expect_err("different content should conflict");
 
-    assert!(err.to_string().contains("already exists with different content"));
+    assert!(
+        err.to_string()
+            .contains("already exists with different content")
+    );
     assert!(db.transactions.lock().await.is_empty());
 }
 
@@ -194,7 +197,10 @@ async fn mysql_definition_snapshot_writes_run_definition_snapshot_table() {
     let executes = db.executes.lock().await;
     assert_eq!(executes.len(), 1);
     let stmt = &executes[0];
-    assert!(stmt.sql().contains("bcs_state_machine_definition_snapshots"));
+    assert!(
+        stmt.sql()
+            .contains("bcs_state_machine_definition_snapshots")
+    );
     assert!(stmt.sql().contains("ON DUPLICATE KEY UPDATE"));
     assert!(stmt.sql().contains("env=env"));
     assert_eq!(stmt.params()[1], DbValue::from("sm-run-1"));
@@ -225,7 +231,11 @@ async fn mysql_definition_snapshot_reads_run_definition_snapshot_table() {
     assert_eq!(loaded.id, "sm_e2e_single");
     assert_eq!(loaded.version, 3);
     let queries = db.queries.lock().await;
-    assert!(queries[0].sql().contains("bcs_state_machine_definition_snapshots"));
+    assert!(
+        queries[0]
+            .sql()
+            .contains("bcs_state_machine_definition_snapshots")
+    );
     assert_eq!(queries[0].params()[1], DbValue::from("sm-run-1"));
 }
 
@@ -296,10 +306,7 @@ async fn mysql_runtime_reads_run_and_node_rows() {
         .expect("run row");
     assert_eq!(loaded_by_session.run_id, "sm-run-1");
 
-    let nodes = store
-        .list_node_runs("sm-run-1")
-        .await
-        .expect("list nodes");
+    let nodes = store.list_node_runs("sm-run-1").await.expect("list nodes");
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes[0].node_timeout_ms, Some(120_000));
     assert_eq!(nodes[0].timeout_deadline_ms, Some(121_000));
@@ -315,13 +322,7 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
     let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
 
     store
-        .mark_node_running(
-            "sm-run-1",
-            "answer",
-            1,
-            "delivery-1".to_string(),
-            1_000,
-        )
+        .mark_node_running("sm-run-1", "answer", 1, "delivery-1".to_string(), 1_000)
         .await
         .expect("mark running");
     let artifact_recorded = store
@@ -338,7 +339,9 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
             "sm-run-1",
             "answer",
             1,
+            "complete".to_string(),
             "done".to_string(),
+            None,
             2_000,
         )
         .await
@@ -378,13 +381,38 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
     assert_eq!(executes[1].params()[0], DbValue::from("candidate"));
     assert_eq!(executes[1].params()[4], DbValue::from(1));
     assert!(executes[2].sql().contains("AND attempt = ? AND status = 'running'"));
-    assert_eq!(executes[2].params()[5], DbValue::from(1));
+    assert_eq!(executes[2].params()[7], DbValue::from(1));
     assert!(executes[3].sql().contains("status NOT IN ('completed', 'failed', 'aborted')"));
     assert!(executes[4].sql().contains("AND attempt = ? AND status = 'failed'"));
     assert_eq!(executes[4].params()[4], DbValue::from(1));
     assert!(executes[5].sql().contains("SET status = 'skipped'"));
     assert!(executes[5].sql().contains("AND status = 'pending'"));
     assert_eq!(executes[5].params()[0], DbValue::from(2_200_u64));
+}
+
+#[tokio::test]
+async fn mysql_human_activation_uses_empty_assignee_sentinel_and_persisted_deadline() {
+    let db = Arc::new(RecordingDb::default());
+    let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
+
+    let marked = store
+        .mark_human_node_running_if_run_active(MarkHumanNodeRunningCommand {
+            run_id: "sm-run-1".to_string(),
+            node_id: "review".to_string(),
+            attempt: 0,
+            started_at_ms: 1_000,
+            timeout_deadline_ms: 61_000,
+        })
+        .await
+        .expect("mark Human node running");
+
+    assert!(marked);
+    let executes = db.executes.lock().await;
+    assert_eq!(executes.len(), 1);
+    assert!(executes[0].sql().contains("assignee_bot_id = ''"));
+    assert_eq!(executes[0].params()[0], DbValue::from(1_000_u64));
+    assert_eq!(executes[0].params()[1], DbValue::from(61_000_u64));
+    assert_eq!(executes[0].params()[4], DbValue::from("review"));
 }
 
 #[tokio::test]
@@ -450,7 +478,11 @@ async fn mysql_runtime_delivery_correlation_and_events_are_persistent() {
     assert_eq!(transactions[0].len(), 2);
     let executes = db.executes.lock().await;
     assert_eq!(executes.len(), 2);
-    assert!(executes[0].sql().contains("bcs_state_machine_delivery_correlations"));
+    assert!(
+        executes[0]
+            .sql()
+            .contains("bcs_state_machine_delivery_correlations")
+    );
     assert!(executes[1].sql().contains("bcs_collaboration_events"));
     assert_eq!(executes[1].params()[2], DbValue::from("answer"));
     assert_eq!(executes[1].params()[3], DbValue::from(1));
@@ -469,7 +501,9 @@ async fn mysql_runtime_cas_failures_return_false() {
             "sm-run-1",
             "answer",
             1,
+            "complete".to_string(),
             "done".to_string(),
+            None,
             2_000,
         )
         .await
@@ -484,13 +518,7 @@ async fn mysql_runtime_cas_failures_return_false() {
         .await
         .expect("record node artifact");
     let failed = store
-        .fail_node_attempt(
-            "sm-run-1",
-            "answer",
-            1,
-            "error".to_string(),
-            2_000,
-        )
+        .fail_node_attempt("sm-run-1", "answer", 1, "error".to_string(), 2_000)
         .await
         .expect("fail node");
     let retry_scheduled = store
@@ -567,7 +595,11 @@ impl RecordingDb {
                     continue;
                 }
                 let content_hash = stmt.params().get(6)?.as_str()?.to_string();
-                let blob_id = stmt.params().get(7).and_then(DbValue::as_str).map(str::to_string);
+                let blob_id = stmt
+                    .params()
+                    .get(7)
+                    .and_then(DbValue::as_str)
+                    .map(str::to_string);
                 return Some((content_hash, blob_id));
             }
         }
@@ -594,11 +626,17 @@ impl DbPlugin for RecordingDb {
         if statement.sql().contains("normalized_json") {
             let definition_json = self.definition_json.lock().await.clone().unwrap();
             return Ok(vec![DbRow::new(BTreeMap::from([
-                ("normalized_json".to_string(), DbValue::from(definition_json)),
+                (
+                    "normalized_json".to_string(),
+                    DbValue::from(definition_json),
+                ),
                 ("yaml_text".to_string(), DbValue::Null),
             ]))]);
         }
-        if statement.sql().contains("FROM bcs_state_machine_definition_snapshots") {
+        if statement
+            .sql()
+            .contains("FROM bcs_state_machine_definition_snapshots")
+        {
             return Ok(self
                 .snapshot_json
                 .lock()
@@ -614,13 +652,28 @@ impl DbPlugin for RecordingDb {
                 .collect());
         }
         if statement.sql().contains("FROM bcs_state_machine_runs") {
-            return Ok(self.runtime_run_row.lock().await.clone().into_iter().collect());
+            return Ok(self
+                .runtime_run_row
+                .lock()
+                .await
+                .clone()
+                .into_iter()
+                .collect());
         }
         if statement.sql().contains("FROM bcs_state_machine_node_runs") {
             return Ok(self.runtime_node_rows.lock().await.clone());
         }
-        if statement.sql().contains("FROM bcs_state_machine_delivery_correlations") {
-            return Ok(self.correlation_row.lock().await.clone().into_iter().collect());
+        if statement
+            .sql()
+            .contains("FROM bcs_state_machine_delivery_correlations")
+        {
+            return Ok(self
+                .correlation_row
+                .lock()
+                .await
+                .clone()
+                .into_iter()
+                .collect());
         }
         if statement.sql().contains("FROM bcs_collaboration_events") {
             return Ok(self.event_rows.lock().await.clone());
@@ -692,7 +745,9 @@ fn test_node() -> StateMachineNodeRun {
         node_timeout_ms: Some(120_000),
         timeout_deadline_ms: Some(121_000),
         max_attempts: 2,
-        assignee_bot_id: "bot_sm_e2e_driver".to_string(),
+        assignee_bot_id: Some("bot_sm_e2e_driver".to_string()),
+        outcome: None,
+        responded_by: None,
         delivery_request_id: Some("delivery-1".to_string()),
         bot_delivery_run_id: Some("bot-run-1".to_string()),
         artifact_text: None,
@@ -716,14 +771,32 @@ fn test_correlation() -> StateMachineDeliveryCorrelation {
 fn run_row(run: &StateMachineRun) -> DbRow {
     DbRow::new(BTreeMap::from([
         ("run_id".to_string(), DbValue::from(run.run_id.as_str())),
-        ("definition_id".to_string(), DbValue::from(run.definition_id.as_str())),
-        ("definition_version".to_string(), DbValue::from(run.definition_version)),
+        (
+            "definition_id".to_string(),
+            DbValue::from(run.definition_id.as_str()),
+        ),
+        (
+            "definition_version".to_string(),
+            DbValue::from(run.definition_version),
+        ),
         ("group_id".to_string(), DbValue::from(run.group_id.as_str())),
-        ("group_version".to_string(), DbValue::from(run.group_version)),
-        ("session_id".to_string(), DbValue::from(run.session_id.as_str())),
-        ("created_by".to_string(), DbValue::from(run.created_by.as_deref())),
+        (
+            "group_version".to_string(),
+            DbValue::from(run.group_version),
+        ),
+        (
+            "session_id".to_string(),
+            DbValue::from(run.session_id.as_str()),
+        ),
+        (
+            "created_by".to_string(),
+            DbValue::from(run.created_by.as_deref()),
+        ),
         ("status".to_string(), DbValue::from("running")),
-        ("input_json".to_string(), DbValue::from(run.input.to_string())),
+        (
+            "input_json".to_string(),
+            DbValue::from(run.input.to_string()),
+        ),
         ("output_text".to_string(), DbValue::Null),
         ("error_message".to_string(), DbValue::Null),
         ("created_at_ms".to_string(), DbValue::from(run.created_at)),
@@ -739,11 +812,31 @@ fn node_row(node: &StateMachineNodeRun) -> DbRow {
         ("status".to_string(), DbValue::from("running")),
         ("attempt".to_string(), DbValue::from(node.attempt)),
         ("node_timeout_ms".to_string(), DbValue::from(120_000_u64)),
-        ("timeout_deadline_ms".to_string(), DbValue::from(121_000_u64)),
+        (
+            "timeout_deadline_ms".to_string(),
+            DbValue::from(121_000_u64),
+        ),
         ("max_attempts".to_string(), DbValue::from(node.max_attempts)),
-        ("assignee_bot_id".to_string(), DbValue::from(node.assignee_bot_id.as_str())),
-        ("delivery_request_id".to_string(), DbValue::from("delivery-1")),
-        ("bot_delivery_run_id".to_string(), DbValue::from("bot-run-1")),
+        (
+            "assignee_bot_id".to_string(),
+            DbValue::from(node.assignee_bot_id.as_deref()),
+        ),
+        (
+            "outcome".to_string(),
+            DbValue::from(node.outcome.as_deref()),
+        ),
+        (
+            "responded_by".to_string(),
+            DbValue::from(node.responded_by.as_deref()),
+        ),
+        (
+            "delivery_request_id".to_string(),
+            DbValue::from("delivery-1"),
+        ),
+        (
+            "bot_delivery_run_id".to_string(),
+            DbValue::from("bot-run-1"),
+        ),
         ("artifact_text".to_string(), DbValue::Null),
         ("error_message".to_string(), DbValue::Null),
         ("started_at_ms".to_string(), DbValue::from(1_000_u64)),
@@ -757,7 +850,10 @@ fn correlation_row(correlation: &StateMachineDeliveryCorrelation) -> DbRow {
             "state_machine_run_id".to_string(),
             DbValue::from(correlation.state_machine_run_id.as_str()),
         ),
-        ("node_id".to_string(), DbValue::from(correlation.node_id.as_str())),
+        (
+            "node_id".to_string(),
+            DbValue::from(correlation.node_id.as_str()),
+        ),
         ("attempt".to_string(), DbValue::from(correlation.attempt)),
         (
             "assignee_bot_id".to_string(),
@@ -785,9 +881,15 @@ fn collaboration_event_row(
     DbRow::new(BTreeMap::from([
         ("state_machine_run_id".to_string(), DbValue::from(run_id)),
         ("node_id".to_string(), DbValue::from(node_id)),
-        ("attempt".to_string(), attempt.map(DbValue::from).unwrap_or(DbValue::Null)),
+        (
+            "attempt".to_string(),
+            attempt.map(DbValue::from).unwrap_or(DbValue::Null),
+        ),
         ("event_type".to_string(), DbValue::from(event_type)),
-        ("payload_json".to_string(), DbValue::from(payload.to_string())),
+        (
+            "payload_json".to_string(),
+            DbValue::from(payload.to_string()),
+        ),
         ("created_at_ms".to_string(), DbValue::from(created_at)),
     ]))
 }

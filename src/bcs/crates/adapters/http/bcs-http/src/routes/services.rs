@@ -1,5 +1,6 @@
 //! Service-invocation HTTP handlers (对外服务化入口).
 
+use crate::service_key::{ResolvedCaller, caller_principal_for, sha256_hex};
 use axum::{
     Json,
     extract::{Path, State},
@@ -7,15 +8,14 @@ use axum::{
     response::IntoResponse,
 };
 use bcs_domain::SystemMessageEvent;
-use crate::service_key::{ResolvedCaller, caller_principal_for, sha256_hex};
 use bcs_service_api::{StartStateMachineRunCommand, StartStateMachineRunOutcome};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{bot_token_from_headers, validate_container_header};
 use super::collaboration_runs::collaboration_error_to_response;
-use crate::state::HttpAppState;
 use super::sessions::session_error_to_response;
+use super::{bot_token_from_headers, validate_container_header};
+use crate::state::HttpAppState;
 
 #[derive(Debug, Deserialize)]
 pub struct InvocationRequest {
@@ -89,7 +89,11 @@ pub async fn post_invocation(
             .into_response();
     }
     if body.session_id.is_none() {
-        if let Some(max) = group.service_spec.as_ref().and_then(|spec| spec.max_concurrency) {
+        if let Some(max) = group
+            .service_spec
+            .as_ref()
+            .and_then(|spec| spec.max_concurrency)
+        {
             let current = state
                 .services
                 .session_management
@@ -128,7 +132,12 @@ pub async fn post_invocation(
         },
     };
 
-    match state.services.session_management.create_or_reactivate(cmd).await {
+    match state
+        .services
+        .session_management
+        .create_or_reactivate(cmd)
+        .await
+    {
         Ok(outcome) => {
             let reused = !outcome.created;
             let run = if group.group_strategy == bcs_service_api::GroupStrategy::StateMachine {
@@ -143,6 +152,7 @@ pub async fn post_invocation(
                         definition_ref: None,
                         input: outcome.session.input.clone().unwrap_or(Value::Null),
                         caller_id: outcome.session.caller_id.clone(),
+                        authenticated_human: None,
                     })
                     .await
                 {
@@ -186,7 +196,8 @@ pub async fn post_invocation(
                     reused,
                     run.as_ref(),
                 )),
-            ).into_response()
+            )
+                .into_response()
         }
         Err(e) => session_error_to_response(&e),
     }
@@ -220,12 +231,14 @@ async fn resolve_service_caller(
                     .into_response());
             }
         };
-        if !entry.bound_groups.is_empty() && !entry.bound_groups.iter().any(|bound| bound == group_id) {
+        if !entry.bound_groups.is_empty()
+            && !entry.bound_groups.iter().any(|bound| bound == group_id)
+        {
             return Err((
                 StatusCode::FORBIDDEN,
                 Json(serde_json::json!({"error": "key_not_bound_to_group", "group_id": group_id})),
             )
-            .into_response());
+                .into_response());
         }
         return Ok(ResolvedCaller {
             key_name: entry.name.clone(),
@@ -262,7 +275,7 @@ async fn resolve_service_caller(
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "invalid_bot_token"})),
         )
-        .into_response());
+            .into_response());
     }
     Ok(ResolvedCaller {
         key_name: format!("bot:{}", bot_id),
@@ -320,7 +333,8 @@ pub async fn get_service_session(
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "session not found"})),
-        ).into_response(),
+        )
+            .into_response(),
         Err(e) => session_error_to_response(&e),
     }
 }
@@ -337,7 +351,9 @@ fn service_session_to_json(sess: &bcs_service_api::Session, reused: bool) -> Val
         .map(|p| {
             let mut filled = p.clone();
             if filled.mode.is_none() {
-                filled.mode = Some(bcs_service_api::ParticipantMode::default_for(filled.actor_kind));
+                filled.mode = Some(bcs_service_api::ParticipantMode::default_for(
+                    filled.actor_kind,
+                ));
             }
             serde_json::to_value(filled).unwrap_or_else(|_| Value::Null)
         })
