@@ -82,6 +82,59 @@ class FakeCommonConfigRepository:
         return self.rows.pop((business_code, param_code, env), None) is not None
 
 
+def test_skills_pool_rollout_rejects_generic_config_writes() -> None:
+    repo = FakeCommonConfigRepository()
+    service = CommonConfigService(repo)
+
+    with pytest.raises(ValueError, match="operator API"):
+        service.upsert_config(
+            business_code="skills_pool",
+            business_name="Skills Pool",
+            param_code="layout_rollout",
+            param_name="Rollout",
+            param_value={},
+            env="pre",
+        )
+
+    config_id = repo.create_config(
+        business_code="skills_pool",
+        business_name="Skills Pool",
+        param_code="layout_rollout",
+        param_name="Rollout",
+        param_value="{}",
+        enable="0",
+        ext_info=None,
+        env="pre",
+    )
+    with pytest.raises(ValueError, match="operator API"):
+        service.update_config(
+            config_id=config_id,
+            updates={"enable": "1"},
+        )
+
+
+def test_generic_update_cannot_rename_config_into_rollout_key() -> None:
+    repo = FakeCommonConfigRepository()
+    service = CommonConfigService(repo)
+    config_id = service.create_config(
+        business_code="other",
+        business_name="Other",
+        param_code="safe",
+        param_name="Safe",
+        param_value={},
+        env="pre",
+    )
+
+    with pytest.raises(ValueError, match="operator API"):
+        service.update_config(
+            config_id=config_id,
+            updates={
+                "business_code": "skills_pool",
+                "param_code": "layout_rollout",
+            },
+        )
+
+
 def test_common_config_service_serializes_value_and_hides_disabled_by_default():
     repo = FakeCommonConfigRepository()
     service = CommonConfigService(repo)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -162,6 +163,78 @@ def test_missing_layout_state_reads_as_legacy_without_persisting() -> None:
     assert state.phase is SkillLayoutPhase.LEGACY_ACTIVE
     assert state.migration_generation is None
     assert state.persisted is False
+
+
+def test_list_states_is_scoped_to_environment_and_only_returns_persisted_rows() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    with database.transactional_orm_session() as session:
+        session.add_all(
+            [
+                BotSkillLayoutStateModel(
+                    env="pre",
+                    entity_id="entity-2",
+                    bot_id="bot-2",
+                    active_layout=SkillLayout.LEGACY.value,
+                    phase=SkillLayoutPhase.LEGACY_ACTIVE.value,
+                ),
+                BotSkillLayoutStateModel(
+                    env="pre",
+                    entity_id="entity-1",
+                    bot_id="bot-1",
+                    active_layout=SkillLayout.LEGACY.value,
+                    phase=SkillLayoutPhase.LEGACY_ACTIVE.value,
+                ),
+                BotSkillLayoutStateModel(
+                    env="prod",
+                    entity_id="entity-3",
+                    bot_id="bot-3",
+                    active_layout=SkillLayout.LEGACY.value,
+                    phase=SkillLayoutPhase.LEGACY_ACTIVE.value,
+                ),
+            ]
+        )
+
+    states = repository.list_states(env="pre")
+
+    assert [state.scope.bot_id for state in states] == ["bot-2", "bot-1"]
+    assert all(state.persisted for state in states)
+
+    with database.transactional_orm_session() as session:
+        rows = {
+            row.bot_id: row
+            for row in session.query(BotSkillLayoutStateModel)
+            .filter(BotSkillLayoutStateModel.env == "pre")
+            .all()
+        }
+        rows["bot-1"].rollout_evidence = json.dumps(
+            {
+                "env": "pre",
+                "config_id": 1,
+                "config_version": "v1",
+                "batch_id": "batch-1",
+                "engine_type": "openclaw",
+                "decision_reason": "eligible",
+            }
+        )
+        rows["bot-2"].rollout_evidence = json.dumps(
+            {
+                "env": "pre",
+                "config_id": 1,
+                "config_version": "v1",
+                "batch_id": "batch-1",
+                "engine_type": "claude_code",
+                "decision_reason": "eligible",
+            }
+        )
+
+    filtered = repository.list_states(
+        env="pre",
+        engine="openclaw",
+        batch_id="batch-1",
+    )
+
+    assert [state.scope.bot_id for state in filtered] == ["bot-1"]
 
 
 def test_claim_pool_migration_persists_generation_lease_and_rollout_evidence() -> None:

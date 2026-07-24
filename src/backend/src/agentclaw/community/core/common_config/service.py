@@ -13,6 +13,7 @@ from agentclaw.community.log import get_logger
 
 
 logger = get_logger()
+_PROTECTED_CONFIG_KEYS = {("skills_pool", "layout_rollout")}
 
 
 class CommonConfigService:
@@ -55,6 +56,36 @@ class CommonConfigService:
             if record.gmt_modified
             else None,
         }
+
+    @staticmethod
+    def _ensure_generic_write_allowed(
+        *,
+        business_code: str,
+        param_code: str,
+    ) -> None:
+        if (business_code, param_code) in _PROTECTED_CONFIG_KEYS:
+            raise ValueError(
+                "skills_pool layout rollout must use its operator API"
+            )
+
+    def _ensure_config_id_write_allowed(
+        self,
+        config_id: int,
+        updates: dict[str, Any] | None = None,
+    ) -> None:
+        record = self._repo.get_by_id(config_id=config_id)
+        if record is not None:
+            self._ensure_generic_write_allowed(
+                business_code=record.business_code,
+                param_code=record.param_code,
+            )
+            updates = updates or {}
+            self._ensure_generic_write_allowed(
+                business_code=str(
+                    updates.get("business_code", record.business_code)
+                ),
+                param_code=str(updates.get("param_code", record.param_code)),
+            )
 
     @staticmethod
     def _normalize_enable(enable: str) -> str:
@@ -149,6 +180,10 @@ class CommonConfigService:
         ext_info: Any = None,
         env: str,
     ) -> int:
+        self._ensure_generic_write_allowed(
+            business_code=business_code,
+            param_code=param_code,
+        )
         enable = self._normalize_enable(enable)
         config_id = self._repo.create_config(
             business_code=business_code,
@@ -170,6 +205,7 @@ class CommonConfigService:
         return config_id
 
     def update_config(self, *, config_id: int, updates: dict[str, Any]) -> bool:
+        self._ensure_config_id_write_allowed(config_id, updates)
         serialized: dict[str, Any] = {}
         for key, value in updates.items():
             if key in ("param_value", "ext_info"):
@@ -192,6 +228,10 @@ class CommonConfigService:
         ext_info: Any = None,
         env: str,
     ) -> int:
+        self._ensure_generic_write_allowed(
+            business_code=business_code,
+            param_code=param_code,
+        )
         enable = self._normalize_enable(enable)
         config_id = self._repo.upsert_config(
             business_code=business_code,
@@ -221,8 +261,13 @@ class CommonConfigService:
         env: str | None = None,
     ) -> bool:
         if config_id is not None:
+            self._ensure_config_id_write_allowed(config_id)
             return self._repo.delete_config(config_id=config_id)
         if business_code and param_code and env:
+            self._ensure_generic_write_allowed(
+                business_code=business_code,
+                param_code=param_code,
+            )
             return self._repo.delete_by_biz_param(
                 business_code=business_code, param_code=param_code, env=env
             )

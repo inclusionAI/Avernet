@@ -105,6 +105,18 @@ def test_exact_bot_in_promoted_engine_is_eligible_with_audit_evidence() -> None:
     assert decision.evidence.engine_type == "openclaw"
 
 
+def test_logical_config_revision_is_frozen_into_claim_evidence() -> None:
+    config = {
+        **enabled_config(),
+        "ext_info": {"revision": "revision-7", "audit_log": []},
+    }
+
+    decision = evaluate(make_gate(config))
+
+    assert decision.evidence is not None
+    assert decision.evidence.config_version == "revision-7"
+
+
 @pytest.mark.parametrize(
     ("gate", "reason"),
     [
@@ -182,7 +194,14 @@ def test_non_pool_engine_never_matches(engine_type: str) -> None:
 def test_service_draft_is_editable_but_published_service_is_not(
     engine_type: str,
 ) -> None:
-    gate = make_gate(enabled_config(promoted_engines=[engine_type]))
+    promotion_order = ["openclaw", "claude_code", "aicoding", "hermes"]
+    gate = make_gate(
+        enabled_config(
+            promoted_engines=promotion_order[
+                : promotion_order.index(engine_type) + 1
+            ]
+        )
+    )
 
     assert evaluate(
         gate,
@@ -205,3 +224,25 @@ def test_unknown_runtime_form_fails_closed(runtime_form: object) -> None:
 
     assert not decision.eligible
     assert decision.reason is RolloutDecisionReason.RUNTIME_NOT_EDITABLE
+
+
+def test_unknown_rollout_config_key_fails_closed() -> None:
+    config = enabled_config()
+    config["param_value"]["enable_pattern"] = "*"
+
+    decision = evaluate(make_gate(config))
+
+    assert not decision.eligible
+    assert decision.reason is RolloutDecisionReason.CONFIG_INVALID
+
+
+def test_invalid_control_entry_fails_closed() -> None:
+    config = enabled_config()
+    config["param_value"]["negative_controls"] = [
+        {"owner_id": "owner-2", "bot_id": "*", "batch_id": "batch-1"}
+    ]
+
+    decision = evaluate(make_gate(config))
+
+    assert not decision.eligible
+    assert decision.reason is RolloutDecisionReason.CONFIG_INVALID
