@@ -110,6 +110,66 @@ def test_enum_value_added_is_compatible() -> None:
     assert check_compatible(old, new) == []
 
 
+def test_parameter_type_change_is_breaking() -> None:
+    old = _spec(
+        {
+            "/x": {
+                "get": {
+                    "parameters": [
+                        {"name": "id", "in": "query", "schema": {"type": "string"}}
+                    ]
+                }
+            }
+        }
+    )
+    new = _spec(
+        {
+            "/x": {
+                "get": {
+                    "parameters": [
+                        {"name": "id", "in": "query", "schema": {"type": "integer"}}
+                    ]
+                }
+            }
+        }
+    )
+    assert any(b.kind == "type-changed" for b in check_compatible(old, new))
+
+
+def test_parameter_enum_removal_is_breaking() -> None:
+    old = _spec(
+        {
+            "/x": {
+                "get": {
+                    "parameters": [
+                        {"name": "k", "in": "query", "schema": {"enum": ["a", "b"]}}
+                    ]
+                }
+            }
+        }
+    )
+    new = _spec(
+        {
+            "/x": {
+                "get": {
+                    "parameters": [
+                        {"name": "k", "in": "query", "schema": {"enum": ["a"]}}
+                    ]
+                }
+            }
+        }
+    )
+    assert any(b.kind == "enum-value-removed" for b in check_compatible(old, new))
+
+
+def test_request_body_now_required_is_breaking() -> None:
+    old = _spec({"/x": {"post": {"requestBody": {"content": {}}}}})
+    new = _spec({"/x": {"post": {"requestBody": {"required": True, "content": {}}}}})
+    assert any(
+        b.kind == "request-body-now-required" for b in check_compatible(old, new)
+    )
+
+
 def test_removed_schema_is_breaking() -> None:
     old = _spec({}, {"Bot": {"properties": {}}, "Owner": {"properties": {}}})
     new = _spec({}, {"Bot": {"properties": {}}})

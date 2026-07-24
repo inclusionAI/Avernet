@@ -5,6 +5,13 @@ this classifies a candidate description against the currently-published one and
 returns the breaking changes (empty list ⇒ safe to publish). It is deliberately
 focused — the well-known breaking classes — not a full OpenAPI differ.
 
+**Conservative bias.** OpenAPI shares ``components/schemas`` between request and
+response bodies, so this checker cannot always tell which side a schema serves.
+It errs toward *flagging* (a false positive over-blocks; it never silently ships
+a break): e.g. a **response** property becoming required, or a request-only
+property being dropped, are compatible in practice but may be reported. Use the
+gate's ``--allow-breaking`` for such a reviewed, coordinated change.
+
 Pure logic (Rule 7): no web framework, no I/O.
 """
 
@@ -61,6 +68,22 @@ def _check_operations(
             breaks.append(Breaking("operation-removed", f"{method.upper()} {path}"))
             continue
         _check_parameters(method, path, old_op, new_op, breaks)
+        _check_request_body(method, path, old_op, new_op, breaks)
+
+
+def _check_request_body(
+    method: str,
+    path: str,
+    old_op: dict[str, Any],
+    new_op: dict[str, Any],
+    breaks: list[Breaking],
+) -> None:
+    old_rb = old_op.get("requestBody") or {}
+    new_rb = new_op.get("requestBody") or {}
+    new_required = isinstance(new_rb, dict) and new_rb.get("required")
+    old_required = isinstance(old_rb, dict) and old_rb.get("required")
+    if new_required and not old_required:
+        breaks.append(Breaking("request-body-now-required", f"{method.upper()} {path}"))
 
 
 def _check_parameters(
@@ -89,6 +112,17 @@ def _check_parameters(
                     f"{loc} param {name!r}",
                 )
             )
+        # A param whose type or enum tightened breaks callers sending the old form.
+        if was is not None:
+            old_schema = was.get("schema")
+            new_schema = param.get("schema")
+            if isinstance(old_schema, dict) and isinstance(new_schema, dict):
+                _check_property(
+                    f"{method.upper()} {path} {loc} param {name!r}",
+                    old_schema,
+                    new_schema,
+                    breaks,
+                )
 
 
 def _params_by_name(op: dict[str, Any]) -> dict[tuple[Any, Any], dict[str, Any]]:
