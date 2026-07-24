@@ -1,6 +1,5 @@
 """SQLAlchemy ORM model for baas_session_file_tickets table."""
 
-from secbaas.spi.database import Base
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -11,6 +10,8 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+
+from secbaas.spi.database import Base
 
 from ._record import SessionTicketRecord
 
@@ -25,7 +26,7 @@ class SessionFileTicketModel(Base):
     )
     transfer_id = Column(String(128), nullable=False)
     tenant = Column(String(128), nullable=False)
-    session_id = Column(String(256), nullable=False)  # replaces paas_device_id
+    session_id = Column(String(256), nullable=False)            # replaces paas_device_id
     # No direction column
     status = Column(String(32), nullable=False)
     staging_subdir = Column(String(1024), nullable=True)
