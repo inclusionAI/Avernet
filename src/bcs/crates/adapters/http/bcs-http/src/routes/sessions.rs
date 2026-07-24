@@ -111,6 +111,34 @@ pub(crate) async fn human_has_group_access(
         .any(|b| group.participants.iter().any(|p| p.bot_uuid == b.bot_uuid))
 }
 
+/// Check whether the Human identified by `actor_id` / `staff_no` has access
+/// to the given session. The Human has access if any of:
+///   1. The Human's actor_id is a participant in the session.
+///   2. The Human owns at least one bot that is a participant in the session.
+///
+/// Session participants are the authoritative set for session-scoped access
+/// (seeded from the group at creation, then evolving independently); this
+/// mirrors `human_has_group_access` but judges membership against
+/// `session.participants` rather than `group.participants`.
+pub(crate) async fn human_has_session_access(
+    state: &HttpAppState,
+    session: &bcs_service_api::Session,
+    actor_id: &str,
+    staff_no: &str,
+) -> bool {
+    if session
+        .participants
+        .iter()
+        .any(|p| p.bot_uuid == actor_id)
+    {
+        return true;
+    }
+    let owned = state.services.registry.list_bots_by_creator(staff_no).await;
+    owned
+        .iter()
+        .any(|b| session.participants.iter().any(|p| p.bot_uuid == b.bot_uuid))
+}
+
 pub fn session_error_to_response(err: &bcs_service_api::SessionUseCaseError) -> Response {
     let (code, msg) = match err {
         bcs_service_api::SessionUseCaseError::NotFound(s) => (StatusCode::NOT_FOUND, s.clone()),

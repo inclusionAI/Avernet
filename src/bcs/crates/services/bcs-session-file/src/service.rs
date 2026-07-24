@@ -30,7 +30,7 @@ use bcs_storage_api::{
     StorageError, StorageHandle, UploadHandle, UploadMode, UploadPrepareRequest,
 };
 
-use crate::authz::{can_mutate, derive_key, validate_file_name};
+use crate::authz::{can_mutate, can_share, derive_key, validate_file_name};
 
 /// Fixed part size used by the local-proxy (`ProxyViaBcs`) multipart branch.
 ///
@@ -573,14 +573,9 @@ impl SessionFileService for SessionFileServiceImpl {
                 row.status,
             )));
         }
-        if !can_mutate(
-            &cmd.caller_identities,
-            &row.owner,
-            cmd.session_creator.as_deref(),
-            cmd.driver_bot.as_deref(),
-        ) {
+        if !can_share(&cmd.caller_identities, &cmd.session_participants) {
             return Err(SessionFileUseCaseError::Forbidden(format!(
-                "caller not authorized to share file {}",
+                "caller not a session member, cannot share file {}",
                 cmd.file_id,
             )));
         }
@@ -1368,16 +1363,16 @@ mod tests {
 
     // ---- share mint + consume -----------------------------------------------
 
-    fn share_cmd(file_id: &str, ids: &[&str]) -> ShareMintCommand {
+    fn share_cmd(file_id: &str, ids: &[&str], participants: &[&str]) -> ShareMintCommand {
         let caller_identities = ids.iter().map(|s| (*s).to_string()).collect();
+        let session_participants = participants.iter().map(|s| (*s).to_string()).collect();
         ShareMintCommand {
             session_id: "g1:abcd1234".into(),
             file_id: file_id.into(),
             caller: actor("human_1"),
             ttl_seconds: None,
             caller_identities,
-            session_creator: Some("creator_1".into()),
-            driver_bot: None,
+            session_participants,
         }
     }
 
@@ -1393,7 +1388,7 @@ mod tests {
     async fn share_mint_and_consume_roundtrip() {
         let (s, _, _) = build_svc(local_caps());
         let file_id = prepare_complete(&s).await;
-        let r = s.share_mint(share_cmd(&file_id, &["human_1"])).await.unwrap();
+        let r = s.share_mint(share_cmd(&file_id, &["human_1"], &["human_1"])).await.unwrap();
         assert!(r.share_url.contains("/sessions/shared-file/content?token="));
         assert!(!r.share_token.is_empty());
         assert!(r.expires_at > now_secs());
@@ -1403,18 +1398,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn share_mint_non_owner_forbidden() {
+    async fn share_mint_non_member_forbidden() {
         let (s, _, _) = build_svc(local_caps());
         let file_id = prepare_complete(&s).await;
-        let err = s.share_mint(share_cmd(&file_id, &["someone_else"])).await.unwrap_err();
+        // caller is not among session participants -> Forbidden
+        let err = s.share_mint(share_cmd(&file_id, &["someone_else"], &["human_1"])).await.unwrap_err();
         assert!(matches!(err, SessionFileUseCaseError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn share_mint_any_member_can_share() {
+        let (s, _, _) = build_svc(local_caps());
+        let file_id = prepare_complete(&s).await; // uploaded by human_1
+        // human_2 is a session member but NOT the uploader — relaxation allows sharing.
+        let r = s.share_mint(share_cmd(&file_id, &["human_2"], &["human_1", "human_2"])).await.unwrap();
+        assert!(!r.share_token.is_empty());
+    }
+
+    #[tokio::test]
+    async fn share_mint_human_via_owned_bot_can_share() {
+        let (s, _, _) = build_svc(local_caps());
+        let file_id = prepare_complete(&s).await; // uploaded by human_1
+        // human_h is NOT a direct participant, but owns bot_a which is a session
+        // member. HTTP resolves caller_identities = [human_h, bot_a], so the human
+        // shares via the owned participating bot (mirrors human_has_session_access).
+        let r = s.share_mint(share_cmd(&file_id, &["human_h", "bot_a"], &["human_1", "bot_a"])).await.unwrap();
+        assert!(!r.share_token.is_empty());
     }
 
     #[tokio::test]
     async fn share_mint_non_ready_rejects() {
         let (s, _, _) = build_svc(local_caps());
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
-        let err = s.share_mint(share_cmd(&r.file.file_id, &["human_1"])).await.unwrap_err();
+        let err = s.share_mint(share_cmd(&r.file.file_id, &["human_1"], &["human_1"])).await.unwrap_err();
         assert!(matches!(err, SessionFileUseCaseError::InvalidState(_)));
     }
 
@@ -1437,7 +1453,7 @@ mod tests {
     async fn share_consume_tampered_token_rejected() {
         let (s, _, _) = build_svc(local_caps());
         let file_id = prepare_complete(&s).await;
-        let r = s.share_mint(share_cmd(&file_id, &["human_1"])).await.unwrap();
+        let r = s.share_mint(share_cmd(&file_id, &["human_1"], &["human_1"])).await.unwrap();
         // Tamper: flip one character in the token.
         let mut chars: Vec<char> = r.share_token.chars().collect();
         let last_idx = chars.len() - 1;
@@ -1454,7 +1470,7 @@ mod tests {
     async fn share_mint_uses_share_base_url_when_configured() {
         let (s, _, _) = build_svc_parts_for_share_base();
         let file_id = prepare_complete(&s).await;
-        let r = s.share_mint(share_cmd(&file_id, &["human_1"])).await.unwrap();
+        let r = s.share_mint(share_cmd(&file_id, &["human_1"], &["human_1"])).await.unwrap();
         assert!(r.share_url.starts_with("https://share.example.com/sessions/shared-file/content?token="));
     }
 

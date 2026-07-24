@@ -83,6 +83,21 @@ pub fn can_mutate(
     false
 }
 
+/// Test whether `caller` may share a file in the session. Sharing is gated on
+/// session membership only — not on file ownership: the caller is a member when
+/// any of their identities (`caller.actor_id` plus bots they own, pre-resolved
+/// by the HTTP layer as `caller_identities`) appears among the session's own
+/// `participants`. Pure set intersection — no IO — mirroring `can_mutate`'s
+/// contract that the service crate stays free of group/bot repo dependencies.
+pub fn can_share(
+    caller_identities: &[String],
+    session_participants: &[String],
+) -> bool {
+    caller_identities
+        .iter()
+        .any(|id| session_participants.iter().any(|part| part == id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,6 +136,29 @@ mod tests {
     fn multiple_identities_one_match_allows() {
         let ids = vec!["u1".to_string(), "bot-a".into(), "u3".into()];
         assert!(can_mutate(&ids, &actor("u3"), None, None));
+    }
+
+    // ---- can_share: membership-gated sharing ------------------------------
+
+    #[test]
+    fn share_member_allows() {
+        assert!(can_share(&["u1".into()], &["u1".into(), "u2".into()]));
+    }
+
+    #[test]
+    fn share_member_via_owned_bot_allows() {
+        let ids = vec!["human_h".to_string(), "bot_a".into()];
+        assert!(can_share(&ids, &["bot_a".into()]));
+    }
+
+    #[test]
+    fn share_non_member_denies() {
+        assert!(!can_share(&["u9".into()], &["u1".into(), "u2".into()]));
+    }
+
+    #[test]
+    fn share_empty_identities_denies() {
+        assert!(!can_share(&[], &["u1".into()]));
     }
 
     // ---- validate_file_name: path-traversal guard ---------------------------
