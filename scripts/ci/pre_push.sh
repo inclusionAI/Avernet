@@ -146,6 +146,11 @@ if matches_any '^src/bcs/'; then
   fi
 fi
 
+if matches_any '^src/gateway/'; then
+  # Gateway CI: ruff lint + pytest + coverage + diff coverage (>=90%).
+  run_required "$repo_root/src/gateway/scripts/ci_test.sh" --base "$base" --head "$head"
+fi
+
 if matches_any '^src/frontend/'; then
   # Frontend 也通过模块自己的 ci_test.sh 作为统一入口。
   run_required "$repo_root/src/frontend/scripts/ci_test.sh" --base "$base" --head "$head"

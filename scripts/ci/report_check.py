@@ -4,8 +4,12 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+RED = "\033[0;31m"
+NC = "\033[0m"
 
 
 def parse_junit(path: Path) -> tuple[int, int, int]:
@@ -161,6 +165,11 @@ def check_change_coverage(
         f"change line coverage: {rate:.2f}% ({covered}/{total}, required >= {minimum:.2f}%)"
     )
     if rate + 1e-9 < minimum:
+        print(
+            f"{RED}FAILED: changed-line coverage {rate:.2f}% "
+            f"is below minimum {minimum:.2f}%{NC}",
+            file=sys.stderr,
+        )
         print("uncovered changed executable lines:")
         for filename, lines in uncovered_by_file.items():
             print(f"  {filename}: {','.join(str(line) for line in lines)}")
@@ -186,6 +195,11 @@ def main() -> int:
         f"case pass rate: {case_rate:.2f}% ({passed}/{tests}, required >= {args.min_case_pass_rate:.2f}%)"
     )
     if case_rate + 1e-9 < args.min_case_pass_rate:
+        print(
+            f"{RED}FAILED: case pass rate {case_rate:.2f}% "
+            f"is below minimum {args.min_case_pass_rate:.2f}%{NC}",
+            file=sys.stderr,
+        )
         return 1
 
     line_rate, hits = parse_coverage(args.coverage)
@@ -194,6 +208,11 @@ def main() -> int:
             f"line coverage: {line_rate:.2f}% (required >= {args.min_line_coverage:.2f}%)"
         )
         if line_rate + 1e-9 < args.min_line_coverage:
+            print(
+                f"{RED}FAILED: line coverage {line_rate:.2f}% "
+                f"is below minimum {args.min_line_coverage:.2f}%{NC}",
+                file=sys.stderr,
+            )
             return 1
 
     if args.min_change_line_coverage is not None and args.base:
