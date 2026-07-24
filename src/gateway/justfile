@@ -22,7 +22,19 @@ test-e2e-one test:
 test-ci group='ci' mode='bare' overlay='e2e-sqlite':
     ./scripts/ci_test.sh --group {{group}} {{mode}} {{overlay}}
 
-test mode='bare' overlay='e2e-sqlite':
+# Local test entry point. Enforces the changed-line coverage gate against the
+# merge-base of HEAD and origin/dev, mirroring GitHub CI. Set
+# AVERNET_LOCAL_TEST_BASE=<ref> to override the base, or AVERNET_LOCAL_TEST_NO_FETCH=1
+# to skip the `git fetch` step. Use `just test-no-cov` for fast feedback without
+# the gate.
+test:
+    base="$(source ../../scripts/lib/local_test_base.sh && resolve_local_test_base)" && \
+        ./scripts/ci_test.sh --base "$base"
+
+# Fast feedback path: runs the CI pipeline directly without the changed-line
+# coverage gate. Use for iterative development; switch to `just test` before
+# pushing.
+test-no-cov mode='bare' overlay='e2e-sqlite':
     source scripts/lib/pipeline.sh && run_ci_pipeline {{mode}} {{overlay}}
 
 test-full:

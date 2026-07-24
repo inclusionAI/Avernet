@@ -114,6 +114,12 @@ just test-e2e
 just test
 ```
 
+`just test` enforces the changed-line coverage gate against
+`git merge-base HEAD origin/dev`, matching GitHub CI. Set
+`AVERNET_LOCAL_TEST_BASE=<ref>` to override the base, or
+`AVERNET_LOCAL_TEST_NO_FETCH=1` to skip the auto-fetch. Use `just test-no-cov`
+for quick feedback without the coverage gate.
+
 ### Environment Variables
 
 | Variable | Purpose |

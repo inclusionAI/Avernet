@@ -178,6 +178,42 @@ fresh focused run, then run the default all-module gate to catch shared-stack
 interference. Do not inflate a result by excluding production Core paths or by
 adding test-only calls to domain logic.
 
+## Local Test Coverage Gate
+
+The `just test` recipes in `src/baas` and `src/gateway` enforce the same
+changed-line coverage gate as GitHub CI. They resolve a base ref via
+`scripts/lib/local_test_base.sh` and pass it to `scripts/ci_test.sh --base`,
+which runs `scripts/ci/report_check.py` with `--min-change-line-coverage 90`
+against the diff.
+
+Base resolution order:
+
+1. `AVERNET_LOCAL_TEST_BASE` — explicit override; used verbatim. Set this when
+   you want a specific merge-base (e.g. a feature branch point) or when
+   `origin/dev` is unavailable.
+2. `origin/dev` — fetched on demand (`git fetch --no-tags origin dev`) unless
+   `AVERNET_LOCAL_TEST_NO_FETCH=1`, then `git merge-base HEAD origin/dev`.
+3. If `origin/dev` cannot be resolved and no override is set, the recipe fails
+   closed rather than silently widening the diff range.
+
+Escape hatches:
+
+- `AVERNET_LOCAL_TEST_BASE=<ref>` — pin the base ref yourself (e.g.
+  `AVERNET_LOCAL_TEST_BASE=$(git merge-base HEAD upstream/dev)`).
+- `AVERNET_LOCAL_TEST_NO_FETCH=1` — skip the auto-fetch; useful in sandboxes
+  without network. `origin/dev` must already exist locally.
+- `just test-no-cov` — run the CI pipeline directly without the changed-line
+  coverage gate, for fast iteration. Switch back to `just test` before pushing.
+
+`just test` takes no parameters: it always runs the gate with the default
+`bare` mode and `e2e-sqlite` overlay that `scripts/ci_test.sh` applies
+internally. To run the pipeline with a custom mode or overlay, use
+`just test-no-cov mode=<m> overlay=<o>`, which forwards `{{mode}} {{overlay}}`
+to `run_ci_pipeline`.
+
+This keeps local `just test` aligned with `.github/workflows/unit-tests.yml`
+and the pre-push module gates described above.
+
 ## Development Guidelines
 
 Start from the requirement and the existing contract. Keep changes small and
