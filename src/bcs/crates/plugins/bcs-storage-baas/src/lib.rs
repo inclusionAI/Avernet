@@ -172,6 +172,15 @@ fn parse_iso_to_unix(s: &str) -> Option<u64> {
     Some(dt.timestamp().max(0) as u64)
 }
 
+/// Current unix timestamp in seconds.
+/// Used as a fallback when baas returns `expires_at: null`.
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 #[async_trait]
 impl StoragePlugin for BaasStoragePlugin {
     fn backend_name(&self) -> &'static str { "baas" }
@@ -200,7 +209,7 @@ impl StoragePlugin for BaasStoragePlugin {
             .to_string();
         let type_str = data["type"].as_str().unwrap_or("SINGLE").to_string();
         let expires_at = parse_iso_to_unix(data["expires_at"].as_str().unwrap_or(""))
-            .unwrap_or(req.ttl_secs);
+            .unwrap_or_else(|| now_unix_secs().saturating_add(req.ttl_secs));
 
         let (client_target, handle) = if type_str == "MULTIPART" {
             let part_size = data["part_size"].as_u64().unwrap_or(0);
@@ -287,7 +296,7 @@ impl StoragePlugin for BaasStoragePlugin {
             .map_err(|e| StorageError::Backend(e.into()))?;
         let data = baas_data(resp).await?;
         let share_url = data["share_url"].as_str().ok_or_else(|| bad("missing share_url"))?.to_string();
-        let expires_at = parse_iso_to_unix(data["expires_at"].as_str().unwrap_or("")).unwrap_or(ttl_secs);
+        let expires_at = parse_iso_to_unix(data["expires_at"].as_str().unwrap_or("")).unwrap_or_else(|| now_unix_secs().saturating_add(ttl_secs));
         Ok(PresignGetTicket { download_url: share_url, expires_at })
     }
     async fn delete(&self, handle: &StorageHandle) -> Result<(), StorageError> {

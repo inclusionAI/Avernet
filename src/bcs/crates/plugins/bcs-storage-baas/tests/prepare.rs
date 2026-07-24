@@ -79,9 +79,26 @@ async fn prepare_multipart_returns_parts_and_null_top_url() {
         .await;
 
     let p = plugin(server.uri());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let r = p.prepare_upload(req(20 * 1024 * 1024)).await.unwrap();
     assert_eq!(r.handle.backend_handle["transfer_id"], "t-multi");
     assert_eq!(r.handle.backend_handle["type"], "MULTIPART");
+    // Fixture sends expires_at: null → fallback must be an absolute future
+    // timestamp (now + ttl_secs), NOT the raw relative ttl value (300).
+    assert!(
+        r.expires_at >= now,
+        "expires_at {} should be >= now {}",
+        r.expires_at, now,
+    );
+    assert!(
+        r.expires_at < now + 305, // 300s ttl + 5s slop window
+        "expires_at {} should be <= now+300+5 = {}",
+        r.expires_at, now + 305,
+    );
+    assert_eq!(r.handle.expires_at, r.expires_at);
     match r.client_target {
         ClientUploadTarget::Direct {
             mode: UploadMode::Multipart,

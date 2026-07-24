@@ -404,6 +404,11 @@ impl SessionFileService for SessionFileServiceImpl {
             key: upload_handle.key,
             backend_handle: upload_handle.backend_handle,
         };
+        // Presign_put backends (baas/OSS) do not report bytes on complete
+        // (meta.size == 0); keep the prepared size we recorded at prepare time.
+        // Non-presign backends (local) report the real written size, so use
+        // meta.size.
+        let final_size = if self.caps.supports_presign_put { row.size } else { meta.size };
         let handle_json = serde_json::to_string(&storage_handle).map_err(|e| {
             SessionFileUseCaseError::Internal(bcs_service_api::ServiceError::InternalError(
                 e.to_string(),
@@ -417,7 +422,7 @@ impl SessionFileService for SessionFileServiceImpl {
                 file_id,
                 &handle_json,
                 FileStatus::Ready,
-                meta.size,
+                final_size,
             )
             .await
             .map_err(SessionFileUseCaseError::Internal)?
@@ -1826,6 +1831,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ready.status, FileStatus::Ready); // not rejected as Conflict
+        // Presign_put backends return size=0 on complete; the service must
+        // persist the prepared size (5 for "hello"), not 0.
+        assert_eq!(ready.size, 5, "presign complete must preserve prepared size, not 0");
     }
 
     // ---- misc / trait sanity ------------------------------------------------

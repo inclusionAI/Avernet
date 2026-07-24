@@ -61,6 +61,7 @@ members = [
     # plugins
     "crates/plugins/bcs-cache-local",
     "crates/plugins/bcs-cache-redis",
+    "crates/plugins/bcs-storage-baas",
     "crates/plugins/bcs-storage-local",
     "crates/plugins/bcs-db-local",
     "crates/plugins/bcs-db-mysql",
@@ -86,7 +87,6 @@ members = [
     "crates/test-support/bcs-test-support",
 ]
 resolver = "2"
-exclude = ["crates/plugins/bcs-storage-baas"]
 
 [workspace.lints.rust]
 unsafe_code           = "deny"
