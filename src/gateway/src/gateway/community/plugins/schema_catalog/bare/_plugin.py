@@ -46,7 +46,7 @@ class BareSchemaCatalog(SchemaCatalog):
             return False
         try:
             parsed = _parse(path)
-        except (OSError, ValueError, yaml.YAMLError) as exc:
+        except Exception as exc:  # doc-only refresher must never crash the loop
             logger.warning("schema refresh failed for %s (%s): %s", domain, path, exc)
             return False
         if not isinstance(parsed, dict):

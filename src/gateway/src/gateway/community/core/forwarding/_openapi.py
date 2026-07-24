@@ -108,19 +108,18 @@ def _prune_components(
 
 
 def _collect_refs(node: Any, acc: set[str]) -> None:
+    # Any string shaped like a component ref counts — not only `$ref` values but
+    # also `discriminator.mapping` values and other ref-bearing fields. Over-
+    # inclusion is harmless (an unused schema is kept); a missed ref would leave
+    # the served doc with a dangling reference.
     if isinstance(node, dict):
-        for key, value in node.items():
-            if (
-                key == "$ref"
-                and isinstance(value, str)
-                and value.startswith("#/components/")
-            ):
-                acc.add(value)
-            else:
-                _collect_refs(value, acc)
+        for value in node.values():
+            _collect_refs(value, acc)
     elif isinstance(node, list):
         for item in node:
             _collect_refs(item, acc)
+    elif isinstance(node, str) and node.startswith("#/components/"):
+        acc.add(node)
 
 
 def _ref_parts(ref: str) -> tuple[str | None, str | None]:
