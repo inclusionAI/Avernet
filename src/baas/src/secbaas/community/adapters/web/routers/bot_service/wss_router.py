@@ -61,10 +61,9 @@ class BotWsErrorContext(BaseModel):
     "/{bot_uuid}/ws-info",
     response_model=ApiResponse[BotWsConnectionInfoResponse],
     responses={
-        404: {"model": BotWsConnectionErrorResponse, "description": "Bot not found"},
-        503: {
+        404: {
             "model": BotWsConnectionErrorResponse,
-            "description": "No active devices",
+            "description": "Bot not found or no active devices",
         },
         500: {"model": BotWsConnectionErrorResponse, "description": "Internal error"},
     },
@@ -120,7 +119,7 @@ async def get_bot_ws_connection_info(
 
     Raises:
         HTTPException 404: Bot not found or no devices found
-        HTTPException 503: No active devices available
+        HTTPException 404: No active devices available
         HTTPException 500: Internal error or PaaS error
     """
     logger.info(
@@ -180,7 +179,7 @@ async def get_bot_ws_connection_info(
     except NoActiveDevicesError as e:
         logger.warning(f"No active devices for bot: {bot_uuid}")
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "error": "NO_ACTIVE_DEVICES",
                 "message": str(e),
