@@ -150,6 +150,43 @@ class BotSkillLayoutStateModel(Base):
         )
 
 
+class SkillsPoolRolloutAuditModel(Base):
+    """Append-only audit event committed with one rollout config revision."""
+
+    __tablename__ = "ac_skills_pool_rollout_audit"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    env = Column(String(20), nullable=False)
+    config_id = Column(AutoIncrementBigInteger, nullable=False)
+    action = Column(String(128), nullable=False)
+    batch_id = Column(String(128), nullable=True)
+    operator = Column(String(128), nullable=False)
+    reason = Column(String(512), nullable=False)
+    based_on_config_version = Column(String(64), nullable=True)
+    effective_config_version = Column(String(64), nullable=False)
+    evidence = Column(Text, nullable=True)
+    effective_at = Column(DateTime, nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "env",
+            "effective_config_version",
+            name="uk_skills_pool_rollout_audit_revision",
+        ),
+        Index(
+            "idx_skills_pool_rollout_audit_batch",
+            "env",
+            "batch_id",
+            "id",
+        ),
+    )
+
+
 class SkillMigrationQuarantineModel(Base):
     """One immutable Bot/migration-generation quarantine identity."""
 

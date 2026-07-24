@@ -676,6 +676,118 @@ async def test_non_ready_runtime_keeps_legacy_without_data_plane_changes() -> No
 
 
 @pytest.mark.asyncio
+async def test_mixed_image_bots_reconcile_independently_in_one_environment() -> None:
+    old_scope = BotSkillLayoutScope(
+        env="pre",
+        entity_id="entity-2",
+        bot_id="bot-2",
+    )
+
+    class MultiBotRepository:
+        def get_by_id_and_entity(
+            self,
+            bot_id: str,
+            entity_id: str,
+        ) -> dict[str, object] | None:
+            bots = {
+                (SCOPE.bot_id, SCOPE.entity_id): {
+                    "bot_id": SCOPE.bot_id,
+                    "entity_id": SCOPE.entity_id,
+                    "owner_id": "owner-1",
+                    "env": SCOPE.env,
+                    "active_engine": "openclaw",
+                },
+                (old_scope.bot_id, old_scope.entity_id): {
+                    "bot_id": old_scope.bot_id,
+                    "entity_id": old_scope.entity_id,
+                    "owner_id": "owner-2",
+                    "env": old_scope.env,
+                    "active_engine": "openclaw",
+                },
+            }
+            return bots.get((bot_id, entity_id))
+
+    class MultiLayoutRepository(FakeLayoutRepository):
+        def __init__(self) -> None:
+            super().__init__(claimed_state())
+            self._current_scope = SCOPE
+            self._states = {
+                SCOPE: self.state,
+                old_scope: replace(
+                    claimed_state(),
+                    scope=old_scope,
+                    migration_generation="generation-2",
+                    lease_owner="worker-2",
+                ),
+            }
+
+        def get(self, scope: BotSkillLayoutScope) -> BotSkillLayoutState:
+            self._states[self._current_scope] = self.state
+            self._current_scope = scope
+            self.state = self._states[scope]
+            return self.state
+
+        def state_for(
+            self,
+            scope: BotSkillLayoutScope,
+        ) -> BotSkillLayoutState:
+            self._states[self._current_scope] = self.state
+            return self._states[scope]
+
+        def _owns(self, values: dict[str, object]) -> bool:
+            return (
+                values["scope"] == self._current_scope
+                and values["migration_generation"]
+                == self.state.migration_generation
+                and values["lease_owner"] == self.state.lease_owner
+            )
+
+    class MixedImageRuntime(FakeRuntime):
+        async def probe(self, **kwargs: object) -> RuntimeLayoutProbeResult:
+            if kwargs["bot_id"] == old_scope.bot_id:
+                self.events.append("probe:old-image")
+                return replace(
+                    self.probe_result,
+                    status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
+                    preparation_id=None,
+                )
+            return await super().probe(**kwargs)
+
+    layouts = MultiLayoutRepository()
+    runtime = MixedImageRuntime()
+    service = SkillsPoolReconcileService(
+        bot_repository=MultiBotRepository(),
+        layout_repository=layouts,
+        skill_repository=FakeSkillRepository(),
+        runtime=runtime,
+    )
+
+    ready_result = await service.reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+    old_result = await service.reconcile(
+        scope=old_scope,
+        lease_owner="worker-2",
+    )
+
+    assert ready_result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert old_result.outcome is SkillsPoolReconcileOutcome.NOT_CAPABLE
+    assert layouts.state_for(SCOPE).active_layout is SkillLayout.POOL
+    old_state = layouts.state_for(old_scope)
+    assert old_state.active_layout is SkillLayout.LEGACY
+    assert old_state.phase is SkillLayoutPhase.POOL_PREPARING
+    assert runtime.physical_cutovers == 1
+    assert runtime.events == [
+        "probe",
+        "cutover",
+        "mapping",
+        "verify",
+        "probe:old-image",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_invalid_probe_is_persisted_as_non_retryable_blocker() -> None:
     layouts = FakeLayoutRepository()
     runtime = FakeRuntime()

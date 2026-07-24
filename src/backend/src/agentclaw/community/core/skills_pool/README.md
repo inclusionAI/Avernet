@@ -70,6 +70,18 @@ Engine Layout Descriptor 仍不在本期范围内。
 - 七天任务由持久化任务队列延迟调度；重复执行、任务接管和目录已不存在均
   幂等。容器只接受 generation，由固定 engine Pool 根推导删除目标，不能
   删除其他 Bot 或 generation。数据库保留清理时间与证据。
+- 灰度运维入口只接受当前环境中的精确 `(owner_id, bot_id)`，不提供
+  `enable_all`。引擎按 OpenClaw、Claude Code、AICoding、Hermes 的固定
+  顺序人工晋级；每次扩大同引擎批次必须引用最近一次已冻结验收，除首个
+  引擎外，晋级还必须引用上一引擎已冻结的验收批次。配置写入使用完整旧值
+  加逻辑 revision CAS，冲突 fail closed；配置和包含前后 revision、原因及
+  验收快照的独立审计事件在同一事务提交。
+- 单 Bot 运维视图合成 engine、provider、runtime form、rollout 决策、
+  layout/generation、probe/failure 和 quarantine 证据；批次视图只有在
+  全部 eligible Bot 激活、无失败且负对照与 Teclaw 对照均健康时才报告
+  `promotion_ready`，但不会据此改写灰度配置。
+- 人工 wake/retry 通过持久化任务队列交接，repair/rollback 复用既有恢复
+  服务；所有写入口仅对 operator 开放。
 
 ## Context Boundary
 
@@ -86,6 +98,10 @@ provides:
   - "SkillsPoolRollbackService"
   - "SkillsPoolQuarantineService"
   - "SkillsPoolQuarantineCleanupTaskHandler"
+  - "SkillsPoolRolloutOperations"
+  - "SkillsPoolOperationalQuery"
+  - "SkillsPoolOperatorCommands"
+  - "SkillsPoolRolloutRepositoryProtocol"
   - "QuarantineRepositoryProtocol"
   - "QuarantineRecord, QuarantineStatus, QuarantineEligibility and QuarantineOperationalView"
   - "RuntimeQuarantineCleanupResult"
@@ -96,7 +112,7 @@ consumes:
   - "BotRepository"
   - "BotPublishRepositoryProtocol"
   - "CommonConfigService and CommonWhiteListService"
-  - "DatabasePlugin (through plugins/skills_pool_layout_repository.py)"
+  - "DatabasePlugin (through Skills Pool layout, operational and rollout repositories)"
   - "SkillsPoolRuntimeProtocol"
   - "SkillsPoolSkillRepositoryProtocol"
   - "DeviceBindingRepository"

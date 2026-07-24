@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
-
 from injector import inject
 
 from agentclaw.community.core.common_config.service import CommonConfigService
@@ -13,6 +11,9 @@ from agentclaw.community.core.common_config.whitelist_service import (
     CommonWhiteListService,
 )
 from agentclaw.community.core.skills_pool.types import RolloutEvidence
+from agentclaw.community.core.skills_pool.rollout_config import (
+    is_valid_rollout_config_value,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -71,42 +72,6 @@ class SkillsPoolRolloutGate:
     def _reject(reason: RolloutDecisionReason) -> RolloutDecision:
         return RolloutDecision(eligible=False, reason=reason)
 
-    @staticmethod
-    def _valid_identity(value: Any) -> bool:
-        return (
-            not isinstance(value, bool)
-            and isinstance(value, (str, int))
-            and str(value).strip() not in {"", "*"}
-        )
-
-    @classmethod
-    def _valid_config_value(cls, value: Any) -> bool:
-        if not isinstance(value, dict):
-            return False
-        if value.get("enable_all") is not False:
-            return value.get("enable_all") is True
-
-        engines = value.get("promoted_engines")
-        whitelist = value.get("whitelist")
-        if not isinstance(engines, list) or not isinstance(whitelist, list):
-            return False
-        if any(not isinstance(engine, str) or not engine for engine in engines):
-            return False
-        allowed_entry_keys = {"owner_id", "bot_id", "batch_id"}
-        for entry in whitelist:
-            if not isinstance(entry, dict):
-                return False
-            if not set(entry).issubset(allowed_entry_keys):
-                return False
-            if not cls._valid_identity(entry.get("owner_id")):
-                return False
-            if not cls._valid_identity(entry.get("bot_id")):
-                return False
-            batch_id = entry.get("batch_id")
-            if batch_id is not None and not cls._valid_identity(batch_id):
-                return False
-        return True
-
     def evaluate(
         self,
         *,
@@ -149,20 +114,26 @@ class SkillsPoolRolloutGate:
             return self._reject(RolloutDecisionReason.CONFIG_ENV_MISMATCH)
 
         config_id = config.get("id")
-        config_version = config.get("gmt_modified")
+        ext_info = config.get("ext_info")
+        revision = (
+            ext_info.get("revision")
+            if isinstance(ext_info, dict)
+            else None
+        )
+        config_version = revision or config.get("gmt_modified")
         value = config.get("param_value")
+        if isinstance(value, dict) and value.get("enable_all") is True:
+            return self._reject(RolloutDecisionReason.ENABLE_ALL_FORBIDDEN)
         if (
             isinstance(config_id, bool)
             or not isinstance(config_id, int)
             or not isinstance(config_version, str)
             or not config_version
-            or not self._valid_config_value(value)
+            or not is_valid_rollout_config_value(value)
         ):
             return self._reject(RolloutDecisionReason.CONFIG_INVALID)
         assert isinstance(value, dict)
 
-        if value.get("enable_all") is True:
-            return self._reject(RolloutDecisionReason.ENABLE_ALL_FORBIDDEN)
         promoted_engines = value["promoted_engines"]
         if engine_type not in promoted_engines:
             return self._reject(RolloutDecisionReason.ENGINE_NOT_PROMOTED)

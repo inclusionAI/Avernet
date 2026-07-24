@@ -20,6 +20,16 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """读取状态；不存在记录时返回非持久化的 Legacy 缺省状态。"""
         ...
 
+    def list_states(
+        self,
+        *,
+        env: str,
+        engine: str | None = None,
+        batch_id: str | None = None,
+    ) -> list[BotSkillLayoutState]:
+        """列出一个环境内已经认领过布局状态的 Bot。"""
+        ...
+
     def claim_pool_migration(
         self,
         *,

@@ -26,12 +26,13 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugins.skills_pool_cutover_diagnostics import (
     log_missing_quarantine_path,
 )
+from agentclaw.community.plugins.skills_pool_operational_repository import SkillsPoolOperationalRepositoryMixin
 from agentclaw.community.plugins.skills_pool_quarantine_repository import (
     SkillsPoolQuarantineRepositoryMixin,
 )
 
 
-class SkillsPoolLayoutRepository(SkillsPoolQuarantineRepositoryMixin):
+class SkillsPoolLayoutRepository(SkillsPoolOperationalRepositoryMixin, SkillsPoolQuarantineRepositoryMixin):
     @inject
     def __init__(self, database: DatabasePlugin) -> None:
         self._database = database

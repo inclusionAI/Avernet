@@ -79,7 +79,7 @@ class SkillsPoolMigrationClaimService:
             or state.target_layout is SkillLayout.POOL
         )
 
-    def _resolve_runtime_form(
+    def resolve_runtime_form(
         self,
         *,
         bot: dict[str, object],
@@ -119,6 +119,19 @@ class SkillsPoolMigrationClaimService:
             return None
         return BotRuntimeForm.SERVICE_DRAFT
 
+    def inspect_runtime_form(
+        self,
+        *,
+        bot: dict[str, object],
+        scope: BotSkillLayoutScope,
+    ) -> BotRuntimeForm | None:
+        """Resolve an observable form, including non-editable published services."""
+
+        runtime_form = self.resolve_runtime_form(bot=bot, scope=scope)
+        if runtime_form is None and bot.get("bot_type") == "service":
+            return BotRuntimeForm.PUBLISHED_SERVICE
+        return runtime_form
+
     def claim(
         self,
         *,
@@ -153,7 +166,7 @@ class SkillsPoolMigrationClaimService:
             )
 
         try:
-            runtime_form = self._resolve_runtime_form(bot=bot, scope=scope)
+            runtime_form = self.resolve_runtime_form(bot=bot, scope=scope)
         except _RuntimeFormLookupError:
             return MigrationClaimResult(
                 outcome=MigrationClaimOutcome.TRANSIENT_ERROR,
