@@ -365,6 +365,27 @@ def test_atom_bot_not_found_abandons_with_reason_and_raises(ledger, baas):
     assert op.last_error == "BOT_NOT_FOUND -> first release"
 
 
+def test_atom_device_not_found_abandons_with_reason_and_raises(ledger, baas):
+    """Regression (#435): BaaS reports a destroyed TeClaw device as
+    ``DEVICE_NOT_FOUND`` (not ``BOT_NOT_FOUND``). The deploy atom must classify
+    it the same way so the caller self-heals with a fresh first release instead
+    of failing the publish permanently."""
+    r = _runner(ledger, baas)
+
+    async def issue():
+        return {"success": False, "error_code": "DEVICE_NOT_FOUND"}
+
+    with pytest.raises(TargetBotGoneError):
+        run(acquire_deploy_workflow(
+            r, publish_id=1, kind=PublishOperationKind.UPGRADE,
+            stage=PublishStage.ONLINE, operator="op", issue=issue,
+            bot_uuid="BOT-gone", bot_gone_reason="DEVICE_NOT_FOUND -> first release",
+        ))
+    op = ledger.get_latest_by_kind(1, UPGRADE, "online")
+    assert op.state == PublishOperationState.ABANDONED.value
+    assert op.last_error == "DEVICE_NOT_FOUND -> first release"
+
+
 def test_atom_creation_requires_bot_uuid(ledger, baas):
     r = _runner(ledger, baas)
 

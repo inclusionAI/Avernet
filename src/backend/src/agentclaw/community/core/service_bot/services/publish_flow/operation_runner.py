@@ -86,8 +86,18 @@ class PublishOperationError(Exception):
     """A publish operation step failed (surfaced to the caller / task)."""
 
 
+# Error codes for which BaaS is telling us the operation's target bot no longer
+# exists, so an in-place mutation (UPDATE/RESTART) can never succeed and the
+# caller must fall back to a fresh CREATE. BaaS reports ``BOT_NOT_FOUND`` when
+# the bot record is gone and ``DEVICE_NOT_FOUND`` when the underlying device is
+# gone — e.g. a TeClaw bot whose device was physically destroyed by an offline
+# STOP. Both must trigger the recreate self-heal.
+BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
+
+
 class TargetBotGoneError(Exception):
-    """BaaS reported the operation's target bot gone (``BOT_NOT_FOUND``).
+    """BaaS reported the operation's target bot gone (see
+    :data:`BOT_GONE_ERROR_CODES` — ``BOT_NOT_FOUND`` / ``DEVICE_NOT_FOUND``).
 
     Raised out of :func:`acquire_deploy_workflow` after the op has been
     ABANDONED, so the caller runs its fallback (a fresh first-release-shaped
@@ -111,7 +121,8 @@ async def acquire_deploy_workflow(
     operation (first release, upgrade, restart, and the restart-recreate leg).
 
     ``issue`` performs the BaaS mutation and returns its result dict. A result
-    of ``{success: False, error_code: "BOT_NOT_FOUND"}`` is classified
+    of ``{success: False, error_code: <bot-gone code>}`` (see
+    :data:`BOT_GONE_ERROR_CODES`) is classified
     uniformly: the op is ABANDONED (``bot_gone_reason``, naming the caller's
     fallback for ledger forensics) and :class:`TargetBotGoneError` raised so
     the caller runs that fallback as a separate, fresh op. Any other issue outcome flows through
@@ -142,7 +153,7 @@ async def acquire_deploy_workflow(
         result = await issue()
         if (
             result.get("success") is False
-            and result.get("error_code") == "BOT_NOT_FOUND"
+            and result.get("error_code") in BOT_GONE_ERROR_CODES
         ):
             raise TargetBotGoneError()
         return result
