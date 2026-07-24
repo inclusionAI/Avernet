@@ -32,7 +32,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
     def __init__(
         self,
         build_service: "BotBuildService",
-        skills_artifact_builder: ServiceSkillsArtifactBuilder | None = None,
+        skills_artifact_builder: ServiceSkillsArtifactBuilder,
     ) -> None:
         # Duck-typed at runtime — anything exposing ``build(bot, version) -> dict``
         # works (tests inject a lightweight stub). Annotated as the concrete
@@ -49,11 +49,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         exactly that: same keys, same values, same failure message — only the
         return type changes.
         """
-        captured_layout = (
-            self._skills_artifact_builder.capture(bot=bot)
-            if self._skills_artifact_builder is not None
-            else None
-        )
+        captured_layout = self._skills_artifact_builder.capture(bot=bot)
         result = self._build_service.build(bot=bot, version=version)
 
         success = bool(result.get("success"))
@@ -64,11 +60,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
             ext["migration_path"] = result.get("migration_path")
         if "build_target_path" in result:
             ext["build_target_path"] = result.get("build_target_path")
-        if (
-            success
-            and self._skills_artifact_builder is not None
-            and captured_layout is not None
-        ):
+        if success and captured_layout is not None:
             build_target_path = result.get("build_target_path")
             if not build_target_path:
                 raise ValueError(

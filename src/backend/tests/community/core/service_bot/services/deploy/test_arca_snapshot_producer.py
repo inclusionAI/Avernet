@@ -34,11 +34,21 @@ class _RecordingBuild:
         return self.result
 
 
+class _NoSkillsArtifactBuilder(ServiceSkillsArtifactBuilder):
+    """Minimal builder for tests that only exercise the producer wrapper."""
+
+    def __init__(self) -> None:
+        pass
+
+    def capture(self, *, bot: dict[str, Any]) -> None:
+        return None
+
+
 @pytest.mark.unit
 def test_passes_bot_and_version_through_to_build() -> None:
     stub = _RecordingBuild({"success": True})
     bot = {"bot_id": "b1", "entity_id": "u1"}
-    ArcaSnapshotProducer(stub).produce_artifact(bot, 7)
+    ArcaSnapshotProducer(stub, _NoSkillsArtifactBuilder()).produce_artifact(bot, 7)
     assert stub.calls == [(bot, 7)]
 
 
@@ -54,7 +64,9 @@ def test_maps_success_and_both_paths_onto_ext() -> None:
             "version": "3",
         }
     )
-    artifact = ArcaSnapshotProducer(stub).produce_artifact({}, 3)
+    artifact = ArcaSnapshotProducer(
+        stub, _NoSkillsArtifactBuilder()
+    ).produce_artifact({}, 3)
     assert artifact.success is True
     assert artifact.message == ""
     assert artifact.ext == {
@@ -66,7 +78,9 @@ def test_maps_success_and_both_paths_onto_ext() -> None:
 @pytest.mark.unit
 def test_failed_build_propagates_success_false_and_message() -> None:
     stub = _RecordingBuild({"success": False})
-    artifact = ArcaSnapshotProducer(stub).produce_artifact({}, 1)
+    artifact = ArcaSnapshotProducer(
+        stub, _NoSkillsArtifactBuilder()
+    ).produce_artifact({}, 1)
     assert artifact.success is False
     assert artifact.message == "构建失败"
     assert artifact.ext == {}
@@ -77,7 +91,9 @@ def test_missing_paths_are_omitted_from_ext() -> None:
     # build() may legitimately omit a pointer (e.g. no device_id branch);
     # we must not invent keys.
     stub = _RecordingBuild({"success": True, "migration_path": "/only/mig"})
-    artifact = ArcaSnapshotProducer(stub).produce_artifact({}, 1)
+    artifact = ArcaSnapshotProducer(
+        stub, _NoSkillsArtifactBuilder()
+    ).produce_artifact({}, 1)
     assert artifact.ext == {"migration_path": "/only/mig"}
 
 
