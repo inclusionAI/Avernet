@@ -7,13 +7,13 @@
 > that seam but does not implement it; the live cutover depends on it (see Rollout
 > in `plan.md`).
 
-## Task 1: Domain map config + resolver
+## Task 1: Domain map config + resolver `[x]`
 - **Goal:** Load `upstreams.yaml` and resolve a request's leading path segment to a target server (unknown domain → no match).
 - **Files:** `src/gateway/src/gateway/community/core/forwarding/_domains.py` (new), `src/gateway/configs/upstreams.yaml` (new)
 - **Done when:**
-  - [ ] `DomainMap.from_yaml` parses `domains` (server + schema source) and `servers` (base_url, env-expanded).
-  - [ ] `resolve(path) -> Server | None` returns the server for a configured leading segment (after the `/openapi/v1` base) and `None` otherwise.
-  - [ ] Unit tests cover match, no-match, and env-var base_url expansion.
+  - [x] `DomainMap.from_yaml` parses `domains` (server + schema source) and `servers` (base_url, env-expanded).
+  - [x] `resolve(path) -> Server | None` returns the server for a configured leading segment (after the `/openapi/v1` base) and `None` otherwise.
+  - [x] Unit tests cover match, no-match, and env-var base_url expansion.
 - **Depends on:** —
 
 ## Task 2: Forwarder SPI + bare httpx plugin

@@ -1,0 +1,26 @@
+# Domain → upstream-server map for the gateway.
+#
+# The leading path segment after `base_path` is the DOMAIN; it selects the
+# target server. A request whose leading segment is not a configured domain is
+# denied (the gateway forwards only into known domains — never an open proxy).
+#
+# `schema` tells the gateway where to read that domain's published OpenAPI
+# description for doc generation:
+#   source: file  → `path` (single-box / open-source; committed artifact)
+#   source: oss   → `url`  (enterprise; auto-adopted via background refresh)
+# The schema is a DOC-ONLY input — routing/auth/forwarding never read it.
+
+base_path: /openapi/v1
+
+domains:
+  bots:
+    server: agentclaw
+    schema:
+      source: file
+      path: schemas/bots.openapi.json
+      refresh_seconds: 300
+
+servers:
+  # base_url supports ${ENV} expansion (see the transparent-forwarding doc §1).
+  agentclaw:
+    base_url: "${AGENTCLAW_URL}"
