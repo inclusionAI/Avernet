@@ -18,6 +18,7 @@ from gateway.community.spi.forwarder import (
     ForwardRequest,
     ForwardResponse,
     strip_hop_by_hop,
+    strip_hop_by_hop_items,
 )
 
 
@@ -49,9 +50,10 @@ class BareForwarder(Forwarder):
         )
         response = await client.send(upstream, stream=True)
         try:
+            # multi_items() preserves duplicate response headers (Set-Cookie).
             yield ForwardResponse(
                 status_code=response.status_code,
-                headers=strip_hop_by_hop(dict(response.headers)),
+                headers=strip_hop_by_hop_items(response.headers.multi_items()),
                 body=response.aiter_raw(),
             )
         finally:
