@@ -3,16 +3,21 @@
 ## Approach
 
 Make declarative configuration the single source of truth for the gateway's
-external surface. A **forwarding table** (one entry per exposed operation:
-gateway method+path ↔ upstream method+path, auth requirement, public flag) plus a
-**domain→server map** (top path segment → upstream base URL) replace the
-hand-written stub routers from #389. At request time a single catch-all
+external surface. A **forwarding table** (one entry per exposed operation: path,
+auth requirement, public flag, and an *optional* upstream-path override) plus a
+**domain→server map** (domain segment → upstream base URL) replace the
+hand-written stub routers from #389. Paths forward to the upstream **verbatim by
+default** — the backend serves the same paths it is exposed under, so there is no
+per-operation rewrite in the common case; the override exists only for the rare
+op whose backend path genuinely differs. At request time a single catch-all
 entrypoint resolves the operation from the table, authenticates via the existing
-`Authenticator`, and forwards to the resolved upstream with the path rewritten.
-The served OpenAPI is **generated** by joining the forwarding table with each
-upstream's own committed OpenAPI artifact (shapes from upstream, presented under
-gateway paths). Two CI gates keep config and the pinned artifact honest:
-reference-resolution (drift) and backward-compatibility (breaking-change).
+`Authenticator`, and forwards the (verbatim, or overridden) path to the resolved
+server. The served OpenAPI is **generated** by joining the forwarding table with
+each upstream's own committed OpenAPI artifact — since paths are identity by
+default, generation is mostly filter-to-public + attach-security, with path
+re-keying only for overridden ops. Two CI gates keep config and the pinned
+artifact honest: reference-resolution (drift) and backward-compatibility
+(breaking-change).
 
 Because backend and gateway share this monorepo, the "pinned upstream artifact"
 is a committed file regenerated from the backend's FastAPI app; independent
@@ -30,6 +35,12 @@ build its surface.
   `/openapi/v1/bots/{id}`); former groups become sub-paths
   (`/openapi/v1/bots/{id}/identity`, `/openapi/v1/bots/{id}/resources`, …). No
   `bots/bots`.
+- **Verbatim forwarding scope** → the *entire* path forwards unchanged, version
+  base included: the backend serves `/openapi/v1/bots/…` itself and owns its
+  versioned public contract. Domain resolution reads the segment after
+  `/openapi/v1`. (If we later prefer the gateway to own the version base and strip
+  it before forwarding, that is a one-line change in the matcher — flagged, not
+  chosen.)
 - **Pre-GA breaking-change policy** → CI blocks breaking changes to referenced
   ops by default; an explicit per-PR marker (`ALLOW_BREAKING_CHANGE=<reason>` in
   a `.gateway-breaking-change` file or PR label) permits a coordinated break and
@@ -49,9 +60,11 @@ build its surface.
 - `src/gateway/configs/` — new `forwarding.yaml` (table) + `upstreams.yaml`
   (domain→server) + `upstreams/bots.openapi.json` (pinned artifact). Fold the
   standalone `route_security.yaml` into the table (auth becomes a per-op field).
-- `src/backend/…/adapters/http/app.py` — add a CI-invokable dump of
-  `app.openapi()`; align the externally-exposed routes under the `bots` domain
-  mapping (no code move required — mapping lives in gateway config).
+- `src/backend/…/adapters/http/` — add a CI-invokable dump of `app.openapi()`,
+  **and move the externally-exposed routers to serve the client-facing paths
+  directly** (`/openapi/v1/bots/…`) so verbatim forwarding needs no rewrite. This
+  is the one non-trivial backend code change; internal/non-exposed routes are
+  untouched. (Existing `/api/…` routes may stay during transition; see Rollout.)
 - `src/backend/tests/community/contracts/gateway/` — extend to (a) regenerate and
   compare the pinned artifact (drift) and (b) run the breaking-change gate.
 
@@ -66,16 +79,21 @@ a committed OpenAPI artifact.
 
 ```yaml
 operations:
-  - id: create_bot                      # stable join key (matches upstream operationId)
-    gateway:  { method: POST, path: /openapi/v1/bots }
-    upstream: { method: POST, path: /api/bots }
-    auth:     [ first_party_user ]      # was route_security.yaml; OR-list, §8.1 shape
-    public:   true
-  - id: get_bot
-    gateway:  { method: GET, path: /openapi/v1/bots/{id} }
-    upstream: { method: GET, path: /api/bots/{id} }
-    auth:     [ first_party_user ]
-    public:   true
+  # Default: path forwards verbatim; no upstream field needed.
+  - method: POST
+    path:   /openapi/v1/bots
+    auth:   [ first_party_user ]        # was route_security.yaml; OR-list, §8.1 shape
+    public: true
+  - method: GET
+    path:   /openapi/v1/bots/{id}
+    auth:   [ first_party_user ]
+    public: true
+  # Exceptional: a backend path that genuinely differs and can't be moved.
+  - method: GET
+    path:   /openapi/v1/bots/{id}/passport
+    upstream: { method: GET, path: /legacy/agent/{id}/passport }   # optional override
+    auth:   [ first_party_user ]
+    public: true
 ```
 
 **Domain→server map — `configs/upstreams.yaml`**:
@@ -88,13 +106,15 @@ servers:
 ```
 
 **Runtime entrypoint** — one catch-all replaces all group routers: resolve op by
-(method, gateway-path) → 404 if unconfigured (fail-closed, never open-proxy) →
-`Authenticator.authenticate` → rewrite path params gateway→upstream → `Forwarder`
-issues the upstream call → stream response back through the standard envelope.
+(method, path) → 404 if unconfigured (fail-closed, never open-proxy) →
+`Authenticator.authenticate` → forward the path verbatim (or apply the override) →
+`Forwarder` issues the upstream call → stream response back through the standard
+envelope.
 
 **Generated OpenAPI** — `GET /openapi.json` is served from the generator (config ⋈
 pinned artifact), not FastAPI's route introspection. Only `public: true` ops
-appear; each carries `x-avernet-security` from its `auth` field.
+appear, presented at their (verbatim) paths; each carries `x-avernet-security`
+from its `auth` field. Path re-keying happens only for ops with an override.
 
 **No change** to `Principal` establishment/enforcement (`core/authn/_runner.py`,
 strategies) or the gateway↔backend trust model: identity is built exactly as
@@ -104,10 +124,12 @@ today and conveyed downstream via the existing bare seam; hardened signing
 ## Key Files & Functions
 
 - `core/forwarding/_table.py` (new) — `ForwardingTable.from_yaml`; `resolve(method,
-  path) -> Operation | None`; reuse `_route_security.py` segment matcher/specificity.
+  path) -> Operation | None`; `Operation.upstream_path` returns the path verbatim
+  unless an override is set. Reuse `_route_security.py` segment matcher/specificity.
 - `core/forwarding/_openapi.py` (new) — `generate_openapi(table, catalog) -> dict`:
   for each public op, pull the upstream operation object + referenced `components`
-  from the pinned artifact, re-key under the gateway path, attach security.
+  from the pinned artifact, key it under its path (verbatim; re-keyed only for
+  overridden ops), attach security.
 - `spi/forwarder/_protocols.py` + `plugins/forwarder/bare/_plugin.py` (new) —
   `Forwarder.forward(request, target) -> Response`, httpx-backed.
 - `spi/upstream/_protocols.py` + `plugins/upstream/bare/_plugin.py` (new) —
@@ -137,10 +159,16 @@ today and conveyed downstream via the existing bare seam; hardened signing
   **Mitigation:** bare forwarder streams request/response; SSE/upload ops are
   flagged in the table and covered by explicit tests; timeout/retry policy is a
   per-server config field with sane defaults.
-- **Risk:** operationId is the join key but FastAPI auto-generates them; a backend
-  refactor could rename one and silently orphan a config entry.
-  **Mitigation:** the drift gate fails when a referenced op is absent; match on
-  (upstream method+path) as the primary key with `id` as a stable alias.
+- **Risk:** With verbatim forwarding the join key is (method, path); a backend
+  route rename silently orphans a config entry and changes the public URL.
+  **Mitigation:** the drift gate fails when a referenced (method, path) is absent
+  from the pinned artifact; the compatibility gate treats a public-path rename as
+  a breaking change. Overridden ops match on the override target.
+- **Risk:** Moving backend routers to `/openapi/v1/bots/…` changes the paths
+  existing internal callers use (`/api/…`).
+  **Mitigation:** keep the old `/api/…` routes mounted during transition (dual-mount
+  or a compatibility router); the migration is a backend-owned step sequenced
+  before the gateway cutover (see Rollout).
 - **Risk:** Losing the gateway's standalone contract test (it no longer authors
   the surface). **Mitigation:** the generated-OpenAPI is snapshot-tested, and the
   compatibility gate now covers the *real* backend ops — strictly stronger.
@@ -167,9 +195,11 @@ today and conveyed downstream via the existing bare seam; hardened signing
 
 ## Rollout
 
-- Additive until cutover: land config + generator + forwarder behind the existing
-  app; keep #389 routers until the catch-all serves the same OpenAPI (snapshot
-  parity check), then delete them in the same PR.
+- Sequence: **(1)** backend adds routers at `/openapi/v1/bots/…` (dual-mounted
+  with the existing `/api/…` during transition) and emits the pinned artifact;
+  **(2)** gateway lands config + generator + forwarder; **(3)** cut over — the
+  catch-all serves the generated OpenAPI, then the #389 stub routers are deleted
+  in the same PR. Verbatim forwarding depends on (1), so it leads.
 - Single domain (`bots`) wired; the map admits more domains without code change.
 - Backward-compat: the generated `/openapi/v1` surface must snapshot-match #389's
   served document for already-published ops (guarded by the compatibility gate).
@@ -177,10 +207,10 @@ today and conveyed downstream via the existing bare seam; hardened signing
 
 ## Test Strategy
 
-- **Unit:** table resolution + specificity (incl. unconfigured→404); path-param
-  rewrite gateway→upstream; OpenAPI generator (public filter, path substitution,
-  component collection, security attach); compatibility checker (additive passes,
-  each breaking class fails).
+- **Unit:** table resolution + specificity (incl. unconfigured→404); verbatim
+  path forward + the override path; OpenAPI generator (public filter, component
+  collection, security attach, override re-keying); compatibility checker
+  (additive passes, each breaking class fails).
 - **Integration:** catch-all with a stub upstream (httpx transport mock) — auth
   reject-before-forward, 404 on unconfigured, envelope on success/error, one SSE
   and one upload op.
