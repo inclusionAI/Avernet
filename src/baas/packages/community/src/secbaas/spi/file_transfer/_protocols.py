@@ -203,27 +203,6 @@ class FileTransferBackend(Protocol):
         """
         ...
 
-    def list_objects(
-        self,
-        prefix: str,
-        limit: int,
-        marker: str | None,
-    ) -> ObjectListing:
-        """List staging objects with marker pagination.
-
-        Used for staging management (e.g., listing objects under a
-        tenant/subdir prefix).  ``limit`` is capped at 1000 (OSS max).
-
-        Args:
-            prefix: Object storage key prefix to filter by.
-            limit: Maximum number of objects to return (capped at 1000).
-            marker: Opaque pagination marker from previous response.
-
-        Returns:
-            ObjectListing with items, truncated flag, and next_marker.
-        """
-        ...
-
     def build_staging_path(
         self,
         tenant: str,
@@ -281,42 +260,5 @@ class FileTransferBackend(Protocol):
 
         Returns:
             Complete object storage key string for the Session staging area.
-        """
-        ...
-
-    def build_session_staging_path(
-        self,
-        tenant: str,
-        session_id: str,
-        transfer_id: str,
-        filename: str,
-        subdir: str | None = None,
-    ) -> str:
-        """Construct full OSS object key for Session File Sharing staging.
-
-        The Session Dispatcher calls this instead of hardcoding paths.
-        Parallel to ``build_staging_path()`` for Bot use; does not modify
-        the old method.
-
-        Pattern:
-          ``{staging_root}/{env}/{tenant}/{session_id}/[{subdir}/]{transfer_id}/{filename}``
-
-        The ``env`` component is resolved internally by implementations via
-        ``get_current_env()`` — it is NOT passed as a parameter, keeping
-        the Dispatcher's call site clean.  All four input fields (tenant,
-        session_id, transfer_id, filename) and the optional subdir are
-        checked for path traversal (``..`` detection), and both ``subdir``
-        and ``filename`` are stripped of leading/trailing slashes before
-        path construction.
-
-        Args:
-            tenant: Tenant identifier for scoping.
-            session_id: Owning session identifier (replaces device scope).
-            transfer_id: Transfer ticket ID for uniqueness.
-            filename: Target filename on the OSS object.
-            subdir: Optional subdirectory grouping under the session scope.
-
-        Returns:
-            Complete OSS object key string for the Session staging area.
         """
         ...
