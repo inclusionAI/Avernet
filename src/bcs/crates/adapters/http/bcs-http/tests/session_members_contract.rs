@@ -9,11 +9,15 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::{HeaderMap, Request, StatusCode},
 };
 use bcs_bot::BotCore;
+use bcs_auth_api::{AuthError, UserIdentityInfo};
 use bcs_group::GroupStore;
-use bcs_http::{router::build_router, state::HttpAppState};
+use bcs_http::{
+    router::build_router,
+    state::{HttpAppState, HttpUserIdentity, UserIdentityPort},
+};
 use bcs_service_api::{
     ActorKind, BotCapabilities, BotRegistryCoreService, CreateOrReactivateCommand,
     CreateOrReactivateOutcome, Group, GroupCoreService, GroupStrategy, Participant,
@@ -345,4 +349,204 @@ impl SessionManagementService for RecordingSessions {
         Ok(Vec::new())
     }
     async fn delete(&self, _session_id: &str) -> Result<bool, SessionUseCaseError> { Ok(false) }
+}
+
+// ----- bot-owner removal authz (bug: owner was rejected) ------------------
+//
+// remove_session_participant must admit a Human caller who owns the target
+// bot (via registry.list_bots_by_creator), but still protect the driver bot
+// from removal by the owner.
+
+#[tokio::test]
+async fn remove_session_participant_allows_bot_owner() {
+    // alice owns worker-bot; the session participants are driver-bot (driver)
+    // and worker-bot (consultant). As the owner of worker-bot, alice may remove
+    // worker-bot from the session.
+    let (app, _sessions, _temp_dir) = owner_app("alice", "worker-bot").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/sessions/group-1:00000001/members/worker-bot")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn remove_session_participant_rejects_non_owner_human() {
+    // bob owns no bot in the session → cannot remove worker-bot.
+    let (app, _sessions, _temp_dir) = owner_app("bob", "worker-bot").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/sessions/group-1:00000001/members/worker-bot")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn bot_owner_cannot_remove_driver_bot() {
+    // alice owns driver-bot, which is the group's driver. Even as the owner she
+    // cannot remove the driver bot.
+    let (app, _sessions, _temp_dir) = owner_app("alice", "driver-bot").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/sessions/group-1:00000001/members/driver-bot")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+async fn owner_app(staff: &str, owned_bot: &str) -> (axum::Router, Arc<RecordingSessions>, TempDir) {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    register_bot(&registry, "driver-bot", "Driver").await;
+    register_bot(&registry, "worker-bot", "Worker").await;
+    // Best-effort extension used to associate a bot with its owner in tests;
+    // always returns true to exercise the ownership predicate.
+    if owned_bot == "driver-bot" && staff == "alice" {
+        registry.save_created_by("driver-bot", "alice", true).await.unwrap();
+    } else if staff == "alice" && owned_bot == "worker-bot" {
+        registry.save_created_by("worker-bot", "alice", true).await.unwrap();
+    }
+
+    let group_store = Arc::new(GroupStore::new());
+    let mut group = Group::new(
+        "group-1",
+        "driver-bot",
+        vec![
+            Participant {
+                bot_uuid: "driver-bot".to_string(),
+                bot_name: Some("Driver".to_string()),
+                kind: None,
+                role: ParticipantRole::Driver,
+                actor_kind: ActorKind::Bot,
+                mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+            },
+            Participant {
+                bot_uuid: "worker-bot".to_string(),
+                bot_name: Some("Worker".to_string()),
+                kind: None,
+                role: ParticipantRole::Consultant,
+                actor_kind: ActorKind::Bot,
+                mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
+            },
+        ],
+    );
+    group.group_strategy = GroupStrategy::Chat;
+    group_store.upsert(group).await.unwrap();
+
+    let session = Session {
+        id: "group-1:00000001".to_string(),
+        group_id: "group-1".to_string(),
+        session_title: None,
+        env: None,
+        status: SessionStatus::Running,
+        session_kind: SessionKind::Chat,
+        participants: vec![
+            Participant::bot("driver-bot", ParticipantRole::Driver),
+            Participant::bot("worker-bot", ParticipantRole::Consultant),
+        ],
+        group_version: Some(1),
+        caller_id: None,
+        input: None,
+        output: None,
+        error_message: None,
+        callback_status: None,
+        activation_count: 1,
+        caller_principal: None,
+        created_by: None,
+        current_msg_seq: 0,
+        participant_join_seq: None,
+        created_at: 1,
+        updated_at: 1,
+        completed_at: None,
+        meta: None,
+        collected_at: None,
+    };
+
+    let sessions = Arc::new(RecordingSessions {
+        session: Mutex::new(Some(session)),
+    });
+
+    let mut services = Services::noop();
+    services.registry = registry;
+    services.group = group_store;
+    services.session_management = sessions.clone();
+
+    let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
+        staff_no: Some(staff.to_string()),
+    });
+    let app = build_router(HttpAppState::new(services).with_user_identity(identity_port));
+    (app, sessions, temp_dir)
+}
+
+#[derive(Default)]
+struct StaticHumanIdentity {
+    staff_no: Option<String>,
+}
+
+#[async_trait::async_trait]
+impl UserIdentityPort for StaticHumanIdentity {
+    async fn extract(
+        &self,
+        _headers: &HeaderMap,
+        _uri: &axum::http::Uri,
+    ) -> Option<HttpUserIdentity> {
+        self.staff_no.as_ref().map(|sn| HttpUserIdentity {
+            staff_no: Some(sn.clone()),
+            nick_name: Some("Test".to_string()),
+        })
+    }
+
+    async fn ensure_identity(
+        &self,
+        _auth_source: &str,
+        _external_user_id: &str,
+        _external_user_name: Option<&str>,
+        _avatar: Option<&str>,
+        _env: &str,
+    ) -> Result<String, AuthError> {
+        Ok("noop-identity".to_string())
+    }
+
+    async fn get_identity_by_token(
+        &self,
+        _token: &str,
+    ) -> Result<Option<UserIdentityInfo>, AuthError> {
+        Ok(None)
+    }
+
+    async fn get_identity_by_user_id(
+        &self,
+        _user_id: &str,
+    ) -> Result<Option<UserIdentityInfo>, AuthError> {
+        Ok(None)
+    }
+
+    async fn update_token(
+        &self,
+        _user_id: &str,
+        _token: &str,
+        _expire_at: u64,
+    ) -> Result<(), AuthError> {
+        Ok(())
+    }
 }
