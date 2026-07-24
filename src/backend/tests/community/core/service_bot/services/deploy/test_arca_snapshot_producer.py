@@ -8,11 +8,11 @@ import pytest
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
     ArcaSnapshotProducer,
 )
-from agentclaw.community.core.service_bot.services.deploy.service_skills_artifact import (
-    ServiceSkillsArtifactBuilder,
-    ServiceSkillsArtifactError,
-    service_skills_artifact_env,
-    validate_service_skills_artifact_for_release,
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ServiceSkillsManifestBuilder,
+    ServiceSkillsManifestError,
+    service_skills_manifest_env,
+    validate_service_skills_manifest_for_release,
 )
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -34,7 +34,7 @@ class _RecordingBuild:
         return self.result
 
 
-class _NoSkillsArtifactBuilder(ServiceSkillsArtifactBuilder):
+class _NoSkillsManifestBuilder(ServiceSkillsManifestBuilder):
     """Minimal builder for tests that only exercise the producer wrapper."""
 
     def __init__(self) -> None:
@@ -48,7 +48,7 @@ class _NoSkillsArtifactBuilder(ServiceSkillsArtifactBuilder):
 def test_passes_bot_and_version_through_to_build() -> None:
     stub = _RecordingBuild({"success": True})
     bot = {"bot_id": "b1", "entity_id": "u1"}
-    ArcaSnapshotProducer(stub, _NoSkillsArtifactBuilder()).produce_artifact(bot, 7)
+    ArcaSnapshotProducer(stub, _NoSkillsManifestBuilder()).produce_artifact(bot, 7)
     assert stub.calls == [(bot, 7)]
 
 
@@ -65,7 +65,7 @@ def test_maps_success_and_both_paths_onto_ext() -> None:
         }
     )
     artifact = ArcaSnapshotProducer(
-        stub, _NoSkillsArtifactBuilder()
+        stub, _NoSkillsManifestBuilder()
     ).produce_artifact({}, 3)
     assert artifact.success is True
     assert artifact.message == ""
@@ -79,7 +79,7 @@ def test_maps_success_and_both_paths_onto_ext() -> None:
 def test_failed_build_propagates_success_false_and_message() -> None:
     stub = _RecordingBuild({"success": False})
     artifact = ArcaSnapshotProducer(
-        stub, _NoSkillsArtifactBuilder()
+        stub, _NoSkillsManifestBuilder()
     ).produce_artifact({}, 1)
     assert artifact.success is False
     assert artifact.message == "构建失败"
@@ -92,7 +92,7 @@ def test_missing_paths_are_omitted_from_ext() -> None:
     # we must not invent keys.
     stub = _RecordingBuild({"success": True, "migration_path": "/only/mig"})
     artifact = ArcaSnapshotProducer(
-        stub, _NoSkillsArtifactBuilder()
+        stub, _NoSkillsManifestBuilder()
     ).produce_artifact({}, 1)
     assert artifact.ext == {"migration_path": "/only/mig"}
 
@@ -142,7 +142,7 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
 
     artifact = ArcaSnapshotProducer(
         stub,
-        ServiceSkillsArtifactBuilder(layout_repository),
+        ServiceSkillsManifestBuilder(layout_repository),
     ).produce_artifact(
         {
             "bot_id": "b1",
@@ -153,7 +153,7 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
         7,
     )
 
-    assert artifact.ext["skills_artifact"] == {
+    assert artifact.ext["skills_manifest"] == {
         "schema_version": 1,
         "engine": "openclaw",
         "active_layout": "pool",
@@ -236,11 +236,11 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsArtifactBuilder(repository),
+        ServiceSkillsManifestBuilder(repository),
     )
 
     with pytest.raises(
-        ServiceSkillsArtifactError,
+        ServiceSkillsManifestError,
         match="draft Skills layout changed during service build",
     ):
         producer.produce_artifact(
@@ -257,10 +257,10 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
 @pytest.mark.unit
 def test_release_rejects_live_engine_drift_from_the_frozen_artifact() -> None:
     with pytest.raises(
-        ServiceSkillsArtifactError,
+        ServiceSkillsManifestError,
         match="engine no longer matches",
     ):
-        validate_service_skills_artifact_for_release(
+        validate_service_skills_manifest_for_release(
             {
                 "schema_version": 1,
                 "engine": "openclaw",
@@ -273,7 +273,7 @@ def test_release_rejects_live_engine_drift_from_the_frozen_artifact() -> None:
 
 @pytest.mark.unit
 def test_release_translates_frozen_layout_into_container_env() -> None:
-    assert service_skills_artifact_env(
+    assert service_skills_manifest_env(
         {
             "schema_version": 1,
             "engine": "openclaw",
@@ -290,10 +290,10 @@ def test_release_translates_frozen_layout_into_container_env() -> None:
 @pytest.mark.unit
 def test_release_rejects_an_unknown_pool_contract() -> None:
     with pytest.raises(
-        ServiceSkillsArtifactError,
+        ServiceSkillsManifestError,
         match="unsupported layout contract",
     ):
-        service_skills_artifact_env(
+        service_skills_manifest_env(
             {
                 "schema_version": 1,
                 "engine": "openclaw",
@@ -320,7 +320,7 @@ def test_legacy_draft_builds_a_legacy_artifact_without_pool_contract(
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsArtifactBuilder(
+        ServiceSkillsManifestBuilder(
             _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
         ),
     )
@@ -335,7 +335,7 @@ def test_legacy_draft_builds_a_legacy_artifact_without_pool_contract(
         1,
     )
 
-    frozen = artifact.ext["skills_artifact"]
+    frozen = artifact.ext["skills_manifest"]
     assert frozen["active_layout"] == "legacy"
     assert frozen["layout_contract_version"] is None
     assert frozen["local_snapshot"]["relative_path"] == (
@@ -359,13 +359,13 @@ def test_build_fails_when_the_selected_local_snapshot_is_missing(tmp_path) -> No
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsArtifactBuilder(
+        ServiceSkillsManifestBuilder(
             _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
         ),
     )
 
     with pytest.raises(
-        ServiceSkillsArtifactError,
+        ServiceSkillsManifestError,
         match="local Skills snapshot directory is missing",
     ):
         producer.produce_artifact(
@@ -385,12 +385,12 @@ def test_aicoding_service_engine_remains_closed() -> None:
     build = _RecordingBuild({"success": True})
     producer = ArcaSnapshotProducer(
         build,
-        ServiceSkillsArtifactBuilder(
+        ServiceSkillsManifestBuilder(
             _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
         ),
     )
 
-    with pytest.raises(ServiceSkillsArtifactError):
+    with pytest.raises(ServiceSkillsManifestError):
         producer.produce_artifact(
             {
                 "bot_id": "b1",
@@ -405,7 +405,7 @@ def test_aicoding_service_engine_remains_closed() -> None:
 
 
 @pytest.mark.unit
-def test_hermes_pool_service_artifact_is_closed_before_physical_build() -> None:
+def test_hermes_pool_service_manifest_is_closed_before_physical_build() -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
     pool_state = BotSkillLayoutState(
         scope=scope,
@@ -419,12 +419,12 @@ def test_hermes_pool_service_artifact_is_closed_before_physical_build() -> None:
     build = _RecordingBuild({"success": True})
     producer = ArcaSnapshotProducer(
         build,
-        ServiceSkillsArtifactBuilder(_LayoutRepository(pool_state)),
+        ServiceSkillsManifestBuilder(_LayoutRepository(pool_state)),
     )
 
     with pytest.raises(
-        ServiceSkillsArtifactError,
-        match="Hermes Pool service artifact is disabled",
+        ServiceSkillsManifestError,
+        match="Hermes Pool service manifest is disabled",
     ):
         producer.produce_artifact(
             {
@@ -451,7 +451,7 @@ def test_hermes_legacy_publish_keeps_pre_pool_compatibility() -> None:
     )
     producer = ArcaSnapshotProducer(
         build,
-        ServiceSkillsArtifactBuilder(
+        ServiceSkillsManifestBuilder(
             _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
         ),
     )
@@ -467,5 +467,5 @@ def test_hermes_legacy_publish_keeps_pre_pool_compatibility() -> None:
     )
 
     assert artifact.success is True
-    assert "skills_artifact" not in artifact.ext
+    assert "skills_manifest" not in artifact.ext
     assert build.calls
