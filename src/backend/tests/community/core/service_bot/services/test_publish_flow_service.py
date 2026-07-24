@@ -247,7 +247,7 @@ async def test_service_release_uses_frozen_engine_layout_not_live_draft_drift():
         status=PublishStatus.BUILT.value,
         ext={
             "migration_path": "/snapshot/1/openclaw",
-            "skills_artifact": {
+            "skills_manifest": {
                 "schema_version": 1,
                 "engine": "openclaw",
                 "active_layout": "pool",
@@ -789,7 +789,7 @@ async def test_restart_and_recreate_preserve_frozen_pool_layout():
         ext={
             "binding": {"online": 1},
             "migration_path": "/snapshot/2/openclaw",
-            "skills_artifact": {
+            "skills_manifest": {
                 "schema_version": 1,
                 "engine": "openclaw",
                 "active_layout": "pool",
@@ -1363,7 +1363,7 @@ async def test_verify_first_release_arca_skips_channel_fetch_and_store():
         status=PublishStatus.BUILT.value,
         ext={
             "migration_path": "/m",
-            "skills_artifact": {
+            "skills_manifest": {
                 "schema_version": 1,
                 "engine": "openclaw",
                 "active_layout": "pool",
@@ -1726,7 +1726,7 @@ async def test_execute_rollback_uses_fixed_device_count_one():
         ext={
             "migration_path": "/tmp/build/v2",
             "binding": {"online": 100},  # binding_id
-            "skills_artifact": {
+            "skills_manifest": {
                 "schema_version": 1,
                 "engine": "openclaw",
                 "active_layout": "pool",
@@ -2035,7 +2035,7 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
         status=PublishStatus.SUCCESS.value,
         ext={
             "binding": {"online": 123},
-            "skills_artifact": frozen_skills,
+            "skills_manifest": frozen_skills,
         },
     )
     binding = Mock()
@@ -2064,7 +2064,7 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
         publish_id=10,
         ext={
             "binding": {"online": 123},
-            "skills_artifact": frozen_skills,
+            "skills_manifest": frozen_skills,
             "scale": {"publish_id": 888},
         },
     )

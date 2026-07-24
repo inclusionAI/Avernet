@@ -74,8 +74,8 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import Bo
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
     ArcaSnapshotProducer,
 )
-from agentclaw.community.core.service_bot.services.deploy.service_skills_artifact import (
-    ServiceSkillsArtifactBuilder,
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ServiceSkillsManifestBuilder,
 )
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
@@ -301,7 +301,7 @@ class ServiceBotModule(Module):
         """ARCA snapshot plus the service draft's frozen Skills layout."""
         return ArcaSnapshotProducer(
             bot_build_service,
-            ServiceSkillsArtifactBuilder(layout_repository),
+            ServiceSkillsManifestBuilder(layout_repository),
         )
 
     @singleton

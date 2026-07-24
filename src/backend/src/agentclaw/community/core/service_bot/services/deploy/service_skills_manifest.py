@@ -1,4 +1,4 @@
-"""Freeze a service draft's active Skills layout into its publish artifact.
+"""Describe a service draft's frozen Skills layout within its publish artifact.
 
 This module deliberately owns only the service-publish contract.  It does not
 resolve the rollout whitelist and it is not a general engine-layout descriptor:
@@ -77,12 +77,12 @@ _RESERVED_ACTIVE_ENTRIES = frozenset(
 SERVICE_SKILLS_POOL_CONTRACT_VERSION = "skills-pool-p3-v1"
 
 
-class ServiceSkillsArtifactError(RuntimeError):
-    """The draft cannot be represented as a supported service artifact."""
+class ServiceSkillsManifestError(RuntimeError):
+    """The draft cannot be represented as a supported Skills manifest."""
 
 
-class ServiceSkillsArtifactBuilder:
-    """Build the auditable Skills portion of one versioned service artifact."""
+class ServiceSkillsManifestBuilder:
+    """Build the Skills manifest embedded in one versioned service artifact."""
 
     def __init__(
         self,
@@ -104,23 +104,23 @@ class ServiceSkillsArtifactBuilder:
         state = self._layout_repository.get(scope)
 
         if engine == "aicoding":
-            raise ServiceSkillsArtifactError(
+            raise ServiceSkillsManifestError(
                 "AICoding service publishing is not supported"
             )
         if engine == "hermes":
             if state.active_layout is SkillLayout.POOL:
-                raise ServiceSkillsArtifactError(
-                    "Hermes Pool service artifact is disabled until native "
+                raise ServiceSkillsManifestError(
+                    "Hermes Pool service manifest is disabled until native "
                     "service delivery is verified"
                 )
             # Preserve the pre-Pool Legacy service path.  It has no verified
-            # native Hermes artifact contract, so do not falsely stamp one.
+            # native Hermes manifest contract, so do not falsely stamp one.
             return None
 
         paths = _SERVICE_LAYOUTS.get(engine)
         if paths is None:
-            raise ServiceSkillsArtifactError(
-                f"service Skills artifact is not supported for engine: {engine}"
+            raise ServiceSkillsManifestError(
+                f"service Skills manifest is not supported for engine: {engine}"
             )
 
         is_pool = state.active_layout is SkillLayout.POOL
@@ -129,8 +129,8 @@ class ServiceSkillsArtifactBuilder:
             or state.phase is not SkillLayoutPhase.POOL_ACTIVE
             or not state.layout_contract_version
         ):
-            raise ServiceSkillsArtifactError(
-                "Pool service artifact requires a persisted POOL_ACTIVE draft"
+            raise ServiceSkillsManifestError(
+                "Pool service manifest requires a persisted POOL_ACTIVE draft"
             )
 
         return CapturedServiceSkillsLayout(
@@ -159,7 +159,7 @@ class ServiceSkillsArtifactBuilder:
             current.active_layout is not captured.active_layout
             or current_contract != captured.layout_contract_version
         ):
-            raise ServiceSkillsArtifactError(
+            raise ServiceSkillsManifestError(
                 "draft Skills layout changed during service build"
             )
         paths = _SERVICE_LAYOUTS[engine]
@@ -206,48 +206,48 @@ class ServiceSkillsArtifactBuilder:
         }
 
 
-def validate_service_skills_artifact_for_release(
-    artifact: dict[str, Any],
+def validate_service_skills_manifest_for_release(
+    manifest: dict[str, Any],
     bot: dict[str, Any],
 ) -> None:
-    """Fail closed when a live draft identity no longer matches its artifact."""
+    """Fail closed when a live draft identity no longer matches its manifest."""
 
-    if artifact.get("schema_version") != 1:
-        raise ServiceSkillsArtifactError(
-            "unsupported service Skills artifact schema"
+    if manifest.get("schema_version") != 1:
+        raise ServiceSkillsManifestError(
+            "unsupported service Skills manifest schema"
         )
-    artifact_engine = str(artifact.get("engine") or "").strip().lower()
+    manifest_engine = str(manifest.get("engine") or "").strip().lower()
     live_engine = str(bot.get("active_engine") or "openclaw").strip().lower()
-    if artifact_engine != live_engine:
-        raise ServiceSkillsArtifactError(
-            "live Bot engine no longer matches the frozen service Skills artifact"
+    if manifest_engine != live_engine:
+        raise ServiceSkillsManifestError(
+            "live Bot engine no longer matches the frozen service Skills manifest"
         )
-    active_layout = artifact.get("active_layout")
+    active_layout = manifest.get("active_layout")
     if active_layout not in {SkillLayout.LEGACY.value, SkillLayout.POOL.value}:
-        raise ServiceSkillsArtifactError(
-            "invalid active layout in service Skills artifact"
+        raise ServiceSkillsManifestError(
+            "invalid active layout in service Skills manifest"
         )
     if (
         active_layout == SkillLayout.POOL.value
-        and artifact.get("layout_contract_version")
+        and manifest.get("layout_contract_version")
         != SERVICE_SKILLS_POOL_CONTRACT_VERSION
     ):
-        raise ServiceSkillsArtifactError(
-            "Pool service Skills artifact uses an unsupported layout contract"
+        raise ServiceSkillsManifestError(
+            "Pool service Skills manifest uses an unsupported layout contract"
         )
 
 
-def service_skills_artifact_env(
-    artifact: dict[str, Any],
+def service_skills_manifest_env(
+    manifest: dict[str, Any],
     bot: dict[str, Any],
 ) -> dict[str, str]:
-    """Translate the frozen artifact into the backwards-compatible wire contract."""
+    """Translate the frozen manifest into the backwards-compatible wire contract."""
 
-    validate_service_skills_artifact_for_release(artifact, bot)
+    validate_service_skills_manifest_for_release(manifest, bot)
     env = {
-        "AGENTCLAW_SKILLS_LAYOUT": str(artifact["active_layout"]),
+        "AGENTCLAW_SKILLS_LAYOUT": str(manifest["active_layout"]),
     }
-    contract = artifact.get("layout_contract_version")
+    contract = manifest.get("layout_contract_version")
     if contract:
         env["AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION"] = str(contract)
     return env
@@ -259,15 +259,15 @@ def service_skills_env_from_ext(
 ) -> dict[str, str] | None:
     """Return the immutable runtime layout declaration from a publish ext."""
 
-    artifact = (ext or {}).get("skills_artifact")
-    if artifact is None:
+    manifest = (ext or {}).get("skills_manifest")
+    if manifest is None:
         return None
-    return service_skills_artifact_env(artifact, bot)
+    return service_skills_manifest_env(manifest, bot)
 
 
 def _require_snapshot_directory(path: Path, *, label: str) -> None:
     if path.is_symlink() or not path.is_dir():
-        raise ServiceSkillsArtifactError(
+        raise ServiceSkillsManifestError(
             f"{label} snapshot directory is missing or invalid: {path}"
         )
 
@@ -351,9 +351,9 @@ def _digest_tree(root: Path) -> tuple[str, int]:
 __all__ = [
     "CapturedServiceSkillsLayout",
     "SERVICE_SKILLS_POOL_CONTRACT_VERSION",
-    "ServiceSkillsArtifactBuilder",
-    "ServiceSkillsArtifactError",
-    "service_skills_artifact_env",
+    "ServiceSkillsManifestBuilder",
+    "ServiceSkillsManifestError",
+    "service_skills_manifest_env",
     "service_skills_env_from_ext",
-    "validate_service_skills_artifact_for_release",
+    "validate_service_skills_manifest_for_release",
 ]

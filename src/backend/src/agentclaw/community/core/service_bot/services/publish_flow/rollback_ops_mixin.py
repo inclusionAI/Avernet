@@ -12,7 +12,7 @@ from agentclaw.community.core.service_bot.schemas.publish_schemas import Publish
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
-from agentclaw.community.core.service_bot.services.deploy.service_skills_artifact import (
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     service_skills_env_from_ext,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (

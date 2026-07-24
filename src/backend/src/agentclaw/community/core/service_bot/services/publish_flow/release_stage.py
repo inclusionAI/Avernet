@@ -39,7 +39,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.operation_runner
     TargetBotGoneError,
     acquire_deploy_workflow,
 )
-from agentclaw.community.core.service_bot.services.deploy.service_skills_artifact import (
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     service_skills_env_from_ext,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
