@@ -52,6 +52,8 @@ pub struct ChannelOutboundEvent {
     pub text: Option<String>,
     pub raw_payload: serde_json::Value,
     pub render_hint: ChannelRenderHint,
+    /// Original IM message id that started this run, when available.
+    pub source_im_message_id: Option<String>,
 }
 
 /// 归一化投递结果(刻意极简,仿 `BotDeliveryResult`)。

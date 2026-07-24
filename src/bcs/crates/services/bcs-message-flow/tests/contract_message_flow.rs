@@ -1051,6 +1051,7 @@ async fn web_send_resets_message_count_routes_and_delivers() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
         sender_conn_id: None,
         })
         .await
@@ -1114,6 +1115,7 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     })
     .await
@@ -1151,6 +1153,7 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
             sender_conn_id: None,
         })
         .await
@@ -1189,7 +1192,8 @@ async fn accepted_chat_send_records_run_context_for_callback() {
             mentions: vec![],
             attachments: None,
             thinking: None,
-            idempotency_key: None,
+            idempotency_key: Some("idempotency-1".to_string()),
+            source_im_message_id: Some("source-msg-1".to_string()),
             sender_conn_id: None,
         })
         .await
@@ -1204,6 +1208,13 @@ async fn accepted_chat_send_records_run_context_for_callback() {
     assert_eq!(context.group_id, "group-1");
     assert_eq!(context.bcs_session_id.as_deref(), Some("group-1:abcdef12"));
     assert!(!context.terminal);
+    assert_eq!(
+        flow.message_tracker
+            .channel_source_message_id(&outcome.primary_run_id)
+            .await
+            .as_deref(),
+        Some("source-msg-1")
+    );
     assert!(
         context.deadline_ms
             >= before_send_ms.saturating_add(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS)
@@ -1269,6 +1280,7 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
             sender_conn_id: None,
         })
         .await
@@ -1309,6 +1321,7 @@ async fn provider_stream_gray_created_by_enables_sse_for_provider_chat_send() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     })
     .await
@@ -1349,6 +1362,7 @@ async fn provider_stream_gray_created_by_miss_keeps_provider_callback() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     })
     .await
@@ -1389,6 +1403,7 @@ async fn provider_stream_gray_mode_disabled_sends_provider_chat_send_over_sse() 
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     })
     .await
@@ -1447,6 +1462,7 @@ async fn provider_stream_gray_created_by_still_keeps_inject_on_callback() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     })
     .await
@@ -1566,6 +1582,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
             sender_conn_id: None,
         })
         .await
@@ -1610,6 +1627,7 @@ async fn web_send_in_human_bot_dm_uses_dm_routing_and_keeps_frontend_echo() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
         sender_conn_id: None,
         })
         .await
@@ -1659,6 +1677,7 @@ async fn web_send_in_human_bot_dm_omits_group_context_by_default() -> ServiceRes
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     })
     .await?;
@@ -1711,6 +1730,7 @@ async fn web_send_blocking_interceptor_prevents_bot_delivery() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
         sender_conn_id: None,
         })
         .await
@@ -1752,6 +1772,7 @@ async fn web_send_delivery_frame_contains_recipient_group_context() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
     sender_conn_id: None,
     })
     .await
@@ -1821,6 +1842,7 @@ async fn web_send_with_session_id_routes_v2_by_substituting_wire_group_id() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
     sender_conn_id: None,
     })
     .await
@@ -1887,6 +1909,7 @@ async fn web_send_with_legacy_session_id_routes_v2_with_group_wire_id() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     })
     .await
@@ -1943,6 +1966,7 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
     sender_conn_id: None,
     })
     .await
@@ -2005,6 +2029,7 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     })
     .await
@@ -2069,6 +2094,7 @@ async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResu
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     })
     .await?;
@@ -2128,6 +2154,7 @@ async fn web_send_prefers_human_from_name_in_delivered_frame() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
     sender_conn_id: None,
     })
     .await
@@ -2179,6 +2206,7 @@ async fn web_send_inject_delivery_uses_event_frame() {
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
     sender_conn_id: None,
     })
     .await
@@ -2232,6 +2260,7 @@ async fn web_send_delivers_to_private_group_targets() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
         sender_conn_id: None,
         })
         .await
@@ -2278,6 +2307,7 @@ async fn web_send_partial_delivery_failure_is_represented_in_outcome() {
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
         sender_conn_id: None,
         })
         .await

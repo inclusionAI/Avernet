@@ -329,6 +329,7 @@ async fn handle_chat_send(
             }),
             thinking: params.thinking,
             idempotency_key: params.idempotency_key,
+            source_im_message_id: None,
             sender_conn_id,
         })
         .await?;

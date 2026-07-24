@@ -615,6 +615,19 @@ pub async fn handle_web_send(
         let provider_transport = flow
             .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
             .await;
+        let source_im_message_id = cmd
+            .source_im_message_id
+            .as_deref()
+            .filter(|message_id| {
+                delivery_type == DeliveryType::Send && !message_id.trim().is_empty()
+            });
+        if let Some(message_id) = source_im_message_id {
+            // Cache before delivery: a fast bot may emit its first response
+            // before the delivery call itself has returned.
+            flow.message_tracker
+                .cache_channel_source_message_id(&run_id, message_id)
+                .await;
+        }
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -649,6 +662,10 @@ pub async fn handle_web_send(
                         cmd.session_id.as_deref(),
                     )
                     .await;
+                } else if source_im_message_id.is_some() {
+                    flow.message_tracker
+                        .remove_channel_source_message_id(&run_id)
+                        .await;
                 }
                 delivery_results.push(delivery_result_summary(
                     &target_bot_id,
@@ -659,6 +676,11 @@ pub async fn handle_web_send(
                 bot_deliveries.push(result);
             }
             Err(error) => {
+                if source_im_message_id.is_some() {
+                    flow.message_tracker
+                        .remove_channel_source_message_id(&run_id)
+                        .await;
+                }
                 let error_text = error.to_string();
                 log_bot_deliver_result(
                     &cmd.group_id,
@@ -892,6 +914,7 @@ pub async fn handle_group_chat(
             attachments: None,
             thinking: None,
             idempotency_key: None,
+            source_im_message_id: None,
             sender_conn_id: None,
         },
     )
@@ -1012,6 +1035,7 @@ pub async fn handle_persistent_group_send(
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     };
     for target in &decision.targets {
@@ -1382,6 +1406,7 @@ pub async fn handle_group_callback(
         attachments: None,
         thinking: None,
         idempotency_key: None,
+        source_im_message_id: None,
         sender_conn_id: None,
     };
 

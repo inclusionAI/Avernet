@@ -818,6 +818,9 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
     let recording_channel = Arc::new(RecordingChannelService::default());
     let channel: Arc<dyn ChannelService> = recording_channel.clone();
     assert!(flow.channel_slot().set(channel).is_ok());
+    flow.message_tracker
+        .cache_channel_source_message_id("run-channel-delta", "source-msg-1")
+        .await;
     let group_get_count_before = support.group.get_count("group-1").await;
 
     for delta in ["你", "好"] {
@@ -840,6 +843,14 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
     let outbound = recording_channel.outbound().await;
     assert_eq!(outbound.len(), 2);
     assert_eq!(outbound[0].sender_label, "Observer");
+    assert_eq!(
+        outbound[0].source_im_message_id.as_deref(),
+        Some("source-msg-1")
+    );
+    assert_eq!(
+        outbound[1].source_im_message_id.as_deref(),
+        Some("source-msg-1")
+    );
     assert_eq!(
         support
             .registry
