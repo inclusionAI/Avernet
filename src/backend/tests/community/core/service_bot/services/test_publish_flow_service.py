@@ -515,6 +515,7 @@ def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():
         current_status=PublishStatus.ONLINE_PUB,
         ext=ext,
         progress={'status': 'FAILED', 'failed_devices': [{'id': 'd1'}]},
+        baas_publish_id=456,
     )
 
     assert result.status == PublishStatus.FAILED
@@ -695,15 +696,20 @@ def _setup_restart(svc, record, bot_uuid="BOT-x"):
 
 
 @pytest.mark.asyncio
-async def test_restart_fallback_threads_config_artifact():
-    # On BOT_NOT_FOUND, restart falls back to release_async — which for a teclaw
-    # bot must carry the frozen artifact (from ext), not an empty config.
+async def test_restart_recreate_threads_config_artifact():
+    # On BOT_NOT_FOUND, restart recreates via release_async (the crash-safe
+    # recreate leg) — which for a teclaw bot must carry the frozen artifact
+    # (from ext), not an empty config. The creation must return bot_uuid (the
+    # recreate mints a NEW bot + binding; it never reuses the gone one).
     publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
     build_service = Mock()
     build_service.upgrade_async = AsyncMock(
         return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
     )
-    build_service.release_async = AsyncMock(return_value={"publish_id": 99})
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-recreated"}
+    )
     baas_service = Mock()
     svc = _pf(
         publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
@@ -719,6 +725,8 @@ async def test_restart_fallback_threads_config_artifact():
     result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
     assert result["success"] is True
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
+    # The recreate minted a fresh binding for the new bot.
+    assert publish_service.create_device_binding.call_args.kwargs["device_id"] == "BOT-recreated"
 
 
 # ── Task 9: restart reads stored per-stage overrides ─────────────────────────
@@ -3160,40 +3168,107 @@ async def test_retry_missing_source_status_raises():
 
 
 @pytest.mark.asyncio
-async def test_retry_from_online_pub_recorded_calls_restart():
-    # Online release already recorded (ext.publish.online) → a BaaS-wait failure →
-    # retry restarts the BaaS publish.
+async def test_retry_from_online_pub_always_reenqueues_online_release_even_when_current():
+    """An ONLINE_PUB retry never pre-judges restart-vs-rerun: even with a
+    COMPLETED, still-current online release in the ledger, retry re-enqueues the
+    online_release task and lets its is_current_online_deployment gate decide
+    (skip + poll). The old restart heuristic was the #341-era regression."""
     record = _make_publish_record(
         status=PublishStatus.FAILED.value,
-        ext={
-            "source_status": PublishStatus.ONLINE_PUB.value,
-            "publish": {"online": 9},
-        },
+        ext={"source_status": PublishStatus.ONLINE_PUB.value},
     )
-    svc, _ = _svc_with_record(record)
-    # #162 + durable restart: retry runs execute_restart inline then enqueues the poll.
-    svc.execute_restart = AsyncMock(return_value={"success": True})
+    tq = Mock()
+    svc, publish_service = _svc_with_record(record, task_queue_service=tq)
+    op = svc._operation_runner.open_operation(
+        publish_id=1, kind="upgrade", stage=PublishStage.ONLINE, bot_uuid="BOT-live"
+    )
+    svc._publish_operation_repo.record_workflow(op.id, baas_publish_id=9, bot_uuid="BOT-live")
+    svc._publish_operation_repo.complete(op.id)
+    assert svc.is_current_online_deployment(1) is True
+
+    svc.execute_restart = AsyncMock()
     result = await svc.retry(publish_id=1, operator="op")
-    svc.execute_restart.assert_awaited_once()
-    assert result.action == "restart"
+
+    svc.execute_restart.assert_not_awaited()
+    tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == "service_bot.publish.online_release"
+    assert result.action == "process"
+    # Release-branch rollback write must NOT carry the poll-redirect flag —
+    # the poll must follow ext.publish.online, not a stale restart workflow.
+    rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs["ext"]
+    assert "retry" not in rollback_ext
 
 
 @pytest.mark.asyncio
 async def test_retry_from_online_pub_not_recorded_reenqueues_online_release():
-    # Online release NOT recorded → the release work itself failed → retry re-runs
+    # Online release never landed → the release work itself failed → retry re-runs
     # the online_release task rather than restarting a bot that was never created.
     record = _make_publish_record(
         status=PublishStatus.FAILED.value,
         ext={"source_status": PublishStatus.ONLINE_PUB.value},
     )
     tq = Mock()
-    svc, _ = _svc_with_record(record, task_queue_service=tq)
+    svc, publish_service = _svc_with_record(record, task_queue_service=tq)
     svc.restart_bot = Mock()
     result = await svc.retry(publish_id=1, operator="op")
     svc.restart_bot.assert_not_called()
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.online_release"
     assert result.action == "process"
+    rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs["ext"]
+    assert "retry" not in rollback_ext
+
+
+@pytest.mark.asyncio
+async def test_retry_from_online_pub_clears_stale_retry_flag():
+    """A stale retry=True from a prior retry cycle must be cleared in the same
+    atomic rollback write on the release branch, or the poll would redirect to
+    sync_restart_progress and sync a stale restart workflow (stranding)."""
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value,
+        ext={"source_status": PublishStatus.ONLINE_PUB.value, "retry": True},
+    )
+    tq = Mock()
+    svc, publish_service = _svc_with_record(record, task_queue_service=tq)
+    await svc.retry(publish_id=1, operator="op")
+    rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs["ext"]
+    assert "retry" not in rollback_ext
+
+
+@pytest.mark.asyncio
+async def test_retry_from_success_calls_restart_with_flag():
+    """A SUCCESS record only fails via a failed restart-sync → retry re-restarts.
+    It must NOT route through the release path: the record's release IS the
+    current deployment, so the gate would skip BaaS and the retry would no-op."""
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value,
+        ext={"source_status": PublishStatus.SUCCESS.value},
+    )
+    svc, publish_service = _svc_with_record(record)
+    svc.execute_restart = AsyncMock(return_value={"success": True})
+    result = await svc.retry(publish_id=1, operator="op")
+    svc.execute_restart.assert_awaited_once()
+    assert result.action == "restart"
+    rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs["ext"]
+    assert rollback_ext["retry"] is True
+
+
+@pytest.mark.asyncio
+async def test_retry_from_validate_pub_calls_restart_with_flag():
+    """VALIDATE_PUB stays on the restart branch (verify release cannot re-enter;
+    verify/online symmetry deferred) and its rollback write carries retry=True
+    so the poll redirects to sync_restart_progress."""
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value,
+        ext={"source_status": PublishStatus.VALIDATE_PUB.value},
+    )
+    svc, publish_service = _svc_with_record(record)
+    svc.execute_restart = AsyncMock(return_value={"success": True})
+    result = await svc.retry(publish_id=1, operator="op")
+    svc.execute_restart.assert_awaited_once()
+    assert result.action == "restart"
+    rollback_ext = publish_service.update_publish_status_with_ext.call_args.kwargs["ext"]
+    assert rollback_ext["retry"] is True
 
 
 @pytest.mark.asyncio

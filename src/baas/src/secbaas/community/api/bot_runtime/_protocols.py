@@ -15,12 +15,11 @@ from ..device_manage import CommandResult
 from ._file_transfer_models import (
     CancelUploadResponse,
     CompleteUploadResponse,
+    DeleteTransferResponse,
     GetDownloadUrlResponse,
     GetTransferStatusResponse,
     GetUploadUrlResponse,
     ShareLinkResponse,
-    StagingDeleteResponse,
-    StagingListResponse,
 )
 from ._http_connection_info import HttpConnectionInfo
 from ._models import (
@@ -136,6 +135,7 @@ class BotFileTransferDispatcher(Protocol):
         device_affinity: str | None = None,
         file_size: int = 0,
         part_size: int | None = None,
+        operator: str | None = None,
     ) -> GetUploadUrlResponse: ...
 
     async def dispatch_get_download_url(
@@ -145,6 +145,7 @@ class BotFileTransferDispatcher(Protocol):
         device_path: str,
         expire_seconds: int = 3600,
         device_affinity: str | None = None,
+        operator: str | None = None,
     ) -> GetDownloadUrlResponse: ...
 
     async def dispatch_get_transfer_status(
@@ -166,19 +167,17 @@ class BotFileTransferDispatcher(Protocol):
         tenant: str | None = None,
     ) -> CancelUploadResponse: ...
 
-    async def dispatch_list_staging(
+    async def dispatch_delete_transfer(
         self,
-        prefix: str,
-        limit: int = 100,
-        marker: str | None = None,
+        transfer_id: str,
         tenant: str | None = None,
-    ) -> StagingListResponse: ...
+    ) -> DeleteTransferResponse:
+        """Delete a transfer ticket and its associated OSS staging object (D-09, D-10).
 
-    async def dispatch_delete_staging(
-        self,
-        key: str,
-        tenant: str | None = None,
-    ) -> StagingDeleteResponse: ...
+        Only tickets in terminal states (DONE/FAILED/CANCELLED/DELETED) can be
+        deleted. Already-DELETED tickets return 200 (idempotent).
+        """
+        ...
 
     async def dispatch_generate_share_link(
         self,

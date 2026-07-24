@@ -86,6 +86,85 @@ class PublishOperationError(Exception):
     """A publish operation step failed (surfaced to the caller / task)."""
 
 
+class TargetBotGoneError(Exception):
+    """BaaS reported the operation's target bot gone (``BOT_NOT_FOUND``).
+
+    Raised out of :func:`acquire_deploy_workflow` after the op has been
+    ABANDONED, so the caller runs its fallback (a fresh first-release-shaped
+    op) without touching the dead op again."""
+
+
+async def acquire_deploy_workflow(
+    runner: "PublishOperationRunner",
+    *,
+    publish_id: int,
+    kind: PublishOperationKind,
+    stage: PublishStage,
+    operator: str,
+    issue: Callable[[], Awaitable[Dict[str, Any]]],
+    bot_uuid: Optional[str] = None,
+    params: Optional[Dict[str, Any]] = None,
+    bot_gone_reason: str = "BOT_NOT_FOUND",
+) -> PublishOperationRecord:
+    """The deploy atom: open the ledger op → acquire its BaaS workflow →
+    validate the recorded ids. The shared crash-safe core of every deploy-shaped
+    operation (first release, upgrade, restart, and the restart-recreate leg).
+
+    ``issue`` performs the BaaS mutation and returns its result dict. A result
+    of ``{success: False, error_code: "BOT_NOT_FOUND"}`` is classified
+    uniformly: the op is ABANDONED (``bot_gone_reason``, naming the caller's
+    fallback for ledger forensics) and :class:`TargetBotGoneError` raised so
+    the caller runs that fallback as a separate, fresh op. Any other issue outcome flows through
+    ``acquire_workflow`` unchanged — including its no-catch contract: a crash
+    or transient error leaves the op non-terminal so a re-run resumes the SAME
+    op (adopt-by-query on an existing bot, issue-once on a creation).
+
+    Validation: ``acquire_workflow`` guarantees a recorded ``baas_publish_id``;
+    creation kinds must additionally have resolved a ``bot_uuid``.
+
+    Deliberately NOT here (each caller owns them):
+    * any skip-if-current-deployment check — that is the online_release gate's
+      concern alone; a deploy op that reaches this atom always talks to BaaS
+      (a restart of a live, current bot must still re-deploy);
+    * follow-up binding/ext writes and ``complete_operation`` — they differ
+      per operation and stay with the caller, keyed off the returned op.
+    """
+    op = runner.open_operation(
+        publish_id=publish_id,
+        kind=kind,
+        stage=stage,
+        bot_uuid=bot_uuid,
+        operator=operator,
+        params=params,
+    )
+
+    async def _issue_classified() -> Dict[str, Any]:
+        result = await issue()
+        if (
+            result.get("success") is False
+            and result.get("error_code") == "BOT_NOT_FOUND"
+        ):
+            raise TargetBotGoneError()
+        return result
+
+    try:
+        op = await runner.acquire_workflow(op, _issue_classified)
+    except TargetBotGoneError:
+        runner.abandon_operation(op, bot_gone_reason)
+        raise
+
+    if op.baas_publish_id is None:
+        # Defensive: acquire_workflow guarantees a recorded id (issue/adopt).
+        raise PublishOperationError(
+            f"deploy did not record a BaaS publish_id: publish_id={publish_id} kind={kind}"
+        )
+    if kind in PublishOperationKind.creation_kinds() and not op.bot_uuid:
+        raise PublishOperationError(
+            f"BaaS creation did not return bot_uuid: publish_id={publish_id} kind={kind}"
+        )
+    return op
+
+
 class PublishOperationRunner:
     """Runs a BaaS mutation as resumable ledger steps.
 

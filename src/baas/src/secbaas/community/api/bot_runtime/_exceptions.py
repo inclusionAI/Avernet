@@ -142,7 +142,7 @@ class TransferNotTerminalError(BotServiceError):
     is attempted on a ticket that is still in progress.
     """
 
-    error_code = "NOT_TERMINAL_STATE"
+    error_code = "TRANSFER_NOT_TERMINAL"
     http_status = 409
 
     def __init__(self, transfer_id: str = "", status: str = ""):

@@ -9,13 +9,20 @@ from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_collaborator.models import BotCollabLockModel
-from agentclaw.community.core.caller_identity.models import McpCallType
+from agentclaw.community.core.caller_identity.models import (
+    BotMcpCallConfigModel,
+    McpCallType,
+)
 from agentclaw.community.core.caller_identity.repository import (
     CallerIdentityLockMismatchError,
+)
+from agentclaw.community.core.caller_identity.contracts import (
+    CallerIdentityIrreversibleError,
 )
 from agentclaw.community.plugins.caller_identity_repository import (
     CallerIdentityRepository,
 )
+from agentclaw.community.plugin_api.models import BotModel
 
 
 class InMemorySqliteDB:
@@ -42,6 +49,14 @@ class InMemorySqliteDB:
         finally:
             session.close()
 
+    @contextmanager
+    def orm_session(self):
+        session = self._session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
 
 @pytest.fixture
 def database() -> InMemorySqliteDB:
@@ -59,6 +74,33 @@ def _add_lock(database: InMemorySqliteDB) -> None:
             BotCollabLockModel(
                 lock_key="bot:1",
                 holder_user_id="other-editor",
+                env="dev",
+            )
+        )
+
+
+def _add_caller_bot(database: InMemorySqliteDB) -> None:
+    with database.transactional_orm_session() as session:
+        session.add(
+            BotModel(
+                id=1,
+                bot_id="bot-1",
+                entity_id="entity-1",
+                entity_type="staff",
+                creator_id="owner",
+                owner_id="owner",
+                active_engine="openclaw",
+                call_type=McpCallType.CALLER.value,
+                env="dev",
+            )
+        )
+        session.add(
+            BotMcpCallConfigModel(
+                bot_pk=1,
+                server_code="mcp-a",
+                engine_type="openclaw",
+                call_type=McpCallType.CALLER.value,
+                modifier_id="owner",
                 env="dev",
             )
         )
@@ -127,3 +169,52 @@ def test_compensation_rejects_lock_created_before_unlocked_rollback(
 
     with pytest.raises(CallerIdentityLockMismatchError):
         _compensate_call_type(repository, lock_epoch=None)
+
+
+def test_replace_rejects_caller_bot_transition_back_to_owner(
+    repository: CallerIdentityRepository,
+    database: InMemorySqliteDB,
+) -> None:
+    _add_caller_bot(database)
+
+    with pytest.raises(CallerIdentityIrreversibleError) as error:
+        repository.replace_draft_call_type(
+            bot_pk=1,
+            engine_type="openclaw",
+            server_code="mcp-a",
+            call_type=McpCallType.OWNER,
+            modifier_id="owner",
+            effective_server_codes={"mcp-a"},
+            lock_key="bot:1",
+            lock_holder_user_id="owner",
+            lock_epoch=None,
+        )
+
+    assert error.value.detail == "CALLER_TO_OWNER_UNSUPPORTED"
+    assert repository.list_draft_call_types(1, "openclaw") == {
+        "mcp-a": McpCallType.CALLER
+    }
+
+
+def test_replace_allows_owner_mcp_when_bot_remains_caller(
+    repository: CallerIdentityRepository,
+    database: InMemorySqliteDB,
+) -> None:
+    _add_caller_bot(database)
+
+    result = repository.replace_draft_call_type(
+        bot_pk=1,
+        engine_type="openclaw",
+        server_code="mcp-b",
+        call_type=McpCallType.OWNER,
+        modifier_id="owner",
+        effective_server_codes={"mcp-a", "mcp-b"},
+        lock_key="bot:1",
+        lock_holder_user_id="owner",
+        lock_epoch=None,
+    )
+
+    assert result.bot_call_type is McpCallType.CALLER
+    assert repository.list_draft_call_types(1, "openclaw") == {
+        "mcp-a": McpCallType.CALLER
+    }

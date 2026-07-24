@@ -104,8 +104,8 @@ async def test_staging_delete_done_ticket(
     stub_oss_backend.put_content(f"stub-upload://{transfer_id}", b"done-file-content")
     assert stub_oss_backend.check_object_exists(key)
 
-    # Configure mock_ticket_repo for dispatch_delete_staging
-    mock_ticket_repo.get_by_fileservice_staging_path.return_value = done_ticket
+    # Configure mock_ticket_repo for dispatch_delete_transfer
+    mock_ticket_repo.get_by_transfer_id.return_value = done_ticket
 
     # Act: delete by transfer_id (the stub stores by transfer_id, not by full key)
     stub_oss_backend.delete_object(transfer_id)
@@ -132,12 +132,12 @@ async def test_staging_delete_non_terminal_returns_409(
         status="CREATED",
         fileservice_staging_path="file-transfers/created-test/data.txt",
     )
-    mock_ticket_repo.get_by_fileservice_staging_path.return_value = created_ticket
+    mock_ticket_repo.get_by_transfer_id.return_value = created_ticket
 
     # Simulate the dispatcher logic: check terminal state
     with pytest.raises(TransferNotTerminalError) as exc_info:
-        ticket = mock_ticket_repo.get_by_fileservice_staging_path(
-            "file-transfers/created-test/data.txt",
+        ticket = mock_ticket_repo.get_by_transfer_id(
+            "stub-created-test",
         )
         terminal_states = {"DONE", "FAILED", "CANCELLED", "DELETED"}
         if ticket.status not in terminal_states:

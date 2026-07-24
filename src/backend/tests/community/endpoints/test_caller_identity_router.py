@@ -137,6 +137,52 @@ def get_caller_context_happy():
 @endpoint_test(
     method="GET",
     path="/api/bots/{bot_id}/caller-context",
+    scenario="gateway_ctoken_compatibility",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={
+            "stage": "draft",
+            "entity_id": _OWNER_ID,
+            "ctoken": "opaque-gateway-compatibility-value",
+        },
+        headers={"x-user-id": _OWNER_ID},
+    ),
+    seed=_seed_editable_service_bot,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "capability": "caller_identity.v1",
+            "stage": "draft",
+            "editable": True,
+        },
+    ),
+)
+def get_caller_context_accepts_gateway_ctoken():
+    """Gateway compatibility query values do not change Caller reads."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/caller-context",
+    scenario="context_rejects_unknown_query",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={
+            "stage": "draft",
+            "unexpected": "rejected",
+        },
+        headers={"x-user-id": _OWNER_ID},
+    ),
+    seed=_seed_editable_service_bot,
+    expect=ExpectError(status=422),
+)
+def get_caller_context_rejects_unknown_query_parameter():
+    """Only the documented ctoken compatibility parameter is tolerated."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/caller-context",
     scenario="error",
     input=CaseInput(
         path_params={"bot_id": "missing_caller_identity_bot"},

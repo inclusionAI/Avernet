@@ -9,7 +9,7 @@ from ._protocols import (
 __all__ = [
     "FileTransferBackend",
     "MultipartSession",
-    "PartInfo",
     "ObjectItem",
     "ObjectListing",
+    "PartInfo",
 ]

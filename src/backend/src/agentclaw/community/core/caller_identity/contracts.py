@@ -38,6 +38,11 @@ class CallerIdentityReadOnlyError(Conflict):
         super().__init__("BOT_CONFIG_READ_ONLY")
 
 
+class CallerIdentityIrreversibleError(Conflict):
+    def __init__(self) -> None:
+        super().__init__("CALLER_TO_OWNER_UNSUPPORTED")
+
+
 class CallerLockEpochError(Conflict):
     def __init__(self) -> None:
         super().__init__("CALLER_LOCK_EPOCH_INVALID")
@@ -90,6 +95,14 @@ class CallerIamTokenContext:
     binding_id: int | None = None
 
 
+@dataclass(frozen=True)
+class CallerIamTokenOutcome:
+    """HTTP-neutral result of optional Caller identity installation."""
+
+    iam_token: str
+    error: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class CallerContext:
     capability: str
@@ -106,6 +119,7 @@ __all__ = [
     "CallerContext",
     "CallerIamTokenContext",
     "CallerIdentityAmbiguousError",
+    "CallerIdentityIrreversibleError",
     "CallerIdentityNotFoundError",
     "CallerIdentityPermissionError",
     "CallerIdentityReadOnlyError",

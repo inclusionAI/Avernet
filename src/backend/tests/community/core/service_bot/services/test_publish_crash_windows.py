@@ -371,16 +371,28 @@ async def test_upgrade_bot_not_found_abandons_and_falls_back():
 
 
 # ── retry / abandonment: ledger-driven decisions (#197 Task 10) ───────────────
-def test_is_online_release_recorded_reads_ledger():
+def _land_completed_op(svc, ledger, *, publish_id, kind, bot_uuid, baas_id):
+    """Open → record workflow → complete a ledger op landing ``baas_id`` on
+    ``bot_uuid`` (a completed BaaS deploy/lifecycle workflow)."""
+    op = svc._operation_runner.open_operation(
+        publish_id=publish_id, kind=kind, stage=PublishStage.ONLINE, bot_uuid=bot_uuid
+    )
+    ledger.record_workflow(op.id, baas_publish_id=baas_id, bot_uuid=bot_uuid)
+    ledger.complete(op.id)
+    return op
+
+
+def test_is_current_online_deployment_reads_ledger():
     ledger = _ledger()
     baas = FakeBaas()
     publish_service = Mock()
-    publish_service.get_publish_by_id.return_value = _record(PublishStatus.ONLINE_PUB.value)
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
     svc = _flow(ledger=ledger, baas=baas, build_service=Mock(),
                 publish_service=publish_service)
 
-    # No op, no ext marker (record ext has no 'publish') → not recorded.
-    assert svc.is_online_release_recorded(1) is False
+    # No online release op for this publish → not recorded.
+    assert svc.is_current_online_deployment(1) is False
 
     # An online op with only the workflow recorded (ID_RECORDED, binding/ext not
     # yet written) is NOT "recorded": the crash-resume guard must let the release
@@ -389,22 +401,231 @@ def test_is_online_release_recorded_reads_ledger():
         publish_id=1, kind="first_release", stage=PublishStage.ONLINE
     )
     ledger.record_workflow(op.id, baas_publish_id=901, bot_uuid="BOT-x")
-    assert svc.is_online_release_recorded(1) is False
+    assert svc.is_current_online_deployment(1) is False
 
-    # Only once the op COMPLETES (binding + ext done) is it "recorded".
+    # Once the op COMPLETES it is the latest deploy that landed on the bot → the
+    # live online release.
     ledger.complete(op.id)
-    assert svc.is_online_release_recorded(1) is True
+    assert svc.is_current_online_deployment(1) is True
 
 
-def test_is_online_release_recorded_ext_fallback_for_pre_ledger():
+def test_is_current_online_deployment_false_for_rolled_back_completed_op():
+    """A COMPLETED online op is stale once a later deploy lands on the same bot.
+
+    Rollback demotes a SUCCESS record to DRAFT and re-deploys the previous version
+    onto the shared online bot (a ROLLBACK_DEPLOY op with a higher baas_publish_id).
+    The demoted record's prior COMPLETED online op is no longer the latest deploy on
+    the bot, so a re-publish of that record must run the release again — the stale op
+    must NOT gate it (otherwise the online leg is skipped and no BaaS workflow is
+    ever issued for the new lifecycle)."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=baas, build_service=Mock(),
+                publish_service=publish_service)
+
+    # This record's online upgrade completed and is the latest deploy on the bot.
+    _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=901)
+    assert svc.is_current_online_deployment(1) is True
+
+    # Rollback re-deploys the previous version onto the SAME bot (higher baas id),
+    # on the target record (publish_id=2). The demoted record's op 901 is no longer
+    # the latest deploy → stale → not recorded → a re-publish runs the release.
+    _land_completed_op(svc, ledger, publish_id=2, kind="rollback_deploy",
+                       bot_uuid="BOT-live", baas_id=902)
+    assert svc.is_current_online_deployment(1) is False
+
+
+def test_is_current_online_deployment_true_after_restart_or_scale():
+    """A restart / scale lands on the same online bot (higher baas id) but does NOT
+    set the deployed version, so it must not make a live release look stale — else
+    the online_release gate would read the live release as superseded and a
+    crash-resume (or retry) of the task would re-issue a redundant deploy."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+
+    _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=901)
+    # A restart and a scale-up land afterwards on the same bot (version unchanged).
+    _land_completed_op(svc, ledger, publish_id=1, kind="restart",
+                       bot_uuid="BOT-live", baas_id=902)
+    _land_completed_op(svc, ledger, publish_id=1, kind="scale",
+                       bot_uuid="BOT-live", baas_id=903)
+    assert svc.is_current_online_deployment(1) is True
+
+
+def test_is_current_online_deployment_ignores_ext_marker():
+    """The answer is purely ledger-driven: an ext.publish.online marker with no
+    completed online release op in the ledger does NOT count as recorded. (The
+    ledger is the source of truth; a record with a live release always carries its
+    own COMPLETED first_release/upgrade op.)"""
     ledger = _ledger()
     svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
                 publish_service=Mock())
-    # No ledger op, but a legacy ext.publish.online marker (pre-ledger record).
     rec = _record(PublishStatus.ONLINE_PUB.value)
     rec.ext = {"publish": {"online": 500}}
     svc._publish_service.get_publish_by_id = Mock(return_value=rec)
-    assert svc.is_online_release_recorded(2) is True
+    assert svc.is_current_online_deployment(2) is False
+
+
+def test_sync_failure_outcome_corrects_release_op():
+    """A BaaS-wait failure must fail the ledger op, not just the record: the
+    release op COMPLETED at bookkeeping time, and without the correction the
+    failed deploy still reads as the live deployment — the online gate would
+    skip the re-issue on retry and the record would loop FAILED forever."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+
+    op = _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                            bot_uuid="BOT-live", baas_id=901)
+    assert svc.is_current_online_deployment(1) is True
+
+    svc._handle_sync_failure(
+        publish_id=1,
+        current_status=PublishStatus.ONLINE_PUB,
+        ext={},
+        progress={"status": "FAILED", "failed_devices": [{"id": "d1"}]},
+        baas_publish_id=901,
+    )
+
+    corrected = ledger.get_by_id(op.id)
+    assert corrected.state == PublishOperationState.FAILED.value
+    # The failed deploy no longer reads as the live deployment → the gate
+    # re-runs the release and open_operation opens a fresh attempt.
+    assert svc.is_current_online_deployment(1) is False
+
+
+def test_failed_deploy_does_not_supersede_live_release():
+    """Cross-record liveness: v1's release is live; v2's later upgrade lands
+    (higher baas id) then its workflow FAILS. Before #Task2 the COMPLETED v2 op
+    superseded v1 forever; after the outcome correction v1 reads current again."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+
+    _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=901)
+    _land_completed_op(svc, ledger, publish_id=2, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=902)
+    # v2's landed deploy supersedes v1 while it is (presumed) live/in-flight.
+    assert svc.is_current_online_deployment(1) is False
+
+    # v2's workflow terminally fails → outcome-corrected → it never took:
+    # v1's release is the latest *landed* deploy on the bot again.
+    assert ledger.fail_by_workflow(2, 902, "BaaS publish failed") is True
+    assert svc.is_current_online_deployment(1) is True
+
+
+def test_sync_restart_failure_outcome_corrects_restart_op():
+    """The restart wait failing corrects the RESTART op too — consistent ledger
+    semantics (a restart op is not a version-setting deploy, but its recorded
+    outcome should still reflect reality)."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+
+    op = _land_completed_op(svc, ledger, publish_id=1, kind="restart",
+                            bot_uuid="BOT-live", baas_id=905)
+    svc._handle_sync_failure(
+        publish_id=1,
+        current_status=PublishStatus.ONLINE_PUB,
+        ext={},
+        progress={"status": "FAILED"},
+        baas_publish_id=905,
+        error_message="Restart publish status: FAILED",
+    )
+    assert ledger.get_by_id(op.id).state == PublishOperationState.FAILED.value
+
+
+@pytest.mark.asyncio
+async def test_failed_deploy_retry_reissues_fresh_attempt_no_loop():
+    """The end-to-end loop guard: deploy issued → workflow FAILED (op
+    outcome-corrected) → the gate reads not-current → the release re-runs and
+    open_operation opens a FRESH attempt that re-issues. Without the outcome
+    correction the COMPLETED op read as live, the gate skipped the re-issue,
+    and the record looped FAILED forever."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+    svc = _upgrade_flow(ledger, baas, build_service)
+
+    record = _record(PublishStatus.ONLINE_PUB.value)
+    record.last_pub_id = 10
+    await _run_online_upgrade(svc, record)
+    assert svc.is_current_online_deployment(1) is True
+
+    # The BaaS wait fails → the poll's failure handler outcome-corrects the op.
+    svc._handle_sync_failure(
+        publish_id=1,
+        current_status=PublishStatus.ONLINE_PUB,
+        ext={},
+        progress={"status": "FAILED", "failed_devices": []},
+        baas_publish_id=901,
+    )
+    # Gate: not current → the online_release task re-runs the release work.
+    assert svc.is_current_online_deployment(1) is False
+
+    await _run_online_upgrade(svc, record)
+    # A SECOND issue reached BaaS via a fresh ledger attempt — no skip, no loop.
+    assert build_service.upgrade_async.await_count == 2
+    op = ledger.get_latest_by_kind(1, "upgrade", "online")
+    assert op.attempt == 2
+    assert op.state == PublishOperationState.COMPLETED.value
+    assert op.baas_publish_id == 902
+    assert svc.is_current_online_deployment(1) is True
+    # Exactly the two attempts on the bot's timeline — no duplicate bot.
+    assert len(baas.list_bot_publishes("BOT-live")) == 2
+
+
+def test_online_retry_poll_follows_release_not_restart_sync():
+    """After an ONLINE_PUB retry the record's ext carries NO retry flag, so the
+    progress poll must drive the release wait (ext.publish.online) instead of
+    redirecting to sync_restart_progress — which would read a stale restart
+    workflow (or nothing) and strand the record."""
+    ledger = _ledger()
+    publish_service = Mock()
+    rec = _record(PublishStatus.ONLINE_PUB.value)
+    rec.ext = {"source_status": PublishStatus.ONLINE_PUB.value,
+               "publish": {"online": 901}}
+    publish_service.get_publish_by_id.return_value = rec
+    svc = _flow(ledger=ledger, baas=FakeBaas(), build_service=Mock(),
+                publish_service=publish_service)
+    svc.sync_restart_progress = Mock()
+    svc.get_baas_publish_progress = Mock(return_value={"status": "RUNNING"})
+
+    result = svc.advance_publish_progress(1)
+
+    svc.sync_restart_progress.assert_not_called()
+    svc.get_baas_publish_progress.assert_called_once_with(baas_publish_id=901)
+    assert "RUNNING" in result.message
+
+    # Contrast: with the restart-branch flag set, the redirect still fires.
+    rec.ext = {"retry": True, "source_status": PublishStatus.VALIDATE_PUB.value}
+    svc.sync_restart_progress = Mock(return_value="REDIRECTED")
+    assert svc.advance_publish_progress(1) == "REDIRECTED"
 
 
 def test_abandon_inflight_operations_marks_nonterminal():
@@ -702,3 +923,306 @@ async def test_offline_destroy_stop_failure_propagates_for_retry():
     with pytest.raises(RuntimeError):
         await svc.execute_offline_destroy(publish_id=5, stage="online", operator="op")
     svc._release_binding.assert_not_called()
+
+
+# ── restart: atom rebase + crash-safe recreate leg ────────────────────────────
+def _recreate_restart_flow(ledger, baas, build_service, *, record, bot_uuid="BOT-gone"):
+    """Flow wired for execute_restart's resolution reads (record → binding →
+    bot → artifact) with a real ledger + FakeBaas."""
+    svc = _flow(ledger=ledger, baas=baas, build_service=build_service)
+    svc._publish_service.get_publish_by_id = Mock(return_value=record)
+    svc._publish_service.get_device_binding_by_id = Mock(
+        return_value=Mock(device_id=bot_uuid)
+    )
+    svc._publish_service.create_device_binding = Mock(return_value=55)
+    svc._publish_service.update_publish_ext = Mock()
+    svc._bot_service.get_bot = Mock(return_value={"bot_id": "b2", "entity_id": "u1"})
+    svc.refresh_publish_handle = Mock()
+    return svc
+
+
+def _restart_record(stage="online"):
+    rec = _record(PublishStatus.SUCCESS.value)
+    rec.ext = {"migration_path": "/m", "config_artifact": None,
+               "binding": {stage: 88}}
+    return rec
+
+
+@pytest.mark.asyncio
+async def test_restart_bot_not_found_recreates_with_fresh_op_and_binding():
+    """The recreate leg: RESTART op ABANDONED, a FIRST_RELEASE op completes with
+    a NEW bot + NEW binding (the old binding pointing at the gone bot is never
+    reused), and ext.binding/publish/restart.<stage> move to the new ids —
+    restart.<stage> keeps sync_restart_progress resolvable after the RESTART
+    op's abandonment left no ledger workflow id."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-new", "CREATE")
+        return {"bot_uuid": "BOT-new", "publish_id": wid, "success": True}
+
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=_restart_record())
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    assert result["restart_publish_id"] == 901
+
+    restart_op = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_op.state == PublishOperationState.ABANDONED.value
+    assert restart_op.last_error == "BOT_NOT_FOUND -> recreate"
+
+    fr = ledger.get_latest_by_kind(1, "first_release", "online")
+    assert fr.state == PublishOperationState.COMPLETED.value
+    assert fr.bot_uuid == "BOT-new"
+    assert fr.baas_publish_id == 901
+    assert fr.result["binding_id"] == 55
+
+    # A NEW binding for the new bot; the gone bot's binding is not reused.
+    binding_kwargs = svc._publish_service.create_device_binding.call_args.kwargs
+    assert binding_kwargs["device_id"] == "BOT-new"
+
+    # One ext write carrying all three read handles for the stage.
+    ext = svc._publish_service.update_publish_ext.call_args.kwargs["ext"]
+    assert ext["binding"]["online"] == 55
+    assert ext["publish"]["online"] == 901
+    assert ext["restart"]["online"] == 901
+
+    svc.refresh_publish_handle.assert_called_once_with(55, 901)
+
+
+@pytest.mark.asyncio
+async def test_restart_recreate_crash_resume_converges_like_first_release():
+    """Crash in the recreate's issue→record window. The resume re-runs
+    execute_restart: a fresh RESTART attempt re-classifies BOT_NOT_FOUND, and
+    the recreate RESUMES the same FIRST_RELEASE op — creation semantics, so the
+    re-issue is the bounded Option-C orphan (identical to a normal first
+    release; the former inline recreate had this window with no op bookkeeping
+    at all). The binding is minted once and the op converges on the recorded
+    workflow."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-new", "CREATE")
+        return {"bot_uuid": "BOT-new", "publish_id": wid, "success": True}
+
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=_restart_record())
+
+    _crash_before_record(ledger)
+    with pytest.raises(RuntimeError):
+        await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    assert build_service.release_async.await_count == 1
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    assert result["success"] is True
+
+    # Bounded re-issue (accepted creation orphan), binding minted exactly once,
+    # op converged COMPLETED on the second (recorded) workflow.
+    assert build_service.release_async.await_count == 2
+    fr = ledger.get_latest_by_kind(1, "first_release", "online")
+    assert fr.attempt == 1              # SAME op resumed, not a new attempt
+    assert fr.state == PublishOperationState.COMPLETED.value
+    assert fr.baas_publish_id == 902
+    assert svc._publish_service.create_device_binding.call_count == 1
+    # Each delivery attempt opened its own RESTART attempt, both abandoned.
+    assert ledger.get_latest_by_kind(1, "restart", "online").attempt == 2
+
+
+@pytest.mark.asyncio
+async def test_restart_of_live_current_deployment_still_issues_baas_call():
+    """The point-2 guard end-to-end: the record's release is COMPLETED and
+    current, yet restart must still re-deploy via BaaS — the skip-if-current
+    check belongs to the online_release gate alone."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+    record = _restart_record()
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=record,
+                        bot_uuid="BOT-live")
+    _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
+                       bot_uuid="BOT-live", baas_id=850)
+    assert svc.is_current_online_deployment(1) is True
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.upgrade_async.assert_awaited_once()
+    restart_op = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_op.state == PublishOperationState.COMPLETED.value
+    # The restart (not sets_deployed_version) leaves the release current.
+    assert svc.is_current_online_deployment(1) is True
+
+
+@pytest.mark.asyncio
+async def test_verify_stage_restart_bot_not_found_gets_same_recreate():
+    """execute_restart is stage-agnostic: a verify-stage restart whose bot is
+    gone takes the same crash-safe recreate leg (verify-stage ledger ops + ext
+    keys; the verify release/retry flow itself is untouched)."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-new-v", "CREATE")
+        return {"bot_uuid": "BOT-new-v", "publish_id": wid, "success": True}
+
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    svc = _recreate_restart_flow(ledger, baas, build_service,
+                        record=_restart_record(stage="verify"))
+
+    result = await svc.execute_restart(publish_id=1, stage="verify", operator="op")
+
+    assert result["success"] is True
+    assert ledger.get_latest_by_kind(1, "restart", "verify").state == \
+        PublishOperationState.ABANDONED.value
+    fr = ledger.get_latest_by_kind(1, "first_release", "verify")
+    assert fr.state == PublishOperationState.COMPLETED.value
+    ext = svc._publish_service.update_publish_ext.call_args.kwargs["ext"]
+    assert ext["restart"]["verify"] == 901
+    assert ext["binding"]["verify"] == 55
+
+
+@pytest.mark.asyncio
+async def test_restart_recreate_crash_before_complete_resumes_idempotently():
+    """A crash between the recreate's ext write and its complete_operation
+    leaves the FIRST_RELEASE op ID_RECORDED while ext already points at the NEW
+    bot + its recreate workflow. Because RESTART_TASK is at-least-once, the
+    redelivery of the SAME restart request must finish that bookkeeping and
+    return the recreate's existing workflow — NOT open a second RESTART op and
+    issue another deploy (PR #360 review: doing so left two concurrent deploy
+    workflows for one restart)."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+
+    async def release_async(**kw):
+        wid = baas.issue("BOT-new", "CREATE")
+        return {"bot_uuid": "BOT-new", "publish_id": wid, "success": True}
+
+    build_service.release_async = AsyncMock(side_effect=release_async)
+    record = _restart_record()
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=record)
+
+    # Crash seam: complete_operation dies on its first call — after the recreate
+    # already wrote ext (binding/publish/restart → the new ids).
+    real_complete = ledger.complete
+    state = {"crashed": False}
+
+    def crash_once(op_id):
+        if not state["crashed"]:
+            state["crashed"] = True
+            raise RuntimeError("pod died after ext write, before complete")
+        return real_complete(op_id)
+
+    ledger.complete = crash_once
+
+    with pytest.raises(RuntimeError):
+        await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    fr = ledger.get_latest_by_kind(1, "first_release", "online")
+    assert fr.state == PublishOperationState.ID_RECORDED.value  # stranded
+    restart_before = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_before.state == PublishOperationState.ABANDONED.value
+
+    # Re-delivery: ext points at the NEW bot + workflow 901 (the recreate's
+    # landed ext write on the record the resolution re-reads).
+    record.ext = {"migration_path": "/m", "config_artifact": None,
+                  "binding": {"online": 55}, "publish": {"online": 901},
+                  "restart": {"online": 901}}
+    svc._publish_service.get_device_binding_by_id = Mock(
+        return_value=Mock(device_id="BOT-new")
+    )
+    # An upgrade here would be the bug; wire it to prove it is never called.
+    build_service.upgrade_async = AsyncMock(
+        side_effect=AssertionError("redelivery must not issue a second deploy")
+    )
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    assert result["success"] is True
+    # Idempotent: the redelivery returns the recreate's existing workflow.
+    assert result["restart_publish_id"] == 901
+
+    # The stranded recreate op is finalized...
+    fr = ledger.get_latest_by_kind(1, "first_release", "online")
+    assert fr.state == PublishOperationState.COMPLETED.value
+    assert fr.baas_publish_id == 901
+    # ...and NO new RESTART attempt was opened, NO second deploy issued.
+    restart_after = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_after.attempt == restart_before.attempt
+    assert restart_after.state == PublishOperationState.ABANDONED.value
+    build_service.upgrade_async.assert_not_awaited()
+    assert build_service.release_async.await_count == 1
+    # Exactly one deploy workflow exists on the recreated bot.
+    assert len(baas.list_bot_publishes("BOT-new")) == 1
+
+
+@pytest.mark.asyncio
+async def test_restart_does_not_finalize_normal_release_crash_window():
+    """The finalize short-circuit must be specific to restart-recreate. A normal
+    online first release that crashed after record_release_ext (ext.publish.online
+    written, op still ID_RECORDED) but before complete_operation leaves a dangling
+    FIRST_RELEASE op too — but it never wrote ext.restart. A restart in that window
+    (restart_bot accepts ONLINE_PUB) must NOT mistake it for a recreate: it must
+    actually restart the existing bot, not finalize the release op and return."""
+    ledger = _ledger()
+    baas = FakeBaas()
+    build_service = Mock()
+
+    async def upgrade_async(**kw):
+        wid = baas.issue("BOT-live", "UPDATE")
+        return {"publish_id": wid, "success": True}
+
+    build_service.upgrade_async = AsyncMock(side_effect=upgrade_async)
+
+    # The crashed normal-release op: ID_RECORDED, workflow 850, ext.publish set
+    # to it — but NO ext.restart entry (a normal release never writes restart).
+    stranded = ledger.insert({
+        "publish_id": 1, "operation_kind": "first_release", "stage": "online",
+        "attempt": 1, "request_id": "req-rel", "bot_uuid": "BOT-live", "env": "dev",
+    })
+    ledger.record_workflow(stranded.id, baas_publish_id=850, bot_uuid="BOT-live")
+
+    record = _record(PublishStatus.ONLINE_PUB.value)
+    record.ext = {"migration_path": "/m", "config_artifact": None,
+                  "binding": {"online": 88}, "publish": {"online": 850}}
+    svc = _recreate_restart_flow(ledger, baas, build_service, record=record,
+                                 bot_uuid="BOT-live")
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    # It actually restarted: a fresh RESTART op issued a new deploy (901, the
+    # FakeBaas next id), NOT a short-circuit returning the release workflow 850.
+    build_service.upgrade_async.assert_awaited_once()
+    assert result["restart_publish_id"] == 901
+    assert result["restart_publish_id"] != 850
+    restart_op = ledger.get_latest_by_kind(1, "restart", "online")
+    assert restart_op.state == PublishOperationState.COMPLETED.value
+    assert restart_op.baas_publish_id == 901
+    # The dangling release op is left for the online_release task to finalize —
+    # not our concern here, and NOT completed by the restart.
+    assert ledger.get_by_id(stranded.id).state == PublishOperationState.ID_RECORDED.value

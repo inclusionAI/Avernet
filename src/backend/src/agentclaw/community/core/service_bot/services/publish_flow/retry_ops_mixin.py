@@ -36,6 +36,30 @@ _RETRYABLE_SOURCE_STATUSES = frozenset({
     PublishStatus.SUCCESS,
 })
 
+# Pre-failure statuses whose retry is a BaaS-level restart (re-deploy of the
+# existing bot) rather than re-driving a durable release/build path:
+#
+# * ``VALIDATE_PUB`` — the verify release self-advances BUILT -> VALIDATE_PUB
+#   (the transition IS its idempotency guard), so the verify release work
+#   cannot idempotently re-enter; a BaaS-wait failure is recovered by
+#   re-deploying. Making verify re-enterable like online (run within its wait
+#   state behind its own liveness gate) is deferred — see
+#   specs/2026-07-23-online-release-retry-fix (out of scope: verify symmetry).
+# * ``SUCCESS`` — a live record only reaches FAILED via a failed restart-sync,
+#   so retry re-restarts. It must NOT route through the online-release path:
+#   the record's release IS the current deployment, so the gate would skip the
+#   BaaS call entirely and the retry would do nothing.
+#
+# Every other retryable status re-drives its durable path: BUILDING/BUILT ->
+# verify_flow; VALIDATING/ONLINE_PUB -> online_release, whose
+# ``is_current_online_deployment`` gate + ledger decide run-vs-skip and
+# first-release-vs-upgrade — retry itself never asks whether the release was
+# recorded (that heuristic was the #341-era regression).
+_RESTART_RETRY_STATUSES = frozenset({
+    PublishStatus.VALIDATE_PUB,
+    PublishStatus.SUCCESS,
+})
+
 
 class RetryOpsMixin:
     """Failed-flow retry orchestration, mixed into PublishFlowService."""
@@ -52,9 +76,13 @@ class RetryOpsMixin:
         - building → roll back to BUILDING, rebuild + verify publish
         - built → roll back to BUILT, re-run verify publish
         - validate_pub → roll back to VALIDATE_PUB, call BaaS restart to retry
-        - online_pub → roll back to ONLINE_PUB; if the online release was already
-          recorded (BaaS-wait failure) call BaaS restart, otherwise re-run the
-          online release work via the online_release task
+          (the verify release cannot re-enter; see _RESTART_RETRY_STATUSES)
+        - online_pub → roll back to ONLINE_PUB and re-run the online_release
+          task unconditionally: its ``is_current_online_deployment`` gate and
+          the operation ledger decide run-vs-skip and first-release-vs-upgrade,
+          so retry never needs to ask whether the release was recorded
+        - success → roll back to SUCCESS, call BaaS restart to retry (a live
+          record only fails via a failed restart-sync)
 
         Args:
             publish_id: Publish record ID
@@ -96,11 +124,23 @@ class RetryOpsMixin:
         # source_status), validated against the retryable set.
         rollback_status = self._resolve_retry_rollback_status(source_status, publish_id)
 
-        # Step 5: roll back FAILED -> rollback_status and set the retry flag.
-        # ``retry=True`` tells the progress poll to redirect to
-        # ``sync_restart_progress`` (restart mode); the restart branch clears it
-        # again if the restart never actually submits.
-        ext["retry"] = True
+        # Step 5: roll back FAILED -> rollback_status; the dispatch is a pure
+        # function of rollback_status, so decide it before the write and set the
+        # retry flag ONLY for the restart branch. For VALIDATE_PUB,
+        # ``retry=True`` redirects the progress poll to ``sync_restart_progress``
+        # (restart mode); for SUCCESS the flag is inert — SUCCESS is not a poll
+        # wait state, so that restart is driven by the user-called
+        # /restart_status endpoint (pre-existing shape, flag kept for
+        # consistency). On the release/build branches the flag must be absent
+        # (cleared here in the same atomic write, in case a prior retry cycle
+        # left it — e.g. an inert SUCCESS-branch flag), or the poll would sync a
+        # stale restart workflow instead of the fresh release
+        # (``ext.publish.<stage>``) and strand the record.
+        use_restart = rollback_status in _RESTART_RETRY_STATUSES
+        if use_restart:
+            ext["retry"] = True
+        else:
+            self._clear_retry_flag(ext)
         try:
             self._update_publish_status(
                 publish_id=publish_id,
@@ -118,7 +158,7 @@ class RetryOpsMixin:
         )
 
         # Step 6: dispatch by how far the failed attempt had progressed.
-        if self._retry_uses_baas_restart(publish_id, rollback_status):
+        if use_restart:
             return await self._retry_via_restart(publish_id, operator, rollback_status)
         if rollback_status in (PublishStatus.VALIDATING, PublishStatus.ONLINE_PUB):
             return self._retry_via_online_release(publish_id, operator, rollback_status)
@@ -143,26 +183,6 @@ class RetryOpsMixin:
             )
         return rollback_status
 
-    def _retry_uses_baas_restart(
-        self, publish_id: int, rollback_status: PublishStatus
-    ) -> bool:
-        """A BaaS-level restart is the retry when the mutation already reached BaaS
-        and *it* failed:
-
-        * ``VALIDATE_PUB`` — the verify publish was in its BaaS wait;
-        * ``SUCCESS`` — a *restart* of a live online bot failed (a SUCCESS record
-          only reaches FAILED via a failed restart-sync), so retry re-restarts it;
-        * ``ONLINE_PUB`` whose online release the ledger records as done — a
-          BaaS-wait failure, so restart. An ONLINE_PUB whose release was never
-          recorded means the release *work* itself failed → re-run it instead.
-        """
-        if rollback_status in (PublishStatus.VALIDATE_PUB, PublishStatus.SUCCESS):
-            return True
-        return (
-            rollback_status == PublishStatus.ONLINE_PUB
-            and self.is_online_release_recorded(publish_id)
-        )
-
     async def _retry_via_restart(
         self, publish_id: int, operator: str, rollback_status: PublishStatus
     ) -> PublishFlowResult:
@@ -186,8 +206,10 @@ class RetryOpsMixin:
             restart_result = {"success": False, "message": str(e)}
         success = restart_result.get("success", False)
         if success:
-            # The durable poll (retry-flag redirect → sync_restart_progress) drives
-            # the record out of its *_PUB wait state.
+            # VALIDATE_PUB: the durable poll (retry-flag redirect →
+            # sync_restart_progress) drives the record out of its wait state.
+            # SUCCESS: not a poll wait state — the poll completes immediately and
+            # the restart is settled by the user-called /restart_status endpoint.
             enqueue_progress_poll(self._task_queue_service, publish_id=publish_id)
         else:
             # The restart never submitted → clear the retry flag so a stray poll does
@@ -206,7 +228,14 @@ class RetryOpsMixin:
         self, publish_id: int, operator: str, rollback_status: PublishStatus
     ) -> PublishFlowResult:
         """Re-open ONLINE_PUB (idempotent if already there) and re-enqueue the
-        online_release task, which re-runs the release work."""
+        online_release task — unconditionally for an online-stage retry.
+
+        The task's ``is_current_online_deployment`` gate + the operation ledger
+        own the recovery decision: a release that never landed (or whose
+        workflow failed → op outcome-corrected FAILED) re-runs as a resumed op
+        or a fresh attempt; a release that is still the live deployment is
+        skipped and the enqueued poll settles it. Retry deliberately does not
+        pre-judge restart-vs-rerun here."""
         self._advance_status(
             publish_id, PublishStatus.ONLINE_PUB, PublishStatus.VALIDATING
         )

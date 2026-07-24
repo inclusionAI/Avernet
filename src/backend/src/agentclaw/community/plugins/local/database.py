@@ -158,6 +158,7 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
         import agentclaw.community.core.session_resources.repository.models  # noqa: F401  ac_session_resource
         import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401  governance_*
         import agentclaw.community.core.caller_identity.models  # noqa: F401  caller identity tables
+        import agentclaw.community.core.user_list.models  # noqa: F401  ac_entity_user_list
 
         # bot_chat uses a private ``Base = declarative_base()`` instead of
         # the canonical ``agentclaw.community.core.base.Base``. Side-effect import

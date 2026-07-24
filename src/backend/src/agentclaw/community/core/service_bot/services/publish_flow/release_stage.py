@@ -27,9 +27,6 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
-from agentclaw.community.core.service_bot.services.publish_flow.errors import (
-    PublishFlowServiceError,
-)
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
     PublishExtState,
 )
@@ -39,6 +36,8 @@ from agentclaw.community.core.service_bot.services.publish_flow.provider_behavio
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     PublishOperationRunner,
+    TargetBotGoneError,
+    acquire_deploy_workflow,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
@@ -116,11 +115,6 @@ ONLINE_SPEC = StageSpec(
 )
 
 
-class _BotNotFoundError(Exception):
-    """Internal signal: BaaS upgrade returned BOT_NOT_FOUND — abandon the upgrade
-    op and fall back to a first release."""
-
-
 class ReleaseStageRunner:
     """Run a release for one stage — first-release or upgrade."""
 
@@ -168,16 +162,10 @@ class ReleaseStageRunner:
         # overlay, persisted below so a future restart/rollback can reproduce it.
         delivery, overrides = self._ext_state.compose_live(publish_record, spec.stage)
 
-        # Crash-safe issuance (#197): open the ledger op, then acquire the workflow
-        # (issue the BaaS create at most once — a resume adopts the in-doubt bot via
-        # its returned bot_uuid rather than creating a second one).
-        op = self._operation_runner.open_operation(
-            publish_id=publish_id,
-            kind=PublishOperationKind.FIRST_RELEASE,
-            stage=spec.stage,
-            operator=operator,
-        )
-
+        # Crash-safe issuance (#197) via the deploy atom: open the ledger op, then
+        # acquire the workflow (issue the BaaS create at most once — a resume
+        # adopts the in-doubt bot via its returned bot_uuid rather than creating a
+        # second one). The atom validates that the creation recorded both ids.
         async def _issue():
             release_kwargs = dict(
                 bot=bot,
@@ -195,13 +183,16 @@ class ReleaseStageRunner:
                 release_kwargs["version"] = f"{publish_record.version}"
             return await self._build_service.release_async(**release_kwargs)
 
-        op = await self._operation_runner.acquire_workflow(op, _issue)
+        op = await acquire_deploy_workflow(
+            self._operation_runner,
+            publish_id=publish_id,
+            kind=PublishOperationKind.FIRST_RELEASE,
+            stage=spec.stage,
+            operator=operator,
+            issue=_issue,
+        )
         bot_uuid = op.bot_uuid
         baas_publish_id = op.baas_publish_id
-        if not bot_uuid:
-            raise PublishFlowServiceError("BaaS layer did not return bot_uuid")
-        if not baas_publish_id:
-            raise PublishFlowServiceError("BaaS layer did not return publish_id")
 
         # Two follow-up steps: (1) create the device binding (recorded into the op's
         # result so a re-run reuses it rather than creating a second binding), (2)
@@ -267,20 +258,13 @@ class ReleaseStageRunner:
         # overlay, persisted below via the provider's stage-promotion write.
         delivery, overrides = self._ext_state.compose_live(publish_record, spec.stage)
 
-        # Crash-safe issuance (#197): an existing-bot mutation → the runner adopts
-        # an in-doubt workflow (queried by bot_uuid) on resume instead of issuing a
-        # second upgrade. A BOT_NOT_FOUND from BaaS is signalled out of ``issue`` so
-        # the op is abandoned and the first-release fallback opens its own op.
-        op = self._operation_runner.open_operation(
-            publish_id=publish_id,
-            kind=PublishOperationKind.UPGRADE,
-            stage=spec.stage,
-            bot_uuid=bot_uuid,
-            operator=operator,
-        )
-
+        # Crash-safe issuance (#197) via the deploy atom: an existing-bot mutation
+        # → the runner adopts an in-doubt workflow (queried by bot_uuid) on resume
+        # instead of issuing a second upgrade. The atom classifies BOT_NOT_FOUND
+        # uniformly — it abandons the upgrade op and raises, and the first-release
+        # fallback opens its own op.
         async def _issue():
-            upgrade_result = await self._build_service.upgrade_async(
+            return await self._build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot,
                 user_id=owner_id,
@@ -290,22 +274,24 @@ class ReleaseStageRunner:
                 version=version,
                 delivery=delivery,
             )
-            if (
-                upgrade_result.get("success") is False
-                and upgrade_result.get("error_code") == "BOT_NOT_FOUND"
-            ):
-                raise _BotNotFoundError()
-            return upgrade_result
 
         try:
-            op = await self._operation_runner.acquire_workflow(op, _issue)
-        except _BotNotFoundError:
+            op = await acquire_deploy_workflow(
+                self._operation_runner,
+                publish_id=publish_id,
+                kind=PublishOperationKind.UPGRADE,
+                stage=spec.stage,
+                operator=operator,
+                issue=_issue,
+                bot_uuid=bot_uuid,
+                bot_gone_reason="BOT_NOT_FOUND -> first release",
+            )
+        except TargetBotGoneError:
             logger.warning(
                 "[ReleaseStageRunner.upgrade_release] %s upgrade target bot not "
                 "found, fallback to first release: publish_id=%s, bot_uuid=%s",
                 spec.stage.value, publish_id, bot_uuid,
             )
-            self._operation_runner.abandon_operation(op, "BOT_NOT_FOUND -> first release")
             return await fallback(
                 publish_record=publish_record,
                 operator=operator,
@@ -314,8 +300,6 @@ class ReleaseStageRunner:
             )
 
         baas_publish_id = op.baas_publish_id
-        if not baas_publish_id:
-            raise PublishFlowServiceError("BaaS layer upgrade did not return publish_id")
 
         # Reuse the existing binding; update ext (binding/publish refs, provider
         # per-stage promotion state, refresh the teclaw read handle).

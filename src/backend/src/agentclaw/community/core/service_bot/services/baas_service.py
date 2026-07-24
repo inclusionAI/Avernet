@@ -1040,9 +1040,17 @@ class BaasService:  # pragma: no cover
         try:
             return self._post_bots_api(path=path, payload=payload, action=action)
         except httpx.HTTPStatusError as e:
-            raise BaasServiceError(
+            error = BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+            # Preserve the HTTP payload for structured extraction downstream:
+            # BotBuildService._extract_baas_error_info reads ``.response.json()``
+            # to classify errors like the 404 ``{"detail": {"error_code":
+            # "BOT_NOT_FOUND"}}``. Dropping it here made the teclaw path unable
+            # to take the gone-bot fallback (first-release / restart-recreate)
+            # that the ARCA path (which re-raises the HTTPStatusError) has.
+            error.response = e.response
+            raise error from e
         except BaasServiceError:
             raise
         except Exception as e:
@@ -1853,9 +1861,22 @@ class BaasService:  # pragma: no cover
             # only floods the alarm/ticket pipeline. Whether a failure is truly
             # alarm-worthy is the caller's call, made where the business context
             # is known.
+            #
+            # The BaaS app only ever answers this endpoint with JSON
+            # (200/404/503/500); a 3xx status here is injected by the fronting
+            # gateway (Spanner) before the request reaches BaaS. Its ``Location``
+            # says where the request is being redirected (login/SSO host vs a
+            # moved route), and bot_uuid/tenant/device_affinity let us cluster
+            # intermittent redirects by bot/tenant/target device — the data
+            # needed to tell a partial-instance/routing fault apart from a
+            # blanket auth requirement.
+            location = e.response.headers.get("location")
             logger.warning(
                 f"[BaasService.get_ws_info_by_bot_uuid] "
-                f"HTTP error: {e.response.status_code} - {e.response.text}"
+                f"HTTP error: {e.response.status_code} - "
+                f"bot_uuid={bot_uuid}, tenant={effective_tenant}, "
+                f"device_affinity={device_affinity}, location={location!r} - "
+                f"{e.response.text}"
             )
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
@@ -2270,7 +2291,7 @@ class BaasService:  # pragma: no cover
             stage_str = stage
             ext_info = ext_info or {}
             if ext_info.get("biz_id"):
-                stage_str += f"-{ext_info.get("biz_id")}"
+                stage_str += f"-{ext_info.get('biz_id')}"
             start_service_cmd += f" --stage {stage_str}"
 
         if version:
@@ -3147,6 +3168,45 @@ class BaasService:  # pragma: no cover
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
 
+    def append_caller_outbound_rule(
+        self,
+        paas_device_id: str,
+        caller_rule: OutBoundOperationRule,
+    ) -> bool:
+        """Append one validated Caller overlay without replacing base rules."""
+        payload = self._outbound_rule_to_dict(caller_rule)
+        logger.info(
+            "caller_outbound_append_started rule_count=%s",
+            len(caller_rule.header_operation_rules),
+        )
+        try:
+            response = self._http.put(
+                f"/api/v1/paas/devices/{paas_device_id}/outbound-rule?mode=append",
+                json=payload,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            if response_data.get("code") != 0:
+                logger.warning("caller_outbound_append_rejected")
+                raise BaasServiceError("BaaS Caller outbound append rejected")
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "caller_outbound_append_http_failed status_code=%s",
+                exc.response.status_code,
+            )
+            raise BaasServiceError("BaaS Caller outbound append failed") from exc
+        except BaasServiceError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "caller_outbound_append_failed error_type=%s",
+                type(exc).__name__,
+            )
+            raise BaasServiceError("BaaS Caller outbound append failed") from exc
+        logger.info("caller_outbound_append_succeeded")
+        return True
+
     def update_caller_identity(
         self,
         *,
@@ -3154,8 +3214,6 @@ class BaasService:  # pragma: no cover
         owner_user_id: str,
         caller_user_id: str,
         caller_token: CallerToken,
-        agent_pass_token: str,
-        agent_code: str,
         stage: str,
         publish_id: int | None,
         entity_id: str | None = None,
@@ -3166,7 +3224,6 @@ class BaasService:  # pragma: no cover
         if (
             not caller_token.access_token
             or caller_token.subject_user_id != caller_user_id
-            or not agent_pass_token
         ):
             raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
 
@@ -3222,37 +3279,24 @@ class BaasService:  # pragma: no cover
         if not self._is_valid_paas_device_id(paas_device_id):
             raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
 
-        base_rule = self._build_outbound_operation_rule(
-            bot_id=bot_id,
-            owner_id=owner_user_id,
-            agent_pass_token=agent_pass_token,
-            agent_code=agent_code,
-        )
         caller_rule = self._outbound_rule_provider.build_caller_rule(
             caller_token=caller_token.access_token,
         )
         if not self._is_valid_caller_rule(caller_rule, caller_token.access_token):
             raise CallerCredentialError(CALLER_OUTBOUND_INVALID)
         assert caller_rule is not None
-        complete_rule = OutBoundOperationRule(
-            header_operation_rules=(
-                base_rule.header_operation_rules
-                + caller_rule.header_operation_rules
-            )
-        )
-
         logger.info(
             "caller_outbound_update_started bot_id=%s stage=%s rule_count=%s "
             "entity_scoped=%s supplied_binding_id=%s test_exchange=%s",
             bot_id,
             stage,
-            len(complete_rule.header_operation_rules),
+            len(caller_rule.header_operation_rules),
             entity_id is not None,
             use_supplied_binding_id,
             is_test_exchange,
         )
         try:
-            updated = self.update_device_outbound_rule(paas_device_id, complete_rule)
+            updated = self.append_caller_outbound_rule(paas_device_id, caller_rule)
         except Exception as exc:
             logger.warning(
                 "caller_outbound_update_failed bot_id=%s stage=%s error_type=%s "

@@ -45,6 +45,7 @@ from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
+from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.log import get_logger
@@ -114,6 +115,7 @@ def build_injector(
         HarnessModule(),
         BotCollaboratorModule(),
         CallerIdentityModule(),
+        UserListModule(),
         BotDormantModule(),
         TaskQueueModule(),
         QualityModule(),

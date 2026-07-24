@@ -24,14 +24,13 @@ from secbaas.community.api.bot_runtime import (
     BotNotFoundError,
     CancelUploadResponse,
     CompleteUploadResponse,
+    DeleteTransferResponse,
     GetDownloadUrlResponse,
     GetUploadUrlResponse,
     NoActiveDevicesError,
     NoDevicesFoundError,
     OssObjectNotFoundError,
     ShareLinkResponse,
-    StagingDeleteResponse,
-    StagingListResponse,
     TransferNotFoundError,
     TransferStateConflictError,
 )
@@ -472,94 +471,62 @@ async def test_cancel_upload_generic_exception(mock_dispatcher):
     assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"
 
 
-# ── list_staging tests ───────────────────────────────────────────────
+# ── delete_transfer tests ──────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_list_staging_success(mock_dispatcher):
-    """GET staging returns 200 with StagingListResponse."""
-    mock_dispatcher.dispatch_list_staging.return_value = StagingListResponse(
-        prefix="",
-        items=[{"key": "k1", "size": 100, "last_modified": "2025-01-01"}],
-        truncated=False,
-    )
-    resp = await _get("/api/v1/bots/t1/bot-001/files/staging")
-
-    assert resp.status_code == 200
-    assert resp.json()["data"]["truncated"] is False
-
-
-@pytest.mark.asyncio
-async def test_list_staging_generic_exception(mock_dispatcher):
-    """GET staging with generic Exception returns 500."""
-    mock_dispatcher.dispatch_list_staging.side_effect = RuntimeError("boom")
-    resp = await _get("/api/v1/bots/t1/bot-001/files/staging")
-
-    assert resp.status_code == 500
-    assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"
-
-
-# ── delete_staging tests ─────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_delete_staging_success(mock_dispatcher):
-    """DELETE staging returns 200."""
-    mock_dispatcher.dispatch_delete_staging.return_value = StagingDeleteResponse(
-        deleted_key="k1",
+async def test_delete_transfer_success(mock_dispatcher):
+    """DELETE transfer returns 200 with DeleteTransferResponse."""
+    mock_dispatcher.dispatch_delete_transfer.return_value = DeleteTransferResponse(
         transfer_id="tf-001",
         previous_status="DONE",
         new_status="DELETED",
     )
-    resp = await _delete("/api/v1/bots/t1/bot-001/files/staging?key=k1")
+    resp = await _delete("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
 
     assert resp.status_code == 200
-    assert resp.json()["data"]["deleted_key"] == "k1"
+    data = resp.json()["data"]
+    assert data["transfer_id"] == "tf-001"
+    assert data["new_status"] == "DELETED"
 
 
 @pytest.mark.asyncio
-async def test_delete_staging_transfer_not_found(mock_dispatcher):
-    """DELETE staging with TransferNotFoundError returns 404."""
-    mock_dispatcher.dispatch_delete_staging.side_effect = TransferNotFoundError("nope")
-    resp = await _delete("/api/v1/bots/t1/bot-001/files/staging?key=k1")
+async def test_delete_transfer_not_found(mock_dispatcher):
+    """DELETE transfer with TransferNotFoundError returns 404."""
+    mock_dispatcher.dispatch_delete_transfer.side_effect = TransferNotFoundError("nope")
+    resp = await _delete("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
 
     assert resp.status_code == 404
     assert resp.json()["detail"]["error"] == "TRANSFER_NOT_FOUND"
 
 
 @pytest.mark.asyncio
-async def test_delete_staging_not_terminal(mock_dispatcher):
-    """DELETE staging with TransferNotTerminalError returns 409."""
-    from secbaas.community.api.bot_runtime import TransferNotTerminalError as TNE
-
-    mock_dispatcher.dispatch_delete_staging.side_effect = TNE(
-        transfer_id="tf-001",
-        status="CREATED",
+async def test_delete_transfer_state_conflict(mock_dispatcher):
+    """DELETE transfer with TransferStateConflictError returns 409."""
+    mock_dispatcher.dispatch_delete_transfer.side_effect = TransferStateConflictError(
+        "bad state"
     )
-
-    resp = await _delete("/api/v1/bots/t1/bot-001/files/staging?key=k1")
+    resp = await _delete("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
 
     assert resp.status_code == 409
-    detail = resp.json()["detail"]
-    assert detail["error"] == "NOT_TERMINAL_STATE"
-    assert detail["transfer_id"] == "tf-001"
+    assert resp.json()["detail"]["error"] == "TRANSFER_STATE_CONFLICT"
 
 
 @pytest.mark.asyncio
-async def test_delete_staging_not_implemented(mock_dispatcher):
-    """DELETE staging with NotImplementedError returns 501."""
-    mock_dispatcher.dispatch_delete_staging.side_effect = NotImplementedError("nope")
-    resp = await _delete("/api/v1/bots/t1/bot-001/files/staging?key=k1")
+async def test_delete_transfer_not_implemented(mock_dispatcher):
+    """DELETE transfer with NotImplementedError returns 501."""
+    mock_dispatcher.dispatch_delete_transfer.side_effect = NotImplementedError("nope")
+    resp = await _delete("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
 
     assert resp.status_code == 501
     assert resp.json()["detail"]["error"] == "NOT_IMPLEMENTED"
 
 
 @pytest.mark.asyncio
-async def test_delete_staging_generic_exception(mock_dispatcher):
-    """DELETE staging with generic Exception returns 500."""
-    mock_dispatcher.dispatch_delete_staging.side_effect = RuntimeError("boom")
-    resp = await _delete("/api/v1/bots/t1/bot-001/files/staging?key=k1")
+async def test_delete_transfer_generic_exception(mock_dispatcher):
+    """DELETE transfer with generic Exception returns 500."""
+    mock_dispatcher.dispatch_delete_transfer.side_effect = RuntimeError("boom")
+    resp = await _delete("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
 
     assert resp.status_code == 500
     assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"
@@ -636,78 +603,6 @@ async def test_generate_share_link_generic_exception(mock_dispatcher):
         "/api/v1/bots/t1/bot-001/files/transfers/tf-001/share-link",
         json_data={"expire_seconds": 3600},
     )
-
-    assert resp.status_code == 500
-    assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"
-
-
-# ── get_transfer_status tests ────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_get_transfer_status_success(mock_dispatcher):
-    """GET transfer status returns 200 with GetTransferStatusResponse."""
-    from secbaas.community.api.bot_runtime import GetTransferStatusResponse as GTSR
-
-    mock_dispatcher.dispatch_get_transfer_status.return_value = GTSR(
-        transfer_id="tf-001",
-        status="DONE",
-        direction="UPLOAD",
-        filename="data.csv",
-        device_path="/home/data.csv",
-        download_url="https://oss.example.com/dl",
-        created_at="2025-01-01T00:00:00",
-        updated_at="2025-01-01T00:00:00",
-    )
-    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
-
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["transfer_id"] == "tf-001"
-    assert data["status"] == "DONE"
-
-
-@pytest.mark.asyncio
-async def test_get_transfer_status_bot_not_found(mock_dispatcher):
-    """GET transfer status with BotNotFoundError returns 404."""
-    mock_dispatcher.dispatch_get_transfer_status.side_effect = BotNotFoundError(
-        "no bot"
-    )
-    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
-
-    assert resp.status_code == 404
-    assert resp.json()["detail"]["error"] == "BOT_NOT_FOUND"
-
-
-@pytest.mark.asyncio
-async def test_get_transfer_status_transfer_not_found(mock_dispatcher):
-    """GET transfer status with TransferNotFoundError returns 404."""
-    mock_dispatcher.dispatch_get_transfer_status.side_effect = TransferNotFoundError(
-        "nope"
-    )
-    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
-
-    assert resp.status_code == 404
-    assert resp.json()["detail"]["error"] == "TRANSFER_NOT_FOUND"
-
-
-@pytest.mark.asyncio
-async def test_get_transfer_status_not_implemented(mock_dispatcher):
-    """GET transfer status with NotImplementedError returns 501."""
-    mock_dispatcher.dispatch_get_transfer_status.side_effect = NotImplementedError(
-        "nope"
-    )
-    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
-
-    assert resp.status_code == 501
-    assert resp.json()["detail"]["error"] == "NOT_IMPLEMENTED"
-
-
-@pytest.mark.asyncio
-async def test_get_transfer_status_generic_exception(mock_dispatcher):
-    """GET transfer status with generic Exception returns 500."""
-    mock_dispatcher.dispatch_get_transfer_status.side_effect = RuntimeError("boom")
-    resp = await _get("/api/v1/bots/t1/bot-001/files/transfers/tf-001")
 
     assert resp.status_code == 500
     assert resp.json()["detail"]["error"] == "INTERNAL_ERROR"

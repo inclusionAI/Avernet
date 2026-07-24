@@ -40,7 +40,8 @@ VALID_TRANSITIONS = frozenset(
         ("UPLOAD_COMPLETED", "FAILED"),
         ("PULLING", "FAILED"),
         ("PUSHING", "FAILED"),
-        # Phase 72: Cancel upload -- any non-terminal upload state -> CANCELLED
+        # Phase 72: Cancel upload -- non-terminal upload states -> CANCELLED
+        # (UPLOAD_COMPLETED deliberately excluded: OSS object already exists, cannot cancel)
         ("CREATED", "CANCELLED"),
         ("UPLOADING", "CANCELLED"),
         ("PULLING", "CANCELLED"),
@@ -71,6 +72,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         fileservice_staging_path: str,
         error_message: str | None,
         multipart_session_id: str | None = None,
+        operator: str = "unknown",
     ) -> int:
         log.info(
             "create_ticket: transfer_id=%s, direction=%s, multipart_session_id=%s",
@@ -92,6 +94,7 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
             error_message=error_message,
             multipart_session_id=multipart_session_id,
             env=env,
+            operator=operator,
         )
         self._session.add(row)
         self._session.flush()
@@ -141,8 +144,9 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         update_kwargs = {
             "status": new_status,
             "gmt_modified": func.now(),
-            "error_message": error_message,
         }
+        if error_message is not None:
+            update_kwargs["error_message"] = error_message
         result = (
             self._session.query(FileTransferTicketModel)
             .filter(
@@ -195,53 +199,18 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         return record
 
     @with_orm_session
-    def get_by_fileservice_staging_path(
-        self,
-        staging_path: str,
-        tenant: str | None = None,
-    ) -> TicketRecord | None:
-        """Look up a ticket by its fileservice_staging_path.
-
-        Args:
-            staging_path: Full OSS object key (fileservice_staging_path).
-            tenant: Optional tenant filter for authorization enforcement.
-
-        Returns:
-            TicketRecord if found, None otherwise.
-        """
-        log.info(
-            "[file-transfer:get_by_staging_path] staging_path=%s, tenant=%s",
-            staging_path,
-            tenant,
-        )
-        env = get_current_env()
-        filters = [
-            FileTransferTicketModel.fileservice_staging_path == staging_path,
-            FileTransferTicketModel.env == env,
-        ]
-        if tenant is not None:
-            filters.append(FileTransferTicketModel.tenant == tenant)
-        row = self._session.query(FileTransferTicketModel).filter(*filters).first()
-        if row is None:
-            log.info("[file-transfer:get_by_staging_path] result: not found")
-            return None
-        record = row.to_record()
-        log.info("[file-transfer:get_by_staging_path] result: id=%s", record.id)
-        return record
-
-    @with_orm_session
     def update_urls(
         self,
         transfer_id: str,
         *,
         download_url: str | None = None,
-        upload_url: str | None = None,
     ) -> None:
+        download_url_preview = (download_url[:200]) if download_url else None
         log.info(
-            "update_urls: transfer_id=%s, download_url=%s, upload_url=%s",
+            "update_urls: transfer_id=%s, download_url=%s, download_url_preview=%s",
             transfer_id,
             bool(download_url),
-            bool(upload_url),
+            download_url_preview,
         )
         from sqlalchemy import func
 
@@ -249,11 +218,11 @@ class OrmTicketRepository(OrmConnectionMixin, TicketRepository):
         update_kwargs: dict = {"gmt_modified": func.now()}
         if download_url is not None:
             update_kwargs["download_url"] = download_url
-        if upload_url is not None:
-            update_kwargs["upload_url"] = upload_url
-
-        if "download_url" not in update_kwargs and "upload_url" not in update_kwargs:
-            return  # no-op: both None
+        else:
+            log.debug(
+                "update_urls: transfer_id=%s, download_url is None, no-op", transfer_id
+            )
+            return  # no-op
 
         result = (
             self._session.query(FileTransferTicketModel)

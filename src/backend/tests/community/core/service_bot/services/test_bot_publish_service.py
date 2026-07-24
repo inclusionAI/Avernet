@@ -2061,7 +2061,7 @@ class TestRollbackPublish:
     async def test_rollback_publish_clears_online_release_refs(self):
         """回滚后当前版本回到 DRAFT，应清除其线上发布/绑定引用。
 
-        否则再次发布时 is_online_release_recorded() 会因残留的 ext.publish.online
+        否则再次发布时 is_current_online_deployment() 会因残留的 ext.publish.online
         判定为已发布，从而跳过 execute_release_phase（不再执行 upgrade 把共享的线上
         bot/binding 指向本版本）。清除后，重新发布才会真正重新执行 upgrade。
         """

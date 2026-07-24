@@ -20,6 +20,9 @@ class CallerContextQuery(BaseModel):
     stage: CallerIdentityStage
     publish_id: Annotated[int | None, Field(gt=0)] = None
     entity_id: str | None = None
+    # Accepted only because gateway callers append this opaque value.
+    # Authentication remains exclusively bound to ``get_current_user``.
+    ctoken: str | None = None
 
     @model_validator(mode="after")
     def validate_stage_scope(self) -> Self:

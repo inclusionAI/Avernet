@@ -6,7 +6,9 @@ Replaces:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 
 from agentclaw.community.adapters.http.access.schemas import (
     AllowDisallowData,
@@ -16,15 +18,19 @@ from agentclaw.community.adapters.http.access.schemas import (
     SetBotsCeilingRequest,
     UpsertUserRequest,
     UserItem,
+    UserListCheckData,
+    UserListCorrectionRequest,
     WhitelistCheckData,
 )
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.api.user_list_service import UserListServiceProtocol
 from agentclaw.community.api.user_service import UserServiceProtocol
 from agentclaw.community.core.access.errors import UserNotFoundError
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 logger = get_logger()
@@ -95,6 +101,90 @@ async def upsert_user(
 # ==================== Access (Whitelist) Router ====================
 
 access_router = APIRouter(prefix="/api/v1/access", tags=["access"])
+user_list_router = APIRouter(prefix="/api/v1/user-lists", tags=["user-lists"])
+
+_USER_LIST_ENV_PATTERN = r"^(?:dev|pre|prod)$"
+
+
+@user_list_router.get("/check", response_model=ApiResponse[UserListCheckData])
+async def check_user_list(
+    entity_id: Annotated[str, Query(min_length=1, max_length=1024)],
+    user_list_type: Annotated[
+        str,
+        Query(
+            min_length=1,
+            max_length=64,
+            pattern=r"^[a-z][a-z0-9_.-]*$",
+        ),
+    ],
+    env: Annotated[
+        str | None,
+        Query(
+            min_length=3,
+            max_length=4,
+            pattern=_USER_LIST_ENV_PATTERN,
+            description="Optional query environment; defaults to the running environment",
+        ),
+    ] = None,
+    ctoken: Annotated[str | None, Query()] = None,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: UserListServiceProtocol = Injected(UserListServiceProtocol),
+) -> ApiResponse[UserListCheckData]:
+    """Return one authenticated user's feature eligibility in a selected environment."""
+    # Gateway may append this opaque compatibility value.  Do not use or log it.
+    del ctoken
+    query_env = env or get_current_env()
+    in_whitelist = service.is_in_user_list(
+        entity_id=entity_id,
+        user_list_type=user_list_type,
+        env=query_env,
+    )
+    logger.info(
+        "user_list_check_completed entity_id=%s user_list_type=%s env=%s "
+        "in_whitelist=%s",
+        entity_id,
+        user_list_type,
+        query_env,
+        in_whitelist,
+    )
+    return ApiResponse(
+        success=True,
+        message="OK",
+        error_code=200,
+        data=UserListCheckData(in_whitelist=in_whitelist),
+    )
+
+
+@user_list_router.put("/correct", response_model=ApiResponse[UserListCheckData])
+async def correct_user_list(
+    request: UserListCorrectionRequest,
+    env: Annotated[
+        str | None,
+        Query(
+            min_length=3,
+            max_length=4,
+            pattern=_USER_LIST_ENV_PATTERN,
+            description="Optional correction environment; defaults to the running environment",
+        ),
+    ] = None,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: UserListServiceProtocol = Injected(UserListServiceProtocol),
+) -> ApiResponse[UserListCheckData]:
+    """Apply one authenticated user-list correction in the selected environment."""
+    correction_env = env or get_current_env()
+    in_whitelist = service.correct_membership(
+        actor_id=user.staffId,
+        entity_id=request.entity_id,
+        user_list_type=request.user_list_type,
+        in_whitelist=request.in_whitelist,
+        env=correction_env,
+    )
+    return ApiResponse(
+        success=True,
+        message="OK",
+        error_code=200,
+        data=UserListCheckData(in_whitelist=in_whitelist),
+    )
 
 
 @access_router.get("/check", response_model=ApiResponse[WhitelistCheckData])

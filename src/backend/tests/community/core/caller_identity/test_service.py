@@ -9,6 +9,7 @@ import pytest
 from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
     CallerIdentityAmbiguousError,
+    CallerIdentityIrreversibleError,
     CallerIdentityPermissionError,
     CallerIdentityStage,
     CallerIdentityReadOnlyError,
@@ -242,11 +243,8 @@ def test_iam_context_does_not_reuse_draft_binding_outside_draft(
     assert context.binding_id is None
 
 
-def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> None:
+def test_exchange_caller_identity_installs_opaque_token_without_passport_lookup() -> None:
     service, _ = _service(bot=_bot(call_type="caller"))
-    passport = MagicMock()
-    passport.query_token.return_value = "agent-pass-token"
-    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
     token_provider = MagicMock()
     caller_token = CallerToken(
         access_token="caller-token",
@@ -262,7 +260,6 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
         caller_user_id="caller-1",
         bot_id="bot-1",
         owner_user_id="owner-1",
-        passport=passport,
         token_provider=token_provider,
         runtime_updater=runtime_updater,
         stage="draft",
@@ -271,14 +268,18 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
         binding_id=9,
     )
 
-    token_provider.exchange.assert_called_once()
+    token_provider.exchange.assert_called_once_with(
+        auth_context=caller_identity_service.AuthContext(user_id="caller-1"),
+        iam_token="iam-token",
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        task_metadata=caller_identity_service.CALLER_CHAT_TASK,
+    )
     runtime_updater.update_caller_identity.assert_called_once_with(
         bot_id="bot-1",
         owner_user_id="owner-1",
         caller_user_id="caller-1",
         caller_token=caller_token,
-        agent_pass_token="agent-pass-token",
-        agent_code="agent-code",
         stage="draft",
         publish_id=None,
         entity_id="entity-1",
@@ -288,9 +289,6 @@ def test_exchange_caller_identity_uses_passport_and_installs_opaque_token() -> N
 
 def test_exchange_caller_identity_propagates_test_exchange_to_runtime() -> None:
     service, _ = _service(bot=_bot(call_type="owner"))
-    passport = MagicMock()
-    passport.query_token.return_value = "agent-pass-token"
-    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
     token_provider = MagicMock()
     caller_token = CallerToken(
         access_token="caller-token",
@@ -306,7 +304,6 @@ def test_exchange_caller_identity_propagates_test_exchange_to_runtime() -> None:
         caller_user_id="owner-1",
         bot_id="bot-1",
         owner_user_id="owner-1",
-        passport=passport,
         token_provider=token_provider,
         runtime_updater=runtime_updater,
         stage="draft",
@@ -321,13 +318,10 @@ def test_exchange_caller_identity_propagates_test_exchange_to_runtime() -> None:
 
 
 @pytest.mark.parametrize("stage", ["verify", "online"])
-def test_exchange_caller_identity_does_not_pass_draft_binding_outside_draft(
+def test_exchange_caller_identity_passes_binding_id_in_all_stages(
     stage: str,
 ) -> None:
     service, _ = _service(bot=_bot(call_type="caller"))
-    passport = MagicMock()
-    passport.query_token.return_value = "agent-pass-token"
-    passport.query_agent_passport.return_value = {"agent_code": "agent-code"}
     token_provider = MagicMock()
     token_provider.exchange.return_value = CallerToken(
         access_token="caller-token",
@@ -342,7 +336,6 @@ def test_exchange_caller_identity_does_not_pass_draft_binding_outside_draft(
         caller_user_id="caller-1",
         bot_id="bot-1",
         owner_user_id="owner-1",
-        passport=passport,
         token_provider=token_provider,
         runtime_updater=runtime_updater,
         stage=stage,
@@ -351,6 +344,38 @@ def test_exchange_caller_identity_does_not_pass_draft_binding_outside_draft(
         binding_id=9,
     )
 
+    assert runtime_updater.update_caller_identity.call_args.kwargs["binding_id"] == 9
+
+
+@pytest.mark.parametrize("binding_id", [None, 0, -1, False])
+def test_exchange_caller_identity_does_not_pass_invalid_binding_id(
+    binding_id: int | None | bool,
+) -> None:
+    """Invalid binding_id values should not be passed to runtime_updater."""
+    service, _ = _service(bot=_bot(call_type="caller"))
+    token_provider = MagicMock()
+    token_provider.exchange.return_value = CallerToken(
+        access_token="caller-token",
+        subject_user_id="caller-1",
+        expires_at=datetime.now(),
+        fingerprint="fingerprint",
+    )
+    runtime_updater = MagicMock()
+
+    service.exchange_caller_identity(
+        iam_token="iam-token",
+        caller_user_id="caller-1",
+        bot_id="bot-1",
+        owner_user_id="owner-1",
+        token_provider=token_provider,
+        runtime_updater=runtime_updater,
+        stage="online",
+        publish_id=1,
+        entity_id="entity-1",
+        binding_id=binding_id,
+    )
+
+    # Invalid binding_id should not be in kwargs
     assert "binding_id" not in runtime_updater.update_caller_identity.call_args.kwargs
 
 
@@ -717,3 +742,26 @@ async def test_mcp_update_rejects_non_service_bot_as_read_only() -> None:
         )
 
     deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_rejects_irreversible_owner_downgrade_before_sync() -> None:
+    service, deps = _service(bot=_bot(call_type="caller"))
+    deps.mcp_provider.collect_bot_active_mcps.return_value = [
+        {"server_code": "calendar"}
+    ]
+    deps.lock_repository.get_by_key.return_value = None
+    deps.repository.replace_draft_call_type.side_effect = (
+        CallerIdentityIrreversibleError()
+    )
+
+    with pytest.raises(CallerIdentityIrreversibleError):
+        await service.update_mcp_call_type(
+            bot_id="bot-1",
+            server_code="calendar",
+            call_type=McpCallType.OWNER,
+            actor_id="owner-1",
+        )
+
+    deps.mcp_sync_service.sync_mcp_identity_to_agent_principal.assert_not_awaited()
+    deps.repository.compensate_draft_call_type.assert_not_called()

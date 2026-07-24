@@ -19,12 +19,11 @@ from secbaas.community.api.bot_runtime import (
     BotNotFoundError,
     CancelUploadResponse,
     CompleteUploadResponse,
+    DeleteTransferResponse,
     GetDownloadUrlResponse,
     GetTransferStatusResponse,
     GetUploadUrlResponse,
     ShareLinkResponse,
-    StagingDeleteResponse,
-    StagingListResponse,
     TransferNotFoundError,
     TransferStateConflictError,
 )
@@ -82,6 +81,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         device_affinity: str | None = None,
         file_size: int = 0,
         part_size: int | None = None,
+        operator: str | None = None,
     ) -> GetUploadUrlResponse:
         """Orchestrate upload URL generation (v1.5: D-01/D-02/D-05 flow).
 
@@ -104,6 +104,9 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             tenant,
             file_size,
         )
+        # D-04: Normalize empty/None operator to "unknown" before any DB write
+        if not operator or not operator.strip():
+            operator = "unknown"
 
         # D-05: Retention mode — device_path is None, skip device resolution
         if device_path is not None:
@@ -143,9 +146,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             subdir=staging_subdir,
         )
 
-        expires_at = (
-            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
 
         # Validate file_size before routing (applies to both SINGLE and MULTIPART)
         if file_size < 0:
@@ -190,6 +191,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 {
                     "part_number": p.part_number,
                     "upload_url": p.upload_url,
+                    "http_method": "PUT",
                     "expires_at": expires_at,
                 }
                 for p in multipart_session.parts
@@ -209,6 +211,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 fileservice_staging_path=staging_path,
                 error_message=None,
                 multipart_session_id=multipart_session.session_id,
+                operator=operator,
             )
 
             logger.info(
@@ -223,7 +226,6 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 part_count=part_count,
                 parts=parts_data,
                 transfer_id=transfer_id,
-                expires_at=expires_at,
             )
         else:
             # SINGLE path (existing logic + retention mode)
@@ -251,6 +253,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 device_path=device_path,
                 fileservice_staging_path=staging_path,
                 error_message=None,
+                operator=operator,
             )
 
             logger.info(
@@ -260,6 +263,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             return GetUploadUrlResponse(
                 upload_url=upload_url,
                 transfer_id=transfer_id,
+                http_method="PUT",
                 expires_at=expires_at,
                 type="SINGLE",
             )
@@ -271,6 +275,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         device_path: str,
         expire_seconds: int = 3600,
         device_affinity: str | None = None,
+        operator: str | None = None,
     ) -> GetDownloadUrlResponse:
         """Orchestrate download URL request (D-10 flow).
 
@@ -289,6 +294,9 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             device_path,
             tenant,
         )
+        # D-04: Normalize empty/None operator to "unknown" before any DB write
+        if not operator or not operator.strip():
+            operator = "unknown"
 
         _, _, paas_device_id = await self._resolve_bot_device(
             bot_uuid=bot_uuid,
@@ -343,6 +351,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             device_path=device_path,
             fileservice_staging_path=staging_path,
             error_message=None,
+            operator=operator,
         )
 
         logger.info("Ticket created: transfer_id=%s, direction=DOWNLOAD", transfer_id)
@@ -360,9 +369,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             device_path,
         )
 
-        expires_at = (
-            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
         return GetDownloadUrlResponse(
             transfer_id=transfer_id,
             expires_at=expires_at,
@@ -398,10 +405,6 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
 
         # Conditional fields per status
         download_url = record.download_url if record.status == "DONE" else None
-        upload_url = record.upload_url if record.status == "CREATED" else None
-        # OSS presigned URLs embed their own expiry — expires_at is null for transfer queries
-        expires_at: str | None = None
-
         error_message = record.error_message if record.status == "FAILED" else None
 
         return GetTransferStatusResponse(
@@ -411,11 +414,10 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             filename=record.filename,
             device_path=record.device_path,
             download_url=download_url,
-            upload_url=upload_url,
-            expires_at=expires_at,
             error_message=error_message,
             created_at=record.gmt_create.isoformat(),
             updated_at=record.gmt_modified.isoformat(),
+            operator=record.operator,
         )
 
     # ------------------------------------------------------------------
@@ -628,111 +630,38 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
 
         return CancelUploadResponse(transfer_id=transfer_id, status="CANCELLED")
 
-    async def dispatch_list_staging(
+    async def dispatch_delete_transfer(
         self,
-        prefix: str,
-        limit: int = 100,
-        marker: str | None = None,
+        transfer_id: str,
         tenant: str | None = None,
-    ) -> StagingListResponse:
-        """List OSS staging objects with marker pagination (D-07/D-08).
+    ) -> DeleteTransferResponse:
+        """Delete a transfer ticket and its associated OSS staging object (D-09, D-10).
 
-        Pure OSS operation — no device involvement, no PaaS layer.
-        Returns flat list of objects matching the prefix.
-        """
+        Validates the ticket is in a terminal state
+        (DONE/FAILED/CANCELLED/DELETED per D-13) before deleting.
+        Already-DELETED tickets are handled idempotently.
 
-        # Tenant-scoped prefix: every listing is automatically scoped to
-        # the authenticated tenant's staging root, preventing
-        # cross-tenant metadata leakage.
-        if tenant is not None:
-            prefix_subdir = None
-            if prefix:
-                # Normalize user-provided prefix: strip legacy hardcoded
-                # prefixes if present, then strip leading/trailing slashes
-                # to avoid double-slash paths.
-                user_sub = prefix
-                if user_sub.startswith("file-transfers/"):
-                    user_sub = user_sub[len("file-transfers/") :]
-                elif user_sub.startswith("baas-file-transfer/"):
-                    user_sub = user_sub[len("baas-file-transfer/") :]
-                elif user_sub in ("file-transfers", "baas-file-transfer"):
-                    user_sub = ""
-                user_sub = user_sub.strip("/")
-                if ".." in user_sub:
-                    raise ValueError("prefix contains invalid path traversal")
-                if user_sub:
-                    prefix_subdir = user_sub
-            effective_prefix = self._file_transfer_backend.build_staging_prefix(
-                tenant=tenant,
-                subdir=prefix_subdir,
-            )
-        else:
-            # Defense-in-depth: validate prefix even when tenant scoping
-            # is skipped — prevents path traversal in raw prefix input
-            if prefix and ".." in prefix:
-                raise ValueError("prefix contains invalid path traversal")
-            effective_prefix = prefix
-
-        logger.info(
-            "dispatch_list_staging: prefix=%s, effective_prefix=%s, "
-            "limit=%d, marker=%s, tenant=%s",
-            prefix,
-            effective_prefix,
-            limit,
-            marker,
-            tenant,
-        )
-
-        result = await asyncio.to_thread(
-            self._file_transfer_backend.list_objects,
-            effective_prefix,
-            limit,
-            marker,
-        )
-
-        return StagingListResponse(
-            prefix=prefix,
-            items=[
-                {
-                    "key": item.key,
-                    "size": item.size,
-                    "last_modified": item.last_modified,
-                }
-                for item in result.items
-            ],
-            truncated=result.truncated,
-            next_marker=result.next_marker,
-        )
-
-    async def dispatch_delete_staging(
-        self,
-        key: str,
-        tenant: str | None = None,
-    ) -> StagingDeleteResponse:
-        """Delete a staging object (D-09).
-
-        Validates the associated ticket is in a terminal state
-        (DONE/FAILED/CANCELLED/DELETED) before deleting.  Already-DELETED
-        tickets are handled idempotently.
+        Uses transfer_id (not OSS key) to query the ticket per D-09.
+        OSS deletion uses the ticket's fileservice_staging_path per D-12.
         """
 
         logger.info(
-            "dispatch_delete_staging: key=%s, tenant=%s",
-            key,
+            "dispatch_delete_transfer: transfer_id=%s, tenant=%s",
+            transfer_id,
             tenant,
         )
 
-        ticket = self._ticket_repo.get_by_fileservice_staging_path(
-            key,
+        ticket = self._ticket_repo.get_by_transfer_id(
+            transfer_id,
             tenant=tenant,
         )
 
         if ticket is None:
             raise TransferNotFoundError(
-                f"No ticket found for staging key: {key}",
+                f"Transfer not found: {transfer_id}",
             )
 
-        # D-09: validate terminal state
+        # D-13: validate terminal state
         terminal_states = {"DONE", "FAILED", "CANCELLED", "DELETED"}
         if ticket.status not in terminal_states:
             from secbaas.community.api.bot_runtime import (
@@ -746,21 +675,51 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
 
         if ticket.status == "DELETED":
             # Already deleted — idempotent
-            return StagingDeleteResponse(
-                deleted_key=key,
+            return DeleteTransferResponse(
                 transfer_id=ticket.transfer_id,
                 previous_status="DELETED",
                 new_status="DELETED",
             )
 
         previous_status = ticket.status
+        # D-12: Delete OSS object first — if this fails with a transient
+        # error the ticket stays in its original terminal state and the
+        # caller can safely retry without hitting the idempotency guard.
         await asyncio.to_thread(
             self._file_transfer_backend.delete_object,
-            key,
+            ticket.fileservice_staging_path,
         )
-        self._ticket_repo.update_status(ticket.transfer_id, "DELETED")
-        return StagingDeleteResponse(
-            deleted_key=key,
+
+        # Only mark DELETED after OSS deletion succeeds.
+        # CAS-aware status update — a concurrent delete may have already
+        # transitioned this ticket.
+        try:
+            self._ticket_repo.update_status(ticket.transfer_id, "DELETED")
+        except TransferStateConflictError:
+            ticket = self._ticket_repo.get_by_transfer_id(
+                ticket.transfer_id, tenant=tenant
+            )
+            if ticket is not None and ticket.status == "DELETED":
+                logger.info(
+                    "dispatch_delete_transfer: CAS conflict resolved — "
+                    "ticket already DELETED (transfer_id=%s)",
+                    ticket.transfer_id,
+                )
+                return DeleteTransferResponse(
+                    transfer_id=ticket.transfer_id,
+                    previous_status=previous_status,
+                    new_status="DELETED",
+                )
+            raise
+
+        logger.info(
+            "dispatch_delete_transfer: result: transfer_id=%s, "
+            "previous_status=%s, new_status=DELETED",
+            ticket.transfer_id,
+            previous_status,
+        )
+
+        return DeleteTransferResponse(
             transfer_id=ticket.transfer_id,
             previous_status=previous_status,
             new_status="DELETED",
@@ -804,9 +763,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             expire_seconds,
         )
 
-        expires_at = (
-            datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
         return ShareLinkResponse(
             share_url=share_url,
             transfer_id=transfer_id,

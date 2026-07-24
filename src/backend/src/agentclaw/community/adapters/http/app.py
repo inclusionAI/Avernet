@@ -105,6 +105,7 @@ from agentclaw.community.adapters.http.token_exchange import router as token_exc
 from agentclaw.community.adapters.http.yuque import router as yuque_router  # noqa: E402
 from agentclaw.community.adapters.http.devices.router import router as device_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import access_router as whitelist_router  # noqa: E402
+from agentclaw.community.adapters.http.access.router import user_list_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_router  # noqa: E402
 from agentclaw.community.adapters.http.expert_chat import router as expert_chats_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat import router as bot_chat_router  # noqa: E402
@@ -297,6 +298,7 @@ from agentclaw.community.core.errors import (  # noqa: E402
 from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerCallTypeInvalidError,
     CallerIdentityAmbiguousError,
+    CallerIdentityIrreversibleError,
     CallerIdentityNotFoundError,
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
@@ -315,6 +317,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     InternalError:         500,
     CallerIdentityPermissionError: 403,
     CallerIdentityAmbiguousError: 409,
+    CallerIdentityIrreversibleError: 409,
     CallerIdentityNotFoundError: 404,
     CallerIdentityReadOnlyError: 409,
     CallerLockEpochError: 409,
@@ -422,6 +425,7 @@ app.include_router(bot_chat_router)  # 个人对话（Langfuse trace 查询）
 app.include_router(bot_chat_otel_router)  # bot-chat OTLP 日志写入
 app.include_router(bot_chat_relation_router)  # bot-chat 业务任务关系写入
 app.include_router(whitelist_router)
+app.include_router(user_list_router)
 app.include_router(user_router)
 app.include_router(system_config_router)
 app.include_router(common_config_router)
