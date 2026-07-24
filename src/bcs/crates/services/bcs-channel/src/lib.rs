@@ -657,6 +657,7 @@ impl BcsChannelService {
                 "run_id": run_id,
             }),
             render_hint: ChannelRenderHint::Render,
+            source_im_message_id: None,
             source_is_channel: false,
         })
         .await
@@ -1352,6 +1353,7 @@ impl SessionChannelOutboundPort for BcsChannelService {
                     "response_ref": event.response_ref,
                 }),
                 render_hint: ChannelRenderHint::Render,
+                source_im_message_id: None,
                 source_is_channel: false,
             },
         )
