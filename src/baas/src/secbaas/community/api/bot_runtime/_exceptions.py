@@ -151,19 +151,19 @@ class TransferNotTerminalError(BotServiceError):
         super().__init__(f"Transfer {transfer_id} is not in a terminal state: {status}")
 
 
-class OssObjectNotFoundError(BotServiceError):
-    """OSS object not found at the staging path.
+class StagingObjectNotFoundError(BotServiceError):
+    """Staging object not found at the staging path.
 
-    Raised when complete upload detects no OSS object at the staging path,
+    Raised when complete upload detects no object at the staging path,
     indicating the caller has not finished uploading.
     """
 
-    error_code = "OSS_OBJECT_NOT_FOUND"
+    error_code = "STAGING_OBJECT_NOT_FOUND"
     http_status = 404
 
     def __init__(self, staging_path: str = ""):
         self.staging_path = staging_path
-        super().__init__(f"OSS object not found: {staging_path}")
+        super().__init__(f"Staging object not found: {staging_path}")
 
 
 class DirectoryNotEmptyError(BotServiceError):

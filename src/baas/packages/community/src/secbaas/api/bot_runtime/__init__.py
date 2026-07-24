@@ -2,7 +2,7 @@ from ._exceptions import (
     BotNotFoundError,
     NoActiveDevicesError,
     NoDevicesFoundError,
-    OssObjectNotFoundError,
+    StagingObjectNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,
 )
@@ -25,7 +25,7 @@ __all__ = [
     "BotNotFoundError",
     "NoActiveDevicesError",
     "NoDevicesFoundError",
-    "OssObjectNotFoundError",
+    "StagingObjectNotFoundError",
     "TransferNotTerminalError",
     "TransferStateConflictError",
     # File Transfer Models

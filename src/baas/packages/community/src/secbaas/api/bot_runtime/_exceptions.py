@@ -47,19 +47,19 @@ class NoActiveDevicesError(BotServiceError):
         super().__init__(f"No active devices found for bot: {bot_uuid}")
 
 
-class OssObjectNotFoundError(BotServiceError):
-    """OSS object not found at the staging path.
+class StagingObjectNotFoundError(BotServiceError):
+    """Staging object not found at the staging path.
 
-    Raised when complete upload detects no OSS object at the staging path,
+    Raised when complete upload detects no object at the staging path,
     indicating the caller has not finished uploading.
     """
 
-    error_code: str = "OSS_OBJECT_NOT_FOUND"
+    error_code: str = "STAGING_OBJECT_NOT_FOUND"
     http_status: int = 404
 
     def __init__(self, staging_path: str = "") -> None:
         self.staging_path = staging_path
-        super().__init__(f"OSS object not found: {staging_path}")
+        super().__init__(f"Staging object not found: {staging_path}")
 
 
 class TransferNotTerminalError(BotServiceError):
