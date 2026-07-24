@@ -46,70 +46,72 @@ third-party developers without paying the double-write cost on every change.
 
 ## Acceptance Criteria
 
-- [ ] The gateway no longer contains a hand-written endpoint definition per
-      forwarded operation; forwarded operations are described entirely by
-      configuration.
-- [ ] Each forwarded operation's configuration comprehensively specifies: the
-      auth requirement, the request path and method, and whether the operation
-      appears in the published document. By default the path is forwarded to the
-      upstream **verbatim** (identity mapping, including the domain segment) — the
-      backend serves the same paths it is exposed under. An **optional** upstream
-      override may be given for the exceptional operation whose backend path
-      genuinely differs and cannot be moved. The operation entry does **not** name
-      a server or a domain — the domain is the top-level segment of the path, and
-      the server is resolved from that domain through the separate domain→server
-      map (below).
-- [ ] A separate configuration maps each **domain** (the top-level path segment)
-      to a target backend server; changing a domain's server requires no change
-      to any operation's client-facing path.
-- [ ] An incoming request is routed to a server strictly by resolving its domain
-      through that map; a request whose path is not covered by configuration is
-      **denied** (the gateway is never an open proxy).
-- [ ] Every forwarded operation resolves to exactly one auth requirement; a
-      request that fails it is rejected before forwarding, and the caller identity
-      is established at the gateway exactly as it is today (no change to the trust
-      model between gateway and backend).
-- [ ] The gateway serves a single OpenAPI document that covers all publicly
-      exposed forwarded operations. Its per-operation request/response shapes come
-      from the backend's own published API description — they are not authored on
-      the gateway. Because paths are forwarded verbatim by default, the backend's
-      paths are the client-facing paths and are presented as-is; only an
-      operation carrying an explicit upstream override is re-keyed to its
-      client-facing path.
-- [ ] The published document includes an operation **only if** its configuration
-      marks it public; a backend operation that exists but is not configured as
-      public does not appear.
+- [ ] The gateway contains **no hand-written endpoint definition** per forwarded
+      operation and **no per-operation forwarding whitelist**. Onboarding a new
+      backend API (served under the public namespace) requires **no gateway config
+      change and no gateway release**.
+- [ ] Forwarding is **domain-transparent**: a request whose leading path segment
+      matches a configured **domain** is forwarded to that domain's server; the
+      path is sent **verbatim** (identity, version base and domain segment
+      included). A request whose leading segment matches **no** configured domain
+      is **denied** — the gateway forwards only into known domains, never acts as
+      an open proxy.
+- [ ] A single configuration maps each **domain** to a target server; changing a
+      domain's server requires no change to any client-facing path.
+- [ ] Auth is resolved from **prefix rules with a fail-closed default**: every
+      request resolves to an auth requirement via the most-specific matching rule
+      (ultimately the `/**` default), is authenticated before forwarding, and the
+      established identity is conveyed downstream via the gateway's signed
+      principal (JWT). A new endpoint therefore inherits its domain's auth
+      requirement automatically; only endpoints needing **non-default** auth add a
+      rule.
+- [ ] The public path namespace (`/openapi/v1/**`) is, by invariant, the
+      **external contract only**: the backend never mounts internal-only routes
+      there, and this is enforced by a backend-side check. This invariant — not a
+      gateway whitelist — is the exposure gate.
+- [ ] The gateway serves a single OpenAPI document whose request/response shapes
+      come from the backend's own published API description (not authored on the
+      gateway) and are presented at their verbatim paths. An operation with an
+      explicit upstream override is re-keyed to its client-facing path.
 - [ ] The backend's operations are exposed under a single **`bots`** domain, and
-      the backend **serves those same paths** (so no per-operation path rewrite is
-      needed for the default case).
-- [ ] The gateway obtains a backend's API description as a **versioned, pinned
-      artifact** produced when the backend is released; the gateway does not
-      require the backend to be reachable at request time in order to route,
-      authenticate, or forward.
-- [ ] Continuous integration **fails** when a referenced backend operation changes
-      incompatibly (e.g. a field or operation is removed, an optional input
-      becomes required, a type or default changes) unless the change is an
-      explicit new major version; backward-compatible changes (new operations, new
-      optional fields) are allowed to flow into the published version.
-- [ ] Continuous integration **fails** when configuration references an operation
-      that does not exist in the pinned backend description, so config and backend
-      cannot drift apart unnoticed.
+      the backend **serves those same paths** (no per-operation path rewrite in the
+      default case).
+- [ ] On each backend release, CI **publishes** the backend's generated API
+      description as an artifact to a shared store (e.g. OSS). The gateway
+      **auto-adopts the latest** published description by refreshing it in the
+      background and serving the doc from an in-memory copy; a new release's doc
+      appears **without a gateway redeploy**.
+- [ ] The published description is a **doc-only input**: routing, auth, and
+      forwarding never read it, so the shared store being unreachable or stale
+      degrades **only** the doc endpoint, never live traffic. On fetch failure or a
+      malformed artifact the gateway keeps serving the **last known-good** copy.
+- [ ] The **backward-compatibility gate runs at publish time** (backend release
+      CI), comparing the new description against the currently-published one, and
+      **fails the release** on a breaking change (field/operation removed, optional
+      input made required, type/default changed) unless it is an explicit new major
+      version; backward-compatible changes publish freely.
+- [ ] The schema source is **pluggable**: the single-box / open-source profile
+      reads a local committed description file; the shared-store (OSS) reader is an
+      enterprise flavor of the same seam.
 
 ## In Scope
 
-- The declarative configuration format for forwarded operations (auth, public
-  exposure, and an optional upstream-path override; paths forward verbatim by
-  default).
-- The domain → server mapping configuration and domain-based route resolution.
-- Generating the served public API document from configuration + the pinned
-  backend API description.
-- The mechanism by which a backend's API description becomes a pinned artifact the
-  gateway consumes, and the CI gates that (a) detect breaking changes to
-  referenced operations and (b) detect config/backend drift.
+- The domain → server mapping configuration and domain-transparent route
+  resolution (deny requests to unknown domains).
+- The prefix-based, fail-closed auth resolution (default rule + non-default
+  overrides), and signing the established principal for the downstream call.
+- Generating the served public API document from the backend's published API
+  description, presented at verbatim paths (with an optional upstream override).
+- The publish-and-refresh mechanism: backend release CI publishes the generated
+  description to a shared store; the gateway auto-adopts the latest via background
+  refresh with last-known-good fallback; and the publish-time backward-compat gate.
+- Making the schema source pluggable (local committed file for single-box; shared
+  store / OSS reader as the enterprise flavor).
 - Collapsing the backend's exposed operations under the `bots` domain, including
-  moving the backend's routes so it serves those client-facing paths directly.
-- Retiring the hand-written per-operation endpoint stubs that exist only to
-  generate documentation.
+  moving the backend's routes so it serves those client-facing paths directly, and
+  a backend-side check enforcing the `/openapi/v1` = external-only invariant.
+- Retiring the hand-written per-operation endpoint stubs (and the per-operation
+  forwarding whitelist) that exist only to generate documentation / gate exposure.
 
 ## Out of Scope
 
@@ -125,22 +127,27 @@ third-party developers without paying the double-write cost on every change.
   are not delivered here.
 - Onboarding a **second** backend server / domain beyond `bots`; the design must
   allow it, but only `bots` is wired up now.
-- The **auto-bump automation** that opens a pull request when a new backend
-  artifact is published — the pin and the CI gates are in scope; automating the
-  version bump is a follow-up.
+- Hardened **principal signing key management / rotation** (auth-design §7.1) — the
+  signing seam is used, but key distribution/rotation policy is a separate effort.
+
+## Resolved Decisions
+
+- **Doc transport / freshness** → backend release CI publishes the generated
+  description to a shared store; the gateway **auto-adopts the latest** via
+  background refresh (no promotion pointer, no gateway redeploy). Single-box reads
+  a local committed file via the same pluggable seam.
+- **Domain IA** → `bots` is the sole domain; agent-CRUD sits at the domain root
+  and former groups become per-agent sub-paths (no `bots/bots`). The `/openapi/v1`
+  namespace is external-only, enforced backend-side.
+- **Exposure model** → no per-operation whitelist; forwarding is domain-transparent
+  with fail-closed prefix auth, so onboarding a new API needs no gateway release.
+- **Breaking-change policy** → gate runs at publish time and blocks breaking
+  changes to the published description; an explicit new major version is the way to
+  make one.
 
 ## Open Questions
 
-- **Artifact transport for a single-box deployment.** In the open-source /
-  single-box profile there may be no artifact registry. Is committing each
-  backend's generated API description into a shared location (read at gateway
-  build) acceptable as the baseline, with a registry as an enterprise overlay?
-- **Domain naming.** `bots` is both the chosen domain name and, previously, one
-  resource group among several (identity, resources, skills, routines, channels,
-  mcp). Under the domain model those groups become sub-paths of `bots`. Is that
-  the intended information architecture, and does the agent-CRUD group keep a
-  clean path (avoiding an awkward `bots/bots`)?
-- **Breaking-change policy while pre-GA.** During single-partner co-development,
-  are coordinated breaking changes to a published version permitted (CI override
-  by agreement), or should breaking changes always require a new major version
-  even before GA?
+- **Scope inheritance (future).** Once the scope vocabulary lands, a new endpoint
+  silently inheriting the domain's default auth may be under-protected if it is
+  sensitive. A mechanism to force explicit scopes on such routes will be needed —
+  out of scope now (scopes are deferred), noted so it is not lost.
