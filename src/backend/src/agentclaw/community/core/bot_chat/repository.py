@@ -7,7 +7,7 @@ from hashlib import sha256
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.bot_chat.models import (
     AwLangfuseObservation,
@@ -17,17 +17,24 @@ from agentclaw.community.core.bot_chat.models import (
     AcOtelLogTrace,
 )
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
+from agentclaw.community.core.bot_chat.query_support import (
+    enrich_trace_labels,
+    list_group_sessions,
+    load_bot_names,
+    load_task_refs,
+    match_column,
+    task_trace_condition,
+)
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationObservation,
     ConversationDetail,
     ConversationSession,
     SessionMetadata,
 )
-from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
 
-logger = get_logger()
+_OUTPUT_PREVIEW_LENGTH = 500
 
 
 def _extract_user_input(trace_input: Any) -> str | None:
@@ -69,6 +76,16 @@ def _extract_user_input(trace_input: Any) -> str | None:
     if isinstance(trace_input, dict):
         return trace_input.get("content", str(trace_input))
     return str(trace_input)
+
+
+def _output_preview(trace_output: Any) -> str | None:
+    if trace_output is None:
+        return None
+    if isinstance(trace_output, str):
+        value = trace_output
+    else:
+        value = json.dumps(trace_output, ensure_ascii=False)
+    return value[:_OUTPUT_PREVIEW_LENGTH]
 
 
 def _decimal_for_column_or_none(value: Any, column: Any) -> Decimal | None:
@@ -113,6 +130,16 @@ class BotChatDbRepository:
             return value
         return json.dumps(value, ensure_ascii=False)
 
+    def _metadata_bot_id(self, metadata_json: str | None) -> str | None:
+        metadata = self._safe_json_loads(metadata_json, {})
+        if not isinstance(metadata, dict):
+            return None
+        attributes = metadata.get("attributes") or {}
+        if not isinstance(attributes, dict):
+            return None
+        value = attributes.get("identity.bot_id")
+        return str(value) if value else None
+
     def _ref_digest(self, ref_value: str) -> str:
         return f"sha256:{sha256(ref_value.encode('utf-8')).hexdigest()}"
 
@@ -134,10 +161,14 @@ class BotChatDbRepository:
             latency=row.latency,
             total_cost=row.total_cost,
             observations=row.observations,
-            bot_id=row.bot_id,
+            bot_id=row.bot_id or self._metadata_bot_id(row.trace_metadata),
             device_id=row.device_id,
             real_session_id=row.real_session_id,
             usage_total_tokens=None,
+            bot_name=None,
+            group_id=None,
+            session_kind=None,
+            match_sources=[],
         )
 
     def _detach_ocb_trace_row(self, row: Any) -> Any:
@@ -157,9 +188,13 @@ class BotChatDbRepository:
             latency=row.latency_ms,
             total_cost=row.total_cost,
             observations=None,
-            bot_id=row.bot_id,
+            bot_id=row.bot_id or self._metadata_bot_id(row.metadata_json),
             device_id=None,
             usage_total_tokens=row.usage_total_tokens,
+            bot_name=None,
+            group_id=None,
+            session_kind=None,
+            match_sources=[],
         )
 
     def _fill_ocb_trace_usage_from_observations(self, session: Any, row: AcOtelLogTrace) -> None:
@@ -207,6 +242,7 @@ class BotChatDbRepository:
         from datetime import datetime
 
         input_data = self._safe_json_loads(row.input, None)
+        output_data = self._safe_json_loads(row.output, row.output)
         metadata_raw = self._safe_json_loads(row.trace_metadata, {})
         attributes = dict(metadata_raw.get("attributes") or {}) if isinstance(metadata_raw, dict) else {}
         biz_task_id = (
@@ -239,8 +275,14 @@ class BotChatDbRepository:
             biz_scene=biz_scene,
             session_id=session_id,
             session_key=session_key,
+            bot_id=getattr(row, "bot_id", None),
+            bot_name=getattr(row, "bot_name", None),
+            group_id=getattr(row, "group_id", None),
+            session_kind=getattr(row, "session_kind", None),
             name=row.name or "未命名会话",
             input=_extract_user_input(input_data),
+            output_preview=_output_preview(output_data),
+            match_sources=list(getattr(row, "match_sources", None) or []),
             status="SUCCESS",
             timestamp=timestamp,
             user_id=row.user_id,
@@ -287,6 +329,10 @@ class BotChatDbRepository:
             biz_scene=biz_scene,
             session_id=session_id,
             session_key=session_key,
+            bot_id=getattr(row, "bot_id", None),
+            bot_name=getattr(row, "bot_name", None),
+            group_id=getattr(row, "group_id", None),
+            session_kind=getattr(row, "session_kind", None),
             name=row.name or "未命名会话",
             input=input_data,
             output=output_data,
@@ -332,6 +378,7 @@ class BotChatDbRepository:
             total_tokens=int(getattr(row, "usage_total_tokens", None) or 0),
             input=input_value,
             output=output,
+            metadata=metadata if isinstance(metadata, dict) else None,
             model_name=getattr(row, "model", None) or attributes.get("gen_ai.response.model") or attributes.get("gen_ai.request.model"),
             parent_observation_id=getattr(row, "parent_observation_id", None),
             children=[],
@@ -397,6 +444,28 @@ class BotChatDbRepository:
         """Check if user_id is either owner or collaborator of bot_id."""
         return self.is_bot_owner(user_id, bot_id) or self.is_bot_collaborator(user_id, bot_id)
 
+    def get_bot_name(self, bot_id: str | None) -> str | None:
+        if not bot_id:
+            return None
+        with self._db.orm_session() as session:
+            return load_bot_names(session, {bot_id}).get(bot_id)
+
+    def get_group_labels(
+        self, session_key: str | None
+    ) -> tuple[str | None, str | None]:
+        if not session_key:
+            return None, None
+        probe = SimpleNamespace(
+            bot_id=None,
+            bot_name=None,
+            session_key=session_key,
+            group_id=None,
+            session_kind=None,
+        )
+        with self._db.orm_session() as session:
+            enriched = enrich_trace_labels(session, probe)
+        return enriched.group_id, enriched.session_kind
+
     def list_traces(
         self,
         owner_id: str,
@@ -409,6 +478,11 @@ class BotChatDbRepository:
         session_id: str | None = None,
         session_key: str | None = None,
         query: str | None = None,
+        biz_scene: str | None = None,
+        biz_task_id: str | None = None,
+        group_id: str | None = None,
+        match_mode: str = "exact",
+        include_output_match: bool = False,
     ) -> tuple[list[ConversationSession], int]:
         """List traces from DB with pagination."""
         with self._db.orm_session() as session:
@@ -432,24 +506,52 @@ class BotChatDbRepository:
                 conditions.append(AwLangfuseTrace.bot_id == bot_id)
 
             if trace_id:
-                conditions.append(AwLangfuseTrace.trace_id == trace_id)
+                conditions.append(match_column(AwLangfuseTrace.trace_id, trace_id, match_mode))
 
             # session_key maps to DB session_id
             if session_key:
-                conditions.append(AwLangfuseTrace.session_id == session_key)
+                conditions.append(match_column(AwLangfuseTrace.session_id, session_key, match_mode))
 
             # session_id maps to DB real_session_id
             if session_id:
-                conditions.append(AwLangfuseTrace.real_session_id == session_id)
+                conditions.append(match_column(AwLangfuseTrace.real_session_id, session_id, match_mode))
+
+            task_refs = load_task_refs(
+                session,
+                biz_scene,
+                biz_task_id,
+                match_mode,
+                owner_id,
+                bot_id,
+            )
+            if biz_scene or biz_task_id:
+                ref_conditions = []
+                if task_refs.get("trace_id"):
+                    ref_conditions.append(AwLangfuseTrace.trace_id.in_(task_refs["trace_id"]))
+                if task_refs.get("session_id"):
+                    ref_conditions.append(AwLangfuseTrace.real_session_id.in_(task_refs["session_id"]))
+                if task_refs.get("session_key"):
+                    ref_conditions.append(AwLangfuseTrace.session_id.in_(task_refs["session_key"]))
+                if not ref_conditions:
+                    return [], 0
+                conditions.append(or_(*ref_conditions))
+
+            group_sessions: dict[str, str | None] = {}
+            if group_id:
+                group_sessions = list_group_sessions(session, group_id)
+                if not group_sessions:
+                    return [], 0
+                conditions.append(AwLangfuseTrace.session_id.in_(group_sessions))
 
             if query:
                 like_pattern = f"%{query}%"
-                conditions.append(
-                    and_(
-                        AwLangfuseTrace.name.like(like_pattern)
-                        | AwLangfuseTrace.input.like(like_pattern)
-                    )
-                )
+                text_conditions = [
+                    AwLangfuseTrace.name.like(like_pattern),
+                    AwLangfuseTrace.input.like(like_pattern),
+                ]
+                if include_output_match:
+                    text_conditions.append(AwLangfuseTrace.output.like(like_pattern))
+                conditions.append(or_(*text_conditions))
 
             where_clause = and_(*conditions)
 
@@ -471,10 +573,18 @@ class BotChatDbRepository:
                 .all()
             )
 
-            sessions = [
-                self._row_to_session(row)
-                for row in rows
-            ]
+            detached = [self._detach_trace_row(row) for row in rows]
+            bot_names = load_bot_names(
+                session, {row.bot_id for row in detached if row.bot_id}
+            )
+            for row in detached:
+                row.bot_name = bot_names.get(row.bot_id)
+                if group_id:
+                    row.group_id = group_id
+                    row.session_kind = group_sessions.get(row.session_key)
+                if biz_scene or biz_task_id:
+                    row.match_sources = ["biz_ref"]
+            sessions = [self._row_to_session(row) for row in detached]
             return sessions, total
 
     def list_ocb_traces(
@@ -489,6 +599,11 @@ class BotChatDbRepository:
         session_id: str | None = None,
         session_key: str | None = None,
         query: str | None = None,
+        biz_scene: str | None = None,
+        biz_task_id: str | None = None,
+        group_id: str | None = None,
+        match_mode: str = "exact",
+        include_output_match: bool = False,
     ) -> tuple[list[ConversationSession], int]:
         with self._db.orm_session() as session:
             conditions = [
@@ -503,14 +618,40 @@ class BotChatDbRepository:
             else:
                 conditions.append(AcOtelLogTrace.bot_id == bot_id)
             if trace_id:
-                conditions.append(AcOtelLogTrace.trace_id == trace_id)
+                conditions.append(match_column(AcOtelLogTrace.trace_id, trace_id, match_mode))
             if session_key:
-                conditions.append(AcOtelLogTrace.session_key == session_key)
+                conditions.append(match_column(AcOtelLogTrace.session_key, session_key, match_mode))
             if session_id:
-                conditions.append(AcOtelLogTrace.session_id == session_id)
+                conditions.append(match_column(AcOtelLogTrace.session_id, session_id, match_mode))
+            task_refs = load_task_refs(
+                session,
+                biz_scene,
+                biz_task_id,
+                match_mode,
+                owner_id,
+                bot_id,
+            )
+            if biz_scene or biz_task_id:
+                conditions.append(
+                    task_trace_condition(
+                        task_refs, biz_scene, biz_task_id, match_mode
+                    )
+                )
+            group_sessions: dict[str, str | None] = {}
+            if group_id:
+                group_sessions = list_group_sessions(session, group_id)
+                if not group_sessions:
+                    return [], 0
+                conditions.append(AcOtelLogTrace.session_key.in_(group_sessions))
             if query:
                 like_pattern = f"%{query}%"
-                conditions.append(AcOtelLogTrace.name.like(like_pattern) | AcOtelLogTrace.input.like(like_pattern))
+                text_conditions = [
+                    AcOtelLogTrace.name.like(like_pattern),
+                    AcOtelLogTrace.input.like(like_pattern),
+                ]
+                if include_output_match:
+                    text_conditions.append(AcOtelLogTrace.output.like(like_pattern))
+                conditions.append(or_(*text_conditions))
 
             where_clause = and_(*conditions)
             total = session.query(func.count(AcOtelLogTrace.id)).filter(where_clause).scalar() or 0
@@ -526,6 +667,38 @@ class BotChatDbRepository:
                 self._detach_ocb_trace_row(row)
                 for row in rows
             ]
+            bot_names = load_bot_names(
+                session,
+                {row.bot_id for row in detached if row.bot_id},
+            )
+            ref_trace_ids = task_refs.get("trace_id", set())
+            ref_session_ids = task_refs.get("session_id", set())
+            ref_session_keys = task_refs.get("session_key", set())
+            for row in detached:
+                row.bot_name = bot_names.get(row.bot_id)
+                if group_id:
+                    row.group_id = group_id
+                    row.session_kind = group_sessions.get(row.session_key)
+                sources = []
+                direct_scene = not biz_scene or (
+                    biz_scene in (row.biz_scene or "")
+                    if match_mode == "contains"
+                    else row.biz_scene == biz_scene
+                )
+                direct_task = not biz_task_id or (
+                    biz_task_id in (row.biz_task_id or "")
+                    if match_mode == "contains"
+                    else row.biz_task_id == biz_task_id
+                )
+                if (biz_scene or biz_task_id) and direct_scene and direct_task:
+                    sources.append("direct")
+                if (
+                    row.trace_id in ref_trace_ids
+                    or row.session_id in ref_session_ids
+                    or row.session_key in ref_session_keys
+                ):
+                    sources.append("biz_ref")
+                row.match_sources = sources
             sessions = [
                 self._row_to_session(row)
                 for row in detached
@@ -540,12 +713,20 @@ class BotChatDbRepository:
                 .filter(AwLangfuseTrace.trace_id == trace_id)
                 .first()
             )
-            return self._detach_trace_row(row) if row is not None else None
+            return (
+                enrich_trace_labels(session, self._detach_trace_row(row))
+                if row is not None
+                else None
+            )
 
     def get_ocb_trace(self, trace_id: str) -> Any | None:
         with self._db.orm_session() as session:
             row = session.query(AcOtelLogTrace).filter(AcOtelLogTrace.trace_id == trace_id).first()
-            return self._detach_ocb_trace_row(row) if row is not None else None
+            return (
+                enrich_trace_labels(session, self._detach_ocb_trace_row(row))
+                if row is not None
+                else None
+            )
 
     def list_ocb_observations(self, trace_id: str) -> list[ConversationObservation]:
         with self._db.orm_session() as session:

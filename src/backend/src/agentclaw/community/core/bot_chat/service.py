@@ -31,6 +31,8 @@ _DEFAULT_PAGE_SIZE = 20
 _MAX_PAGE_SIZE = 100
 # 对外列表接口默认回看时间窗口；调用方不传 from_date/to_date 时查最近 72 小时。
 _DEFAULT_TIME_RANGE_HOURS = 72
+# Fuzzy searches are bounded even when callers provide an explicit range.
+_MAX_FUZZY_TIME_RANGE_DAYS = 90
 # metadata 精确查询走多页扫描时的内部批大小；与对外返回 limit 解耦。
 _SCAN_PAGE_SIZE = 100
 # metadata 精确查询走多页扫描时默认最多扫描页数；默认最多扫描 100 * 10 条 trace。
@@ -54,6 +56,13 @@ def _build_auth_header(public_key: str, secret_key: str) -> str:
 
     credentials = f"{public_key}:{secret_key}"
     return f"Basic {base64.b64encode(credentials.encode()).decode()}"
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Treat timezone-free API values as UTC and normalize aware values."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _extract_user_input(trace_input: Any) -> str | None:
@@ -115,8 +124,24 @@ def _map_trace_to_session(trace: dict[str, Any]) -> ConversationSession:
             or attributes.get("agentic.biz_scene")
             or attributes.get("identity.biz_scene")
         ),
+        session_id=attributes.get("gen_ai.session.id"),
+        session_key=(
+            attributes.get("session_id")
+            or attributes.get("gen_ai.conversation.id")
+        ),
+        bot_id=attributes.get("identity.bot_id"),
         name=trace.get("name") or "未命名会话",
         input=_extract_user_input(trace.get("input")),
+        output_preview=(
+            str(trace.get("output"))[:500]
+            if trace.get("output") is not None
+            else None
+        ),
+        search_output=(
+            str(trace.get("output"))
+            if trace.get("output") is not None
+            else None
+        ),
         status="FAILED" if trace.get("success") is False else "SUCCESS",
         timestamp=trace.get("timestamp", ""),
         user_id=trace.get("userId"),
@@ -152,6 +177,7 @@ def _map_observation(obs: dict[str, Any]) -> ConversationObservation:
         total_tokens=int(usage.get("totalTokens") or 0),
         input=obs.get("input"),
         output=obs.get("output"),
+        metadata=metadata_raw if isinstance(metadata_raw, dict) else None,
         model_name=attributes.get("gen_ai.request.model"),
         parent_observation_id=obs.get("parentObservationId"),
         children=[],
@@ -195,14 +221,23 @@ def _apply_client_side_filters(
     session_id: str | None,
     session_key: str | None,
     query: str | None = None,
+    biz_scene: str | None = None,
+    biz_task_id: str | None = None,
+    match_mode: str = "exact",
+    include_output_match: bool = False,
 ) -> list[ConversationSession]:
     """Apply client-side filters that Langfuse API doesn't support natively."""
     result = sessions
+    def matches(actual: str | None, expected: str) -> bool:
+        if actual is None:
+            return False
+        return expected in actual if match_mode == "contains" else actual == expected
+
     if trace_id:
         result = [
             s
             for s in result
-            if s.id == trace_id
+            if matches(s.id, trace_id)
         ]
     if bot_id:
         result = [
@@ -219,7 +254,16 @@ def _apply_client_side_filters(
             for s in result
             if (
                 s.metadata
-                and _matches_session_key(s.metadata.attributes, session_key)
+                and (
+                    (
+                        session_key
+                        in str(s.metadata.attributes.get("session_id") or "")
+                        or session_key
+                        in str(s.metadata.attributes.get("gen_ai.conversation.id") or "")
+                    )
+                    if match_mode == "contains"
+                    else _matches_session_key(s.metadata.attributes, session_key)
+                )
             )
         ]
     if session_id:
@@ -228,9 +272,15 @@ def _apply_client_side_filters(
             for s in result
             if (
                 s.metadata
-                and s.metadata.attributes.get("gen_ai.session.id") == session_id
+                and matches(
+                    s.metadata.attributes.get("gen_ai.session.id"), session_id
+                )
             )
         ]
+    if biz_scene:
+        result = [s for s in result if matches(s.biz_scene, biz_scene)]
+    if biz_task_id:
+        result = [s for s in result if matches(s.biz_task_id, biz_task_id)]
     if query:
         q = query.lower()
         result = [
@@ -244,6 +294,11 @@ def _apply_client_side_filters(
                 or (
                     s.input is not None
                     and q in s.input.lower()
+                )
+                or (
+                    include_output_match
+                    and s.search_output is not None
+                    and q in s.search_output.lower()
                 )
             )
         ]
@@ -319,19 +374,62 @@ class BotChatService:
         session_id: str | None = None,
         session_key: str | None = None,
         query: str | None = None,
+        biz_scene: str | None = None,
+        biz_task_id: str | None = None,
+        group_id: str | None = None,
+        match_mode: str = "exact",
+        include_output_match: bool = False,
+        time_scope: str = "default",
         log_source: str | None = None,
     ) -> SessionListResponse:
         """List conversation sessions for a given owner."""
         limit = min(max(1, limit), _MAX_PAGE_SIZE)
         page = max(1, page)
 
+        if match_mode not in {"exact", "contains"}:
+            raise ValueError("match_mode must be 'exact' or 'contains'")
+        if time_scope not in {"default", "all"}:
+            raise ValueError("time_scope must be 'default' or 'all'")
+
+        exact_identifiers = (
+            trace_id,
+            session_id,
+            session_key,
+            biz_task_id,
+            group_id,
+        )
+        if time_scope == "all" and (
+            match_mode != "exact" or not any(exact_identifiers)
+        ):
+            raise ValueError(
+                "time_scope=all requires match_mode=exact and an exact identifier"
+            )
+
         now = datetime.now(timezone.utc)
-        if from_date is None:
-            from_date = now - timedelta(hours=_DEFAULT_TIME_RANGE_HOURS)
-        if to_date is None:
-            to_date = now
+        if from_date is not None:
+            from_date = _as_utc(from_date)
+        if to_date is not None:
+            to_date = _as_utc(to_date)
+        if time_scope == "all":
+            from_date = from_date or datetime(1970, 1, 1, tzinfo=timezone.utc)
+            to_date = to_date or now
+        else:
+            if from_date is None:
+                from_date = now - timedelta(hours=_DEFAULT_TIME_RANGE_HOURS)
+            if to_date is None:
+                to_date = now
+        if from_date > to_date:
+            raise ValueError("from_date must not be later than to_date")
+        if (
+            match_mode == "contains"
+            and to_date - from_date > timedelta(days=_MAX_FUZZY_TIME_RANGE_DAYS)
+        ):
+            raise ValueError("contains queries support a maximum time range of 90 days")
 
         effective_source = self._get_log_source(log_source)
+        # Task relations and group-session mappings are stored in the DB.
+        if group_id or biz_scene or biz_task_id:
+            effective_source = "db"
 
         if effective_source == "langfuse":
             return await self._list_sessions_langfuse(
@@ -345,6 +443,8 @@ class BotChatService:
                 session_id=session_id,
                 session_key=session_key,
                 query=query,
+                match_mode=match_mode,
+                include_output_match=include_output_match,
             )
 
         # Default DB mode: for non-default bot, check access (owner or collaborator).
@@ -374,6 +474,11 @@ class BotChatService:
             session_id=session_id,
             session_key=session_key,
             query=query,
+            biz_scene=biz_scene,
+            biz_task_id=biz_task_id,
+            group_id=group_id,
+            match_mode=match_mode,
+            include_output_match=include_output_match,
         )
 
     async def _list_sessions_db(
@@ -388,6 +493,11 @@ class BotChatService:
         session_id: str | None,
         session_key: str | None,
         query: str | None,
+        biz_scene: str | None,
+        biz_task_id: str | None,
+        group_id: str | None,
+        match_mode: str,
+        include_output_match: bool,
     ) -> SessionListResponse:
         """List sessions using one DB source per request.
 
@@ -411,6 +521,11 @@ class BotChatService:
             session_id=session_id,
             session_key=session_key,
             query=query,
+            biz_scene=biz_scene,
+            biz_task_id=biz_task_id,
+            group_id=group_id,
+            match_mode=match_mode,
+            include_output_match=include_output_match,
         )
 
         if total == 0:
@@ -425,6 +540,11 @@ class BotChatService:
                 session_id=session_id,
                 session_key=session_key,
                 query=query,
+                biz_scene=biz_scene,
+                biz_task_id=biz_task_id,
+                group_id=group_id,
+                match_mode=match_mode,
+                include_output_match=include_output_match,
             )
 
         has_more = page * limit < total
@@ -449,9 +569,18 @@ class BotChatService:
         session_id: str | None,
         session_key: str | None,
         query: str | None,
+        match_mode: str,
+        include_output_match: bool,
     ) -> SessionListResponse:
         """List sessions using Langfuse source with legacy scan logic."""
-        requires_exhaustive_scan = bool(bot_id or session_id or session_key)
+        requires_exhaustive_scan = bool(
+            bot_id
+            or trace_id
+            or session_id
+            or session_key
+            or query
+            or match_mode == "contains"
+        )
 
         if requires_exhaustive_scan:
             return await self._list_sessions_with_exhaustive_scan(
@@ -465,6 +594,8 @@ class BotChatService:
                 session_id=session_id,
                 session_key=session_key,
                 query=query,
+                match_mode=match_mode,
+                include_output_match=include_output_match,
             )
 
         traces, total = await self._fetch_traces_from_langfuse(
@@ -479,7 +610,16 @@ class BotChatService:
             _map_trace_to_session(t)
             for t in traces
         ]
-        sessions = _apply_client_side_filters(sessions, bot_id, trace_id, session_id, session_key, query)
+        sessions = _apply_client_side_filters(
+            sessions,
+            bot_id,
+            trace_id,
+            session_id,
+            session_key,
+            query,
+            match_mode=match_mode,
+            include_output_match=include_output_match,
+        )
 
         filtered_total = len(sessions)
         has_more = (page * limit) < total
@@ -577,6 +717,8 @@ class BotChatService:
         session_id: str | None,
         session_key: str | None,
         query: str | None,
+        match_mode: str = "exact",
+        include_output_match: bool = False,
     ) -> SessionListResponse:
         """List sessions with exhaustive multi-page scan for exact metadata matching.
 
@@ -602,7 +744,16 @@ class BotChatService:
                 _map_trace_to_session(t)
                 for t in traces
             ]
-            filtered = _apply_client_side_filters(sessions, bot_id, trace_id, session_id, session_key, query)
+            filtered = _apply_client_side_filters(
+                sessions,
+                bot_id,
+                trace_id,
+                session_id,
+                session_key,
+                query,
+                match_mode=match_mode,
+                include_output_match=include_output_match,
+            )
             matched_sessions.extend(filtered)
             scanned_count += len(sessions)
 
@@ -717,9 +868,32 @@ class BotChatService:
         metadata_raw = trace_data.get("metadata") or {}
         attributes = (metadata_raw.get("attributes") or {}) if isinstance(metadata_raw, dict) else {}
         usage = trace_data.get("usage") or {}
+        session_id = attributes.get("gen_ai.session.id")
+        session_key = (
+            attributes.get("session_id")
+            or attributes.get("gen_ai.conversation.id")
+        )
+        bot_id = attributes.get("identity.bot_id")
+        group_id, session_kind = self._db_repo.get_group_labels(session_key)
 
         return ConversationDetail(
             id=trace_data.get("id", ""),
+            biz_task_id=(
+                trace_data.get("biz_task_id")
+                or attributes.get("agentic.biz_task_id")
+                or attributes.get("identity.biz_task_id")
+            ),
+            biz_scene=(
+                trace_data.get("biz_scene")
+                or attributes.get("agentic.biz_scene")
+                or attributes.get("identity.biz_scene")
+            ),
+            session_id=session_id,
+            session_key=session_key,
+            bot_id=bot_id,
+            bot_name=self._db_repo.get_bot_name(bot_id),
+            group_id=group_id,
+            session_kind=session_kind,
             name=trace_data.get("name") or "未命名会话",
             input=trace_data.get("input"),
             output=trace_data.get("output"),

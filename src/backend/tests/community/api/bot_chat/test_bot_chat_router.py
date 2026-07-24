@@ -1,8 +1,7 @@
 """API integration tests for bot_chat router."""
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationSession,
@@ -56,6 +55,50 @@ def sample_sessions():
 # ---------------------------------------------------------------------------
 
 class TestListSessions:
+
+    @pytest.mark.asyncio
+    async def test_product_query_parameters_are_forwarded(self, mock_service, mock_user):
+        from agentclaw.community.adapters.http.bot_chat.router import list_sessions
+
+        mock_service.list_sessions = AsyncMock(
+            return_value=SessionListResponse(
+                sessions=[],
+                total=0,
+                page=1,
+                limit=20,
+                has_more=False,
+            )
+        )
+
+        await list_sessions(
+            service=mock_service,
+            user=mock_user,
+            owner_id=None,
+            bot_id=None,
+            trace_id=None,
+            session_id=None,
+            session_key=None,
+            query="fixture",
+            biz_scene="scene_fixture",
+            biz_task_id="task_fixture",
+            group_id="group_fixture",
+            match_mode="contains",
+            include_output_match=True,
+            time_scope="default",
+            from_date=None,
+            to_date=None,
+            page=1,
+            limit=20,
+            log_source=None,
+        )
+
+        kwargs = mock_service.list_sessions.call_args.kwargs
+        assert kwargs["biz_scene"] == "scene_fixture"
+        assert kwargs["biz_task_id"] == "task_fixture"
+        assert kwargs["group_id"] == "group_fixture"
+        assert kwargs["match_mode"] == "contains"
+        assert kwargs["include_output_match"] is True
+        assert kwargs["time_scope"] == "default"
 
     @pytest.mark.asyncio
     async def test_list_sessions_success(self, mock_service, mock_user, sample_sessions):
