@@ -166,6 +166,8 @@ def _upload_skill_di_app(mock_ctx, bot_status="ACTIVE", bot_type="personal",
     bot_record = {
         "bot_id": mock_ctx.bot_id,
         "owner_id": mock_ctx.user_id,
+        "entity_id": f"staff_{mock_ctx.user_id}",
+        "env": "local",
         "active_engine": "openclaw",
         "bot_type": bot_type,
         "status": bot_status,
@@ -188,6 +190,9 @@ def _upload_skill_di_app(mock_ctx, bot_status="ACTIVE", bot_type="personal",
         bot_service = MagicMock()
         bot_service.resolve_desktop_live_status = MagicMock(return_value=None)
 
+    mock_edit_guard = MagicMock()
+    mock_edit_guard.acquire_for_edit.return_value = object()
+
     app = FastAPI()
     app.include_router(skills_router)
     app.dependency_overrides[get_request_context] = lambda: mock_ctx
@@ -200,6 +205,9 @@ def _upload_skill_di_app(mock_ctx, bot_status="ACTIVE", bot_type="personal",
                 DeviceContextResolver,
             )
             from agentclaw.community.core.skill_center.factories import SkillServiceFactory
+            from agentclaw.community.core.skills_pool.edit_guard import (
+                SkillsPoolEditGuard,
+            )
             from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 
             from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
@@ -209,6 +217,7 @@ def _upload_skill_di_app(mock_ctx, bot_status="ACTIVE", bot_type="personal",
             binder.bind(BotRepository, to=mock_bot_repo)
             binder.bind(DeviceContextResolver, to=mock_resolver)
             binder.bind(BotServiceProtocol, to=bot_service)
+            binder.bind(SkillsPoolEditGuard, to=mock_edit_guard)
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
