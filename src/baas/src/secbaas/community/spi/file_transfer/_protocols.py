@@ -9,7 +9,7 @@ class MultipartSession:
     """Result of initiating a multipart upload.
 
     Fields:
-        session_id: OSS upload_id for the multipart session.
+        session_id: Upload session identifier for the multipart session.
         part_count: ceil(file_size / part_size).
         parts: Pre-generated list of {part_number, upload_url} for each part.
     """
@@ -26,7 +26,7 @@ class PartInfo:
     Fields:
         part_number: 1-based part number within the upload.
         upload_url: Pre-signed per-part PUT URL.
-        etag: ETag returned by OSS after successful part upload. None in init response.
+        etag: ETag returned by the storage backend after successful part upload. None in init response.
     """
 
     part_number: int
@@ -39,7 +39,7 @@ class ObjectItem:
     """Metadata for a single staging object returned by list_objects.
 
     Fields:
-        key: Full OSS object key.
+        key: Full object storage key.
         size: Object size in bytes.
         last_modified: ISO-format timestamp of last modification.
     """
@@ -74,11 +74,11 @@ class FileTransferBackend(Protocol):
     def generate_upload_url(self, staging_path: str, expire_seconds: int) -> str:
         """Generate a presigned PUT URL for uploading a file to the staging path.
 
-        The staging_path is a complete OSS object key constructed by the
+        The staging_path is a complete object storage key constructed by the
         Dispatcher.  This method does NOT construct or transform the path.
 
         Args:
-            staging_path: Complete OSS object key (constructed by Dispatcher).
+            staging_path: Complete object storage key (constructed by Dispatcher).
             expire_seconds: URL validity duration in seconds.
 
         Returns:
@@ -89,11 +89,11 @@ class FileTransferBackend(Protocol):
     def check_object_exists(self, staging_path: str) -> bool:
         """Check whether an object exists at the given staging path.
 
-        Uses OSS head_object to verify existence.  Leverages OSS atomic
-        write semantics to confirm file upload completeness.
+        Uses an HTTP head request to verify existence.  Leverages atomic
+        write semantics of the underlying storage to confirm file upload completeness.
 
         Args:
-            staging_path: Complete OSS object key.
+            staging_path: Complete object storage key.
 
         Returns:
             True if object exists and is readable.
@@ -113,11 +113,11 @@ class FileTransferBackend(Protocol):
     ) -> str:
         """Generate a presigned GET URL for downloading a file from the staging path.
 
-        The staging_path is a complete OSS object key constructed by the
+        The staging_path is a complete object storage key constructed by the
         Dispatcher.  This method does NOT construct or transform the path.
 
         Args:
-            staging_path: Complete OSS object key.
+            staging_path: Complete object storage key.
             expire_seconds: URL validity duration in seconds.
             response_params: Optional dict of additional query parameters for
                 the presigned URL (e.g. {"response-content-disposition": "attachment"}
@@ -140,7 +140,7 @@ class FileTransferBackend(Protocol):
         pre-signed URLs.
 
         Args:
-            staging_path: Complete OSS object key.
+            staging_path: Complete object storage key.
             expire_seconds: URL validity duration in seconds.
             part_count: Number of parts to generate pre-signed URLs for.
 
@@ -150,18 +150,18 @@ class FileTransferBackend(Protocol):
         ...
 
     def list_parts(self, staging_path: str, session_id: str) -> list[PartInfo]:
-        """Query OSS for uploaded parts.
+        """Query the storage backend for uploaded parts.
 
         Returns {part_number, etag} per part.  Used by the Dispatcher
         before completing a multipart upload to validate part count
         completeness.
 
         Args:
-            staging_path: Complete OSS object key.
-            session_id: OSS upload_id for the multipart session.
+            staging_path: Complete object storage key.
+            session_id: Upload session identifier for the multipart session.
 
         Returns:
-            List of PartInfo with etag populated from OSS response.
+            List of PartInfo with etag populated from the storage backend response.
         """
         ...
 
@@ -176,8 +176,8 @@ class FileTransferBackend(Protocol):
         validating part count completeness before calling this method.
 
         Args:
-            staging_path: Complete OSS object key.
-            session_id: OSS upload_id.
+            staging_path: Complete object storage key.
+            session_id: Upload session identifier.
             parts: List of PartInfo from list_parts (with etag set).
         """
         ...
@@ -185,21 +185,21 @@ class FileTransferBackend(Protocol):
     def abort_multipart_upload(self, staging_path: str, session_id: str) -> None:
         """Cancel an in-progress multipart upload.
 
-        Aborts the OSS multipart session, freeing any uploaded parts.
+        Aborts the multipart upload session, freeing any uploaded parts.
 
         Args:
-            staging_path: Complete OSS object key.
-            session_id: OSS upload_id.
+            staging_path: Complete object storage key.
+            session_id: Upload session identifier.
         """
         ...
 
     def delete_object(self, key: str) -> None:
         """Delete a single object from staging.
 
-        Hard delete — the object is permanently removed from OSS.
+        Hard delete — the object is permanently removed from storage.
 
         Args:
-            key: Full OSS object key to delete.
+            key: Full object storage key to delete.
         """
         ...
 
@@ -210,7 +210,7 @@ class FileTransferBackend(Protocol):
         filename: str,
         subdir: str | None = None,
     ) -> str:
-        """Construct full OSS object key for file transfer staging.
+        """Construct full object storage key for file transfer staging.
 
         The Dispatcher calls this instead of hardcoding paths.
         Pattern: ``{staging_root}/{tenant}[/{subdir}]/{transfer_id}/{filename}``
@@ -218,11 +218,11 @@ class FileTransferBackend(Protocol):
         Args:
             tenant: Tenant identifier for scoping.
             transfer_id: Transfer ticket ID for uniqueness.
-            filename: Target filename on the OSS object.
+            filename: Target filename on the storage object.
             subdir: Optional subdirectory under the tenant scope.
 
         Returns:
-            Complete OSS object key string.
+            Complete object storage key string.
         """
         ...
 
@@ -234,7 +234,7 @@ class FileTransferBackend(Protocol):
         filename: str,
         subdir: str | None = None,
     ) -> str:
-        """Construct full OSS object key for Session File Sharing staging.
+        """Construct full object storage key for Session File Sharing staging.
 
         The Session Dispatcher calls this instead of hardcoding paths.
         Parallel to ``build_staging_path()`` for Bot use; does not modify
@@ -255,10 +255,10 @@ class FileTransferBackend(Protocol):
             tenant: Tenant identifier for scoping.
             session_id: Owning session identifier (replaces device scope).
             transfer_id: Transfer ticket ID for uniqueness.
-            filename: Target filename on the OSS object.
+            filename: Target filename on the storage object.
             subdir: Optional subdirectory grouping under the session scope.
 
         Returns:
-            Complete OSS object key string for the Session staging area.
+            Complete object storage key string for the Session staging area.
         """
         ...
