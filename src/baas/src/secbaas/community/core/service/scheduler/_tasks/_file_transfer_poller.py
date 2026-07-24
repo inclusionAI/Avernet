@@ -94,7 +94,13 @@ class FileTransferPoller:
                 # if a ticket gets stuck after status transition but before
                 # the operation completes (e.g. pull_file fails after
                 # update_status), the next poller cycle can retry it.
-                statuses=["CREATED", "UPLOADING", "UPLOAD_COMPLETED", "PULLING", "PUSHING"],
+                statuses=[
+                    "CREATED",
+                    "UPLOADING",
+                    "UPLOAD_COMPLETED",
+                    "PULLING",
+                    "PUSHING",
+                ],
                 limit=10000,
             )
             # UPLOAD direction: CREATED/UPLOADING/UPLOAD_COMPLETED
@@ -275,9 +281,7 @@ class FileTransferPoller:
                 # transition), skip the redundant status update and retry
                 # pull_file directly.
                 if ticket.status != "PULLING":
-                    self._ticket_repo.update_status(
-                        transfer_id, "PULLING", None
-                    )
+                    self._ticket_repo.update_status(transfer_id, "PULLING", None)
 
                 download_url = await asyncio.to_thread(
                     self._file_backend.generate_download_url,

@@ -64,10 +64,3 @@ class SourceTransferNotReadyError(SessionFileSharingError):
 # (per D-04).  These ARE DomainError subclasses (or plain Exception in the
 # case of TransferNotFoundError from _file_transfer_models.py).
 # ---------------------------------------------------------------------------
-
-from secbaas.api.bot_runtime import (  # noqa: E402
-    StagingObjectNotFoundError,
-    TransferNotFoundError,
-    TransferNotTerminalError,
-    TransferStateConflictError,
-)

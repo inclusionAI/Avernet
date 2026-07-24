@@ -129,18 +129,14 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             subdir=staging_subdir,
         )
 
-        expires_at = (
-            datetime.now(UTC) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
 
         # SINGLE / MULTIPART routing
         if file_size >= self.MULTIPART_THRESHOLD:
             # ---- MULTIPART path ----
             effective_part_size = part_size if part_size else self.DEFAULT_PART_SIZE
             if effective_part_size <= 0:
-                raise ValueError(
-                    f"part_size must be positive, got {part_size}"
-                )
+                raise ValueError(f"part_size must be positive, got {part_size}")
             part_count = -(-file_size // effective_part_size)  # ceil division
 
             # OSS limits multipart uploads to 10,000 parts.  Dynamically
@@ -196,9 +192,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 operator=operator,
             )
 
-            logger.info(
-                "Ticket created (MULTIPART): transfer_id=%s", transfer_id
-            )
+            logger.info("Ticket created (MULTIPART): transfer_id=%s", transfer_id)
 
             return SessionGetUploadUrlResponse(
                 type="MULTIPART",
@@ -236,9 +230,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 operator=operator,
             )
 
-            logger.info(
-                "Ticket created (SINGLE): transfer_id=%s", transfer_id
-            )
+            logger.info("Ticket created (SINGLE): transfer_id=%s", transfer_id)
 
             return SessionGetUploadUrlResponse(
                 upload_url=upload_url,
@@ -322,9 +314,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         except TransferStateConflictError:
             # CAS failed — a concurrent operation may have transitioned
             # this ticket.  Re-read and return success if already DONE.
-            ticket = self._ticket_repo.get_by_transfer_id(
-                transfer_id, tenant=tenant
-            )
+            ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
             if ticket is not None and ticket.status == "DONE":
                 logger.info(
                     "dispatch_complete_upload: CAS conflict resolved — "
@@ -399,9 +389,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         try:
             self._ticket_repo.update_status(transfer_id, "CANCELLED")
         except TransferStateConflictError:
-            ticket = self._ticket_repo.get_by_transfer_id(
-                transfer_id, tenant=tenant
-            )
+            ticket = self._ticket_repo.get_by_transfer_id(transfer_id, tenant=tenant)
             if ticket is not None and ticket.status in (
                 "CANCELLED",
                 "FAILED",
@@ -420,9 +408,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 )
             raise
 
-        return SessionCancelUploadResponse(
-            transfer_id=transfer_id, status="CANCELLED"
-        )
+        return SessionCancelUploadResponse(transfer_id=transfer_id, status="CANCELLED")
 
     # ------------------------------------------------------------------
     # dispatch_get_share_link
@@ -475,9 +461,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         # show=False → attachment (download); show=True → inline (preview)
         response_params = None
         if not show:
-            response_params = {
-                "response-content-disposition": "attachment"
-            }
+            response_params = {"response-content-disposition": "attachment"}
 
         share_url = await asyncio.to_thread(
             self._file_transfer_backend.generate_download_url,
@@ -486,9 +470,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             response_params,
         )
 
-        expires_at = (
-            datetime.now(UTC) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
 
         return SessionShareLinkResponse(
             share_url=share_url,
@@ -513,8 +495,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         the transfer_id exists for another session.
         """
         logger.info(
-            "dispatch_get_transfer_status: transfer_id=%s, tenant=%s, "
-            "session_id=%s",
+            "dispatch_get_transfer_status: transfer_id=%s, tenant=%s, session_id=%s",
             transfer_id,
             tenant,
             session_id,
@@ -532,9 +513,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Conditional fields per status
-        error_message = (
-            record.error_message if record.status == "FAILED" else None
-        )
+        error_message = record.error_message if record.status == "FAILED" else None
 
         return SessionGetTransferStatusResponse(
             transfer_id=record.transfer_id,

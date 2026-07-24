@@ -31,7 +31,9 @@ class TransferNotFoundError(FileTransferRepositoryError, ApiTransferNotFoundErro
 
     def __init__(self, transfer_id: str) -> None:
         message = f"Transfer ticket {transfer_id} not found"
-        self.message = message  # Set explicitly -- cooperative MRO stops at RuntimeError
+        self.message = (
+            message  # Set explicitly -- cooperative MRO stops at RuntimeError
+        )
         super().__init__(
             message,
             error_code="FILE_TRANSFER_NOT_FOUND",

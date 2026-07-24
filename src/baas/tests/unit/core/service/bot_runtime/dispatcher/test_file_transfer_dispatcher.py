@@ -12,7 +12,6 @@ from secbaas.community.api.bot_runtime import (
     DeleteTransferResponse,
     GetDownloadUrlResponse,
     GetUploadUrlResponse,
-    StagingObjectNotFoundError,
     ShareLinkResponse,
     StagingObjectNotFoundError,
     TransferNotFoundError,

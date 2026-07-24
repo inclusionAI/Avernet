@@ -82,7 +82,9 @@ class StubFileTransferBackend(FileTransferBackend):
         return transfer_id in self._storage
 
     def generate_download_url(
-        self, staging_path: str, expire_seconds: int,
+        self,
+        staging_path: str,
+        expire_seconds: int,
         response_params: dict | None = None,
     ) -> str:
         """Generate a fake presigned GET URL for the given staging path.
@@ -387,7 +389,9 @@ class StubFileTransferBackend(FileTransferBackend):
         env = get_current_env()
         root = self._staging_root_path
         subdir_part = f"{subdir}/" if subdir else ""
-        return f"{root}/{env}/{tenant}/{session_id}/{subdir_part}{transfer_id}/{filename}"
+        return (
+            f"{root}/{env}/{tenant}/{session_id}/{subdir_part}{transfer_id}/{filename}"
+        )
 
     def build_staging_prefix(
         self,
