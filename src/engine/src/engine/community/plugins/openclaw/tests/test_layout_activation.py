@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -261,22 +262,31 @@ def test_registered_local_missing_is_structured_data_inconsistency(
 
 def test_registered_local_unreadable_is_structured_data_inconsistency(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
     skill_file = legacy_local / "handmade" / "SKILL.md"
     prepared_content = (pool_local / "handmade" / "SKILL.md").read_text()
-    skill_file.chmod(0)
-    try:
-        result = activate_openclaw_pool(
-            migration_generation="generation-1",
-            preparation_id=PREPARATION_ID,
-            registered_local_names=["handmade"],
-            mappings=[],
-            home=home,
-            repo_is_mounted=lambda path: path == pool_repo,
-        )
-    finally:
-        skill_file.chmod(0o600)
+    real_access = os.access
+
+    def access_with_unreadable_skill(path: os.PathLike[str] | str, mode: int) -> bool:
+        if Path(path) == skill_file and mode & os.R_OK:
+            return False
+        return real_access(path, mode)
+
+    monkeypatch.setattr(
+        "engine.community.plugins.skills_pool.layout_activation.os.access",
+        access_with_unreadable_skill,
+    )
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
 
     assert result.status is PoolActivationStatus.DATA_INCONSISTENT
     assert result.evidence["reason"] == "registered_local_source_unreadable"
