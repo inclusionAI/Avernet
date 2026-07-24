@@ -26,7 +26,11 @@ from ._models import (
     SessionShareLinkResponse,
 )
 
+from ._protocols import SessionFileSharingDispatcher
+
 __all__ = [
+    # Protocols
+    "SessionFileSharingDispatcher",
     # Errors
     "OssObjectNotFoundError",
     "SessionFileSharingError",
