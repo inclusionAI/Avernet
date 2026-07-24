@@ -93,6 +93,7 @@ class DistributedLockService:
         self._renew_interval_seconds = renew_interval_seconds
         self._lock_contexts: dict[str, LockContext] = {}
         self._local_lock = threading.Lock()
+        self._renew_lock = threading.Lock()
 
     def _generate_holder_id(self) -> str:
         """生成唯一的锁持有者标识。
@@ -136,10 +137,11 @@ class DistributedLockService:
                     )
 
                     # 更新数据库中的过期时间
-                    updated = self._repository.update_expire_time(
-                        lock_name=context.lock_name,
-                        expire_time=new_expire_time,
-                    )
+                    with self._renew_lock:
+                        updated = self._repository.update_expire_time(
+                            lock_name=context.lock_name,
+                            expire_time=new_expire_time,
+                        )
 
                     if updated > 0:
                         context.expire_time = new_expire_time
@@ -306,34 +308,35 @@ class DistributedLockService:
             now = datetime.now()
             expire_time = now + timedelta(seconds=expire_seconds)
 
-            record = self._repository.get_by_lock_name(lock_name)
+            with self._renew_lock:
+                record = self._repository.get_by_lock_name(lock_name)
 
-            if record is None:
-                # 锁不存在，尝试插入
-                inserted = self._repository.insert_lock(
-                    lock_name=lock_name,
-                    lock_holder=lock_holder,
-                    expire_time=expire_time,
-                )
-                return inserted > 0
+                if record is None:
+                    # 锁不存在，尝试插入
+                    inserted = self._repository.insert_lock(
+                        lock_name=lock_name,
+                        lock_holder=lock_holder,
+                        expire_time=expire_time,
+                    )
+                    return inserted > 0
 
-            if record.expire_time and record.expire_time < now:
-                # 锁已过期，删除后重新插入
-                self._repository.delete_lock(lock_name)
-                inserted = self._repository.insert_lock(
-                    lock_name=lock_name,
-                    lock_holder=lock_holder,
-                    expire_time=expire_time,
-                )
-                return inserted > 0
+                if record.expire_time and record.expire_time < now:
+                    # 锁已过期，删除后重新插入
+                    self._repository.delete_lock(lock_name)
+                    inserted = self._repository.insert_lock(
+                        lock_name=lock_name,
+                        lock_holder=lock_holder,
+                        expire_time=expire_time,
+                    )
+                    return inserted > 0
 
-            if record.lock_holder == lock_holder:
-                # 同一持有者，续期
-                self._repository.update_expire_time(
-                    lock_name=lock_name,
-                    expire_time=expire_time,
-                )
-                return True
+                if record.lock_holder == lock_holder:
+                    # 同一持有者，续期
+                    self._repository.update_expire_time(
+                        lock_name=lock_name,
+                        expire_time=expire_time,
+                    )
+                    return True
 
             # 锁被他人持有且未过期
             return False
