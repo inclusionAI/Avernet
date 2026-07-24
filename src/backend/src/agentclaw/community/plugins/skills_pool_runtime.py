@@ -17,6 +17,7 @@ from agentclaw.community.core.skills_pool.models import (
     PoolCutoverResult,
     PoolCutoverStatus,
     PoolSkillMapping,
+    SkillMappingSourceLayout,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
@@ -124,13 +125,17 @@ class SkillsPoolRuntime:
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool:
         try:
             response = await self._invoke(
                 bot_id=bot_id,
                 user_id=user_id,
                 path="/api/skills/layout/mappings/publish",
-                body={"mappings": [mapping.to_dict() for mapping in mappings]},
+                body={
+                    "mappings": [mapping.to_dict() for mapping in mappings],
+                    "source_layout": source_layout.value,
+                },
             )
         except Exception:
             logger.exception(
@@ -207,13 +212,17 @@ class SkillsPoolRuntime:
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool:
         try:
             response = await self._invoke(
                 bot_id=bot_id,
                 user_id=user_id,
                 path="/api/skills/layout/mappings/verify",
-                body={"mappings": [mapping.to_dict() for mapping in mappings]},
+                body={
+                    "mappings": [mapping.to_dict() for mapping in mappings],
+                    "source_layout": source_layout.value,
+                },
             )
         except Exception:
             logger.exception(

@@ -48,6 +48,7 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
     PoolMappingPublishResult,
+    PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     Skill,
     SkillConfig,
@@ -55,10 +56,10 @@ from engine.community.core.skills.models import (
     SkillExecutionResult,
     SkillStatus,
     SkillType,
+    SymlinkItem,
     SyncBindPathsRequest,
     SyncSymlinksRequest,
     SyncSymlinksResult,
-    SymlinkItem,
 )
 from engine.community.core.skills.protocol import SkillsService
 from engine.community.plugin_api.claude_code.skills import ClaudeCodeSkillsPort
@@ -424,13 +425,16 @@ class ClaudeCodeSkillsAdapter(SkillsService):
     async def publish_pool_mappings(
         self,
         mappings: list[SymlinkItem],
+        *,
+        source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
         raw = await self._port.publish_pool_mappings(
             {
                 "mappings": [
                     {"source": item.source, "target": item.target} for item in mappings
-                ]
+                ],
+                "source_layout": source_layout.value,
             }
         )
         return PoolMappingPublishResult(
@@ -441,13 +445,16 @@ class ClaudeCodeSkillsAdapter(SkillsService):
     async def verify_pool_mappings(
         self,
         mappings: list[SymlinkItem],
+        *,
+        source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:
         raw = await self._port.verify_pool_mappings(
             {
                 "mappings": [
                     {"source": item.source, "target": item.target} for item in mappings
-                ]
+                ],
+                "source_layout": source_layout.value,
             }
         )
         return PoolMappingVerificationResult(

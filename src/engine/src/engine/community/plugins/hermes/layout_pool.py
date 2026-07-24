@@ -8,12 +8,18 @@ from typing import Callable
 
 from engine.community.plugins.skills_pool.layout_activation import (
     MappingPublishResult,
+    MappingSourceLayout,
     MappingVerificationResult,
     PoolActivationResult,
     PoolActivationStatus,
     SkillMapping,
     activate_hermes_pool,
+    rollback_hermes_pool,
+)
+from engine.community.plugins.skills_pool.layout_activation import (
     publish_pool_mappings as _publish_pool_mappings,
+)
+from engine.community.plugins.skills_pool.layout_activation import (
     verify_skill_mappings as _verify_skill_mappings,
 )
 from engine.community.plugins.skills_pool.layout_probe import (
@@ -41,30 +47,35 @@ def inspect_hermes_runtime_layout(
 def publish_hermes_pool_mappings(
     *,
     mappings: list[SkillMapping],
+    source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     home: str | Path = "/home/admin",
 ) -> MappingPublishResult:
     return _publish_pool_mappings(
         mappings=mappings,
         home=home,
         engine="hermes",
+        source_layout=source_layout,
     )
 
 
 def verify_hermes_pool_mappings(
     *,
     mappings: list[SkillMapping],
+    source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     home: str | Path = "/home/admin",
 ) -> MappingVerificationResult:
     return _verify_skill_mappings(
         mappings=mappings,
         home=home,
         engine="hermes",
+        source_layout=source_layout,
     )
 
 
 __all__ = [
     "LAYOUT_CONTRACT_VERSION",
     "MappingPublishResult",
+    "MappingSourceLayout",
     "MappingVerificationResult",
     "PoolActivationResult",
     "PoolActivationStatus",
@@ -74,5 +85,6 @@ __all__ = [
     "activate_hermes_pool",
     "inspect_hermes_runtime_layout",
     "publish_hermes_pool_mappings",
+    "rollback_hermes_pool",
     "verify_hermes_pool_mappings",
 ]

@@ -124,7 +124,8 @@ async def test_claude_code_adapter_exposes_complete_pool_runtime_contract() -> N
                     "source": mapping.source,
                     "target": mapping.target,
                 }
-            ]
+            ],
+            "source_layout": "pool",
         }
     )
     port.verify_pool_mappings.assert_awaited_once_with(
@@ -134,7 +135,8 @@ async def test_claude_code_adapter_exposes_complete_pool_runtime_contract() -> N
                     "source": mapping.source,
                     "target": mapping.target,
                 }
-            ]
+            ],
+            "source_layout": "pool",
         }
     )
 

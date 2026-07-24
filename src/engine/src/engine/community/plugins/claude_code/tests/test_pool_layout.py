@@ -9,6 +9,7 @@ import pytest
 from engine.community.plugins.claude_code.layout_pool import (
     LAYOUT_CONTRACT_VERSION,
     MappingPublishResult,
+    MappingSourceLayout,
     MappingVerificationResult,
     PoolActivationResult,
     PoolActivationStatus,
@@ -21,7 +22,6 @@ from engine.community.plugins.claude_code.layout_pool import (
     verify_claude_code_pool_mappings,
 )
 from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
-
 
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
 
@@ -298,4 +298,5 @@ async def test_claude_code_port_runs_pool_filesystem_operations_off_loop(
         "mappings": [
             SkillMapping(source="/pool/handmade", target="/skills/handmade")
         ],
+        "source_layout": MappingSourceLayout.POOL,
     }

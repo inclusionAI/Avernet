@@ -31,19 +31,20 @@ from engine.community.core.skills.models import (
     CleanSymlinksResult,
     PoolLayoutActivateRequest,
     PoolLayoutActivationResult,
-    PoolLayoutRollbackRequest,
     PoolLayoutProbeRequest,
     PoolLayoutProbeResult,
+    PoolLayoutRollbackRequest,
     PoolMappingPublishResult,
+    PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     Skill,
     SkillConfig,
     SkillExecutionRequest,
     SkillExecutionResult,
+    SymlinkItem,
     SyncBindPathsRequest,
     SyncSymlinksRequest,
     SyncSymlinksResult,
-    SymlinkItem,
 )
 
 
@@ -195,6 +196,8 @@ class SkillsService(Protocol):
     async def publish_pool_mappings(
         self,
         mappings: list[SymlinkItem],
+        *,
+        source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
         """发布目标 Pool layout 的完整受管 mapping。"""
@@ -203,6 +206,8 @@ class SkillsService(Protocol):
     async def verify_pool_mappings(
         self,
         mappings: list[SymlinkItem],
+        *,
+        source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:
         """验证当前受管入口精确指向请求中的 Pool source。"""

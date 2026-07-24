@@ -14,6 +14,7 @@ from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
 from agentclaw.community.core.models.skill import Skill
+from agentclaw.community.core.skills_pool.models import local_locator_prefixes
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -635,11 +636,7 @@ class SkillsPoolLayoutRepository:
     ) -> bool:
         """原子提交精确 Bot 范围内的全部 local locator 和布局状态。"""
 
-        pool_prefixes = (
-            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/",
-            "local:///home/admin/.claude_code/workspace/skills-pool/skills-local/",
-            "local:///home/admin/.aicoding/workspace/skills-pool/skills-local/",
-        )
+        pool_prefixes = local_locator_prefixes(pool=True)
         if any(
             not isinstance(skill_id, int)
             or not locator.startswith(pool_prefixes)
@@ -913,11 +910,7 @@ class SkillsPoolLayoutRepository:
     ) -> bool:
         """同事务恢复全部 local locator 与 ``LEGACY_ACTIVE``。"""
 
-        legacy_prefixes = (
-            "local:///home/admin/.openclaw/workspace/skills/skills-local/",
-            "local:///home/admin/.claude_code/workspace/skills/skills-local/",
-            "local:///home/admin/.aicoding/workspace/skills/skills-local/",
-        )
+        legacy_prefixes = local_locator_prefixes(pool=False)
         if any(
             not isinstance(skill_id, int)
             or not locator.startswith(legacy_prefixes)

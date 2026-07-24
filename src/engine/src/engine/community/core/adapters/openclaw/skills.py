@@ -39,15 +39,16 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
     PoolMappingPublishResult,
+    PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     Skill,
     SkillConfig,
     SkillExecutionRequest,
     SkillExecutionResult,
+    SymlinkItem,
     SyncBindPathsRequest,
     SyncSymlinksRequest,
     SyncSymlinksResult,
-    SymlinkItem,
 )
 from engine.community.core.skills.protocol import SkillsService
 from engine.community.plugin_api.openclaw.skills import OpenClawSkillsPort
@@ -238,6 +239,8 @@ class OpenClawSkillsAdapter(SkillsService):
     async def publish_pool_mappings(
         self,
         mappings: list[SymlinkItem],
+        *,
+        source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
         raw = await self._port.publish_pool_mappings(
@@ -245,7 +248,8 @@ class OpenClawSkillsAdapter(SkillsService):
                 "mappings": [
                     {"source": item.source, "target": item.target}
                     for item in mappings
-                ]
+                ],
+                "source_layout": source_layout.value,
             }
         )
         return PoolMappingPublishResult(
@@ -256,6 +260,8 @@ class OpenClawSkillsAdapter(SkillsService):
     async def verify_pool_mappings(
         self,
         mappings: list[SymlinkItem],
+        *,
+        source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:
         raw = await self._port.verify_pool_mappings(
@@ -263,7 +269,8 @@ class OpenClawSkillsAdapter(SkillsService):
                 "mappings": [
                     {"source": item.source, "target": item.target}
                     for item in mappings
-                ]
+                ],
+                "source_layout": source_layout.value,
             }
         )
         return PoolMappingVerificationResult(

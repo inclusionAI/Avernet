@@ -8,13 +8,18 @@ from typing import Callable
 
 from engine.community.plugins.skills_pool.layout_activation import (
     MappingPublishResult,
+    MappingSourceLayout,
     MappingVerificationResult,
     PoolActivationResult,
     PoolActivationStatus,
     SkillMapping,
     activate_aicoding_pool,
-    publish_pool_mappings as _publish_pool_mappings,
     rollback_aicoding_pool,
+)
+from engine.community.plugins.skills_pool.layout_activation import (
+    publish_pool_mappings as _publish_pool_mappings,
+)
+from engine.community.plugins.skills_pool.layout_activation import (
     verify_skill_mappings as _verify_skill_mappings,
 )
 from engine.community.plugins.skills_pool.layout_probe import (
@@ -42,30 +47,35 @@ def inspect_aicoding_runtime_layout(
 def publish_aicoding_pool_mappings(
     *,
     mappings: list[SkillMapping],
+    source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     home: str | Path = "/home/admin",
 ) -> MappingPublishResult:
     return _publish_pool_mappings(
         mappings=mappings,
         home=home,
         engine="aicoding",
+        source_layout=source_layout,
     )
 
 
 def verify_aicoding_pool_mappings(
     *,
     mappings: list[SkillMapping],
+    source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     home: str | Path = "/home/admin",
 ) -> MappingVerificationResult:
     return _verify_skill_mappings(
         mappings=mappings,
         home=home,
         engine="aicoding",
+        source_layout=source_layout,
     )
 
 
 __all__ = [
     "LAYOUT_CONTRACT_VERSION",
     "MappingPublishResult",
+    "MappingSourceLayout",
     "MappingVerificationResult",
     "PoolActivationResult",
     "PoolActivationStatus",

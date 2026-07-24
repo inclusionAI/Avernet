@@ -132,13 +132,13 @@ class OpenClawSkillsPort(Protocol):
     async def publish_pool_mappings(
         self, params: dict[str, Any]
     ) -> dict[str, Any]:
-        """发布目标 Pool layout 的完整受管 mapping。"""
+        """发布受管 mapping；``source_layout`` 缺省为 ``pool``。"""
         ...
 
     async def verify_pool_mappings(
         self, params: dict[str, Any]
     ) -> dict[str, Any]:
-        """验证受管入口精确解析到目标 Pool source。"""
+        """按 ``source_layout`` 验证受管入口的 source。"""
         ...
 
 

@@ -53,6 +53,9 @@ Engine Layout Descriptor 仍不在本期范围内。
   再从当前 Pool 全量重建新的 Legacy local 并原子交换。交换后即使 mapping
   或数据库失败也保持 `LEGACY_ROLLBACK_COMMITTED`，同一 generation 可由
   lease 过期后的新 worker 接管并继续提交 Legacy mapping 和 locator。
+- Backend 上传、删除和显式回滚共用 Bot 级互斥锁；回滚阶段内的新 local
+  编辑 fail closed。mapping 请求同时声明 `source_layout`：激活缺省为
+  `pool`，显式回滚前后使用 `legacy`。
 - 显式回滚不会读取迁移隔离副本，Pool 激活后产生的 local 新增和修改会被
   带入新的 Legacy；Pool 本身保留用于证据和后续恢复。
 - local 后置合并采用 best-effort 原子 exchange：一般的切换前修改、切换后

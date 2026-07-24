@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from engine.community.plugins.claude_code.layout_pool import (
+    MappingSourceLayout,
     SkillMapping,
     activate_claude_code_pool,
     inspect_claude_code_runtime_layout,
@@ -94,6 +95,9 @@ class _SkillsPortMixin:
         result = await asyncio.to_thread(
             publish_claude_code_pool_mappings,
             mappings=self._pool_mappings(params),
+            source_layout=MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
         )
         return result.to_data()
 
@@ -104,6 +108,9 @@ class _SkillsPortMixin:
         result = await asyncio.to_thread(
             verify_claude_code_pool_mappings,
             mappings=self._pool_mappings(params),
+            source_layout=MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
         )
         return result.to_data()
 

@@ -10,6 +10,7 @@ from engine.community.plugins.hermes.layout_pool import (
     activate_hermes_pool,
     inspect_hermes_runtime_layout,
     publish_hermes_pool_mappings,
+    rollback_hermes_pool,
     verify_hermes_pool_mappings,
 )
 
@@ -185,6 +186,19 @@ def test_activation_switches_hermes_local_bridge_to_pool(tmp_path: Path) -> None
     assert published.published is True
     assert verified.valid is True
     assert (active_root / "handmade").resolve() == (pool_local / "handmade")
+
+    (pool_local / "handmade" / "SKILL.md").write_text("pool-write")
+    rolled_back = rollback_hermes_pool(
+        rollback_generation="rollback-1",
+        registered_local_names=["handmade"],
+        home=home,
+    )
+
+    assert rolled_back.status is PoolActivationStatus.COMMITTED
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
+    assert (legacy_local / "handmade" / "SKILL.md").read_text() == "pool-write"
+    assert local_bridge.resolve() == legacy_local.resolve()
 
 
 def test_mapping_rejects_openclaw_source_instead_of_falling_back(

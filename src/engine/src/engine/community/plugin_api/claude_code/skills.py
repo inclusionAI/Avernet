@@ -257,14 +257,14 @@ class ClaudeCodeSkillsPort(Protocol):
         self,
         params: dict,
     ) -> dict:
-        """Publish the complete managed mapping set under ``~/.claude/skills``."""
+        """Publish mappings from the declared ``source_layout``."""
         ...
 
     async def verify_pool_mappings(
         self,
         params: dict,
     ) -> dict:
-        """Verify managed Claude Code entries against Pool sources."""
+        """Verify mappings against the declared ``source_layout``."""
         ...
 
 

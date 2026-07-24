@@ -16,6 +16,7 @@ from engine.community.plugin_api.openclaw.skills import (
 from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.plugins.openclaw._file import _convert_path
 from engine.community.plugins.openclaw.layout_activation import (
+    MappingSourceLayout,
     SkillMapping,
     activate_openclaw_pool,
     publish_pool_mappings,
@@ -97,6 +98,9 @@ class _SkillsPortMixin:
         result = await asyncio.to_thread(
             publish_pool_mappings,
             mappings=self._pool_mappings(params),
+            source_layout=MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
         )
         return result.to_data()
 
@@ -106,6 +110,9 @@ class _SkillsPortMixin:
         result = await asyncio.to_thread(
             verify_skill_mappings,
             mappings=self._pool_mappings(params),
+            source_layout=MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
         )
         return result.to_data()
 

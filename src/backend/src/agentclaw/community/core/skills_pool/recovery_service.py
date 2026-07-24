@@ -16,8 +16,10 @@ from agentclaw.community.core.skills_pool.models import (
     PoolPaths,
     PoolSkillMapping,
     RegisteredSkillAsset,
+    SkillMappingSourceLayout,
     pool_paths_for_engine,
 )
+from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.ports import (
     SkillsPoolRuntimeProtocol,
     SkillsPoolSkillRepositoryProtocol,
@@ -37,6 +39,9 @@ from agentclaw.community.core.skills_pool.types import (
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
 
 
 class ManualRepairResolution(StrEnum):
@@ -48,6 +53,7 @@ class ManualRepairResolution(StrEnum):
 
 class SkillsPoolRecoveryOutcome(StrEnum):
     RETRIGGERED = "retriggered"
+    RETRIGGER_FAILED = "retrigger_failed"
     NOT_FOUND = "not_found"
     NOT_REPAIR_REQUIRED = "not_repair_required"
     STALE_GENERATION = "stale_generation"
@@ -89,7 +95,19 @@ class SkillsPoolRecoveryService:
         state = self._layouts.get(scope)
         if not state.persisted:
             return SkillsPoolRecoveryResult(SkillsPoolRecoveryOutcome.NOT_FOUND)
-        if state.phase is not SkillLayoutPhase.NEEDS_MANUAL_REPAIR:
+        retrying_resolved_enqueue = (
+            state.migration_generation == migration_generation
+            and state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+            and state.phase
+            in {
+                SkillLayoutPhase.POOL_READY,
+                SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+            }
+        )
+        if (
+            state.phase is not SkillLayoutPhase.NEEDS_MANUAL_REPAIR
+            and not retrying_resolved_enqueue
+        ):
             return SkillsPoolRecoveryResult(
                 SkillsPoolRecoveryOutcome.NOT_REPAIR_REQUIRED
             )
@@ -98,17 +116,18 @@ class SkillsPoolRecoveryService:
                 SkillsPoolRecoveryOutcome.STALE_GENERATION
             )
 
-        committed = resolution is ManualRepairResolution.POOL_COMMITTED
-        if not self._layouts.resolve_repair(
-            scope=scope,
-            migration_generation=migration_generation,
-            operator=operator.strip(),
-            note=note.strip(),
-            cutover_committed=committed,
-        ):
-            return SkillsPoolRecoveryResult(
-                SkillsPoolRecoveryOutcome.STATE_RACE_LOST
-            )
+        if not retrying_resolved_enqueue:
+            committed = resolution is ManualRepairResolution.POOL_COMMITTED
+            if not self._layouts.resolve_repair(
+                scope=scope,
+                migration_generation=migration_generation,
+                operator=operator.strip(),
+                note=note.strip(),
+                cutover_committed=committed,
+            ):
+                return SkillsPoolRecoveryResult(
+                    SkillsPoolRecoveryOutcome.STATE_RACE_LOST
+                )
 
         payload = build_skills_pool_reconcile_payload(
             scope=scope,
@@ -118,11 +137,24 @@ class SkillsPoolRecoveryService:
                 "resolution": resolution.value,
             },
         )
-        self._queue.enqueue(
-            SKILLS_POOL_RECONCILE_TASK,
-            payload,
-            deadline_seconds=SKILLS_POOL_RECONCILE_DEADLINE_SECONDS,
-        )
+        try:
+            self._queue.enqueue(
+                SKILLS_POOL_RECONCILE_TASK,
+                payload,
+                deadline_seconds=SKILLS_POOL_RECONCILE_DEADLINE_SECONDS,
+            )
+        except Exception:
+            logger.exception(
+                "[skills_pool.recovery] durable retrigger enqueue failed "
+                "env=%s entity_id=%s bot_id=%s generation=%s",
+                scope.env,
+                scope.entity_id,
+                scope.bot_id,
+                migration_generation,
+            )
+            return SkillsPoolRecoveryResult(
+                SkillsPoolRecoveryOutcome.RETRIGGER_FAILED
+            )
         return SkillsPoolRecoveryResult(SkillsPoolRecoveryOutcome.RETRIGGERED)
 
 
@@ -132,6 +164,7 @@ class SkillsPoolRollbackOutcome(StrEnum):
     NOT_POOL_ACTIVE = "not_pool_active"
     STALE_GENERATION = "stale_generation"
     INVALID_REQUEST = "invalid_request"
+    EDIT_BUSY = "edit_busy"
     BOT_CHANGED = "bot_changed"
     STATE_RACE_LOST = "state_race_lost"
     ROLLBACK_FAILED = "rollback_failed"
@@ -160,13 +193,42 @@ class SkillsPoolRollbackService:
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skill_repository: SkillsPoolSkillRepositoryProtocol,
         runtime: SkillsPoolRuntimeProtocol,
+        edit_guard: SkillsPoolEditGuard,
     ) -> None:
         self._bots = bot_repository
         self._layouts = layout_repository
         self._skills = skill_repository
         self._runtime = runtime
+        self._edit_guard = edit_guard
 
     async def rollback(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        rollback_generation: str,
+        lease_owner: str,
+        operator: str,
+        note: str,
+    ) -> SkillsPoolRollbackResult:
+        edit_lease = self._edit_guard.acquire_for_rollback(scope=scope)
+        if edit_lease is None:
+            return SkillsPoolRollbackResult(
+                SkillsPoolRollbackOutcome.EDIT_BUSY,
+                evidence={"reason": "local_skill_edit_in_progress"},
+                retryable=True,
+            )
+        try:
+            return await self._rollback_with_edit_pause(
+                scope=scope,
+                rollback_generation=rollback_generation,
+                lease_owner=lease_owner,
+                operator=operator,
+                note=note,
+            )
+        finally:
+            self._edit_guard.release(edit_lease)
+
+    async def _rollback_with_edit_pause(
         self,
         *,
         scope: BotSkillLayoutScope,
@@ -223,8 +285,15 @@ class SkillsPoolRollbackService:
 
         bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
         if bot is None or bot.get("env") != scope.env:
-            return SkillsPoolRollbackResult(
-                SkillsPoolRollbackOutcome.BOT_CHANGED
+            return self._failure(
+                scope=scope,
+                rollback_generation=rollback_generation,
+                lease_owner=lease_owner,
+                outcome=SkillsPoolRollbackOutcome.BOT_CHANGED,
+                code="ROLLBACK_BOT_CHANGED",
+                stage="rollback_bot_validation",
+                retryable=False,
+                evidence={"reason": "bot_missing_or_environment_changed"},
             )
         engine = bot.get("active_engine")
         owner_id = bot.get("owner_id")
@@ -233,14 +302,28 @@ class SkillsPoolRollbackService:
             or not isinstance(owner_id, (str, int))
             or isinstance(owner_id, bool)
         ):
-            return SkillsPoolRollbackResult(
-                SkillsPoolRollbackOutcome.BOT_CHANGED
+            return self._failure(
+                scope=scope,
+                rollback_generation=rollback_generation,
+                lease_owner=lease_owner,
+                outcome=SkillsPoolRollbackOutcome.BOT_CHANGED,
+                code="ROLLBACK_BOT_CHANGED",
+                stage="rollback_bot_validation",
+                retryable=False,
+                evidence={"reason": "bot_engine_or_owner_invalid"},
             )
         try:
             paths = pool_paths_for_engine(engine)
-        except ValueError:
-            return SkillsPoolRollbackResult(
-                SkillsPoolRollbackOutcome.BOT_CHANGED
+        except ValueError as error:
+            return self._failure(
+                scope=scope,
+                rollback_generation=rollback_generation,
+                lease_owner=lease_owner,
+                outcome=SkillsPoolRollbackOutcome.BOT_CHANGED,
+                code="ROLLBACK_ENGINE_UNSUPPORTED",
+                stage="rollback_bot_validation",
+                retryable=False,
+                evidence={"reason": str(error)},
             )
         user_id = str(owner_id)
 
@@ -362,6 +445,7 @@ class SkillsPoolRollbackService:
             bot_id=scope.bot_id,
             user_id=user_id,
             mappings=mappings,
+            source_layout=SkillMappingSourceLayout.LEGACY,
         ):
             return self._failure(
                 scope=scope,
@@ -377,6 +461,7 @@ class SkillsPoolRollbackService:
             bot_id=scope.bot_id,
             user_id=user_id,
             mappings=mappings,
+            source_layout=SkillMappingSourceLayout.LEGACY,
         ):
             return self._failure(
                 scope=scope,

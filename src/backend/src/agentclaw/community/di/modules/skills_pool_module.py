@@ -9,6 +9,7 @@ from agentclaw.community.core.devices.repository.protocol import (
 from agentclaw.community.core.skills_pool.claim_service import (
     SkillsPoolMigrationClaimService,
 )
+from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
 )
@@ -69,6 +70,11 @@ class SkillsPoolModule(Module):
         binder.bind(
             SkillsPoolReconcileService,
             to=SkillsPoolReconcileService,
+            scope=singleton,
+        )
+        binder.bind(
+            SkillsPoolEditGuard,
+            to=SkillsPoolEditGuard,
             scope=singleton,
         )
 
