@@ -1,4 +1,10 @@
-"""The served OpenAPI is generated from the published description (parity)."""
+"""The served OpenAPI is generated from a domain's published description.
+
+Driven by a small committed fixture rather than the real dumped artifact — the
+artifact is a build output (produced by the backend's ``dump_openapi`` for the
+single-box file, or pulled from the object store in the enterprise flavor) and
+is not committed.
+"""
 
 from __future__ import annotations
 
@@ -6,43 +12,54 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi.testclient import TestClient
+from gateway.community.core.authn import RouteSecurity
+from gateway.community.core.forwarding import build_served_openapi
 
-from gateway.community.adapters.web.app import create_app
-
-_SEED = (
-    Path(__file__).resolve().parents[1] / "configs" / "schemas" / "bots.openapi.json"
-)
+_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "bots.openapi.json"
 _METHODS = {"get", "post", "put", "delete", "patch"}
-
-
-def _ops(spec: dict[str, Any]) -> set[tuple[str, str]]:
-    return {
-        (path, method)
-        for path, item in spec.get("paths", {}).items()
-        for method in item
-        if method in _METHODS
-    }
+_RULES = RouteSecurity.from_table({"/**": ["first_party_user"]})
 
 
 def _served() -> dict[str, Any]:
-    return TestClient(create_app()).get("/openapi.json").json()
+    description = json.loads(_FIXTURE.read_text())
+    return build_served_openapi(
+        ["bots"],
+        lambda _domain: description,
+        _RULES,
+        title="gateway",
+        version="0.1.0",
+        description="test",
+    )
 
 
-def test_served_doc_is_superset_of_published_ops() -> None:
-    seed = json.loads(_SEED.read_text())
-    missing = _ops(seed) - _ops(_served())
-    assert not missing, f"served doc dropped published operations: {sorted(missing)}"
+def test_public_operations_are_served() -> None:
+    paths = _served()["paths"]
+    assert set(paths) == {"/openapi/v1/bots", "/openapi/v1/bots/{id}"}
+    assert set(paths["/openapi/v1/bots"]) >= {"get", "post"}
+
+
+def test_non_public_paths_are_filtered_out() -> None:
+    assert "/api/internal/debug" not in _served()["paths"]
 
 
 def test_every_served_operation_carries_security() -> None:
-    served = _served()
-    for path, item in served["paths"].items():
+    for path, item in _served()["paths"].items():
         for method, operation in item.items():
             if method in _METHODS:
-                assert "x-avernet-security" in operation, f"{method} {path}"
+                assert operation["x-avernet-security"] == [{"first_party_user": {}}], (
+                    f"{method} {path}"
+                )
 
 
-def test_served_doc_only_exposes_public_namespace() -> None:
-    for path in _served()["paths"]:
-        assert path.startswith("/openapi/v1"), path
+def test_components_pruned_to_referenced() -> None:
+    schemas = _served()["components"]["schemas"]
+    # Bot (via get + BotList.items), BotList, BotCreate; Unused is dropped.
+    assert set(schemas) == {"Bot", "BotList", "BotCreate"}
+
+
+def test_empty_catalog_yields_empty_but_valid_doc() -> None:
+    doc = build_served_openapi(
+        ["bots"], lambda _d: {}, _RULES, title="gateway", version="0.1.0"
+    )
+    assert doc["openapi"].startswith("3.")
+    assert doc["paths"] == {}
