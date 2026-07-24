@@ -14,7 +14,7 @@ from ._record import SessionTicketRecord
 
 log = get_logger("orm-repository")
 
-# Upload path:  CREATED -> UPLOADING -> DONE
+# Upload path:  CREATED -> UPLOADING -> DONE  (fast: CREATED -> DONE)
 # Cancel path:  CREATED/UPLOADING -> CANCELLED
 # Failure path: UPLOADING -> FAILED
 # Delete path:  DONE/FAILED/CANCELLED -> DELETED
@@ -24,6 +24,7 @@ VALID_TRANSITIONS = frozenset(
         # Upload path
         ("CREATED", "UPLOADING"),
         ("UPLOADING", "DONE"),
+        ("CREATED", "DONE"),  # Session complete_upload fast path (no device pull)
         # Cancel path
         ("CREATED", "CANCELLED"),
         ("UPLOADING", "CANCELLED"),
