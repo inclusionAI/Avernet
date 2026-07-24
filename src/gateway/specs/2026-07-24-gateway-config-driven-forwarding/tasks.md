@@ -45,13 +45,13 @@
   - [x] Unit tests: namespace filter, transitive component collection, security attach (default + specific), input not mutated.
 - **Depends on:** Task 3
 
-## Task 5: Catch-all forwarding entrypoint
+## Task 5: Catch-all forwarding entrypoint `[x]`
 - **Goal:** One route that authenticates and forwards verbatim — the runtime request path.
 - **Files:** `src/gateway/src/gateway/community/adapters/web/_forward.py` (new)
 - **Done when:**
-  - [ ] Resolves the domain (unknown → `404`, never open-proxy); authenticates via `require_principal` (fail-closed) before any forward.
-  - [ ] Forwards the path **verbatim** to the resolved server via `Forwarder`; response returns through the standard envelope. (The auth workstream attaches the signed principal at the forwarder seam.)
-  - [ ] Integration tests (mocked upstream transport): auth reject-before-forward, unknown-domain 404, success/error envelope, one SSE path, one upload path.
+  - [x] Resolves the domain (unknown → `404` envelope, never open-proxy, before auth); authenticates (fail-closed) before any forward.
+  - [x] Forwards the path **verbatim** to the resolved server via `Forwarder`, streaming the response with duplicate headers preserved; upstream failure → `502` envelope. (The auth workstream attaches the signed principal at the forwarder seam.)
+  - [x] Integration tests (real streaming forwarder + stub upstream): auth reject-before-forward, unknown-domain 404, success + duplicate Set-Cookie, SSE streaming, upload verbatim.
 - **Depends on:** Tasks 1, 2
 
 ## Task 6: Wire gateway + retire #389 stub routers
