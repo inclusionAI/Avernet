@@ -69,9 +69,9 @@
 - **Goal:** Every externally-exposed backend group (the seven #389 groups — bots, channels, identity, mcp, resources, routines, skills) serves under the `/openapi/v1/bots` prefix, in a **new dedicated subdirectory** that keeps the public surface distinct from the legacy `/api/…` routers.
 - **Files:** new `src/backend/src/agentclaw/community/adapters/http/openapi_v1/**` (dedicated public-API package); `src/backend/src/agentclaw/community/adapters/http/app.py` (mount it). Legacy `/api/…` routers untouched.
 - **Done when:**
-  - [x] `openapi_v1/_rehome.py` re-mounts the existing group routers under `/openapi/v1/bots/…` (path move only — same handlers/deps reused, no logic written). `bot_management` (`/api/bots`) collapses onto the domain root (no `bots/bots`); other groups become sub-paths. 119 public paths under the community profile; `app.openapi()` generates with no operationId collisions.
+  - [x] `openapi_v1/` defines **new, purpose-built** routers for the redesigned external contract (ported from the #389 definitions), **not** a re-mount of the legacy handlers — the redesign means completely new APIs. Definition-only: Pydantic schemas + `x-avernet-security` markers + stub handlers (`NotImplementedError`); auth via a `_deps.require_principal` stub (the gateway-JWT verifier drops in later). 32 clean paths under `/openapi/v1/bots` (agent-CRUD at the root — no `bots/bots`; sub-groups mounted before it so literals beat the `{bot_id}` wildcard).
   - [x] Public surface lives in its own subdirectory, distinct from legacy `/api/…` which is untouched.
-  - [x] Existing backend gateway contract suite stays green (102 passed).
+  - [x] Existing backend gateway contract suite stays green (102 passed); `app.openapi()` generates cleanly.
 
 ## Task 8: Backend — `dump_openapi()` + public-namespace test `[x]`
 - **Goal:** Deterministic OpenAPI dump for publishing, and enforce that the public namespace holds only the intended `bots` surface.

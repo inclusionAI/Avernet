@@ -1,48 +1,45 @@
-"""Public ``/openapi/v1/bots`` API surface (path move over existing handlers).
+"""Public ``/openapi/v1/bots`` API surface — the redesigned external contract.
 
-The gateway forwards ``/openapi/v1/bots/...`` here verbatim. This package does
-**not** implement endpoints — it re-mounts the existing group routers under the
-public prefix so the same handlers are reachable there, keeping the public
-surface in a dedicated place, distinct from the legacy ``/api/...`` routers.
+These are **new, purpose-built** routers for the redesigned API (definition
+only; handlers are stubs). The gateway forwards ``/openapi/v1/bots/...`` here
+verbatim and generates its served doc from this surface. This is distinct from —
+and does not reuse — the legacy ``/api/...`` routers.
+
+The sub-resource groups (channels, identity, mcp, resources, routines, skills)
+are mounted **before** the bots group so their literal path segments
+(``/openapi/v1/bots/channels`` …) resolve ahead of the agent-CRUD wildcard
+``/openapi/v1/bots/{bot_id}``.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 
-from agentclaw.community.adapters.http.bot_management import (
-    router as bot_management_module,
-)
-from agentclaw.community.adapters.http.channel.router import router as channel_router
-from agentclaw.community.adapters.http.cron import router as cron_router
-from agentclaw.community.adapters.http.identity.router import router as identity_router
-from agentclaw.community.adapters.http.mcp import router as mcp_router
-from agentclaw.community.adapters.http.resources import router as resources_router
-from agentclaw.community.adapters.http.skill_center import skills, skillsets
+from .bots import router as bots_router
+from .channels import router as channels_router
+from .identity import router as identity_router
+from .mcp import router as mcp_router
+from .resources import router as resources_router
+from .routines import router as routines_router
+from .skills import router as skills_router
 
-from ._rehome import rehome_into
-
-# (source router, prefix to strip). The agent-CRUD group (`/api/bots`) collapses
-# onto the domain root so paths read `/openapi/v1/bots` and `/openapi/v1/bots/{id}`
-# rather than `/openapi/v1/bots/bots`. Every other group keeps its name as a
-# sub-path (`/openapi/v1/bots/channels`, `/openapi/v1/bots/mcp`, …).
-_GROUPS = [
-    (bot_management_module.router, "/api/bots"),
-    (channel_router, "/api"),
-    (identity_router, "/api"),
-    (mcp_router, "/api"),
-    (resources_router, "/api"),
-    (cron_router, "/api"),
-    (skills.router, "/api"),
-    (skillsets.router, "/api"),
+# Order matters: literal sub-groups first, the `{bot_id}` wildcard group last.
+_SUBGROUPS = [
+    channels_router,
+    identity_router,
+    mcp_router,
+    resources_router,
+    routines_router,
+    skills_router,
 ]
 
 
 def build_public_router() -> APIRouter:
-    """Assemble the re-homed ``/openapi/v1/bots`` router."""
-    public = APIRouter(tags=["openapi-v1"])
-    for source, strip_prefix in _GROUPS:
-        rehome_into(public, source, strip_prefix=strip_prefix)
+    """Assemble the ``/openapi/v1/bots`` public router."""
+    public = APIRouter()
+    for router in _SUBGROUPS:
+        public.include_router(router)
+    public.include_router(bots_router)
     return public
 
 
