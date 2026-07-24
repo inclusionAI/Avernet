@@ -463,7 +463,7 @@ mod tests {
     async fn multipart_roundtrip() {
         let (p, _dir) = plugin();
         let key = "multipart";
-        let prep = p.prepare_upload(req(key, 6)).await.unwrap();
+        let prep = p.prepare_upload(req(key, 6), None).await.unwrap();
         p.stream_upload(&prep.handle, Some(1), stream_of(Bytes::from_static(b"abc")))
             .await
             .unwrap();
@@ -623,7 +623,7 @@ mod tests {
         let key = "session-files/test/sid/fid/file.txt";
         let body = Bytes::from_static(b"single upload with p-prefixed suffix");
         let size = body.len() as u64;
-        let prep = p.prepare_upload(req(key, size)).await.unwrap();
+        let prep = p.prepare_upload(req(key, size), None).await.unwrap();
 
         let staged = p.data_dir.join(format!("{key}.pABCDEFG.part"));
         tokio::fs::create_dir_all(staged.parent().unwrap())
@@ -654,7 +654,7 @@ mod tests {
     async fn malformed_p_prefixed_temp_is_rejected() {
         let (p, _dir) = plugin();
         let key = "session-files/test/sid/fid/file.txt";
-        let prep = p.prepare_upload(req(key, 3)).await.unwrap();
+        let prep = p.prepare_upload(req(key, 3), None).await.unwrap();
         let staged = p.data_dir.join(format!("{key}.pBAD.X.part"));
         tokio::fs::create_dir_all(staged.parent().unwrap())
             .await
