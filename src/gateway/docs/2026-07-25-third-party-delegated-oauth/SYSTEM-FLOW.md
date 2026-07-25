@@ -200,10 +200,12 @@ Both flavors use the **same clean architecture** (we are the authz server; we mi
 
 ## 11. Why we are not forced back to the two-token passthrough
 
-- **Option A (build our own authz server / login-with-avernet)** has **no external dependency** — it needs only (i) our own `/authorize` + consent + `/token`, (ii) the human-login we already run, (iii) minting our own JWTs. **Always achievable by us alone.** It is the floor — **the guaranteed baseline and, until the question below is answered, the working design**.
-- **Option B (lean on antbuservice / Google as the authz server)** — an *optimization to build less*, viable **only if** that provider can issue **tc-audience, tc-consented** tokens (i.e. act as teamclaw's *authorization* server, more than SSO passthrough). **Unconfirmed** — this is the open build-weight question (§12), and the provider's capability isn't knowable from this repo (§9). Note the distinction that matters when answering it: *"can it issue an SSO/login token?"* = yes (that's the login step we already use and keep), *"can it be teamclaw's authorization server?"* = the actual open question. Until it's answered, **Option A is the working design**.
+- **Option A (build our own authz server / login-with-avernet)** has **no external dependency** — it needs only (i) our own `/authorize` + consent + `/token`, (ii) the human-login we already run, (iii) minting our own JWTs. **Always achievable by us alone**, and **the design we build** in both flavors — for the reasons below.
+- **Option B (lean on the IdP as teamclaw's authz server) is not on the table** — but for *different reasons per flavor*, and neither reason is "unverified capability":
+  - **Corp (BUService):** a **category mismatch**. BUService is an **authentication** service — it verifies the human and resolves identity — **not a third-party OAuth authorization server**: it does not register third-party OAuth clients, run a third-party consent flow, or issue **teamclaw-audience** tokens. So we build our **own** authz server *on top of* BUService, using it only for the authenticate-the-human step. B isn't a missing feature we're waiting on.
+  - **Community (Google):** a **design choice**. Google *can* act as an OAuth authorization server, so this isn't a capability limit — we **choose** to use Google as an **OIDC sign-in (authentication) only** and build our own authz server, keeping community's architecture identical to corp and avoiding Google-specific resource/scope registration.
 - **Option C (forward a generic provider token to tc)** = the anti-pattern; rejected.
-- Reverting to `IAM_TOKEN` passthrough is therefore **not a technical necessity** (A is always buildable). It would be a **conscious prioritization decision** to accept a known anti-pattern (with compensating controls) — a business call, not an engineering dead-end.
+- Reverting to `IAM_TOKEN` passthrough is therefore **not a technical necessity** (A is always buildable, and is the design). It would be a **conscious prioritization decision** to accept a known anti-pattern (with compensating controls) — a business call, not an engineering dead-end.
 
 ## 12. Decided vs. Open (review agenda)
 
@@ -216,13 +218,12 @@ Both flavors use the **same clean architecture** (we are the authz server; we mi
 - Same clean design for both; IdP is the only flavored difference.
 - Single all-encompassing scope for now; **pure JWT** revocation (≤ ~15 min access latency).
 - Caller-token/downstream mint **de-scoped** (service-bot-only; future cross-team).
-- **Option A is the working design / guaranteed baseline** in both flavors (we can always build it ourselves). Whether a lighter path exists is the build-weight question below — not a feasibility blocker.
+- **Build A (our own OAuth authorization server) is decided for both flavors.** **Corp:** BUService is an *authentication* service, not a third-party OAuth authorization server, so we build our own authz server on top of it (BUService only authenticates the human) — a category fit, not a pending capability. **Community:** a *design choice* to use Google as OIDC sign-in only and build our own authz server (uniform with corp; no Google-specific resource/scope registration). Option B (lean on the IdP) is off the table — corp by category, community by choice.
 
 **Open — needs the team**
 
-1. **A vs B (build-weight):** can antbuservice (corp) / Google (community) act as an authz server that issues **tc-audience, tc-consented** tokens? *Yes* → lighter path (B); *No* → build A. **Option A is the guaranteed baseline either way**, so this decides build-weight, not feasibility. The provider's capability **isn't knowable from this repo** (§9), so this needs the team / IdP owners, not a source read.
-2. **Proceed vs. defer:** if the team judges the clean fix not worth prioritizing now, the alternative is a *documented* acceptance of the passthrough anti-pattern — not "we had no choice." (Option A is always buildable, so this is a prioritization call.)
-3. **Consent lifetime & re-consent triggers** (expiry; what re-prompts). With a single scope there is no "new scope requested" trigger yet.
+1. **Proceed vs. defer:** since Option B is off the table, the only alternative to building A is a *documented* acceptance of the passthrough anti-pattern — not a lighter clean option to wait for. A is always buildable, so this is a prioritization call.
+2. **Consent lifetime & re-consent triggers** (expiry; what re-prompts). With a single scope there is no "new scope requested" trigger yet.
 
 ---
 
