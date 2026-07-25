@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 
 from injector import inject
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.skills_pool.repository.models import (
     SkillsPoolRolloutAuditModel,
@@ -24,6 +25,36 @@ class SkillsPoolRolloutRepository:
         self._database = database
 
     def commit_change(
+        self,
+        *,
+        env: str,
+        config_id: int | None,
+        expected_revision: str | None,
+        expected_enable: bool,
+        expected_value: dict[str, object],
+        next_revision: str,
+        enabled: bool,
+        value: dict[str, object],
+        audit: dict[str, object],
+    ) -> bool:
+        try:
+            return self._commit_change(
+                env=env,
+                config_id=config_id,
+                expected_revision=expected_revision,
+                expected_enable=expected_enable,
+                expected_value=expected_value,
+                next_revision=next_revision,
+                enabled=enabled,
+                value=value,
+                audit=audit,
+            )
+        except IntegrityError:
+            if config_id is None:
+                return False
+            raise
+
+    def _commit_change(
         self,
         *,
         env: str,

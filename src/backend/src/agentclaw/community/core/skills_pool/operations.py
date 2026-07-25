@@ -355,12 +355,6 @@ class SkillsPoolRolloutOperations:
         reason: str,
     ) -> WhitelistMutationResult:
         self._validate_change(operator=operator, reason=reason)
-        scope = self._resolve_scope(env=env, owner_id=owner_id, bot_id=bot_id)
-        state = self._layouts.get(scope)
-        claimed_before = self._claimed(
-            state.active_layout,
-            state.target_layout,
-        )
         current = self.get_snapshot(env=env)
         removed = next(
             (
@@ -371,6 +365,24 @@ class SkillsPoolRolloutOperations:
             ),
             None,
         )
+        scope: BotSkillLayoutScope | None = None
+        claimed_before = False
+        try:
+            scope = self._resolve_scope(
+                env=env,
+                owner_id=owner_id,
+                bot_id=bot_id,
+            )
+        except RolloutOperationError:
+            # Configuration cleanup must remain possible after the Bot row
+            # has been deleted or otherwise becomes unresolvable.
+            pass
+        if scope is not None:
+            state = self._layouts.get(scope)
+            claimed_before = self._claimed(
+                state.active_layout,
+                state.target_layout,
+            )
         whitelist = tuple(
             item
             for item in current.whitelist
@@ -399,10 +411,13 @@ class SkillsPoolRolloutOperations:
             batch_id=removed.batch_id if removed else None,
             action=f"whitelist_remove:{owner_id}:{bot_id}",
         )
-        claimed_after = self._claimed(
-            self._layouts.get(scope).active_layout,
-            self._layouts.get(scope).target_layout,
-        )
+        claimed_after = claimed_before
+        if scope is not None:
+            state_after = self._layouts.get(scope)
+            claimed_after = self._claimed(
+                state_after.active_layout,
+                state_after.target_layout,
+            )
         return WhitelistMutationResult(
             True,
             claimed_before,
@@ -623,11 +638,17 @@ class SkillsPoolRolloutOperations:
         for entry in snapshot.whitelist:
             if entry.batch_id is None or entry.batch_id in accepted:
                 continue
-            bot, _ = self._resolve_bot_and_scope(
-                env=env,
-                owner_id=entry.owner_id,
-                bot_id=entry.bot_id,
-            )
+            try:
+                bot, _ = self._resolve_bot_and_scope(
+                    env=env,
+                    owner_id=entry.owner_id,
+                    bot_id=entry.bot_id,
+                )
+            except RolloutOperationError:
+                # Keep an orphaned member's batch open until an operator
+                # explicitly removes the stale whitelist entry.
+                opened.add(entry.batch_id)
+                continue
             if bot.get("active_engine") == engine:
                 opened.add(entry.batch_id)
         for state in self._layouts.list_states(env=env, engine=engine):

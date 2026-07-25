@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from datetime import UTC, datetime
+
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.common_config.repository import (
     CommonConfigRepository,
@@ -85,3 +88,47 @@ def test_rollout_config_and_append_only_audit_commit_atomically(test_injector):
         audit=_audit("revision-2"),
     )
     assert len(repository.list_audit_events(env="pre")) == 1
+
+
+def test_concurrent_first_config_insert_is_reported_as_cas_conflict() -> None:
+    class ConflictingSession:
+        def query(self, *_: object):
+            return self
+
+        def filter(self, *_: object):
+            return self
+
+        def with_for_update(self):
+            return self
+
+        def one_or_none(self):
+            return None
+
+        def add(self, _: object) -> None:
+            return None
+
+        def flush(self) -> None:
+            raise IntegrityError(
+                "INSERT INTO ac_common_config ...",
+                {},
+                RuntimeError("duplicate rollout config"),
+            )
+
+    class ConflictingDatabase:
+        @contextmanager
+        def transactional_orm_session(self):
+            yield ConflictingSession()
+
+    repository = SkillsPoolRolloutRepository(ConflictingDatabase())
+
+    assert not repository.commit_change(
+        env="pre",
+        config_id=None,
+        expected_revision=None,
+        expected_enable=False,
+        expected_value=_value(),
+        next_revision="revision-1",
+        enabled=True,
+        value=_value(),
+        audit=_audit("revision-1"),
+    )
