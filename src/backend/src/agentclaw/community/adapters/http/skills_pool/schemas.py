@@ -45,7 +45,7 @@ class WhitelistRemoveRequest(BotIdentityRequest):
 
 class ControlBotRequest(BotIdentityRequest):
     bot_id: str
-    batch_id: str
+    batch_id: str = Field(min_length=1)
     group: RolloutControlGroup
     present: bool = True
     reason: str = Field(min_length=1)

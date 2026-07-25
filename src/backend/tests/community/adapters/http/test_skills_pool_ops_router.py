@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator
 from agentclaw.community.adapters.http.skills_pool.router import (
@@ -11,7 +12,10 @@ from agentclaw.community.adapters.http.skills_pool.router import (
     rollback_bot,
     router,
 )
-from agentclaw.community.adapters.http.skills_pool.schemas import RollbackRequest
+from agentclaw.community.adapters.http.skills_pool.schemas import (
+    ControlBotRequest,
+    RollbackRequest,
+)
 from agentclaw.community.core.skills_pool.recovery_service import (
     SkillsPoolRollbackOutcome,
     SkillsPoolRollbackResult,
@@ -43,6 +47,17 @@ def test_all_skills_pool_operations_are_operator_only() -> None:
             dependency.call for dependency in route.dependant.dependencies
         }
         assert require_operator in dependency_calls
+
+
+def test_control_bot_request_rejects_empty_batch_id() -> None:
+    with pytest.raises(ValidationError):
+        ControlBotRequest(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            batch_id="",
+            group="negative",
+            reason="control sample",
+        )
 
 
 @pytest.mark.asyncio

@@ -100,8 +100,17 @@ class FakeBots:
             }
         ]
 
-    def get_live_by_id_owner_and_env(self, **_: object) -> list[dict[str, object]]:
-        return self.matches
+    def get_live_by_id_owner_and_env(
+        self,
+        **identity: object,
+    ) -> list[dict[str, object]]:
+        return [
+            bot
+            for bot in self.matches
+            if str(bot["bot_id"]) == str(identity["bot_id"])
+            and str(bot["owner_id"]) == str(identity["owner_id"])
+            and bot["env"] == identity["env"]
+        ]
 
 
 class FakeLayouts:
@@ -524,6 +533,63 @@ def test_removing_whitelist_reports_claimed_state_without_reverting_it() -> None
     assert result.claimed_after is True
     assert result.snapshot.whitelist == ()
     assert layouts.state.migration_generation == "generation-1"
+
+
+def test_deleted_bot_can_still_be_removed_from_whitelist() -> None:
+    operations, _, _, _ = build_operations(
+        config=rollout_config(
+            promoted_engines=["openclaw"],
+            whitelist=[
+                {
+                    "owner_id": OWNER,
+                    "bot_id": "deleted-bot",
+                    "batch_id": "batch-1",
+                }
+            ],
+        )
+    )
+
+    result = operations.remove_bot(
+        env=ENV,
+        owner_id=OWNER,
+        bot_id="deleted-bot",
+        operator="freddie",
+        reason="remove orphaned whitelist entry",
+    )
+
+    assert result.changed is True
+    assert result.claimed_before is False
+    assert result.claimed_after is False
+    assert result.snapshot.whitelist == ()
+
+
+def test_deleted_bot_keeps_its_batch_open_until_operator_removes_it() -> None:
+    operations, _, _, _ = build_operations(
+        config=rollout_config(
+            promoted_engines=["openclaw"],
+            whitelist=[
+                {
+                    "owner_id": OWNER,
+                    "bot_id": "deleted-bot",
+                    "batch_id": "batch-1",
+                }
+            ],
+        )
+    )
+
+    with pytest.raises(
+        RolloutOperationError,
+        match="current engine batch must be accepted",
+    ):
+        operations.add_bot(
+            env=ENV,
+            owner_id=OWNER,
+            bot_id=BOT_ID,
+            batch_id="batch-2",
+            acceptance_batch_id=None,
+            operator="freddie",
+            reason="must clean orphaned batch first",
+        )
 
 
 def test_control_samples_are_explicit_and_never_enter_whitelist() -> None:
