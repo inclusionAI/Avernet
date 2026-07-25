@@ -883,6 +883,15 @@ class StickyClaimService:
         )
 
 
+class NoQuarantineRepository:
+    def get_quarantine(
+        self,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+    ) -> None:
+        return None
+
+
 def build_task_handler(
     layouts: FakeLayoutRepository,
     runtime: FakeRuntime,
@@ -891,6 +900,7 @@ def build_task_handler(
         claim_service=StickyClaimService(layouts),
         layout_repository=layouts,
         reconcile_service=build_service(layouts, runtime),
+        quarantine_repository=NoQuarantineRepository(),
     )
 
 
@@ -1057,6 +1067,7 @@ def test_stale_signal_uses_current_resolved_binding_for_real_mutations() -> None
         claim_service=StickyClaimService(layouts),
         layout_repository=layouts,
         reconcile_service=reconcile,
+        quarantine_repository=NoQuarantineRepository(),
     )
     payload = build_skills_pool_reconcile_payload(
         scope=SCOPE,

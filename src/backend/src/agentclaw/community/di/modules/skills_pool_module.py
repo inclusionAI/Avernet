@@ -96,12 +96,14 @@ class SkillsPoolModule(Module):
         claim_service: SkillsPoolMigrationClaimService,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         reconcile_service: SkillsPoolReconcileService,
+        quarantine_repository: QuarantineRepositoryProtocol,
         task_queue_service: TaskQueueService,
     ) -> SkillsPoolReconcileTaskHandler:
         return SkillsPoolReconcileTaskHandler(
             claim_service=claim_service,
             layout_repository=layout_repository,
             reconcile_service=reconcile_service,
+            quarantine_repository=quarantine_repository,
             task_queue_service=task_queue_service,
         )
 

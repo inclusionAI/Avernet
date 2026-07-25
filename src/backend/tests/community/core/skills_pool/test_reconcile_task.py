@@ -31,6 +31,7 @@ from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
     build_skills_pool_reconcile_payload,
 )
+from agentclaw.community.core.skills_pool.quarantine import QuarantineStatus
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -315,6 +316,22 @@ class FakeReconcileService:
         return self.results[0]
 
 
+class FakeQuarantines:
+    def __init__(self, status: QuarantineStatus) -> None:
+        self.status = status
+
+    def get_quarantine(
+        self,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            scope=scope,
+            migration_generation=migration_generation,
+            status=self.status,
+        )
+
+
 def _handler(
     *,
     claim_results: list[MigrationClaimResult],
@@ -335,6 +352,7 @@ def _handler(
             claim_service=claims,
             layout_repository=layouts,
             reconcile_service=reconcile,
+            quarantine_repository=FakeQuarantines(QuarantineStatus.RETAINED),
             lease_seconds=300,
         ),
         claims,
@@ -395,6 +413,7 @@ def test_pool_activation_schedules_generation_scoped_seven_day_cleanup() -> None
         claim_service=claims,
         layout_repository=layouts,
         reconcile_service=reconcile,
+        quarantine_repository=FakeQuarantines(QuarantineStatus.RETAINED),
         task_queue_service=queue,
     )
 
@@ -477,6 +496,29 @@ def test_pool_active_wakeup_records_runtime_reconciliation_after_ready_probe() -
     assert layouts.runtime_reconciliation_calls[0]["evidence"]["probe"] is None
 
 
+def test_pool_active_wakeup_skips_probe_after_quarantine_is_cleaned() -> None:
+    state = _claimed_state(active_layout=SkillLayout.POOL)
+    claims = FakeClaimService(
+        [MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)]
+    )
+    layouts = FakeLayouts(state)
+    reconcile = FakeReconcileService(
+        [SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.ALREADY_ACTIVE)]
+    )
+    handler = SkillsPoolReconcileTaskHandler(
+        claim_service=claims,
+        layout_repository=layouts,
+        reconcile_service=reconcile,
+        quarantine_repository=FakeQuarantines(QuarantineStatus.CLEANED),
+    )
+
+    assert handler.handle(_payload()) == Complete()
+
+    assert reconcile.calls == []
+    assert layouts.runtime_reconciliation_calls == []
+    assert layouts.runtime_reconciliation_failure_calls == []
+
+
 def test_pool_active_wakeup_does_not_enqueue_duplicate_cleanup_task() -> None:
     state = _claimed_state(active_layout=SkillLayout.POOL)
     claims = FakeClaimService(
@@ -491,6 +533,7 @@ def test_pool_active_wakeup_does_not_enqueue_duplicate_cleanup_task() -> None:
         claim_service=claims,
         layout_repository=layouts,
         reconcile_service=reconcile,
+        quarantine_repository=FakeQuarantines(QuarantineStatus.RETAINED),
         task_queue_service=queue,
     )
 
