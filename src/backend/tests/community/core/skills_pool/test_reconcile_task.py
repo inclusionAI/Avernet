@@ -477,6 +477,48 @@ def test_pool_active_wakeup_records_runtime_reconciliation_after_ready_probe() -
     assert layouts.runtime_reconciliation_calls[0]["evidence"]["probe"] is None
 
 
+def test_pool_active_wakeup_does_not_enqueue_duplicate_cleanup_task() -> None:
+    state = _claimed_state(active_layout=SkillLayout.POOL)
+    claims = FakeClaimService(
+        [MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)]
+    )
+    layouts = FakeLayouts(state)
+    reconcile = FakeReconcileService(
+        [SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.ALREADY_ACTIVE)]
+    )
+    queue = MagicMock()
+    handler = SkillsPoolReconcileTaskHandler(
+        claim_service=claims,
+        layout_repository=layouts,
+        reconcile_service=reconcile,
+        task_queue_service=queue,
+    )
+
+    assert handler.handle(_payload()) == Complete()
+
+    queue.enqueue.assert_not_called()
+
+
+def test_pool_active_legacy_task_without_observed_at_completes_without_probe() -> None:
+    state = _claimed_state(active_layout=SkillLayout.POOL)
+    handler, _, layouts, reconcile = _handler(
+        claim_results=[
+            MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)
+        ],
+        reconcile_results=[
+            SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.ALREADY_ACTIVE)
+        ],
+        state=state,
+    )
+    payload = _payload()
+    payload.pop("observed_at")
+
+    assert handler.handle(payload) == Complete()
+
+    assert reconcile.calls == []
+    assert layouts.runtime_reconciliation_calls == []
+
+
 def test_pool_active_wakeup_does_not_record_failed_runtime_probe() -> None:
     state = _claimed_state(active_layout=SkillLayout.POOL)
     handler, _, layouts, _ = _handler(

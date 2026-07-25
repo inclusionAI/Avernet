@@ -150,6 +150,11 @@ class SkillsPoolReconcileTaskHandler:
             generation = claim.state.migration_generation
             if generation is None:
                 return Fail("pool-active layout has no migration generation")
+            if observed_at is None:
+                # Tasks written by the previous Backend cannot prove a
+                # post-activation runtime observation. They remain safe to
+                # consume, but must not probe, write evidence, or busy-retry.
+                return Complete()
             verification = asyncio.run(
                 self._reconcile.reconcile(
                     scope=scope,
@@ -183,11 +188,6 @@ class SkillsPoolReconcileTaskHandler:
             )
             if not recorded:
                 return Retry("skills pool runtime reconciliation evidence race lost")
-            self._schedule_quarantine_cleanup(
-                scope=scope,
-                migration_generation=generation,
-                delay_seconds=0,
-            )
             return Complete()
 
         lease_outcome = self._ensure_lease(
@@ -318,7 +318,7 @@ class SkillsPoolReconcileTaskHandler:
         str,
         str,
         dict[str, object],
-        datetime,
+        datetime | None,
     ]:
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
@@ -344,7 +344,7 @@ class SkillsPoolReconcileTaskHandler:
         if raw_observed_at is None:
             # Tasks persisted by the previous Backend remain executable, but
             # their unknown event time can never qualify cleanup evidence.
-            observed_at = datetime.min.replace(tzinfo=UTC)
+            observed_at = None
         elif not isinstance(raw_observed_at, str):
             raise ValueError("observed_at must be an ISO timestamp")
         else:
@@ -352,14 +352,14 @@ class SkillsPoolReconcileTaskHandler:
                 observed_at = datetime.fromisoformat(raw_observed_at)
             except ValueError as error:
                 raise ValueError("observed_at must be an ISO timestamp") from error
-        if observed_at.tzinfo is None:
+        if observed_at is not None and observed_at.tzinfo is None:
             raise ValueError("observed_at must include a timezone")
         return (
             BotSkillLayoutScope(**values),
             wakeup_id,
             source,
             signal_identity,
-            observed_at.astimezone(UTC),
+            observed_at.astimezone(UTC) if observed_at is not None else None,
         )
 
 

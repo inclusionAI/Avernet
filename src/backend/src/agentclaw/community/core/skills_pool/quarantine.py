@@ -91,6 +91,7 @@ class QuarantineEligibility:
 class QuarantineCleanupResult:
     status: QuarantineStatus
     evidence: dict[str, object]
+    retryable: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +307,10 @@ class SkillsPoolQuarantineService:
             return QuarantineCleanupResult(
                 status=QuarantineStatus.CLEANUP_FAILED,
                 evidence=evidence,
+                retryable=(
+                    response.status
+                    is RuntimeQuarantineCleanupStatus.TRANSIENT_ERROR
+                ),
             )
         committed = self._records.mark_cleaned(
             scope=scope,
@@ -320,6 +325,7 @@ class SkillsPoolQuarantineService:
                 else QuarantineStatus.CLEANUP_FAILED
             ),
             evidence=evidence,
+            retryable=True if not committed else None,
         )
 
     def inspect(
@@ -367,5 +373,7 @@ class SkillsPoolQuarantineCleanupTaskHandler:
         if result.status is QuarantineStatus.CLEANED:
             return Complete()
         if result.status is QuarantineStatus.CLEANUP_FAILED:
+            if result.retryable is False:
+                return Complete()
             return Retry("migration quarantine cleanup failed")
         return Reschedule(QUARANTINE_RECHECK_SECONDS)
