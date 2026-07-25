@@ -20,10 +20,17 @@ from unittest.mock import MagicMock
 import pytest
 
 from secbaas.community.api.session_file_sharing import (
+    SessionCancelUploadResponse,
     SessionCompleteUploadResponse,
+    SessionDeleteTransferResponse,
+    SessionGetTransferStatusResponse,
     SessionGetUploadUrlResponse,
+    SessionShareLinkResponse,
+    SourceTransferNotFoundError,
+    SourceTransferNotReadyError,
     StagingObjectNotFoundError,
     TransferNotFoundError,
+    TransferNotTerminalError,
     TransferStateConflictError,
 )
 from secbaas.community.core.repository.session_file_ticket import SessionTicketRecord
@@ -449,3 +456,402 @@ class TestDispatchCompleteUploadFull:
         ticket_repo.get_by_transfer_id.assert_called_with(
             "tf-001", tenant="my-tenant"
         )
+
+
+# ============================================================================
+# TestCancelUpload — 8 test cases
+# ============================================================================
+
+
+class TestCancelUpload:
+    """Tests for dispatch_cancel_upload covering success, idempotency, multipart, and errors."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_upload_success(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket CREATED, no multipart → status CANCELLED."""
+        ticket = _make_ticket()
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await dispatcher.dispatch_cancel_upload(transfer_id="tf-001")
+
+        assert isinstance(result, SessionCancelUploadResponse)
+        assert result.transfer_id == "tf-001"
+        assert result.status == "CANCELLED"
+        ticket_repo.update_status.assert_called_once_with("tf-001", "CANCELLED")
+
+    @pytest.mark.asyncio
+    async def test_cancel_idempotent_already_cancelled(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket status CANCELLED → returns CANCELLED idempotently."""
+        ticket = _make_ticket(status="CANCELLED")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await dispatcher.dispatch_cancel_upload(transfer_id="tf-001")
+
+        assert isinstance(result, SessionCancelUploadResponse)
+        assert result.transfer_id == "tf-001"
+        assert result.status == "CANCELLED"
+        ticket_repo.update_status.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_idempotent_already_done(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket status DONE → returns DONE idempotently."""
+        ticket = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await dispatcher.dispatch_cancel_upload(transfer_id="tf-001")
+
+        assert isinstance(result, SessionCancelUploadResponse)
+        assert result.transfer_id == "tf-001"
+        assert result.status == "DONE"
+
+    @pytest.mark.asyncio
+    async def test_cancel_with_multipart_aborts(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket has multipart_session_id → abort_multipart_upload called."""
+        ticket = _make_ticket(multipart_session_id="mp-sess-01")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await dispatcher.dispatch_cancel_upload(transfer_id="tf-001")
+
+        assert isinstance(result, SessionCancelUploadResponse)
+        assert result.transfer_id == "tf-001"
+        assert result.status == "CANCELLED"
+        file_backend.abort_multipart_upload.assert_called_once_with(
+            ticket.fileservice_staging_path,
+            ticket.multipart_session_id,
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancel_multipart_abort_no_such_upload_tolerated(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """abort_multipart_upload raises NoSuchUpload → caught, ticket still CANCELLED."""
+        ticket = _make_ticket(multipart_session_id="mp-sess-01")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+        file_backend.abort_multipart_upload.side_effect = Exception("NoSuchUpload: upload session not found")
+
+        result = await dispatcher.dispatch_cancel_upload(transfer_id="tf-001")
+
+        assert isinstance(result, SessionCancelUploadResponse)
+        assert result.transfer_id == "tf-001"
+        assert result.status == "CANCELLED"
+
+    @pytest.mark.asyncio
+    async def test_cancel_not_found(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket None → raises TransferNotFoundError."""
+        ticket_repo.get_by_transfer_id.return_value = None
+
+        with pytest.raises(TransferNotFoundError):
+            await dispatcher.dispatch_cancel_upload(transfer_id="nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_cancel_ownership_mismatch(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket.session_id != session_id → raises TransferNotFoundError (404)."""
+        ticket = _make_ticket(session_id="sess-001")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        with pytest.raises(TransferNotFoundError):
+            await dispatcher.dispatch_cancel_upload(
+                transfer_id="tf-001",
+                session_id="sess-other",
+            )
+
+    @pytest.mark.asyncio
+    async def test_cancel_cas_conflict_resolved(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """update_status raises TransferStateConflictError, re-read terminal → returns idempotently."""
+        ticket = _make_ticket()
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        cancelled_ticket = _make_ticket(status="CANCELLED")
+        ticket_repo.get_by_transfer_id.side_effect = [ticket, cancelled_ticket]
+        ticket_repo.update_status.side_effect = TransferStateConflictError(
+            f"CAS conflict for {ticket.transfer_id}"
+        )
+
+        result = await dispatcher.dispatch_cancel_upload(transfer_id="tf-001")
+
+        assert isinstance(result, SessionCancelUploadResponse)
+        assert result.transfer_id == "tf-001"
+        assert result.status == "CANCELLED"
+
+
+# ============================================================================
+# TestGetShareLink — 5 test cases
+# ============================================================================
+
+
+class TestGetShareLink:
+    """Tests for dispatch_get_share_link covering success, show flag, and errors."""
+
+    @pytest.mark.asyncio
+    async def test_share_link_success(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket DONE → generate_download_url called with response-disposition: attachment when show=False."""
+        ticket = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+        file_backend.generate_download_url.return_value = "https://oss.example.com/dl?token=abc"
+
+        result = await dispatcher.dispatch_get_share_link(
+            transfer_id="tf-001",
+            tenant="test-tenant",
+            session_id="sess-001",
+        )
+
+        assert isinstance(result, SessionShareLinkResponse)
+        assert result.share_url == "https://oss.example.com/dl?token=abc"
+        assert result.transfer_id == "tf-001"
+        assert result.expires_at is not None
+
+        # response_params is passed as positional arg (3rd position after staging_path, expire_seconds)
+        call_args = file_backend.generate_download_url.call_args
+        response_params_arg = call_args[0][2] if len(call_args[0]) > 2 else None
+        assert response_params_arg == {
+            "response-content-disposition": "attachment"
+        }
+
+    @pytest.mark.asyncio
+    async def test_share_link_show_true(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """show=True → generate_download_url called with response_params=None (inline preview)."""
+        ticket = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+        file_backend.generate_download_url.return_value = "https://oss.example.com/dl?token=abc"
+
+        await dispatcher.dispatch_get_share_link(
+            transfer_id="tf-001",
+            tenant="test-tenant",
+            session_id="sess-001",
+            show=True,
+        )
+
+        # response_params is passed as positional arg (3rd position), should be None for show=True
+        call_args = file_backend.generate_download_url.call_args
+        response_params_arg = call_args[0][2] if len(call_args[0]) > 2 else None
+        assert response_params_arg is None
+
+    @pytest.mark.asyncio
+    async def test_share_link_ticket_not_found(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket None → raises SourceTransferNotFoundError."""
+        ticket_repo.get_by_transfer_id.return_value = None
+
+        with pytest.raises(SourceTransferNotFoundError):
+            await dispatcher.dispatch_get_share_link(
+                transfer_id="nonexistent",
+                tenant="test-tenant",
+                session_id="sess-001",
+            )
+
+    @pytest.mark.asyncio
+    async def test_share_link_ownership_mismatch(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket.session_id != session_id → raises SourceTransferNotFoundError (404)."""
+        ticket = _make_ticket(session_id="sess-001", status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        with pytest.raises(SourceTransferNotFoundError):
+            await dispatcher.dispatch_get_share_link(
+                transfer_id="tf-001",
+                tenant="test-tenant",
+                session_id="sess-other",
+            )
+
+    @pytest.mark.asyncio
+    async def test_share_link_not_done_raises(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket status CREATED → raises SourceTransferNotReadyError."""
+        ticket = _make_ticket(status="CREATED")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        with pytest.raises(SourceTransferNotReadyError) as exc_info:
+            await dispatcher.dispatch_get_share_link(
+                transfer_id="tf-001",
+                tenant="test-tenant",
+                session_id="sess-001",
+            )
+
+        assert exc_info.value.transfer_id == "tf-001"
+        assert exc_info.value.current_status == "CREATED"
+
+
+# ============================================================================
+# TestGetTransferStatus — 4 test cases
+# ============================================================================
+
+
+class TestGetTransferStatus:
+    """Tests for dispatch_get_transfer_status covering success, not-found, ownership, and FAILED."""
+
+    @pytest.mark.asyncio
+    async def test_status_success(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket found → returns SessionGetTransferStatusResponse with all fields."""
+        ticket = _make_ticket()
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await dispatcher.dispatch_get_transfer_status(transfer_id="tf-001")
+
+        assert isinstance(result, SessionGetTransferStatusResponse)
+        assert result.transfer_id == "tf-001"
+        assert result.status == "CREATED"
+        assert result.filename == "data.csv"
+        assert result.session_id == "sess-001"
+
+    @pytest.mark.asyncio
+    async def test_status_not_found(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket None → raises TransferNotFoundError."""
+        ticket_repo.get_by_transfer_id.return_value = None
+
+        with pytest.raises(TransferNotFoundError):
+            await dispatcher.dispatch_get_transfer_status(transfer_id="nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_status_ownership_mismatch(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket.session_id != session_id → raises TransferNotFoundError."""
+        ticket = _make_ticket(session_id="sess-001")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        with pytest.raises(TransferNotFoundError):
+            await dispatcher.dispatch_get_transfer_status(
+                transfer_id="tf-001",
+                session_id="sess-other",
+            )
+
+    @pytest.mark.asyncio
+    async def test_status_failed_includes_error(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket status FAILED with error_message='test error' → response.error_message is set."""
+        ticket = _make_ticket(status="FAILED", error_message="test error")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await dispatcher.dispatch_get_transfer_status(transfer_id="tf-001")
+
+        assert isinstance(result, SessionGetTransferStatusResponse)
+        assert result.transfer_id == "tf-001"
+        assert result.status == "FAILED"
+        assert result.error_message == "test error"
+
+
+# ============================================================================
+# TestDeleteTransfer — 6 test cases
+# ============================================================================
+
+
+class TestDeleteTransfer:
+    """Tests for dispatch_delete_transfer covering success, idempotency, and errors."""
+
+    @pytest.mark.asyncio
+    async def test_delete_success(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket DONE → delete_object called, ticket transitions to DELETED."""
+        ticket = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await dispatcher.dispatch_delete_transfer(transfer_id="tf-001")
+
+        assert isinstance(result, SessionDeleteTransferResponse)
+        assert result.transfer_id == ticket.transfer_id
+        assert result.previous_status == "DONE"
+        assert result.new_status == "DELETED"
+        file_backend.delete_object.assert_called_once_with(ticket.fileservice_staging_path)
+        ticket_repo.update_status.assert_called_once_with(ticket.transfer_id, "DELETED")
+
+    @pytest.mark.asyncio
+    async def test_delete_idempotent_already_deleted(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket DELETED → returns previous_status=DELETED, new_status=DELETED, no delete_object call."""
+        ticket = _make_ticket(status="DELETED")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await dispatcher.dispatch_delete_transfer(transfer_id="tf-001")
+
+        assert isinstance(result, SessionDeleteTransferResponse)
+        assert result.transfer_id == ticket.transfer_id
+        assert result.previous_status == "DELETED"
+        assert result.new_status == "DELETED"
+        file_backend.delete_object.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_not_found(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket None → raises TransferNotFoundError."""
+        ticket_repo.get_by_transfer_id.return_value = None
+
+        with pytest.raises(TransferNotFoundError):
+            await dispatcher.dispatch_delete_transfer(transfer_id="nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_delete_ownership_mismatch(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket.session_id != session_id → raises TransferNotFoundError."""
+        ticket = _make_ticket(session_id="sess-001", status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        with pytest.raises(TransferNotFoundError):
+            await dispatcher.dispatch_delete_transfer(
+                transfer_id="tf-001",
+                session_id="sess-other",
+            )
+
+    @pytest.mark.asyncio
+    async def test_delete_in_progress_rejects(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """ticket status CREATED → raises TransferNotTerminalError."""
+        ticket = _make_ticket(status="CREATED")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        with pytest.raises(TransferNotTerminalError) as exc_info:
+            await dispatcher.dispatch_delete_transfer(transfer_id="tf-001")
+
+        assert exc_info.value.transfer_id == ticket.transfer_id
+        assert exc_info.value.status == "CREATED"
+
+    @pytest.mark.asyncio
+    async def test_delete_cas_conflict_resolved(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """update_status raises TransferStateConflictError, re-read DELETED → returns idempotently."""
+        ticket = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        deleted_ticket = _make_ticket(status="DELETED")
+        ticket_repo.get_by_transfer_id.side_effect = [ticket, deleted_ticket]
+        ticket_repo.update_status.side_effect = TransferStateConflictError(
+            f"CAS conflict for {ticket.transfer_id}"
+        )
+
+        result = await dispatcher.dispatch_delete_transfer(transfer_id="tf-001")
+
+        assert isinstance(result, SessionDeleteTransferResponse)
+        assert result.transfer_id == ticket.transfer_id
+        assert result.previous_status == "DONE"
+        assert result.new_status == "DELETED"
