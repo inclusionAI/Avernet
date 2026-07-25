@@ -343,6 +343,8 @@ class SkillsPoolRolloutOperations:
             batch_id=batch_id,
             action=f"whitelist_add:{owner_id}:{bot_id}",
         )
+        # Admission only persists rollout configuration. Claiming remains an
+        # asynchronous reconciliation step, so this write cannot change it.
         return WhitelistMutationResult(True, claimed, claimed, updated)
 
     def remove_bot(
