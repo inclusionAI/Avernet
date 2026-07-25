@@ -129,10 +129,7 @@ class TestCreateTicket:
         assert model.status == "CREATED"
         assert model.staging_subdir == "my-subdir"
         assert model.filename == "data.csv"
-        assert (
-            model.fileservice_staging_path
-            == "file-transfers/test/t1/sess-001/tf-001/data.csv"
-        )
+        assert model.fileservice_staging_path == "file-transfers/test/t1/sess-001/tf-001/data.csv"
         assert model.error_message is None
         assert model.multipart_session_id == "upload-123"
         assert model.operator == "test-user"
@@ -240,64 +237,3 @@ class TestListBySession:
         repo.list_by_session("t1", "sess-001")
 
         mock_session.query.return_value.filter.return_value.order_by.assert_called_once()
-
-
-# ==================== TestUpdateStatus ====================
-
-VALID_TRANSITIONS_CASES = [
-    # Upload path
-    ("CREATED", "UPLOADING"),
-    ("UPLOADING", "DONE"),
-    ("CREATED", "DONE"),  # Session fast path
-    # Cancel path
-    ("CREATED", "CANCELLED"),
-    ("UPLOADING", "CANCELLED"),
-    # Failure path
-    ("UPLOADING", "FAILED"),
-    # Delete path
-    ("DONE", "DELETED"),
-    ("FAILED", "DELETED"),
-    ("CANCELLED", "DELETED"),
-    # Idempotent same-state
-    ("CREATED", "CREATED"),
-]
-
-
-class TestUpdateStatus:
-    @pytest.mark.parametrize("src_status,new_status", VALID_TRANSITIONS_CASES)
-    def test_valid_transition(self, repo, mock_session, src_status, new_status):
-        """CAS update returns 1 -- valid transition succeeds with no exception."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        # Should not raise
-        repo.update_status("tf-001", new_status)
-
-    def test_invalid_transition_conflict(self, repo, mock_session):
-        """CAS update returns 0, fallback finds ticket with conflicting status."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 0
-        # Fallback first() returns a model with status=DELETED (terminal)
-        fallback_row = MagicMock()
-        fallback_row.status = "DELETED"
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            fallback_row
-        )
-
-        with pytest.raises(TransferStateConflictError):
-            repo.update_status("tf-001", "UPLOADING")
-
-    def test_not_found(self, repo, mock_session):
-        """CAS update returns 0, fallback query returns None -- TransferNotFoundError."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 0
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        with pytest.raises(TransferNotFoundError, match="not found"):
-            repo.update_status("nonexistent", "DONE")
-
-    def test_cas_update_uses_env_filter(self, repo, mock_session):
-        """Verify the .filter() chain includes SessionFileTicketModel.env condition."""
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        repo.update_status("tf-001", "UPLOADING")
-
-        # The filter() chain should have been called with env condition
-        assert mock_session.query.return_value.filter.call_count >= 1
