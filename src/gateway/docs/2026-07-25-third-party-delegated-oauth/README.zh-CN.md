@@ -33,7 +33,7 @@
 
 - 第三方服务器每次 API 调用只出示**恰好一个**凭证（`Authorization: Bearer <access_token>`），永不带 `IAM_TOKEN`。
 - 真人只在首次授权时**交互式认证一次**，走既有的 `iam.alipay.com` 登录（IAM/BUService 仍是唯一身份权威）。
-- 显式、可撤销的**用户授权**；租户 + 用户 + App + scope 都是**令牌内的 claim**，不是并列的多个令牌。
+- 显式、可撤销的**用户授权**（撤销时延有界 —— 见 §8.3）；租户 + 用户 + App + scope 都是**令牌内的 claim**，不是并列的多个令牌。
 - 资源归属仍锚定 App 的 `developer_org_id` / `tenant`，借来的用户句柄绝不能越界读到别的组织的数据。
 
 **非目标**
@@ -126,16 +126,41 @@
 
 ```
 iss: teamclaw-authz
-aud: teamclaw-openapi
-sub: <我方用户 id / 工号>          # 被代表的真人，授权时验证过一次
-tnt: <租户 id>                    # 一个 CLAIM —— 不是独立令牌
+aud: teamclaw-openapi             # 面向 CLIENT 的令牌 audience（见 §8.1 —— 两个凭证）
+sub: <我方用户 id / 工号>          # 被代表的真人 —— 仅用于授权 + 归属/审计，绝不作数据访问锚点
+tnt: <租户 id>                    # CLIENT 的租户（App 的 developer_org）；终端用户自己的租户永不被查询
 azp: <client_id>                 # 发起调用的第三方 App
-org: <developer_org_id>          # 用于资源归属锚定
+org: <developer_org_id>          # 资源归属锚点
 scope: "bots:chat bots:read"     # 用户授权的确切范围
 exp / iat / jti
 ```
 
 现状两三个令牌所携带的一切，如今都是一个凭证里的 claim。
+
+### 8.1 两个截然不同的凭证 —— 切勿混为一谈
+
+系统里存在两个凭证，绝不能混淆：
+
+- **OAuth access token** —— 面向 client、短期（约 15 分钟）、`aud: teamclaw-openapi`，仅在网关边界校验；
+- **转发的（内部）Principal** —— 内部、秒级有效、`aud: <具体后端>`，即 auth-design.md §7.1，由网关签名、后端校验。
+
+后端**永不**看到或校验 OAuth access token；它只校验**网关签名的 Principal**（§9）。这样 OAuth 令牌不会越入后端信任边界，且后端校验在所有策略间保持统一。
+
+### 8.2 `tnt` 与 `sub` 的含义（以及不含义）
+
+`tnt` 是 **client 的**租户（App 的 `developer_org`）。终端用户自己的租户**永不**被查询，`sub` 也**不是**资源归属锚点 —— 它只用于**授权与归属/审计**。这正是让跨租户委托在构造上不可能（§2 目标）：一次委托调用只能触及 **client** 租户内、锚定于 `org`/`tnt` 的数据。
+
+具体地，这里的"代表我方终端用户"意为 **"在 client 的租户内、以一个已验证且已授权的真人在册的方式行事"** —— 它**不**授予 client 访问该用户**自有的**跨租户数据。后续读者不得假设 `sub` 决定数据访问范围。
+
+### 8.3 撤销模型与时延
+
+纯无状态 JWT 在 `exp` 之前无法被拒（网关仅凭签名校验），因此"可撤销"与"无状态校验"存在真实张力。三个选项：
+
+- **不透明令牌 + 内省** —— 即时撤销，但每次 API 调用要查一次存储（网关在热路径上有状态）。
+- **JWT + 一次廉价撤销检查（推荐）** —— 保留签名校验，同时查一个按 `(user, client)` 的"最小有效 `iat`"水位（或小的 `jti` 黑名单），短 TTL 缓存 → 近即时撤销，基本无状态。
+- **纯 JWT，不检查** —— 撤销只杀 refresh + 授权；已签发的 access token 活到 `exp`（≤15 分钟），故"撤销"实际意为"15 分钟内"。
+
+推荐中间方案。无论选哪个，都要**写明由此产生的撤销时延**，以免"可撤销"（§2、§11）过度承诺。
 
 ## 9. 网关校验 → `DelegatedPrincipal`
 
@@ -161,9 +186,20 @@ class OAuthBearerStrategy(AuthStrategy):
 
 随后 runner 照常裁决 `required_scopes ⊆ granted_scopes`。`DelegatedPrincipal` 是 §15 判别联合里同时携带**App 与已验证 subject** 的成员 —— 这是 `AppPrincipal.on_behalf_of_opaque`（**未验证**句柄）表达不了的形态。
 
-## 10. 下游"代表用户"凭证
+**然后要重新签名 —— 不要把 OAuth 令牌透传下去。** `oauth_bearer` 校验 access token 并构建 `DelegatedPrincipal` 只是网关边界这一步。网关随后把该 `DelegatedPrincipal` **重新签名为 auth-design.md §7.1 的短期内部 Principal**（`aud: <具体后端>`，秒级有效）再转发；后端校验网关签名的 Principal，**绝不**校验 client 的 OAuth access token（见 §8.1）。从后端视角，每种策略（`first_party_user` / `app_key` / `oauth_bearer`）都收敛为"校验一个网关签名的 Principal"。
 
-当请求抵达 runtime、需要**以 Alice 身份**调用 BaaS/MCP 时，复用后端接缝 `CallerIdentityService.exchange_caller_identity()`（`src/backend/src/agentclaw/community/core/caller_identity/service.py:328`）。步骤 2 记录的授权**即**预授权；所签发的 caller 凭证经 `runtime_updater.update_caller_identity(...)` 装入 runtime，**绝不回吐给第三方**。
+### 9.1 与配置驱动转发（PR #420）的落位
+
+`/authorize`、`/token`、`/revoke` 与授权界面是网关**本地**端点 —— 它们*不*在 `/openapi/v1/<domain>` 之下，也**不**应被配置驱动转发的 catch-all 处理。该 catch-all 把版本基路径下的一切路由到某个域的上游、并拒绝未知域，因此这些路由必须注册在其**之前 / 被排除在外**（与 `/health`、`/docs` 同样待遇），否则会被当作未知域拒绝。
+
+与 PR #420 的另两点对齐：
+
+- `oauth_bearer` 在 `route_security.yaml` 里作为诸多**策略候选之一**注册（如 `[oauth_bearer, app_key]`），契合"网关拥有鉴权策略选择"。重新签名后的 `DelegatedPrincipal`（§9）才是后端 per-route 依赖用于授权的对象。
+- 本设计让网关成为一个**有状态的授权服务器**（授权/grant 库、refresh 状态、授权界面），与本应无状态的代理并存。要把这份授权状态做成**有界、可分离**的组件，让转发热路径保持无状态。
+
+## 10. 下游凭证 —— 在 *client 的租户内、归属于* 用户 行事
+
+当请求抵达 runtime、需要调用 BaaS/MCP 时，它在 **client 的租户内、归属于 Alice** 行事（依 §8.2 —— 绝不使用 Alice 自己的租户或权限）。复用后端接缝 `CallerIdentityService.exchange_caller_identity()`（`src/backend/src/agentclaw/community/core/caller_identity/service.py:328`）。步骤 2 记录的授权**即**预授权；所签发的 caller 凭证经 `runtime_updater.update_caller_identity(...)` 装入 runtime，**绝不回吐给第三方**。该凭证必须锚定于 client 的 `org`/`tnt` —— **不得**悄悄把用户的租户或权限重新引入。
 
 需要一处签名改动：`exchange_caller_identity` 现取 `iam_token: str`。OAuth 路径下我们不持有 Alice 的活跃 `IAM_TOKEN`，因此 `CallerTokenProviderProtocol` 需要一个从 `(service_credential, subject_id, tenant, grant_ref)` 签发的重载，而非转发用户令牌。BUService 能否在没有用户活跃令牌的情况下签发此类委托凭证，是关键外部依赖 —— 见 §12。
 
@@ -174,7 +210,7 @@ class OAuthBearerStrategy(AuthStrategy):
 | `Bearer <api_key>` → App + 租户 | client 成为 **OAuth client**；App + 租户 + 用户 + scope 都进 access token |
 | `IAM_TOKEN` cookie → 用户（每次调用） | 用户在授权时**验证一次**；access token 携带 `sub` |
 | `policy.allowed_bots` fail-closed 白名单 | 保留，作网关粗粒度 scope / 资源白名单 |
-| （无授权、无撤销） | 显式授权记录；可撤销；refresh token 轮换 |
+| （无授权、无撤销） | 显式授权记录；可撤销（时延有界 —— 见 §8.3）；refresh token 轮换**并带重放检测**（§13） |
 
 改造是增量的：auth-design.md 的 `app_key`（纯 App / 不透明 on-behalf-of）路径不动；本文只新增**代表用户**这一路。
 
@@ -186,11 +222,12 @@ class OAuthBearerStrategy(AuthStrategy):
 2. **令牌格式** —— 签名 JWT（无状态校验，契合 §7.1 签名接缝）vs 不透明 + 内省（更易撤销）。建议：JWT access token + 服务端 refresh/授权状态。
 3. **委托凭证签发** —— BUService 能否从 `(服务凭证 + subject + 已记录授权)` 签发"代表 subject"的凭证，而无需用户活跃令牌（RFC 8693 令牌交换 / on-behalf-of）？若不能，则在授权时存一份可赎回的委托 grant；用户令牌依赖完全留在我方信任边界内。（auth-design.md §15 也标注了同一"sender-constrained 令牌"疑问。）
 4. **授权粒度与有效期** —— 按 scope 授权、授权过期、以及 client 申请新 scope 时的重新授权触发。
+5. **scope 词表是硬前置。** 按 scope 授权、令牌的 `scope` claim、runner 的 `required ⊆ granted` 校验都依赖一份已定义的 **scope 词表**（合法 scope 串 + 各自授予什么）。该词表目前在 auth-design.md 与 gateway-v1 spec 里被暂缓；它必须**先于/随** 本设计落地 —— 没有它就无法渲染有意义的授权页，也无法强制 scope。
 
 ## 13. 增量落地
 
 1. **MVP：** 只实现 `authorization_code + PKCE` 的 `/authorize` + `/token`（不做 implicit / client-credentials / device）。用网关 Principal 密钥对签发 JWT access token。接上 `oauth_bearer` 策略。仅此一步即可把 `IAM_TOKEN` 从第三方面上移除。
-2. 加 refresh token 轮换 + `/revoke` + 授权管理界面（用户可查看/撤销 App）。
+2. 加 refresh token 轮换**并带重放检测** + `/revoke` + 授权管理界面（用户可查看/撤销 App）。重放检测正是让轮换有意义的机制：既然每个轮换后的 refresh token 只能用一次，对一个已消费的 refresh token 的重放就意味着两方持有它（其一被盗）→ **吊销该 grant 的整条令牌家族**（所有 refresh + access）并强制重新授权（OAuth 安全 BCP）。没有它，被盗的 refresh token 会在其整个生命周期内静默可用。
 3. 改造 `CallerTokenProviderProtocol` 支持无令牌签发，退掉委托路径里最后的 `iam_token` 依赖。
 
 ## 14. 术语
@@ -198,7 +235,8 @@ class OAuthBearerStrategy(AuthStrategy):
 - **认证（Authentication）** —— "这是谁？" 归 IAM/BUService，不变。
 - **授权（Authorization）** —— "该用户是否允许该 App 代表其行事，并给出证明令牌。" 即新增的薄层。
 - **授权码（authorization code）** —— 浏览器回跳里携带的短期、一次性值；由服务端后端直连换取令牌。
-- **access token** —— API 调用所用的短期 bearer 凭证；以 claim 携带租户 + 用户 + App + scope。
-- **refresh token** —— 长期、轮换的凭证，服务端直连用它签发新 access token，无需用户参与。
+- **access token** —— API 调用所用的短期、面向 client 的 bearer 凭证；以 claim 携带租户 + 用户 + App + scope。仅在网关边界校验（§8.1）。
+- **转发的（内部）Principal** —— 短期、网关签名的凭证（`aud: <具体后端>`，auth-design.md §7.1），后端实际校验的就是它；与面向 client 的 access token 不同（§8.1、§9）。
+- **refresh token** —— 长期、轮换的凭证，服务端直连用它签发新 access token，无需用户参与；轮换与重放检测配套（§13）。
 - **PKCE** —— `code_challenge` / `code_verifier`（S256），把 code 绑定到发起方。
 - **`DelegatedPrincipal`** —— 同时携带发起 App 与已验证终端用户 subject 的网关 principal（auth-design.md §15）。
