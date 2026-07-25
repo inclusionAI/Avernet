@@ -22,10 +22,13 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugins.skills_pool_quarantine_repository import (
     SkillsPoolQuarantineRepositoryMixin,
 )
+
+logger = get_logger()
 
 
 class SkillsPoolLayoutRepository(SkillsPoolQuarantineRepositoryMixin):
@@ -318,6 +321,17 @@ class SkillsPoolLayoutRepository(SkillsPoolQuarantineRepositoryMixin):
                 return False
             engine = json.loads(row.rollout_evidence).get("engine_type")
             if not isinstance(engine, str) or not engine:
+                return False
+            if not isinstance(quarantine_path, str) or not quarantine_path:
+                logger.error(
+                    "[skills_pool.cutover] commit rejected "
+                    "reason=missing_quarantine_path env=%s entity_id=%s "
+                    "bot_id=%s migration_generation=%s",
+                    scope.env,
+                    scope.entity_id,
+                    scope.bot_id,
+                    migration_generation,
+                )
                 return False
             if not self._upsert_quarantine(
                 session,

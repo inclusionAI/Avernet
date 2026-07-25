@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+import logging
 from pathlib import Path
 from threading import Barrier
 
@@ -100,6 +101,52 @@ def test_layout_repository_satisfies_public_protocol_shape() -> None:
     repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
 
     assert isinstance(repository, SkillsPoolLayoutRepositoryProtocol)
+
+
+def test_cutover_commit_logs_missing_quarantine_path(caplog) -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+
+    with caplog.at_level(logging.ERROR, logger="start"):
+        committed = repository.record_cutover_committed(
+            scope=scope,
+            migration_generation="generation-1",
+            lease_owner="worker-1",
+            preparation_id="preparation-1",
+            evidence={
+                "committed": True,
+                "status": "COMMITTED",
+                "evidence": {"bridge": "valid"},
+            },
+        )
+
+    assert committed is False
+    assert (
+        "reason=missing_quarantine_path env=pre entity_id=entity-1 "
+        "bot_id=bot-1 migration_generation=generation-1"
+    ) in caplog.text
 
 
 def test_missing_layout_state_reads_as_legacy_without_persisting() -> None:
