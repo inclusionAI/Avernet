@@ -77,7 +77,7 @@ from secbaas.community.core.service.publish_manage import (
     DefaultPublishService,
 )
 from secbaas.community.core.service.scheduler import AppScheduler
-from secbaas.community.core.service.session_file_sharing._dispatcher import (
+from secbaas.community.core.service.session_file_sharing import (
     DefaultSessionFileSharingDispatcher,
 )
 from secbaas.community.core.service.sse import (
