@@ -59,13 +59,14 @@ class TestSessionFileSharingContract:
             f"Missing protocol method: {method_name}"
         )
         method = getattr(dispatcher, method_name)
-        assert callable(method), f"Protocol method {method_name} must be callable"
+        assert callable(method), (
+            f"Protocol method {method_name} must be callable"
+        )
 
     def test_method_count(self, dispatcher):
         """Exactly six dispatch methods are present (no extras, no missing)."""
         method_names = [
-            name
-            for name in DISPATCH_METHODS
+            name for name in DISPATCH_METHODS
             if hasattr(dispatcher, name) and callable(getattr(dispatcher, name))
         ]
         assert len(method_names) == 6, (
