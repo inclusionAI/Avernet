@@ -217,9 +217,7 @@ class OAuthBearerStrategy(AuthStrategy):
 
 ## 12. 需优先拍板的开放问题
 
-1. **阿里 IAM 是否已作为第三方应用的 OAuth/OIDC 授权服务器**（"开放平台"能力）？这是**配置 vs 自建**的分岔：
-   - **是** → 在 IAM 注册 client；由 IAM 跑 `/authorize` + 授权 + `/token`；网关只**校验** IAM 签发的令牌。自建量最小。
-   - **否** → 网关自建本文的轻量 `/authorize` + `/token`，`iam.alipay.com` 跳转仅用于真人登录这一步。
+1. ~~**阿里 IAM 是否已作为第三方应用的 OAuth/OIDC 授权服务器？**~~ **已定（2026-07-25）：否。** 阿里 IAM / antbuservice 无法充当签发 teamclaw-audience、teamclaw-consented 令牌的授权服务器（且 community 里的 Google 仅做认证）。→ **网关自建 `/authorize` + `/token` 端点**（方案 A），`iam.alipay.com` 跳转仅用于真人登录这一步。"配置即用、借 IAM"这条分支不可用。
 2. **令牌格式** —— 签名 JWT（无状态校验，契合 §7.1 签名接缝）vs 不透明 + 内省（更易撤销）。建议：JWT access token + 服务端 refresh/授权状态。
 3. **委托凭证签发** —— BUService 能否从 `(服务凭证 + subject + 已记录授权)` 签发"代表 subject"的凭证，而无需用户活跃令牌（RFC 8693 令牌交换 / on-behalf-of）？若不能，则在授权时存一份可赎回的委托 grant；用户令牌依赖完全留在我方信任边界内。（auth-design.md §15 也标注了同一"sender-constrained 令牌"疑问。）
 4. **授权粒度与有效期** —— 按 scope 授权、授权过期、以及 client 申请新 scope 时的重新授权触发。

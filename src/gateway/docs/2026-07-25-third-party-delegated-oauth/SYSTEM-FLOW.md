@@ -200,8 +200,8 @@ Both flavors use the **same clean architecture** (we are the authz server; we mi
 
 ## 11. Why we are not forced back to the two-token passthrough
 
-- **Option A (build our own authz server / login-with-avernet)** has **no external dependency** — it needs only (i) our own `/authorize` + consent + `/token`, (ii) the human-login we already run, (iii) minting our own JWTs. **Always achievable by us alone.** It is the floor.
-- **Option B (lean on antbuservice / Google as the authz server)** is an *optimization to build less* — viable **only if** that external party can issue **tc-audience, tc-consented** tokens (more than SSO passthrough). May not be achievable; that's the team question.
+- **Option A (build our own authz server / login-with-avernet)** has **no external dependency** — it needs only (i) our own `/authorize` + consent + `/token`, (ii) the human-login we already run, (iii) minting our own JWTs. **Always achievable by us alone.** It is the floor — and, per the decision below, **the path we take**.
+- **Option B (lean on antbuservice / Google as the authz server)** was the *optimization to build less* — viable only if that external party could issue **tc-audience, tc-consented** tokens (more than SSO passthrough). **Ruled out (2026-07-25):** the corp provider (antbuservice) cannot issue such tokens, and Google (community) is authentication-only — so B is unavailable in both flavors.
 - **Option C (forward a generic provider token to tc)** = the anti-pattern; rejected.
 - Reverting to `IAM_TOKEN` passthrough is therefore **not a technical necessity** (A is always buildable). It would be a **conscious prioritization decision** to accept a known anti-pattern (with compensating controls) — a business call, not an engineering dead-end.
 
@@ -216,12 +216,12 @@ Both flavors use the **same clean architecture** (we are the authz server; we mi
 - Same clean design for both; IdP is the only flavored difference.
 - Single all-encompassing scope for now; **pure JWT** revocation (≤ ~15 min access latency).
 - Caller-token/downstream mint **de-scoped** (service-bot-only; future cross-team).
+- **A vs B resolved (2026-07-25) → build A.** No external provider (antbuservice for corp, Google for community) can issue **tc-audience, tc-consented** tokens, so the own-authorization-server path (Option A) is the design in both flavors. The lighter "lean on the IdP" branch is off the table.
 
 **Open — needs the team**
 
-1. **A vs B (build-weight):** can **antbuservice / Google** act as an authz server that issues **tc-audience, tc-consented** tokens? *Yes* → lighter (B). *No* → build A. (A is the guaranteed baseline either way.)
-2. **Proceed vs. defer:** if the team judges the clean fix not worth prioritizing now, the only alternative is a *documented* acceptance of the passthrough anti-pattern — not "we had no choice."
-3. **Consent lifetime & re-consent triggers** (expiry; what re-prompts). With a single scope there is no "new scope requested" trigger yet.
+1. **Proceed vs. defer:** if the team judges the clean fix not worth prioritizing now, the only alternative is a *documented* acceptance of the passthrough anti-pattern — not "we had no choice." (Note: since B is ruled out, deferring means accepting the anti-pattern; there is no lighter clean option to wait for.)
+2. **Consent lifetime & re-consent triggers** (expiry; what re-prompts). With a single scope there is no "new scope requested" trigger yet.
 
 ---
 
