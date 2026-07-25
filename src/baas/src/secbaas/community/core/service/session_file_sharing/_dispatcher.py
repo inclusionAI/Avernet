@@ -470,7 +470,19 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             response_params,
         )
 
-        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
+        logger.info(
+            "share-link audit: operator=%s transfer_id=%s session_id=%s "
+            "expire_seconds=%d show=%s",
+            operator or "unknown",
+            transfer_id,
+            session_id,
+            expire_seconds,
+            show,
+        )
+
+        expires_at = (
+            datetime.now(UTC) + timedelta(seconds=expire_seconds)
+        ).isoformat()
 
         return SessionShareLinkResponse(
             share_url=share_url,
