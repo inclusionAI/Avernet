@@ -308,7 +308,8 @@ class SkillsPoolQuarantineService:
                 status=QuarantineStatus.CLEANUP_FAILED,
                 evidence=evidence,
                 retryable=(
-                    response.status
+                    cleanup_uncertain
+                    or response.status
                     is RuntimeQuarantineCleanupStatus.TRANSIENT_ERROR
                 ),
             )
