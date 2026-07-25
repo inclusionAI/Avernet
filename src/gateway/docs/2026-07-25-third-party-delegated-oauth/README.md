@@ -217,7 +217,9 @@ The re-home is additive: the `app_key` (pure app / opaque on-behalf-of) path fro
 
 ## 12. Open questions to resolve first
 
-1. ~~**Does Alipay IAM already act as an OAuth/OIDC authorization server for third-party apps?**~~ **Resolved (2026-07-25): No.** Alipay IAM / antbuservice cannot act as an authorization server issuing teamclaw-audience, teamclaw-consented tokens (and Google, in community, is authentication-only). → **The gateway builds the `/authorize` + `/token` endpoints itself** (Option A), using the `iam.alipay.com` redirect solely for the human-login step. The "config-only, lean on IAM" branch is not available.
+1. **Does Alipay IAM / antbuservice already act as an OAuth/OIDC authorization server** that can issue teamclaw-audience, teamclaw-consented tokens (more than SSO/login)? This is the config-vs-build (build-weight) fork; the provider's capability **isn't knowable from this repo** and needs the IdP owners:
+   - **Yes** → register the client in IAM; IAM runs `/authorize` + consent + `/token`; the gateway only **validates** IAM-issued tokens. Lighter build.
+   - **No / unconfirmed** → the gateway builds the `/authorize` + `/token` endpoints itself, using the `iam.alipay.com` redirect solely for the human-login step. **This is the working design** (always buildable by us).
 2. **Token format** — signed JWT (stateless validation, aligns with §7.1 signing seam) vs opaque + introspection (easier revocation). Recommendation: JWT access token + server-side refresh/consent state.
 3. **Delegated-credential mint** — can BUService issue an "act as subject" credential from `(service credential + subject + recorded consent)` without the user's live token (RFC 8693-style token exchange / on-behalf-of)? If not, store a redeemable delegation grant at consent time; the user-token dependency stays entirely inside our trust boundary. (auth-design.md §15 flags the same sender-constrained-token question.)
 4. **Consent granularity & lifetime** — per-scope consent, consent expiry, and the re-consent trigger when a client requests new scopes.
