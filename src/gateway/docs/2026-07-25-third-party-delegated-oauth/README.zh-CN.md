@@ -7,6 +7,7 @@
 **关联：** `src/gateway/docs/2026-07-21-auth-design.md` —— 本文把该设计 **§15「模式 C」（OAuth 授权码，"用 Avernet 登录"）** 具体化；那里已埋点但暂缓。
 
 > English version: [`README.md`](./README.md)。
+> **系统流程**（corp + community 时序图、授权模型、评审议程）：[`SYSTEM-FLOW.zh-CN.md`](./SYSTEM-FLOW.zh-CN.md)。
 
 ---
 

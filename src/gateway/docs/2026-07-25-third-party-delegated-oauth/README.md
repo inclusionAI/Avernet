@@ -7,6 +7,7 @@
 **Related:** `src/gateway/docs/2026-07-21-auth-design.md` — this note concretizes that doc's **§15 "Mode C" (OAuth authorization-code, "Login with Avernet")**, which is earmarked but deferred.
 
 > 中文版见 [`README.zh-CN.md`](./README.zh-CN.md)。
+> **System flow** (corp + community sequence diagrams, consent model, review agenda): [`SYSTEM-FLOW.md`](./SYSTEM-FLOW.md).
 
 ---
 
