@@ -15,6 +15,7 @@ import {
   initAgentEventsSubscription,
   rememberTaskToolSession,
   resolveChatRunId,
+  resolveInboundSender,
   resolveGroupIdFromSessionKey,
 } from '../src/inbound-handler.js';
 import type { RequestFrame, ResolvedBcsAccount } from '../src/types.js';
@@ -43,6 +44,64 @@ describe('openclaw-channel-bcn', () => {
     assert.match(
       resolveChatRunId(undefined, '  '),
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it('uses BCS actor identity for OpenClaw sender metadata', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:Apple]ALL Hi',
+        {
+          source: 'api',
+          user_id: 'Apple',
+          actor_id: 'human_001',
+          actor_name: 'Apple',
+        },
+        {
+          session_id: 'session-1',
+          participants: [],
+          originator: '产品经理',
+          from: 'Apple(human_001)',
+          you_are_mentioned: true,
+          is_sender: false,
+          mentions: [],
+          message: 'ALL Hi',
+        },
+      ),
+      {
+        displayName: 'Apple',
+        actorId: 'human_001',
+        strippedText: 'ALL Hi',
+      },
+    );
+
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:研发]bot reply',
+        {
+          source: 'api',
+          user_id: '研发',
+          actor_id: 'bot_11b77a19',
+          actor_name: '研发',
+        },
+        {
+          session_id: 'session-1',
+          participants: [],
+          originator: '产品经理',
+          from: '研发(bot_11b77a19)',
+          from_bot_id: 'bot_11b77a19',
+          from_bot_owner: '001',
+          you_are_mentioned: true,
+          is_sender: false,
+          mentions: [],
+          message: 'bot reply',
+        },
+      ),
+      {
+        displayName: '研发',
+        actorId: 'bot_11b77a19',
+        strippedText: 'bot reply',
+      },
     );
   });
 

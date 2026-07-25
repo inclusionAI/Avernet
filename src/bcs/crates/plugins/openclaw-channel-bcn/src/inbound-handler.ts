@@ -56,6 +56,24 @@ function extractFromPrefix(raw: string): { senderName: string; text: string } {
   return { senderName: '', text: raw };
 }
 
+export function resolveInboundSender(
+  rawText: string,
+  channel?: ChatSendParams['channel'],
+  sessionContext?: GroupContext,
+): { displayName: string; actorId: string | undefined; strippedText: string } {
+  const { senderName, text: strippedText } = extractFromPrefix(rawText);
+  const displayName = channel?.actor_name?.trim()
+    || senderName.trim()
+    || channel?.user_id?.trim()
+    || sessionContext?.from?.trim()
+    || 'bcs-bot';
+  const actorId = channel?.actor_id?.trim()
+    || sessionContext?.from_bot_id?.trim()
+    || channel?.user_id?.trim()
+    || undefined;
+  return { displayName, actorId, strippedText };
+}
+
 /** Active streams: run_id -> AbortController */
 const activeStreams = new Map<string, AbortController>();
 
@@ -879,8 +897,11 @@ export async function handleChatSend(
   const runId = resolveChatRunId(request.id, params.idempotency_key);
   client.sendResponse(request.id, true, { run_id: runId });
 
-  const { senderName, text: strippedText } = extractFromPrefix(text);
-  const displayName = senderName || channel?.user_id || sessionContext?.from || 'bcs-bot';
+  const { displayName, actorId, strippedText } = resolveInboundSender(
+    text,
+    channel,
+    sessionContext,
+  );
 
   const preview = strippedText.length > 100 ? `${strippedText.slice(0, 100)}...` : strippedText;
   const ctxInfo = sessionContext ? extractGroupContext(sessionContext) : {};
@@ -954,8 +975,8 @@ export async function handleChatSend(
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: bcsGroupId || `bcs:${account.botId}`,
       ChatType: 'group',
-      SenderName: sessionContext.from_bot_owner ?? undefined,
-      SenderId: sessionContext.from_bot_id ?? undefined,
+      SenderName: displayName,
+      SenderId: actorId,
       Provider: CHANNEL_ID,
       Surface: CHANNEL_ID,
       ConversationLabel: bcsGroupId ? `BCS Group ${bcsGroupId}` : 'BCS Onboarding',
@@ -1304,8 +1325,11 @@ export async function handleChatInject(
     return;
   }
 
-  const { senderName, text: strippedText } = extractFromPrefix(text);
-  const displayName = senderName || channel?.user_id || sessionContext?.from || 'bcs-bot';
+  const { displayName, actorId, strippedText } = resolveInboundSender(
+    text,
+    channel,
+    sessionContext,
+  );
   const preview = strippedText.length > 100 ? `${strippedText.slice(0, 100)}...` : strippedText;
   const ctxInfo = sessionContext ? extractGroupContext(sessionContext) : {};
   log?.info?.(`chat.inject from ${displayName} in ${bcsGroupId} (observe only): ${preview}`, ctxInfo);
@@ -1355,8 +1379,8 @@ export async function handleChatInject(
       OriginatingChannel: CHANNEL_ID,
       OriginatingTo: bcsGroupId || `bcs:${account.botId}`,
       ChatType: 'group',
-      SenderName: sessionContext.from_bot_owner ?? undefined,
-      SenderId: sessionContext.from_bot_id ?? undefined,
+      SenderName: displayName,
+      SenderId: actorId,
       Provider: CHANNEL_ID,
       Surface: CHANNEL_ID,
       ConversationLabel: bcsGroupId ? `BCS Group ${bcsGroupId}` : 'BCS Onboarding',

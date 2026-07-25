@@ -22,6 +22,7 @@ file_mode() {
 
 setup_env() {
   unset SINGLEBOX_MODEL_CONFIG_MODE
+  unset SINGLEBOX_MOCK_MODEL_PORT
   unset OPENCLAW_OPENAI_PROVIDER_ID
   unset OPENCLAW_OPENAI_BASE_URL
   unset OPENCLAW_OPENAI_API_KEY
@@ -175,7 +176,7 @@ JSON
   fi
 }
 
-test_mock_generates_no_real_provider() {
+test_mock_generates_local_provider() {
   setup_env
   export SINGLEBOX_MODEL_CONFIG_MODE="mock"
 
@@ -185,9 +186,26 @@ test_mock_generates_no_real_provider() {
 
   jq -e '
     .models.mode == "merge"
-    and (.models.providers | length) == 0
-    and .agents.defaults.models == {}
+    and .models.providers["singlebox-mock"].baseUrl == "http://127.0.0.1:18080/v1"
+    and .models.providers["singlebox-mock"].api == "openai-completions"
+    and .models.providers["singlebox-mock"].models[0].id == "singlebox-mock"
+    and .agents.defaults.model.primary == "singlebox-mock/singlebox-mock"
   ' "$SINGLEBOX_MODEL_CONFIG_FILE" >/dev/null || fail "mock runtime config mismatch"
+}
+
+test_mock_port_override_updates_local_provider() {
+  setup_env
+  export SINGLEBOX_MODEL_CONFIG_MODE="mock"
+  export SINGLEBOX_MOCK_MODEL_PORT="28080"
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+  singlebox_model_config_prepare
+
+  assert_eq \
+    "http://127.0.0.1:28080/v1" \
+    "$(jq -r '.models.providers["singlebox-mock"].baseUrl' "$SINGLEBOX_MODEL_CONFIG_FILE")" \
+    "mock provider port override"
 }
 
 test_prompt_maps_selection_to_mode() {
@@ -229,14 +247,79 @@ test_model_config_is_required_only_for_consumers() {
     || fail "a mixed target containing bots should require model config"
 }
 
+test_mock_lifecycle_is_only_managed_in_mock_mode() {
+  setup_env
+  # shellcheck source=/dev/null
+  source "$MODULE"
+
+  MOCK_READY_CALLS=0
+  singlebox_mock_model_is_ready() {
+    MOCK_READY_CALLS=$((MOCK_READY_CALLS + 1))
+    return 0
+  }
+
+  local mode pid_file
+  pid_file="$(singlebox_mock_model_pid_file)"
+  mkdir -p "$(dirname "$pid_file")"
+  for mode in "" manual home; do
+    SINGLEBOX_MODEL_CONFIG_MODE="$mode"
+    singlebox_mock_model_start
+    assert_eq "0" "$MOCK_READY_CALLS" "${mode:-unset} mode start"
+
+    printf 'not-a-pid\n' > "$pid_file"
+    singlebox_mock_model_stop
+    [ -f "$pid_file" ] || fail "${mode:-unset} mode should not manage mock PID"
+  done
+
+  SINGLEBOX_MODEL_CONFIG_MODE="mock"
+  singlebox_mock_model_start
+  assert_eq "1" "$MOCK_READY_CALLS" "mock mode start"
+
+  printf 'not-a-pid\n' > "$pid_file"
+  singlebox_mock_model_stop
+  [ ! -f "$pid_file" ] || fail "mock mode should manage mock PID"
+
+  printf '%s\n' "$$" > "$pid_file"
+  singlebox_mock_model_stop
+  kill -0 "$$" 2>/dev/null || fail "mock stop terminated a non-mock process"
+}
+
+test_mock_health_requires_exact_response() {
+  setup_env
+  # shellcheck source=/dev/null
+  source "$MODULE"
+
+  curl() {
+    printf '%s\n' '{"status":"ok","service":"singlebox-mock-model"}'
+  }
+  singlebox_mock_model_is_ready || fail "exact mock health response should be ready"
+
+  curl() {
+    printf '%s\n' '{"status":"ok","service":"singlebox-mock-model","extra":true}'
+  }
+  if singlebox_mock_model_is_ready; then
+    fail "health response with extra fields should not be ready"
+  fi
+
+  curl() {
+    printf '%s\n' '{"status":"starting","service":"singlebox-mock-model"}'
+  }
+  if singlebox_mock_model_is_ready; then
+    fail "non-ok health response should not be ready"
+  fi
+}
+
 test_manual_generates_runtime_config_from_env
 test_manual_requires_complete_env
 test_home_copies_only_model_fields
 test_home_ignores_non_object_agents_when_models_exist
 test_home_requires_confirmation
-test_mock_generates_no_real_provider
+test_mock_generates_local_provider
+test_mock_port_override_updates_local_provider
 test_prompt_maps_selection_to_mode
 test_noninteractive_defaults_to_mock_without_stdout_noise
 test_model_config_is_required_only_for_consumers
+test_mock_health_requires_exact_response
+test_mock_lifecycle_is_only_managed_in_mock_mode
 
 printf 'PASS: singlebox model config module tests\n'

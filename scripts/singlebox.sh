@@ -559,6 +559,7 @@ setup_all_and_start() {
 
     # Start current all group (via group module)
     log_info "Running start current all group..."
+    singlebox_mock_model_start || return 1
     if ! all_start; then
         log_error "Start failed. Fix the errors above, then rerun ./scripts/singlebox.sh $(singlebox_mode_option)."
         return 1
@@ -794,6 +795,9 @@ main() {
             if [[ "$with_bcs_coverage" -eq 1 ]]; then
                 prepare_bcs_coverage_bin
             fi
+            if singlebox_model_config_required_for_services "${services[@]}"; then
+                singlebox_mock_model_start || exit 1
+            fi
             for svc in "${services[@]}"; do
                 start_service "$svc"
             done
@@ -802,8 +806,14 @@ main() {
             for svc in "${services[@]}"; do
                 stop_service "$svc"
             done
+            if singlebox_model_config_required_for_services "${services[@]}"; then
+                singlebox_mock_model_stop
+            fi
             ;;
         restart)
+            if singlebox_model_config_required_for_services "${services[@]}"; then
+                singlebox_mock_model_start || exit 1
+            fi
             for svc in "${services[@]}"; do
                 restart_service "$svc"
             done
