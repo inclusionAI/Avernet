@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from secbaas.community.api.session_file_sharing import (
+from secbaas.api.session_file_sharing import (
     SourceTransferNotReadyError,
 )
-from secbaas.community.core.service.session_file_sharing import (
+from secbaas.core.service.session_file_sharing import (
     DefaultSessionFileSharingDispatcher,
 )
 
@@ -42,10 +42,7 @@ async def test_share_link_for_done_transfer(
     mock_session_ticket_repo.create_ticket.return_value = 1
 
     upload_resp = await dispatcher.dispatch_get_upload_url(
-        tenant="t1",
-        session_id="sess-001",
-        filename="test.txt",
-        file_size=100,
+        tenant="t1", session_id="sess-001", filename="test.txt", file_size=100,
     )
 
     # 2. Put content to stub OSS
@@ -116,10 +113,7 @@ async def test_share_link_show_true(
 
     # Upload + put content
     upload_resp = await dispatcher.dispatch_get_upload_url(
-        tenant="t1",
-        session_id="sess-001",
-        filename="preview.txt",
-        file_size=100,
+        tenant="t1", session_id="sess-001", filename="preview.txt", file_size=100,
     )
     original_content = b"inline preview content"
     stub_oss_backend.put_content(upload_resp.upload_url, original_content)
