@@ -165,7 +165,7 @@ class TestGetUploadUrl:
 
     @pytest.mark.asyncio
     async def test_upload_url_domain_error(self, mock_dispatcher):
-        """TransferStateConflictError returns 409 with TRansFER_STATE_CONFLICT."""
+        """TransferStateConflictError returns 409 with TRANSFER_STATE_CONFLICT."""
         mock_dispatcher.dispatch_get_upload_url.side_effect = (
             TransferStateConflictError("bad state")
         )
