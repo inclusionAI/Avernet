@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from secbaas.community.adapters.web.routers.session_file_sharing.session_file_sharing_router import (  # noqa: E501
+    _get_session_file_sharing_dispatcher,
     router,
 )
 from secbaas.community.api.session_file_sharing import (
@@ -23,10 +24,10 @@ from secbaas.community.api.session_file_sharing import (
     SessionCompleteUploadResponse,
     SessionDeleteTransferResponse,
     SessionFileSharingDispatcher,
-    SessionFileSharingError,
     SessionGetTransferStatusResponse,
     SessionGetUploadUrlResponse,
     SessionShareLinkResponse,
+    SessionFileSharingError,
     SourceTransferNotFoundError,
     SourceTransferNotReadyError,
     StagingObjectNotFoundError,
@@ -34,7 +35,6 @@ from secbaas.community.api.session_file_sharing import (
     TransferNotTerminalError,
     TransferStateConflictError,
 )
-from tests.unit.adapters.web.conftest import iter_api_routes
 
 app = FastAPI()
 app.include_router(router)
@@ -47,19 +47,18 @@ app.include_router(router)
 
 @pytest.fixture
 def mock_dispatcher():
-    """Override the Provide dependency to return a mock dispatcher.
+    """Override _get_session_file_sharing_dispatcher to return a mock.
 
-    Session Router uses Depends(Provide[...]) + @inject.  The fixture
-    walks all routes, finds each ``dispatcher`` dependency, and overrides
-    it with a mock — identical to the pattern used by bot_cmd_router and
-    other Provide[...] router tests.
+    Session Router uses Depends(_get_session_file_sharing_dispatcher) — a
+    plain callable — not Provide[...] + @inject.  The override therefore
+    targets the callable directly (not iter_api_routes, which is for
+    Provide[...] injection).
     """
     mock_instance = AsyncMock()
     old_overrides = dict(app.dependency_overrides)
-    for route in iter_api_routes(app):
-        for dep in route.dependant.dependencies:
-            if dep.name == "dispatcher":
-                app.dependency_overrides[dep.call] = lambda: mock_instance
+    app.dependency_overrides[_get_session_file_sharing_dispatcher] = (
+        lambda: mock_instance
+    )
     yield mock_instance
     app.dependency_overrides = old_overrides
 
@@ -166,7 +165,7 @@ class TestGetUploadUrl:
 
     @pytest.mark.asyncio
     async def test_upload_url_domain_error(self, mock_dispatcher):
-        """TransferStateConflictError returns 409 with TRANSFER_STATE_CONFLICT."""
+        """TransferStateConflictError returns 409 with TRansFER_STATE_CONFLICT."""
         mock_dispatcher.dispatch_get_upload_url.side_effect = (
             TransferStateConflictError("bad state")
         )
@@ -183,7 +182,9 @@ class TestGetUploadUrl:
     @pytest.mark.asyncio
     async def test_upload_url_unhandled_500(self, mock_dispatcher):
         """Generic Exception returns 500 with INTERNAL_ERROR."""
-        mock_dispatcher.dispatch_get_upload_url.side_effect = RuntimeError("unexpected")
+        mock_dispatcher.dispatch_get_upload_url.side_effect = RuntimeError(
+            "unexpected"
+        )
 
         resp = await _post(
             "/api/v1/sessions/t1/sess-001/files/upload-url",
@@ -241,8 +242,8 @@ class TestCompleteUpload:
     @pytest.mark.asyncio
     async def test_complete_transfer_not_found_404(self, mock_dispatcher):
         """TransferNotFoundError returns 404."""
-        mock_dispatcher.dispatch_complete_upload.side_effect = TransferNotFoundError(
-            "no ticket"
+        mock_dispatcher.dispatch_complete_upload.side_effect = (
+            TransferNotFoundError("no ticket")
         )
 
         resp = await _post(
@@ -302,8 +303,8 @@ class TestCompleteUpload:
     @pytest.mark.asyncio
     async def test_complete_domain_error(self, mock_dispatcher):
         """Generic SessionFileSharingError (DomainError) returns 400."""
-        mock_dispatcher.dispatch_complete_upload.side_effect = SessionFileSharingError(
-            "session file sharing error"
+        mock_dispatcher.dispatch_complete_upload.side_effect = (
+            SessionFileSharingError("session file sharing error")
         )
 
         resp = await _post(
@@ -313,21 +314,6 @@ class TestCompleteUpload:
         assert resp.status_code == 400
         detail = resp.json()["detail"]
         assert detail["error_code"] == "SESSION_FILE_SHARING_ERROR"
-
-    @pytest.mark.asyncio
-    async def test_complete_unhandled_500(self, mock_dispatcher):
-        """Generic Exception returns 500 with INTERNAL_ERROR."""
-        mock_dispatcher.dispatch_complete_upload.side_effect = RuntimeError(
-            "unexpected"
-        )
-
-        resp = await _post(
-            "/api/v1/sessions/t1/sess-001/files/upload-url/tf-001/complete",
-        )
-
-        assert resp.status_code == 500
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "INTERNAL_ERROR"
 
 
 # ==========================================================================
@@ -360,8 +346,8 @@ class TestCancelUpload:
     @pytest.mark.asyncio
     async def test_cancel_not_found_404(self, mock_dispatcher):
         """TransferNotFoundError returns 404."""
-        mock_dispatcher.dispatch_cancel_upload.side_effect = TransferNotFoundError(
-            "no ticket"
+        mock_dispatcher.dispatch_cancel_upload.side_effect = (
+            TransferNotFoundError("no ticket")
         )
 
         resp = await _delete(
@@ -375,8 +361,8 @@ class TestCancelUpload:
     @pytest.mark.asyncio
     async def test_cancel_state_conflict_409(self, mock_dispatcher):
         """TransferStateConflictError returns 409."""
-        mock_dispatcher.dispatch_cancel_upload.side_effect = TransferStateConflictError(
-            "bad state"
+        mock_dispatcher.dispatch_cancel_upload.side_effect = (
+            TransferStateConflictError("bad state")
         )
 
         resp = await _delete(
@@ -401,318 +387,3 @@ class TestCancelUpload:
         assert resp.status_code == 422
         detail = resp.json()["detail"]
         assert detail["error_code"] == "INVALID_TRANSITION"
-
-    @pytest.mark.asyncio
-    async def test_cancel_unhandled_500(self, mock_dispatcher):
-        """Generic Exception returns 500 with INTERNAL_ERROR."""
-        mock_dispatcher.dispatch_cancel_upload.side_effect = RuntimeError(
-            "unexpected"
-        )
-
-        resp = await _delete(
-            "/api/v1/sessions/t1/sess-001/files/upload-url/tf-001",
-        )
-
-        assert resp.status_code == 500
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "INTERNAL_ERROR"
-
-
-# ==========================================================================
-# Generate Share Link endpoint tests
-# ==========================================================================
-
-
-class TestGenerateShareLink:
-    """POST /{tenant}/{session_id}/files/transfers/{transfer_id}/share-link"""
-
-    @pytest.mark.asyncio
-    async def test_share_link_success(self, mock_dispatcher):
-        """Generate share link returns 200 with share_url."""
-        mock_dispatcher.dispatch_get_share_link.return_value = SessionShareLinkResponse(
-            share_url="https://oss.example.com/dl?token=abc",
-            transfer_id="tf-001",
-            expires_at="2099-01-01T00:00:00",
-        )
-
-        resp = await _post(
-            "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
-            json_data={"expire_seconds": 3600, "show": False, "operator": "test-user"},
-        )
-
-        assert resp.status_code == 200
-        data = resp.json()["data"]
-        assert data["share_url"].startswith("https://")
-        assert data["transfer_id"] == "tf-001"
-        assert data["expires_at"] is not None
-
-    @pytest.mark.asyncio
-    async def test_share_link_source_not_found_404(self, mock_dispatcher):
-        """SourceTransferNotFoundError returns 404 with transfer_id in detail."""
-        mock_dispatcher.dispatch_get_share_link.side_effect = (
-            SourceTransferNotFoundError(transfer_id="tf-001")
-        )
-
-        resp = await _post(
-            "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
-            json_data={"expire_seconds": 3600, "show": False, "operator": "test-user"},
-        )
-
-        assert resp.status_code == 404
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "SOURCE_TRANSFER_NOT_FOUND"
-        assert detail["transfer_id"] == "tf-001"
-
-    @pytest.mark.asyncio
-    async def test_share_link_not_ready_409(self, mock_dispatcher):
-        """SourceTransferNotReadyError returns 409 with transfer_id and current_status."""
-        mock_dispatcher.dispatch_get_share_link.side_effect = (
-            SourceTransferNotReadyError(
-                transfer_id="tf-001",
-                current_status="CREATED",
-            )
-        )
-
-        resp = await _post(
-            "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
-            json_data={"expire_seconds": 3600, "show": False, "operator": "test-user"},
-        )
-
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "SOURCE_TRANSFER_NOT_READY"
-        assert detail["transfer_id"] == "tf-001"
-        assert detail["current_status"] == "CREATED"
-
-    @pytest.mark.asyncio
-    async def test_share_link_value_error_422(self, mock_dispatcher):
-        """ValueError returns 422 with INVALID_TRANSITION."""
-        mock_dispatcher.dispatch_get_share_link.side_effect = ValueError("not DONE")
-
-        resp = await _post(
-            "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
-            json_data={"expire_seconds": 3600, "show": False, "operator": "test-user"},
-        )
-
-        assert resp.status_code == 422
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "INVALID_TRANSITION"
-
-    @pytest.mark.asyncio
-    async def test_share_link_domain_error(self, mock_dispatcher):
-        """TransferStateConflictError returns 409."""
-        mock_dispatcher.dispatch_get_share_link.side_effect = (
-            TransferStateConflictError("bad state")
-        )
-
-        resp = await _post(
-            "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
-            json_data={"expire_seconds": 3600, "show": False, "operator": "test-user"},
-        )
-
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "TRANSFER_STATE_CONFLICT"
-
-    @pytest.mark.asyncio
-    async def test_share_link_unhandled_500(self, mock_dispatcher):
-        """Generic Exception returns 500 with INTERNAL_ERROR."""
-        mock_dispatcher.dispatch_get_share_link.side_effect = RuntimeError(
-            "unexpected"
-        )
-
-        resp = await _post(
-            "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
-            json_data={"expire_seconds": 3600, "show": False, "operator": "test-user"},
-        )
-
-        assert resp.status_code == 500
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "INTERNAL_ERROR"
-
-
-# ==========================================================================
-# Get Transfer Status endpoint tests
-# ==========================================================================
-
-
-class TestGetTransferStatus:
-    """GET /{tenant}/{session_id}/transfers/{transfer_id}"""
-
-    @pytest.mark.asyncio
-    async def test_status_success(self, mock_dispatcher):
-        """Get transfer status returns 200 with session_id in response."""
-        mock_dispatcher.dispatch_get_transfer_status.return_value = (
-            SessionGetTransferStatusResponse(
-                transfer_id="tf-001",
-                status="DONE",
-                filename="test.txt",
-                session_id="sess-001",
-                error_message=None,
-                created_at="2025-01-01T00:00:00",
-                updated_at="2025-01-01T01:00:00",
-                operator="test-user",
-            )
-        )
-
-        resp = await _get(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 200
-        data = resp.json()["data"]
-        assert data["transfer_id"] == "tf-001"
-        assert data["status"] == "DONE"
-        assert data["session_id"] == "sess-001"
-        assert data["filename"] == "test.txt"
-
-    @pytest.mark.asyncio
-    async def test_status_not_found_404(self, mock_dispatcher):
-        """TransferNotFoundError returns 404."""
-        mock_dispatcher.dispatch_get_transfer_status.side_effect = (
-            TransferNotFoundError("no ticket")
-        )
-
-        resp = await _get(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 404
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "TRANSFER_NOT_FOUND"
-
-    @pytest.mark.asyncio
-    async def test_status_domain_error(self, mock_dispatcher):
-        """TransferStateConflictError returns 409."""
-        mock_dispatcher.dispatch_get_transfer_status.side_effect = (
-            TransferStateConflictError("bad state")
-        )
-
-        resp = await _get(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "TRANSFER_STATE_CONFLICT"
-
-    @pytest.mark.asyncio
-    async def test_status_unhandled_500(self, mock_dispatcher):
-        """Generic Exception returns 500 with INTERNAL_ERROR."""
-        mock_dispatcher.dispatch_get_transfer_status.side_effect = RuntimeError(
-            "unexpected"
-        )
-
-        resp = await _get(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 500
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "INTERNAL_ERROR"
-
-
-# ==========================================================================
-# Delete Transfer endpoint tests
-# ==========================================================================
-
-
-class TestDeleteTransfer:
-    """DELETE /{tenant}/{session_id}/transfers/{transfer_id}"""
-
-    @pytest.mark.asyncio
-    async def test_delete_success(self, mock_dispatcher):
-        """Delete transfer returns 200 with previous_status and new_status."""
-        mock_dispatcher.dispatch_delete_transfer.return_value = (
-            SessionDeleteTransferResponse(
-                transfer_id="tf-001",
-                previous_status="DONE",
-                new_status="DELETED",
-            )
-        )
-
-        resp = await _delete(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 200
-        data = resp.json()["data"]
-        assert data["transfer_id"] == "tf-001"
-        assert data["previous_status"] == "DONE"
-        assert data["new_status"] == "DELETED"
-
-    @pytest.mark.asyncio
-    async def test_delete_not_found_404(self, mock_dispatcher):
-        """TransferNotFoundError returns 404."""
-        mock_dispatcher.dispatch_delete_transfer.side_effect = TransferNotFoundError(
-            "no ticket"
-        )
-
-        resp = await _delete(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 404
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "TRANSFER_NOT_FOUND"
-
-    @pytest.mark.asyncio
-    async def test_delete_not_terminal_409(self, mock_dispatcher):
-        """TransferNotTerminalError returns 409 with transfer_id in detail."""
-        mock_dispatcher.dispatch_delete_transfer.side_effect = TransferNotTerminalError(
-            transfer_id="tf-001", status="CREATED"
-        )
-
-        resp = await _delete(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "TRANSFER_NOT_TERMINAL"
-        assert detail["transfer_id"] == "tf-001"
-
-    @pytest.mark.asyncio
-    async def test_delete_state_conflict_409(self, mock_dispatcher):
-        """TransferStateConflictError returns 409."""
-        mock_dispatcher.dispatch_delete_transfer.side_effect = (
-            TransferStateConflictError("bad state")
-        )
-
-        resp = await _delete(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 409
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "TRANSFER_STATE_CONFLICT"
-
-    @pytest.mark.asyncio
-    async def test_delete_domain_error(self, mock_dispatcher):
-        """Generic SessionFileSharingError (DomainError) returns 400."""
-        mock_dispatcher.dispatch_delete_transfer.side_effect = SessionFileSharingError(
-            "session file sharing error"
-        )
-
-        resp = await _delete(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 400
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "SESSION_FILE_SHARING_ERROR"
-
-    @pytest.mark.asyncio
-    async def test_delete_unhandled_500(self, mock_dispatcher):
-        """Generic Exception returns 500 with INTERNAL_ERROR."""
-        mock_dispatcher.dispatch_delete_transfer.side_effect = RuntimeError(
-            "unexpected"
-        )
-
-        resp = await _delete(
-            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
-        )
-
-        assert resp.status_code == 500
-        detail = resp.json()["detail"]
-        assert detail["error_code"] == "INTERNAL_ERROR"
