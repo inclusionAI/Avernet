@@ -33,7 +33,7 @@ This is not inevitable. The right shape is a single, limited, revocable token �
 
 - A third-party server ends up presenting **exactly one** credential per API call (`Authorization: Bearer <access_token>`), never `IAM_TOKEN`.
 - The real human is authenticated **once**, interactively, through the existing `iam.alipay.com` login (IAM/BUService stays the source of truth).
-- Explicit, revocable **user consent**; tenant + user + app + scopes are **claims inside the token**, not separate tokens.
+- Explicit, revocable **user consent** (revocation latency bounded — see §8.3); tenant + user + app + scopes are **claims inside the token**, not separate tokens.
 - Resource ownership stays anchored to the app's `developer_org_id` / `tenant`, so a borrowed user handle can never reach another org's data.
 
 **Non-goals**
@@ -126,16 +126,41 @@ Model it as a signed JWT so the gateway can validate statelessly (this is the sa
 
 ```
 iss: teamclaw-authz
-aud: teamclaw-openapi
-sub: <our user id / staffId>     # the delegated human, verified once at consent
-tnt: <tenant id>                 # a CLAIM — not a separate token
+aud: teamclaw-openapi             # CLIENT-facing token audience (see §8.1 — two credentials)
+sub: <our user id / staffId>     # the delegated human — consent + attribution/audit ONLY, never a data-access anchor
+tnt: <tenant id>                 # the CLIENT's tenant (the app's developer_org); the end user's OWN tenant is never consulted
 azp: <client_id>                 # the acting third-party app
-org: <developer_org_id>          # for resource-ownership anchoring
+org: <developer_org_id>          # the resource-ownership anchor
 scope: "bots:chat bots:read"     # exactly what the user consented to
 exp / iat / jti
 ```
 
 Everything the current two/three tokens carried is now a claim inside one credential.
+
+### 8.1 Two distinct credentials — do not conflate
+
+Two credentials live in this system and must never be conflated:
+
+- the **OAuth access token** — client-facing, short-lived (~15 min), `aud: teamclaw-openapi`, validated only at the gateway edge;
+- the **forwarded (internal) Principal** — internal, seconds-lived, `aud: <specific backend>`, per auth-design.md §7.1, gateway-signed and verified by the backend.
+
+The backend never sees or verifies the OAuth access token; it only ever verifies a **gateway-signed Principal** (§9). This keeps the OAuth token from crossing into the backend's trust boundary, and keeps backend verification uniform across every strategy.
+
+### 8.2 What `tnt` and `sub` mean (and don't)
+
+`tnt` is the **client's** tenant (the app's `developer_org`). The end user's own tenant is **never** consulted, and `sub` is **not** a resource-ownership anchor — it exists for **consent and attribution/audit**. This is what makes cross-tenant delegation impossible by construction (the §2 goal): a delegated call can only ever touch data in the **client's** tenant, anchored to `org`/`tnt`.
+
+Concretely, "act on behalf of our end user" here means **"act within the client's tenant, with a verified, consented human on record"** — it does **not** grant the client access to the user's *own* cross-tenant data. A later reader must not assume `sub` scopes data access.
+
+### 8.3 Revocation model & latency
+
+A pure stateless JWT can't be rejected before its `exp` (the gateway validates by signature alone), so "revocable" and "stateless validation" are in genuine tension. Three options:
+
+- **Opaque token + introspection** — instant revocation, but a store lookup on every API call (gateway stateful on the hot path).
+- **JWT + a cheap revocation check (recommended)** — keep signature validation, but also consult a per-`(user, client)` "min-valid-`iat`" watermark (or a small `jti` denylist), cached with a short TTL → near-instant revocation, mostly stateless.
+- **Pure JWT, no check** — revoke kills refresh + consent only; an already-issued access token lives until `exp` (≤15 min), so "revoke" effectively means "within 15 min."
+
+Recommend the middle option. Whichever is chosen, **state the resulting revocation latency** so "revocable" (§2, §11) does not over-promise.
 
 ## 9. Gateway validation → `DelegatedPrincipal`
 
@@ -161,9 +186,20 @@ class OAuthBearerStrategy(AuthStrategy):
 
 The runner then enforces `required_scopes ⊆ granted_scopes` exactly as for the other strategies. `DelegatedPrincipal` is the §15 discriminated-union member that carries **both** app and verified subject — a shape `AppPrincipal.on_behalf_of_opaque` (an *unverified* handle) cannot express.
 
-## 10. Downstream "act as the user" credential
+**Then re-sign — do not forward the OAuth token.** `oauth_bearer` validating the access token and building `DelegatedPrincipal` is only the gateway-edge step. The gateway then **re-signs that `DelegatedPrincipal` as the short-lived internal Principal of auth-design.md §7.1** (`aud: <specific backend>`, seconds-lived) and forwards *that*; the backend verifies the gateway-signed Principal and **never** the client's OAuth access token (see §8.1). From the backend's view every strategy (`first_party_user` / `app_key` / `oauth_bearer`) collapses to "verify one gateway-signed Principal."
 
-When the request reaches the runtime and must call BaaS/MCP **as Alice**, reuse the backend seam `CallerIdentityService.exchange_caller_identity()` (`src/backend/src/agentclaw/community/core/caller_identity/service.py:328`). The recorded consent from Step 2 **is** the pre-authorization; the minted caller credential is installed into the runtime via `runtime_updater.update_caller_identity(...)` and is **never returned to the partner**.
+### 9.1 Placement within the config-driven forwarder (PR #420)
+
+`/authorize`, `/token`, `/revoke`, and the consent UI are gateway-**local** endpoints — they are *not* under `/openapi/v1/<domain>` and must **not** be handled by the config-driven forwarding catch-all. That catch-all routes everything under the version base to a domain's upstream and denies unknown domains, so these routes must be registered **ahead of / excluded from** it (the same treatment as `/health` and `/docs`), or they'd be rejected as an unknown domain.
+
+Two more alignment points with PR #420:
+
+- `oauth_bearer` is registered in `route_security.yaml` as one **strategy alternative** among others (e.g. `[oauth_bearer, app_key]`), consistent with "the gateway owns auth-strategy selection." The re-signed `DelegatedPrincipal` (§9) is what the backend's per-route dependency consumes for authorization.
+- This design turns the gateway into a **stateful authorization server** (consent/grant DB, refresh state, consent UI) sitting alongside the otherwise-stateless proxy. Keep that authz state a **bounded, separable** component so the forwarding hot path stays stateless.
+
+## 10. Downstream credential — act *within the client's tenant, attributed to* the user
+
+When the request reaches the runtime and must call BaaS/MCP, it acts **within the client's tenant, attributed to Alice** (per §8.2 — never with Alice's own tenant or personal permissions). Reuse the backend seam `CallerIdentityService.exchange_caller_identity()` (`src/backend/src/agentclaw/community/core/caller_identity/service.py:328`). The recorded consent from Step 2 **is** the pre-authorization; the minted caller credential is installed into the runtime via `runtime_updater.update_caller_identity(...)` and is **never returned to the partner**. The minted credential must stay anchored to the client's `org`/`tnt` — it must **not** silently reintroduce the user's tenant or permissions.
 
 One signature change is required: `exchange_caller_identity` currently takes `iam_token: str`. In the OAuth path we do not hold Alice's live `IAM_TOKEN`, so `CallerTokenProviderProtocol` needs an overload that mints from `(service_credential, subject_id, tenant, grant_ref)` instead of a forwarded user token. Whether BUService can issue such a delegated credential without the user's live token is the key external dependency — see §12.
 
@@ -174,7 +210,7 @@ One signature change is required: `exchange_caller_identity` currently takes `ia
 | `Bearer <api_key>` → app + tenant | Client is an **OAuth client**; app + tenant + user + scopes ride in the access token |
 | `IAM_TOKEN` cookie → user (every call) | User verified **once** at consent; access token carries `sub` |
 | `policy.allowed_bots` fail-closed whitelist | Keep as gateway coarse-grained scope / resource whitelist |
-| (no consent, no revocation) | Explicit consent record; revocable; refresh-token rotation |
+| (no consent, no revocation) | Explicit consent record; revocable (bounded latency — see §8.3); refresh-token rotation **with reuse detection** (§13) |
 
 The re-home is additive: the `app_key` (pure app / opaque on-behalf-of) path from auth-design.md is unchanged; this note only adds the **delegated-user** path.
 
@@ -186,11 +222,12 @@ The re-home is additive: the `app_key` (pure app / opaque on-behalf-of) path fro
 2. **Token format** — signed JWT (stateless validation, aligns with §7.1 signing seam) vs opaque + introspection (easier revocation). Recommendation: JWT access token + server-side refresh/consent state.
 3. **Delegated-credential mint** — can BUService issue an "act as subject" credential from `(service credential + subject + recorded consent)` without the user's live token (RFC 8693-style token exchange / on-behalf-of)? If not, store a redeemable delegation grant at consent time; the user-token dependency stays entirely inside our trust boundary. (auth-design.md §15 flags the same sender-constrained-token question.)
 4. **Consent granularity & lifetime** — per-scope consent, consent expiry, and the re-consent trigger when a client requests new scopes.
+5. **Scope taxonomy is a hard prerequisite.** Per-scope consent, the token's `scope` claim, and the runner's `required ⊆ granted` check all depend on a defined **scope vocabulary** (the valid scope strings + what each grants). That taxonomy is currently deferred in auth-design.md and the gateway-v1 spec; it must land **before/with** this design — you cannot render a meaningful consent screen or enforce scopes without it.
 
 ## 13. Incremental delivery
 
 1. **MVP:** implement `/authorize` + `/token` for `authorization_code + PKCE` only (skip implicit / client-credentials / device). Issue JWT access tokens signed with the gateway Principal key pair. Wire the `oauth_bearer` strategy. This alone removes `IAM_TOKEN` from the third-party surface.
-2. Add refresh-token rotation + `/revoke` + a consent-management UI (users can view/revoke apps).
+2. Add refresh-token rotation **with reuse detection** + `/revoke` + a consent-management UI (users can view/revoke apps). Reuse detection is what makes rotation worth doing: since each rotated refresh token is single-use, a replay of an already-consumed refresh token means two parties hold it (one was stolen) → **revoke the whole token family** for that grant (all refresh + access) and force re-authorization (OAuth Security BCP). Without it, a stolen refresh token works quietly for its full lifetime.
 3. Adapt `CallerTokenProviderProtocol` for the tokenless mint, retiring the last `iam_token` dependency in the delegated path.
 
 ## 14. Glossary
@@ -198,7 +235,8 @@ The re-home is additive: the `app_key` (pure app / opaque on-behalf-of) path fro
 - **Authentication** — "who is this human?" Owned by IAM/BUService. Unchanged.
 - **Authorization** — "does this user allow this app to act for them, and here is a token proving it." The thin new layer.
 - **Authorization code** — short-lived, single-use value carried in the browser redirect; exchanged server-to-server for tokens.
-- **Access token** — short-lived bearer credential used on API calls; carries tenant + user + app + scopes as claims.
-- **Refresh token** — long-lived, rotating credential used server-to-server to mint new access tokens without user interaction.
+- **Access token** — short-lived, client-facing bearer credential used on API calls; carries tenant + user + app + scopes as claims. Validated only at the gateway edge (§8.1).
+- **Forwarded (internal) Principal** — the short-lived, gateway-signed credential (`aud: <specific backend>`, auth-design.md §7.1) that the backend actually verifies; distinct from the client-facing access token (§8.1, §9).
+- **Refresh token** — long-lived, rotating credential used server-to-server to mint new access tokens without user interaction; rotation is paired with reuse detection (§13).
 - **PKCE** — `code_challenge` / `code_verifier` (S256) binding a code to the flow's initiator.
 - **`DelegatedPrincipal`** — gateway principal carrying both the acting app and the verified end-user subject (auth-design.md §15).
