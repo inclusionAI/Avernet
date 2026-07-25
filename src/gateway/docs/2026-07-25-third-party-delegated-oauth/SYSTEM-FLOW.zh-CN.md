@@ -201,7 +201,7 @@ exp / iat / jti
 ## 11. 为什么我们没有被迫退回两令牌透传
 
 - **方案 A（自建授权服务器 / login-with-avernet）** **无外部依赖** —— 只需 (i) 我们自己的 `/authorize` + 授权 + `/token`，(ii) 我们本就在跑的真人登录，(iii) 签发我们自己的 JWT。**永远可由我们独立达成。** 它是底线 —— 且据下方决定，**就是我们采用的路径**。
-- **方案 B（借 antbuservice / Google 当授权服务器）** 曾是*为了少建而做的优化* —— 仅当该外部方能签发 **tc-audience、tc-consented** 令牌（不止 SSO 透传）才可行。**已排除（2026-07-25）：** corp 提供方（antbuservice）无法签发此类令牌，Google（community）仅做认证 —— 故 B 在两种 flavor 下都不可用。
+- **方案 B（借 antbuservice / Google 当授权服务器）** 曾是*为了少建而做的优化* —— 仅当该外部方能签发 **tc-audience、tc-consented** 令牌（即充当 teamclaw 的*授权*服务器，而不只是认证）才可行。**已排除（2026-07-25）：** antbuservice **仅**签发 SSO/登录令牌 —— 正是我们已在用、且保留的登录能力 —— 但**无法**在 teamclaw 授权背后签发 teamclaw-audience 令牌；Google（community）同样仅做认证。（注意区分："能签 SSO 令牌吗？" = 能，且与此无关；"能当 teamclaw 的授权服务器吗？" = 不能，这才是排除 B 的原因。）故 B 在两种 flavor 下都不可用。
 - **方案 C（把通用提供方令牌转发给 tc）** = 反模式；拒绝。
 - 因此退回 `IAM_TOKEN` 透传**不是技术必然**（A 永远可建）。那将是一个**有意识的优先级决定** —— 接受一个已知反模式（配合补偿控制），是业务判断，而非工程死路。
 
