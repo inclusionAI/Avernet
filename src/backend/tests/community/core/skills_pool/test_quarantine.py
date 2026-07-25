@@ -20,7 +20,7 @@ from agentclaw.community.core.skills_pool.quarantine import (
     SkillsPoolQuarantineCleanupTaskHandler,
     SkillsPoolQuarantineService,
 )
-from agentclaw.community.core.task_queue.types import Complete
+from agentclaw.community.core.task_queue.types import Complete, Retry
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -220,6 +220,43 @@ def test_cleanup_timeout_keeps_cleanup_fence_until_lease_expires() -> None:
 
     assert result.status is QuarantineStatus.CLEANUP_FAILED
     assert result.retryable is True
+    records.record_cleanup_uncertain.assert_called_once()
+    records.mark_cleanup_failed.assert_not_called()
+
+
+def test_uncertain_invalid_runtime_response_is_retried() -> None:
+    records = MagicMock()
+    records.get_quarantine.return_value = _record()
+    records.claim_cleanup.return_value = True
+    layouts = MagicMock()
+    layouts.get.return_value = _layout()
+    runtime = MagicMock()
+    runtime.cleanup_quarantine = AsyncMock(
+        return_value=RuntimeQuarantineCleanupResult(
+            status=RuntimeQuarantineCleanupStatus.INVALID,
+            evidence={"reason": "invalid_runtime_response"},
+        )
+    )
+    service = SkillsPoolQuarantineService(
+        quarantine_repository=records,
+        layout_repository=layouts,
+        runtime=runtime,
+        now=lambda: NOW,
+    )
+    handler = SkillsPoolQuarantineCleanupTaskHandler(service)
+
+    outcome = handler.handle(
+        {
+            "scope": {
+                "env": SCOPE.env,
+                "entity_id": SCOPE.entity_id,
+                "bot_id": SCOPE.bot_id,
+            },
+            "migration_generation": "generation-1",
+        }
+    )
+
+    assert outcome == Retry("migration quarantine cleanup failed")
     records.record_cleanup_uncertain.assert_called_once()
     records.mark_cleanup_failed.assert_not_called()
 
