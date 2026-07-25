@@ -7,31 +7,98 @@
 ## 发布前置
 
 生产环境不由 Backend 自动建表。发布新 Backend 前，必须先通过 OceanBase
-数据库变更流程创建 `ac_skills_pool_rollout_audit`，并执行
-`SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1` 作为发布 preflight；表不存在
-或不可读写时禁止发布 Backend。Avernet 仓库只维护 ORM，数据库变更单需使用
-以下与 ORM 一致的 DDL：
+数据库变更流程创建 `ac_skill_migration_quarantine` 和
+`ac_skills_pool_rollout_audit`，并分别执行 `SELECT 1 ... LIMIT 1` 作为发布
+preflight；任一表不存在或不可读写时禁止开启 rollout。Avernet 仓库只维护
+ORM，数据库变更单需使用以下与 ORM 一致的 DDL：
 
 ```sql
+CREATE TABLE ac_skill_migration_quarantine (
+  id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT
+    COMMENT '自增主键',
+  env VARCHAR(20) NOT NULL
+    COMMENT '部署环境，如 pre、prod',
+  entity_id VARCHAR(512) NOT NULL
+    COMMENT 'Bot 所属实体或用户标识',
+  bot_id VARCHAR(128) NOT NULL
+    COMMENT 'Bot 唯一标识',
+  migration_generation VARCHAR(64) NOT NULL
+    COMMENT '本次 Skills Pool 迁移代际标识',
+  engine VARCHAR(64) NOT NULL
+    COMMENT 'Bot 使用的引擎类型',
+  path VARCHAR(1024) NOT NULL
+    COMMENT '运行时返回的隔离目录物理路径',
+  status VARCHAR(32) NOT NULL DEFAULT 'retained'
+    COMMENT '隔离记录状态',
+  source_evidence TEXT NOT NULL
+    COMMENT 'Pool cutover 时记录的隔离证据 JSON',
+  pool_activated_at TIMESTAMP NULL DEFAULT NULL
+    COMMENT 'Bot 成功进入 POOL_ACTIVE 的时间',
+  runtime_reconciled_at TIMESTAMP(6) NULL DEFAULT NULL
+    COMMENT 'Pool 激活后运行时完成 reconciliation 的时间',
+  runtime_reconciliation_status VARCHAR(16) NULL
+    COMMENT '运行时 reconciliation 结果',
+  runtime_evidence TEXT NULL
+    COMMENT '运行时 reconciliation 证据 JSON',
+  cleaned_at TIMESTAMP NULL DEFAULT NULL
+    COMMENT '隔离目录完成清理的时间',
+  cleanup_evidence TEXT NULL
+    COMMENT '隔离目录清理结果证据 JSON',
+  cleanup_lease_owner VARCHAR(128) NULL
+    COMMENT '当前持有清理租约的 Worker 标识',
+  cleanup_lease_expires_at TIMESTAMP NULL DEFAULT NULL
+    COMMENT '清理任务租约过期时间',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    COMMENT '记录创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ON UPDATE CURRENT_TIMESTAMP
+    COMMENT '记录最后修改时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_skill_migration_quarantine_scope_generation
+    (env, entity_id, bot_id, migration_generation) GLOBAL,
+  KEY idx_skill_migration_quarantine_cleanup
+    (env, status, pool_activated_at) GLOBAL
+) DEFAULT CHARSET = utf8mb4
+  COMMENT = 'Skills Pool 迁移隔离目录生命周期及清理证据';
+
 CREATE TABLE ac_skills_pool_rollout_audit (
-  id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-  env VARCHAR(20) NOT NULL,
-  config_id BIGINT(20) UNSIGNED NOT NULL,
-  action VARCHAR(128) NOT NULL,
-  batch_id VARCHAR(128) NULL,
-  operator VARCHAR(128) NOT NULL,
-  reason VARCHAR(512) NOT NULL,
-  based_on_config_version VARCHAR(64) NULL,
-  effective_config_version VARCHAR(64) NOT NULL,
-  evidence TEXT NULL,
-  effective_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT
+    COMMENT '自增主键',
+  env VARCHAR(20) NOT NULL
+    COMMENT 'Rollout 配置所属部署环境',
+  config_id BIGINT(20) UNSIGNED NOT NULL
+    COMMENT '关联的 ac_common_config 配置记录 ID',
+  action VARCHAR(128) NOT NULL
+    COMMENT '运维操作类型',
+  batch_id VARCHAR(128) NULL
+    COMMENT '关联的灰度批次标识',
+  operator VARCHAR(128) NOT NULL
+    COMMENT '执行本次操作的人员标识',
+  reason VARCHAR(512) NOT NULL
+    COMMENT '执行本次操作的原因',
+  based_on_config_version VARCHAR(64) NULL
+    COMMENT '修改前配置版本',
+  effective_config_version VARCHAR(64) NOT NULL
+    COMMENT '修改后生效的配置版本',
+  evidence TEXT NULL
+    COMMENT '批次验收报告或其他操作证据 JSON',
+  effective_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+    COMMENT '本次配置变更的业务生效时间',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    COMMENT '审计记录的数据库创建时间',
+  gmt_modify TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ON UPDATE CURRENT_TIMESTAMP
+    COMMENT '审计记录的数据库修改时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_skills_pool_rollout_audit_revision
     (env, effective_config_version) GLOBAL,
   KEY idx_skills_pool_rollout_audit_batch
     (env, batch_id, id) GLOBAL
 ) DEFAULT CHARSET = utf8mb4
-  COMMENT = 'Skills Pool rollout append-only audit';
+  COMMENT = 'Skills Pool 灰度配置变更追加式审计记录';
+
+SELECT 1 FROM ac_skill_migration_quarantine LIMIT 1;
+SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1;
 ```
 
 数据库变更顺序固定为：建表并 preflight → 发布 Backend → 保持 feature disabled

@@ -33,6 +33,12 @@ from agentclaw.community.core.skills_pool.quarantine import (
 from agentclaw.community.plugin_api.models import AutoIncrementBigInteger
 
 
+def _operational_timestamp(*, fsp: int | None = None):
+    """Use the OceanBase-approved TIMESTAMP type without changing SQLite."""
+
+    return DateTime().with_variant(mysql.TIMESTAMP(fsp=fsp), "mysql")
+
+
 class BotSkillLayoutStateModel(Base):
     """``ac_bot_skill_layout_state`` 中的一条 Bot 控制面状态。"""
 
@@ -170,7 +176,22 @@ class SkillsPoolRolloutAuditModel(Base):
     based_on_config_version = Column(String(64), nullable=True)
     effective_config_version = Column(String(64), nullable=False)
     evidence = Column(Text, nullable=True)
-    effective_at = Column(DateTime, nullable=False, server_default=func.now())
+    effective_at = Column(
+        _operational_timestamp(fsp=6),
+        nullable=False,
+        server_default=func.now(),
+    )
+    gmt_create = Column(
+        _operational_timestamp(),
+        nullable=False,
+        server_default=func.now(),
+    )
+    gmt_modify = Column(
+        _operational_timestamp(),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -210,20 +231,27 @@ class SkillMigrationQuarantineModel(Base):
         default=QuarantineStatus.RETAINED.value,
     )
     source_evidence = Column(Text, nullable=False)
-    pool_activated_at = Column(DateTime, nullable=True)
+    pool_activated_at = Column(_operational_timestamp(), nullable=True)
     runtime_reconciled_at = Column(
-        DateTime().with_variant(mysql.DATETIME(fsp=6), "mysql"),
+        _operational_timestamp(fsp=6),
         nullable=True,
     )
     runtime_reconciliation_status = Column(String(16), nullable=True)
     runtime_evidence = Column(Text, nullable=True)
-    cleaned_at = Column(DateTime, nullable=True)
+    cleaned_at = Column(_operational_timestamp(), nullable=True)
     cleanup_evidence = Column(Text, nullable=True)
     cleanup_lease_owner = Column(String(128), nullable=True)
-    cleanup_lease_expires_at = Column(DateTime, nullable=True)
-    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    cleanup_lease_expires_at = Column(
+        _operational_timestamp(),
+        nullable=True,
+    )
+    gmt_create = Column(
+        _operational_timestamp(),
+        nullable=False,
+        server_default=func.now(),
+    )
     gmt_modified = Column(
-        DateTime,
+        _operational_timestamp(),
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),

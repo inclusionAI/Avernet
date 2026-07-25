@@ -30,6 +30,7 @@ from agentclaw.community.core.skills_pool.types import (
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
     SkillMigrationQuarantineModel,
+    SkillsPoolRolloutAuditModel,
 )
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
@@ -77,14 +78,30 @@ class FileSqliteDB(InMemorySqliteDB):
         self._session_factory = sessionmaker(bind=engine, autoflush=False)
 
 
-def test_quarantine_runtime_timestamp_preserves_mysql_microseconds() -> None:
-    ddl = str(
+def test_skills_pool_operational_tables_use_mysql_timestamp_contract() -> None:
+    quarantine_ddl = str(
         CreateTable(SkillMigrationQuarantineModel.__table__).compile(
             dialect=mysql.dialect()
         )
-    )
+    ).upper()
+    audit_ddl = str(
+        CreateTable(SkillsPoolRolloutAuditModel.__table__).compile(
+            dialect=mysql.dialect()
+        )
+    ).upper()
 
-    assert "runtime_reconciled_at DATETIME(6)" in ddl
+    assert "DATETIME" not in quarantine_ddl
+    assert "POOL_ACTIVATED_AT TIMESTAMP" in quarantine_ddl
+    assert "RUNTIME_RECONCILED_AT TIMESTAMP(6)" in quarantine_ddl
+    assert "CLEANED_AT TIMESTAMP" in quarantine_ddl
+    assert "CLEANUP_LEASE_EXPIRES_AT TIMESTAMP" in quarantine_ddl
+    assert "GMT_CREATE TIMESTAMP" in quarantine_ddl
+    assert "GMT_MODIFIED TIMESTAMP" in quarantine_ddl
+
+    assert "DATETIME" not in audit_ddl
+    assert "EFFECTIVE_AT TIMESTAMP(6)" in audit_ddl
+    assert "GMT_CREATE TIMESTAMP" in audit_ddl
+    assert "GMT_MODIFY TIMESTAMP" in audit_ddl
 
 
 def rollout_evidence() -> RolloutEvidence:
