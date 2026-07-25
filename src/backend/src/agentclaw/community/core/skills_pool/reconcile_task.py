@@ -24,6 +24,13 @@ from agentclaw.community.core.skills_pool.claim_service import (
     MigrationClaimOutcome,
     SkillsPoolMigrationClaimService,
 )
+from agentclaw.community.core.skills_pool.quarantine import (
+    QUARANTINE_RETENTION,
+    SKILLS_POOL_QUARANTINE_CLEANUP_TASK,
+    QuarantineRepositoryProtocol,
+    QuarantineStatus,
+    SkillsPoolQuarantineCleanupTaskHandler,
+)
 from agentclaw.community.core.skills_pool.reconcile_service import (
     SkillsPoolReconcileOutcome,
     SkillsPoolReconcileResult,
@@ -37,11 +44,6 @@ from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutState,
     SkillLayout,
     SkillLayoutPhase,
-)
-from agentclaw.community.core.skills_pool.quarantine import (
-    QUARANTINE_RETENTION,
-    SKILLS_POOL_QUARANTINE_CLEANUP_TASK,
-    SkillsPoolQuarantineCleanupTaskHandler,
 )
 from agentclaw.community.core.task_queue.services.registry import (
     HandlerRegistry,
@@ -103,12 +105,14 @@ class SkillsPoolReconcileTaskHandler:
         claim_service: SkillsPoolMigrationClaimService,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         reconcile_service: SkillsPoolReconcileService,
+        quarantine_repository: QuarantineRepositoryProtocol,
         task_queue_service: TaskQueueService | None = None,
         lease_seconds: int = SKILLS_POOL_LEASE_SECONDS,
     ) -> None:
         self._claims = claim_service
         self._layouts = layout_repository
         self._reconcile = reconcile_service
+        self._quarantines = quarantine_repository
         self._queue = task_queue_service
         self._lease_seconds = lease_seconds
 
@@ -150,6 +154,12 @@ class SkillsPoolReconcileTaskHandler:
             generation = claim.state.migration_generation
             if generation is None:
                 return Fail("pool-active layout has no migration generation")
+            quarantine = self._quarantines.get_quarantine(scope, generation)
+            if (
+                quarantine is not None
+                and quarantine.status is QuarantineStatus.CLEANED
+            ):
+                return Complete()
             if observed_at is None:
                 # Tasks written by the previous Backend cannot prove a
                 # post-activation runtime observation. They remain safe to
