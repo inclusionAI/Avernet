@@ -200,8 +200,8 @@ Both flavors use the **same clean architecture** (we are the authz server; we mi
 
 ## 11. Why we are not forced back to the two-token passthrough
 
-- **Option A (build our own authz server / login-with-avernet)** has **no external dependency** — it needs only (i) our own `/authorize` + consent + `/token`, (ii) the human-login we already run, (iii) minting our own JWTs. **Always achievable by us alone.** It is the floor — and, per the decision below, **the path we take**.
-- **Option B (lean on antbuservice / Google as the authz server)** was the *optimization to build less* — viable only if that external party could issue **tc-audience, tc-consented** tokens (i.e. act as teamclaw's *authorization* server, not merely authenticate). **Ruled out (2026-07-25):** antbuservice issues **SSO/login tokens only** — the login capability we already use and keep — but **cannot** mint a teamclaw-audience token behind a teamclaw consent; Google (community) is likewise authentication-only. (Note the distinction: "can it issue an SSO token?" = yes, and irrelevant here; "can it be teamclaw's authorization server?" = no, which is what rules B out.) So B is unavailable in both flavors.
+- **Option A (build our own authz server / login-with-avernet)** has **no external dependency** — it needs only (i) our own `/authorize` + consent + `/token`, (ii) the human-login we already run, (iii) minting our own JWTs. **Always achievable by us alone.** It is the floor — **the guaranteed baseline and, until the question below is answered, the working design**.
+- **Option B (lean on antbuservice / Google as the authz server)** — an *optimization to build less*, viable **only if** that provider can issue **tc-audience, tc-consented** tokens (i.e. act as teamclaw's *authorization* server, more than SSO passthrough). **Unconfirmed** — this is the open build-weight question (§12), and the provider's capability isn't knowable from this repo (§9). Note the distinction that matters when answering it: *"can it issue an SSO/login token?"* = yes (that's the login step we already use and keep), *"can it be teamclaw's authorization server?"* = the actual open question. Until it's answered, **Option A is the working design**.
 - **Option C (forward a generic provider token to tc)** = the anti-pattern; rejected.
 - Reverting to `IAM_TOKEN` passthrough is therefore **not a technical necessity** (A is always buildable). It would be a **conscious prioritization decision** to accept a known anti-pattern (with compensating controls) — a business call, not an engineering dead-end.
 
@@ -216,12 +216,13 @@ Both flavors use the **same clean architecture** (we are the authz server; we mi
 - Same clean design for both; IdP is the only flavored difference.
 - Single all-encompassing scope for now; **pure JWT** revocation (≤ ~15 min access latency).
 - Caller-token/downstream mint **de-scoped** (service-bot-only; future cross-team).
-- **A vs B resolved (2026-07-25) → build A.** No external provider (antbuservice for corp, Google for community) can issue **tc-audience, tc-consented** tokens, so the own-authorization-server path (Option A) is the design in both flavors. The lighter "lean on the IdP" branch is off the table.
+- **Option A is the working design / guaranteed baseline** in both flavors (we can always build it ourselves). Whether a lighter path exists is the build-weight question below — not a feasibility blocker.
 
 **Open — needs the team**
 
-1. **Proceed vs. defer:** if the team judges the clean fix not worth prioritizing now, the only alternative is a *documented* acceptance of the passthrough anti-pattern — not "we had no choice." (Note: since B is ruled out, deferring means accepting the anti-pattern; there is no lighter clean option to wait for.)
-2. **Consent lifetime & re-consent triggers** (expiry; what re-prompts). With a single scope there is no "new scope requested" trigger yet.
+1. **A vs B (build-weight):** can antbuservice (corp) / Google (community) act as an authz server that issues **tc-audience, tc-consented** tokens? *Yes* → lighter path (B); *No* → build A. **Option A is the guaranteed baseline either way**, so this decides build-weight, not feasibility. The provider's capability **isn't knowable from this repo** (§9), so this needs the team / IdP owners, not a source read.
+2. **Proceed vs. defer:** if the team judges the clean fix not worth prioritizing now, the alternative is a *documented* acceptance of the passthrough anti-pattern — not "we had no choice." (Option A is always buildable, so this is a prioritization call.)
+3. **Consent lifetime & re-consent triggers** (expiry; what re-prompts). With a single scope there is no "new scope requested" trigger yet.
 
 ---
 
