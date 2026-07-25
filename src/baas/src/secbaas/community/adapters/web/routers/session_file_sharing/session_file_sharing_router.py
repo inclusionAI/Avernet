@@ -27,7 +27,7 @@ from secbaas.community.api.session_file_sharing import (
     TransferNotTerminalError,
     TransferStateConflictError,
 )
-from secbaas.community.bootstrap import ApplicationContainer
+from secbaas.community.bootstrap import ApplicationContainer, get_container
 from secbaas.community.logger import get_logger
 
 logger = get_logger("router")
@@ -49,7 +49,7 @@ def _get_session_file_sharing_dispatcher() -> SessionFileSharingDispatcher:
     lookup is deferred to request time, after Phase 79 DI registration
     has run.
     """
-    return ApplicationContainer.services.session_file_sharing_dispatcher()
+    return get_container().services.session_file_sharing_dispatcher()
 
 
 # ---------------------------------------------------------------------------
