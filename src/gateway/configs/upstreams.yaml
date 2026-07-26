@@ -6,15 +6,25 @@
 #
 # `schema` tells the gateway where to read that domain's published OpenAPI
 # description for doc generation:
-#   source: file  → `path` (single-box / open-source; committed artifact)
-#   source: oss   → `url`  (enterprise; auto-adopted via background refresh)
-# The schema is a DOC-ONLY input — routing/auth/forwarding never read it.
+#   source: file          → `path` (single-box; committed / local artifact)
+#   source: object_store  → `url`  (any deployed edition — corp or community;
+#                                    each upstream publishes its dumped doc to an
+#                                    object store on deploy, gateway auto-adopts
+#                                    the latest via background refresh)
+# "object_store" is vendor-neutral (S3 / MinIO / GCS / OSS / …); the reader is a
+# pluggable flavor of the SchemaCatalog SPI. The schema is a DOC-ONLY input —
+# routing/auth/forwarding never read it.
 
 base_path: /openapi/v1
 
 domains:
   bots:
     server: agentclaw
+    # Single-box default. A deployed edition overrides this with an object store:
+    #   schema:
+    #     source: object_store
+    #     url: "${BOTS_OPENAPI_URL}"   # e.g. https://<bucket>/bots/openapi-latest.json
+    #     refresh_seconds: 300
     schema:
       source: file
       path: schemas/bots.openapi.json

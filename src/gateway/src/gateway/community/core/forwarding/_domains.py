@@ -40,7 +40,7 @@ class Server:
 class SchemaSource:
     """Where a domain's published OpenAPI description is read from."""
 
-    source: str  # "file" (single-box) | "oss" (enterprise)
+    source: str  # "file" (single-box) | "object_store" (any deployed edition)
     location: str  # file path or object-store URL
     refresh_seconds: int = _DEFAULT_REFRESH_SECONDS
 
