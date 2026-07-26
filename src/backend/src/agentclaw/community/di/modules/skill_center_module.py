@@ -434,7 +434,7 @@ class SkillCenterModule(Module):
             _requested_engine: str,
         ) -> tuple[str, str, str] | None:
             bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
-            if bot is None:
+            if bot is None or bot.get("bot_type") == "desktop":
                 return None
             engine = bot.get("active_engine")
             if not isinstance(engine, str):
