@@ -6,16 +6,15 @@
 - **Goal:** Empirically settle whether a `do_orm_execute` listener applying
   `with_loader_criteria(BotModel, ...)` also constrains `Query.update()` /
   `Query.delete()`, or whether the write methods need an explicit filter.
-- **Files:** throwaway test under
-  `tests/community/plugins/` (not committed, or committed as an xfail probe then
-  removed) — no production change in this task.
+- **Files:** throwaway probe under `tests/community/plugins/` — no production
+  change in this task.
 - **Done when:**
   - [ ] A minimal reproduction inserts two bots under different tenants and runs
         `update_by_owner` / `soft_delete_by_owner` against the other tenant's bot
         with a prototype listener installed.
-  - [ ] The finding is recorded in `tasks.md` under this task: **covered** (read
-        path alone suffices) or **not covered** (write methods need an explicit
-        `_avernet_tenant()` filter — Task 5/6 adopt it).
+  - [ ] The finding is recorded under this task: **covered** (read path alone
+        suffices) or **not covered** (write methods need an explicit
+        `_avernet_tenant()` filter — Task 5 adopts it).
 - **Depends on:** —
 
 ## Task 2: Tenant context primitive
@@ -34,18 +33,20 @@
 - **Depends on:** —
 
 ## Task 3: `avernet_tenant` column on `BotModel`
-- **Goal:** Give bot records the tenant axis, stamped by default, invisible in
-  API responses.
+- **Goal:** Give bot records the tenant axis, stamped by the column default,
+  invisible in API responses.
 - **Files:** `src/agentclaw/community/plugin_api/models.py`,
-  `tests/community/...` (to_dict test).
+  `tests/community/...` (to_dict + insert-stamp tests).
 - **Done when:**
   - [ ] `BotModel` gains `avernet_tenant = Column(String(64),
         default=get_current_avernet_tenant, nullable=False)` after
         `caller_config_revision`.
   - [ ] `avernet_tenant` is **not** added to `BotModel.to_dict()`.
   - [ ] Test asserts `to_dict()`'s key set is unchanged from before this change.
-  - [ ] `create_all` on local SQLite builds the column (a fresh insert carries a
-        tenant without any caller passing one).
+  - [ ] Test: a bot inserted via `BotRepository.insert` inside
+        `avernet_tenant_scope("t1")` has `avernet_tenant == "t1"` — proving the
+        column default stamps inserts with no explicit stamp at the call site
+        (the listener never applies to `INSERT`).
 - **Depends on:** Task 2
 
 ## Task 4: Cross-tenant isolation test (red)
@@ -61,8 +62,8 @@
 - **Depends on:** Task 2, Task 3
 
 ## Task 5: `do_orm_execute` tenant guard (green)
-- **Goal:** Install the single listener that scopes every `BotModel` statement
-  to the current tenant; turn Task 4 green.
+- **Goal:** Install the single listener that scopes every `BotModel`
+  read/update/delete to the current tenant; turn Task 4 green.
 - **Files:** `src/agentclaw/community/plugin_api/models.py`,
   `tests/community/plugins/...`.
 - **Done when:**
@@ -81,18 +82,7 @@
         query sites are covered).
 - **Depends on:** Task 1, Task 3, Task 4
 
-## Task 6: Stamp `avernet_tenant` in `BotRepository.insert`
-- **Goal:** Make bot creation set the tenant explicitly, parity with `env`.
-- **Files:** `src/agentclaw/community/plugins/bot_repository.py`,
-  `tests/community/plugins/...`.
-- **Done when:**
-  - [ ] `insert` passes `avernet_tenant=get_current_avernet_tenant()` beside
-        `env=get_current_env()`.
-  - [ ] Test: a bot inserted inside `avernet_tenant_scope("t1")` has
-        `avernet_tenant == "t1"`.
-- **Depends on:** Task 3
-
-## Task 7: Public-API tenant source (`resolve_avernet_tenant`)
+## Task 6: Public-API tenant source (`resolve_avernet_tenant`)
 - **Goal:** Add the single replaceable seam for the public API's tenant.
 - **Files:** `src/agentclaw/community/adapters/http/openapi_v1/dependencies.py`.
 - **Done when:**
@@ -102,7 +92,7 @@
   - [ ] No Protocol, no DI binding, no `app.py` / `container.py` change.
 - **Depends on:** Task 2
 
-## Task 8: `AvernetTenantMiddleware`
+## Task 7: `AvernetTenantMiddleware`
 - **Goal:** Establish each request's tenant for its whole lifetime, reset on the
   way out including on error.
 - **Files:** `src/agentclaw/community/adapters/http/middleware.py`,
@@ -117,9 +107,9 @@
   - [ ] Integration test: two sequential requests through the ASGI app — the
         second sees `teamclaw`; repeated where the first handler raises 500, the
         tenant still does not leak.
-- **Depends on:** Task 2, Task 7
+- **Depends on:** Task 2, Task 6
 
-## Task 9: Request-spawned work inherits the tenant
+## Task 8: Request-spawned work inherits the tenant
 - **Goal:** In-request background threads observe the request's tenant.
 - **Files:** `core/bot_management/services/bot_service.py` (3 sites),
   `core/service_bot/services/bot_publish_service.py`,
@@ -135,7 +125,7 @@
         spawning request's tenant.
 - **Depends on:** Task 2
 
-## Task 10: Reference DDL artifact — decision + optional file  `[!]`
+## Task 9: Reference DDL artifact — decision + optional file  `[!]`
 - **Goal:** Resolve the spec-vs-convention tension the plan flagged: the spec
   says no migration file is checked in, but repo convention checks a reference
   `.sql` into `core/<module>/sql/` (e.g. `caller_identity`).
@@ -147,20 +137,20 @@
         deploy-ordering note; if "plan only": this task is closed with no file.
 - **Depends on:** — (decision), Task 3 (if a file is added)
 
-## Task 11: Verification against spec acceptance criteria
+## Task 10: Verification against spec acceptance criteria
 - **Goal:** Prove every spec acceptance criterion holds.
 - **Files:** — (runs suites; no production change).
 - **Done when:**
   - [ ] The existing internal API test suite passes **unmodified**.
   - [ ] The cross-tenant isolation test (Task 4/5) is green; its earlier red run
         is on record.
-  - [ ] Non-leakage across requests (incl. post-error) is green (Task 8).
-  - [ ] Request-spawned work inherits the tenant (Task 9).
+  - [ ] Non-leakage across requests (incl. post-error) is green (Task 7).
+  - [ ] Request-spawned work inherits the tenant (Task 8).
   - [ ] `to_dict()` key set unchanged (Task 3) — internal responses identical.
   - [ ] Backend unit tests, changed-line coverage, and singlebox coverage pass
         (`AGENTS.md:131`); pre-push hooks installed via
         `scripts/install_git_hooks.sh`.
-- **Depends on:** Tasks 1–9 (and Task 10's decision)
+- **Depends on:** Tasks 1–8 (and Task 9's decision)
 
 ---
 
@@ -169,12 +159,13 @@
 - **Group A — Mechanism groundwork:** Tasks 1, 2
   - Theme: confirm the write-path approach and land the tenant `ContextVar`
     primitive; pure utility + investigation, no bot-data behavior change yet.
-- **Group B — ORM enforcement:** Tasks 3, 4, 5, 6
-  - Theme: bot records carry a tenant and every read/write is scoped at the ORM
-    layer; the spec's red→green cross-tenant isolation test passes.
-- **Group C — Request wiring & inheritance:** Tasks 7, 8, 9
+- **Group B — ORM enforcement:** Tasks 3, 4, 5
+  - Theme: bot records carry a tenant (stamped by the column default) and every
+    read/write is scoped at the ORM layer; the spec's red→green cross-tenant
+    isolation test passes.
+- **Group C — Request wiring & inheritance:** Tasks 6, 7, 8
   - Theme: each request establishes its tenant (reset even on error),
     request-spawned work inherits it, and the public-API seam exists.
-- **Group D — Finalize & verify:** Tasks 10, 11
+- **Group D — Finalize & verify:** Tasks 9, 10
   - Theme: resolve the checked-in-DDL decision and prove all spec acceptance
     criteria; green gates.

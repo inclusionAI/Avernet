@@ -9,9 +9,11 @@ same mechanism the community tracer already uses for its trace id
 resets it in a `finally`, so it cannot survive the request or leak into the
 next one. Enforcement is a single SQLAlchemy `do_orm_execute` listener that
 appends `with_loader_criteria(BotModel, avernet_tenant == get_current_avernet_tenant())`
-to every ORM statement touching `BotModel`; writes are stamped by an explicit
-`avernet_tenant` column with a context-derived default, exactly as `env` is today
-(`plugin_api/models.py:54`).
+to every `SELECT`/`UPDATE`/`DELETE` touching `BotModel`. Inserts carry no
+`WHERE` clause, so the listener does not apply to them; a new row is stamped by
+the column default `default=get_current_avernet_tenant`, exactly as `env` is
+stamped today (`plugin_api/models.py:54`). That default is the single stamping
+mechanism — no per-call-site stamp is needed.
 
 The column and every new symbol carry the `avernet_tenant` prefix deliberately:
 the bare word `tenant` already denotes the poolab sandbox-allocator's tenant in
@@ -53,8 +55,10 @@ and satisfies the spec's "I cannot leak data by forgetting to add a filter".
   forwards a real principal (no endpoint changes when it lands). "Single
   replaceable seam" in the spec means this drop-in point, not a per-profile
   binding.
-- `src/agentclaw/community/plugins/bot_repository.py` — `insert` stamps
-  `avernet_tenant` explicitly (parity with its explicit `env=get_current_env()`).
+- `src/agentclaw/community/plugins/bot_repository.py` — **unchanged.** Listed
+  only to record it was checked: `insert` builds an ORM instance and flushes, so
+  the `avernet_tenant` column default stamps the tenant automatically. It is the
+  sole `BotModel` insert path, so no explicit stamp is added anywhere.
 
 ## Data Model Changes
 
@@ -138,8 +142,11 @@ request — a total function, not `str | None`, per the type contract in
   execution option (used only by the guard's own tests and by the local
   bootstrap's table creation). Registration is idempotent on a module-level
   flag so a double import cannot double-register.
-- `plugins/bot_repository.py:122` — add `avernet_tenant=get_current_avernet_tenant()`
-  beside `env=get_current_env()`.
+- `plugins/bot_repository.py:122` — **no change.** The `avernet_tenant` column
+  default stamps the tenant at flush; the listener never applies to `INSERT`, so
+  an explicit stamp here would be redundant. This is the only `BotModel` insert
+  path, so the column default is the single guarantee. A test still asserts an
+  insert carries the current tenant (it protects the default).
 - `adapters/http/middleware.py:204` — `AvernetTenantMiddleware` imports
   `resolve_avernet_tenant` directly (a plain function, not injected) and is
   added immediately after `UserContextMiddleware` (line 242) so it ends up
