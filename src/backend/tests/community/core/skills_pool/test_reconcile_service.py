@@ -107,6 +107,25 @@ class FakeLayoutRepository:
         )
         return True
 
+    def release_not_capable_claim(self, **kwargs: object) -> bool:
+        if self._should_fail("not_capable_release"):
+            return False
+        if not self._owns(kwargs):
+            return False
+        self.events.append("not_capable_release")
+        self.state = replace(
+            self.state,
+            target_layout=None,
+            phase=SkillLayoutPhase.LEGACY_ACTIVE,
+            migration_generation=None,
+            preparation_id=None,
+            last_probe_result="NOT_CAPABLE",
+            last_probe_evidence=dict(kwargs["evidence"]),
+            lease_owner=None,
+            lease_expires_at=None,
+        )
+        return True
+
     def holds_lease(self, **kwargs: object) -> bool:
         return self.lease_valid and self._owns(kwargs)
 
@@ -662,6 +681,7 @@ async def test_non_ready_runtime_keeps_legacy_without_data_plane_changes() -> No
         runtime.probe_result,
         status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
         preparation_id=None,
+        evidence={"reason": "pool_marker_missing"},
     )
 
     result = await build_service(layouts, runtime).reconcile(
@@ -671,8 +691,35 @@ async def test_non_ready_runtime_keeps_legacy_without_data_plane_changes() -> No
 
     assert result.outcome is SkillsPoolReconcileOutcome.NOT_CAPABLE
     assert runtime.events == ["probe"]
-    assert layouts.events == []
+    assert layouts.events == ["not_capable_release"]
     assert layouts.state.active_layout is SkillLayout.LEGACY
+    assert layouts.state.target_layout is None
+    assert layouts.state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert layouts.state.migration_generation is None
+    assert layouts.state.last_probe_result == "NOT_CAPABLE"
+    assert layouts.state.last_probe_evidence == {"reason": "pool_marker_missing"}
+
+
+@pytest.mark.asyncio
+async def test_not_capable_release_race_is_not_reported_as_complete() -> None:
+    layouts = FakeLayoutRepository()
+    layouts.fail_once_at = "not_capable_release"
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
+        preparation_id=None,
+        evidence={"reason": "pool_marker_missing"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.STATE_RACE_LOST
+    assert layouts.state.phase is SkillLayoutPhase.POOL_PREPARING
+    assert layouts.state.migration_generation == GENERATION
 
 
 @pytest.mark.asyncio
@@ -776,7 +823,10 @@ async def test_mixed_image_bots_reconcile_independently_in_one_environment() -> 
     assert layouts.state_for(SCOPE).active_layout is SkillLayout.POOL
     old_state = layouts.state_for(old_scope)
     assert old_state.active_layout is SkillLayout.LEGACY
-    assert old_state.phase is SkillLayoutPhase.POOL_PREPARING
+    assert old_state.target_layout is None
+    assert old_state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert old_state.migration_generation is None
+    assert old_state.last_probe_result == "NOT_CAPABLE"
     assert runtime.physical_cutovers == 1
     assert runtime.events == [
         "probe",

@@ -277,6 +277,57 @@ class SkillsPoolLayoutRepository(SkillsPoolOperationalRepositoryMixin, SkillsPoo
             )
         return affected == 1
 
+    def release_not_capable_claim(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """旧运行时不具备 Pool 能力时，保留证据并释放准备阶段 claim。"""
+
+        evidence_json = json.dumps(evidence, ensure_ascii=False)
+        with self._database.transactional_orm_session() as session:
+            affected = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    *self._scope_filter(scope),
+                    BotSkillLayoutStateModel.active_layout
+                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout
+                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase
+                    == SkillLayoutPhase.POOL_PREPARING.value,
+                    BotSkillLayoutStateModel.data_plane_cutover_committed == 0,
+                    BotSkillLayoutStateModel.migration_generation
+                    == migration_generation,
+                    BotSkillLayoutStateModel.lease_owner == lease_owner,
+                    BotSkillLayoutStateModel.lease_expires_at > func.now(),
+                )
+                .update(
+                    {
+                        BotSkillLayoutStateModel.target_layout: None,
+                        BotSkillLayoutStateModel.phase: (
+                            SkillLayoutPhase.LEGACY_ACTIVE.value
+                        ),
+                        BotSkillLayoutStateModel.migration_generation: None,
+                        BotSkillLayoutStateModel.preparation_id: None,
+                        BotSkillLayoutStateModel.last_probe_result: "NOT_CAPABLE",
+                        BotSkillLayoutStateModel.last_probe_evidence: evidence_json,
+                        BotSkillLayoutStateModel.last_failure_code: None,
+                        BotSkillLayoutStateModel.last_failure_stage: None,
+                        BotSkillLayoutStateModel.last_failure_retryable: None,
+                        BotSkillLayoutStateModel.last_failure_evidence: None,
+                        BotSkillLayoutStateModel.last_failure_at: None,
+                        BotSkillLayoutStateModel.lease_owner: None,
+                        BotSkillLayoutStateModel.lease_expires_at: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+        return affected == 1
+
     def record_cutover_committed(
         self,
         *,

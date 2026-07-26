@@ -87,6 +87,17 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """以 generation/lease CAS 记录当前运行时已具备 Pool 能力。"""
         ...
 
+    def release_not_capable_claim(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """记录旧运行时证据，并原子释放尚处于准备阶段的迁移认领。"""
+        ...
+
     def record_cutover_committed(
         self,
         *,
