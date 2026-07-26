@@ -62,14 +62,28 @@ One column on `ac_bots`. No new tables, no code-side migration.
 
 ```sql
 ALTER TABLE ac_bots
-  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'default'
-    COMMENT 'data-isolation tenant; existing rows are the default tenant',
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant',
   ADD KEY idx_bots_avernet_tenant_env (avernet_tenant, env) GLOBAL;
 ```
 
-The `DEFAULT 'default'` is what makes every pre-existing row belong to the
-default tenant without a backfill statement, which is the acceptance criterion
-that keeps current internal API responses unchanged.
+The fallback ("default") tenant is identified as **`teamclaw`** — the internal
+product's own name (already used throughout the code, e.g.
+`teamclaw_service_bot_publish`, `TeamClaw bot_id`). Two reasons over a generic
+`"default"`: it is a meaningful identity for the one tenant that owns all
+current data, and it avoids the bare literal `"default"`, which is already the
+value of the *unrelated* poolab/device/mcp tenant concept in several files
+(`core/bot_management/services/bot_service.py:100`,
+`core/devices/services/device_service.py:1659`, …). This resolves the spec's
+Open Question 3 (is `default` a safe identifier): we don't use it. `teamclaw`
+must never be offered to an external registered tenant.
+
+Adding the column with `NOT NULL DEFAULT 'teamclaw'` backfills every existing
+row to `teamclaw` in place — on OceanBase/MySQL a `NOT NULL` column with a
+`DEFAULT` populates all pre-existing rows, and SQLite behaves the same (moot
+locally, where the table is created fresh from the model). No separate `UPDATE`
+is needed, and that backfill is exactly what keeps every current internal API
+response unchanged.
 
 Local and singlebox runtimes need no DDL: `Base.metadata.create_all` builds the
 table from the model (`plugins/local/database.py:180`).
@@ -87,7 +101,7 @@ New internal interfaces:
 
 ```python
 # utils/avernet_tenant.py
-DEFAULT_AVERNET_TENANT: Final[str] = "default"
+DEFAULT_AVERNET_TENANT: Final[str] = "teamclaw"  # internal tenant; owns all current data
 
 def get_current_avernet_tenant() -> str: ...                    # never None
 @contextmanager
@@ -223,7 +237,7 @@ and `with_loader_criteria`.
 Ordering is a hard constraint: **the `ALTER TABLE` must be applied before the
 code that reads the column is deployed.** A `SELECT` naming a column that does
 not exist fails outright, so a code-first deploy takes every bot read down.
-The column's `NOT NULL DEFAULT 'default'` makes the reverse order safe — the
+The column's `NOT NULL DEFAULT 'teamclaw'` makes the reverse order safe — the
 DDL is inert against the currently-deployed code.
 
 No feature flag. With every row and every request on the default tenant, the
