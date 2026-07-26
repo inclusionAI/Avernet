@@ -94,6 +94,13 @@ sequenceDiagram
     BE-->>X: response
 ```
 
+### 5.1 Precondition & corp SSO (why there is usually no visible login)
+
+- **APP X owns its user's login and a token store.** APP X authenticates its user however it likes (in corp, often an IAM cookie resolved via BUService) and keeps its own storage of `its user → Avernet access + refresh token`. The flow starts only when that store has no valid token for the user.
+- **Never forward APP X's own login cookie to teamclaw.** APP X's IAM cookie proves who APP X's user is *to APP X*. To call teamclaw, APP X uses the **teamclaw access token** from the OAuth flow — not its IAM cookie. Forwarding the IAM cookie would be the very token-passthrough anti-pattern (§3) this design removes.
+- **Corp SSO ⇒ no re-login prompt.** Because corp shares one IAM SSO, the browser already has a live IAM session when it reaches `/authorize`, so teamclaw shows **no login screen**. Either teamclaw reads the session directly (the `alt session present` branch — no redirect at all), or it makes a **silent** 302 to `iam.alipay.com` that returns instantly because the central IAM session exists. Invisible to the user either way.
+- **Boundary:** this holds only when the browser has a live IAM session (true right after using an IAM-based APP X). A genuinely external party outside IAM SSO falls into the `else absent` branch and *does* see IAM login.
+
 ## 6. Community flow (nested OAuth)
 
 Human-login provider = **Google / OIDC**. Same structure as corp, but the login step is itself an OAuth flow — so there are **two nested OAuth flows**, and we play opposite roles in each:
