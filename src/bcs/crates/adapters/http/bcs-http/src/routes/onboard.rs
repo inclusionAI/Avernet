@@ -5,7 +5,7 @@ use axum::{
 };
 use bcs_protocol::{AdminOnboardRequest, OnboardRequest};
 use bcs_service_api::{
-    ActorKind, AdminBotOnboardCommand, BotCapabilities, BotOnboardCommand, BotOnboardResult,
+    ActorKind, AdminBotOnboardCommand, BotOnboardCommand, BotOnboardResult,
     OnboardActorIdentity,
 };
 use serde::Deserialize;
@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::error::HttpAdapterError;
 use crate::mapping::capabilities::{to_core_binding_channels, to_core_skill};
-use crate::state::{HttpAppState, VisibilitySyncRequest};
+use crate::state::HttpAppState;
 
 use super::authenticated_bot_from_headers;
 
@@ -161,11 +161,10 @@ fn sync_onboard_result_to_visibility_index(state: &HttpAppState, result: &BotOnb
     if result.actor_kind == ActorKind::Human {
         return;
     }
-    let Some(capabilities) = result.capabilities.clone() else {
+    if result.capabilities.is_none() {
         return;
-    };
-    let bot_uuid = result.bot_uuid.clone();
-    sync_bot_to_visibility_index(state, bot_uuid, capabilities, result.actor_kind);
+    }
+    state.dispatch_visibility_sync(result.bot_uuid.clone());
 }
 
 async fn onboard_actor_identity(
@@ -183,19 +182,4 @@ async fn onboard_actor_identity(
         staff_no,
         nick_name: user.nick_name,
     })
-}
-
-fn sync_bot_to_visibility_index(
-    state: &HttpAppState,
-    bot_uuid: String,
-    capabilities: BotCapabilities,
-    actor_kind: ActorKind,
-) {
-    let sync_request = VisibilitySyncRequest {
-        bot_uuid,
-        visibility: capabilities.visibility.clone(),
-        capabilities,
-        actor_kind,
-    };
-    state.dispatch_visibility_sync(sync_request);
 }

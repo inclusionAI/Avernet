@@ -60,6 +60,8 @@ fn create_config_bcsfuse_enabled(bots_dir: &PathBuf) -> BcsConfig {
             enabled: true,
             url: "http://127.0.0.1:19999".to_string(), // no server here
             sync_timeout_ms: 1000,
+            sync_max_attempts: 3,
+            sync_retry_base_delay_ms: 1,
             fusion_timeout_ms: 2000,
             ..Default::default()
         },

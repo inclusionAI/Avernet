@@ -9,8 +9,19 @@ use bcs_service_api::{ContextBotSummary, Skill};
 
 use super::fuse_backed::build_participant_id;
 
-/// Maximum number of sync retry attempts.
-const MAX_SYNC_RETRIES: u32 = 3;
+fn sync_retry_backoff(
+    attempt: u32,
+    max_attempts: u32,
+    base_delay_ms: u64,
+) -> Option<Duration> {
+    if attempt + 1 >= max_attempts {
+        return None;
+    }
+    let multiplier = 1u64.checked_shl(attempt).unwrap_or(u64::MAX);
+    Some(Duration::from_millis(
+        base_delay_ms.saturating_mul(multiplier),
+    ))
+}
 
 /// Build a `SyncWorkerRequest` from onboard data and bot context.
 pub fn build_sync_request(
@@ -70,15 +81,17 @@ pub fn build_sync_request(
     }
 }
 
-/// Sync worker with inline retry (3 attempts, exponential backoff).
+/// Sync worker with configured attempts and exponential backoff.
 ///
 /// Designed to be called inside `tokio::spawn` — never panics, only logs.
 pub async fn sync_worker_with_retry(
     client: &FuseClient,
     bot_id: &str,
     sync_req: &SyncWorkerRequest,
+    config: &BcsFuseConfig,
 ) {
-    for attempt in 0..MAX_SYNC_RETRIES {
+    let max_attempts = config.sync_max_attempts.max(1);
+    for attempt in 0..max_attempts {
         match client.sync_worker(bot_id, sync_req.clone()).await {
             Ok(resp) => {
                 if !resp.profile_activated {
@@ -98,19 +111,27 @@ pub async fn sync_worker_with_retry(
                 return;
             }
             Err(e) => {
+                let backoff = sync_retry_backoff(
+                    attempt,
+                    max_attempts,
+                    config.sync_retry_base_delay_ms,
+                );
                 tracing::warn!(
                     bot_id = %bot_id,
                     attempt = attempt + 1,
                     error = %e,
-                    "Worker sync failed, retrying"
+                    will_retry = backoff.is_some(),
+                    "Worker sync failed"
                 );
-                tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                if let Some(backoff) = backoff {
+                    tokio::time::sleep(backoff).await;
+                }
             }
         }
     }
     tracing::error!(
         bot_id = %bot_id,
-        retries = MAX_SYNC_RETRIES,
+        attempts = max_attempts,
         "Worker sync exhausted retries, will retry on next onboard/reconnect"
     );
 }
@@ -134,6 +155,36 @@ fn build_contents_from_context(ctx: &ContextBotSummary) -> HashMap<String, Strin
 mod tests {
     use super::*;
     use bcs_config_api::BcsFuseConfig;
+
+    #[test]
+    fn retry_backoff_does_not_sleep_after_last_attempt() {
+        assert_eq!(
+            sync_retry_backoff(0, 3, 1_000),
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(
+            sync_retry_backoff(1, 3, 1_000),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(sync_retry_backoff(2, 3, 1_000), None);
+    }
+
+    #[test]
+    fn retry_backoff_uses_configured_attempts_and_base_delay() {
+        assert_eq!(
+            sync_retry_backoff(0, 4, 5),
+            Some(Duration::from_millis(5))
+        );
+        assert_eq!(
+            sync_retry_backoff(1, 4, 5),
+            Some(Duration::from_millis(10))
+        );
+        assert_eq!(
+            sync_retry_backoff(2, 4, 5),
+            Some(Duration::from_millis(20))
+        );
+        assert_eq!(sync_retry_backoff(3, 4, 5), None);
+    }
 
     fn make_context(
         identity: Option<&str>,

@@ -19,7 +19,7 @@ use crate::mapping::capabilities::{
     to_core_dynamic_status, to_wire_capabilities, to_wire_dynamic_status,
     to_wire_dynamic_status_response,
 };
-use crate::state::{HttpAppState, VisibilitySyncRequest};
+use crate::state::HttpAppState;
 
 use super::{
     bot_token_from_headers, caller_actor_id_from_headers, require_bot_id_from_headers,
@@ -313,7 +313,7 @@ pub async fn set_visibility(
         .await
     {
         Ok(result) => {
-            sync_visibility_after_update(&state, &result.bot_uuid, &result.visibility).await;
+            state.dispatch_visibility_sync(result.bot_uuid.clone());
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
@@ -648,28 +648,6 @@ fn bot_use_case_error_to_visibility_response(error: BotUseCaseError, bot_uuid: &
             bot_use_case_error_to_http(BotUseCaseError::Connect(error)).into_response()
         }
     }
-}
-
-async fn sync_visibility_after_update(state: &HttpAppState, bot_uuid: &str, visibility: &str) {
-    let Ok(bot) = state
-        .services
-        .bot_query
-        .get_bot(BotDetailCommand {
-            caller_actor_id: None,
-            bot_id: bot_uuid.to_string(),
-        })
-        .await
-    else {
-        return;
-    };
-
-    let sync_request = VisibilitySyncRequest {
-        bot_uuid: bot_uuid.to_string(),
-        capabilities: bot.capabilities,
-        visibility: visibility.to_string(),
-        actor_kind: bot.actor_kind,
-    };
-    state.visibility_sync.sync_visibility(sync_request).await;
 }
 
 fn invalid_visibility_message() -> &'static str {

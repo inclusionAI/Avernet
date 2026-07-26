@@ -5,7 +5,7 @@ use bcs_config_api::ManifestConfig;
 use bcs_domain::BotCapabilities;
 use bcs_route_security::OutboundUrlGuard;
 pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
-use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
+use bcs_service_api::{BotDetailCommand, ProviderCredentialRepoPort, ProviderStreamGrayList};
 use bcs_services_container::Services;
 use std::sync::Arc;
 use std::{
@@ -439,6 +439,7 @@ pub struct HttpAppState {
     pub user_identity: Arc<dyn UserIdentityPort>,
     pub bot_runtime_token_resolver: Arc<dyn BotRuntimeTokenResolverPort>,
     pub visibility_sync: Arc<dyn VisibilitySyncPort>,
+    visibility_sync_jobs: Arc<std::sync::Mutex<HashMap<String, bool>>>,
     pub strict_container_validation: bool,
     pub onboard_binding_enabled: bool,
     pub default_visibility: Option<String>,
@@ -487,6 +488,7 @@ impl HttpAppState {
             ))),
             bot_runtime_token_resolver: Arc::new(BcsHttpAuthBotRuntimeTokenResolver::default()),
             visibility_sync: Arc::new(NoopVisibilitySyncPort),
+            visibility_sync_jobs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             strict_container_validation: false,
             onboard_binding_enabled: false,
             default_visibility: None,
@@ -573,10 +575,61 @@ impl HttpAppState {
         self
     }
 
-    pub fn dispatch_visibility_sync(&self, request: VisibilitySyncRequest) {
-        let visibility_sync = self.visibility_sync.clone();
+    pub fn dispatch_visibility_sync(&self, bot_uuid: String) {
+        let should_start = {
+            let mut jobs = self.visibility_sync_jobs.lock().unwrap();
+            if let Some(dirty) = jobs.get_mut(&bot_uuid) {
+                *dirty = true;
+                false
+            } else {
+                jobs.insert(bot_uuid.clone(), false);
+                true
+            }
+        };
+        if !should_start {
+            return;
+        }
+
+        let state = self.clone();
         let _sync_task = tokio::spawn(async move {
-            visibility_sync.sync_visibility(request).await;
+            loop {
+                if let Ok(bot) = state
+                    .services
+                    .bot_query
+                    .get_bot(BotDetailCommand {
+                        caller_actor_id: None,
+                        bot_id: bot_uuid.clone(),
+                    })
+                    .await
+                {
+                    state
+                        .visibility_sync
+                        .sync_visibility(VisibilitySyncRequest {
+                            bot_uuid: bot_uuid.clone(),
+                            visibility: bot.visibility,
+                            capabilities: bot.capabilities,
+                            actor_kind: bot.actor_kind,
+                        })
+                        .await;
+                }
+
+                let should_repeat = {
+                    let mut jobs = state.visibility_sync_jobs.lock().unwrap();
+                    match jobs.get_mut(&bot_uuid) {
+                        Some(dirty) if *dirty => {
+                            *dirty = false;
+                            true
+                        }
+                        _ => {
+                            jobs.remove(&bot_uuid);
+                            false
+                        }
+                    }
+                };
+                if !should_repeat {
+                    break;
+                }
+            }
         });
     }
 
