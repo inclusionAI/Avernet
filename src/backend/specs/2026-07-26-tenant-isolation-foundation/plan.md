@@ -33,17 +33,23 @@ and satisfies the spec's "I cannot leak data by forgetting to add a filter".
   `ContextVar`, the default tenant constant, and the scope/inherit helpers.
   Sits beside `utils/env_utils.py`, its exact analogue.
 - `src/agentclaw/community/plugin_api/models.py` — `BotModel` gains
-  `avernet_tenant`; installs the guard at import time.
-- `src/agentclaw/community/plugin_api/avernet_tenant_guard.py` (new) — the
-  `do_orm_execute` listener. Registered on the `Session` **class**, so it
-  applies to every session in every runtime, including the out-of-tree corp
-  `DatabasePlugin` this repo does not contain.
+  `avernet_tenant`, and the `do_orm_execute` listener is **defined here**, right
+  after the model, registered at model import. It is not a Plugin/seam: it needs
+  exactly one body for every profile (corp/community/test/singlebox all enforce
+  the identical rule), so it does not get a standalone file in the seam package.
+  `models.py` is the correct home — it is the one concrete file in `plugin_api/`
+  (the shared `BotModel` all plugin impls use), and the guard is welded to that
+  model. Registered on the `Session` **class**, so it applies to every session
+  in every runtime, including the out-of-tree corp `DatabasePlugin` this repo
+  does not contain.
 - `src/agentclaw/community/adapters/http/middleware.py` — new
   `AvernetTenantMiddleware`, wired in `install_middleware`.
 - `src/agentclaw/community/adapters/http/openapi_v1/dependencies.py` — the
-  public-API tenant seam, beside the existing `require_principal` stub.
+  public-API tenant seam (`AvernetTenantResolver`). This one **is** a genuine
+  seam: a default-tenant placeholder now, the real caller-identity verifier
+  later.
 - `src/agentclaw/community/di/modules/tenancy_module.py` (new) — binds the
-  placeholder resolver.
+  placeholder resolver (the seam above; the listener is not bound here).
 - `src/agentclaw/community/plugins/bot_repository.py` — `insert` stamps
   `avernet_tenant` explicitly (parity with its explicit `env=get_current_env()`).
 
@@ -110,14 +116,14 @@ request — a total function, not `str | None`, per the type contract in
   `avernet_tenant = Column(String(64), default=get_current_avernet_tenant, nullable=False)`.
   The callable default mirrors `env`'s `default=get_current_env` on line 54, so
   a bare `session.add(BotModel(...))` from any module is stamped correctly.
-- `plugin_api/models.py` (bottom) — `install_bot_avernet_tenant_guard(BotModel)`.
-  Called from `models.py` rather than a composition root so that any code path
-  able to import the model is also guarded; taking the model as an argument
-  keeps `avernet_tenant_guard.py` free of an import cycle.
-- `plugin_api/avernet_tenant_guard.py` (new) — `event.listens_for(Session,
-  "do_orm_execute")`; skips statements carrying an explicit
-  `{"skip_avernet_tenant_guard": True}` execution option (used only by the
-  guard's own tests and by the local bootstrap's table creation).
+- `plugin_api/models.py` (after `BotModel`) — define `_avernet_tenant_guard`
+  and register it with `event.listens_for(Session, "do_orm_execute")` at module
+  import, so any code path able to import the model is also guarded (no
+  composition-root wiring, and nothing to forget per profile). The listener
+  skips statements carrying an explicit `{"skip_avernet_tenant_guard": True}`
+  execution option (used only by the guard's own tests and by the local
+  bootstrap's table creation). Registration is idempotent on a module-level
+  flag so a double import cannot double-register.
 - `plugins/bot_repository.py:122` — add `avernet_tenant=get_current_avernet_tenant()`
   beside `env=get_current_env()`.
 - `adapters/http/middleware.py:204` — `install_middleware` gains an
@@ -186,8 +192,8 @@ and `with_loader_criteria`.
 
 - **Risk:** the listener is registered at import of `plugin_api/models.py`; a
   test that imports the model twice could double-register.
-  **Mitigation:** `install_bot_avernet_tenant_guard` is idempotent on a
-  module-level flag.
+  **Mitigation:** registration guards on a module-level flag, so a re-import is
+  a no-op.
 
 ## Alternatives Considered
 
