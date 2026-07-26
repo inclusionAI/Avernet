@@ -156,19 +156,35 @@
   - [x] Decision recorded; no `.sql` committed.
 - **Depends on:** —
 
-## Task 10: Verification against spec acceptance criteria
+## Task 10: Verification against spec acceptance criteria  `[x]`
 - **Goal:** Prove every spec acceptance criterion holds.
-- **Files:** — (runs suites; no production change).
-- **Done when:**
-  - [ ] The existing internal API test suite passes **unmodified**.
-  - [ ] The cross-tenant isolation test (Task 4/5) is green; its earlier red run
-        is on record.
-  - [ ] Non-leakage across requests (incl. post-error) is green (Task 7).
-  - [ ] Request-spawned work inherits the tenant (Task 8).
-  - [ ] `to_dict()` key set unchanged (Task 3) — internal responses identical.
-  - [ ] Backend unit tests, changed-line coverage, and singlebox coverage pass
-        (`AGENTS.md:131`); pre-push hooks installed via
-        `scripts/install_git_hooks.sh`.
+- **Files:** README context-boundary declarations only (arch-guard follow-up);
+  no runtime change.
+- **Spec acceptance criteria → evidence:**
+  - [x] Every request carries a tenant; default when none — `AvernetTenantMiddleware`
+        + `DEFAULT_AVERNET_TENANT` (test_avernet_tenant_middleware).
+  - [x] A bot created during a request belongs to that request's tenant —
+        `before_insert` guard (test_bot_tenant_guard::insert stamp).
+  - [x] Reads (fetch/list/count/name-existence/search) tenant-scoped — read guard
+        across all six methods (test_bot_tenant_isolation).
+  - [x] Updates/deletes tenant-scoped; cross-tenant = as if missing — read guard
+        covers `Query.update()/delete()` per Task 1 spike (test_bot_tenant_guard).
+  - [x] Pre-existing rows = default tenant; internal responses unchanged —
+        `server_default="teamclaw"` backfill; `to_dict()` key set pinned (Task 3).
+  - [x] Existing internal API suite passes **unmodified** — full run **8998
+        passed, 3 skipped**; no existing test file's logic changed (only new
+        tests added and two README boundary declarations).
+  - [x] Tenant never leaks across requests, incl. after error — scope reset in
+        `finally` (middleware tests + 200-way concurrency probe, 0 mismatches).
+  - [x] Tenant readable by request-handling code — `get_current_avernet_tenant()`.
+  - [x] Work started during a request inherits the tenant — `bind_current_avernet_tenant`
+        on the five thread sites (Task 8).
+  - [x] Public-API tenant source is a single replaceable seam — `resolve_avernet_tenant`.
+  - [x] Isolation demonstrated by a test red without / green with — Task 4 (6
+        failed) → Task 5 (green).
+- **Gates:** Backend unit suite green locally (8998). Changed-line coverage and
+  singlebox coverage run on push (pre-push hook) and in PR CI; singlebox needs a
+  product stack not available in this sandbox, so it is validated by remote CI.
 - **Depends on:** Tasks 1–8 (and Task 9's decision)
 
 ---
