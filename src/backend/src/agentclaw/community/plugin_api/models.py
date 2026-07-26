@@ -126,9 +126,11 @@ def _avernet_tenant_read_guard(orm_execute_state) -> None:
 
     Column and relationship loads are skipped: they only reload an object that a
     prior (already tenant-filtered) SELECT put in the session, so they carry no
-    new exposure. An explicit ``skip_avernet_tenant_guard`` execution option
-    opts a statement out (the guard's own tests seeding/inspecting across
-    tenants).
+    new exposure. This holds because nothing maps a ``relationship()`` to
+    ``BotModel``; if one is ever added, a lazy load would emit an unfiltered
+    ``ac_bots`` SELECT — revisit this skip then. An explicit
+    ``skip_avernet_tenant_guard`` execution option opts a statement out (the
+    guard's own tests seeding/inspecting across tenants).
     """
     if orm_execute_state.is_column_load or orm_execute_state.is_relationship_load:
         return
@@ -150,7 +152,14 @@ def _avernet_tenant_read_guard(orm_execute_state) -> None:
 
 
 def _avernet_tenant_insert_guard(_mapper, _connection, target: "BotModel") -> None:
-    """Stamp the current tenant on a new ``BotModel``; reject a conflicting one."""
+    """Stamp the current tenant on a new ``BotModel``; reject a conflicting one.
+
+    ``before_insert`` covers ORM unit-of-work inserts (``session.add`` + flush),
+    which is the only insert path today (``bot_repository.insert``). Core/bulk
+    inserts (``session.execute(insert(BotModel))``, ``bulk_insert_mappings``)
+    bypass this event and would fall to ``server_default="teamclaw"``; none
+    exist now — add an equivalent stamp if one is ever introduced.
+    """
     current = get_current_avernet_tenant()
     if target.avernet_tenant is None:
         target.avernet_tenant = current
