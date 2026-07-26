@@ -1,14 +1,17 @@
 //! Port contract harnesses.
 
+use std::future::Future;
+
 pub mod metrics;
 pub mod bot_terminal_observer;
 
 use bcs_domain::HumanInputNotificationMode;
 use bcs_service_api::{
-    BotDeliveryPort, ChatRunCleanupPort, ChatRunEventPort, FrontendDeliveryPort,
+    BotCapabilities, BotDeliveryPort, ChatRunCleanupPort, ChatRunEventPort, FrontendDeliveryPort,
     GroupHistoryBotRequestPort, HumanInputReadyEvent, LeaderElectionPort, LeaderStatus,
     SessionChannelDeliveryOutcome, SessionChannelOutboundPort, StateMachineResultPublishCommand,
     StateMachineResultPublisherPort,
+    port::{VisibilitySyncPort, VisibilitySyncRequest},
 };
 
 pub use metrics::{
@@ -102,4 +105,27 @@ pub async fn state_machine_result_publisher_port_contract_tests<
     })
     .await
     .expect("publish state-machine result under the initiating Bot identity");
+}
+
+pub async fn visibility_sync_port_contract_tests<T, F>(port: &T, observed_effect: F)
+where
+    T: VisibilitySyncPort + ?Sized,
+    F: Future<Output = bool>,
+{
+    port.sync_visibility(VisibilitySyncRequest {
+        bot_uuid: "contract-bot".to_string(),
+        capabilities: BotCapabilities {
+            name: Some("Contract Bot".to_string()),
+            summary: Some("Visibility sync contract".to_string()),
+            domains: vec!["testing".to_string()],
+            visibility: "private".to_string(),
+            ..BotCapabilities::default()
+        },
+    })
+    .await;
+
+    assert!(
+        observed_effect.await,
+        "visibility sync port must produce the expected observable effect"
+    );
 }

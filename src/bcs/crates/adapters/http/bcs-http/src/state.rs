@@ -2,10 +2,9 @@ use crate::service_key::ApiKeyRegistry;
 use bcs_auth_api::{AuthError, UserIdentityInfo};
 use bcs_channel_api::ChannelHttpIngressRegistry;
 use bcs_config_api::ManifestConfig;
-use bcs_domain::BotCapabilities;
 use bcs_route_security::OutboundUrlGuard;
 pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
-use bcs_service_api::{BotDetailCommand, ProviderCredentialRepoPort, ProviderStreamGrayList};
+use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
 use bcs_services_container::Services;
 use std::sync::Arc;
 use std::{
@@ -268,27 +267,6 @@ impl BotRequestPort for NoopBotRequestPort {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct VisibilitySyncRequest {
-    pub bot_uuid: String,
-    pub capabilities: BotCapabilities,
-    pub visibility: String,
-    pub actor_kind: bcs_domain::ActorKind,
-}
-
-#[async_trait::async_trait]
-pub trait VisibilitySyncPort: Send + Sync {
-    async fn sync_visibility(&self, request: VisibilitySyncRequest);
-}
-
-#[derive(Debug, Default)]
-pub struct NoopVisibilitySyncPort;
-
-#[async_trait::async_trait]
-impl VisibilitySyncPort for NoopVisibilitySyncPort {
-    async fn sync_visibility(&self, _request: VisibilitySyncRequest) {}
-}
-
 /// Process-local best-effort association for organization-admin invocations.
 /// It intentionally has no persistence or retry semantics; a process restart
 /// makes old runs unavailable to this management surface.
@@ -438,8 +416,6 @@ pub struct HttpAppState {
     pub bot_request: Arc<dyn BotRequestPort>,
     pub user_identity: Arc<dyn UserIdentityPort>,
     pub bot_runtime_token_resolver: Arc<dyn BotRuntimeTokenResolverPort>,
-    pub visibility_sync: Arc<dyn VisibilitySyncPort>,
-    visibility_sync_jobs: Arc<std::sync::Mutex<HashMap<String, bool>>>,
     pub strict_container_validation: bool,
     pub onboard_binding_enabled: bool,
     pub default_visibility: Option<String>,
@@ -487,8 +463,6 @@ impl HttpAppState {
                 bcs_auth_api::AuthPluginChain::new(vec![]),
             ))),
             bot_runtime_token_resolver: Arc::new(BcsHttpAuthBotRuntimeTokenResolver::default()),
-            visibility_sync: Arc::new(NoopVisibilitySyncPort),
-            visibility_sync_jobs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             strict_container_validation: false,
             onboard_binding_enabled: false,
             default_visibility: None,
@@ -568,69 +542,6 @@ impl HttpAppState {
     ) -> Self {
         self.bot_runtime_token_resolver = resolver;
         self
-    }
-
-    pub fn with_visibility_sync(mut self, visibility_sync: Arc<dyn VisibilitySyncPort>) -> Self {
-        self.visibility_sync = visibility_sync;
-        self
-    }
-
-    pub fn dispatch_visibility_sync(&self, bot_uuid: String) {
-        let should_start = {
-            let mut jobs = self.visibility_sync_jobs.lock().unwrap();
-            if let Some(dirty) = jobs.get_mut(&bot_uuid) {
-                *dirty = true;
-                false
-            } else {
-                jobs.insert(bot_uuid.clone(), false);
-                true
-            }
-        };
-        if !should_start {
-            return;
-        }
-
-        let state = self.clone();
-        let _sync_task = tokio::spawn(async move {
-            loop {
-                if let Ok(bot) = state
-                    .services
-                    .bot_query
-                    .get_bot(BotDetailCommand {
-                        caller_actor_id: None,
-                        bot_id: bot_uuid.clone(),
-                    })
-                    .await
-                {
-                    state
-                        .visibility_sync
-                        .sync_visibility(VisibilitySyncRequest {
-                            bot_uuid: bot_uuid.clone(),
-                            visibility: bot.visibility,
-                            capabilities: bot.capabilities,
-                            actor_kind: bot.actor_kind,
-                        })
-                        .await;
-                }
-
-                let should_repeat = {
-                    let mut jobs = state.visibility_sync_jobs.lock().unwrap();
-                    match jobs.get_mut(&bot_uuid) {
-                        Some(dirty) if *dirty => {
-                            *dirty = false;
-                            true
-                        }
-                        _ => {
-                            jobs.remove(&bot_uuid);
-                            false
-                        }
-                    }
-                };
-                if !should_repeat {
-                    break;
-                }
-            }
-        });
     }
 
     pub fn with_group_request_config(
@@ -819,7 +730,6 @@ impl std::fmt::Debug for HttpAppState {
                 "bot_runtime_token_resolver",
                 &"<BotRuntimeTokenResolverPort>",
             )
-            .field("visibility_sync", &"<VisibilitySyncPort>")
             .field(
                 "strict_container_validation",
                 &self.strict_container_validation,

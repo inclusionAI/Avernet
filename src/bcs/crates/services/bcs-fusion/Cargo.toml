@@ -18,6 +18,7 @@ bcs-service-api = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+axum = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio-test = "0.4"
 tempfile = { workspace = true }

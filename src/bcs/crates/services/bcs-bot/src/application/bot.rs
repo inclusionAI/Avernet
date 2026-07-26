@@ -20,6 +20,7 @@ use bcs_service_api::{
 };
 use bcs_user_directory_api::UserDirectoryPlugin;
 
+use super::VisibilitySyncCoordinator;
 use crate::core::BotCore;
 
 /// Bot query and management application service backed by the registry port.
@@ -32,6 +33,7 @@ pub struct Bot {
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     connection_control: Option<Arc<dyn BotConnectionControlPort>>,
     organization: Option<Arc<dyn OrganizationCoreService>>,
+    visibility_sync: Option<VisibilitySyncCoordinator>,
 }
 
 impl Bot {
@@ -51,6 +53,7 @@ impl Bot {
             user_directory: None,
             connection_control: None,
             organization: None,
+            visibility_sync: None,
         }
     }
 
@@ -87,6 +90,11 @@ impl Bot {
         organization: Arc<dyn OrganizationCoreService>,
     ) -> Self {
         self.organization = Some(organization);
+        self
+    }
+
+    pub fn with_visibility_sync(mut self, visibility_sync: VisibilitySyncCoordinator) -> Self {
+        self.visibility_sync = Some(visibility_sync);
         self
     }
 
@@ -481,6 +489,9 @@ impl BotManagementService for Bot {
         self.registry
             .update_visibility(&bot_id, &visibility)
             .await?;
+        if let Some(visibility_sync) = &self.visibility_sync {
+            visibility_sync.schedule(bot_id.clone());
+        }
 
         Ok(BotVisibilityResult {
             bot_uuid: bot_id,

@@ -12,10 +12,7 @@ use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_http::{
     router::build_router,
-    state::{
-        ChatRunCleanupPort, ChainUserIdentityPort, HttpAppState, VisibilitySyncPort,
-        VisibilitySyncRequest,
-    },
+    state::{ChatRunCleanupPort, ChainUserIdentityPort, HttpAppState},
 };
 use bcs_service_api::{
     A2aChatCommand, A2aChatOutcome, A2aChatRunService, A2aChatService, A2aRunStatus,
@@ -30,12 +27,9 @@ use bcs_service_api::{
 use bcs_services_container::{Services, ServicesBuilder};
 use bcs_test_support::{NoopFriendCoreService, NoopRelationCoreService};
 use serde_json::Value;
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use std::sync::Arc;
 use tempfile::TempDir;
-use tokio::sync::{Mutex, Notify, Semaphore};
+use tokio::sync::Mutex;
 use tower::ServiceExt;
 
 #[derive(Default)]
@@ -177,85 +171,6 @@ fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
         ..Default::default()
     };
     Arc::new(AuthPluginChain::new(vec![Box::new(StaticAuthPlugin::with_principal(principal))]))
-}
-
-#[derive(Default)]
-struct RecordingVisibilitySyncPort {
-    requests: Mutex<Vec<VisibilitySyncRequest>>,
-    notify: Notify,
-}
-
-#[async_trait::async_trait]
-impl VisibilitySyncPort for RecordingVisibilitySyncPort {
-    async fn sync_visibility(&self, request: VisibilitySyncRequest) {
-        self.requests.lock().await.push(request);
-        self.notify.notify_waiters();
-    }
-}
-
-struct SlowVisibilitySyncPort {
-    requests: Mutex<Vec<VisibilitySyncRequest>>,
-    notify: Notify,
-    delay: std::time::Duration,
-}
-
-impl SlowVisibilitySyncPort {
-    fn new(delay: std::time::Duration) -> Self {
-        Self {
-            requests: Mutex::new(Vec::new()),
-            notify: Notify::new(),
-            delay,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl VisibilitySyncPort for SlowVisibilitySyncPort {
-    async fn sync_visibility(&self, request: VisibilitySyncRequest) {
-        self.requests.lock().await.push(request);
-        self.notify.notify_waiters();
-        tokio::time::sleep(self.delay).await;
-    }
-}
-
-struct BlockingVisibilitySyncPort {
-    requests: Mutex<Vec<VisibilitySyncRequest>>,
-    request_recorded: Notify,
-    release_first: Semaphore,
-    active: AtomicUsize,
-    max_active: AtomicUsize,
-}
-
-impl BlockingVisibilitySyncPort {
-    fn new() -> Self {
-        Self {
-            requests: Mutex::new(Vec::new()),
-            request_recorded: Notify::new(),
-            release_first: Semaphore::new(0),
-            active: AtomicUsize::new(0),
-            max_active: AtomicUsize::new(0),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl VisibilitySyncPort for BlockingVisibilitySyncPort {
-    async fn sync_visibility(&self, request: VisibilitySyncRequest) {
-        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-        self.max_active.fetch_max(active, Ordering::SeqCst);
-        let request_index = {
-            let mut requests = self.requests.lock().await;
-            requests.push(request);
-            requests.len() - 1
-        };
-        self.request_recorded.notify_waiters();
-
-        if request_index == 0 {
-            let permit = self.release_first.acquire().await.unwrap();
-            permit.forget();
-        }
-        self.active.fetch_sub(1, Ordering::SeqCst);
-    }
 }
 
 #[derive(Default)]
@@ -924,7 +839,7 @@ async fn get_visibility_route_rejects_invalid_bot_token() {
 }
 
 #[tokio::test]
-async fn set_visibility_route_updates_registry_and_triggers_sync_port() {
+async fn set_visibility_route_updates_registry() {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     registry
@@ -932,9 +847,6 @@ async fn set_visibility_route_updates_registry_and_triggers_sync_port() {
             "bot-visible".to_string(),
             BotCapabilities {
                 name: Some("Visible".to_string()),
-                summary: Some("Visibility test".to_string()),
-                domains: vec!["ops".to_string()],
-                skills: vec![Skill::new("monitor")],
                 visibility: "private".to_string(),
                 ..BotCapabilities::default()
             },
@@ -944,9 +856,8 @@ async fn set_visibility_route_updates_registry_and_triggers_sync_port() {
     registry
         .store_token_mapping("visible-token".to_string(), "bot-visible".to_string())
         .await;
-    let sync = Arc::new(RecordingVisibilitySyncPort::default());
     let services = services_builder_with_bot_use_cases(registry.clone()).build_for_test();
-    let app = build_router(HttpAppState::new(services).with_visibility_sync(sync.clone()));
+    let app = build_router(HttpAppState::new(services));
 
     let response = app
         .oneshot(
@@ -975,168 +886,6 @@ async fn set_visibility_route_updates_registry_and_triggers_sync_port() {
 
     let stored = registry.get("bot-visible").await.unwrap();
     assert_eq!(stored.capabilities.visibility, "protected");
-
-    let sync_request = tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        loop {
-            let notified = sync.notify.notified();
-            {
-                let requests = sync.requests.lock().await;
-                if let Some(request) = requests.first().cloned() {
-                    return request;
-                }
-            }
-            notified.await;
-        }
-    })
-    .await
-    .unwrap();
-    assert_eq!(sync_request.bot_uuid, "bot-visible");
-    assert_eq!(sync_request.visibility, "protected");
-    assert_eq!(sync_request.capabilities.name.as_deref(), Some("Visible"));
-    assert_eq!(
-        sync_request.capabilities.summary.as_deref(),
-        Some("Visibility test")
-    );
-    assert_eq!(sync_request.capabilities.domains, vec!["ops".to_string()]);
-    assert_eq!(sync_request.capabilities.skills[0].name, "monitor");
-}
-
-#[tokio::test]
-async fn set_visibility_route_returns_before_visibility_sync_finishes() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    registry
-        .register(
-            "bot-visible".to_string(),
-            BotCapabilities {
-                visibility: "public".to_string(),
-                ..BotCapabilities::default()
-            },
-        )
-        .await
-        .unwrap();
-    registry
-        .store_token_mapping("visible-token".to_string(), "bot-visible".to_string())
-        .await;
-    let sync = Arc::new(SlowVisibilitySyncPort::new(
-        std::time::Duration::from_millis(250),
-    ));
-    let services = services_builder_with_bot_use_cases(registry).build_for_test();
-    let app = build_router(HttpAppState::new(services).with_visibility_sync(sync));
-
-    let response = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        app.oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/bots/bot-visible/visibility")
-                .header("authorization", "Bearer visible-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "visibility": "private"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        ),
-    )
-    .await
-    .expect("visibility route should not wait for visibility sync")
-    .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn visibility_sync_is_serial_per_bot_and_reloads_latest_state() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    registry
-        .register(
-            "bot-visible".to_string(),
-            BotCapabilities {
-                visibility: "public".to_string(),
-                ..BotCapabilities::default()
-            },
-        )
-        .await
-        .unwrap();
-    registry
-        .store_token_mapping("visible-token".to_string(), "bot-visible".to_string())
-        .await;
-    let sync = Arc::new(BlockingVisibilitySyncPort::new());
-    let services = services_builder_with_bot_use_cases(registry).build_for_test();
-    let app = build_router(HttpAppState::new(services).with_visibility_sync(sync.clone()));
-
-    let first_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/bots/bot-visible/visibility")
-                .header("authorization", "Bearer visible-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "visibility": "protected"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(first_response.status(), StatusCode::OK);
-
-    tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        loop {
-            let notified = sync.request_recorded.notified();
-            if !sync.requests.lock().await.is_empty() {
-                break;
-            }
-            notified.await;
-        }
-    })
-    .await
-    .expect("first visibility sync should start");
-
-    let second_response = app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/bots/bot-visible/visibility")
-                .header("authorization", "Bearer visible-token")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "visibility": "private"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(second_response.status(), StatusCode::OK);
-
-    sync.release_first.add_permits(1);
-    tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        loop {
-            let notified = sync.request_recorded.notified();
-            if sync.requests.lock().await.len() >= 2 {
-                break;
-            }
-            notified.await;
-        }
-    })
-    .await
-    .expect("latest visibility should be synced after the first request");
-
-    let requests = sync.requests.lock().await;
-    assert_eq!(requests[0].visibility, "protected");
-    assert_eq!(requests[1].visibility, "private");
-    assert_eq!(sync.max_active.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -1840,78 +1589,6 @@ async fn onboard_route_persists_capabilities_from_token_and_user_identity() {
         credentials.agent_token.as_deref(),
         Some("Bearer token-1")
     );
-}
-
-#[tokio::test]
-async fn onboard_route_returns_before_visibility_sync_finishes() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    registry
-        .register(
-            "bot-alpha".to_string(),
-            BotCapabilities {
-                visibility: "public".to_string(),
-                ..BotCapabilities::default()
-            },
-        )
-        .await
-        .unwrap();
-    registry
-        .store_token_mapping("token-1".to_string(), "bot-alpha".to_string())
-        .await;
-    let bot_use_cases = Arc::new(Bot::new_with_friend(
-        registry.clone(),
-        Arc::new(NoopFriendCoreService),
-    ));
-    let services = Services::builder()
-        .registry(registry.clone())
-        .bot_onboarding(bot_onboarding_use_cases(registry))
-        .bot_query(bot_use_cases)
-        .build_for_test();
-    let sync = Arc::new(SlowVisibilitySyncPort::new(
-        std::time::Duration::from_millis(250),
-    ));
-    let app = build_router(HttpAppState::new(services).with_visibility_sync(sync.clone()));
-
-    let response = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        app.oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/bots/onboard")
-                .header("authorization", "Bearer token-1")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({
-                        "name": "Alpha",
-                        "summary": "Alpha helper"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        ),
-    )
-    .await
-    .expect("onboard route should not wait for visibility sync")
-    .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let sync_request = tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        loop {
-            let notified = sync.notify.notified();
-            {
-                let requests = sync.requests.lock().await;
-                if let Some(request) = requests.first().cloned() {
-                    return request;
-                }
-            }
-            notified.await;
-        }
-    })
-    .await
-    .unwrap();
-    assert_eq!(sync_request.bot_uuid, "bot-alpha");
 }
 
 #[tokio::test]

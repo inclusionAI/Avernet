@@ -1287,6 +1287,10 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    config.bcsfuse.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.telemetry.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1381,6 +1385,19 @@ mod tests {
             .expect_err("blank group-session WebSocket secret name rejected");
 
         assert!(err.contains("group_session_ws.signing_key_secret must not be blank"));
+    }
+
+    #[test]
+    fn test_loaded_config_rejects_invalid_bcsfuse_retry_settings() {
+        let mut config = BcsConfig::default();
+        config.bcsfuse.sync_max_attempts = 0;
+
+        let error = validate_loaded_config(&config).expect_err("invalid retry config must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("bcsfuse.sync_max_attempts must be at least 1")
+        );
     }
 
     #[test]

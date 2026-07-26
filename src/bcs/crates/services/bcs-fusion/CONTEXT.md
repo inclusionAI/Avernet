@@ -5,13 +5,14 @@
 - Local `FusionCoreService` implementation for loading bot context files and producing a fallback fusion response.
 - BCSFuse-backed `FusionCoreService` implementation using the transport-only external client.
 - BCSFuse-backed `WorkerProfileService` implementation and worker sync helpers.
+- BCSFuse-backed `VisibilitySyncPort` implementation for external worker discovery state.
 - Bot context file loading for `IDENTITY.md`, `SOUL.md`, `RULES.md`, and `MEMORY.md`.
 - Optional LLM-client abstraction used by the local fusion engine.
 
 ## Consumes
 
 - Bot context base directory supplied by bootstrap or by a higher-level adapter.
-- `bcs-service-api` fusion and worker-profile contracts.
+- `bcs-service-api` fusion, worker-profile, and visibility-sync contracts.
 - `bcs-fuse-client` HTTP wrapper for remote BCSFuse calls.
 - Filesystem reads for bot-owned context documents.
 

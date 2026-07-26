@@ -313,7 +313,6 @@ pub async fn set_visibility(
         .await
     {
         Ok(result) => {
-            state.dispatch_visibility_sync(result.bot_uuid.clone());
             (
                 StatusCode::OK,
                 Json(serde_json::json!({

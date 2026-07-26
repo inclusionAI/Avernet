@@ -15,6 +15,7 @@ pub mod secret;
 pub mod session_callback;
 pub mod session_channel_outbound;
 pub mod state_machine_result;
+pub mod visibility_sync;
 
 pub use bot_connection::{BotConnectionControlPort, KickReason};
 pub use bot_terminal_observer::{
@@ -78,3 +79,4 @@ pub use session_channel_outbound::{
 pub use state_machine_result::{
     StateMachineResultPublishCommand, StateMachineResultPublisherPort,
 };
+pub use visibility_sync::{NoopVisibilitySyncPort, VisibilitySyncPort, VisibilitySyncRequest};

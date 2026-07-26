@@ -972,6 +972,7 @@ name = "bcs-fusion"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
  "bcs-config-api",
  "bcs-fuse-client",
  "bcs-service-api",

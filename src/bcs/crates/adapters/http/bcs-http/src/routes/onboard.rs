@@ -5,7 +5,7 @@ use axum::{
 };
 use bcs_protocol::{AdminOnboardRequest, OnboardRequest};
 use bcs_service_api::{
-    ActorKind, AdminBotOnboardCommand, BotOnboardCommand, BotOnboardResult,
+    AdminBotOnboardCommand, BotOnboardCommand, BotOnboardResult,
     OnboardActorIdentity,
 };
 use serde::Deserialize;
@@ -107,8 +107,6 @@ pub async fn onboard_bot(
         })
         .await?;
 
-    sync_onboard_result_to_visibility_index(&state, &result);
-
     Ok(onboard_result_response(result))
 }
 
@@ -134,8 +132,6 @@ pub async fn admin_onboard_bot(
         })
         .await?;
 
-    sync_onboard_result_to_visibility_index(&state, &result);
-
     Ok(onboard_result_response(result))
 }
 
@@ -155,16 +151,6 @@ fn onboard_result_response(result: BotOnboardResult) -> Json<Value> {
         "binding_results": result.binding_results,
         "unbound": result.unbound
     }))
-}
-
-fn sync_onboard_result_to_visibility_index(state: &HttpAppState, result: &BotOnboardResult) {
-    if result.actor_kind == ActorKind::Human {
-        return;
-    }
-    if result.capabilities.is_none() {
-        return;
-    }
-    state.dispatch_visibility_sync(result.bot_uuid.clone());
 }
 
 async fn onboard_actor_identity(

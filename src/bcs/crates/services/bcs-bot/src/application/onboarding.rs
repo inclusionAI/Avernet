@@ -11,12 +11,15 @@ use bcs_service_api::{
 };
 use serde_json::Value;
 
+use super::VisibilitySyncCoordinator;
+
 /// Bot onboarding application service backed by registry and relation services.
 pub struct BotOnboarding {
     registry: Arc<dyn BotRegistryCoreService>,
     relation: Arc<dyn RelationCoreService>,
     binding_enabled: bool,
     default_visibility: Option<String>,
+    visibility_sync: Option<VisibilitySyncCoordinator>,
 }
 
 impl BotOnboarding {
@@ -31,7 +34,13 @@ impl BotOnboarding {
             relation,
             binding_enabled,
             default_visibility,
+            visibility_sync: None,
         }
+    }
+
+    pub fn with_visibility_sync(mut self, visibility_sync: VisibilitySyncCoordinator) -> Self {
+        self.visibility_sync = Some(visibility_sync);
+        self
     }
 
     async fn process_binding_channels(
@@ -261,6 +270,9 @@ impl BotOnboardingService for BotOnboarding {
             .await?;
         self.bind_created_by_and_owner_edges(&command.bot_uuid, command.actor_identity.as_ref())
             .await?;
+        if let Some(visibility_sync) = &self.visibility_sync {
+            visibility_sync.schedule(command.bot_uuid.clone());
+        }
 
         Ok(BotOnboardResult {
             bot_uuid: command.bot_uuid,
@@ -320,6 +332,9 @@ impl BotOnboardingService for BotOnboarding {
             .await?;
         self.bind_created_by_and_owner_edges(&command.bot_uuid, command.actor_identity.as_ref())
             .await?;
+        if let Some(visibility_sync) = &self.visibility_sync {
+            visibility_sync.schedule(command.bot_uuid.clone());
+        }
 
         Ok(BotOnboardResult {
             bot_uuid: command.bot_uuid,

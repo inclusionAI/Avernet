@@ -5,6 +5,7 @@ pub mod core;
 
 pub use application::{
     ActorDirectory, Bot, BotOnboarding, HumanActor, ProviderBotEvents, ProviderManagement,
+    VisibilitySyncCoordinator,
 };
 #[allow(deprecated)]
 pub use core::BotRegistry;

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// bcsfuse integration configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BcsFuseConfig {
     /// Enable bcsfuse integration.
     #[serde(default)]
@@ -21,8 +22,7 @@ pub struct BcsFuseConfig {
     #[serde(default = "default_sync_timeout")]
     pub sync_timeout_ms: u64,
 
-    /// Maximum attempts for best-effort worker synchronization.
-    /// Values below 1 are treated as 1.
+    /// Maximum attempts for best-effort worker synchronization (at least 1).
     #[serde(default = "default_sync_max_attempts")]
     pub sync_max_attempts: u32,
 
@@ -89,5 +89,14 @@ impl Default for BcsFuseConfig {
             recommend_top_k: default_recommend_top_k(),
             recommend_min_score: default_recommend_min_score(),
         }
+    }
+}
+
+impl BcsFuseConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.sync_max_attempts == 0 {
+            return Err("bcsfuse.sync_max_attempts must be at least 1".to_string());
+        }
+        Ok(())
     }
 }

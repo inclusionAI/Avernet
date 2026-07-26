@@ -31,3 +31,30 @@ fn bcsfuse_config_without_retry_fields_uses_defaults() {
     assert_eq!(cfg.sync_max_attempts, 3);
     assert_eq!(cfg.sync_retry_base_delay_ms, 1_000);
 }
+
+#[test]
+fn bcsfuse_config_rejects_unknown_fields() {
+    let error =
+        serde_json::from_str::<BcsFuseConfig>(r#"{"enabled":true,"sync_retry_base_delai_ms":1}"#)
+            .expect_err("unknown bcsfuse fields must be rejected");
+    assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
+fn bcsfuse_config_rejects_zero_sync_attempts() {
+    let cfg = BcsFuseConfig {
+        sync_max_attempts: 0,
+        ..BcsFuseConfig::default()
+    };
+    assert_eq!(
+        cfg.validate().unwrap_err(),
+        "bcsfuse.sync_max_attempts must be at least 1"
+    );
+
+    let cfg = BcsFuseConfig {
+        sync_max_attempts: 11,
+        sync_retry_base_delay_ms: 60_001,
+        ..BcsFuseConfig::default()
+    };
+    assert!(cfg.validate().is_ok());
+}

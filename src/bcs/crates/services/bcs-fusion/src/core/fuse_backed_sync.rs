@@ -132,7 +132,7 @@ pub async fn sync_worker_with_retry(
     tracing::error!(
         bot_id = %bot_id,
         attempts = max_attempts,
-        "Worker sync exhausted retries, will retry on next onboard/reconnect"
+        "Worker sync exhausted retries, will retry on next visibility update or onboard"
     );
 }
 

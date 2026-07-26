@@ -1,11 +1,10 @@
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
-use bcs_fuse_client::FuseClient;
 pub use bcs_http::state::BotRuntimeTokenResolverPort;
 use bcs_http::state::{
     BcsHttpAuthBotRuntimeTokenResolver, BotRequestPort, ChainUserIdentityPort, HealthPort,
-    HttpAppState, VisibilitySyncPort, VisibilitySyncRequest,
+    HttpAppState,
 };
 use bcs_secret::DefaultSecretService;
 use bcs_secret_local::{EnvSecretAccess, NoopSecretAccess};
@@ -95,11 +94,6 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         }))
         .with_bot_request(Arc::new(BootstrapBotRequestPort {
             bot_connections: Arc::clone(&state.bot_connections),
-        }))
-        .with_visibility_sync(Arc::new(BootstrapVisibilitySyncPort {
-            fuse_client: state.fuse_client.clone(),
-            bcsfuse_config: config.bcsfuse.clone(),
-            bots_base_dir: config.bots_base_dir.clone(),
         }))
         .with_group_request_config(
             config.bcs_endpoint.clone(),
@@ -344,65 +338,6 @@ impl BotRequestPort for BootstrapBotRequestPort {
         self.bot_connections
             .send_request(bot_uuid, method, params, timeout_ms)
             .await
-    }
-}
-
-struct BootstrapVisibilitySyncPort {
-    fuse_client: Option<Arc<FuseClient>>,
-    bcsfuse_config: bcs_fuse_client::BcsFuseConfig,
-    bots_base_dir: std::path::PathBuf,
-}
-
-#[async_trait]
-impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
-    async fn sync_visibility(&self, request: VisibilitySyncRequest) {
-        if request.actor_kind == bcs_service_api::ActorKind::Human {
-            return;
-        }
-
-        let Some(fuse_client) = self.fuse_client.clone() else {
-            return;
-        };
-
-        let bot_context = match bcs_fusion::load_bot_context(&self.bots_base_dir, &request.bot_uuid)
-        {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                tracing::info!(
-                    bot_id = %request.bot_uuid,
-                    error = %e,
-                    "No local bot context found, syncing with empty context"
-                );
-                bcs_service_api::ContextBotSummary {
-                    bot_uuid: request.bot_uuid.clone(),
-                    name: None,
-                    emoji: None,
-                    identity: None,
-                    soul: None,
-                    rules: None,
-                    memory: None,
-                }
-            }
-        };
-        let bot_name = request.capabilities.name.clone().unwrap_or_default();
-        let sync_req = bcs_fusion::build_sync_request(
-            &self.bcsfuse_config,
-            &request.bot_uuid,
-            &bot_name,
-            request.capabilities.summary.as_deref(),
-            &request.capabilities.domains,
-            &request.capabilities.skills,
-            &bot_context,
-            &request.visibility,
-        );
-
-        bcs_fusion::sync_worker_with_retry(
-            &fuse_client,
-            &request.bot_uuid,
-            &sync_req,
-            &self.bcsfuse_config,
-        )
-        .await;
     }
 }
 
