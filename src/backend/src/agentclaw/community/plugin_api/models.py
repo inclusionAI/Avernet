@@ -133,59 +133,6 @@ class ResourceModel(Base):
         }
 
 
-class FileModel(Base):
-    """SQLAlchemy ORM model for the ac_file table.
-
-    Teclaw bot workspace-file metadata: the file manager records each uploaded
-    file here so compose can reference it in the BotConfigArtifact (teclaw is
-    pull-based). Teclaw-only — arca/local write the live FS and record nothing.
-    Local/tests auto-create via ``Base.metadata.create_all``; prod DDL is applied
-    to OceanBase out-of-band.
-    """
-    __tablename__ = "ac_file"
-
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
-    bot_id = Column(String(512), nullable=False)
-    entity_id = Column(String(128))
-    entity_type = Column(String(64))
-    engine_type = Column(String(64))
-    env = Column(String(64), default=get_current_env, nullable=False)
-    path = Column(String(2048), nullable=False)
-    name = Column(String(512), nullable=False)
-    parent_path = Column(String(2048))
-    size = Column(BigInteger, default=0, nullable=False)
-    mime_type = Column(String(128))
-    source = Column(String(50))
-    created_by = Column(String(128))
-    user_id = Column(String(128))
-    gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    __table_args__ = (Index("idx_bot_env", "bot_id", "env"),)
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "bot_id": self.bot_id,
-            "entity_id": self.entity_id,
-            "entity_type": self.entity_type,
-            "engine_type": self.engine_type,
-            "env": self.env,
-            "path": self.path,
-            "name": self.name,
-            "parent_path": self.parent_path,
-            "size": self.size,
-            "mime_type": self.mime_type,
-            "source": self.source,
-            "created_by": self.created_by,
-            "user_id": self.user_id,
-            "gmt_create": self.gmt_create.isoformat() if self.gmt_create else None,
-            "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
-        }
-
-
 class ChannelConfig(Base):
     """SQLAlchemy ORM model for ac_channel_config table.
 

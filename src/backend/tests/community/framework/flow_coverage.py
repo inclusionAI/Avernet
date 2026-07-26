@@ -81,7 +81,6 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "desktop_bot": _EXEMPT_REASON,
     "economy": _EXEMPT_REASON,
     "events": _EXEMPT_REASON,
-    "files": _EXEMPT_REASON,
     "group_chat": _EXEMPT_REASON,
     "grt_chat": _EXEMPT_REASON,
     "models": _EXEMPT_REASON,

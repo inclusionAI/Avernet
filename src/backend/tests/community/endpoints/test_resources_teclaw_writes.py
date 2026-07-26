@@ -2,9 +2,8 @@
 
 teclaw now forwards every write **per-file** to the engine (like arca): upload →
 ``/api/v1/file/upload``, delete → ``/api/v1/file/remove``, mkdir → a ``.keep``
-upload. There is NO ``ac_file`` row anymore — the running container owns its
-files. These pin: the write succeeds through the device-fs boundary, and no
-``ac_file`` row is written.
+upload. The running container owns its files — the backend keeps no metadata
+mirror of them. These pin that the write succeeds through the device-fs boundary.
 
 Seam: the two MockSeam ``HttpClient``s — the BAAS-qualified GET (serves both
 ``ws-info`` and ``http-info`` for ``invoke_http``) and the general POST (the
@@ -19,9 +18,7 @@ import httpx
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
-from agentclaw.community.core.files.repository.protocol import FileRepositoryProtocol
 from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_BAAS, QUALIFIER_GENERAL
-from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.devices import make_active_arca_device
 from tests.community.framework import CaseInput, ExpectSuccess, endpoint_test
@@ -91,9 +88,9 @@ def _seed_teclaw_bot(world, *, bot_id: str) -> None:
     _stub_engine_ok(world)
 
 
-# ── teclaw upload forwards to the engine, writes NO ac_file row ──────
+# ── teclaw upload forwards to the engine ─────────────────────────────
 
-def _assert_no_row_up(response, world) -> None:
+def _assert_upload_paths(response, world) -> None:
     body = response.json()
     assert body.get("success") is True, body
     # absolute_path is the logic view (workspace/<rel>) — uniform across providers,
@@ -101,16 +98,12 @@ def _assert_no_row_up(response, world) -> None:
     item = body["uploaded"][0]
     assert item["absolute_path"] == "workspace/report.csv", item
     assert item["path"] == "report.csv", item
-    rows = world.get(FileRepositoryProtocol).list_by_bot(
-        bot_id="bot_teclaw_up", env=get_current_env()
-    )
-    assert rows == [], "teclaw upload must NOT record an ac_file row"
 
 
 @endpoint_test(
     method="POST",
     path="/api/resources/files/upload",
-    scenario="happy_teclaw_upload_forwards_no_ac_file",
+    scenario="happy_teclaw_upload_forwards",
     input=CaseInput(
         query_params={"bot_id": "bot_teclaw_up"},
         headers={"x-user-id": _OWNER},
@@ -118,26 +111,18 @@ def _assert_no_row_up(response, world) -> None:
     ),
     seed=lambda world: _seed_teclaw_bot(world, bot_id="bot_teclaw_up"),
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
-    extra_assertions=(_assert_no_row_up,),
+    extra_assertions=(_assert_upload_paths,),
 )
-def upload_teclaw_forwards_no_row():
-    """Uploading to a teclaw bot forwards per-file to the engine, no ac_file row."""
+def upload_teclaw_forwards():
+    """Uploading to a teclaw bot forwards per-file to the engine."""
 
 
-# ── teclaw mkdir forwards a .keep upload, writes NO ac_file row ──────
-
-def _assert_no_row_mkdir(response, world) -> None:
-    assert response.json().get("success") is True, response.json()
-    rows = world.get(FileRepositoryProtocol).list_by_bot(
-        bot_id="bot_teclaw_mkdir", env=get_current_env()
-    )
-    assert rows == [], "teclaw mkdir must NOT record an ac_file row"
-
+# ── teclaw mkdir forwards a .keep upload ─────────────────────────────
 
 @endpoint_test(
     method="POST",
     path="/api/resources/files/mkdir",
-    scenario="happy_teclaw_mkdir_forwards_no_ac_file",
+    scenario="happy_teclaw_mkdir_forwards",
     input=CaseInput(
         query_params={"bot_id": "bot_teclaw_mkdir"},
         headers={"x-user-id": _OWNER},
@@ -145,10 +130,9 @@ def _assert_no_row_mkdir(response, world) -> None:
     ),
     seed=lambda world: _seed_teclaw_bot(world, bot_id="bot_teclaw_mkdir"),
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
-    extra_assertions=(_assert_no_row_mkdir,),
 )
-def mkdir_teclaw_forwards_no_row():
-    """mkdir on a teclaw bot uploads a .keep via the engine, no ac_file row."""
+def mkdir_teclaw_forwards():
+    """mkdir on a teclaw bot uploads a .keep via the engine."""
 
 
 # ── teclaw delete forwards to the engine ─────────────────────────────
@@ -168,14 +152,14 @@ def delete_teclaw_forwards():
     """Deleting a teclaw file forwards a per-file remove to the engine."""
 
 
-# ── arca upload records NO ac_file row (regression) ──────────────────
+# ── arca upload is unchanged by the teclaw write path (regression) ───
 
 def _seed_arca_bot(world) -> None:
     make_staff_user(world, user_id=_OWNER)
     # make_active_arca_device seeds a local-provider binding (see factory
     # docstring) so the resolver routes through LocalConnInfoBuilder and the
     # dispatcher builds LocalDeviceFileSystem — the FileService write lands on
-    # disk where the no-ac_file-row regression assertion can verify it.
+    # disk, the arca path this regression pins.
     binding_id = make_active_arca_device(world, owner_id=_OWNER, device_id="arca_dev_w")
     world.get(BotRepository).insert({
         "bot_id": "bot_arca_up", "bot_name": "Bot arca", "owner_id": _OWNER,
@@ -187,18 +171,10 @@ def _seed_arca_bot(world) -> None:
     })
 
 
-def _assert_no_row(response, world) -> None:
-    assert response.json().get("success") is True, response.json()
-    rows = world.get(FileRepositoryProtocol).list_by_bot(
-        bot_id="bot_arca_up", env=get_current_env()
-    )
-    assert rows == [], "arca upload must NOT record an ac_file row"
-
-
 @endpoint_test(
     method="POST",
     path="/api/resources/files/upload",
-    scenario="arca_upload_records_no_ac_file",
+    scenario="arca_upload_unchanged",
     input=CaseInput(
         query_params={"bot_id": "bot_arca_up"},
         headers={"x-user-id": _OWNER},
@@ -206,7 +182,6 @@ def _assert_no_row(response, world) -> None:
     ),
     seed=_seed_arca_bot,
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
-    extra_assertions=(_assert_no_row,),
 )
-def upload_arca_records_no_row():
-    """arca upload is unchanged — no ac_file row (regression)."""
+def upload_arca_unchanged():
+    """arca upload still writes the live FS through the device-fs boundary."""
