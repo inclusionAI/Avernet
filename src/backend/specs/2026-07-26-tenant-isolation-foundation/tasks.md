@@ -110,21 +110,22 @@
   - [x] No Protocol, no DI binding, no `app.py` / `container.py` change.
 - **Depends on:** Task 2
 
-## Task 7: `AvernetTenantMiddleware`
+## Task 7: `AvernetTenantMiddleware`  `[x]`
 - **Goal:** Establish each request's tenant for its whole lifetime, reset on the
   way out including on error.
 - **Files:** `src/agentclaw/community/adapters/http/middleware.py`,
-  `tests/community/...` (integration).
+  `tests/community/adapters/http/test_avernet_tenant_middleware.py` (new).
 - **Done when:**
-  - [ ] `AvernetTenantMiddleware.dispatch` picks `resolve_avernet_tenant(request)`
+  - [x] `AvernetTenantMiddleware.dispatch` picks `resolve_avernet_tenant(request)`
         for `/openapi/v1/*` paths, else `DEFAULT_AVERNET_TENANT`; enters
         `avernet_tenant_scope`; awaits `call_next`.
-  - [ ] Added in `install_middleware` immediately after `UserContextMiddleware`
+  - [x] Added in `install_middleware` immediately after `UserContextMiddleware`
         so it is outside it (auth plugin DB reads run under the tenant); no new
         `install_middleware` parameter.
-  - [ ] Integration test: two sequential requests through the ASGI app — the
-        second sees `teamclaw`; repeated where the first handler raises 500, the
-        tenant still does not leak.
+  - [x] Integration test (4): every path defaults to `teamclaw`; a public
+        request uses the resolved tenant; the tenant does not leak between
+        requests, nor after a request raises 500. Existing middleware-stack
+        ordering tests (11) still pass.
 - **Depends on:** Task 2, Task 6
 
 ## Task 8: Request-spawned work inherits the tenant
