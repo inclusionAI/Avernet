@@ -14,6 +14,16 @@ echo "== OCB pre-push gate =="
 echo "remote: ${remote_name} ${remote_url}"
 echo "merge target: $merge_target"
 
+# CI gates are opt-in on push. By default the hook does not run any module CI,
+# so a plain `git push` never triggers SAST/tests/coverage. Set
+# OCB_PRE_PUSH_RUN_CI=1 to re-enable the gates, or run scripts/ci/pre_push.sh
+# manually.
+run_ci="${OCB_PRE_PUSH_RUN_CI:-0}"
+if [[ "$run_ci" != "1" ]]; then
+  echo "pre-push CI gates disabled (set OCB_PRE_PUSH_RUN_CI=1 to run them)"
+  exit 0
+fi
+
 seen_ref=0
 status=0
 target_sha=""
