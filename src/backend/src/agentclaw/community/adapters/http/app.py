@@ -496,7 +496,8 @@ from agentclaw.community.di.optional_routers import OptionalRouters  # noqa: E40
 for _r in injector.get(OptionalRouters).routers:
     app.include_router(_r)
 
-# 3. Public /openapi/v1/bots surface — the same handlers as above, re-mounted
-# under the gateway-facing prefix (path move only; see adapters/http/openapi_v1).
+# 3. Public /openapi/v1/bots surface — new, definition-only routers for the
+# redesigned external contract (not a re-mount of the handlers above; see
+# adapters/http/openapi_v1). Handlers are stubs until the implementation lands.
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router  # noqa: E402
 app.include_router(build_public_router())

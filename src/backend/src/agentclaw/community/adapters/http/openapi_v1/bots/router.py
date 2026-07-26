@@ -14,17 +14,17 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 
-from agentclaw.community.adapters.http.openapi_v1._deps import require_principal
-from agentclaw.community.adapters.http.openapi_v1._contracts import (
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
     NameCheck,
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1._deps import Principal
+from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 
-from ._schemas import (
+from .schemas import (
     Bot,
     BotAuthPending,
     BotAuthStatus,

@@ -75,7 +75,7 @@
 
 ## Task 8: Backend — `dump_openapi()` + public-namespace test `[x]`
 - **Goal:** Deterministic OpenAPI dump for publishing, and enforce that the public namespace holds only the intended `bots` surface.
-- **Files:** `src/backend/src/agentclaw/community/adapters/http/openapi_v1/dump.py` (new), `src/backend/tests/community/contracts/gateway/test_public_namespace.py` (new)
+- **Files:** `src/backend/scripts/dump_openapi.py` (new; tooling, kept out of `adapters/http/`), `src/backend/tests/community/contracts/gateway/test_public_namespace.py` (new)
 - **Done when:**
   - [x] `dump_openapi()` writes the public `/openapi/v1` description deterministically (sorted keys). Regenerated the gateway's `bots.openapi.json` artifact (119 paths) from it.
   - [x] The namespace test fails if any route under `/openapi/v1` falls outside `/openapi/v1/bots`; plus a populated-surface sanity check on the re-home router.
@@ -91,7 +91,7 @@
 
 ## Task 10: Backend release CI — compat-gate then publish `[x]`
 - **Goal:** On release, block breaking changes and publish the description for the gateway to auto-adopt.
-- **Files:** `src/gateway/scripts/gate_and_publish_openapi.py` (new) + `openapi_v1/dump.py` (Task 8)
+- **Files:** `src/gateway/scripts/gate_and_publish_openapi.py` (new) + `src/backend/scripts/dump_openapi.py` (Task 8)
 - **Done when:**
   - [x] `gate_and_publish_openapi.py` runs `check_compatible(published, candidate)`; a breaking change exits non-zero (fails the release) unless `--allow-breaking` for a coordinated change.
   - [x] On pass, the candidate becomes the published artifact (committed single-box file); the docstring documents the two-step CI wiring (backend `dump` → gateway gate/publish) and where an object-store upload slots in.
