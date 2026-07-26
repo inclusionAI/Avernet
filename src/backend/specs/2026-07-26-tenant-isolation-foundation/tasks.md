@@ -33,53 +33,64 @@
 - **Depends on:** —
 
 ## Task 3: `avernet_tenant` column on `BotModel`
-- **Goal:** Give bot records the tenant axis, stamped by the column default,
-  invisible in API responses.
+- **Goal:** Give bot records the tenant axis, invisible in API responses. The
+  column carries only a `server_default` for backfill; context-aware stamping is
+  the `before_insert` guard's job (Task 5).
 - **Files:** `src/agentclaw/community/plugin_api/models.py`,
-  `tests/community/...` (to_dict + insert-stamp tests).
+  `tests/community/...` (to_dict test).
 - **Done when:**
-  - [ ] `BotModel` gains `avernet_tenant = Column(String(64),
-        default=get_current_avernet_tenant, nullable=False)` after
-        `caller_config_revision`.
+  - [ ] `BotModel` gains `avernet_tenant = Column(String(64), nullable=False,
+        server_default="teamclaw")` after `caller_config_revision` (matches the
+        prod DDL `DEFAULT 'teamclaw'`, so `create_all` and the backfill agree).
   - [ ] `avernet_tenant` is **not** added to `BotModel.to_dict()`.
   - [ ] Test asserts `to_dict()`'s key set is unchanged from before this change.
-  - [ ] Test: a bot inserted via `BotRepository.insert` inside
-        `avernet_tenant_scope("t1")` has `avernet_tenant == "t1"` — proving the
-        column default stamps inserts with no explicit stamp at the call site
-        (the listener never applies to `INSERT`).
 - **Depends on:** Task 2
 
 ## Task 4: Cross-tenant isolation test (red)
-- **Goal:** Write the spec-required test that fails before the guard exists and
-  will pass after — and record its red run.
+- **Goal:** Write the spec-required test that fails before the guards exist and
+  passes after — and record its red run.
 - **Files:** `tests/community/plugins/...` (new).
 - **Done when:**
-  - [ ] Test inserts a bot under tenant A and asserts a read under tenant B does
-        not return it, across `get_by_id`, `get_by_id_and_owner`, `list_by_owner`,
-        `count_by_owner`, `exists_by_bot_name`, `search_bots`.
-  - [ ] With no listener yet, the test **fails**, and the red run is recorded in
-        the commit message / task notes.
+  - [ ] Test seeds a bot inside `avernet_tenant_scope("A")` and another inside
+        `avernet_tenant_scope("B")` via `BotRepository.insert`, then asserts a
+        read inside `avernet_tenant_scope("B")` does not return A's bot, across
+        `get_by_id`, `get_by_id_and_owner`, `list_by_owner`, `count_by_owner`,
+        `exists_by_bot_name`, `search_bots`.
+  - [ ] Run at this task's commit (column exists, guards not yet added) the test
+        **fails** — reads are unfiltered so B sees A's row — and the red run is
+        recorded in the commit message / task notes. Task 5 (both guards) turns
+        it green: the insert guard gives the two rows distinct tenants and the
+        read guard filters them.
 - **Depends on:** Task 2, Task 3
 
-## Task 5: `do_orm_execute` tenant guard (green)
-- **Goal:** Install the single listener that scopes every `BotModel`
-  read/update/delete to the current tenant; turn Task 4 green.
+## Task 5: Tenant guards — read filter + insert stamp (green)
+- **Goal:** Install both active guards that scope `BotModel` to the current
+  tenant; turn Task 4 green. Reads/updates/deletes are filtered; inserts are
+  stamped and validated.
 - **Files:** `src/agentclaw/community/plugin_api/models.py`,
   `tests/community/plugins/...`.
 - **Done when:**
-  - [ ] Listener registered via `event.listens_for(Session, "do_orm_execute")`
-        at model import; registration idempotent on a module-level flag.
-  - [ ] Applies `with_loader_criteria(BotModel, avernet_tenant ==
-        get_current_avernet_tenant())`; honors `include_aliases` for joins;
-        skips statements carrying `{"skip_avernet_tenant_guard": True}`.
-  - [ ] Write coverage matches the Task 1 finding: if writes are not covered by
-        the listener, `update_by_owner` / `soft_delete_by_owner` get an explicit
+  - [ ] **Read guard:** registered via `event.listens_for(Session,
+        "do_orm_execute")` at model import; applies `with_loader_criteria(BotModel,
+        avernet_tenant == get_current_avernet_tenant())`; honors `include_aliases`
+        for joins; skips statements carrying `{"skip_avernet_tenant_guard": True}`.
+  - [ ] **Insert guard:** registered via `event.listens_for(BotModel,
+        "before_insert")`; stamps `avernet_tenant = get_current_avernet_tenant()`
+        when unset and raises `CrossTenantInsertError` when a different tenant was
+        explicitly set. Covers every insert path, not just `BotRepository.insert`.
+  - [ ] Both registrations idempotent on a module-level flag.
+  - [ ] Write coverage matches the Task 1 finding: if `Query.update()` /
+        `Query.delete()` are not covered by the read listener,
+        `update_by_owner` / `soft_delete_by_owner` get an explicit
         `_avernet_tenant()` filter.
-  - [ ] Task 4's test passes. Added tests: cross-tenant `update_by_owner` /
-        `soft_delete_by_owner` return `None` / `False` and leave the row
-        untouched (indistinguishable from missing); a bare
-        `session.query(BotModel).all()` is filtered (proves non-repository
-        query sites are covered).
+  - [ ] Task 4's test passes. Added tests:
+        - cross-tenant `update_by_owner` / `soft_delete_by_owner` return `None` /
+          `False` and leave the row untouched (indistinguishable from missing);
+        - a bare `session.query(BotModel).all()` is filtered (proves
+          non-repository query sites are covered);
+        - an insert under `avernet_tenant_scope("B")` is stamped `"B"` with no
+          explicit stamp at the call site; an explicit conflicting-tenant insert
+          raises `CrossTenantInsertError`.
 - **Depends on:** Task 1, Task 3, Task 4
 
 ## Task 6: Public-API tenant source (`resolve_avernet_tenant`)
@@ -160,9 +171,9 @@
   - Theme: confirm the write-path approach and land the tenant `ContextVar`
     primitive; pure utility + investigation, no bot-data behavior change yet.
 - **Group B — ORM enforcement:** Tasks 3, 4, 5
-  - Theme: bot records carry a tenant (stamped by the column default) and every
-    read/write is scoped at the ORM layer; the spec's red→green cross-tenant
-    isolation test passes.
+  - Theme: bot records carry a tenant, every read/update/delete is filtered and
+    every insert is stamped+validated at the ORM layer (two active guards); the
+    spec's red→green cross-tenant isolation test passes.
 - **Group C — Request wiring & inheritance:** Tasks 6, 7, 8
   - Theme: each request establishes its tenant (reset even on error),
     request-spawned work inherits it, and the public-API seam exists.

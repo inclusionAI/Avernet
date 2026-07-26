@@ -7,13 +7,25 @@ layer. A `ContextVar` carries the tenant for the lifetime of a request — the
 same mechanism the community tracer already uses for its trace id
 (`plugins/community/tracer.py:25`). A middleware sets it on the way in and
 resets it in a `finally`, so it cannot survive the request or leak into the
-next one. Enforcement is a single SQLAlchemy `do_orm_execute` listener that
-appends `with_loader_criteria(BotModel, avernet_tenant == get_current_avernet_tenant())`
-to every `SELECT`/`UPDATE`/`DELETE` touching `BotModel`. Inserts carry no
-`WHERE` clause, so the listener does not apply to them; a new row is stamped by
-the column default `default=get_current_avernet_tenant`, exactly as `env` is
-stamped today (`plugin_api/models.py:54`). That default is the single stamping
-mechanism — no per-call-site stamp is needed.
+next one. Enforcement has two active halves, both keyed on the same context and
+both impossible to forget:
+
+- **Reads / updates / deletes** — a `do_orm_execute` listener appends
+  `with_loader_criteria(BotModel, avernet_tenant == get_current_avernet_tenant())`
+  to every `SELECT`/`UPDATE`/`DELETE` touching `BotModel`.
+- **Inserts** — carry no `WHERE` clause, so the read listener cannot apply. A
+  `before_insert` mapper guard on `BotModel` instead *actively* stamps
+  `avernet_tenant = get_current_avernet_tenant()` on every new row, and raises
+  if a caller explicitly set a different tenant. This is deliberately **not** a
+  passive column default: a default only fires when the field is unset, so it
+  cannot stop a wrong value a future path (a clone, a bulk migration) carries in,
+  and it is a convenience rather than an enforced guarantee. The active guard
+  makes the insert side symmetric with the read side — one enforcement point,
+  every insert path covered.
+
+The column carries `server_default="teamclaw"` only to backfill existing rows on
+the `ALTER TABLE` and as a safety net for any non-ORM insert; the context-aware
+value always comes from the `before_insert` guard.
 
 The column and every new symbol carry the `avernet_tenant` prefix deliberately:
 the bare word `tenant` already denotes the poolab sandbox-allocator's tenant in
@@ -35,15 +47,16 @@ and satisfies the spec's "I cannot leak data by forgetting to add a filter".
   `ContextVar`, the default tenant constant, and the scope/inherit helpers.
   Sits beside `utils/env_utils.py`, its exact analogue.
 - `src/agentclaw/community/plugin_api/models.py` — `BotModel` gains
-  `avernet_tenant`, and the `do_orm_execute` listener is **defined here**, right
-  after the model, registered at model import. It is not a Plugin/seam: it needs
-  exactly one body for every profile (corp/community/test/singlebox all enforce
-  the identical rule), so it does not get a standalone file in the seam package.
-  `models.py` is the correct home — it is the one concrete file in `plugin_api/`
-  (the shared `BotModel` all plugin impls use), and the guard is welded to that
-  model. Registered on the `Session` **class**, so it applies to every session
-  in every runtime, including the out-of-tree corp `DatabasePlugin` this repo
-  does not contain.
+  `avernet_tenant`, and **both** guards (the `do_orm_execute` read guard and the
+  `before_insert` write guard) are **defined here**, right after the model,
+  registered at model import. Neither is a Plugin/seam: each needs exactly one
+  body for every profile (corp/community/test/singlebox all enforce the identical
+  rule), so they do not get a standalone file in the seam package. `models.py` is
+  the correct home — it is the one concrete file in `plugin_api/` (the shared
+  `BotModel` all plugin impls use), and the guards are welded to that model.
+  Registered on the `Session` class / the mapped class, so they apply in every
+  runtime, including the out-of-tree corp `DatabasePlugin` this repo does not
+  contain.
 - `src/agentclaw/community/adapters/http/middleware.py` — new
   `AvernetTenantMiddleware`, wired in `install_middleware`.
 - `src/agentclaw/community/adapters/http/openapi_v1/dependencies.py` — the
@@ -57,8 +70,8 @@ and satisfies the spec's "I cannot leak data by forgetting to add a filter".
   binding.
 - `src/agentclaw/community/plugins/bot_repository.py` — **unchanged.** Listed
   only to record it was checked: `insert` builds an ORM instance and flushes, so
-  the `avernet_tenant` column default stamps the tenant automatically. It is the
-  sole `BotModel` insert path, so no explicit stamp is added anywhere.
+  the `before_insert` write guard stamps the tenant. No explicit stamp is added
+  at any call site — the guard covers them uniformly.
 
 ## Data Model Changes
 
@@ -131,22 +144,33 @@ request — a total function, not `str | None`, per the type contract in
   captures the tenant at call time and re-establishes it inside the callee;
   it is the fix for `threading.Thread`, which does not copy context vars.
 - `plugin_api/models.py:58` — add after `caller_config_revision`:
-  `avernet_tenant = Column(String(64), default=get_current_avernet_tenant, nullable=False)`.
-  The callable default mirrors `env`'s `default=get_current_env` on line 54, so
-  a bare `session.add(BotModel(...))` from any module is stamped correctly.
-- `plugin_api/models.py` (after `BotModel`) — define `_avernet_tenant_guard`
-  and register it with `event.listens_for(Session, "do_orm_execute")` at module
-  import, so any code path able to import the model is also guarded (no
-  composition-root wiring, and nothing to forget per profile). The listener
-  skips statements carrying an explicit `{"skip_avernet_tenant_guard": True}`
-  execution option (used only by the guard's own tests and by the local
-  bootstrap's table creation). Registration is idempotent on a module-level
+  `avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")`.
+  `server_default` (not a Python `default=`) so `create_all` emits the same
+  `DEFAULT 'teamclaw'` prod's DDL applies, backfilling existing rows and covering
+  any non-ORM insert. Context-aware stamping is the `before_insert` guard's job,
+  below — not this column.
+- `plugin_api/models.py` (after `BotModel`) — two guards registered at module
+  import, both idempotent on a module-level flag:
+  - `_avernet_tenant_read_guard` via `event.listens_for(Session,
+    "do_orm_execute")` — filters `SELECT`/`UPDATE`/`DELETE` (honors
+    `include_aliases`; skips statements carrying
+    `{"skip_avernet_tenant_guard": True}`, used only by the guard's own tests and
+    the local bootstrap's table creation).
+  - `_avernet_tenant_insert_guard` via `event.listens_for(BotModel,
+    "before_insert")` — stamps `target.avernet_tenant =
+    get_current_avernet_tenant()` when unset, and raises a
+    `CrossTenantInsertError` when a different tenant was explicitly set. Covers
+    every insert path (the read listener cannot, since an `INSERT` has no
+    `WHERE`).
+  Registered on the `Session` class / the mapped class, so both apply in every
+  runtime, including the out-of-tree corp `DatabasePlugin`. Registration is
+  idempotent on a module-level
   flag so a double import cannot double-register.
-- `plugins/bot_repository.py:122` — **no change.** The `avernet_tenant` column
-  default stamps the tenant at flush; the listener never applies to `INSERT`, so
-  an explicit stamp here would be redundant. This is the only `BotModel` insert
-  path, so the column default is the single guarantee. A test still asserts an
-  insert carries the current tenant (it protects the default).
+- `plugins/bot_repository.py:122` — **no change.** The `before_insert` guard
+  stamps the tenant on every `BotModel` flush, so an explicit stamp here would be
+  redundant (and would protect only this one call site). A test still asserts an
+  insert carries the current tenant, and that a cross-tenant explicit insert is
+  rejected — both exercising the guard, not this file.
 - `adapters/http/middleware.py:204` — `AvernetTenantMiddleware` imports
   `resolve_avernet_tenant` directly (a plain function, not injected) and is
   added immediately after `UserContextMiddleware` (line 242) so it ends up
@@ -267,6 +291,10 @@ Unit:
 - Writes — `update_by_owner` and `soft_delete_by_owner` against another
   tenant's bot return `None` / `False`, indistinguishable from a missing row,
   and leave the row untouched.
+- Inserts (`before_insert` guard) — a bot inserted under tenant B is stamped
+  `avernet_tenant == "B"` with no explicit stamp at the call site; constructing
+  a `BotModel` with an explicit tenant different from the current context and
+  flushing raises `CrossTenantInsertError`.
 - Non-repository access — a bare `session.query(BotModel).all()` is filtered,
   proving the guard reaches the direct-query modules.
 - `bind_current_avernet_tenant` — a spawned thread observes the spawning tenant.
