@@ -27,7 +27,7 @@ from secbaas.community.api.session_file_sharing import (
     TransferNotTerminalError,
     TransferStateConflictError,
 )
-from secbaas.community.bootstrap import ApplicationContainer, get_container
+from secbaas.community.bootstrap import get_container
 from secbaas.community.logger import get_logger
 
 logger = get_logger("router")
