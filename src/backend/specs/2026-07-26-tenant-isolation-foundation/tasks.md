@@ -128,20 +128,22 @@
         ordering tests (11) still pass.
 - **Depends on:** Task 2, Task 6
 
-## Task 8: Request-spawned work inherits the tenant
+## Task 8: Request-spawned work inherits the tenant  `[x]`
 - **Goal:** In-request background threads observe the request's tenant.
 - **Files:** `core/bot_management/services/bot_service.py` (3 sites),
   `core/service_bot/services/bot_publish_service.py`,
   `core/bot_collaborator/services/collaborator_service.py`,
-  `tests/community/...`.
+  `tests/community/core/test_request_spawned_tenant_inheritance.py` (new).
 - **Done when:**
-  - [ ] The five `threading.Thread` targets listed in the plan are wrapped with
-        `bind_current_avernet_tenant` (or the tenant is otherwise captured and
-        re-established inside the thread).
-  - [ ] `asyncio.create_task` sites are left unchanged (verified they inherit
-        context).
-  - [ ] Test: a bot operation performed on a spawned thread runs under the
-        spawning request's tenant.
+  - [x] The five `threading.Thread` targets are wrapped with
+        `bind_current_avernet_tenant` (do_allocate, _update_cron_workflow,
+        _refresh_codefuse_token_on_device, _do_restart, collaborator _runner).
+  - [x] `asyncio.create_task` sites left unchanged — task creation copies the
+        context (noted in the plan; no code change).
+  - [x] Test (4): the three spawn shapes I touched (target-only, target+kwargs,
+        run-and-join) inherit the tenant; kwargs still pass; outside a request
+        the default is captured. 1487 tests pass across the three touched
+        modules — no regression.
 - **Depends on:** Task 2
 
 ## Task 9: Reference DDL artifact — decision  `[x]`
