@@ -7,7 +7,7 @@ from typing import Any
 ENGINE_PROMOTION_ORDER = ("openclaw", "claude_code", "aicoding", "hermes")
 CONTROL_KEYS = ("negative_controls", "teclaw_controls")
 _REQUIRED_KEYS = frozenset({"enable_all", "promoted_engines", "whitelist"})
-_ALLOWED_KEYS = _REQUIRED_KEYS | frozenset(CONTROL_KEYS)
+_ALLOWED_KEYS = _REQUIRED_KEYS | frozenset((*CONTROL_KEYS, "full_rollout_engines"))
 _ENTRY_KEYS = frozenset({"owner_id", "bot_id", "batch_id"})
 
 
@@ -43,7 +43,7 @@ def is_valid_rollout_config_value(value: Any) -> bool:
     keys = set(value)
     if not _REQUIRED_KEYS.issubset(keys) or not keys.issubset(_ALLOWED_KEYS):
         return False
-    if value.get("enable_all") is not False:
+    if not isinstance(value.get("enable_all"), bool):
         return False
 
     engines = value.get("promoted_engines")
@@ -52,8 +52,15 @@ def is_valid_rollout_config_value(value: Any) -> bool:
     promoted_engines = tuple(engines)
     if promoted_engines != ENGINE_PROMOTION_ORDER[: len(promoted_engines)]:
         return False
+    full_rollout_engines = value.get("full_rollout_engines", [])
+    if (
+        not isinstance(full_rollout_engines, list)
+        or any(not isinstance(engine, str) for engine in full_rollout_engines)
+        or len(set(full_rollout_engines)) != len(full_rollout_engines)
+        or any(engine not in promoted_engines for engine in full_rollout_engines)
+    ):
+        return False
 
     return all(
-        _valid_entries(value.get(key, []))
-        for key in ("whitelist", *CONTROL_KEYS)
+        _valid_entries(value.get(key, [])) for key in ("whitelist", *CONTROL_KEYS)
     )

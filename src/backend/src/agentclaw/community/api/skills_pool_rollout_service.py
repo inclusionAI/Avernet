@@ -21,6 +21,16 @@ class SkillsPoolRolloutServiceProtocol(Protocol):
         *,
         env: str,
         enabled: bool,
+        engine: str | None = None,
+        operator: str,
+        reason: str,
+    ) -> RolloutConfigSnapshot: ...
+
+    def set_full_rollout(
+        self,
+        *,
+        env: str,
+        enabled: bool,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot: ...

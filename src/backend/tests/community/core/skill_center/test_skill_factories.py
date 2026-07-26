@@ -46,8 +46,32 @@ def test_real_skill_set_service_factory_create_bot_paths_branch(test_injector):
     """user_id/entity_id present → the _get_bot_paths (if) branch the
     routers actually take (skills.py passes user_id/entity_id/bot_id)."""
     factory = test_injector.get(SkillSetServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
     svc = factory.create(user_id="u1", entity_id="e1", bot_id="b1")
     assert isinstance(svc, SkillSetService)
+
+
+def test_pool_active_factory_scopes_skill_writes_to_canonical_pool(test_injector):
+    factory = test_injector.get(SkillSetServiceFactory)
+    factory._pool_layout_paths = lambda *_: (
+        "/home/admin/.openclaw/workspace/skills",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-local",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+    )
+
+    svc = factory.create(
+        user_id="u1",
+        entity_id="e1",
+        bot_id="b1",
+        engine_type="openclaw",
+    )
+
+    assert str(svc.skill_service.local_dir).endswith(
+        "/skills-pool/skills-local"
+    )
+    assert str(svc.skill_service.repo_dir).endswith(
+        "/skills-pool/skills-repo"
+    )
 
 
 @pytest.mark.asyncio

@@ -69,6 +69,43 @@ def test_ready_requires_real_bridge_mount_and_readable_repo(tmp_path):
     assert result.evidence["checks"]["legacy_repo_bridge_valid"] is True
 
 
+def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(
+    tmp_path,
+):
+    home, active_root, pool_local, pool_repo = _ready_home(tmp_path)
+    source = pool_local / "handmade"
+    source.mkdir()
+    target = active_root / "handmade"
+    target.symlink_to(source, target_is_directory=True)
+    (active_root / "skills-repo").unlink()
+    pool_root = pool_local.parent
+    (pool_root / ".pool-active").write_text(
+        json.dumps(
+            {
+                "engine": "openclaw",
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
+                "migration_generation": "generation-1",
+                "activation_state": "active",
+                "mappings": [
+                    {"source": str(source), "target": str(target)}
+                ],
+            }
+        )
+    )
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+    assert result.evidence["activation_state"] == "active"
+    assert result.evidence["checks"]["legacy_storage_entries_absent"] is True
+
+
 def test_absent_marker_is_not_capable(tmp_path):
     result = inspect_runtime_layout(
         engine="openclaw",

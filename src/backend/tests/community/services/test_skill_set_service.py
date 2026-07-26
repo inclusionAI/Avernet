@@ -100,6 +100,12 @@ class TestGetSymlinkMappings:
             "/home/admin/.claude_code/workspace/skills-pool/skills-local/handmade"
         )
         skill_set_service.engine_type = "claude_code"
+        skill_set_service.entity_id = "100015"
+        skill_set_service._pool_layout_paths = lambda *_: (
+            "/home/admin/.claude/skills",
+            "/home/admin/.claude_code/workspace/skills-pool/skills-local",
+            "/home/admin/.claude_code/workspace/skills-pool/skills-repo",
+        )
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Claude Pool", "is_default": False}
         ]
@@ -127,7 +133,7 @@ class TestGetSymlinkMappings:
                 "/home/admin/.claude/skills/handmade",
             ),
             (
-                "/home/admin/.claude/skills/skills-repo/business/repo-skill",
+                "/home/admin/.claude_code/workspace/skills-pool/skills-repo/business/repo-skill",
                 "/home/admin/.claude/skills/repo-skill",
             ),
         ]
@@ -139,6 +145,12 @@ class TestGetSymlinkMappings:
             "/home/admin/.aicoding/workspace/skills-pool/skills-local/handmade"
         )
         skill_set_service.engine_type = "aicoding"
+        skill_set_service.entity_id = "100015"
+        skill_set_service._pool_layout_paths = lambda *_: (
+            "/home/admin/.claude/skills",
+            "/home/admin/.aicoding/workspace/skills-pool/skills-local",
+            "/home/admin/.aicoding/workspace/skills-pool/skills-repo",
+        )
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "AICoding Pool", "is_default": False}
         ]
@@ -166,7 +178,7 @@ class TestGetSymlinkMappings:
                 "/home/admin/.claude/skills/handmade",
             ),
             (
-                "/home/admin/.aicoding/skills-repo/business/repo-skill",
+                "/home/admin/.aicoding/workspace/skills-pool/skills-repo/business/repo-skill",
                 "/home/admin/.claude/skills/repo-skill",
             ),
         ]
@@ -178,6 +190,12 @@ class TestGetSymlinkMappings:
             "/home/admin/.hermes/workspace/skills-pool/skills-local/handmade"
         )
         skill_set_service.engine_type = "hermes"
+        skill_set_service.entity_id = "100015"
+        skill_set_service._pool_layout_paths = lambda *_: (
+            "/home/admin/.hermes/skills",
+            "/home/admin/.hermes/workspace/skills-pool/skills-local",
+            "/home/admin/.hermes/workspace/skills-pool/skills-repo",
+        )
         mock_skill_set_repo.get_all_active_skill_sets.return_value = [
             {"id": "1", "name": "Hermes Pool", "is_default": False}
         ]
@@ -205,10 +223,48 @@ class TestGetSymlinkMappings:
                 "/home/admin/.hermes/skills/handmade",
             ),
             (
-                "/home/admin/.hermes/skills-repo/business/repo-skill",
+                "/home/admin/.hermes/workspace/skills-pool/skills-repo/business/repo-skill",
                 "/home/admin/.hermes/skills/repo-skill",
             ),
         ]
+
+    def test_pool_active_repo_only_skill_uses_canonical_pool_source(
+        self, skill_set_service, mock_skill_set_repo
+    ):
+        skill_set_service.entity_id = "100015"
+        skill_set_service.engine_type = "openclaw"
+        skill_set_service._pool_layout_paths = lambda *_: (
+            "/home/admin/.openclaw/workspace/skills",
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local",
+            "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+        )
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "Pool", "is_default": False}
+        ]
+        mock_skill_set_repo.get_skills_in_set.return_value = [
+            {
+                "id": "2",
+                "name": "repo-skill",
+                "git_path": "git://business/repo-skill",
+            }
+        ]
+
+        with patch(
+            "agentclaw.community.utils.env_utils.is_local_mode",
+            return_value=False,
+        ):
+            mappings = skill_set_service.get_symlink_mappings(
+                user_id="100015",
+                bolt_id="default",
+            )
+
+        assert mappings[0].source == (
+            "/home/admin/.openclaw/workspace/skills-pool/"
+            "skills-repo/business/repo-skill"
+        )
+        assert mappings[0].target == (
+            "/home/admin/.openclaw/workspace/skills/repo-skill"
+        )
 
     def test_local_path_with_relative_name(
         self, skill_set_service, mock_skill_set_repo, mock_skill_repo

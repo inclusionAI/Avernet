@@ -66,6 +66,7 @@ logger = get_logger()
 # users can browse/edit their local skill files (arca/local layout). teclaw keeps
 # local skills flat at /workspace/skills-local, so it needs no injection.
 _SKILLS_LOCAL_RELPATH = "skills/skills-local"
+_POOL_SKILLS_LOCAL_RELPATH = "skills-pool/skills-local"
 
 # System files hidden from the resource browser (OpenClaw identity/config .md files).
 _HIDDEN_BASENAMES = {
@@ -78,6 +79,7 @@ _HIDDEN_BASENAMES = {
 _HIDDEN_DIRNAMES = {
     "state",
     "skills",
+    "skills-pool",
     "conf",
     *(f"{engine}_conf" for engine in SUPPORTED_ENGINE_TYPES),
 }
@@ -264,20 +266,40 @@ class ResourceFileService:
         # so it must be injected; teclaw keeps it flat at /workspace/skills-local and
         # lists naturally; baas/desktop never injected — don't probe it for them).
         if not path and ctx.provider in ("arca", "local", "baas"):
-            try:
-                skills_entries = await device_fs.list_dir(f"{WORKSPACE_NS}/skills")
-            except Exception as e:
-                # the skills dir is optional; a container without it returns 404.
-                # the root listing must not crash when this probe is unavailable.
-                logger.warning("[list_dir] skills-local probe skipped (no skills dir): %s", e)
-                skills_entries = None
-            for s in skills_entries or []:
-                if s.get("name") == "skills-local" and s.get("is_dir", False):
+            for local_relpath in (
+                _SKILLS_LOCAL_RELPATH,
+                _POOL_SKILLS_LOCAL_RELPATH,
+            ):
+                parent = local_relpath.rsplit("/", 1)[0]
+                try:
+                    skills_entries = await device_fs.list_dir(
+                        f"{WORKSPACE_NS}/{parent}"
+                    )
+                except Exception as e:
+                    # Either layout may be absent. Keep probing the other one
+                    # and never fail the root listing for this optional entry.
+                    logger.warning(
+                        "[list_dir] skills-local probe skipped path=%s: %s",
+                        parent,
+                        e,
+                    )
+                    continue
+                skill_local = next(
+                    (
+                        entry
+                        for entry in skills_entries or []
+                        if entry.get("name") == "skills-local"
+                        and entry.get("is_dir", False)
+                    ),
+                    None,
+                )
+                if skill_local is not None:
                     items.append({
                         "name": "skills-local",
-                        "path": _SKILLS_LOCAL_RELPATH,
+                        "path": local_relpath,
                         # the probed entry's own absolute path (logic-view fallback).
-                        "absolute_path": s.get("path") or self._logical(_SKILLS_LOCAL_RELPATH),
+                        "absolute_path": skill_local.get("path")
+                        or self._logical(local_relpath),
                         "is_dir": True,
                         "readonly": False,
                         "size": None,

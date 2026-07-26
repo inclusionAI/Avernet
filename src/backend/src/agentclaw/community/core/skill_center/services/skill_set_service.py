@@ -8,7 +8,7 @@ import zlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from agentclaw.community.core.devices.models import SynlinkMappingInfo
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
@@ -148,6 +148,11 @@ class SkillSetService:
         device_plugin: DeviceAccessor | None = None,
         *,
         path_factory: WorkspacePathFactory,
+        pool_layout_paths: Callable[
+            [str, str, str],
+            tuple[str, str, str] | None,
+        ]
+        | None = None,
     ):
         """
         Args:
@@ -226,6 +231,9 @@ class SkillSetService:
         self._resolver = resolver
         self._device_sync_dispatcher = device_sync_dispatcher
         self._mcp_sync_service = mcp_sync_service
+        self._pool_layout_paths = pool_layout_paths or (
+            lambda _owner_id, _bot_id, _engine: None
+        )
 
     def _get_current_active_skill_set_id(self) -> str | None:
         """Get currently active skill set ID from database (is_active=1)."""
@@ -1169,6 +1177,17 @@ class SkillSetService:
         skills_repo_dir = Path(
             ENGINE_SKILLS_REPO_DIR_MAP.get(self.engine_type, str(base_skills_dir / "skills-repo"))
         )
+        pool_layout_paths = None
+        if not self.is_desktop and self.entity_id is not None:
+            pool_layout_paths = self._pool_layout_paths(
+                str(self.entity_id),
+                str(self.bot_id),
+                self.engine_type,
+            )
+        if pool_layout_paths is not None:
+            active_path, local_path, repo_path = pool_layout_paths
+            base_skills_dir = Path(active_path)
+            skills_repo_dir = Path(repo_path)
 
         # singlebox 本机模式: engine adapter 跑在宿主 macOS,容器视图 /home/admin/...
         # 不存在。把容器路径前缀替换成宿主 per-bot workspace 路径
@@ -1205,6 +1224,8 @@ class SkillSetService:
             )
 
         skills_local_dir = base_skills_dir / "skills-local"
+        if pool_layout_paths is not None:
+            skills_local_dir = Path(local_path)
 
         # 5. 解析 git_path 生成 SynlinkMappingInfo 列表（使用绝对路径）
         symlinks = []
