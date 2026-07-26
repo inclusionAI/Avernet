@@ -22,19 +22,20 @@
   - [x] Finding recorded: **covered** — read path alone suffices for writes too.
 - **Depends on:** —
 
-## Task 2: Tenant context primitive
+## Task 2: Tenant context primitive  `[x]`
 - **Goal:** Add the request-lifetime tenant `ContextVar` and its helpers.
 - **Files:** `src/agentclaw/community/utils/avernet_tenant.py` (new),
-  `tests/community/...` (new unit test).
+  `tests/community/utils/test_avernet_tenant.py` (new).
 - **Done when:**
-  - [ ] `DEFAULT_AVERNET_TENANT = "teamclaw"`, `get_current_avernet_tenant() -> str`
+  - [x] `DEFAULT_AVERNET_TENANT = "teamclaw"`, `get_current_avernet_tenant() -> str`
         (total, never `None`), `avernet_tenant_scope(tenant_id)` context manager,
         and `bind_current_avernet_tenant(fn)` are implemented.
-  - [ ] Module docstring names the unrelated poolab/baas `tenant` concept so a
+  - [x] Module docstring names the unrelated poolab/baas `tenant` concept so a
         future reader does not conflate them.
-  - [ ] Tests: default outside a request; set/reset; nesting; reset still runs
+  - [x] Tests: default outside a request; set/reset; nesting; reset still runs
         when the scoped body raises; a thread wrapped by
-        `bind_current_avernet_tenant` observes the spawning tenant.
+        `bind_current_avernet_tenant` observes the spawning tenant (and a bare
+        thread does not). 7 passed.
 - **Depends on:** —
 
 ## Task 3: `avernet_tenant` column on `BotModel`
