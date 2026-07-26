@@ -94,6 +94,13 @@ sequenceDiagram
     BE-->>X: 响应
 ```
 
+### 5.1 前置条件与 corp SSO（为何通常没有可见的登录）
+
+- **APP X 自持其用户登录与令牌存储。** APP X 以任意方式认证其用户（corp 里常是经 BUService 解析的 IAM cookie），并自己存一份 `其用户 → Avernet access + refresh token` 的映射。仅当该存储中该用户没有有效令牌时，流程才启动。
+- **绝不把 APP X 自己的登录 cookie 转发给 teamclaw。** APP X 的 IAM cookie 只是*向 APP X* 证明其用户是谁。要调用 teamclaw，APP X 用 OAuth 流程拿到的 **teamclaw access token** —— 而非其 IAM cookie。转发 IAM cookie 就正是本设计要消除的令牌透传反模式（§3）。
+- **corp SSO ⇒ 无需重新登录。** 因为 corp 共享同一套 IAM SSO，浏览器到达 `/authorize` 时本就带着活跃的 IAM 会话，故 teamclaw **不显示登录页**。要么 teamclaw 直接读到会话（`alt 会话存在` 分支 —— 完全不跳转），要么它**静默** 302 到 `iam.alipay.com` 并因中心 IAM 会话已存在而瞬间返回。两种情况对用户都不可见。
+- **边界：** 这只在浏览器持有活跃 IAM 会话时成立（刚用过基于 IAM 的 APP X 即如此）。真正在 IAM SSO 之外的外部方会落入 `else 不存在` 分支，**会**看到 IAM 登录。
+
 ## 6. Community 流程（嵌套 OAuth）
 
 真人登录提供方 = **Google / OIDC**。结构同 corp，但登录这一步本身是一次 OAuth 流程 —— 于是有**两个嵌套的 OAuth 流程**，我们在各自里扮演相反角色：
