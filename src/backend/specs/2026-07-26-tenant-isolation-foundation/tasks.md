@@ -100,14 +100,14 @@
         bot_dormant / bot_chat / cleanup — the global guard regresses nothing.
 - **Depends on:** Task 1, Task 3, Task 4
 
-## Task 6: Public-API tenant source (`resolve_avernet_tenant`)
+## Task 6: Public-API tenant source (`resolve_avernet_tenant`)  `[x]`
 - **Goal:** Add the single replaceable seam for the public API's tenant.
 - **Files:** `src/agentclaw/community/adapters/http/openapi_v1/dependencies.py`.
 - **Done when:**
-  - [ ] Plain function `resolve_avernet_tenant(request) -> str` returns
+  - [x] Plain function `resolve_avernet_tenant(request) -> str` returns
         `DEFAULT_AVERNET_TENANT`, beside `require_principal`, same stub pattern,
         docstring marking it the drop-in point for the real verifier.
-  - [ ] No Protocol, no DI binding, no `app.py` / `container.py` change.
+  - [x] No Protocol, no DI binding, no `app.py` / `container.py` change.
 - **Depends on:** Task 2
 
 ## Task 7: `AvernetTenantMiddleware`
