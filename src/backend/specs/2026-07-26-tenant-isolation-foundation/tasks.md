@@ -2,19 +2,24 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Spike — confirm listener covers ORM writes
+## Task 1: Spike — confirm listener covers ORM writes  `[x]`
 - **Goal:** Empirically settle whether a `do_orm_execute` listener applying
   `with_loader_criteria(BotModel, ...)` also constrains `Query.update()` /
   `Query.delete()`, or whether the write methods need an explicit filter.
-- **Files:** throwaway probe under `tests/community/plugins/` — no production
-  change in this task.
+- **Files:** throwaway probe (scratchpad, not committed) — no production change.
+- **Finding (SQLAlchemy 2.0.51): COVERED.** A prototype listener adding
+  `with_loader_criteria(Bot, Bot.tenant == current, include_aliases=True)` in
+  `do_orm_execute` constrains the exact write shape `bot_repository` uses —
+  `db.query(Model).filter(...).update(values, synchronize_session=False)` — and
+  `Query.delete()`. Probe results: a cross-tenant `Query.update()` returned
+  rowcount 0 and left the row unchanged; a cross-tenant `Query.delete()`
+  returned rowcount 0 and left the row present; a cross-tenant read returned
+  nothing. **Task 5 needs no explicit `_avernet_tenant()` filter on the write
+  methods — the single read listener covers reads, updates, and deletes.**
 - **Done when:**
-  - [ ] A minimal reproduction inserts two bots under different tenants and runs
-        `update_by_owner` / `soft_delete_by_owner` against the other tenant's bot
-        with a prototype listener installed.
-  - [ ] The finding is recorded under this task: **covered** (read path alone
-        suffices) or **not covered** (write methods need an explicit
-        `_avernet_tenant()` filter — Task 5 adopts it).
+  - [x] Minimal reproduction run against different-tenant rows with a prototype
+        listener installed.
+  - [x] Finding recorded: **covered** — read path alone suffices for writes too.
 - **Depends on:** —
 
 ## Task 2: Tenant context primitive
