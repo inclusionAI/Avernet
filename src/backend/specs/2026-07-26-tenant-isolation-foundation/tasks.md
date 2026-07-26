@@ -54,21 +54,23 @@
         server_default). 5 model tests pass; existing 32 repo tests still green.
 - **Depends on:** Task 2
 
-## Task 4: Cross-tenant isolation test (red)
+## Task 4: Cross-tenant isolation test (red)  `[x]`
 - **Goal:** Write the spec-required test that fails before the guards exist and
   passes after — and record its red run.
-- **Files:** `tests/community/plugins/...` (new).
+- **Files:** `tests/community/plugins/test_bot_tenant_isolation.py` (new).
+- **Red run (recorded):** at this commit (column present, guards absent) —
+  `6 failed, 1 passed`. The 6 cross-tenant reads (`get_by_id`,
+  `get_by_id_and_owner`, `list_by_owner`, `count_by_owner`, `exists_by_bot_name`,
+  `search_bots`) fail because reads are unfiltered so tenant B sees tenant A's
+  bot; `test_own_tenant_still_visible` passes trivially (no filter yet). Task 5
+  turns the 6 green.
 - **Done when:**
-  - [ ] Test seeds a bot inside `avernet_tenant_scope("A")` and another inside
-        `avernet_tenant_scope("B")` via `BotRepository.insert`, then asserts a
-        read inside `avernet_tenant_scope("B")` does not return A's bot, across
-        `get_by_id`, `get_by_id_and_owner`, `list_by_owner`, `count_by_owner`,
-        `exists_by_bot_name`, `search_bots`.
-  - [ ] Run at this task's commit (column exists, guards not yet added) the test
-        **fails** — reads are unfiltered so B sees A's row — and the red run is
-        recorded in the commit message / task notes. Task 5 (both guards) turns
-        it green: the insert guard gives the two rows distinct tenants and the
-        read guard filters them.
+  - [x] Test seeds a bot inside `avernet_tenant_scope("tenant-a")` and another
+        inside `avernet_tenant_scope("tenant-b")` via `BotRepository.insert`, then
+        asserts a read inside `tenant-b` does not return A's bot across all six
+        read methods.
+  - [x] Run at this task's commit the test **fails** (6 failed) and the red run
+        is recorded above.
 - **Depends on:** Task 2, Task 3
 
 ## Task 5: Tenant guards — read filter + insert stamp (green)
