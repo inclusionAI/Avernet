@@ -8,6 +8,9 @@ base=""
 head="HEAD"
 dry_run="${OCB_PRE_PUSH_DRY_RUN:-0}"
 skip_singlebox_coverage="${OCB_PRE_PUSH_SKIP_SINGLEBOX_COVERAGE:-0}"
+# 默认只跑 lint/SAST 卡点(python_sast_local.sh),跳过更重的单测、覆盖率和
+# singlebox E2E。设置 OCB_PRE_PUSH_RUN_CI=1 才会跑完整 CI。
+run_full_ci="${OCB_PRE_PUSH_RUN_CI:-0}"
 
 # 这个脚本既可以被 .githooks/pre-push 调用,也可以手动运行:
 #   scripts/ci/pre_push.sh --base origin/dev --head HEAD
@@ -76,7 +79,23 @@ run_required() {
   "$@"
 }
 
+run_heavy() {
+  # heavy gate: 单测/覆盖率/E2E。默认(lint-only)跳过,
+  # 只有 OCB_PRE_PUSH_RUN_CI=1 时才作为 required 卡点运行。
+  if [[ "$run_full_ci" != "1" ]]; then
+    echo ""
+    echo "== skipped (lint-only): $* =="
+    echo "set OCB_PRE_PUSH_RUN_CI=1 to run tests/coverage/E2E"
+    return 0
+  fi
+  run_required "$@"
+}
+
 run_singlebox_coverage_once() {
+  if [[ "$run_full_ci" != "1" ]]; then
+    echo "singlebox coverage skipped (lint-only; set OCB_PRE_PUSH_RUN_CI=1)"
+    return 0
+  fi
   if [[ "$skip_singlebox_coverage" == "1" ]]; then
     echo "singlebox coverage skipped (OCB_PRE_PUSH_SKIP_SINGLEBOX_COVERAGE=1)"
     return 0
@@ -93,6 +112,11 @@ run_singlebox_coverage_once() {
 
 echo "base: $base"
 echo "head: $head"
+if [[ "$run_full_ci" == "1" ]]; then
+  echo "mode: full CI (lint + tests + coverage + E2E)"
+else
+  echo "mode: lint-only (set OCB_PRE_PUSH_RUN_CI=1 for tests/coverage/E2E)"
+fi
 
 if [[ -z "$changed_files" ]]; then
   # pre-push 只检查已提交的 push range。
@@ -107,7 +131,7 @@ if matches_any '^src/backend/'; then
   # 2) backend ci_test.sh 跑 pytest + coverage + report_check
   # 3) singlebox coverage 默认并入 pre-push,保证 Backend 变更会跑 singlebox E2E 覆盖率入口。
   run_required "$repo_root/scripts/ci/python_sast_local.sh" src/backend 1 --base "$base" --head "$head"
-  run_required "$repo_root/src/backend/scripts/ci_test.sh" --base "$base" --head "$head"
+  run_heavy "$repo_root/src/backend/scripts/ci_test.sh" --base "$base" --head "$head"
   run_singlebox_coverage_once
 fi
 
@@ -118,7 +142,7 @@ if matches_any '^src/baas/'; then
   # 如需临时跳过 BaaS CI,显式设置 OCB_PRE_PUSH_ENABLE_BAAS=0。
   if [[ "${OCB_PRE_PUSH_ENABLE_BAAS:-1}" == "1" ]]; then
     run_required "$repo_root/scripts/ci/python_sast_local.sh" src/baas 1 --base "$base" --head "$head"
-    run_required "$repo_root/src/baas/scripts/ci_test.sh" --base "$base" --head "$head"
+    run_heavy "$repo_root/src/baas/scripts/ci_test.sh" --base "$base" --head "$head"
     run_singlebox_coverage_once
   else
     echo "BaaS changes detected; BaaS CI gate skipped (OCB_PRE_PUSH_ENABLE_BAAS=0)"
@@ -129,7 +153,7 @@ if matches_any '^src/engine/'; then
   # Engine 默认强卡点:
   # SAST 先兜底语法/高危 lint,再跑 engine 自己的 pytest/coverage gate。
   run_required "$repo_root/scripts/ci/python_sast_local.sh" src/engine 1 --base "$base" --head "$head"
-  run_required "$repo_root/src/engine/scripts/ci_test.sh" --base "$base" --head "$head"
+  run_heavy "$repo_root/src/engine/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
 if matches_any '^src/bcs/'; then
@@ -139,7 +163,7 @@ if matches_any '^src/bcs/'; then
   #    E2E 并采集 runtime line/method、Router API、CLI command 覆盖率。
   # 如需临时跳过,显式设置 OCB_PRE_PUSH_ENABLE_BCS=0。
   if [[ "${OCB_PRE_PUSH_ENABLE_BCS:-1}" == "1" ]]; then
-    run_required "$repo_root/src/bcs/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail
+    run_heavy "$repo_root/src/bcs/scripts/ci_test.sh" --base "$base" --head "$head" --fast-fail
     run_singlebox_coverage_once
   else
     echo "BCS/BCN changes detected; BCS/BCN CI gate skipped (OCB_PRE_PUSH_ENABLE_BCS=0)"
@@ -148,12 +172,12 @@ fi
 
 if matches_any '^src/gateway/'; then
   # Gateway CI: ruff lint + pytest + coverage + diff coverage (>=90%).
-  run_required "$repo_root/src/gateway/scripts/ci_test.sh" --base "$base" --head "$head"
+  run_heavy "$repo_root/src/gateway/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
 if matches_any '^src/frontend/'; then
   # Frontend 也通过模块自己的 ci_test.sh 作为统一入口。
-  run_required "$repo_root/src/frontend/scripts/ci_test.sh" --base "$base" --head "$head"
+  run_heavy "$repo_root/src/frontend/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
 if matches_any '^(scripts/singlebox\.sh|scripts/modules/|scripts/ci/singlebox_coverage(_report|_manifest_check)?\.(sh|py)|scripts/ci/singlebox_coverage_modules\.yaml|scripts/ci/verify_singlebox_coverage_artifacts\.py|src/backend/tests/community/acceptance/|src/baas/tests/e2e/)'; then

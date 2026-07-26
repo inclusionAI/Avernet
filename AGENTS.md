@@ -101,11 +101,14 @@ Install the repository hooks separately in every Git worktree:
 scripts/install_git_hooks.sh
 ```
 
-CI gates are opt-in on push. By default the pre-push hook does not run any
-module CI, so a plain `git push` never triggers SAST, unit tests, or coverage.
-Set `OCB_PRE_PUSH_RUN_CI=1` to re-enable the gates for a push, or run
-`scripts/ci/pre_push.sh` manually. The rest of this section describes the
-behavior when the gates are enabled.
+By default the pre-push hook runs in **lint-only** mode: for changed Python
+modules it runs the fast `python_sast_local.sh` SAST/lint gate, but skips the
+heavier unit tests, changed-line coverage, and Singlebox E2E. Set
+`OCB_PRE_PUSH_RUN_CI=1` to run the full gates for a push, or run
+`scripts/ci/pre_push.sh` manually. The module-gate table below describes the
+full behavior; in lint-only mode only the SAST/lint step of each Python module
+runs, and modules without a standalone lint step (`src/gateway`, `src/frontend`,
+`src/bcs`, and the singlebox coverage paths) run nothing.
 
 ```bash
 OCB_PRE_PUSH_RUN_CI=1 git push
