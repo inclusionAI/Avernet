@@ -11,17 +11,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Response
 
-from agentclaw.community.adapters.http.openapi_v1._deps import require_principal
-from agentclaw.community.adapters.http.openapi_v1._contracts import (
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
     NameCheck,
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1._deps import Principal
+from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 
-from ._schemas import Preview, Resource, ResourceCreate, ResourceType, ResourceUpdate
+from .schemas import Preview, Resource, ResourceCreate, ResourceType, ResourceUpdate
 
 router = APIRouter(prefix="/openapi/v1/bots/resources", tags=["resources"])
 

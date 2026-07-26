@@ -10,14 +10,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from agentclaw.community.adapters.http.openapi_v1._deps import require_principal
-from agentclaw.community.adapters.http.openapi_v1._contracts import (
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
 )
-from agentclaw.community.adapters.http.openapi_v1._deps import Principal
+from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 
-from ._schemas import Channel, ChannelCreate, ChannelStatusUpdate, ChannelUpdate
+from .schemas import Channel, ChannelCreate, ChannelStatusUpdate, ChannelUpdate
 
 router = APIRouter(prefix="/openapi/v1/bots/channels", tags=["channels"])
 

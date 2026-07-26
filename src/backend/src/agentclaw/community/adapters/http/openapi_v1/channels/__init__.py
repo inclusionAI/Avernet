@@ -1,5 +1,5 @@
 """channels public API group."""
 
-from ._router import router
+from .router import router
 
 __all__ = ["router"]
