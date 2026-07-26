@@ -78,7 +78,8 @@ third-party developers without paying the double-write cost on every change.
       the backend **serves those same paths** (no per-operation path rewrite in the
       default case).
 - [ ] On each backend release, CI **publishes** the backend's generated API
-      description as an artifact to a shared store (e.g. OSS). The gateway
+      description as an artifact to an **object store** (vendor-neutral —
+      S3 / MinIO / GCS / OSS / …). The gateway
       **auto-adopts the latest** published description by refreshing it in the
       background and serving the doc from an in-memory copy; a new release's doc
       appears **without a gateway redeploy**.
@@ -91,9 +92,10 @@ third-party developers without paying the double-write cost on every change.
       **fails the release** on a breaking change (field/operation removed, optional
       input made required, type/default changed) unless it is an explicit new major
       version; backward-compatible changes publish freely.
-- [ ] The schema source is **pluggable**: the single-box / open-source profile
-      reads a local committed description file; the shared-store (OSS) reader is an
-      enterprise flavor of the same seam.
+- [ ] The schema source is **pluggable**: the single-box profile reads a local
+      committed description file; **any deployed edition — corp or community —**
+      reads from an **object store** (vendor-neutral) through the same seam. The
+      object-store reader is a flavor, not an enterprise-only capability.
 
 ## In Scope
 
@@ -107,8 +109,8 @@ third-party developers without paying the double-write cost on every change.
 - The publish-and-refresh mechanism: backend release CI publishes the generated
   description to a shared store; the gateway auto-adopts the latest via background
   refresh with last-known-good fallback; and the publish-time backward-compat gate.
-- Making the schema source pluggable (local committed file for single-box; shared
-  store / OSS reader as the enterprise flavor).
+- Making the schema source pluggable (local committed file for single-box;
+  vendor-neutral object-store reader for any deployed edition — corp or community).
 - Collapsing the backend's exposed operations under the `bots` domain, including
   moving the backend's routes so it serves those client-facing paths directly, and
   a backend-side check enforcing the `/openapi/v1` = external-only invariant.

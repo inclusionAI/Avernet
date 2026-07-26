@@ -18,8 +18,9 @@ class SchemaCatalog(Protocol):
 
     Implementations:
     - BareSchemaCatalog: reads a committed local file (single-box default).
-    - a sofa flavor (enterprise) reads an object store (OSS) and auto-adopts
-      the latest published version.
+    - an object-store flavor reads from a vendor-neutral object store
+      (S3 / MinIO / GCS / OSS / …) and auto-adopts the latest published version.
+      Used by any deployed edition — corp or community — not enterprise-only.
     """
 
     def current(self, domain: str) -> dict[str, Any]:

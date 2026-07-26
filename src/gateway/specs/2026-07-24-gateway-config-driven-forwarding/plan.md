@@ -25,9 +25,10 @@ release CI), so an incompatible description never reaches the store.
 ## Resolved decisions
 
 - **Doc transport = auto-adopt latest.** Backend release CI publishes the
-  generated description to a shared store (OSS); the gateway background-refreshes
-  and adopts the latest — no promotion pointer, no gateway redeploy. Single-box /
-  open-source reads a local committed file through the same pluggable seam.
+  generated description to a vendor-neutral **object store**; the gateway
+  background-refreshes and adopts the latest — no promotion pointer, no gateway
+  redeploy. Single-box reads a local committed file through the same pluggable
+  seam. Deployed community uses the object store too (same as corp).
 - **Verbatim forwarding, version base included.** The whole path forwards
   unchanged; the backend serves `/openapi/v1/bots/…` itself and owns its versioned
   public contract. Domain resolution reads the leading segment after `/openapi/v1`.
@@ -52,7 +53,8 @@ release CI), so an incompatible description never reaches the store.
   matcher/specificity in `core/authn/_route_security.py`) and the OpenAPI
   generator.
 - `src/gateway/…/spi/` + `plugins/` (new) — `Forwarder` SPI (bare = httpx);
-  `SchemaCatalog` SPI (bare = local file, enterprise flavor = OSS + refresh).
+  `SchemaCatalog` SPI (bare = local file; object-store flavor = object store +
+  refresh, for any deployed edition — corp or community).
 - `src/gateway/…/bootstrap/` — compose forwarder, domain map, schema catalog;
   keep the existing `Authenticator` wiring.
 - `src/gateway/configs/` — new `upstreams.yaml` (domain→server + schema source).
@@ -77,7 +79,7 @@ artifact (in the store / a local file).
 domains:
   bots:
     server: agentclaw
-    schema: { source: oss, url: "oss://…/bots/openapi-latest.json", refresh_seconds: 300 }
+    schema: { source: object_store, url: "https://<bucket>/bots/openapi-latest.json", refresh_seconds: 300 }
     # single-box flavor instead:  schema: { source: file, path: schemas/bots.openapi.json }
 servers:
   agentclaw: { base_url: "${AGENTCLAW_URL}" }   # env-overridable per the forwarding doc §1
@@ -129,8 +131,11 @@ it.
 ## Dependencies
 
 - Promote **`httpx`** to a runtime dep (`pyproject.toml:7`) for the bare forwarder.
-- The **OSS reader** lives in the enterprise flavor only; community stays
-  file-based (no cloud SDK in the open-source deps).
+- The **object-store reader** is a pluggable flavor available to any deployed
+  edition (corp or community); only single-box stays file-based. Keep it
+  vendor-neutral — read the published object over a portable HTTP(S) fetch so no
+  vendor cloud SDK enters the open-source deps. (Bare ships file-only today; the
+  object-store reader is a follow-up.)
 - Breaking-change detection: a focused in-repo Python checker over two OpenAPI
   JSONs (removed op/field, optional→required, type/`default`/enum change).
   `oasdiff` (Go) is the richer alternative but adds a non-Python toolchain —

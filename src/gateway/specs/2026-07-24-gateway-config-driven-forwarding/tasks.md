@@ -94,14 +94,14 @@
 - **Files:** `src/gateway/scripts/gate_and_publish_openapi.py` (new) + `openapi_v1/dump.py` (Task 8)
 - **Done when:**
   - [x] `gate_and_publish_openapi.py` runs `check_compatible(published, candidate)`; a breaking change exits non-zero (fails the release) unless `--allow-breaking` for a coordinated change.
-  - [x] On pass, the candidate becomes the published artifact (committed single-box file); the docstring documents the two-step CI wiring (backend `dump` → gateway gate/publish) and where an OSS upload slots in.
+  - [x] On pass, the candidate becomes the published artifact (committed single-box file); the docstring documents the two-step CI wiring (backend `dump` → gateway gate/publish) and where an object-store upload slots in.
   - [x] Tests cover additive-pass, breaking-block, override, missing-published, and publish-on-pass.
 
 ## Task 11: Tests & Verification `[x]`
 - **Goal:** Ensure the feature meets the spec acceptance criteria end-to-end.
 - **Files:** the test suites above
 - **Done when:**
-  - [x] Every spec acceptance criterion holds: no hand-written endpoints/whitelist (catch-all + no per-op config); domain-transparent verbatim forward, unknown domain denied (`DomainMap`/catch-all); single domain→server map (`upstreams.yaml`); fail-closed prefix auth before forward; `/openapi/v1` external-only invariant (backend namespace test); single generated doc, shapes from the backend at verbatim paths; backend serves the `bots` surface (119 paths); publish → background auto-adopt latest with last-known-good; doc-only degradation; publish-time compat gate; pluggable schema source (bare file; OSS = enterprise seam).
+  - [x] Every spec acceptance criterion holds: no hand-written endpoints/whitelist (catch-all + no per-op config); domain-transparent verbatim forward, unknown domain denied (`DomainMap`/catch-all); single domain→server map (`upstreams.yaml`); fail-closed prefix auth before forward; `/openapi/v1` external-only invariant (backend namespace test); single generated doc, shapes from the backend at verbatim paths; backend serves the `bots` surface (119 paths); publish → background auto-adopt latest with last-known-good; doc-only degradation; publish-time compat gate; pluggable schema source (bare file; vendor-neutral object-store reader for any deployed edition — corp or community).
   - [x] `ruff` + `pytest -m "not e2e"` green — gateway **306**, backend gateway-contracts **102** (+ namespace invariant). mypy consistent with the repo baseline (only the pre-existing environmental subclass/Any artifacts).
 
 ---
