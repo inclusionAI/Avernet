@@ -153,6 +153,68 @@ class TestBotModelToDict:
         for field in required_fields:
             assert field in result, f"Field '{field}' is missing from to_dict result"
 
+    def test_to_dict_key_set_unchanged_by_avernet_tenant(self, db):
+        """The avernet_tenant column must NOT surface in to_dict().
+
+        Isolation adds a column but must not change any current internal API
+        response body — so to_dict()'s exact key set stays what it was before
+        this feature. Pinning the full set here fails loudly if avernet_tenant
+        (or anything else) ever leaks in.
+        """
+        expected_keys = {
+            "id",
+            "bot_id",
+            "bot_name",
+            "bot_desc",
+            "entity_id",
+            "entity_type",
+            "creator_id",
+            "owner_id",
+            "owner_name",
+            "engine_types",
+            "active_engine",
+            "status",
+            "binding_id",
+            "device_id",
+            "gmt_create",
+            "gmt_modified",
+            "modifier_id",
+            "share_policy",
+            "is_delete",
+            "public",
+            "ext",
+            "env",
+            "bot_type",
+            "template_type",
+            "call_type",
+            "caller_config_revision",
+        }
+
+        bot = BotModel(
+            bot_id="test-bot",
+            bot_name="Test Bot",
+            bot_desc="Test description",
+            entity_id="entity-1",
+            entity_type="staff",
+            creator_id="user-1",
+            owner_id="user-1",
+            owner_name="Test User",
+            status="ACTIVE",
+        )
+
+        with db.orm_session() as session:
+            session.add(bot)
+            session.flush()
+            session.refresh(bot)
+            # The column exists and is populated on the row...
+            assert bot.avernet_tenant == "teamclaw"
+            result = bot.to_dict()
+
+        # ...but it is absent from the serialized form, and the full key set is
+        # exactly what it was before isolation.
+        assert "avernet_tenant" not in result
+        assert set(result.keys()) == expected_keys
+
     def test_to_dict_handles_json_fields(self, db):
         """Test that to_dict properly serializes JSON fields."""
         bot = BotModel(

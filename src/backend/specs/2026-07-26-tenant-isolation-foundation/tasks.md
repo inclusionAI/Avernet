@@ -38,18 +38,20 @@
         thread does not). 7 passed.
 - **Depends on:** —
 
-## Task 3: `avernet_tenant` column on `BotModel`
+## Task 3: `avernet_tenant` column on `BotModel`  `[x]`
 - **Goal:** Give bot records the tenant axis, invisible in API responses. The
   column carries only a `server_default` for backfill; context-aware stamping is
   the `before_insert` guard's job (Task 5).
 - **Files:** `src/agentclaw/community/plugin_api/models.py`,
-  `tests/community/...` (to_dict test).
+  `tests/community/plugin_api/test_models.py`.
 - **Done when:**
-  - [ ] `BotModel` gains `avernet_tenant = Column(String(64), nullable=False,
+  - [x] `BotModel` gains `avernet_tenant = Column(String(64), nullable=False,
         server_default="teamclaw")` after `caller_config_revision` (matches the
         prod DDL `DEFAULT 'teamclaw'`, so `create_all` and the backfill agree).
-  - [ ] `avernet_tenant` is **not** added to `BotModel.to_dict()`.
-  - [ ] Test asserts `to_dict()`'s key set is unchanged from before this change.
+  - [x] `avernet_tenant` is **not** added to `BotModel.to_dict()`.
+  - [x] Test asserts `to_dict()`'s key set is unchanged (pins the full 26-key
+        set; a seeded row carries `avernet_tenant == "teamclaw"` via the
+        server_default). 5 model tests pass; existing 32 repo tests still green.
 - **Depends on:** Task 2
 
 ## Task 4: Cross-tenant isolation test (red)

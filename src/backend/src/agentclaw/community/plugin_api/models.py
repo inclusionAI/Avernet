@@ -56,6 +56,13 @@ class BotModel(Base):
     template_type = Column(String(64), nullable=True)  # 模板类型，如 applicationCoding
     call_type = Column(String(16), default="owner", nullable=False)
     caller_config_revision = Column(BigInteger, default=0, nullable=False)
+    # Data-isolation tenant (see utils/avernet_tenant + the BotModel guards
+    # below). server_default (not a Python default=) so create_all emits the
+    # same DEFAULT 'teamclaw' prod's out-of-band DDL applies, backfilling
+    # existing rows and covering any non-ORM insert; the context-aware value on
+    # ORM inserts comes from the before_insert guard. Deliberately absent from
+    # to_dict() so no current API response body changes.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
