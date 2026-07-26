@@ -439,7 +439,6 @@ def _resources_router_app(mock_ctx, tmp_path):
         DeviceFilesystemDispatcher,
     )
     from agentclaw.community.api.baas_service import BaasServiceProtocol
-    from agentclaw.community.core.files.factory import BotFileServiceFactory
     from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
         BotPublishRepositoryProtocol,
     )
@@ -476,7 +475,6 @@ def _resources_router_app(mock_ctx, tmp_path):
 
     path_factory = _make_mock_path_factory(tmp_path)
     baas_service = MagicMock()
-    bot_file_factory = MagicMock()
     publish_repo = MagicMock()
 
     app = FastAPI()
@@ -496,7 +494,6 @@ def _resources_router_app(mock_ctx, tmp_path):
             binder.bind(
                 BaasServiceProtocol, to=CallableProvider(lambda: baas_service)
             )
-            binder.bind(BotFileServiceFactory, to=bot_file_factory)
             binder.bind(
                 BotPublishRepositoryProtocol,
                 to=CallableProvider(lambda: publish_repo),
@@ -587,7 +584,6 @@ def _file_router_app(mock_ctx, tmp_path):
         DeviceFilesystemDispatcher,
     )
     from agentclaw.community.api.baas_service import BaasServiceProtocol
-    from agentclaw.community.core.files.factory import BotFileServiceFactory
     from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
         BotPublishRepositoryProtocol,
     )
@@ -619,7 +615,6 @@ def _file_router_app(mock_ctx, tmp_path):
 
     path_factory = _make_mock_path_factory(tmp_path)
     baas_service = MagicMock()
-    bot_file_factory = MagicMock()
     publish_repo = MagicMock()
 
     app = FastAPI()
@@ -635,7 +630,6 @@ def _file_router_app(mock_ctx, tmp_path):
             binder.bind(
                 BaasServiceProtocol, to=CallableProvider(lambda: baas_service)
             )
-            binder.bind(BotFileServiceFactory, to=bot_file_factory)
             binder.bind(
                 BotPublishRepositoryProtocol,
                 to=CallableProvider(lambda: publish_repo),

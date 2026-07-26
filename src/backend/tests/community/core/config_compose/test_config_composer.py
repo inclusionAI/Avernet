@@ -39,7 +39,6 @@ class _FakeCollector:
     def skills(self, req): return self._skills
     def mcps(self, req): return self._mcps
     def resources(self, req): return self._resources
-    def bot_files(self, req): return getattr(self, "_bot_files", [])
     def identity_files(self, req): return self._identity
     def engine_overrides(self, req): return self._overrides
 

@@ -205,7 +205,6 @@ modules:
     acceptance_targets:
       - tests/community/acceptance/files
     core_paths:
-      - src/agentclaw/community/core/files/
       - src/agentclaw/community/core/services/resource_file_service.py
     router_api:
       status: applicable

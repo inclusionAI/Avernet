@@ -304,15 +304,6 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             if r.path
         ]
 
-    # ── workspace files ──────────────────────────────────────────────────
-    def bot_files(self, req: ComposeRequest) -> list[CollectedFile]:
-        """Always ``[]`` — teclaw owns its workspace files in the running
-        container (no ``ac_file`` mirror; gathered from the engine into the next
-        version at promotion), and teclaw is the only engine that ever populated
-        ``ac_file``. Kept because it's part of the ``ComposeInputCollector``
-        protocol the composer calls (alongside :meth:`resources`)."""
-        return []
-
     # ── identity files ──────────────────────────────────────────────────
     def identity_files(self, req: ComposeRequest) -> list[CollectedFile]:
         """Collect the bot's existing identity/persona files as ``CollectedFile``.

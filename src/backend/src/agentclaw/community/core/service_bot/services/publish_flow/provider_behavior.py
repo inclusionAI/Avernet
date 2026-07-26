@@ -123,8 +123,9 @@ class DefaultProviderBehavior(ProviderBehavior):
 class TeclawProviderBehavior(ProviderBehavior):
     """Pull-based teclaw container behavior.
 
-    The running source container owns its live files (no ``ac_file`` mirror), so a
-    build snapshots ``/workspace`` + identity files into OSS and embeds the refs;
+    The running source container owns its live files (the backend keeps no mirror
+    of them), so a build snapshots ``/workspace`` + identity files into OSS and
+    embeds the refs;
     a teclaw upgrade has no startup callback, so the MCP outbound rule is refreshed
     explicitly; teclaw service bots do not support scale; and the verify bot is
     kept (not destroyed) when online succeeds.

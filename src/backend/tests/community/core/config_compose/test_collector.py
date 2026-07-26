@@ -226,14 +226,6 @@ def test_resources_emit_absolute_container_path(monkeypatch):
 
 
 @pytest.mark.unit
-def test_bot_files_always_empty():
-    # ac_file is fully retired: teclaw owns its files in the container (gathered
-    # at promotion), and no other engine populated ac_file. bot_files is now a
-    # protocol-required no-op.
-    assert _collector().bot_files(_req()) == []
-
-
-@pytest.mark.unit
 def test_identity_files_use_sync_existence_check(tmp_path, monkeypatch):
     import agentclaw.community.core.config_compose.services.collector as collector_mod
 
@@ -384,7 +376,7 @@ def test_engine_overrides_no_active_channels_returns_empty():
 # asserted against the real ``teclaw/{env}/bolt_data`` store base.
 
 
-# ── teclaw: files owned by the running container (no ac_file / no probe) ──
+# ── teclaw: files owned by the running container (no backend mirror / no probe) ──
 
 def _teclaw_req() -> ComposeRequest:
     return ComposeRequest(

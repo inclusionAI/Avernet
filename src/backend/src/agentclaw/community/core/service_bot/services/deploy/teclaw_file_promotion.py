@@ -1,8 +1,8 @@
 """``TeclawFilePromotion`` — snapshot a running teclaw bot's files into OSS at a
 publish stage, as artifact refs.
 
-A running teclaw container owns its live files (no ``ac_file`` mirror; see the
-per-file write migration). So at a promotion boundary (draft→verify,
+A running teclaw container owns its live files (the backend keeps no mirror of
+them; see the per-file write migration). So at a promotion boundary (draft→verify,
 verify→publish) the backend must **read the source container's files from the
 engine**, write each to a **stage-scoped OSS key**, and return ``{store, path}``
 refs to embed in the composed :class:`BotConfigArtifact` for the new stage.
