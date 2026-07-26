@@ -282,6 +282,38 @@ def test_claim_pool_migration_persists_generation_lease_and_rollout_evidence() -
     assert claimed.persisted is True
 
 
+def test_not_capable_probe_releases_preparing_claim_and_preserves_evidence() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+
+    released = repository.release_not_capable_claim(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        evidence={"reason": "pool_marker_missing"},
+    )
+
+    assert released is True
+    state = repository.get(scope)
+    assert state.active_layout is SkillLayout.LEGACY
+    assert state.target_layout is None
+    assert state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert state.migration_generation is None
+    assert state.lease_owner is None
+    assert state.lease_expires_at is None
+    assert state.last_probe_result == "NOT_CAPABLE"
+    assert state.last_probe_evidence == {"reason": "pool_marker_missing"}
+    assert state.data_plane_cutover_committed is False
+
+
 def test_claim_updates_an_existing_unclaimed_legacy_row() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)

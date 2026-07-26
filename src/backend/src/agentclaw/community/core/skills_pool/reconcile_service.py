@@ -139,7 +139,18 @@ class SkillsPoolReconcileService:
             engine=engine,
         )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
-            if probe.status in {
+            if probe.status is RuntimeLayoutProbeStatus.NOT_CAPABLE:
+                released = self._layouts.release_not_capable_claim(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    evidence=probe.evidence,
+                )
+                if not released:
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                    )
+            elif probe.status in {
                 RuntimeLayoutProbeStatus.INVALID,
                 RuntimeLayoutProbeStatus.TRANSIENT_ERROR,
             }:
