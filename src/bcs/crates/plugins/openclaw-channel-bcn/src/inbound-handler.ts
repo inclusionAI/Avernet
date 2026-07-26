@@ -56,21 +56,24 @@ function extractFromPrefix(raw: string): { senderName: string; text: string } {
   return { senderName: '', text: raw };
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.trim() || undefined;
+}
+
 export function resolveInboundSender(
   rawText: string,
   channel?: ChatSendParams['channel'],
   sessionContext?: GroupContext,
 ): { displayName: string; actorId: string | undefined; strippedText: string } {
   const { senderName, text: strippedText } = extractFromPrefix(rawText);
-  const displayName = channel?.actor_name?.trim()
-    || senderName.trim()
-    || channel?.user_id?.trim()
-    || sessionContext?.from?.trim()
+  const displayName = nonEmptyString(channel?.actor_name)
+    || nonEmptyString(senderName)
+    || nonEmptyString(channel?.user_id)
+    || nonEmptyString(sessionContext?.from)
     || 'bcs-bot';
-  const actorId = channel?.actor_id?.trim()
-    || sessionContext?.from_bot_id?.trim()
-    || channel?.user_id?.trim()
-    || undefined;
+  const actorId = nonEmptyString(channel?.actor_id)
+    || nonEmptyString(sessionContext?.from_bot_id);
   return { displayName, actorId, strippedText };
 }
 

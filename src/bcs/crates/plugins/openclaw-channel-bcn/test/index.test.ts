@@ -105,6 +105,65 @@ describe('openclaw-channel-bcn', () => {
     );
   });
 
+  it('does not treat a legacy Human display name as SenderId', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        'hello',
+        { source: 'api', user_id: 'Apple' },
+      ),
+      {
+        displayName: 'Apple',
+        actorId: undefined,
+        strippedText: 'hello',
+      },
+    );
+  });
+
+  it('uses legacy from_bot_id as the Bot SenderId', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:研发]bot reply',
+        { source: 'api', user_id: '研发' },
+        {
+          session_id: 'session-1',
+          participants: [],
+          originator: '产品经理',
+          from: '研发(bot_11b77a19)',
+          from_bot_id: 'bot_11b77a19',
+          you_are_mentioned: true,
+          is_sender: false,
+          mentions: [],
+          message: 'bot reply',
+        },
+      ),
+      {
+        displayName: '研发',
+        actorId: 'bot_11b77a19',
+        strippedText: 'bot reply',
+      },
+    );
+  });
+
+  it('ignores malformed non-string sender fields without throwing', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:研发]bot reply',
+        {
+          source: 'api',
+          user_id: 101,
+          actor_id: { value: 'human_001' },
+          actor_name: false,
+        } as never,
+        { from_bot_id: 101 } as never,
+      ),
+      {
+        displayName: '研发',
+        actorId: undefined,
+        strippedText: 'bot reply',
+      },
+    );
+  });
+
   it('resolves default and named BCS accounts', () => {
     const cfg = {
       channels: {
@@ -658,6 +717,8 @@ describe('openclaw-channel-bcn', () => {
       assert.equal(capturedReplyOptions?.disableBlockStreaming, false);
       assert.equal(capturedReplyOptions?.sourceReplyDeliveryMode, 'automatic');
       assert.equal(capturedInboundContext?.Body, '[Image: diagram.png]');
+      assert.equal(capturedInboundContext?.SenderName, 'user-1');
+      assert.equal(capturedInboundContext?.SenderId, undefined);
       assert.equal(capturedInboundContext?.MediaPath, savedImagePath);
       assert.equal(capturedInboundContext?.MediaType, 'image/png');
       assert.deepEqual(capturedInboundContext?.MediaPaths, [ savedImagePath ]);
