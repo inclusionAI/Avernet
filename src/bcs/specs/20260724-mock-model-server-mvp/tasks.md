@@ -20,7 +20,7 @@
 验证：
 
 ```bash
-python3 scripts/test_mock_model_server.py
+python3 scripts/modules/test_mock_model_server.py
 bash scripts/test_singlebox_model_config.sh
 bash -n scripts/modules/model_config.sh
 bash -n scripts/singlebox.sh

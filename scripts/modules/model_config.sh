@@ -39,7 +39,7 @@ singlebox_mock_model_start() {
     fi
 
     mkdir -p "$(dirname "$pid_file")" "$LOG_DIR"
-    python3 "${PROJECT_ROOT}/scripts/mock_model_server.py" \
+    python3 "${PROJECT_ROOT}/scripts/modules/mock_model_server.py" \
         --port "${SINGLEBOX_MOCK_MODEL_PORT:-18080}" >"$log_file" 2>&1 &
     pid=$!
     printf '%s\n' "$pid" > "$pid_file"
@@ -79,7 +79,7 @@ singlebox_mock_model_stop() {
     kill -0 "$pid" 2>/dev/null || return 0
     command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
     case "$command" in
-        *"${PROJECT_ROOT}/scripts/mock_model_server.py"*) ;;
+        *"${PROJECT_ROOT}/scripts/modules/mock_model_server.py"*) ;;
         *)
             log_warn "Refusing to stop PID ${pid}; it is not the singlebox mock model server."
             return 0

@@ -259,7 +259,7 @@ Sender 名称不保证一次请求的全局唯一性。MVP 的目标是验证真
 
 ### AC-04 回归
 
-- `python3 scripts/test_mock_model_server.py` 通过。
+- `python3 scripts/modules/test_mock_model_server.py` 通过。
 - `bash scripts/test_singlebox_model_config.sh` 通过。
 - 相关 shell 脚本语法检查通过。
 - `git diff --check` 通过。
