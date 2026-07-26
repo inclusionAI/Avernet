@@ -73,34 +73,31 @@
         is recorded above.
 - **Depends on:** Task 2, Task 3
 
-## Task 5: Tenant guards — read filter + insert stamp (green)
+## Task 5: Tenant guards — read filter + insert stamp (green)  `[x]`
 - **Goal:** Install both active guards that scope `BotModel` to the current
   tenant; turn Task 4 green. Reads/updates/deletes are filtered; inserts are
   stamped and validated.
 - **Files:** `src/agentclaw/community/plugin_api/models.py`,
-  `tests/community/plugins/...`.
+  `tests/community/plugins/test_bot_tenant_guard.py` (new).
 - **Done when:**
-  - [ ] **Read guard:** registered via `event.listens_for(Session,
-        "do_orm_execute")` at model import; applies `with_loader_criteria(BotModel,
-        avernet_tenant == get_current_avernet_tenant())`; honors `include_aliases`
-        for joins; skips statements carrying `{"skip_avernet_tenant_guard": True}`.
-  - [ ] **Insert guard:** registered via `event.listens_for(BotModel,
-        "before_insert")`; stamps `avernet_tenant = get_current_avernet_tenant()`
-        when unset and raises `CrossTenantInsertError` when a different tenant was
-        explicitly set. Covers every insert path, not just `BotRepository.insert`.
-  - [ ] Both registrations idempotent on a module-level flag.
-  - [ ] Write coverage matches the Task 1 finding: if `Query.update()` /
-        `Query.delete()` are not covered by the read listener,
-        `update_by_owner` / `soft_delete_by_owner` get an explicit
-        `_avernet_tenant()` filter.
-  - [ ] Task 4's test passes. Added tests:
-        - cross-tenant `update_by_owner` / `soft_delete_by_owner` return `None` /
-          `False` and leave the row untouched (indistinguishable from missing);
-        - a bare `session.query(BotModel).all()` is filtered (proves
-          non-repository query sites are covered);
-        - an insert under `avernet_tenant_scope("B")` is stamped `"B"` with no
-          explicit stamp at the call site; an explicit conflicting-tenant insert
-          raises `CrossTenantInsertError`.
+  - [x] **Read guard:** `event.listen(Session, "do_orm_execute", ...)` at model
+        import; applies `with_loader_criteria(BotModel, avernet_tenant ==
+        get_current_avernet_tenant(), include_aliases=True)`; skips column /
+        relationship loads (already-authorized reloads) and statements carrying
+        `{"skip_avernet_tenant_guard": True}`.
+  - [x] **Insert guard:** `event.listen(BotModel, "before_insert", ...)`; stamps
+        `avernet_tenant` when unset, raises `CrossTenantInsertError` on an
+        explicit conflicting tenant. Covers every insert path.
+  - [x] Both registrations idempotent on `_AVERNET_TENANT_GUARDS_INSTALLED`.
+  - [x] Per the Task 1 finding, **no** explicit write-method filter added — the
+        read listener covers `Query.update()` / `Query.delete()`.
+  - [x] Task 4's isolation test passes (7). Added guard tests (7): cross-tenant
+        `update_by_owner` / `soft_delete_by_owner` are no-ops and leave the row
+        untouched; a bare `session.query(BotModel).all()` is filtered; insert
+        under a scope stamps that tenant (default outside a request); an explicit
+        conflicting-tenant insert raises `CrossTenantInsertError`; the skip option
+        sees all tenants. **1212 passed** across plugins / plugin_api /
+        bot_dormant / bot_chat / cleanup — the global guard regresses nothing.
 - **Depends on:** Task 1, Task 3, Task 4
 
 ## Task 6: Public-API tenant source (`resolve_avernet_tenant`)
