@@ -45,11 +45,14 @@ and satisfies the spec's "I cannot leak data by forgetting to add a filter".
 - `src/agentclaw/community/adapters/http/middleware.py` — new
   `AvernetTenantMiddleware`, wired in `install_middleware`.
 - `src/agentclaw/community/adapters/http/openapi_v1/dependencies.py` — the
-  public-API tenant seam (`AvernetTenantResolver`). This one **is** a genuine
-  seam: a default-tenant placeholder now, the real caller-identity verifier
-  later.
-- `src/agentclaw/community/di/modules/tenancy_module.py` (new) — binds the
-  placeholder resolver (the seam above; the listener is not bound here).
+  public-API tenant source: a single plain function `resolve_avernet_tenant`,
+  sitting beside the existing `require_principal` stub and following its exact
+  pattern. It is **not** a DI/profile seam — there is one gateway contract, so
+  one implementation for every profile; today it returns the default tenant,
+  and the auth workstream replaces this one body in place when the gateway
+  forwards a real principal (no endpoint changes when it lands). "Single
+  replaceable seam" in the spec means this drop-in point, not a per-profile
+  binding.
 - `src/agentclaw/community/plugins/bot_repository.py` — `insert` stamps
   `avernet_tenant` explicitly (parity with its explicit `env=get_current_env()`).
 
@@ -93,14 +96,11 @@ def bind_current_avernet_tenant(fn: Callable[P, R]) -> Callable[P, R]: ...
 ```
 
 ```python
-# adapters/http/openapi_v1/dependencies.py
-class AvernetTenantResolver(Protocol):
-    def resolve(self, request: Request) -> str: ...
-
-class DefaultAvernetTenantResolver:
-    """Placeholder until the caller-identity verifier lands."""
-    def resolve(self, request: Request) -> str:
-        return DEFAULT_AVERNET_TENANT
+# adapters/http/openapi_v1/dependencies.py — beside require_principal, same pattern
+def resolve_avernet_tenant(request: Request) -> str:
+    """Public-API tenant source. Placeholder until the gateway forwards a
+    verified principal; the auth workstream replaces this body in place."""
+    return DEFAULT_AVERNET_TENANT
 ```
 
 `get_current_avernet_tenant()` returns `DEFAULT_AVERNET_TENANT` outside any
@@ -126,19 +126,18 @@ request — a total function, not `str | None`, per the type contract in
   flag so a double import cannot double-register.
 - `plugins/bot_repository.py:122` — add `avernet_tenant=get_current_avernet_tenant()`
   beside `env=get_current_env()`.
-- `adapters/http/middleware.py:204` — `install_middleware` gains an
-  `avernet_tenant_resolver` parameter; `AvernetTenantMiddleware` is added
-  immediately after `UserContextMiddleware` (line 242) so it ends up *outside*
-  it, and the auth plugin's own DB reads run under the request's tenant.
-- `adapters/http/app.py:251` — pass `injector.get(AvernetTenantResolver)`.
-- `di/container.py:117` — register `TenancyModule()` beside
-  `CallerIdentityModule()`.
+- `adapters/http/middleware.py:204` — `AvernetTenantMiddleware` imports
+  `resolve_avernet_tenant` directly (a plain function, not injected) and is
+  added immediately after `UserContextMiddleware` (line 242) so it ends up
+  *outside* it, and the auth plugin's own DB reads run under the request's
+  tenant. `install_middleware` needs no new parameter and `app.py` needs no
+  change — nothing is DI-bound.
 
 `AvernetTenantMiddleware.dispatch` is four lines: pick
-`resolver.resolve(request)` when `request.url.path` starts with `/openapi/v1/`,
-otherwise `DEFAULT_AVERNET_TENANT`; enter `avernet_tenant_scope`; `await
-call_next`. Starlette copies the context into the downstream task, which is why
-the existing tracer middleware works the same way.
+`resolve_avernet_tenant(request)` when `request.url.path` starts with
+`/openapi/v1/`, otherwise `DEFAULT_AVERNET_TENANT`; enter `avernet_tenant_scope`;
+`await call_next`. Starlette copies the context into the downstream task, which
+is why the existing tracer middleware works the same way.
 
 ### Request-spawned work
 
@@ -207,10 +206,14 @@ and `with_loader_criteria`.
   for endpoints, but leaves middleware-level DB access (the auth plugin) and
   non-endpoint code outside the scope, and makes the reset path harder to
   reason about.
-- **A plain module-level `resolve_public_tenant()` function instead of a
-  DI-bound protocol.** Fewer moving parts, but the composition root is where
-  this codebase selects implementations, and the auth workstream needs a
-  binding it can override without editing a shared function body.
+- **A DI-bound `AvernetTenantResolver` protocol with a `tenancy_module.py`
+  binding, instead of a plain function.** Rejected as ceremony with nothing to
+  switch: there is one gateway contract, so one implementation for every
+  profile — a DI seam only pays off when N implementations coexist. It would
+  also diverge from `require_principal`, the sibling auth seam for this same
+  gateway boundary, which is a plain module-level function replaced in place.
+  The plain `resolve_avernet_tenant` satisfies the spec's "single replaceable
+  seam" (you replace its body) without the binding.
 - **`contextvars.copy_context()` around thread spawns** instead of a
   tenant-only helper. One line shorter, but it also carries the trace id into
   background threads — a behavior change outside this spec's scope.
