@@ -58,6 +58,9 @@ sequenceDiagram
     participant IAM as IAM / BUService
     participant BE as Backend
 
+    Note over B,X: Precondition — user already signed in to APP X (tracked by APP X session cookie)
+    B->>X: use APP X (a feature needs Avernet on behalf of the user)
+    X->>X: no stored Avernet token for this user → start linking
     Note over X,GW: Linking — one-time, in the browser
     X-->>B: 302 to GW /authorize (client_id, redirect_uri, PKCE challenge, scope)
     B->>GW: GET /authorize
@@ -111,24 +114,27 @@ sequenceDiagram
     participant G as Google / OIDC
     participant BE as Backend
 
-    Note over X,GW: OUTER flow start — APP X ↔ us (authorization)
+    Note over B,X: Precondition — user already signed in to APP X (tracked by APP X session cookie)
+    B->>X: use APP X (a feature needs Avernet on behalf of the user)
+    X->>X: no stored Avernet token for this user → start linking
+    Note over X,GW: OUTER flow start — APP X and us (authorization)
     X-->>B: 302 to GW /authorize (client_id, redirect_uri, PKCE, scope)
     B->>GW: GET /authorize
     alt our session cookie present
-        GW->>GW: known user — skip to consent
-    else absent — INNER flow start (us ↔ Google, authentication)
-        GW-->>B: 302 to Google (we are Google's OAuth client; minimal identity scopes)
-        B->>G: authenticate (+ first-time Google consent "teamclaw wants basic profile")
+        GW->>GW: known user → skip to consent
+    else absent — INNER flow start, we call Google to authenticate
+        GW-->>B: 302 to Google (we act as the Google OAuth client, minimal identity scopes)
+        B->>G: authenticate (first-time Google consent for basic profile)
         G-->>B: 302 back to us with code
         B->>GW: deliver Google code
         GW->>G: exchange code for Google identity
-        G-->>GW: Google id/token (stays with us; never forwarded)
-        GW->>GW: account-link google-sub → our user #N (create if new); set our session cookie
+        G-->>GW: Google id/token (stays with us, never forwarded)
+        GW->>GW: account-link google-sub to our user (create if new), set our session cookie
     end
     alt prior valid grant
         GW->>GW: skip consent
     else no grant
-        GW-->>B: consent — "Allow APP X to access your teamclaw account?"
+        GW-->>B: consent — Allow APP X to access your teamclaw account?
         B->>GW: approve
         GW->>GW: record grant (user + client)
     end
@@ -150,7 +156,8 @@ Different purposes → not redundant. This is the ubiquitous "Sign in with Googl
 
 ## 7. Session & identity model (community; the pattern is general)
 
-- The **session cookie** is a browser↔us credential, scoped to **our** domain. The **third-party app never sees it** (it only ever gets the auth code / tokens).
+- **APP X identifies its user with its *own* cookie/session, in its *own* domain.** The flow's true starting point is the user already using APP X: APP X knows who they are, finds it has **no stored Avernet token** for them, and only then starts the linking redirect. APP X's cookie and our cookie are separate credentials in separate trust domains and never mix.
+- The **session cookie** (ours) is a browser↔us credential, scoped to **our** domain. The **third-party app never sees it** (it only ever gets the auth code / tokens).
 - The cookie resolves to **our session → our user**, via a **session manager** (server-side session store keyed by an opaque id, or stateless verification of a signed cookie). We do **not** re-consult Google per request.
 - The **Google → our-user** mapping is a **one-time account-linking** step at login, then persisted. Google is the doorway, consulted once.
 - A **"teamclaw account"** is the user's resource-owning principal on our platform. Federated login doesn't erase it — it **maps into** it (`google-sub` or `IAM staffId` → our user, who owns bots/agents/data).

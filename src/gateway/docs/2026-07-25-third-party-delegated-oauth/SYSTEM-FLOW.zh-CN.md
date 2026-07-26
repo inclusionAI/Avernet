@@ -58,6 +58,9 @@ sequenceDiagram
     participant IAM as IAM / BUService
     participant BE as 后端
 
+    Note over B,X: 前置 —— 用户已登录 APP X（由 APP X 自己的会话 cookie 标识）
+    B->>X: 使用 APP X（某功能需要代表用户访问 Avernet）
+    X->>X: 本用户无已存 Avernet 令牌 → 开始绑定
     Note over X,GW: 绑定 —— 一次性，在浏览器里
     X-->>B: 302 到 GW /authorize（client_id、redirect_uri、PKCE challenge、scope）
     B->>GW: GET /authorize
@@ -111,6 +114,9 @@ sequenceDiagram
     participant G as Google / OIDC
     participant BE as 后端
 
+    Note over B,X: 前置 —— 用户已登录 APP X（由 APP X 自己的会话 cookie 标识）
+    B->>X: 使用 APP X（某功能需要代表用户访问 Avernet）
+    X->>X: 本用户无已存 Avernet 令牌 → 开始绑定
     Note over X,GW: 外层流程开始 —— APP X ↔ 我们（授权）
     X-->>B: 302 到 GW /authorize（client_id、redirect_uri、PKCE、scope）
     B->>GW: GET /authorize
@@ -150,7 +156,8 @@ sequenceDiagram
 
 ## 7. 会话与身份模型（以 community 为例；模式通用）
 
-- **会话 cookie** 是浏览器↔我们的凭证，作用域限于**我方**域名。**第三方 App 永远看不到它**（它只拿到 auth code / 令牌）。
+- **APP X 用它*自己的* cookie/会话在*自己的*域名里标识用户。** 流程真正的起点是用户已在使用 APP X：APP X 知道用户是谁，发现**没有为其存下 Avernet 令牌**，这才发起绑定跳转。APP X 的 cookie 与我方 cookie 是不同信任域里的不同凭证，绝不混用。
+- **我方会话 cookie** 是浏览器↔我们的凭证，作用域限于**我方**域名。**第三方 App 永远看不到它**（它只拿到 auth code / 令牌）。
 - cookie 解析为**我方会话 → 我方用户**，经由**会话管理器**（服务端会话存储、按不透明 id 索引；或对签名 cookie 做无状态校验）。我们**不**每次请求都再问 Google。
 - **Google → 我方用户**的映射是登录时的**一次性账号绑定**，随后持久化。Google 是门，只问一次。
 - **"teamclaw 账号"** 是用户在我方平台上的资源归属主体。联邦登录不会抹掉它 —— 而是**映射进**它（`google-sub` 或 `IAM staffId` → 我方用户，其拥有 bots/agents/data）。
