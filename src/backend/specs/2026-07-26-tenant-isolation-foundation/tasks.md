@@ -136,17 +136,15 @@
         spawning request's tenant.
 - **Depends on:** Task 2
 
-## Task 9: Reference DDL artifact — decision + optional file  `[!]`
-- **Goal:** Resolve the spec-vs-convention tension the plan flagged: the spec
-  says no migration file is checked in, but repo convention checks a reference
-  `.sql` into `core/<module>/sql/` (e.g. `caller_identity`).
-- **Files:** possibly `src/agentclaw/community/core/.../sql/2026_07_26_avernet_tenant.sql` (new).
+## Task 9: Reference DDL artifact — decision  `[x]`
+- **Goal:** Resolve the spec-vs-convention tension the plan flagged.
+- **Decision (user, 2026-07-26):** **No DDL file is checked in.** The schema
+  change is always applied out-of-band on the platform; the `ALTER TABLE` in
+  `plan.md` remains the authoritative record. No file to add — this task is
+  closed with no production change.
 - **Done when:**
-  - [ ] User confirms: keep DDL in `plan.md` only (spec's stance) **or** also
-        check in a reference `.sql` (convention). Pending that decision.
-  - [ ] If "check in": the file carries exactly the plan's `ALTER TABLE` and the
-        deploy-ordering note; if "plan only": this task is closed with no file.
-- **Depends on:** — (decision), Task 3 (if a file is added)
+  - [x] Decision recorded; no `.sql` committed.
+- **Depends on:** —
 
 ## Task 10: Verification against spec acceptance criteria
 - **Goal:** Prove every spec acceptance criterion holds.

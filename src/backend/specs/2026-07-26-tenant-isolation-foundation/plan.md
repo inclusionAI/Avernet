@@ -276,9 +276,10 @@ change is behavior-preserving by construction; a flag would add a second code
 path with nothing to switch between.
 
 Repository convention checks a reference DDL file into `core/<module>/sql/`
-(see `core/caller_identity/sql/2026_07_13_caller_identity.sql`). The spec
-explicitly decided against a checked-in migration file for this change, so the
-DDL lives in this plan instead. Worth reconsidering before implementation.
+(see `core/caller_identity/sql/2026_07_13_caller_identity.sql`), but **the
+decision (user, 2026-07-26) is not to check one in**: the schema change is
+always applied out-of-band on the platform, so the `ALTER TABLE` above is the
+authoritative record and no migration file lands in the repo.
 
 ## Test Strategy
 
