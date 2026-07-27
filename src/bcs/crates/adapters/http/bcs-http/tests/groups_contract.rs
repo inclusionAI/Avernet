@@ -2525,7 +2525,7 @@ fn detail_from_create(cmd: &GroupCreateCommand) -> GroupDetailResult {
         service_mode: None,
         group_kind: Default::default(),
         dm_pair_key: None,
-        group_strategy: Default::default(),
+        group_strategy: cmd.group_strategy.unwrap_or_default(),
         created_at: 10,
         updated_at: 10,
         chat_url: None,
