@@ -251,6 +251,11 @@ async def list_resources(
 
 
 @router.post("/url", response_model=ResourceDetailResponse)
+@with_interceptors(CollaboratorPermissionInterceptor(
+    bot_id="$bot_id",
+    # Not a route parameter: force authoritative owner resolution from bot_id.
+    owner_id="$owner_id",
+))
 async def create_url_resource(
     request: URLCreateRequest,
     bot_id: Optional[str] = Query(None, description="Bot ID"),
@@ -278,6 +283,11 @@ async def create_url_resource(
 
 
 @router.post("/node", response_model=ResourceDetailResponse)
+@with_interceptors(CollaboratorPermissionInterceptor(
+    bot_id="$bot_id",
+    # Not a route parameter: force authoritative owner resolution from bot_id.
+    owner_id="$owner_id",
+))
 async def create_node_resource(
     request: NodeCreateRequest,
     bot_id: Optional[str] = Query(None, description="Bot ID"),
