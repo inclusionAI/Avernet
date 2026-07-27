@@ -333,6 +333,30 @@ def _lexical_target(link: Path) -> Path:
     return Path(os.path.abspath(target))
 
 
+def _cleanup_owned_cutover_temporary(
+    *,
+    temporary: Path,
+    legacy_local: Path,
+    pool_local: Path,
+) -> bool:
+    """清理由当前 generation 创建、且交换尚未发生的 canonical 临时桥。"""
+
+    if (
+        not temporary.is_symlink()
+        or not legacy_local.is_dir()
+        or legacy_local.is_symlink()
+    ):
+        return False
+    try:
+        target = _lexical_target(temporary)
+    except OSError:
+        return False
+    if target != Path(os.path.abspath(pool_local)):
+        return False
+    temporary.unlink()
+    return True
+
+
 def _canonical_pool_source(layout: _Layout, source: Path) -> Path | None:
     source = Path(os.path.abspath(source))
     for root, pool_root in (
@@ -833,14 +857,41 @@ def _activate_pool(
                 failures=list(mapping_plan.failures),
             )
 
+        recovered_temporary = False
         if temporary.exists() or temporary.is_symlink():
-            return _invalid("cutover_temporary_path_occupied", path=str(temporary))
+            recovered_temporary = _cleanup_owned_cutover_temporary(
+                temporary=temporary,
+                legacy_local=layout.legacy_local,
+                pool_local=layout.pool_local,
+            )
+            if not recovered_temporary:
+                return _invalid(
+                    "cutover_temporary_path_occupied",
+                    path=str(temporary),
+                )
         temporary.symlink_to(layout.pool_local, target_is_directory=True)
-        if not exchange_paths(layout.legacy_local, temporary):
-            temporary.unlink(missing_ok=True)
+        try:
+            exchanged = exchange_paths(layout.legacy_local, temporary)
+        except OSError:
+            _cleanup_owned_cutover_temporary(
+                temporary=temporary,
+                legacy_local=layout.legacy_local,
+                pool_local=layout.pool_local,
+            )
+            raise
+        if not exchanged:
+            if not _cleanup_owned_cutover_temporary(
+                temporary=temporary,
+                legacy_local=layout.legacy_local,
+                pool_local=layout.pool_local,
+            ):
+                return _invalid("cutover_result_ambiguous")
             return PoolActivationResult(
                 PoolActivationStatus.NOT_ATOMIC,
-                {"reason": "atomic_exchange_unavailable"},
+                {
+                    "reason": "atomic_exchange_unavailable",
+                    "recovered_temporary": recovered_temporary,
+                },
             )
 
         if not layout.legacy_local.is_symlink() or _lexical_target(
