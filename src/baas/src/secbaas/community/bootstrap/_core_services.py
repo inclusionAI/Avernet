@@ -45,9 +45,6 @@ from secbaas.community.core.service.bot_runtime.dispatcher import (
     DefaultBotOpenFolderDispatcher,
     DefaultBotWssDispatcher,
 )
-from secbaas.community.core.service.session_file_sharing import (
-    DefaultSessionFileSharingDispatcher,
-)
 from secbaas.community.core.service.bot_session import DefaultSessionService
 from secbaas.community.core.service.callback import HttpCallback
 from secbaas.community.core.service.config_manage import (
@@ -80,6 +77,9 @@ from secbaas.community.core.service.publish_manage import (
     DefaultPublishService,
 )
 from secbaas.community.core.service.scheduler import AppScheduler
+from secbaas.community.core.service.session_file_sharing import (
+    DefaultSessionFileSharingDispatcher,
+)
 from secbaas.community.core.service.sse import (
     DefaultStreamConverter,  # noqa: F401  triggers side-effect registration of default SSE converter
     SseConverterFactory,

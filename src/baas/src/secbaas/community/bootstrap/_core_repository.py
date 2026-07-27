@@ -22,15 +22,15 @@ from secbaas.community.core.repository.distributed_lock import (
     OrmDistributedLockRepository,
 )
 from secbaas.community.core.repository.file_transfer_ticket import OrmTicketRepository
-from secbaas.community.core.repository.session_file_ticket import (
-    OrmSessionTicketRepository,
-)
 from secbaas.community.core.repository.local_user_machine import (
     OrmLocalUserMachineRepository,
 )
 from secbaas.community.core.repository.publish import OrmPublishRepository
 from secbaas.community.core.repository.publish_batch import OrmPublishBatchRepository
 from secbaas.community.core.repository.publish_record import OrmPublishRecordRepository
+from secbaas.community.core.repository.session_file_ticket import (
+    OrmSessionTicketRepository,
+)
 from secbaas.community.core.repository.system_config import OrmSystemConfigRepository
 from secbaas.community.core.repository.tenant import OrmTenantRepository
 from secbaas.community.core.repository.ws_relay_session import (
