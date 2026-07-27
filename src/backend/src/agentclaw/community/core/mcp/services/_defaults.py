@@ -50,6 +50,7 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.antdingopenapi.antdingmessagemcpserver"},
         {"server_code": "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"},
         {"server_code": "mcp.ant.antcodemcp.code.mcpserver"},
+        {"server_code": "mcp.ant.archassistant-mcp.appmcp"},
         {"server_code": "mcp.ant.brwithub.worksummaryserver"},
         {"server_code": "mcp.ant.agentclawscs.bcs_mcp"},
         {"server_code": "mcp.ant.zlatan.yuntumcpserver"},
