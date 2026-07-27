@@ -527,3 +527,68 @@ async def test_run_one_releases_bucket_slot(repo, queue):
         await worker._run_one(record)
 
     assert limiter.ref_count == 0
+
+
+# ── race condition: timeout scan vs executor completion ────────────
+
+
+class _LateCompletingExecutor:
+    """先被 timeout scan 标记 FAILED，之后才正常完成（模拟慢 executor）。
+
+    execute() 先把 baas_bot_run 标记为 FAILED（模拟 timeout scan 截胡），
+    然后调 update_result（模拟 executor 最终完成）。
+    """
+
+    def __init__(self, repo: OrmBotRunRepository):
+        self._repo = repo
+        self.executed: list[str] = []
+
+    async def execute(self, record: BotRunQueueRecord) -> None:
+        self.executed.append(record.run_id)
+        # 模拟 timeout scan 先到了
+        self._repo.update_error(record.run_id, "worker safety-net: time out")
+        # executor 最终完成，尝试写 result（CAS 应阻止覆盖 FAILED）
+        self._repo.update_result(record.run_id, "late result", {"session_id": "s"})
+
+
+async def test_executor_completes_after_timeout_scan_keeps_failed(repo, queue):
+    """executor 完成时如果 baas_bot_run 已被 timeout scan 标记 FAILED，
+    update_result 不应覆盖终态，且 _run_one 应跳过 post_run callback。"""
+    _insert(repo, queue, "bot-1")
+    ex = _LateCompletingExecutor(repo)
+    worker = _worker(queue, repo, ex)
+
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = None
+    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
+    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+        await worker._run_one(record)
+
+    rec = repo.get_by_run_id(record.run_id)
+    assert rec.status == "FAILED"
+    assert rec.error is not None
+    assert "time out" in rec.error
+
+
+async def test_timeout_scan_skips_callback_when_already_terminal(repo, queue):
+    """_timeout_scan_once 对已是终态的记录应跳过 callback。"""
+    _insert(repo, queue, "bot-1")
+    ex = _CompletingExecutor(repo)
+    worker = _worker(queue, repo, ex)
+
+    # 先让 executor 正常完成 → COMPLETED
+    record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    await ex.execute(record)
+
+    # timeout scan 此时扫描到这条记录（如果它在 PENDING/RUNNING 列表里）
+    # _safety_mark_failed 应返回 False（已是 COMPLETED），跳过 callback
+    marked = worker._safety_mark_failed(record.run_id, "time out")
+    assert marked is False
+
+    rec = repo.get_by_run_id(record.run_id)
+    assert rec.status == "COMPLETED"

@@ -291,6 +291,7 @@ class AsyncChatClient:
             timeout: 超时时间（秒），None 表示无限等待
             auth_token: 认证令牌，为空时传 OPEN_API:NOT_PROVIDED
             app_id: 应用标识，用于标识调用方应用
+            chat_metadata: chat metadata
 
         Returns:
             Tuple[content, agent_events]: 返回 (响应内容, agent事件列表)
@@ -365,7 +366,7 @@ class AsyncChatClient:
                     message=message,
                     auth_token=auth_token,
                     app_id=app_id,
-                    timeout_ms=timeout * 1000 if timeout else None,
+                    timeout_ms=int(timeout * 1000) if timeout else None,
                     chat_metadata=chat_metadata,
                 )
 
@@ -380,16 +381,9 @@ class AsyncChatClient:
 
                 # 5. 等待主对话事件完成
                 if timeout:
-                    try:
-                        await asyncio.wait_for(
-                            state.chat_complete.wait(), timeout=timeout
-                        )
-                    except TimeoutError:
-                        logger.warning(
-                            "[send] timeout waiting for chat events, "
-                            "session_key=%s, returning anyway",
-                            session_key,
-                        )
+                    await asyncio.wait_for(
+                        state.chat_complete.wait(), timeout=timeout
+                    )
                 else:
                     # 无超时等待
                     await state.chat_complete.wait()
@@ -483,7 +477,7 @@ class AsyncChatClient:
                     message=message,
                     auth_token=auth_token,
                     app_id=app_id,
-                    timeout_ms=timeout * 1000 if timeout else None,
+                    timeout_ms=int(timeout * 1000) if timeout else None,
                     chat_metadata=chat_metadata,
                 )
 

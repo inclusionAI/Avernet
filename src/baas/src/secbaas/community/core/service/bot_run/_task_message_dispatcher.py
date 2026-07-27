@@ -141,7 +141,7 @@ class TaskMessageDispatcher:
                 # 客户端断连（GeneratorExit）时检查 run 是否已终结，
                 # 未终结则标记为 error
                 run = self._run_repository.get_by_run_id(run_id)
-                if run and run.status not in ("COMPLETED", "FAILED", "TIMEOUT"):
+                if run and run.status not in ("COMPLETED", "FAILED", "TIME_OUT"):
                     self._run_repository.update_error(
                         run_id=run_id,
                         error="stream interrupted",
