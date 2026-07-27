@@ -116,9 +116,11 @@
 - **Files:** `src/agentclaw/community/adapters/http/middleware.py`,
   `tests/community/adapters/http/test_avernet_tenant_middleware.py` (new).
 - **Done when:**
-  - [x] `AvernetTenantMiddleware.dispatch` picks `resolve_avernet_tenant(request)`
-        for `/openapi/v1/*` paths, else `DEFAULT_AVERNET_TENANT`; enters
-        `avernet_tenant_scope`; awaits `call_next`.
+  - [x] `AvernetTenantMiddleware` (a **pure ASGI** middleware, not
+        `BaseHTTPMiddleware`, for `ContextVar`-propagation robustness) picks
+        `resolve_avernet_tenant(request)` for `/openapi/v1/*` paths, else
+        `DEFAULT_AVERNET_TENANT`; enters `avernet_tenant_scope`; awaits the
+        downstream app.
   - [x] Added in `install_middleware` immediately after `UserContextMiddleware`
         so it is outside it (auth plugin DB reads run under the tenant); no new
         `install_middleware` parameter.

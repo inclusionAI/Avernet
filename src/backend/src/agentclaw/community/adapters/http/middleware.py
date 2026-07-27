@@ -18,6 +18,7 @@ from urllib.parse import parse_qsl, urlencode
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import (
@@ -115,7 +116,7 @@ class UserContextMiddleware(BaseHTTPMiddleware):
 # =============================================================================
 # AvernetTenantMiddleware
 # =============================================================================
-class AvernetTenantMiddleware(BaseHTTPMiddleware):
+class AvernetTenantMiddleware:
     """Bind each request's data-isolation tenant for the request's lifetime.
 
     Public-API requests (``/openapi/v1/*``) resolve their tenant through the
@@ -124,24 +125,39 @@ class AvernetTenantMiddleware(BaseHTTPMiddleware):
     resets on the way out (including on error), so a tenant never survives its
     request or leaks into the next one that reuses the worker.
 
+    Deliberately a **pure ASGI middleware, not ``BaseHTTPMiddleware``**. The
+    tenant lives in a ``ContextVar``, and ``BaseHTTPMiddleware`` has a fragile
+    history with context propagation (it runs the downstream app in a child
+    anyio task, so which context a ``set``/``reset`` lands in has depended on the
+    Starlette version). A pure ASGI middleware sets the ``ContextVar`` in the
+    exact coroutine/context that then awaits the downstream app and resets it in
+    that same context — no task hop, so visibility downstream and a correct
+    reset are guaranteed regardless of Starlette internals.
+
     Installed *outside* ``UserContextMiddleware`` (see ``install_middleware``) so
     the auth plugin's own DB reads already run under the request's tenant.
     """
 
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path.startswith("/openapi/v1/"):
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        if scope["path"].startswith("/openapi/v1/"):
             # Lazy import: the openapi_v1 package pulls in every public router,
-            # so keep it off the middleware module-load path (matches the
-            # lazy-import style UserContextMiddleware uses for auth).
+            # so keep it off the middleware module-load path.
             from agentclaw.community.adapters.http.openapi_v1.dependencies import (
                 resolve_avernet_tenant,
             )
-            tenant = resolve_avernet_tenant(request)
+            tenant = resolve_avernet_tenant(Request(scope))
         else:
             tenant = DEFAULT_AVERNET_TENANT
 
         with avernet_tenant_scope(tenant):
-            return await call_next(request)
+            await self.app(scope, receive, send)
 
 
 # =============================================================================

@@ -58,7 +58,11 @@ and satisfies the spec's "I cannot leak data by forgetting to add a filter".
   runtime, including the out-of-tree corp `DatabasePlugin` this repo does not
   contain.
 - `src/agentclaw/community/adapters/http/middleware.py` — new
-  `AvernetTenantMiddleware`, wired in `install_middleware`.
+  `AvernetTenantMiddleware`, wired in `install_middleware`. A **pure ASGI**
+  middleware (not `BaseHTTPMiddleware`): the tenant is a `ContextVar`, and a pure
+  ASGI middleware sets/reset it in the same coroutine that awaits the downstream
+  app — no child-task hop — so downstream visibility and a correct reset don't
+  depend on Starlette's `BaseHTTPMiddleware` context-propagation behavior.
 - `src/agentclaw/community/adapters/http/openapi_v1/dependencies.py` — the
   public-API tenant source: a single plain function `resolve_avernet_tenant`,
   sitting beside the existing `require_principal` stub and following its exact
@@ -262,6 +266,11 @@ and `with_loader_criteria`.
 - **`contextvars.copy_context()` around thread spawns** instead of a
   tenant-only helper. One line shorter, but it also carries the trace id into
   background threads — a behavior change outside this spec's scope.
+- **`BaseHTTPMiddleware` for the tenant middleware** (matching the tracer). It
+  works on the current Starlette, but `BaseHTTPMiddleware` runs the downstream
+  app in a child anyio task, so `ContextVar` set/reset landing in the right
+  context has been version-dependent. A pure ASGI middleware sidesteps the whole
+  class of issue, so it is used instead.
 
 ## Rollout
 
