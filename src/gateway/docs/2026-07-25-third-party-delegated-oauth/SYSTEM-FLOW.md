@@ -10,7 +10,25 @@
 
 ---
 
+> ## Outcome (2026-07-26) — corp uses `xoneid`; this OAuth design is the *community* path
+>
+> Team review concluded a bespoke OAuth authorization server is **too heavy for corp** and adds a visible redirect **"flash"** (闪一下) for no gain: when the caller and teamclaw already share one IdP (BUService) and the user is already logged in there, the redirect to `/authorize` bounces out and back with no real login or consent happening.
+>
+> **Corp → `xoneid`.** Corp uses **`xoneid`** — the corp-standard **server-to-server subject-propagation** mechanism (auth-design.md §15), resolved via the BUService SDK. This is how auth already works inside corp, and it is **not** the raw-`IAM_TOKEN`-cookie passthrough this doc warned against — `xoneid` is a purpose-built subject assertion, not the ambient browser login cookie.
+>
+> **Community → the OAuth design below.** With no shared IdP there is a real trust boundary, so the redirect + consent earn their cost. Everything from §1 on describes the **community** path (and remains the reference should a truly external, non-IdP third party ever appear in corp).
+>
+> **Corp follow-ups (non-blocking):** (1) confirm `xoneid` is **sender-constrained** (audience / mTLS / DPoP) and the calling app is **authenticated**, so teamclaw can't be made a *confused deputy* accepting a forged subject; (2) confirm corp needs **no per-user consent** for app→teamclaw access (if it does, a consent step returns).
+>
+> This **closes** the corp delegated-access exploration.
+
+---
+
 ## 1. The decision in one paragraph
+
+> **Corp note:** the paragraph below is the **community** design. Corp uses `xoneid` instead — see the **Outcome** above.
+
+
 
 We keep the **one-token, consent-based** target: a third-party server presents **exactly one** credential per API call (a bearer access token), never a first-party session cookie. The end user is authenticated **once**, interactively, and grants **explicit, revocable consent**. We build this as **"Login with Avernet"**: *we* are the OAuth 2.0 authorization server (Authorization Code + PKCE); we mint our **own** teamclaw-audience token behind our **own** consent screen; the upstream login provider is used **only** to authenticate the human. Same clean architecture in corp and community — the only difference is which provider handles the human-login step.
 
@@ -207,6 +225,8 @@ Track this as a downstream dependency owned by the auth workstream + the existin
 
 ## 10. Corp vs community = one flavored seam, not two designs
 
+> **Superseded by the Outcome (top).** This "one design, only the IdP differs" framing was the pre-review position. Post-review, **corp uses `xoneid`** (not this OAuth AS), so the symmetry below holds only for the community path. Kept for context.
+
 Both flavors use the **same clean architecture** (we are the authz server; we mint our own tc-audience token behind our own consent). The **only** difference is the human-login provider:
 
 - **Identity resolution** = the bare/sofa-flavored SPI seam (**corp/sofa** = BUService; **community/bare** = Google/OIDC). Cf. auth-design §15's `SubjectTokenResolver`.
@@ -232,15 +252,17 @@ Both flavors use the **same clean architecture** (we are the authz server; we mi
 - Same clean design for both; IdP is the only flavored difference.
 - Single all-encompassing scope for now; **pure JWT** revocation (≤ ~15 min access latency).
 - Caller-token/downstream mint **de-scoped** (service-bot-only; future cross-team).
-- **Build A (our own OAuth authorization server) is decided for both flavors.** **Corp:** BUService is an *authentication* service, not a third-party OAuth authorization server, so we build our own authz server on top of it (BUService only authenticates the human) — a category fit, not a pending capability. **Community:** a *design choice* to use Google as OIDC sign-in only and build our own authz server (uniform with corp; no Google-specific resource/scope registration). Option B (lean on the IdP) is off the table — corp by category, community by choice.
+- **Corp → `xoneid`, not a bespoke OAuth authorization server** (Outcome, 2026-07-26). The OAuth redirect/consent buys little inside a shared IdP and adds a visible flash; `xoneid` (auth-design §15, resolved via the BUService SDK) is the corp-standard S2S subject propagation and matches how corp auth already works. It is **not** the raw-`IAM_TOKEN`-cookie passthrough (§3) — that concern was about the ambient browser cookie, not a purpose-built subject assertion.
+- **Community → the OAuth "Login with Avernet" design** in this doc (no shared IdP → the redirect + consent earn their cost). Build A applies to community.
 
-**Open — needs the team**
+**Open / follow-ups**
 
-1. **Proceed vs. defer:** since Option B is off the table, the only alternative to building A is a *documented* acceptance of the passthrough anti-pattern — not a lighter clean option to wait for. A is always buildable, so this is a prioritization call.
-2. **Consent lifetime & re-consent triggers** (expiry; what re-prompts). With a single scope there is no "new scope requested" trigger yet.
+1. **Corp `xoneid` — confirm it is sender-constrained** (audience / mTLS / DPoP) **and the calling app is authenticated**, so teamclaw can't be a confused deputy accepting a forged subject. (auth-design §15 flagged the same question.)
+2. **Corp — confirm no per-user consent** is required for app→teamclaw access. If it is, a consent step returns.
+3. **Community — consent lifetime & re-consent triggers** (expiry; what re-prompts). With a single scope there is no "new scope requested" trigger yet.
 
 ---
 
 ### Note on status
 
-The SDD spec started for this was **reverted off the config-driven-forwarding branch (PR #420)**; the delegated-access work is parked pending the team decision in §12. Nothing here changes PR #420.
+The SDD spec started for this was **reverted off the config-driven-forwarding branch (PR #420)**. Per the **Outcome (2026-07-26)**, the corp delegated-access exploration is **closed**: corp adopts `xoneid`; this OAuth design is retained as the **community** path. Nothing here changes PR #420.

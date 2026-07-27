@@ -10,7 +10,23 @@
 
 ---
 
+> ## 结论（2026-07-26）—— corp 用 `xoneid`；本 OAuth 设计是 *community* 路径
+>
+> 团队评审结论：为 corp 自建一套 OAuth 授权服务器**过重**，且会带来可见的**"闪一下"**：当调用方与 teamclaw 本就共享同一 IdP（BUService）、用户也已在其登录时，跳转到 `/authorize` 会弹出去再弹回来，而并没有真正发生登录或授权。
+>
+> **Corp → `xoneid`。** corp 使用 **`xoneid`** —— corp 标准的**服务器到服务器主体传递**机制（auth-design.md §15），经 BUService SDK 解析。这正是 corp 内部既有的鉴权方式，且**不是**本文所警示的原始 `IAM_TOKEN` cookie 透传 —— `xoneid` 是专用的主体断言，而非浏览器的环境登录 cookie。
+>
+> **Community → 本文的 OAuth 设计。** 没有共享 IdP 就存在真正的信任边界，跳转 + 授权因而值得其代价。§1 及以下描述的是 **community** 路径（若 corp 里出现真正外部、非同 IdP 的第三方，本设计仍作参考）。
+>
+> **Corp 后续（非阻塞）：**（1）确认 `xoneid` 是 **sender-constrained**（audience / mTLS / DPoP）且调用方 App 已**认证**，使 teamclaw 不会成为接受伪造主体的*混淆代理*；（2）确认 corp 对 app→teamclaw 访问**无需按用户授权**（若需要，则重新引入授权步骤）。
+>
+> 这**关闭**了 corp 委托访问的探索。
+
+---
+
 ## 1. 一段话结论
+
+> **Corp 提示：** 下面这段是 **community** 设计。corp 改用 `xoneid` —— 见上方**结论**。
 
 我们保持**单令牌、基于授权（consent）**的目标：第三方服务器每次 API 调用出示**恰好一个**凭证（bearer access token），绝不带第一方会话 cookie。终端用户只**交互式认证一次**，并给出**显式、可撤销的授权**。我们把它建成 **"用 Avernet 登录"**：**我们**是 OAuth 2.0 授权服务器（授权码 + PKCE）；在**我们自己的**授权页背后签发**我们自己的** teamclaw-audience 令牌；上游登录提供方**仅**用于认证真人。corp 与 community 用同一套干净架构 —— 唯一差异是由谁承担真人登录这一步。
 
@@ -207,6 +223,8 @@ exp / iat / jti
 
 ## 10. corp vs community = 一个带 flavor 的接缝，不是两套设计
 
+> **已被上方结论取代。** "同一套设计、只差 IdP"是评审前的立场。评审后，**corp 改用 `xoneid`**（而非本 OAuth AS），故下面的对称性只对 community 路径成立。此处保留作背景。
+
 两种 flavor 用**同一套干净架构**（我们是授权服务器；在我们自己的授权背后签发自己的 tc-audience 令牌）。**唯一**差异是真人登录提供方：
 
 - **身份解析** = bare/sofa flavor 的 SPI 接缝（**corp/sofa** = BUService；**community/bare** = Google/OIDC）。参见 auth-design §15 的 `SubjectTokenResolver`。
@@ -232,15 +250,17 @@ exp / iat / jti
 - 两者同一套干净设计；IdP 是唯一带 flavor 的差异。
 - 暂用单一全覆盖 scope；**纯 JWT** 撤销（访问时延 ≤ ~15 分钟）。
 - Caller 令牌 / 下游签发**移出范围**（仅 service-bot；未来跨团队）。
-- **自建 A（我们自己的 OAuth 授权服务器）在两种 flavor 下均已定。** **Corp：** BUService 是*认证*服务，不是第三方 OAuth 授权服务器，故我们在其之上自建授权服务器（BUService 仅做认证真人）—— 是范畴契合，而非待定能力。**Community：** *设计选择* —— 仅把 Google 当 OIDC 登录，并自建授权服务器（与 corp 一致；不在 Google 注册专属资源/scope）。方案 B（借 IdP）不在考虑之列 —— corp 因范畴，community 因选择。
+- **Corp → `xoneid`，而非自建 OAuth 授权服务器**（结论，2026-07-26）。在共享 IdP 下 OAuth 的跳转/授权收益甚微且带来可见的闪一下；`xoneid`（auth-design §15，经 BUService SDK 解析）是 corp 标准的 S2S 主体传递，契合 corp 既有鉴权方式。它**不是**原始 `IAM_TOKEN` cookie 透传（§3）—— 那个顾虑针对的是浏览器环境 cookie，而非专用主体断言。
+- **Community → 本文的 OAuth "用 Avernet 登录"设计**（无共享 IdP → 跳转 + 授权值得其代价）。自建 A 适用于 community。
 
-**待议 —— 需团队**
+**待议 / 后续**
 
-1. **推进 vs 推迟：** 既然方案 B 不在考虑之列，建 A 的唯一替代就是*有据可查地*接受透传反模式 —— 而非可等待的更轻的干净选项。A 始终可建，故这是优先级判断。
-2. **授权有效期与重新授权触发**（过期；何时重新弹窗）。单一 scope 下暂无"申请新 scope"触发。
+1. **Corp `xoneid` —— 确认其 sender-constrained**（audience / mTLS / DPoP）**且调用方 App 已认证**，使 teamclaw 不会成为接受伪造主体的混淆代理。（auth-design §15 也标注了同一问题。）
+2. **Corp —— 确认 app→teamclaw 访问无需按用户授权。** 若需要，则重新引入授权步骤。
+3. **Community —— 授权有效期与重新授权触发**（过期；何时重新弹窗）。单一 scope 下暂无"申请新 scope"触发。
 
 ---
 
 ### 状态说明
 
-为此起草的 SDD spec 已**从配置驱动转发分支（PR #420）回退**；委托访问工作暂停，等待 §12 的团队决定。本文不改动 PR #420。
+为此起草的 SDD spec 已**从配置驱动转发分支（PR #420）回退**。依据**结论（2026-07-26）**，corp 委托访问探索**已关闭**：corp 采用 `xoneid`；本 OAuth 设计保留为 **community** 路径。本文不改动 PR #420。

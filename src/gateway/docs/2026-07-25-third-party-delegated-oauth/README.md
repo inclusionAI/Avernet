@@ -11,6 +11,10 @@
 
 ---
 
+> **Outcome (2026-07-26): corp uses `xoneid`; this OAuth design is the *community* path.** Team review found a bespoke OAuth authorization server too heavy for corp — inside a shared IdP (BUService) the redirect/consent buys little and adds a visible "flash." Corp instead uses **`xoneid`**, the corp-standard server-to-server subject propagation (auth-design §15), which is *not* the raw-`IAM_TOKEN`-cookie passthrough this note warns about. This OAuth approach applies to **community** (no shared IdP → a real trust boundary). Corp follow-ups: confirm `xoneid` is sender-constrained + the caller app authenticated; confirm no per-user consent is required. See [`SYSTEM-FLOW.md`](./SYSTEM-FLOW.md) → **Outcome**. This closes the corp exploration.
+
+---
+
 ## 1. Background & the problem we are fixing
 
 Our OpenAPI surface (`/openapi/v1/*`, fronted by the gateway) is opened to third-party developers, whose **servers** call us. Today a third-party call carries **two tokens**:
