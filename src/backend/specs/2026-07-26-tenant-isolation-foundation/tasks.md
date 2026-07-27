@@ -233,7 +233,14 @@
 - **Verification:** 1005 tests pass across bot_dormant / desktop_bot /
   bot_management.
 
-### F2: Tenant index — deferred (see plan Data Model Changes)
-- No index in Stage 1 (cardinality-1 column; existing indexes stay effective).
-  At multi-tenant, prepend `avernet_tenant` to the hot composites via
-  create-new-then-drop-old (naming convention ties index name to columns).
+### F2: Tenant-leading indexes — MANDATORY policy, deferred  `[ ]`
+- Tenant-leading indexes on a tenant-columned table are a **mandatory corp
+  policy** (confirmed by user 2026-07-27). Consciously deferred to the dedicated
+  index-adding work — **not** an exemption; must be completed before multi-tenant.
+- No index in Stage 1: cardinality-1 column, existing indexes stay effective, so
+  it buys nothing yet (see plan Data Model Changes for the full rationale).
+- When done: prepend `avernet_tenant` to the query-backing composites
+  (`idx_owner`, `idx_bot_id_entity_id`, `idx_entity`, search index) via
+  create-new-then-drop-old (naming convention ties index name to columns;
+  create before drop so no index-less window). Leave low-cardinality
+  (`idx_status`, `idx_is_delete`) and unique-lookup (`idx_binding_id`) indexes.

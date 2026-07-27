@@ -87,8 +87,12 @@ ALTER TABLE ac_bots
     COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
 ```
 
-**No index in Stage 1** (decision 2026-07-27, after inspecting `ac_bots`'s
-current indexes and every query method). With a single tenant `avernet_tenant`
+**No index in Stage 1** (decision 2026-07-27). Tenant-leading indexes on a
+tenant-columned table are a **mandatory corp policy**, so this is a conscious
+*deferral to the dedicated index-adding work* — not an exemption; it must be
+done before this is considered complete for multi-tenant. It's deferred now
+because, after inspecting `ac_bots`'s current indexes and every query method,
+the column adds no value yet: with a single tenant `avernet_tenant`
 has cardinality 1, so an index on it prunes nothing; and every current query
 already leads with a more selective, already-indexed predicate (`owner_id`,
 `bot_id`/`entity_id`, `status`, `binding_id`), against which the guard's
