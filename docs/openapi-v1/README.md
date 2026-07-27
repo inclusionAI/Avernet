@@ -63,17 +63,29 @@ owner.)
 
 | Person | Owns (vertical slices) | Track A stages | Track B endpoint groups |
 |---|---|---|---|
-| **totalfrank** | bots, channels, mcp | 1 (bots ✅), 3 (channels), 5 (mcp) | bots, channels, mcp |
-| **lucas-xzp** | resources, skills, routines, identity | 2 (resources), 4 (skills), 6 (routines) | resources, skills, routines, identity |
+| **totalfrank** | bots, mcp, channels, **skills** (shared) | 1 (bots ✅), 5 (mcp), 3 (channels), 4 (skills, shared) | bots, mcp, channels, skills (shared) |
+| **lucas-xzp** | resources, routines, identity, **skills** (shared) | 2 (resources), 6 (routines), 4 (skills, shared) | resources, routines, identity, skills (shared) |
 
 - **totalfrank** also owns the **reusable Track A mechanism** (built in Stage 1 /
   PR #456) — the pattern every other stage copies.
+- **skills is co-owned by both** (third tier, but the trickiest — see the note
+  in its endpoint table). Split its Track A stage and endpoints between you and
+  agree a shared sub-plan before starting.
 - **identity** (Track B only) has no Track A stage of its own: its data is a bot
   sub-resource, so it's already scoped by **bots isolation (Stage 1 ✅)**. It's
   assigned to **lucas-xzp** for balance; its one dependency is already satisfied,
   so this creates no cross-person block.
-- Rough balance: totalfrank ≈ 2 remaining A stages + ~25 B endpoints; lucas-xzp ≈
-  3 remaining A stages + ~24 B endpoints.
+
+### Priority tiers (what to pick up first)
+
+| Tier | Categories | Owners |
+|---|---|---|
+| **P1 — first** | bots, mcp, resources, routines | bots + mcp → totalfrank; resources + routines → lucas-xzp |
+| **P2 — second** | channels, identity | channels → totalfrank; identity → lucas-xzp |
+| **P3 — third** | skills | **co-owned** (totalfrank + lucas-xzp) — the most involved category |
+
+Within each lane, do your **P1** slices before P2 before P3. Skills (P3) is the
+shared, complex one — tackle it together once the P1/P2 work is moving.
 
 > **Shared gate:** anything touching bots (both people) waits on **PR #456**
 > merging — a one-time gate, not an ongoing cross-person dependency. Once it
@@ -87,28 +99,29 @@ must implement._
 ## Status board (update as work lands)
 
 ### Track A — Tenant-isolation foundation
-| Stage | Scope (data) | Owner | State | Done-when |
-|---|---|---|---|---|
-| 1 | Bot records (`ac_bots` / `BotModel`) | totalfrank | ✅ DONE — **PR #456 (awaiting approval, not yet merged)** | PR #456 merges |
-| 2 | Resources (`ac_resource`) | lucas-xzp | ⬜ TODO | column + guards + tests green; internal API unchanged |
-| 3 | Channels (`ac_channel_config`) | totalfrank | ⬜ TODO | same |
-| 4 | Skills (skill tables) | lucas-xzp | ⬜ TODO | same |
-| 5 | MCP configuration | totalfrank | ⬜ TODO | same |
-| 6 | Routines | lucas-xzp | ⬜ TODO | same |
+| Stage | Scope (data) | Owner | Pri | State | Done-when |
+|---|---|---|---|---|---|
+| 1 | Bot records (`ac_bots` / `BotModel`) | totalfrank | P1 | ✅ DONE — **PR #456 (awaiting approval, not yet merged)** | PR #456 merges |
+| 2 | Resources (`ac_resource`) | lucas-xzp | P1 | ⬜ TODO | column + guards + tests green; internal API unchanged |
+| 3 | Channels (`ac_channel_config`) | totalfrank | P2 | ⬜ TODO | same |
+| 4 | Skills (skill tables) | totalfrank + lucas-xzp | P3 | ⬜ TODO | same |
+| 5 | MCP configuration | totalfrank | P1 | ⬜ TODO | same |
+| 6 | Routines | lucas-xzp | P1 | ⬜ TODO | same |
 
 > Stage 1 also builds the **reusable mechanism** (see below) that every later
 > stage copies. It's the foundation, not just "bots."
 
 ### Track B — Public API implementation (where the endpoints land — NOT STARTED)
-| Category | Owner | Router (stubs today) | State | Depends on |
-|---|---|---|---|---|
-| bots | totalfrank | `openapi_v1/bots/router.py` | ⬜ TODO | Track A stage 1 (PR #456) |
-| channels | totalfrank | `openapi_v1/channels/router.py` | ⬜ TODO | Track A channels (totalfrank) |
-| mcp | totalfrank | `openapi_v1/mcp/router.py` | ⬜ TODO | Track A mcp (totalfrank) |
-| resources | lucas-xzp | `openapi_v1/resources/router.py` | ⬜ TODO | Track A resources (lucas-xzp) |
-| skills | lucas-xzp | `openapi_v1/skills/router.py` | ⬜ TODO | Track A skills (lucas-xzp) |
-| routines | lucas-xzp | `openapi_v1/routines/router.py` | ⬜ TODO | Track A routines (lucas-xzp) |
-| identity | lucas-xzp | `openapi_v1/identity/router.py` | ⬜ TODO | bots isolation (Stage 1 ✅) |
+_Ordered by priority tier._
+| Category | Owner | Pri | Router (stubs today) | State | Depends on |
+|---|---|---|---|---|---|
+| bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ⬜ TODO | Track A stage 1 (PR #456) |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ⬜ TODO | Track A mcp (totalfrank) |
+| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | ⬜ TODO | Track A resources (lucas-xzp) |
+| routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | ⬜ TODO | Track A routines (lucas-xzp) |
+| channels | totalfrank | P2 | `openapi_v1/channels/router.py` | ⬜ TODO | Track A channels (totalfrank) |
+| identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | ⬜ TODO | bots isolation (Stage 1 ✅) |
+| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | ⬜ TODO | Track A skills (shared) |
 
 ### Cross-cutting (not per-stage)
 | Item | State | Note |
@@ -225,7 +238,7 @@ totalfrank — still open/draft, being closed soon; kept here as reference).
 All responses use the `Envelope[T]` / `Page[T]` shapes from
 `openapi_v1/contracts.py` unless noted (binary streams bypass the envelope).
 
-### 🟦 totalfrank — bots (13 endpoints) · `openapi_v1/bots/router.py`
+### 🟦 totalfrank · P1 — bots (13 endpoints) · `openapi_v1/bots/router.py`
 | Method | Path | Purpose | Success |
 |---|---|---|---|
 | POST | `/openapi/v1/bots` | Create a bot; may need Passport authorization | `201 Envelope[Bot]` or `202 Envelope[BotAuthPending]` |
@@ -242,7 +255,7 @@ All responses use the `Envelope[T]` / `Page[T]` shapes from
 | GET | `/openapi/v1/bots/{bot_id}/engine-config` | Read engine config (free-form JSON) | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine-config` | Write engine config (free-form JSON) | `Envelope[dict]` |
 
-### 🟦 totalfrank — channels (6 endpoints) · `openapi_v1/channels/router.py`
+### 🟦 totalfrank · P2 — channels (6 endpoints) · `openapi_v1/channels/router.py`
 DingTalk (`dingding`) config CRUD + status toggle.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
@@ -256,7 +269,7 @@ DingTalk (`dingding`) config CRUD + status toggle.
 _Note: the stub returns `Envelope[list[Channel]]` for list (not `Page`); PR #363
 showed `Page[Channel]`. Confirm which you want when you wire it._
 
-### 🟦 totalfrank — mcp (6 endpoints) · `openapi_v1/mcp/router.py`
+### 🟦 totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py`
 Marketplace + tenants + the caller's unified per-server config.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
@@ -267,7 +280,7 @@ Marketplace + tenants + the caller's unified per-server config.
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Read caller's unified server config | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Write config (pushed to devices) | `Envelope[McpConfig]` |
 
-### 🟩 lucas-xzp — resources (9 endpoints) · `openapi_v1/resources/router.py`
+### 🟩 lucas-xzp · P1 — resources (9 endpoints) · `openapi_v1/resources/router.py`
 Unified file/link/folder abstraction; storage location never exposed.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
@@ -284,9 +297,17 @@ Unified file/link/folder abstraction; storage location never exposed.
 _Note: the stub's upload is raw `octet-stream`; PR #363 described `multipart`.
 Pick one when wiring._
 
-### 🟩 lucas-xzp — skills (5 in stub + 2 proposed) · `openapi_v1/skills/router.py`
+### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (5 in stub + 2 proposed) · `openapi_v1/skills/router.py`
 Catalog at `/openapi/v1/bots/skills`; a bot's installed skills are a bot
 sub-resource.
+
+> **Co-owned — the trickiest category.** Skills has a three-layer lifecycle
+> (global **upload** → per-bot **install** → per-bot **enable/disable**), two ★
+> endpoints not yet ratified into the stubs, and an open question on whether the
+> richer backend skill-set model gets promoted to a first-class concept. Because
+> of that, **both** own it. Agree a shared sub-plan first — e.g. split
+> catalog/upload vs. per-bot install/lifecycle — and give it its own SDD before
+> writing code. Do it after your P1/P2 slices.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/skills` | Skill catalog (`keyword`, paged) | `Envelope[Page[Skill]]` |
@@ -302,7 +323,7 @@ totalfrank before implementing):**
 | POST ★ | `/openapi/v1/skills/upload` | Upload a custom skill (global, owned by caller) | `Envelope[Skill]` |
 | PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Enable/disable an installed skill (`status`) | `Envelope[BotSkill]` |
 
-### 🟩 lucas-xzp — routines (7 endpoints) · `openapi_v1/routines/router.py`
+### 🟩 lucas-xzp · P1 — routines (7 endpoints) · `openapi_v1/routines/router.py`
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
@@ -314,7 +335,7 @@ Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
 | POST | `/openapi/v1/bots/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun]` |
 | GET | `/openapi/v1/bots/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[Page[RoutineRun]]` |
 
-### 🟩 lucas-xzp — identity (3 endpoints) · `openapi_v1/identity/router.py`
+### 🟩 lucas-xzp · P2 — identity (3 endpoints) · `openapi_v1/identity/router.py`
 Read/write a bot's identity markdown files (RULES, SOUL, …), `file_type` is an
 enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 | Method | Path | Purpose | Success |
@@ -396,3 +417,8 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
   vertical slices. Added **Endpoints per component** checklists (from the stub
   routers + PR #363), flagged the `/openapi/v1/bots/...` vs top-level path
   divergence and the two proposed ★ skills endpoints.
+- **2026-07-27** — Added **priority tiers**: P1 = bots, mcp, resources, routines;
+  P2 = channels, identity; P3 = skills. **Skills is now co-owned** by totalfrank
+  + lucas-xzp (its Track A stage and its endpoints), being the most involved
+  category. Priority columns added to both status boards; per-component headers
+  tagged with tier.
