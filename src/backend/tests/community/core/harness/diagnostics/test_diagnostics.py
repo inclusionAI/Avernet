@@ -822,6 +822,79 @@ class TestSoulPersonaDiagnostic:
         assert "This is the active profile" in captured_user
         assert "Draft Bot" not in captured_user
 
+    @pytest.mark.asyncio
+    async def test_low_quality_profile_clears_template(self, monkeypatch):
+        """B-mode: profile quality < 0.7 → suggestions are advisory (improve
+        profile / supplement info), not a SOUL.md edit the patch LLM can fill.
+        The auto-fix template must be dropped so Phase 3 doesn't emit
+        TODO-placeholder patches. The finding still carries its score/message
+        (counts toward health_score, surfaces in the report)."""
+        diag = SoulPersonaDiagnostic()
+        ctx = _make_ctx({"SOUL.md": "## Persona\n\n通用助手"})
+        mock_profiles_resp = {
+            "items": [{
+                "profile_id": "default", "display_name": "Bot",
+                "contents": {"profile": "研发助手", "capabilities": ["代码开发"]},
+                "quality_score": 0.3, "quality_issues": [],
+            }],
+            "total": 1, "active_profile_id": "default",
+        }
+        monkeypatch.setattr(
+            "agentclaw.community.core.harness.diagnostics.config.soul._fetch_profiles",
+            lambda worker_id, base_url: mock_profiles_resp,
+        )
+        ctx.llm.chat = AsyncMock(
+            return_value="通用模板问题\n缺少专属定制，建议完善画像\n[SCORE:50]"
+        )
+        findings = await diag.analyze(ctx)
+        assert len(findings) == 1
+        assert findings[0].score == 50
+        assert findings[0].suggested_template_ids == []
+
+    @pytest.mark.asyncio
+    async def test_no_profile_clears_template(self, monkeypatch):
+        """When BCSFuse is unavailable / returns nothing, the diagnostic can't
+        generate a full SOUL.md rewrite — its suggestions are advisory, so the
+        template is dropped (same as B-mode)."""
+        diag = SoulPersonaDiagnostic()
+        ctx = _make_ctx({"SOUL.md": "## Persona\n\n通用助手"})
+        monkeypatch.setattr(
+            "agentclaw.community.core.harness.diagnostics.config.soul._fetch_profiles",
+            lambda worker_id, base_url: None,
+        )
+        ctx.llm.chat = AsyncMock(
+            return_value="缺少专属定制\n建议补充 Bot 专属职责\n[SCORE:55]"
+        )
+        findings = await diag.analyze(ctx)
+        assert len(findings) == 1
+        assert findings[0].suggested_template_ids == []
+
+    @pytest.mark.asyncio
+    async def test_high_quality_profile_keeps_template(self, monkeypatch):
+        """A-mode: profile quality >= 0.7 → the LLM produces a full suggested
+        SOUL.md rewrite, a concrete file edit. Keep the auto-fix template so
+        Phase 3 can generate a real patch."""
+        diag = SoulPersonaDiagnostic()
+        ctx = _make_ctx({"SOUL.md": "## Persona\n\n通用助手"})
+        mock_profiles_resp = {
+            "items": [{
+                "profile_id": "default", "display_name": "Bot",
+                "contents": {"profile": "研发助手", "capabilities": ["代码开发", "问题排查"]},
+                "quality_score": 0.8, "quality_issues": [],
+            }],
+            "total": 1, "active_profile_id": "default",
+        }
+        monkeypatch.setattr(
+            "agentclaw.community.core.harness.diagnostics.config.soul._fetch_profiles",
+            lambda worker_id, base_url: mock_profiles_resp,
+        )
+        ctx.llm.chat = AsyncMock(
+            return_value="缺少专属定制\n建议版 SOUL.md\n\n我是研发助手\n[SCORE:50]"
+        )
+        findings = await diag.analyze(ctx)
+        assert len(findings) == 1
+        assert findings[0].suggested_template_ids == [3]
+
 
 class TestDiagnosticContextNoCache:
     """Test that DiagnosticContext always reads fresh content from BotProfile."""

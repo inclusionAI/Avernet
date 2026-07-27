@@ -282,4 +282,18 @@ class SoulPersonaDiagnostic(Diagnostic):
         user_msg += "--- end ---"
 
         response = await ctx.llm.chat(system=self.system_prompt, user=user_msg, max_tokens=DIAGNOSTIC_MAX_TOKENS)
-        return self._analyze_response(response, ctx.bot_id)
+        findings = self._analyze_response(response, ctx.bot_id)
+
+        # B-mode (should_generate_full_rewrite is False): the profile is missing
+        # or low-quality, so the LLM is told to give advisory suggestions ("improve
+        # the profile / supplement info") rather than a concrete SOUL.md rewrite.
+        # Such suggestions are not an actionable file edit the patch LLM can fill
+        # — feeding them to PatchPlanner only yields `<!-- TODO: ... -->` placeholder
+        # patches. Drop the auto-fix template here; the finding still carries its
+        # score/message, so it counts toward health_score and surfaces in the report.
+        # A-mode (high-quality profile → full rewrite produced) keeps the template.
+        if not should_generate_full_rewrite:
+            for f in findings:
+                f.suggested_template_ids = []
+
+        return findings
