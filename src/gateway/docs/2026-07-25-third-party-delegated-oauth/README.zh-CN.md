@@ -1,6 +1,6 @@
 # 第三方代表用户接入：OAuth 授权码 + PKCE 方案
 
-**状态：** 草案 / 待评审
+**状态：** 参考记录 —— 决定已记录（非 SDD spec）
 **日期：** 2026-07-25
 **组件：** `src/gateway`（网关承载鉴权面；对外域名 `https://teamclawgw-pre.alipay.com`）
 **范围：** 第三方服务器如何**代表我方某个终端用户**调用，而**全程不持有第一方会话令牌**。
@@ -11,7 +11,7 @@
 
 ---
 
-> **结论（2026-07-26）：corp 用 `xoneid`；本 OAuth 设计是 *community* 路径。** 团队评审认为为 corp 自建 OAuth 授权服务器过重 —— 在共享 IdP（BUService）下跳转/授权收益甚微且带来可见的"闪一下"。corp 改用 **`xoneid`**，即 corp 标准的服务器到服务器主体传递（auth-design §15），且**不是**本文所警示的原始 `IAM_TOKEN` cookie 透传。本 OAuth 方案适用于 **community**（无共享 IdP → 真正的信任边界）。corp 后续：确认 `xoneid` sender-constrained 且调用方 App 已认证；确认无需按用户授权。详见 [`SYSTEM-FLOW.zh-CN.md`](./SYSTEM-FLOW.zh-CN.md) → **结论**。这关闭了 corp 的探索。
+> **结论（2026-07-26）：corp 保留 `xoneid` 令牌透传；本 OAuth 设计作为*参考*（偏 community）。** 团队评审：对 corp，我们回到以服务器到服务器方式转发 `xoneid` 主体令牌（经 BUService SDK 解析，auth-design §15）—— 这是**令牌透传**，之所以在 corp 可接受，是因为它正是 **corp 约定俗成的鉴权方式**。自建 OAuth 授权服务器会带来可见的"闪一下"并偏离 corp 惯例、无收益。本文的 OAuth "用 Avernet 登录"设计保留为**参考**，可能更适合 **community**（无共享 IdP → 真正的信任边界）。本文是**参考记录，非 SDD spec**。详见 [`SYSTEM-FLOW.zh-CN.md`](./SYSTEM-FLOW.zh-CN.md) → **结论**。关闭 corp 探索。
 
 ---
 
