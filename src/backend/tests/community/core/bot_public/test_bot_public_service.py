@@ -9,6 +9,10 @@ from agentclaw.community.core.bot_public.services.bot_public_service import (
 )
 from agentclaw.community.core.bot_public.repository.models import BotFriendStatus
 from agentclaw.community.core.operator_context import OperatorContext
+from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
+
+# The coalescing key is tenant-scoped; unscoped tests run under the default tenant.
+_SYNC_KEY = f"{DEFAULT_AVERNET_TENANT}:owner1:bot1"
 
 
 # ---------------------------------------------------------------------------
@@ -1260,28 +1264,28 @@ class TestSyncAccessModeAndRelations:
         bot_repo.get_by_id_and_owner.return_value = _make_bot()
 
         svc = _make_service(bot_repository=bot_repo)
-        svc._syncing_bots.add("owner1:bot1")
+        svc._syncing_bots.add(_SYNC_KEY)
 
         svc._sync_access_mode_and_relations(
             bot_id="bot1", owner_id="owner1",
             access_mode="RESTRICTED", public="1"
         )
 
-        assert svc._pending_syncs["owner1:bot1"] == ("RESTRICTED", "1")
+        assert svc._pending_syncs[_SYNC_KEY] == ("RESTRICTED", "1")
         # Should not start a new thread
-        assert "owner1:bot1" in svc._syncing_bots
+        assert _SYNC_KEY in svc._syncing_bots
 
     def test_overwrites_pending_with_latest_params(self):
         svc = _make_service()
-        svc._syncing_bots.add("owner1:bot1")
-        svc._pending_syncs["owner1:bot1"] = ("OLD_MODE", "0")
+        svc._syncing_bots.add(_SYNC_KEY)
+        svc._pending_syncs[_SYNC_KEY] = ("OLD_MODE", "0")
 
         svc._sync_access_mode_and_relations(
             bot_id="bot1", owner_id="owner1",
             access_mode="OPEN", public="1"
         )
 
-        assert svc._pending_syncs["owner1:bot1"] == ("OPEN", "1")
+        assert svc._pending_syncs[_SYNC_KEY] == ("OPEN", "1")
 
     @patch("agentclaw.community.core.bot_management.utils.resolve_agent_code", return_value=None)
     def test_raises_when_agent_code_empty(self, _mock_resolve):
