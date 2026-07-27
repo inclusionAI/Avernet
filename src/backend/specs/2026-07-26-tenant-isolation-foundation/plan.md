@@ -97,9 +97,16 @@ already leads with a more selective, already-indexed predicate (`owner_id`,
 (a) a second tenant makes the column selective and (b) a tenant-scoped list query
 (no more-selective predicate) exists. Revisit then — and prefer *prepending*
 `avernet_tenant` to the hot composites (`idx_owner` → `(avernet_tenant, owner_id)`,
-`idx_bot_id_entity_id` → `(avernet_tenant, bot_id, entity_id)`) so mandatory
-tenant-scoping composes with the existing access paths, rather than a standalone
-`(avernet_tenant, env)` the queries can't fully use.
+`idx_bot_id_entity_id` → `(avernet_tenant, bot_id, entity_id)`, `idx_entity` →
+`(avernet_tenant, entity_id)`, and the search index) so mandatory tenant-scoping
+composes with the existing access paths, rather than a standalone
+`(avernet_tenant, env)` the queries can't fully use. Only those query-backing
+composites need it — leave the low-cardinality (`idx_status`, `idx_is_delete`)
+and unique-lookup (`idx_binding_id`) indexes alone. Because the corp naming
+convention ties an index's name to its columns, a reshape can't alter columns in
+place: **create the new (tenant-prepended, convention-named) index, then drop the
+old one** — create-before-drop so no window is left without a usable index, and
+mind online-DDL cost on the hot `ac_bots` table.
 
 The fallback ("default") tenant is identified as **`teamclaw`** — the internal
 product's own name (already used throughout the code, e.g.
