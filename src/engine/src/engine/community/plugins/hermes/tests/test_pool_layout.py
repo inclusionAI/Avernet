@@ -97,7 +97,7 @@ def test_probe_requires_verified_hermes_legacy_bridge(tmp_path: Path) -> None:
     )
 
 
-def test_activation_switches_hermes_local_bridge_to_pool(tmp_path: Path) -> None:
+def test_activation_retires_hermes_legacy_storage_bridges(tmp_path: Path) -> None:
     home = tmp_path / "home" / "admin"
     active_root = home / ".hermes" / "skills"
     legacy_local = home / ".hermes" / "workspace" / "skills" / "skills-local"
@@ -170,8 +170,8 @@ def test_activation_switches_hermes_local_bridge_to_pool(tmp_path: Path) -> None
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
-    assert legacy_local.is_symlink()
-    assert legacy_local.resolve() == pool_local.resolve()
+    assert not legacy_local.exists()
+    assert not legacy_local.is_symlink()
     assert not local_bridge.exists()
     assert not local_bridge.is_symlink()
     assert not repo_bridge.exists()

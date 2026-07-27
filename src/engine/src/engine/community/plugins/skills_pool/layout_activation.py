@@ -1,15 +1,16 @@
-"""文件型引擎 Skills Pool 的完整收敛与原子 local bridge 切换。"""
+"""文件型引擎 Skills Pool 的完整收敛与单向 Legacy storage 退役。"""
 
 from __future__ import annotations
 
+import json
 import os
 import re
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 from engine.community.plugins.skills_pool.layout_atomic import (
     atomic_exchange_paths,
@@ -272,6 +273,8 @@ def _finalize_active_root(
     migration_generation: str,
     preparation_id: str,
     mappings: list[SkillMapping],
+    quarantine: Path,
+    retire_path: Callable[[Path, Path], None],
 ) -> PoolActivationResult | None:
     published = publish_pool_mappings(
         mappings=mappings,
@@ -307,6 +310,13 @@ def _finalize_active_root(
         mappings=mappings,
         activation_state="finalizing",
     )
+    _residue_evidence, residue_failure = _capture_recreated_legacy_local(
+        layout=layout,
+        quarantine=quarantine,
+        retire_path=retire_path,
+    )
+    if residue_failure is not None:
+        return residue_failure
     _retire_bridge(
         layout.local_bridge,
         allowed_targets=(layout.legacy_local, layout.pool_local),
@@ -315,6 +325,28 @@ def _finalize_active_root(
         layout.repo_bridge,
         allowed_targets=(layout.legacy_repo, layout.pool_repo),
     )
+    if layout.legacy_local != layout.local_bridge:
+        _retire_bridge(
+            layout.legacy_local,
+            allowed_targets=(layout.pool_local,),
+        )
+    remaining_storage_entries = [
+        str(path)
+        for path in {
+            layout.legacy_local,
+            layout.local_bridge,
+            layout.repo_bridge,
+        }
+        if path.exists() or path.is_symlink()
+    ]
+    if remaining_storage_entries:
+        return PoolActivationResult(
+            PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+            {
+                "reason": "legacy_storage_entries_remain",
+                "paths": sorted(remaining_storage_entries),
+            },
+        )
     _write_active_marker(
         layout=layout,
         engine=engine,
@@ -656,13 +688,280 @@ def _finalize_post_cutover(
 
     quarantine.parent.mkdir(parents=True, exist_ok=True)
     cleanup_pending = quarantine.exists() or quarantine.is_symlink()
-    if not cleanup_pending:
+    if temporary != quarantine:
+        if cleanup_pending:
+            raise OSError(f"cutover quarantine already exists: {quarantine}")
         temporary.rename(quarantine)
-    baseline_path.unlink(missing_ok=True)
+        cleanup_pending = True
     return _PostCutoverFinalization(
         post_sync=post_sync,
         cleanup_pending=cleanup_pending,
     )
+
+
+def _capture_recreated_legacy_local(
+    *,
+    layout: _Layout,
+    quarantine: Path,
+    retire_path: Callable[[Path, Path], None],
+    max_captures: int = 3,
+) -> tuple[dict[str, object], PoolActivationResult | None]:
+    """收集 rename 后被容器内旧路径 writer 重新创建的极窄窗口增量。
+
+    ``begin_cutover`` 后 Backend 已写 canonical Pool，但运行中 Agent 仍可能
+    在几秒窗口内直接重建 Legacy local。这里只将 Pool 中不存在的新路径
+    best-effort 合入；冲突保留 Pool 权威版本，完整 residue 留在同 generation
+    quarantine 供审计和后续清理。
+    """
+
+    captured: list[dict[str, object]] = []
+    residue_index = 1
+    existing_residues: list[tuple[int, Path]] = []
+    if quarantine.parent.is_dir() and not quarantine.parent.is_symlink():
+        for entry in quarantine.parent.iterdir():
+            match = re.fullmatch(r"skills-local-residue-([1-9][0-9]*)", entry.name)
+            if match is None:
+                continue
+            if not entry.is_dir() or entry.is_symlink():
+                return (
+                    {
+                        "captured_count": len(captured),
+                        "captures": captured,
+                    },
+                    _invalid(
+                        "legacy_local_residue_invalid",
+                        path=str(entry),
+                    ),
+                )
+            existing_residues.append((int(match.group(1)), entry))
+    for index, residue in sorted(existing_residues):
+        post_sync = merge_post_cutover_changes(
+            source_root=residue,
+            pool_local=layout.pool_local,
+            baseline={},
+        )
+        captured.append(
+            {
+                "path": str(residue),
+                "post_sync": post_sync,
+                "replayed": True,
+            }
+        )
+        residue_index = max(residue_index, index + 1)
+
+    for _capture_index in range(1, max_captures + 1):
+        if not layout.legacy_local.exists() and not layout.legacy_local.is_symlink():
+            return (
+                {
+                    "captured_count": len(captured),
+                    "captures": captured,
+                },
+                None,
+            )
+        if layout.legacy_local.is_symlink():
+            return (
+                {
+                    "captured_count": len(captured),
+                    "captures": captured,
+                },
+                None,
+            )
+        if not layout.legacy_local.is_dir():
+            return (
+                {
+                    "captured_count": len(captured),
+                    "captures": captured,
+                },
+                _invalid(
+                    "legacy_local_residue_invalid",
+                    path=str(layout.legacy_local),
+                ),
+            )
+
+        while residue_index <= 128:
+            residue = (
+                quarantine.parent
+                / f"skills-local-residue-{residue_index}"
+            )
+            residue_index += 1
+            if not residue.exists() and not residue.is_symlink():
+                break
+        else:
+            return (
+                {
+                    "captured_count": len(captured),
+                    "captures": captured,
+                },
+                _invalid(
+                    "legacy_local_residue_quarantine_exhausted",
+                    path=str(quarantine.parent),
+                ),
+            )
+        retire_path(layout.legacy_local, residue)
+        post_sync = merge_post_cutover_changes(
+            source_root=residue,
+            pool_local=layout.pool_local,
+            baseline={},
+        )
+        captured.append(
+            {
+                "path": str(residue),
+                "post_sync": post_sync,
+            }
+        )
+
+    if layout.legacy_local.exists() or layout.legacy_local.is_symlink():
+        return (
+            {
+                "captured_count": len(captured),
+                "captures": captured,
+            },
+            PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "legacy_local_recreated_during_cutover",
+                    "captured_count": len(captured),
+                },
+            ),
+        )
+    return (
+        {
+            "captured_count": len(captured),
+            "captures": captured,
+        },
+        None,
+    )
+
+
+def _ensure_quarantine_generation_owned(
+    *,
+    quarantine: Path,
+    engine: str,
+    migration_generation: str,
+    preparation_id: str,
+    baseline_path: Path,
+) -> PoolActivationResult | None:
+    """以 generation 目录和 owner marker 证明 quarantine 写入所有权。
+
+    初次调用以 exclusive mkdir 取得 generation namespace；后续调用必须
+    匹配 owner marker。兼容旧实现已完成 rename、但尚未写 owner 的可恢复
+    状态时，只允许 baseline 存在且目录内全部是已知 quarantine 项。
+    """
+
+    generation_dir = quarantine.parent
+    quarantine_root = generation_dir.parent
+    quarantine_root.mkdir(parents=True, exist_ok=True)
+    created = False
+    try:
+        generation_dir.mkdir()
+        created = True
+    except FileExistsError:
+        if not generation_dir.is_dir() or generation_dir.is_symlink():
+            return _invalid(
+                "cutover_quarantine_generation_invalid",
+                path=str(generation_dir),
+            )
+
+    owner_path = generation_dir / ".owner.json"
+    expected_owner = {
+        "engine": engine,
+        "migration_generation": migration_generation,
+        "preparation_id": preparation_id,
+    }
+    known_entry = re.compile(
+        r"(?:skills-local(?:-residue-[1-9][0-9]*)?|"
+        r"\.owner\.json|\.owner\.invalid-[A-Fa-f0-9]+|"
+        r"\.owner\.tmp-[A-Fa-f0-9]+)"
+    )
+    unknown_entries = sorted(
+        entry.name
+        for entry in generation_dir.iterdir()
+        if known_entry.fullmatch(entry.name) is None
+    )
+
+    if owner_path.is_file() and not owner_path.is_symlink():
+        try:
+            owner = json.loads(owner_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            if (
+                not baseline_path.is_file()
+                or baseline_path.is_symlink()
+                or unknown_entries
+            ):
+                return _invalid(
+                    "cutover_quarantine_owner_invalid",
+                    path=str(owner_path),
+                )
+            owner_path.rename(
+                generation_dir / f".owner.invalid-{uuid4().hex}"
+            )
+            owner = None
+        if owner == expected_owner:
+            return None
+        if owner is not None:
+            return _invalid(
+                "cutover_quarantine_owner_mismatch",
+                path=str(owner_path),
+            )
+    if owner_path.exists() or owner_path.is_symlink():
+        return _invalid(
+            "cutover_quarantine_owner_invalid",
+            path=str(owner_path),
+        )
+
+    if not created and (
+        not baseline_path.is_file()
+        or baseline_path.is_symlink()
+        or unknown_entries
+    ):
+        return _invalid(
+            "cutover_quarantine_ownership_unproven",
+            path=str(generation_dir),
+            unknown_entries=unknown_entries,
+        )
+
+    owner_temporary = generation_dir / f".owner.tmp-{uuid4().hex}"
+    try:
+        with owner_temporary.open("x", encoding="utf-8") as stream:
+            json.dump(
+                expected_owner,
+                stream,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(owner_temporary, owner_path)
+        except FileExistsError:
+            try:
+                raced_owner = json.loads(
+                    owner_path.read_text(encoding="utf-8")
+                )
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                return _invalid(
+                    "cutover_quarantine_owner_raced_invalid",
+                    path=str(owner_path),
+                )
+            if raced_owner != expected_owner:
+                return _invalid(
+                    "cutover_quarantine_owner_raced_mismatch",
+                    path=str(owner_path),
+                )
+        directory_fd = os.open(generation_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except FileExistsError:
+        return _invalid(
+            "cutover_quarantine_owner_temporary_raced",
+            path=str(owner_temporary),
+        )
+    finally:
+        owner_temporary.unlink(missing_ok=True)
+    return None
 
 
 def _activate_pool(
@@ -674,10 +973,19 @@ def _activate_pool(
     mappings: list[SkillMapping],
     home: str | Path = "/home/admin",
     repo_is_mounted: Callable[[Path], bool] | None = None,
-    exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+    retire_path: Callable[[Path, Path], None] = os.replace,
+    before_legacy_retire: Callable[[], None] | None = None,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
-    """校验登记事实、同步完整 local，并原子提交 Legacy→Pool bridge。"""
+    """校验登记事实、同步完整 local，并单向退役 Legacy storage 入口。
+
+    Backend 在调用本接口前已通过 ``begin_cutover`` 将路径消费者切到
+    canonical Pool。这里先镜像完整 local corpus，再以同文件系统普通
+    rename 将 Legacy local 移入 quarantine，最后发布逐 Skill 映射并删除
+    Legacy storage 入口。切换窗口内允许短暂断链，但最终 active root
+    绝不保留指向整个 Pool corpus 的目录 bridge。
+
+    """
 
     home_path = Path(home)
     layout = _Layout.for_engine(engine, home_path)
@@ -700,43 +1008,6 @@ def _activate_pool(
             preparation_id=inspection.preparation_id,
         )
 
-    active_marker = _read_active_marker(layout.active_marker)
-    if active_marker is not None:
-        if (
-            active_marker.get("engine") != engine
-            or active_marker.get("layout_contract_version") != LAYOUT_CONTRACT_VERSION
-            or active_marker.get("preparation_id") != preparation_id
-            or active_marker.get("migration_generation") != migration_generation
-            or active_marker.get("activation_state") not in {"finalizing", "active"}
-        ):
-            return _invalid("active_marker_identity_mismatch")
-        try:
-            completion_failure = _finalize_active_root(
-                layout=layout,
-                engine=engine,
-                migration_generation=migration_generation,
-                preparation_id=preparation_id,
-                mappings=mappings,
-            )
-        except OSError as error:
-            return PoolActivationResult(
-                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
-                {
-                    "reason": "active_root_retirement_failed",
-                    "error_type": type(error).__name__,
-                    "errno": error.errno,
-                },
-            )
-        if completion_failure is not None:
-            return completion_failure
-        return PoolActivationResult(
-            PoolActivationStatus.ALREADY_COMMITTED,
-            {
-                "active_marker": str(layout.active_marker),
-                "legacy_storage_entries_absent": True,
-            },
-        )
-
     temporary = layout.legacy_local.parent / (
         f".skills-local.pool-cutover-{migration_generation}"
     )
@@ -749,6 +1020,56 @@ def _activate_pool(
     baseline_path = layout.pool_root / (
         f".cutover-baseline-{migration_generation}.json"
     )
+    active_marker = _read_active_marker(layout.active_marker)
+    if active_marker is not None:
+        if (
+            active_marker.get("engine") != engine
+            or active_marker.get("layout_contract_version") != LAYOUT_CONTRACT_VERSION
+            or active_marker.get("preparation_id") != preparation_id
+            or active_marker.get("migration_generation") != migration_generation
+            or active_marker.get("activation_state") not in {"finalizing", "active"}
+        ):
+            return _invalid("active_marker_identity_mismatch")
+        if active_marker.get("activation_state") == "finalizing":
+            ownership_failure = _ensure_quarantine_generation_owned(
+                quarantine=quarantine,
+                engine=engine,
+                migration_generation=migration_generation,
+                preparation_id=preparation_id,
+                baseline_path=baseline_path,
+            )
+            if ownership_failure is not None:
+                return ownership_failure
+        try:
+            completion_failure = _finalize_active_root(
+                layout=layout,
+                engine=engine,
+                migration_generation=migration_generation,
+                preparation_id=preparation_id,
+                mappings=mappings,
+                quarantine=quarantine,
+                retire_path=retire_path,
+            )
+        except OSError as error:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_root_retirement_failed",
+                    "error_type": type(error).__name__,
+                    "errno": error.errno,
+                },
+            )
+        if completion_failure is not None:
+            return completion_failure
+        baseline_path.unlink(missing_ok=True)
+        return PoolActivationResult(
+            PoolActivationStatus.ALREADY_COMMITTED,
+            {
+                "active_marker": str(layout.active_marker),
+                "legacy_storage_entries_absent": True,
+            },
+        )
+
     normalized_names: list[str] = []
     for name in registered_local_names:
         path = Path(name)
@@ -769,6 +1090,15 @@ def _activate_pool(
                 return _invalid("legacy_local_bridge_invalid")
             finalization = _PostCutoverFinalization({}, False)
             if temporary.is_dir() and not temporary.is_symlink():
+                ownership_failure = _ensure_quarantine_generation_owned(
+                    quarantine=quarantine,
+                    engine=engine,
+                    migration_generation=migration_generation,
+                    preparation_id=preparation_id,
+                    baseline_path=baseline_path,
+                )
+                if ownership_failure is not None:
+                    return ownership_failure
                 for name in normalized_names:
                     source = temporary / name
                     if not source.is_dir() or source.is_symlink():
@@ -790,9 +1120,12 @@ def _activate_pool(
                 migration_generation=migration_generation,
                 preparation_id=preparation_id,
                 mappings=mappings,
+                quarantine=quarantine,
+                retire_path=retire_path,
             )
             if completion_failure is not None:
                 return completion_failure
+            baseline_path.unlink(missing_ok=True)
             return PoolActivationResult(
                 PoolActivationStatus.ALREADY_COMMITTED,
                 {
@@ -801,6 +1134,75 @@ def _activate_pool(
                     "quarantine": str(quarantine),
                     "quarantine_cleanup_pending": (finalization.cleanup_pending),
                     "post_sync": finalization.post_sync,
+                },
+            )
+        if quarantine.is_dir() and not quarantine.is_symlink():
+            ownership_failure = _ensure_quarantine_generation_owned(
+                quarantine=quarantine,
+                engine=engine,
+                migration_generation=migration_generation,
+                preparation_id=preparation_id,
+                baseline_path=baseline_path,
+            )
+            if ownership_failure is not None:
+                return ownership_failure
+            if not baseline_path.is_file() or baseline_path.is_symlink():
+                return _invalid(
+                    "cutover_baseline_missing_after_legacy_retire",
+                    path=str(baseline_path),
+                )
+            for name in normalized_names:
+                source = quarantine / name
+                if not source.is_dir() or source.is_symlink():
+                    return _data_inconsistent(
+                        "registered_local_source_invalid",
+                        registered_name=name,
+                        source=str(source),
+                    )
+            mapping_plan = _mapping_plan(layout=layout, mappings=mappings)
+            if mapping_plan.conflicts:
+                return _active_entry_conflict(mapping_plan.conflicts)
+            if mapping_plan.failures:
+                return _invalid(
+                    "mapping_source_invalid",
+                    failures=list(mapping_plan.failures),
+                )
+            finalization = _finalize_post_cutover(
+                temporary=quarantine,
+                pool_local=layout.pool_local,
+                quarantine=quarantine,
+                baseline_path=baseline_path,
+            )
+            if finalization.failure is not None:
+                return finalization.failure
+            residue_evidence, residue_failure = _capture_recreated_legacy_local(
+                layout=layout,
+                quarantine=quarantine,
+                retire_path=retire_path,
+            )
+            if residue_failure is not None:
+                return residue_failure
+            completion_failure = _finalize_active_root(
+                layout=layout,
+                engine=engine,
+                migration_generation=migration_generation,
+                preparation_id=preparation_id,
+                mappings=mappings,
+                quarantine=quarantine,
+                retire_path=retire_path,
+            )
+            if completion_failure is not None:
+                return completion_failure
+            baseline_path.unlink(missing_ok=True)
+            return PoolActivationResult(
+                PoolActivationStatus.ALREADY_COMMITTED,
+                {
+                    "active_marker": str(layout.active_marker),
+                    "legacy_storage_entries_absent": True,
+                    "quarantine": str(quarantine),
+                    "quarantine_cleanup_pending": True,
+                    "post_sync": finalization.post_sync,
+                    "legacy_residue": residue_evidence,
                 },
             )
         if not layout.legacy_local.is_dir():
@@ -829,15 +1231,18 @@ def _activate_pool(
                     unreadable_path=str(unreadable),
                 )
 
-        local_names = mirror_local_tree(
+        local_names, staged_legacy_baseline = mirror_local_tree(
             source_root=layout.legacy_local,
             pool_local=layout.pool_local,
             staging_root=layout.pool_root / f".final-sync-{migration_generation}",
         )
         baseline = write_baseline_manifest(
-            pool_local=layout.pool_local,
+            # Freeze the exact staging snapshot. Reading live Legacy here
+            # would miss writes landing after staging copy but before rename.
+            pool_local=layout.legacy_local,
             local_names=local_names,
             manifest_path=baseline_path,
+            manifest=staged_legacy_baseline,
         )
 
         mapping_plan = _mapping_plan(layout=layout, mappings=mappings)
@@ -857,6 +1262,8 @@ def _activate_pool(
                 failures=list(mapping_plan.failures),
             )
 
+        if before_legacy_retire is not None:
+            before_legacy_retire()
         recovered_temporary = False
         if temporary.exists() or temporary.is_symlink():
             recovered_temporary = _cleanup_owned_cutover_temporary(
@@ -869,40 +1276,26 @@ def _activate_pool(
                     "cutover_temporary_path_occupied",
                     path=str(temporary),
                 )
-        temporary.symlink_to(layout.pool_local, target_is_directory=True)
-        try:
-            exchanged = exchange_paths(layout.legacy_local, temporary)
-        except OSError:
-            _cleanup_owned_cutover_temporary(
-                temporary=temporary,
-                legacy_local=layout.legacy_local,
-                pool_local=layout.pool_local,
+        ownership_failure = _ensure_quarantine_generation_owned(
+            quarantine=quarantine,
+            engine=engine,
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            baseline_path=baseline_path,
+        )
+        if ownership_failure is not None:
+            return ownership_failure
+        if quarantine.exists() or quarantine.is_symlink():
+            return _invalid(
+                "cutover_quarantine_path_occupied",
+                path=str(quarantine),
             )
-            raise
-        if not exchanged:
-            if not _cleanup_owned_cutover_temporary(
-                temporary=temporary,
-                legacy_local=layout.legacy_local,
-                pool_local=layout.pool_local,
-            ):
-                return _invalid("cutover_result_ambiguous")
-            return PoolActivationResult(
-                PoolActivationStatus.NOT_ATOMIC,
-                {
-                    "reason": "atomic_exchange_unavailable",
-                    "recovered_temporary": recovered_temporary,
-                },
-            )
-
-        if not layout.legacy_local.is_symlink() or _lexical_target(
-            layout.legacy_local
-        ) != Path(os.path.abspath(layout.pool_local)):
-            return _invalid("cutover_result_ambiguous")
+        retire_path(layout.legacy_local, quarantine)
 
         if before_post_sync is not None:
             before_post_sync()
         finalization = _finalize_post_cutover(
-            temporary=temporary,
+            temporary=quarantine,
             pool_local=layout.pool_local,
             quarantine=quarantine,
             baseline_path=baseline_path,
@@ -910,15 +1303,25 @@ def _activate_pool(
         )
         if finalization.failure is not None:
             return finalization.failure
+        residue_evidence, residue_failure = _capture_recreated_legacy_local(
+            layout=layout,
+            quarantine=quarantine,
+            retire_path=retire_path,
+        )
+        if residue_failure is not None:
+            return residue_failure
         completion_failure = _finalize_active_root(
             layout=layout,
             engine=engine,
             migration_generation=migration_generation,
             preparation_id=preparation_id,
             mappings=mappings,
+            quarantine=quarantine,
+            retire_path=retire_path,
         )
         if completion_failure is not None:
             return completion_failure
+        baseline_path.unlink(missing_ok=True)
         return PoolActivationResult(
             PoolActivationStatus.COMMITTED,
             {
@@ -926,6 +1329,7 @@ def _activate_pool(
                 "legacy_storage_entries_absent": True,
                 "quarantine": str(quarantine),
                 "quarantine_cleanup_pending": finalization.cleanup_pending,
+                "recovered_temporary": recovered_temporary,
                 "registered_local_count": len(normalized_names),
                 "local_inventory": {
                     "registered": len(normalized_names),
@@ -938,6 +1342,7 @@ def _activate_pool(
                     "external": len(mapping_plan.external),
                 },
                 "post_sync": finalization.post_sync,
+                "legacy_residue": residue_evidence,
             },
         )
     except OSError as error:
@@ -971,8 +1376,13 @@ def activate_openclaw_pool(
     home: str | Path = "/home/admin",
     repo_is_mounted: Callable[[Path], bool] | None = None,
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+    retire_path: Callable[[Path, Path], None] = os.replace,
+    before_legacy_retire: Callable[[], None] | None = None,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
+    # Deprecated compatibility seam for existing in-process callers. Forward
+    # activation no longer depends on atomic exchange.
+    del exchange_paths
     return _activate_pool(
         engine="openclaw",
         migration_generation=migration_generation,
@@ -981,7 +1391,8 @@ def activate_openclaw_pool(
         mappings=mappings,
         home=home,
         repo_is_mounted=repo_is_mounted,
-        exchange_paths=exchange_paths,
+        retire_path=retire_path,
+        before_legacy_retire=before_legacy_retire,
         before_post_sync=before_post_sync,
     )
 
@@ -995,8 +1406,11 @@ def activate_claude_code_pool(
     home: str | Path = "/home/admin",
     repo_is_mounted: Callable[[Path], bool] | None = None,
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+    retire_path: Callable[[Path, Path], None] = os.replace,
+    before_legacy_retire: Callable[[], None] | None = None,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
+    del exchange_paths
     return _activate_pool(
         engine="claude_code",
         migration_generation=migration_generation,
@@ -1005,7 +1419,8 @@ def activate_claude_code_pool(
         mappings=mappings,
         home=home,
         repo_is_mounted=repo_is_mounted,
-        exchange_paths=exchange_paths,
+        retire_path=retire_path,
+        before_legacy_retire=before_legacy_retire,
         before_post_sync=before_post_sync,
     )
 
@@ -1019,8 +1434,11 @@ def activate_aicoding_pool(
     home: str | Path = "/home/admin",
     repo_is_mounted: Callable[[Path], bool] | None = None,
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+    retire_path: Callable[[Path, Path], None] = os.replace,
+    before_legacy_retire: Callable[[], None] | None = None,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
+    del exchange_paths
     return _activate_pool(
         engine="aicoding",
         migration_generation=migration_generation,
@@ -1029,7 +1447,8 @@ def activate_aicoding_pool(
         mappings=mappings,
         home=home,
         repo_is_mounted=repo_is_mounted,
-        exchange_paths=exchange_paths,
+        retire_path=retire_path,
+        before_legacy_retire=before_legacy_retire,
         before_post_sync=before_post_sync,
     )
 
@@ -1043,8 +1462,11 @@ def activate_hermes_pool(
     home: str | Path = "/home/admin",
     repo_is_mounted: Callable[[Path], bool] | None = None,
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+    retire_path: Callable[[Path, Path], None] = os.replace,
+    before_legacy_retire: Callable[[], None] | None = None,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
+    del exchange_paths
     return _activate_pool(
         engine="hermes",
         migration_generation=migration_generation,
@@ -1053,7 +1475,8 @@ def activate_hermes_pool(
         mappings=mappings,
         home=home,
         repo_is_mounted=repo_is_mounted,
-        exchange_paths=exchange_paths,
+        retire_path=retire_path,
+        before_legacy_retire=before_legacy_retire,
         before_post_sync=before_post_sync,
     )
 
@@ -1122,7 +1545,7 @@ def _rollback_pool(
         if rebuild.is_symlink() or (rebuild.exists() and not rebuild.is_dir()):
             return _invalid("rollback_temporary_path_occupied", path=str(rebuild))
         rebuild.mkdir(exist_ok=True)
-        local_names = mirror_local_tree(
+        local_names, _rollback_baseline = mirror_local_tree(
             source_root=layout.pool_local,
             pool_local=rebuild,
             staging_root=copy_staging,
