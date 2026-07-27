@@ -1,6 +1,6 @@
 # Third-Party Delegated Access via OAuth (Authorization Code + PKCE)
 
-**Status:** Draft / for review
+**Status:** Reference note — decision recorded (not an SDD spec)
 **Date:** 2026-07-25
 **Component:** `src/gateway` (the gateway hosts the auth surface; public host `https://teamclawgw-pre.alipay.com`)
 **Scope:** How a third-party server acts **on behalf of one of our end users** without ever holding a first-party session token.
@@ -11,7 +11,7 @@
 
 ---
 
-> **Outcome (2026-07-26): corp uses `xoneid`; this OAuth design is the *community* path.** Team review found a bespoke OAuth authorization server too heavy for corp — inside a shared IdP (BUService) the redirect/consent buys little and adds a visible "flash." Corp instead uses **`xoneid`**, the corp-standard server-to-server subject propagation (auth-design §15), which is *not* the raw-`IAM_TOKEN`-cookie passthrough this note warns about. This OAuth approach applies to **community** (no shared IdP → a real trust boundary). Corp follow-ups: confirm `xoneid` is sender-constrained + the caller app authenticated; confirm no per-user consent is required. See [`SYSTEM-FLOW.md`](./SYSTEM-FLOW.md) → **Outcome**. This closes the corp exploration.
+> **Outcome (2026-07-26): corp stays with the `xoneid` token pass-through; this OAuth design is a *reference* (community-leaning).** Team review: for corp we go back to forwarding the `xoneid` subject token server-to-server (resolved via the BUService SDK, auth-design §15) — a **token pass-through**, accepted for corp because it is **how auth conventionally works inside corp**. A bespoke OAuth authorization server would add a visible redirect "flash" and diverge from the corp norm for no gain. The OAuth "Login with Avernet" design here is kept as a **reference**, likely the more reasonable approach for **community** (no shared IdP → a real trust boundary). This doc is a **reference note, not an SDD spec**. See [`SYSTEM-FLOW.md`](./SYSTEM-FLOW.md) → **Outcome**. Closes the corp exploration.
 
 ---
 

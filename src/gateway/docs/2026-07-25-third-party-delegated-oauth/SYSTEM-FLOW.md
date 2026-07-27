@@ -1,6 +1,6 @@
 # Delegated Access ("Login with Avernet") — System Flow
 
-**Status:** Draft / for team review
+**Status:** Reference note — decision recorded (not an SDD spec, no committed corp implementation)
 **Date:** 2026-07-25
 **Component:** `src/gateway` (teamclaw authorization server; public host `https://teamclawgw-pre.alipay.com`)
 **Scope:** The end-to-end system flow for a third-party server acting on behalf of one of our end users — corp and community — plus the token/consent model and the decided-vs-open agenda.
@@ -10,23 +10,19 @@
 
 ---
 
-> ## Outcome (2026-07-26) — corp uses `xoneid`; this OAuth design is the *community* path
+> ## Outcome (2026-07-26) — corp stays with `xoneid` pass-through; this OAuth design is a *reference* (community-leaning)
 >
-> Team review concluded a bespoke OAuth authorization server is **too heavy for corp** and adds a visible redirect **"flash"** (闪一下) for no gain: when the caller and teamclaw already share one IdP (BUService) and the user is already logged in there, the redirect to `/authorize` bounces out and back with no real login or consent happening.
+> Team review: for **corp**, we go **back to the `xoneid` token pass-through** — a server-to-server call forwards the `xoneid` subject token and the callee resolves it via the BUService SDK (auth-design.md §15). This **is** a token pass-through, and it is accepted for corp because it is **how auth conventionally works inside corp**. Standing up a bespoke OAuth authorization server would add a visible redirect **"flash" (闪一下)** — with a shared IdP (BUService) and the user already logged in, `/authorize` bounces out and back with no real login or consent — and would diverge from the corp platform norm for no corp-side gain.
 >
-> **Corp → `xoneid`.** Corp uses **`xoneid`** — the corp-standard **server-to-server subject-propagation** mechanism (auth-design.md §15), resolved via the BUService SDK. This is how auth already works inside corp, and it is **not** the raw-`IAM_TOKEN`-cookie passthrough this doc warned against — `xoneid` is a purpose-built subject assertion, not the ambient browser login cookie.
+> The **"Login with Avernet" OAuth design in this doc** (us as the authorization server) is kept as a **reference**. It may be the more reasonable approach for **community**, where there is no shared IdP and the real trust boundary makes the redirect + consent worthwhile.
 >
-> **Community → the OAuth design below.** With no shared IdP there is a real trust boundary, so the redirect + consent earn their cost. Everything from §1 on describes the **community** path (and remains the reference should a truly external, non-IdP third party ever appear in corp).
->
-> **Corp follow-ups (non-blocking):** (1) confirm `xoneid` is **sender-constrained** (audience / mTLS / DPoP) and the calling app is **authenticated**, so teamclaw can't be made a *confused deputy* accepting a forged subject; (2) confirm corp needs **no per-user consent** for app→teamclaw access (if it does, a consent step returns).
->
-> This **closes** the corp delegated-access exploration.
+> **This doc is a reference note — not an SDD spec, and not a committed corp implementation.** Recorded to close the exploration.
 
 ---
 
 ## 1. The decision in one paragraph
 
-> **Corp note:** the paragraph below is the **community** design. Corp uses `xoneid` instead — see the **Outcome** above.
+> **Corp note:** the paragraph below is the **community**-leaning design. Corp stays with the `xoneid` token pass-through instead — see the **Outcome** above.
 
 
 
@@ -234,6 +230,8 @@ Both flavors use the **same clean architecture** (we are the authz server; we mi
 
 ## 11. Why we are not forced back to the two-token passthrough
 
+> **Update (Outcome):** for **corp** the team chose to stay with the `xoneid` token pass-through — the corp convention — accepting its trade-offs. The argument below is why an OAuth authorization server is *available* as an alternative; it is the community-leaning path, not the corp decision.
+
 - **Option A (build our own authz server / login-with-avernet)** has **no external dependency** — it needs only (i) our own `/authorize` + consent + `/token`, (ii) the human-login we already run, (iii) minting our own JWTs. **Always achievable by us alone**, and **the design we build** in both flavors — for the reasons below.
 - **Option B (lean on the IdP as teamclaw's authz server) is not on the table** — but for *different reasons per flavor*, and neither reason is "unverified capability":
   - **Corp (BUService):** a **category mismatch**. BUService is an **authentication** service — it verifies the human and resolves identity — **not a third-party OAuth authorization server**: it does not register third-party OAuth clients, run a third-party consent flow, or issue **teamclaw-audience** tokens. So we build our **own** authz server *on top of* BUService, using it only for the authenticate-the-human step. B isn't a missing feature we're waiting on.
@@ -252,17 +250,17 @@ Both flavors use the **same clean architecture** (we are the authz server; we mi
 - Same clean design for both; IdP is the only flavored difference.
 - Single all-encompassing scope for now; **pure JWT** revocation (≤ ~15 min access latency).
 - Caller-token/downstream mint **de-scoped** (service-bot-only; future cross-team).
-- **Corp → `xoneid`, not a bespoke OAuth authorization server** (Outcome, 2026-07-26). The OAuth redirect/consent buys little inside a shared IdP and adds a visible flash; `xoneid` (auth-design §15, resolved via the BUService SDK) is the corp-standard S2S subject propagation and matches how corp auth already works. It is **not** the raw-`IAM_TOKEN`-cookie passthrough (§3) — that concern was about the ambient browser cookie, not a purpose-built subject assertion.
-- **Community → the OAuth "Login with Avernet" design** in this doc (no shared IdP → the redirect + consent earn their cost). Build A applies to community.
+- **Corp → `xoneid` token pass-through (the conventional corp approach), decided.** Corp forwards the `xoneid` subject token server-to-server, resolved via the BUService SDK (auth-design §15). This **is** a token pass-through, accepted for corp because it matches the established corp convention; the OAuth authorization-server design here is **not** adopted for corp.
+- **Community → the OAuth "Login with Avernet" design here — kept as a reference/proposal.** No shared IdP → a real trust boundary → the redirect + consent are worthwhile.
+- **This doc is a reference note, not an SDD spec.** No committed corp implementation.
 
-**Open / follow-ups**
+**Notes / follow-ups**
 
-1. **Corp `xoneid` — confirm it is sender-constrained** (audience / mTLS / DPoP) **and the calling app is authenticated**, so teamclaw can't be a confused deputy accepting a forged subject. (auth-design §15 flagged the same question.)
-2. **Corp — confirm no per-user consent** is required for app→teamclaw access. If it is, a consent step returns.
-3. **Community — consent lifetime & re-consent triggers** (expiry; what re-prompts). With a single scope there is no "new scope requested" trigger yet.
+1. **Corp:** nothing new to build — the `xoneid` pass-through is the existing corp convention (it rides on corp's established authenticated server-to-server trust).
+2. **Community (only if pursued):** consent lifetime & re-consent triggers, scope taxonomy, and the revocation model — see the sections above.
 
 ---
 
 ### Note on status
 
-The SDD spec started for this was **reverted off the config-driven-forwarding branch (PR #420)**. Per the **Outcome (2026-07-26)**, the corp delegated-access exploration is **closed**: corp adopts `xoneid`; this OAuth design is retained as the **community** path. Nothing here changes PR #420.
+The SDD spec started for this was **reverted off the config-driven-forwarding branch (PR #420)**. Per the **Outcome (2026-07-26)**: **corp stays with the `xoneid` token pass-through** (the corp convention); this OAuth design is checked in as a **reference** (community-leaning), **not an SDD spec**. The corp exploration is **closed**. Nothing here changes PR #420.
