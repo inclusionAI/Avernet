@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from secbaas.core.service.session_file_sharing import (
+from secbaas.community.core.service.session_file_sharing import (
     DefaultSessionFileSharingDispatcher,
 )
 
