@@ -297,7 +297,7 @@ Unified file/link/folder abstraction; storage location never exposed.
 _Note: the stub's upload is raw `octet-stream`; PR #363 described `multipart`.
 Pick one when wiring._
 
-### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (5 in stub + 2 proposed) · `openapi_v1/skills/router.py`
+### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (7 endpoints: 5 in stub + 2 proposed ★) · `openapi_v1/skills/router.py`
 Catalog at `/openapi/v1/bots/skills`; a bot's installed skills are a bot
 sub-resource.
 
@@ -308,20 +308,20 @@ sub-resource.
 > of that, **both** own it. Agree a shared sub-plan first — e.g. split
 > catalog/upload vs. per-bot install/lifecycle — and give it its own SDD before
 > writing code. Do it after your P1/P2 slices.
-| Method | Path | Purpose | Success |
-|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | Skill catalog (`keyword`, paged) | `Envelope[Page[Skill]]` |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[SkillDetail]` |
-| GET | `/openapi/v1/bots/{bot_id}/skills` | List a bot's installed skills | `Envelope[list[BotSkill]]` |
-| POST | `/openapi/v1/bots/{bot_id}/skills` | Install a skill on a bot (default enabled) | `201 Envelope[BotSkill]` |
-| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Remove (unbind) a skill from a bot | `Envelope[Deleted]` |
 
-**Proposed additions from PR #363 (★ — NOT in the router stubs yet; decide with
-totalfrank before implementing):**
-| Method | Path | Purpose | Success |
-|---|---|---|---|
-| POST ★ | `/openapi/v1/skills/upload` | Upload a custom skill (global, owned by caller) | `Envelope[Skill]` |
-| PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Enable/disable an installed skill (`status`) | `Envelope[BotSkill]` |
+The **Status** column marks whether each endpoint is already in the router stub
+(`in stub`) or a proposed addition from PR #363 (`★ proposed` — not in the stubs
+yet; ratify with totalfrank before implementing).
+
+| Method | Path | Purpose | Success | Status |
+|---|---|---|---|---|
+| GET | `/openapi/v1/bots/skills` | Skill catalog (`keyword`, paged) | `Envelope[Page[Skill]]` | in stub |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[SkillDetail]` | in stub |
+| POST ★ | `/openapi/v1/skills/upload` | Upload a custom skill (global, owned by caller) | `Envelope[Skill]` | ★ proposed |
+| GET | `/openapi/v1/bots/{bot_id}/skills` | List a bot's installed skills | `Envelope[list[BotSkill]]` | in stub |
+| POST | `/openapi/v1/bots/{bot_id}/skills` | Install a skill on a bot (default enabled) | `201 Envelope[BotSkill]` | in stub |
+| PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Enable/disable an installed skill (`status`) | `Envelope[BotSkill]` | ★ proposed |
+| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Remove (unbind) a skill from a bot | `Envelope[Deleted]` | in stub |
 
 ### 🟩 lucas-xzp · P1 — routines (7 endpoints) · `openapi_v1/routines/router.py`
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
@@ -422,3 +422,6 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
   + lucas-xzp (its Track A stage and its endpoints), being the most involved
   category. Priority columns added to both status boards; per-component headers
   tagged with tier.
+- **2026-07-27** — Skills endpoints merged from two tables (5 in-stub + 2
+  proposed) into a **single 7-row table with a Status column**, so the full
+  surface reads as 7 at a glance instead of looking like 2.
