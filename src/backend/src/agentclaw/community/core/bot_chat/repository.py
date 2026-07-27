@@ -18,6 +18,7 @@ from agentclaw.community.core.bot_chat.models import (
 )
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.bot_chat.query_support import (
+    QueryScope,
     enrich_trace_labels,
     list_group_sessions,
     load_bot_names,
@@ -468,7 +469,7 @@ class BotChatDbRepository:
 
     def list_traces(
         self,
-        owner_id: str,
+        owner_id: str | None,
         from_ms: int,
         to_ms: int,
         page: int,
@@ -483,6 +484,7 @@ class BotChatDbRepository:
         group_id: str | None = None,
         match_mode: str = "exact",
         include_output_match: bool = False,
+        query_scope: QueryScope = QueryScope.OWNER,
     ) -> tuple[list[ConversationSession], int]:
         """List traces from DB with pagination."""
         with self._db.orm_session() as session:
@@ -496,14 +498,17 @@ class BotChatDbRepository:
             # - bot_id is None: filter by user_id = owner_id
             # - bot_id == "default": filter by user_id = owner_id AND bot_id = "default"
             # - bot_id != "default": caller must verify ownership; here only filter by bot_id
-            if bot_id is None:
-                conditions.append(AwLangfuseTrace.user_id == owner_id)
-            elif bot_id == "default":
-                conditions.append(AwLangfuseTrace.user_id == owner_id)
-                conditions.append(AwLangfuseTrace.bot_id == "default")
-            else:
-                # Non-default bot: only filter by bot_id (ownership verified by caller)
-                conditions.append(AwLangfuseTrace.bot_id == bot_id)
+            if query_scope == QueryScope.OWNER:
+                if not owner_id:
+                    raise ValueError("owner_id is required for owner-scoped queries")
+                if bot_id is None:
+                    conditions.append(AwLangfuseTrace.user_id == owner_id)
+                elif bot_id == "default":
+                    conditions.append(AwLangfuseTrace.user_id == owner_id)
+                    conditions.append(AwLangfuseTrace.bot_id == "default")
+                else:
+                    # Non-default bot: only filter by bot_id (ownership verified by caller)
+                    conditions.append(AwLangfuseTrace.bot_id == bot_id)
 
             if trace_id:
                 conditions.append(match_column(AwLangfuseTrace.trace_id, trace_id, match_mode))
@@ -523,6 +528,7 @@ class BotChatDbRepository:
                 match_mode,
                 owner_id,
                 bot_id,
+                query_scope,
             )
             if biz_scene or biz_task_id:
                 ref_conditions = []
@@ -589,7 +595,7 @@ class BotChatDbRepository:
 
     def list_ocb_traces(
         self,
-        owner_id: str,
+        owner_id: str | None,
         from_ms: int,
         to_ms: int,
         page: int,
@@ -604,19 +610,23 @@ class BotChatDbRepository:
         group_id: str | None = None,
         match_mode: str = "exact",
         include_output_match: bool = False,
+        query_scope: QueryScope = QueryScope.OWNER,
     ) -> tuple[list[ConversationSession], int]:
         with self._db.orm_session() as session:
             conditions = [
                 AcOtelLogTrace.start_time_ms >= from_ms,
                 AcOtelLogTrace.start_time_ms <= to_ms,
             ]
-            if bot_id is None:
-                conditions.append(AcOtelLogTrace.user_id == owner_id)
-            elif bot_id == "default":
-                conditions.append(AcOtelLogTrace.user_id == owner_id)
-                conditions.append(AcOtelLogTrace.bot_id.in_(["default", f"{owner_id}_default"]))
-            else:
-                conditions.append(AcOtelLogTrace.bot_id == bot_id)
+            if query_scope == QueryScope.OWNER:
+                if not owner_id:
+                    raise ValueError("owner_id is required for owner-scoped queries")
+                if bot_id is None:
+                    conditions.append(AcOtelLogTrace.user_id == owner_id)
+                elif bot_id == "default":
+                    conditions.append(AcOtelLogTrace.user_id == owner_id)
+                    conditions.append(AcOtelLogTrace.bot_id.in_(["default", f"{owner_id}_default"]))
+                else:
+                    conditions.append(AcOtelLogTrace.bot_id == bot_id)
             if trace_id:
                 conditions.append(match_column(AcOtelLogTrace.trace_id, trace_id, match_mode))
             if session_key:
@@ -630,6 +640,7 @@ class BotChatDbRepository:
                 match_mode,
                 owner_id,
                 bot_id,
+                query_scope,
             )
             if biz_scene or biz_task_id:
                 conditions.append(

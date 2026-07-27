@@ -1,5 +1,6 @@
 """SQL query construction and display-label enrichment for bot-chat reads."""
 
+from enum import Enum
 from typing import Any
 
 from sqlalchemy import and_, or_
@@ -18,6 +19,13 @@ logger = get_logger()
 _GROUP_SESSION_KEY_PREFIX = "agent:main:"
 
 
+class QueryScope(str, Enum):
+    """Visibility boundary selected by the service entry point."""
+
+    OWNER = "owner"
+    OPEN = "open"
+
+
 def match_column(column: Any, value: str, match_mode: str) -> Any:
     """Build exact or substring matching for a SQLAlchemy column."""
     return column.like(f"%{value}%") if match_mode == "contains" else column == value
@@ -28,8 +36,9 @@ def load_task_refs(
     biz_scene: str | None,
     biz_task_id: str | None,
     match_mode: str,
-    owner_id: str,
+    owner_id: str | None,
     bot_id: str | None,
+    query_scope: QueryScope = QueryScope.OWNER,
 ) -> dict[str, set[str]]:
     """Load task references visible to the current user/Bot scope."""
     if not biz_scene and not biz_task_id:
@@ -43,13 +52,16 @@ def load_task_refs(
         query = query.filter(
             match_column(AcOtelLogBizRef.biz_task_id, biz_task_id, match_mode)
         )
-    query = query.filter(
-        or_(
-            AcOtelLogBizRef.user_id == owner_id,
-            AcOtelLogBizRef.user_id.is_(None),
+    if query_scope == QueryScope.OWNER:
+        if not owner_id:
+            raise ValueError("owner_id is required for owner-scoped queries")
+        query = query.filter(
+            or_(
+                AcOtelLogBizRef.user_id == owner_id,
+                AcOtelLogBizRef.user_id.is_(None),
+            )
         )
-    )
-    if bot_id:
+    if query_scope == QueryScope.OWNER and bot_id:
         relation_bot_ids = [bot_id]
         if bot_id == "default":
             relation_bot_ids.append(f"{owner_id}_default")

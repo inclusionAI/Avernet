@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_chat.models import (
     BcsGroupSession,
 )
 from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.core.bot_chat.service import (
     BotChatService,
     _apply_client_side_filters,
@@ -54,6 +55,7 @@ def _write_trace(
     biz_scene: str | None = None,
     biz_task_id: str | None = None,
     output: str = "synthetic output",
+    user_id: str = "user_fixture",
 ) -> None:
     repo.upsert_ocb_trace(
         {
@@ -62,7 +64,7 @@ def _write_trace(
             "session_key": session_key,
             "biz_scene": biz_scene,
             "biz_task_id": biz_task_id,
-            "user_id": "user_fixture",
+            "user_id": user_id,
             "bot_id": "bot_fixture",
             "name": "Synthetic trace",
             "input": "synthetic input",
@@ -184,6 +186,84 @@ def test_task_relations_are_isolated_by_user_when_identity_is_present():
     assert total == 0
 
 
+def test_open_task_query_ignores_trace_and_relation_owner():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    _write_trace(
+        repo,
+        trace_id="trace_other_owner",
+        session_id="session_other_owner",
+        session_key="agent:main:session_other_owner",
+        user_id="other_owner_fixture",
+    )
+    repo.upsert_biz_refs(
+        {
+            "biz_scene": "scene_fixture",
+            "biz_task_id": "task_fixture",
+            "user_id": "other_owner_fixture",
+            "bot_id": "other_bot_fixture",
+            "refs": [
+                {"ref_type": "trace_id", "ref_value": "trace_other_owner"},
+            ],
+        }
+    )
+
+    rows, total = repo.list_ocb_traces(
+        owner_id=None,
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+        biz_scene="scene_fixture",
+        biz_task_id="task_fixture",
+        query_scope=QueryScope.OPEN,
+    )
+
+    assert total == 1
+    assert [row.id for row in rows] == ["trace_other_owner"]
+
+
+def test_owner_scope_remains_the_default_for_session_queries():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    _write_trace(
+        repo,
+        trace_id="trace_owned",
+        session_id="shared_session",
+        session_key="agent:main:shared_session",
+    )
+    _write_trace(
+        repo,
+        trace_id="trace_other",
+        session_id="shared_session",
+        session_key="agent:main:shared_session",
+        user_id="other_owner_fixture",
+    )
+
+    owned, owned_total = repo.list_ocb_traces(
+        owner_id="user_fixture",
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+        session_key="agent:main:shared_session",
+    )
+    opened, open_total = repo.list_ocb_traces(
+        owner_id=None,
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+        session_key="agent:main:shared_session",
+        query_scope=QueryScope.OPEN,
+    )
+
+    assert owned_total == 1
+    assert [row.id for row in owned] == ["trace_owned"]
+    assert open_total == 2
+    assert {row.id for row in opened} == {"trace_owned", "trace_other"}
+
+
 def test_group_query_normalizes_session_key_and_returns_optional_labels():
     db = _LocalDb()
     repo = BotChatDbRepository(db)
@@ -256,6 +336,7 @@ def test_group_query_supports_multiple_sessions_and_existing_agent_prefix():
         trace_id="trace_group_two",
         session_id="session_two",
         session_key=prefixed,
+        user_id="other_owner_fixture",
     )
     with db.orm_session() as session:
         session.add_all(
@@ -276,12 +357,13 @@ def test_group_query_supports_multiple_sessions_and_existing_agent_prefix():
         )
 
     rows, total = repo.list_ocb_traces(
-        owner_id="user_fixture",
+        owner_id=None,
         from_ms=0,
         to_ms=2_000,
         page=1,
         limit=20,
         group_id="group_fixture",
+        query_scope=QueryScope.OPEN,
     )
 
     assert total == 2
@@ -309,19 +391,20 @@ def test_group_query_supports_legacy_trace_storage():
                 gmt_trace=1_000,
                 session_id=full_session_key,
                 real_session_id="legacy_session_fixture",
-                user_id="user_fixture",
+                user_id="other_owner_fixture",
                 bot_id="default",
                 name="Synthetic legacy trace",
             )
         )
 
     rows, total = repo.list_traces(
-        owner_id="user_fixture",
+        owner_id=None,
         from_ms=0,
         to_ms=2_000,
         page=1,
         limit=20,
         group_id="group_fixture",
+        query_scope=QueryScope.OPEN,
     )
 
     assert total == 1

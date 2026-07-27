@@ -43,4 +43,16 @@ class BotChatServiceProtocol(Protocol):
         log_source: str | None = None,
     ) -> ConversationDetail: ...
 
+    async def list_open_sessions(
+        self,
+        session_key: str | None = None,
+        biz_scene: str | None = None,
+        biz_task_id: str | None = None,
+        group_id: str | None = None,
+        page: int = 1,
+        limit: int = 100,
+    ) -> SessionListResponse: ...
+
+    async def get_open_session(self, trace_id: str) -> ConversationDetail: ...
+
     async def health_check(self) -> HealthCheckData: ...
