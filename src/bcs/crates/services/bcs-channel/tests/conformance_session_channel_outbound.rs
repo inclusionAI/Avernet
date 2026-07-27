@@ -3,7 +3,8 @@ use std::sync::Arc;
 use bcs_channel::BcsChannelService;
 use bcs_channel_api::ChannelProviderRegistry;
 use bcs_channel_store::{
-    MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryImParticipantRepo,
+    MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryHumanInputRequestRepo,
+    MemoryImParticipantRepo,
 };
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::{
@@ -17,6 +18,7 @@ async fn conformance_bcs_channel_service_session_channel_outbound_port() {
         Arc::new(MemoryChannelBindingRepo::new("contract")),
         Arc::new(MemoryConversationSessionRepo::new()),
         Arc::new(MemoryImParticipantRepo::new()),
+        Arc::new(MemoryHumanInputRequestRepo::new()),
         Arc::new(MemorySessionRepo::new()),
         Arc::new(NoopMessageFlowService),
         Arc::new(NoopSystemMessageService),

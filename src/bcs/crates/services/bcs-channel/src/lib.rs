@@ -7,12 +7,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use bcs_channel_api::{ChannelInboundSink, ChannelProvider, ChannelProviderRegistry};
 use bcs_domain::{
     ActorKind, BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
-    Group, GroupChatScope, GroupKind, GroupStrategy, ImParticipantMap, Participant, ParticipantMode,
+    Group, GroupChatScope, GroupKind, GroupStrategy, HumanInputNotificationMode,
+    HumanInputRequest, HumanInputRequestStatus, ImParticipantMap, Participant, ParticipantMode,
     ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, SystemMessageEvent,
     Visibility, channel_group_id,
 };
@@ -31,15 +32,15 @@ use bcs_service_api::port::channel_delivery::{
 };
 use bcs_service_api::port::ChannelBindingCleanupPort;
 use bcs_service_api::port::repo::{
-    ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort, NewSessionParams,
-    SessionRepoPort,
+    ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
+    HumanInputRequestRepoPort, ImParticipantRepoPort, NewSessionParams, SessionRepoPort,
 };
 use bcs_service_api::{
-    BotRegistryCoreService, ChannelOutboundEventKind, ChannelRenderHint,
+    BotRegistryCoreService, ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
     CollaborationRuntimeService, GroupCoreService, HumanInputReadyEvent, HumanResponseSource,
-    ListPendingHumanNodesCommand, MessageFlowService, RespondHumanNodeCommand, ServiceError,
-    ServiceResult, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
-    SystemMessageService,
+    MessageFlowService, RespondHumanNodeCommand, ServiceError, ServiceResult,
+    SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    StateMachineTerminalEvent, StateMachineTerminalStatus, SystemMessageService,
 };
 
 pub use visibility::visibility_allows;
@@ -52,6 +53,7 @@ pub struct BcsChannelService {
     bindings: Arc<dyn ChannelBindingRepoPort>,
     conversations: Arc<dyn ConversationSessionRepoPort>,
     im_participants: Arc<dyn ImParticipantRepoPort>,
+    human_input_requests: Arc<dyn HumanInputRequestRepoPort>,
     sessions: Arc<dyn SessionRepoPort>,
     message_flow: Arc<dyn MessageFlowService>,
     system_message: Arc<dyn SystemMessageService>,
@@ -83,6 +85,7 @@ impl BcsChannelService {
         bindings: Arc<dyn ChannelBindingRepoPort>,
         conversations: Arc<dyn ConversationSessionRepoPort>,
         im_participants: Arc<dyn ImParticipantRepoPort>,
+        human_input_requests: Arc<dyn HumanInputRequestRepoPort>,
         sessions: Arc<dyn SessionRepoPort>,
         message_flow: Arc<dyn MessageFlowService>,
         system_message: Arc<dyn SystemMessageService>,
@@ -99,6 +102,7 @@ impl BcsChannelService {
             bindings,
             conversations,
             im_participants,
+            human_input_requests,
             sessions,
             message_flow,
             system_message,
@@ -554,86 +558,22 @@ impl BcsChannelService {
     async fn continue_state_machine_from_inbound(
         &self,
         ctx: &ResolvedInboundContext,
-        msg: &InboundMessage,
-        actor_id: &str,
+        _msg: &InboundMessage,
+        _actor_id: &str,
         run_id: &str,
         session_id: &str,
     ) -> Result<(), ChannelUseCaseError> {
-        let mut participant = Participant::human(actor_id.to_string(), ParticipantRole::Observer);
-        participant.mode = Some(ParticipantMode::Present);
-        participant.bot_name = msg.im_user_nick.clone();
-        self.sessions
-            .add_participant(session_id, participant)
-            .await?;
-        let pending = self
-            .collaboration_runtime
-            .list_pending_human_nodes(ListPendingHumanNodesCommand {
-                run_id: run_id.to_string(),
-                caller_actor_id: actor_id.to_string(),
-            })
-            .await
-            .map_err(|error| {
-                ChannelUseCaseError::Internal(ServiceError::InternalError(error.to_string()))
-            })?;
-        let selected = match pending.as_slice() {
-            [selected] => selected,
-            [] => {
-                self.send_state_machine_system(
-                    ctx,
-                    session_id,
-                    run_id,
-                    "流程当前没有等待人工输入，消息未被接收。",
-                )
-                .await?;
-                return Ok(());
-            }
-            _ => {
-                error!(
-                    run_id = %run_id,
-                    pending_human_nodes = pending.len(),
-                    "channel state-machine input rejected: multiple pending HumanInput nodes"
-                );
-                self.send_state_machine_system(
-                    ctx,
-                    session_id,
-                    run_id,
-                    "流程状态异常：当前存在多个等待人工输入的节点，消息未被接收。",
-                )
-                .await?;
-                return Ok(());
-            }
-        };
-        let content = msg.text.trim().to_string();
-        let outcome = self
-            .collaboration_runtime
-            .respond_human_node(RespondHumanNodeCommand {
-                run_id: run_id.to_string(),
-                node_id: selected.node_id.clone(),
-                caller_actor_id: actor_id.to_string(),
-                content,
-                source: HumanResponseSource::Channel {
-                    binding_id: ctx.binding_id.clone(),
-                    conversation_id: msg.im_conversation_id.clone(),
-                    message_id: msg.msg_id.clone(),
-                },
-            })
-            .await;
-        let reply = match outcome {
-            Ok(_) => "回复已接收，流程继续执行。".to_string(),
-            Err(bcs_service_api::CollaborationRuntimeError::Conflict(_)) => {
-                "该节点已不再接受这条回复，请刷新流程状态。".to_string()
-            }
-            Err(bcs_service_api::CollaborationRuntimeError::JudgeUnavailable(_)) => {
-                "暂时无法判断这条回复，请稍后重试。".to_string()
-            }
-            Err(error) => {
-                return Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
-                    error.to_string(),
-                )));
-            }
-        };
-        self.send_state_machine_system(ctx, session_id, run_id, &reply)
-            .await
+        // HumanInput replies are selected exclusively through the persisted
+        // active request before normal state-machine conversation resolution.
+        // Never guess a node from a session's pending-node list and never grant
+        // session participation merely because someone sent an IM message.
+        self.send_state_machine_system(
+            ctx,
+            session_id,
+            run_id,
+            "流程当前没有可通过此会话回复的人工输入请求，消息未被接收。",
+        )
+        .await
     }
 
     async fn send_state_machine_system(
@@ -651,6 +591,7 @@ impl BcsChannelService {
             sender_role: ParticipantRole::Driver,
             sender_label: "BCS State Machine".to_string(),
             kind: ChannelOutboundEventKind::System,
+            purpose: ChannelOutboundPurpose::HumanInputAck,
             text: Some(text.to_string()),
             raw_payload: serde_json::json!({
                 "type": "state_machine.system",
@@ -661,6 +602,259 @@ impl BcsChannelService {
             source_is_channel: false,
         })
         .await
+    }
+
+    async fn try_consume_human_input(
+        &self,
+        binding: &ChannelBinding,
+        msg: &InboundMessage,
+        actor_id: &str,
+    ) -> Result<bool, ChannelUseCaseError> {
+        let reply_scope_key = match msg.conversation_type.as_str() {
+            "2" => fixed_group_reply_scope(
+                &binding.id,
+                &msg.im_conversation_id,
+                actor_id,
+            ),
+            "1" => direct_reply_scope(&binding.id, &msg.im_user_id, actor_id),
+            _ => return Ok(false),
+        };
+        let Some(request) = self
+            .human_input_requests
+            .find_active_by_scope(&reply_scope_key)
+            .await?
+        else {
+            return Ok(false);
+        };
+
+        // COSEC: never trust message text or a visible card title to select a
+        // request. Match the authenticated binding, actor and destination
+        // against the persisted active HumanInputRequest snapshot.
+        let destination_matches = request.binding_id == binding.id
+            && request.account_ref == binding.account_ref
+            && request.assignee_actor_id == actor_id
+            && match request.notification_mode {
+                HumanInputNotificationMode::FixedGroup => {
+                    msg.conversation_type == "2"
+                        && request.im_conversation_id == msg.im_conversation_id
+                }
+                HumanInputNotificationMode::DirectAssignee => {
+                    msg.conversation_type == "1"
+                        && request.im_user_id.as_deref() == Some(msg.im_user_id.as_str())
+                }
+            };
+        if !destination_matches {
+            return Ok(false);
+        }
+
+        let now = (self.now_ms)();
+        if request.deadline_ms <= now {
+            self.human_input_requests
+                .close_for_run_node(
+                    &request.run_id,
+                    &request.node_id,
+                    HumanInputRequestStatus::Expired,
+                )
+                .await?;
+            self.advance_human_input_queue(&request.reply_scope_key)
+                .await?;
+            return Ok(true);
+        }
+
+        let outcome = self
+            .collaboration_runtime
+            .respond_human_node(RespondHumanNodeCommand {
+                run_id: request.run_id.clone(),
+                node_id: request.node_id.clone(),
+                caller_actor_id: actor_id.to_string(),
+                content: msg.text.trim().to_string(),
+                source: HumanResponseSource::Channel {
+                    binding_id: binding.id.clone(),
+                    conversation_id: msg.im_conversation_id.clone(),
+                    message_id: msg.msg_id.clone(),
+                },
+            })
+            .await;
+        match outcome {
+            Ok(outcome) => {
+                if !self
+                    .human_input_requests
+                    .mark_responded(&request.request_id, now)
+                    .await?
+                {
+                    return Err(ChannelUseCaseError::Internal(ServiceError::Conflict(
+                        "HumanInput request lost the response completion race".to_string(),
+                    )));
+                }
+                if outcome.run.status != bcs_domain::StateMachineRunStatus::Completed {
+                    if let Err(error) = self.deliver_human_input_event(
+                        &request,
+                        ChannelOutboundPurpose::HumanInputAck,
+                        format!("【输入已接收】{}\n\n流程继续执行。", request.node_display_name),
+                    )
+                    .await
+                    {
+                        warn!(
+                            request_id = %request.request_id,
+                            run_id = %request.run_id,
+                            error = %error,
+                            "human_input: response persisted but acknowledgement delivery failed"
+                        );
+                    }
+                }
+                self.advance_human_input_queue(&request.reply_scope_key)
+                    .await?;
+                Ok(true)
+            }
+            Err(bcs_service_api::CollaborationRuntimeError::Conflict(_)) => {
+                self.human_input_requests
+                    .close_for_run_node(
+                        &request.run_id,
+                        &request.node_id,
+                        HumanInputRequestStatus::Cancelled,
+                    )
+                    .await?;
+                self.advance_human_input_queue(&request.reply_scope_key)
+                    .await?;
+                Ok(true)
+            }
+            Err(error) => Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
+                error.to_string(),
+            ))),
+        }
+    }
+
+    async fn deliver_human_input_event(
+        &self,
+        request: &HumanInputRequest,
+        purpose: ChannelOutboundPurpose,
+        text: String,
+    ) -> Result<Option<String>, ChannelUseCaseError> {
+        let binding = self
+            .bindings
+            .get(&request.binding_id)
+            .await?
+            .ok_or_else(|| ChannelUseCaseError::NotFound(request.binding_id.clone()))?;
+        if binding.status != BindingStatus::Active
+            || binding.channel_type != request.channel_type
+            || binding.account_ref != request.account_ref
+        {
+            return Err(ChannelUseCaseError::InvalidParams(
+                "HumanInput request binding snapshot is no longer active".to_string(),
+            ));
+        }
+        let provider = self.provider_for(&binding.channel_type)?;
+        let binding_ref = ChannelBindingRef {
+            channel_type: binding.channel_type,
+            account_ref: binding.account_ref,
+        };
+        if !provider.delivery().is_available(&binding_ref).await {
+            return Err(ChannelUseCaseError::InvalidParams(
+                "HumanInput channel delivery is unavailable".to_string(),
+            ));
+        }
+        let result = provider
+            .delivery()
+            .deliver_event(ChannelOutboundEvent {
+                binding_ref,
+                im_conversation_id: request.im_conversation_id.clone(),
+                im_conversation_type: request.im_conversation_type.clone(),
+                im_user_id: request.im_user_id.clone(),
+                im_user_display_name: None,
+                bcs_session_id: request.session_id.clone(),
+                run_id: match purpose {
+                    ChannelOutboundPurpose::StateMachineCompleted
+                    | ChannelOutboundPurpose::StateMachineFailed => {
+                        format!("state-machine-terminal-{}", request.run_id)
+                    }
+                    _ => format!("human-input-{}", request.request_id),
+                },
+                sender_actor_id: "bcs_state_machine".to_string(),
+                sender_label: "BCS State Machine".to_string(),
+                render_sender_label: false,
+                sender_role: ParticipantRole::Driver,
+                kind: ChannelOutboundEventKind::System,
+                purpose,
+                text: Some(text),
+                raw_payload: serde_json::json!({
+                    "request_id": request.request_id,
+                    "run_id": request.run_id,
+                    "node_id": request.node_id,
+                }),
+                render_hint: ChannelRenderHint::Render,
+                source_im_message_id: None,
+            })
+            .await?;
+        if !result.delivered {
+            return Err(ChannelUseCaseError::Internal(
+                result.error.unwrap_or_else(|| {
+                    ServiceError::InternalError(
+                        "HumanInput channel delivery was not confirmed".to_string(),
+                    )
+                }),
+            ));
+        }
+        Ok(result.provider_message_ref)
+    }
+
+    async fn activate_human_input_request(
+        &self,
+        request: &HumanInputRequest,
+    ) -> Result<(), ChannelUseCaseError> {
+        let queued = self
+            .human_input_requests
+            .count_queued(&request.reply_scope_key)
+            .await?;
+        let mut text = request.notification_text.clone();
+        if queued > 0 {
+            text.push_str(&format!("\n\n另有 {queued} 项等待处理。"));
+        }
+        match self
+            .deliver_human_input_event(request, ChannelOutboundPurpose::HumanInputRequest, text)
+            .await
+        {
+            Ok(provider_message_ref) => {
+                if !self
+                    .human_input_requests
+                    .mark_active(
+                        &request.request_id,
+                        provider_message_ref.as_deref(),
+                        (self.now_ms)(),
+                    )
+                    .await?
+                {
+                    return Err(ChannelUseCaseError::Internal(ServiceError::Conflict(
+                        "HumanInput request was no longer notifying".to_string(),
+                    )));
+                }
+                Ok(())
+            }
+            Err(error) => {
+                let diagnostic = error.to_string();
+                self.human_input_requests
+                    .mark_delivery_failed(&request.request_id, &diagnostic)
+                    .await?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn advance_human_input_queue(
+        &self,
+        reply_scope_key: &str,
+    ) -> Result<(), ChannelUseCaseError> {
+        loop {
+            let Some(next) = self
+                .human_input_requests
+                .promote_next(reply_scope_key, (self.now_ms)())
+                .await?
+            else {
+                return Ok(());
+            };
+            if self.activate_human_input_request(&next).await.is_ok() {
+                return Ok(());
+            }
+        }
     }
 
     fn channel_route_from_session_meta(&self, session: &Session) -> Option<ConversationSessionMap> {
@@ -808,6 +1002,23 @@ impl ChannelService for BcsChannelService {
                 actor_id = %actor_id,
                 "channel inbound: actor resolved"
             );
+            if self
+                .try_consume_human_input(&binding, &msg, &actor_id)
+                .await
+                .map_err(|error| {
+                    inbound_failure(ChannelInboundFailureKind::DispatchFailed, true, error)
+                })?
+            {
+                info!(
+                    channel_type = %msg.channel_type,
+                    account_ref = %account_ref,
+                    binding_id = %binding.id,
+                    msg_id = %msg.msg_id,
+                    actor_id = %actor_id,
+                    "channel inbound: HumanInput consumed"
+                );
+                return Ok(());
+            }
             let ctx = self
                 .resolve_inbound_context(&binding, &msg, &actor_id)
                 .await
@@ -1086,6 +1297,7 @@ impl ChannelService for BcsChannelService {
                         && binding.outbound_visibility == Visibility::FullTranscript,
                     sender_role: msg.sender_role,
                     kind: msg.kind,
+                    purpose: msg.purpose,
                     text: msg.text.clone(),
                     raw_payload: msg.raw_payload.clone(),
                     render_hint: msg.render_hint,
@@ -1300,24 +1512,160 @@ impl BcsChannelService {
 
 #[async_trait]
 impl SessionChannelOutboundPort for BcsChannelService {
+    async fn validate_human_input_channel(
+        &self,
+        group_id: &str,
+        channel_type: &str,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        let target = BindingTarget::Group {
+            group_id: group_id.to_string(),
+        };
+        let bindings = self
+            .bindings
+            .list_by_target(&target, Some(channel_type))
+            .await?
+            .into_iter()
+            .filter(|binding| binding.status == BindingStatus::Active)
+            .collect::<Vec<_>>();
+        let binding = match bindings.as_slice() {
+            [binding] => binding,
+            [] => {
+                return Err(ServiceError::InvalidOperation {
+                    message: format!(
+                        "no active {channel_type} ChannelBinding exists for group {group_id}"
+                    ),
+                    request_id: None,
+                });
+            }
+            _ => {
+                return Err(ServiceError::Conflict(format!(
+                    "multiple active {channel_type} ChannelBindings exist for group {group_id}"
+                )));
+            }
+        };
+        let provider = self
+            .providers
+            .get(channel_type)
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: format!("channel provider '{channel_type}' is not available"),
+                request_id: None,
+            })?;
+        let binding_ref = ChannelBindingRef {
+            channel_type: binding.channel_type.clone(),
+            account_ref: binding.account_ref.clone(),
+        };
+        if !provider.delivery().is_available(&binding_ref).await {
+            return Err(ServiceError::InvalidOperation {
+                message: format!(
+                    "channel provider '{channel_type}' is unavailable for group {group_id}"
+                ),
+                request_id: None,
+            });
+        }
+        Ok(SessionChannelDeliveryOutcome::Delivered)
+    }
+
     async fn publish_human_input_ready(
         &self,
         event: HumanInputReadyEvent,
     ) -> ServiceResult<SessionChannelDeliveryOutcome> {
-        if self
-            .conversations
-            .list_by_bcs_session(&event.session_id)
+        let target = BindingTarget::Group {
+            group_id: event.group_id.clone(),
+        };
+        let active_bindings = self
+            .bindings
+            .list_by_target(&target, Some(&event.channel_type))
             .await?
-            .is_empty()
-        {
-            return Ok(SessionChannelDeliveryOutcome::NotApplicable);
-        }
-
+            .into_iter()
+            .filter(|binding| binding.status == BindingStatus::Active)
+            .collect::<Vec<_>>();
+        let binding = match active_bindings.as_slice() {
+            [binding] => binding.clone(),
+            [] => {
+                return Err(ServiceError::InvalidOperation {
+                    message: format!(
+                        "no active {} ChannelBinding exists for group {}",
+                        event.channel_type, event.group_id
+                    ),
+                    request_id: Some(event.event_id),
+                });
+            }
+            _ => {
+                return Err(ServiceError::Conflict(format!(
+                    "multiple active {} ChannelBindings exist for group {}",
+                    event.channel_type, event.group_id
+                )));
+            }
+        };
+        let (im_conversation_id, im_conversation_type, im_user_id, reply_scope_key) =
+            match event.notification_mode {
+                HumanInputNotificationMode::FixedGroup => {
+                    let conversation_id = event
+                        .fixed_group_conversation_id
+                        .clone()
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| ServiceError::InvalidOperation {
+                            message: "fixed_group HumanInput notification has no conversation id"
+                                .to_string(),
+                            request_id: Some(event.event_id.clone()),
+                        })?;
+                    (
+                        conversation_id.clone(),
+                        "2".to_string(),
+                        None,
+                        fixed_group_reply_scope(
+                            &binding.id,
+                            &conversation_id,
+                            &event.assignee_actor_id,
+                        ),
+                    )
+                }
+                HumanInputNotificationMode::DirectAssignee => {
+                    let mappings = self
+                        .im_participants
+                        .find_by_actor(
+                            binding.channel_type.clone(),
+                            &binding.account_ref,
+                            &event.assignee_actor_id,
+                        )
+                        .await?;
+                    let mapping = match mappings.as_slice() {
+                        [mapping] => mapping,
+                        [] => {
+                            return Err(ServiceError::InvalidOperation {
+                                message: format!(
+                                    "no IM identity mapping for HumanInput assignee {}",
+                                    event.assignee_actor_id
+                                ),
+                                request_id: Some(event.event_id),
+                            });
+                        }
+                        _ => {
+                            return Err(ServiceError::Conflict(format!(
+                                "multiple IM identity mappings for HumanInput assignee {}",
+                                event.assignee_actor_id
+                            )));
+                        }
+                    };
+                    (
+                        mapping.im_user_id.clone(),
+                        "1".to_string(),
+                        Some(mapping.im_user_id.clone()),
+                        direct_reply_scope(
+                            &binding.id,
+                            &mapping.im_user_id,
+                            &event.assignee_actor_id,
+                        ),
+                    )
+                }
+            };
         let mut sections = vec![
-            format!("【待人工处理】{}", event.display_name),
+            format!("【待你处理】{}", event.display_name),
             event.instruction.clone(),
         ];
-        if !event.upstream_artifacts.is_empty() {
+        if event.notification_mode == HumanInputNotificationMode::DirectAssignee
+            && !event.upstream_artifacts.is_empty()
+        {
             let artifacts = event
                 .upstream_artifacts
                 .iter()
@@ -1332,35 +1680,176 @@ impl SessionChannelOutboundPort for BcsChannelService {
         if let Some(deadline_ms) = event.timeout_deadline_ms {
             sections.push(format!("等待截止时间（Unix ms）：{deadline_ms}"));
         }
-        sections.push("直接 @ 机器人回复即可。".to_string());
+        sections.push(match event.notification_mode {
+            HumanInputNotificationMode::FixedGroup => "请直接 @ 机器人回复。".to_string(),
+            HumanInputNotificationMode::DirectAssignee => "请直接回复本会话。".to_string(),
+        });
         let text = sections.join("\n\n");
-
-        ChannelService::try_outbound(
-            self,
-            OutboundMessage {
-                group_id: event.group_id,
-                bcs_session_id: event.session_id,
-                run_id: event.run_id,
-                sender_actor_id: "bcs_state_machine".to_string(),
-                sender_role: ParticipantRole::Driver,
-                sender_label: "BCS State Machine".to_string(),
-                kind: ChannelOutboundEventKind::System,
-                text: Some(text),
-                raw_payload: serde_json::json!({
-                    "type": "state_machine.human_input_ready",
-                    "event_id": event.event_id,
-                    "node_id": event.node_id,
-                    "response_ref": event.response_ref,
-                }),
-                render_hint: ChannelRenderHint::Render,
-                source_im_message_id: None,
-                source_is_channel: false,
-            },
-        )
-        .await
-        .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-
+        let deadline_ms = event
+            .timeout_deadline_ms
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: "HumanInput notification requires a deadline".to_string(),
+                request_id: Some(event.event_id.clone()),
+            })?;
+        let request = HumanInputRequest {
+            request_id: event.event_id,
+            session_id: event.session_id,
+            run_id: event.run_id,
+            node_id: event.node_id,
+            binding_id: binding.id,
+            channel_type: binding.channel_type,
+            account_ref: binding.account_ref,
+            notification_mode: event.notification_mode,
+            reply_scope_key: reply_scope_key.clone(),
+            active_slot_key: None,
+            assignee_actor_id: event.assignee_actor_id,
+            im_conversation_id,
+            im_conversation_type,
+            im_user_id,
+            node_display_name: event.display_name,
+            notification_text: text,
+            deadline_ms,
+            status: HumanInputRequestStatus::Queued,
+            provider_message_ref: None,
+            delivery_attempts: 0,
+            last_delivery_error: None,
+            created_at: (self.now_ms)(),
+            activated_at: None,
+            responded_at: None,
+        };
+        match self.human_input_requests.enqueue(request.clone()).await? {
+            HumanInputEnqueueDisposition::Queued => {
+                let queued = self
+                    .human_input_requests
+                    .count_queued(&request.reply_scope_key)
+                    .await?;
+                if let Err(error) = self
+                    .deliver_human_input_event(
+                        &request,
+                        ChannelOutboundPurpose::HumanInputQueueSummary,
+                        format!(
+                            "【待办队列更新】当前已有请求等待回复，另有 {queued} 项排队；完成当前项后会继续通知。"
+                        ),
+                    )
+                    .await
+                {
+                    warn!(
+                        request_id = %request.request_id,
+                        run_id = %request.run_id,
+                        error = %error,
+                        "human_input: queued summary delivery failed"
+                    );
+                }
+            }
+            HumanInputEnqueueDisposition::Notifying => {
+                let request = self
+                    .human_input_requests
+                    .get(&request.request_id)
+                    .await?
+                    .ok_or_else(|| {
+                        ServiceError::InternalError(
+                            "enqueued HumanInput request is missing".to_string(),
+                        )
+                    })?;
+                if let Err(error) = self.activate_human_input_request(&request).await {
+                    let _ = self.advance_human_input_queue(&reply_scope_key).await;
+                    return Err(ServiceError::InternalError(error.to_string()));
+                }
+            }
+        }
         Ok(SessionChannelDeliveryOutcome::Delivered)
+    }
+
+    async fn publish_state_machine_terminal(
+        &self,
+        event: StateMachineTerminalEvent,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        let requests = self.human_input_requests.list_by_run(&event.run_id).await?;
+        let reply_scopes = requests
+            .iter()
+            .map(|request| request.reply_scope_key.clone())
+            .collect::<HashSet<_>>();
+        if event.status == StateMachineTerminalStatus::Failed {
+            let run_nodes = requests
+                .iter()
+                .map(|request| (request.run_id.clone(), request.node_id.clone()))
+                .collect::<HashSet<_>>();
+            for (run_id, node_id) in run_nodes {
+                self.human_input_requests
+                    .close_for_run_node(
+                        &run_id,
+                        &node_id,
+                        HumanInputRequestStatus::Cancelled,
+                    )
+                    .await?;
+            }
+        }
+        let mut destinations = HashSet::new();
+        let requests = requests
+            .into_iter()
+            .filter(|request| {
+                destinations.insert((
+                    request.binding_id.clone(),
+                    request.im_conversation_id.clone(),
+                    request.im_conversation_type.clone(),
+                    request.im_user_id.clone(),
+                ))
+            })
+            .collect::<Vec<_>>();
+        if requests.is_empty() {
+            return Ok(SessionChannelDeliveryOutcome::NotApplicable);
+        }
+
+        let (purpose, text) = match event.status {
+            StateMachineTerminalStatus::Completed => {
+                let mut text = format!("【协同已完成】{}", event.workflow_name);
+                if let Some(output) = event.output.as_deref().filter(|value| !value.trim().is_empty())
+                {
+                    text.push_str("\n\n");
+                    text.push_str(&truncate_chars(output, 2_000));
+                }
+                (ChannelOutboundPurpose::StateMachineCompleted, text)
+            }
+            StateMachineTerminalStatus::Failed => (
+                ChannelOutboundPurpose::StateMachineFailed,
+                format!(
+                    "【协同执行失败】{}\n\n请在 Workbench 查看详情。",
+                    event.workflow_name
+                ),
+            ),
+        };
+
+        let mut delivered = 0usize;
+        let mut errors = Vec::new();
+        for request in requests {
+            match self
+                .deliver_human_input_event(&request, purpose, text.clone())
+                .await
+            {
+                Ok(_) => delivered += 1,
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        for reply_scope in reply_scopes {
+            self.advance_human_input_queue(&reply_scope)
+                .await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        }
+        if delivered > 0 {
+            if !errors.is_empty() {
+                warn!(
+                    run_id = %event.run_id,
+                    failed_destinations = errors.len(),
+                    "state_machine: terminal IM notification partially failed"
+                );
+            }
+            Ok(SessionChannelDeliveryOutcome::Delivered)
+        } else {
+            Err(ServiceError::InternalError(format!(
+                "state-machine terminal notification failed for every destination: {}",
+                errors.join("; ")
+            )))
+        }
     }
 }
 
@@ -1383,6 +1872,16 @@ impl ChannelInboundSink for ChannelServiceInboundSink {
 
 fn invalid_inbound(error: ChannelUseCaseError) -> ChannelInboundError {
     inbound_failure(ChannelInboundFailureKind::InvalidInbound, false, error)
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
 }
 
 fn inbound_failure(
@@ -1511,6 +2010,25 @@ fn human_actor_id(staff_no: &str) -> String {
     format!("human_{}", staff_no.trim())
 }
 
+fn fixed_group_reply_scope(binding_id: &str, conversation_id: &str, actor_id: &str) -> String {
+    reply_scope_key("fixed_group", &[binding_id, conversation_id, actor_id])
+}
+
+fn direct_reply_scope(binding_id: &str, im_user_id: &str, actor_id: &str) -> String {
+    reply_scope_key("direct_assignee", &[binding_id, im_user_id, actor_id])
+}
+
+fn reply_scope_key(kind: &str, components: &[&str]) -> String {
+    let mut key = kind.to_string();
+    for component in components {
+        key.push('|');
+        key.push_str(&component.len().to_string());
+        key.push(':');
+        key.push_str(component);
+    }
+    key
+}
+
 fn inbound_dedup_key(channel_type: &str, account_ref: &str, msg_id: &str) -> Option<String> {
     let msg_id = msg_id.trim();
     if msg_id.is_empty() {
@@ -1576,14 +2094,15 @@ mod tests {
         ChannelProviderResult,
     };
     use bcs_channel_store::{
-        MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryImParticipantRepo,
+        MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryHumanInputRequestRepo,
+        MemoryImParticipantRepo,
     };
     use bcs_domain::{
         ActorKind, BindingStatus, BindingTarget, BotCapabilities, BotDynamicStatus,
         ChannelBinding, ChannelConfig, ChannelType, Group, GroupChatScope, GroupKind, Participant,
         ParticipantMode, ParticipantRole, RegisteredBot, Session, SessionKind, SessionScope,
         SessionStatus, Skill, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
-        StateMachineRunStatus, SystemMessageEvent, Visibility,
+        StateMachineRunStatus, SystemMessageEvent, Visibility, HumanInputNotificationMode,
     };
     use bcs_service_api::application::channel::{
         ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
@@ -1609,7 +2128,8 @@ mod tests {
         GroupCoreService, ServiceError, ServiceResult,
     };
     use bcs_service_api::{
-        ChannelBindingCleanupPort, CollaborationRuntimeService, SystemMessageService,
+        ChannelBindingCleanupPort, ChannelOutboundPurpose, CollaborationRuntimeService,
+        SystemMessageService,
     };
     use bcs_service_api::lifecycle::ServiceLifecycle;
     use bcs_service_api::port::channel_delivery::{
@@ -1759,6 +2279,15 @@ mod tests {
                 "actor write failed".to_string(),
             ))
         }
+
+        async fn find_by_actor(
+            &self,
+            _channel_type: ChannelType,
+            _account_ref: &str,
+            _actor_id: &str,
+        ) -> ServiceResult<Vec<bcs_domain::ImParticipantMap>> {
+            unreachable!("inbound actor test only writes the participant mapping")
+        }
     }
 
     #[derive(Clone, Default)]
@@ -1905,6 +2434,7 @@ mod tests {
             let binding_repo = Arc::new(MemoryChannelBindingRepo::new(env));
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
+            let human_input_requests = Arc::new(MemoryHumanInputRequestRepo::new());
             let session_repo = Arc::new(RecordingSessionRepo::default());
             let groups = Arc::new(bcs_group::GroupCore::memory());
             groups.upsert(group).await?;
@@ -1922,6 +2452,7 @@ mod tests {
                 binding_repo.clone(),
                 conversation_repo.clone(),
                 participant_repo.clone(),
+                human_input_requests,
                 session_repo.clone(),
                 message_flow.clone(),
                 system_message.clone(),
@@ -1953,6 +2484,7 @@ mod tests {
             let binding_repo = Arc::new(MemoryChannelBindingRepo::new("pre"));
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
+            let human_input_requests = Arc::new(MemoryHumanInputRequestRepo::new());
             let session_repo = Arc::new(RecordingSessionRepo::default());
             let groups = Arc::new(bcs_group::GroupCore::memory());
             groups.upsert(group).await?;
@@ -1970,6 +2502,7 @@ mod tests {
                 Arc::new(PanicOnListBindingRepo::new(binding_repo.clone())),
                 conversation_repo.clone(),
                 participant_repo.clone(),
+                human_input_requests,
                 session_repo.clone(),
                 message_flow.clone(),
                 system_message.clone(),
@@ -2014,6 +2547,7 @@ mod tests {
             bindings,
             Arc::new(MemoryConversationSessionRepo::new()),
             im_participants,
+            Arc::new(MemoryHumanInputRequestRepo::new()),
             sessions,
             message_flow,
             Arc::new(RecordingSystemMessage::default()),
@@ -3648,19 +4182,31 @@ mod tests {
                 true,
             ))
             .await?;
-        *harness
-            .collaboration_runtime
-            .pending_human_nodes
-            .lock()
-            .await = vec![PendingHumanNodeView {
-            node_id: "human_review".to_string(),
-            display_name: "Human review".to_string(),
-            instruction: "Review the draft".to_string(),
-            response_ref: "state_run_1:human_review".to_string(),
-            judge_outcomes: vec!["approve".to_string(), "reject".to_string()],
-            timeout_deadline_ms: None,
-            upstream_artifacts: Vec::new(),
-        }];
+        let session_id = harness.collaboration_runtime.starts.lock().await[0]
+            .session_id
+            .clone()
+            .expect("state-machine session");
+        SessionChannelOutboundPort::publish_human_input_ready(
+            &harness.service,
+            HumanInputReadyEvent {
+                event_id: "human-ready-state-run-1-human-review".to_string(),
+                group_id: "group_sm".to_string(),
+                session_id,
+                run_id: "state_run_1".to_string(),
+                node_id: "human_review".to_string(),
+                display_name: "Human review".to_string(),
+                instruction: "Review the draft".to_string(),
+                assignee_actor_id: "human_u1".to_string(),
+                channel_type: channel_type(),
+                notification_mode: HumanInputNotificationMode::FixedGroup,
+                fixed_group_conversation_id: Some("conv_sm".to_string()),
+                response_ref: "state_run_1:human_review".to_string(),
+                judge_outcomes: vec!["approve".to_string(), "reject".to_string()],
+                timeout_deadline_ms: Some(60_000),
+                upstream_artifacts: Vec::new(),
+            },
+        )
+        .await?;
 
         let mut response = group_inbound("conv_sm", "u1", Some("张三"), "msg_response", true);
         response.text = "looks good".to_string();
@@ -3711,9 +4257,9 @@ mod tests {
             events
                 .last()
                 .and_then(|event| event.text.as_deref())
-                .is_some_and(
-                    |text| text.contains("没有等待人工输入") && text.contains("消息未被接收")
-                )
+                .is_some_and(|text| {
+                    text.contains("没有可通过此会话回复") && text.contains("消息未被接收")
+                })
         );
 
         Ok(())
@@ -3749,9 +4295,9 @@ mod tests {
             events
                 .last()
                 .and_then(|event| event.text.as_deref())
-                .is_some_and(
-                    |text| text.contains("多个等待人工输入") && text.contains("消息未被接收")
-                )
+                .is_some_and(|text| {
+                    text.contains("没有可通过此会话回复") && text.contains("消息未被接收")
+                })
         );
 
         Ok(())
@@ -3856,6 +4402,10 @@ mod tests {
                 node_id: "human_review".to_string(),
                 display_name: "Human review".to_string(),
                 instruction: "请审核上游结果".to_string(),
+                assignee_actor_id: "human_u1".to_string(),
+                channel_type: channel_type(),
+                notification_mode: HumanInputNotificationMode::FixedGroup,
+                fixed_group_conversation_id: Some("conv_sm".to_string()),
                 response_ref: "state_run_1:human_review".to_string(),
                 upstream_artifacts: vec![bcs_service_api::JudgeArtifact {
                     node_id: "draft".to_string(),
@@ -3874,7 +4424,7 @@ mod tests {
             events[0]
                 .text
                 .as_deref()
-                .is_some_and(|text| text.contains("直接 @ 机器人回复即可"))
+                .is_some_and(|text| text.contains("请直接 @ 机器人回复"))
         );
         assert!(
             !events[0]
@@ -3882,10 +4432,8 @@ mod tests {
                 .as_deref()
                 .is_some_and(|text| text.contains("response_ref:"))
         );
-        assert_eq!(
-            events[0].raw_payload["type"],
-            "state_machine.human_input_ready"
-        );
+        assert_eq!(events[0].purpose, ChannelOutboundPurpose::HumanInputRequest);
+        assert_eq!(events[0].raw_payload["request_id"], "event-1");
 
         Ok(())
     }
@@ -4480,6 +5028,7 @@ mod tests {
             sender_role,
             sender_label: "Worker".to_string(),
             kind: ChannelOutboundEventKind::ChatFinal,
+            purpose: ChannelOutboundPurpose::Conversation,
             text: Some("done".to_string()),
             raw_payload: serde_json::json!({"type": "chat.final"}),
             render_hint: ChannelRenderHint::Render,
@@ -4852,11 +5401,13 @@ mod tests {
             if let Some(error) = self.fail_error.lock().await.clone() {
                 return Ok(ChannelDeliveryResult {
                     delivered: false,
+                    provider_message_ref: None,
                     error: Some(ServiceError::InternalError(error)),
                 });
             }
             Ok(ChannelDeliveryResult {
                 delivered: true,
+                provider_message_ref: None,
                 error: None,
             })
         }

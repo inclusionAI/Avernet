@@ -326,7 +326,11 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
         .start_state_machine_run(StartStateMachineRunCommand {
             group_id: seeded_group.id,
             session_id: Some(returning_session.id.clone()),
-            definition_yaml: Some(human_input_yaml()),
+            definition_yaml: Some(
+                human_input_yaml()
+                    .replace("human_input_single", "returning_human_input")
+                    .replace("human_1001", "human_2002"),
+            ),
             definition: None,
             definition_ref: None,
             input: json!({"proposal": "ship it"}),
@@ -3002,10 +3006,20 @@ runtime:
   state_machine:
     version: 1
     graph_mode: acyclic
+    human_input_channel:
+      channel_type: dingtalk
+      fixed_group:
+        conversation_type: group
+        conversation_id: cid-review
     nodes:
       review:
         kind: human_input
         display_name: Review
+        assignee:
+          type: runtime_actor
+          actor: human_1001
+        notification:
+          mode: fixed_group
         instruction: 请用自然语言给出你的意见。
         node_timeout_ms: 60000
 "#
@@ -3024,10 +3038,20 @@ runtime:
   state_machine:
     version: 1
     graph_mode: acyclic
+    human_input_channel:
+      channel_type: dingtalk
+      fixed_group:
+        conversation_type: group
+        conversation_id: cid-review
     nodes:
       review:
         kind: human_input
         display_name: Review
+        assignee:
+          type: runtime_actor
+          actor: human_1001
+        notification:
+          mode: fixed_group
         instruction: 请用自然语言给出你的意见。
         node_timeout_ms: 60000
         transitions:

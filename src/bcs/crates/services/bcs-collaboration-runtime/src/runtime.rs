@@ -38,7 +38,7 @@ use bcs_service_api::{
     StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
     StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
     StateMachineRunAccessCommand, StateMachineRunGraphView, StateMachineRunRepoPort,
-    StateMachineRunView,
+    StateMachineRunView, StateMachineTerminalEvent, StateMachineTerminalStatus,
     UpgradeGroupCollaborationDefinitionCommand, ValidateCollaborationDefinitionYamlCommand,
     MAX_COLLABORATION_DEFINITION_YAML_BYTES, MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET,
     message_log_json,
@@ -381,6 +381,28 @@ impl CollaborationRuntime {
         let node = state_machine.nodes.get(node_id).ok_or_else(|| {
             CollaborationRuntimeError::InvalidDefinition(format!("node not found: {node_id}"))
         })?;
+        let assignee_actor_id = match &node.assignee {
+            Some(StateMachineAssignee::RuntimeActor { actor }) => actor.clone(),
+            _ => {
+                return Err(CollaborationRuntimeError::InvalidDefinition(format!(
+                    "human_input node {node_id} requires runtime_actor assignee"
+                )));
+            }
+        };
+        let notification_mode = node
+            .notification
+            .as_ref()
+            .ok_or_else(|| {
+                CollaborationRuntimeError::InvalidDefinition(format!(
+                    "human_input node {node_id} notification is required"
+                ))
+            })?
+            .mode;
+        let human_input_channel = state_machine.human_input_channel.as_ref().ok_or_else(|| {
+            CollaborationRuntimeError::InvalidDefinition(format!(
+                "human_input node {node_id} requires state_machine.human_input_channel"
+            ))
+        })?;
         let node_run = self
             .runs
             .get_node_run(&run.run_id, node_id)
@@ -434,6 +456,13 @@ impl CollaborationRuntime {
             node_id: node_id.to_string(),
             display_name: pending.display_name,
             instruction: pending.instruction,
+            assignee_actor_id,
+            channel_type: human_input_channel.channel_type.clone(),
+            notification_mode,
+            fixed_group_conversation_id: human_input_channel
+                .fixed_group
+                .as_ref()
+                .map(|group| group.conversation_id.clone()),
             response_ref: pending.response_ref,
             upstream_artifacts: pending.upstream_artifacts,
             judge_outcomes: pending.judge_outcomes,
@@ -1216,9 +1245,9 @@ impl CollaborationRuntime {
                 Some(now),
             )
             .await?;
-        let session_complete_result = match self
+        let (session_complete_result, session_transitioned) = match self
             .sessions
-            .complete_if_running(&run.session_id, output.map(Value::String), None)
+            .complete_if_running(&run.session_id, output.clone().map(Value::String), None)
             .await
         {
             Ok(Some(session)) => {
@@ -1228,9 +1257,9 @@ impl CollaborationRuntime {
                     self.sessions.clone(),
                     self.callback_url_guard.clone(),
                 );
-                "completed"
+                ("completed", true)
             }
-            Ok(None) => "not_running",
+            Ok(None) => ("not_running", false),
             Err(error) => {
                 warn!(
                     run_id = %run.run_id,
@@ -1239,9 +1268,30 @@ impl CollaborationRuntime {
                     error = %error,
                     "state_machine: failed to complete session for completed run"
                 );
-                "error"
+                ("error", false)
             }
         };
+        if session_transitioned {
+            if let Some(outbound) = self.session_channel_outbound.as_ref() {
+                if let Err(error) = outbound
+                    .publish_state_machine_terminal(StateMachineTerminalEvent {
+                        group_id: run.group_id.clone(),
+                        session_id: run.session_id.clone(),
+                        run_id: run.run_id.clone(),
+                        workflow_name: compiled.definition.name.clone(),
+                        status: StateMachineTerminalStatus::Completed,
+                        output: output.clone(),
+                    })
+                    .await
+                {
+                    warn!(
+                        run_id = %run.run_id,
+                        error = %error,
+                        "state_machine: failed to publish completed IM notification"
+                    );
+                }
+            }
+        }
         info!(
             run_id = %run.run_id,
             group_id = %run.group_id,
@@ -1273,7 +1323,7 @@ impl CollaborationRuntime {
                 Some(now),
             )
             .await?;
-        let session_complete_result = match self
+        let (session_complete_result, session_transitioned) = match self
             .sessions
             .complete_if_running(&run.session_id, None, Some(error.clone()))
             .await
@@ -1285,9 +1335,9 @@ impl CollaborationRuntime {
                     self.sessions.clone(),
                     self.callback_url_guard.clone(),
                 );
-                "completed"
+                ("completed", true)
             }
-            Ok(None) => "not_running",
+            Ok(None) => ("not_running", false),
             Err(error) => {
                 warn!(
                     run_id = %run.run_id,
@@ -1296,9 +1346,36 @@ impl CollaborationRuntime {
                     error = %error,
                     "state_machine: failed to complete session for failed run"
                 );
-                "error"
+                ("error", false)
             }
         };
+        if session_transitioned {
+            let workflow_name = self
+                .definitions
+                .get_run_snapshot(&run.run_id)
+                .await?
+                .map(|definition| definition.name)
+                .unwrap_or_else(|| run.definition_id.clone());
+            if let Some(outbound) = self.session_channel_outbound.as_ref() {
+                if let Err(publish_error) = outbound
+                    .publish_state_machine_terminal(StateMachineTerminalEvent {
+                        group_id: run.group_id.clone(),
+                        session_id: run.session_id.clone(),
+                        run_id: run.run_id.clone(),
+                        workflow_name,
+                        status: StateMachineTerminalStatus::Failed,
+                        output: None,
+                    })
+                    .await
+                {
+                    warn!(
+                        run_id = %run.run_id,
+                        error = %publish_error,
+                        "state_machine: failed to publish failed IM notification"
+                    );
+                }
+            }
+        }
         warn!(
             run_id = %run.run_id,
             group_id = %run.group_id,
@@ -1612,6 +1689,27 @@ impl CollaborationRuntime {
             .await?
             .ok_or_else(|| CollaborationRuntimeError::RunNotFound(run.run_id.clone()))
     }
+
+    async fn validate_human_input_channel_for_group(
+        &self,
+        group_id: &str,
+        compiled: &CompiledStateMachine,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let CollaborationRuntimeDefinition::StateMachine(state_machine) =
+            &compiled.definition.runtime
+        else {
+            return Ok(());
+        };
+        let Some(channel) = state_machine.human_input_channel.as_ref() else {
+            return Ok(());
+        };
+        if let Some(outbound) = self.session_channel_outbound.as_ref() {
+            outbound
+                .validate_human_input_channel(group_id, &channel.channel_type)
+                .await?;
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -1640,6 +1738,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let definition = &compiled.definition;
         let authenticated_human = cmd.authenticated_human.clone();
         let has_human_input = compiled_has_human_input(&compiled);
+        self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
+            .await?;
         let resolved_participant_bindings =
             resolve_participant_bindings(&group, &compiled, group_binding.as_ref())?;
         if should_upsert_definition {
@@ -1749,6 +1849,20 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     "state-machine definitions with human_input require a Present Human session participant"
                         .to_string(),
                 ));
+            }
+            let missing_assignees = human_input_assignees(&compiled)
+                .into_iter()
+                .filter(|assignee| {
+                    !present_humans
+                        .iter()
+                        .any(|participant| participant.bot_uuid == *assignee)
+                })
+                .collect::<Vec<_>>();
+            if !missing_assignees.is_empty() {
+                return Err(CollaborationRuntimeError::InvalidRequest(format!(
+                    "HumanInput assignees must be Present Human session participants: {}",
+                    missing_assignees.join(", ")
+                )));
             }
         }
         let run_id = format!("sm-{}", Uuid::new_v4());
@@ -1933,6 +2047,16 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 cmd.node_id
             )));
         }
+        // COSEC: a channel sender must match the assignee frozen in the run
+        // definition; being any Present Human in the session is insufficient.
+        if !matches!(
+            &node_definition.assignee,
+            Some(StateMachineAssignee::RuntimeActor { actor }) if actor == &cmd.caller_actor_id
+        ) {
+            return Err(CollaborationRuntimeError::Forbidden(
+                "caller is not the HumanInput node assignee".to_string(),
+            ));
+        }
 
         let node = self
             .runs
@@ -2076,7 +2200,14 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             if !state_machine
                 .nodes
                 .get(&node_run.node_id)
-                .is_some_and(|node| node.kind == StateMachineNodeKind::HumanInput)
+                .is_some_and(|node| {
+                    node.kind == StateMachineNodeKind::HumanInput
+                        && matches!(
+                            &node.assignee,
+                            Some(StateMachineAssignee::RuntimeActor { actor })
+                                if actor == &cmd.caller_actor_id
+                        )
+                })
             {
                 continue;
             }
@@ -2814,6 +2945,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         })?;
         reject_explicit_participant_roles(&definition)?;
         let compiled = validate_definition(definition)?;
+        self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
+            .await?;
         let candidate_ref = CollaborationDefinitionRef {
             id: compiled.definition.id.clone(),
             version: compiled.definition.version,
@@ -2906,6 +3039,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 )
             })?;
         let compiled = validate_definition(definition)?;
+        self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
+            .await?;
         let final_participant_bindings = cmd
             .participant_bindings
             .unwrap_or_else(|| binding.participant_bindings.clone());
@@ -2960,6 +3095,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 .map_err(|error| CollaborationRuntimeError::InvalidDefinition(error.to_string()))?;
             reject_explicit_participant_roles(&definition)?;
             let compiled = validate_definition(definition)?;
+            self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
+                .await?;
             let definition_ref = CollaborationDefinitionRef {
                 id: compiled.definition.id.clone(),
                 version: compiled.definition.version,
@@ -2974,6 +3111,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 .map_err(|error| CollaborationRuntimeError::InvalidDefinition(error.to_string()))?;
             reject_explicit_participant_roles(&definition)?;
             let compiled = validate_definition(definition)?;
+            self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
+                .await?;
             let definition_ref = CollaborationDefinitionRef {
                 id: compiled.definition.id.clone(),
                 version: compiled.definition.version,
@@ -2993,6 +3132,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     )
                 })?;
             let compiled = validate_definition(definition)?;
+            self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
+                .await?;
             definition_for_validation = Some(compiled.definition);
             Some(definition_ref)
         } else {
@@ -3539,6 +3680,25 @@ fn compiled_has_human_input(compiled: &CompiledStateMachine) -> bool {
             .values()
             .any(|node| node.kind == StateMachineNodeKind::HumanInput),
         _ => false,
+    }
+}
+
+fn human_input_assignees(compiled: &CompiledStateMachine) -> HashSet<String> {
+    match &compiled.definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
+            .nodes
+            .values()
+            .filter_map(|node| {
+                if node.kind != StateMachineNodeKind::HumanInput {
+                    return None;
+                }
+                match &node.assignee {
+                    Some(StateMachineAssignee::RuntimeActor { actor }) => Some(actor.clone()),
+                    _ => None,
+                }
+            })
+            .collect(),
+        _ => HashSet::new(),
     }
 }
 

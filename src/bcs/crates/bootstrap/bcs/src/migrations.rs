@@ -190,6 +190,39 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         display_name TEXT DEFAULT NULL,
         PRIMARY KEY (channel_type, account_ref, im_user_id)
     )",
+    "CREATE INDEX IF NOT EXISTS idx_channel_im_participants_actor ON bcs_channel_im_participants(channel_type, account_ref, actor_id)",
+    // ── HumanInput IM requests ────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_human_input_requests (
+        request_id TEXT PRIMARY KEY,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        session_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        binding_id TEXT NOT NULL,
+        channel_type TEXT NOT NULL,
+        account_ref TEXT NOT NULL,
+        notification_mode TEXT NOT NULL,
+        reply_scope_key TEXT NOT NULL,
+        active_slot_key TEXT DEFAULT NULL,
+        assignee_actor_id TEXT NOT NULL,
+        im_conversation_id TEXT NOT NULL,
+        im_conversation_type TEXT NOT NULL,
+        im_user_id TEXT DEFAULT NULL,
+        node_display_name TEXT NOT NULL,
+        notification_text TEXT NOT NULL,
+        deadline_ms INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        provider_message_ref TEXT DEFAULT NULL,
+        delivery_attempts INTEGER NOT NULL DEFAULT 0,
+        last_delivery_error TEXT DEFAULT NULL,
+        created_at INTEGER NOT NULL,
+        activated_at INTEGER DEFAULT NULL,
+        responded_at INTEGER DEFAULT NULL
+    )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_human_input_active_slot ON bcs_human_input_requests(active_slot_key)",
+    "CREATE INDEX IF NOT EXISTS idx_human_input_scope_status ON bcs_human_input_requests(reply_scope_key, status, deadline_ms, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_human_input_run_node ON bcs_human_input_requests(run_id, node_id)",
     // ── provider_credentials ──────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_provider_credentials (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -687,6 +720,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 7,
         name: "human_input_output_metadata",
     },
+    SqliteMigration {
+        version: 8,
+        name: "human_input_im_requests",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -950,6 +987,9 @@ async fn apply_sqlite_migration_body(
         // SQLITE_DDL_STATEMENTS; version 6 only records progress.
         6 => Ok(()),
         7 => add_sqlite_human_input_output_metadata_schema(db).await,
+        // Startup DDL creates the HumanInput request table and indexes before
+        // versioned migrations are recorded.
+        8 => Ok(()),
         _ => Ok(()),
     }
 }

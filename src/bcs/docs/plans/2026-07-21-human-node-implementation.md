@@ -1,5 +1,10 @@
 # HumanInput 节点实现说明
 
+> 更新说明（2026-07-27）：本文保留第一版实现背景。IM 渠道下不再根据 session
+> 中唯一 pending 节点推断回复目标，而是使用持久化 HumanInputRequest；
+> RuntimeActor assignee、ChannelBinding 解析、typed outbound purpose 和排队规则
+> 见 `docs/plans/2026-07-27-human-input-dingtalk-im.md`。
+
 > 本文描述第一版 `human_input` 的实际实现边界。产品语义见
 > [Human node 设计](../superpowers/specs/2026-01-08-human-node-design.md)。
 

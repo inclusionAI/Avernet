@@ -13,7 +13,10 @@ pub mod session_file;
 pub mod user_identity;
 
 pub use bot::BotRepoPort;
-pub use channel::{ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort};
+pub use channel::{
+    ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
+    HumanInputRequestRepoPort, ImParticipantRepoPort,
+};
 pub use collaboration::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     GroupRuntimeBindingRepoPort, MarkHumanNodeRunningCommand, StateMachineDefinitionRepoPort,
