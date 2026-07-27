@@ -1721,9 +1721,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                         .sessions
                         .add_participant(&session_id, participant)
                         .await
-                        .map_err(|error| {
-                            CollaborationRuntimeError::InvalidRequest(error.to_string())
-                        })?;
+                        .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?;
                 } else if existing.is_some_and(|participant| {
                     participant.effective_mode() != ParticipantMode::Present
                 }) {
@@ -1735,9 +1733,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                             ParticipantMode::Present,
                         )
                         .await
-                        .map_err(|error| {
-                            CollaborationRuntimeError::InvalidRequest(error.to_string())
-                        })?;
+                        .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?;
                 }
             }
             let present_humans = session
