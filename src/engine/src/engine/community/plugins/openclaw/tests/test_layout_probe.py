@@ -106,6 +106,190 @@ def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(
     assert result.evidence["checks"]["legacy_storage_entries_absent"] is True
 
 
+def _active_marker_path(home: Path) -> Path:
+    return (
+        home
+        / ".openclaw"
+        / "workspace"
+        / "skills-pool"
+        / ".pool-active"
+    )
+
+
+def _write_active_marker(
+    home: Path,
+    *,
+    activation_state: str = "finalizing",
+    mappings: object = None,
+) -> Path:
+    marker_path = _active_marker_path(home)
+    marker_path.write_text(
+        json.dumps(
+            {
+                "engine": "openclaw",
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
+                "migration_generation": "generation-1",
+                "activation_state": activation_state,
+                "mappings": [] if mappings is None else mappings,
+            }
+        )
+    )
+    return marker_path
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda marker: "not-a-marker",
+        lambda marker: {**marker, "engine": "claude_code"},
+        lambda marker: {**marker, "mappings": "not-a-list"},
+        lambda marker: {**marker, "mappings": ["not-a-mapping"]},
+        lambda marker: {
+            **marker,
+            "mappings": [{"source": 1, "target": "target"}],
+        },
+        lambda marker: {
+            **marker,
+            "mappings": [{"source": "/outside/pool", "target": "/tmp/skill"}],
+        },
+        lambda marker: {
+            **marker,
+            "mappings": [
+                {
+                    "source": marker["pool_local"],
+                    "target": marker["pool_local"],
+                }
+            ],
+        },
+    ],
+)
+def test_active_marker_contract_mismatch_is_invalid(tmp_path, mutate):
+    home, _, pool_local, pool_repo = _ready_home(tmp_path)
+    marker_path = _write_active_marker(home)
+    marker = json.loads(marker_path.read_text())
+    marker["pool_local"] = str(pool_local)
+    marker_path.write_text(json.dumps(mutate(marker)))
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "active_marker_contract_mismatch"
+
+
+def test_active_marker_must_be_regular_file(tmp_path):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    _active_marker_path(home).mkdir()
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "active_marker_not_regular_file"
+
+
+def test_invalid_active_marker_payload_is_invalid(tmp_path):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    _active_marker_path(home).write_text("{")
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "active_marker_invalid"
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "reason"),
+    [
+        (
+            PermissionError("denied"),
+            RuntimeLayoutInspectionStatus.INVALID,
+            "active_marker_unreadable",
+        ),
+        (
+            OSError(errno.ESTALE, "stale NAS handle"),
+            RuntimeLayoutInspectionStatus.TRANSIENT_ERROR,
+            "active_marker_temporarily_unavailable",
+        ),
+    ],
+)
+def test_active_marker_stat_error_is_classified(
+    tmp_path, monkeypatch, error, status, reason
+):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    active_marker = _write_active_marker(home)
+    original_lstat = Path.lstat
+
+    def fail_active_marker_lstat(path):
+        if path == active_marker:
+            raise error
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", fail_active_marker_lstat)
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is status
+    assert result.evidence["reason"] == reason
+
+
+def test_active_marker_read_io_error_is_transient(tmp_path, monkeypatch):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    active_marker = _write_active_marker(home)
+    original_read_bytes = Path.read_bytes
+
+    def fail_active_marker_read(path):
+        if path == active_marker:
+            raise OSError(errno.ESTALE, "stale NAS handle")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_active_marker_read)
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.TRANSIENT_ERROR
+    assert result.evidence["reason"] == "active_marker_temporarily_unavailable"
+
+
+def test_active_marker_rejects_unretired_repo_bridge(tmp_path):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    _write_active_marker(home, activation_state="active")
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "retired_repo_bridge_present"
+
+
 def test_absent_marker_is_not_capable(tmp_path):
     result = inspect_runtime_layout(
         engine="openclaw",

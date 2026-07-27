@@ -1,5 +1,6 @@
 """Skills Pool operator API surface contract."""
 
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
@@ -11,9 +12,11 @@ from agentclaw.community.adapters.http.skills_pool.router import (
     get_rollout,
     rollback_bot,
     router,
+    set_full_rollout,
 )
 from agentclaw.community.adapters.http.skills_pool.schemas import (
     ControlBotRequest,
+    FullRolloutRequest,
     RollbackRequest,
 )
 from agentclaw.community.core.skills_pool.recovery_service import (
@@ -28,6 +31,7 @@ def test_all_skills_pool_operations_are_operator_only() -> None:
     expected = {
         "/api/ops/skills-pool/rollout",
         "/api/ops/skills-pool/rollout/feature",
+        "/api/ops/skills-pool/rollout/full",
         "/api/ops/skills-pool/rollout/promote",
         "/api/ops/skills-pool/rollout/whitelist",
         "/api/ops/skills-pool/rollout/whitelist/remove",
@@ -58,6 +62,40 @@ def test_control_bot_request_rejects_empty_batch_id() -> None:
             group="negative",
             reason="control sample",
         )
+
+
+@pytest.mark.asyncio
+async def test_full_rollout_route_forwards_optional_engine() -> None:
+    @dataclass(frozen=True)
+    class Result:
+        enabled: bool = True
+
+    class RolloutService:
+        call: dict[str, object] | None = None
+
+        def set_full_rollout(self, **kwargs: object):
+            self.call = kwargs
+            return Result()
+
+    service = RolloutService()
+
+    await set_full_rollout(
+        request=FullRolloutRequest(
+            enabled=True,
+            engine="openclaw",
+            reason="promote future OpenClaw claims",
+        ),
+        user=SimpleNamespace(staffId="freddie"),
+        service=service,
+    )
+
+    assert service.call == {
+        "env": "dev",
+        "enabled": True,
+        "engine": "openclaw",
+        "operator": "freddie",
+        "reason": "promote future OpenClaw claims",
+    }
 
 
 @pytest.mark.asyncio

@@ -98,7 +98,6 @@ async def set_rollout_feature(
             service.set_feature_enabled(
                 env=get_current_env(),
                 enabled=request.enabled,
-                engine=request.engine,
                 operator=user.staffId,
                 reason=request.reason,
             )
@@ -142,6 +141,7 @@ async def set_full_rollout(
             service.set_full_rollout(
                 env=get_current_env(),
                 enabled=request.enabled,
+                engine=request.engine,
                 operator=user.staffId,
                 reason=request.reason,
             )

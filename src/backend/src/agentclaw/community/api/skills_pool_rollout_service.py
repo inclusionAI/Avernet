@@ -21,7 +21,6 @@ class SkillsPoolRolloutServiceProtocol(Protocol):
         *,
         env: str,
         enabled: bool,
-        engine: str | None = None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot: ...
@@ -31,6 +30,7 @@ class SkillsPoolRolloutServiceProtocol(Protocol):
         *,
         env: str,
         enabled: bool,
+        engine: str | None = None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot: ...
