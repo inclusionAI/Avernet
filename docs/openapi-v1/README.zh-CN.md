@@ -47,44 +47,56 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 
 ## 谁在做什么
 
-我们两个人来做这件事。在这里认领你的分工，避免撞车，并保持它随时更新。
+我们按**纵向切片（vertical slice）**分工：每个人端到端地负责若干数据类别 —— 既包括它的
+**Track A** 隔离阶段，也包括它的 **Track B** 端点。这样一来，一个 Track B 类别就绝不会被
+*另一个人*负责的 Track A 阶段卡住。（你举的 `mcp` 例子：`mcp` 的 Track B 依赖 `mcp` 的
+Track A，所以两者都归同一个人。）
 
-| 成员 | 当前聚焦 | 分支 | 备注 |
+| 成员 | 负责（纵向切片） | Track A 阶段 | Track B 端点组 |
 |---|---|---|---|
-| _(待认领)_ | — | — | 挑一个 Track A 阶段或一个 Track B 类别 |
-| _(待认领)_ | — | — | |
+| **totalfrank** | bots、channels、mcp | 1（bots ✅）、3（channels）、5（mcp） | bots、channels、mcp |
+| **lucas-xzp** | resources、skills、routines、identity | 2（resources）、4（skills）、6（routines） | resources、skills、routines、identity |
 
-> 建议的分工（可讨论）：一人推进 **Track A 各阶段**（隔离各类数据），另一人紧随其后、
-> 落后一个类别去做 **Track B**（为一个已隔离的类别接通端点）。在确定顺序之前，请先看下面
-> "尚未决定的排序问题"。
+- **totalfrank** 同时负责**可复用的 Track A 机制**（在 Stage 1 / PR #456 中构建）—— 其余
+  阶段都复制这套模式。
+- **identity**（仅 Track B）没有自己独立的 Track A 阶段：它的数据是 bot 的子资源，因此已由
+  **bots 隔离（Stage 1 ✅）** 覆盖。为均衡工作量分给 **lucas-xzp**；它唯一的依赖已经满足，
+  因此不构成跨人阻塞。
+- 大致均衡：totalfrank ≈ 剩余 2 个 A 阶段 + 约 25 个 B 端点；lucas-xzp ≈ 剩余 3 个 A 阶段 +
+  约 24 个 B 端点。
+
+> **共同的闸口：** 任何触及 bots 的工作（两人都有）都要等 **PR #456** 合并 —— 这是一次性的
+> 闸口，不是持续的跨人依赖。一旦合并，两位负责人就能各自并行推进自己的切片。
+
+_具体每个切片要实现哪些端点，见下方的 **各组件端点清单**。_
 
 ---
 
 ## 状态看板（工作落地时请更新）
 
 ### Track A —— 租户隔离基础设施
-| 阶段 | 范围（数据） | 状态 | 完成判据 |
-|---|---|---|---|
-| 1 | 机器人记录（`ac_bots` / `BotModel`） | ✅ DONE —— **PR #456（等待审批，尚未合并）** | PR #456 合并后 |
-| 2 | 资源（`ac_resource`） | ⬜ TODO | 列 + 守卫 + 测试通过；内部 API 不变 |
-| 3 | 渠道（`ac_channel_config`） | ⬜ TODO | 同上 |
-| 4 | 技能（skill 相关表） | ⬜ TODO | 同上 |
-| 5 | MCP 配置 | ⬜ TODO | 同上 |
-| 6 | 例程（Routines） | ⬜ TODO | 同上 |
+| 阶段 | 范围（数据） | 负责人 | 状态 | 完成判据 |
+|---|---|---|---|---|
+| 1 | 机器人记录（`ac_bots` / `BotModel`） | totalfrank | ✅ DONE —— **PR #456（等待审批，尚未合并）** | PR #456 合并后 |
+| 2 | 资源（`ac_resource`） | lucas-xzp | ⬜ TODO | 列 + 守卫 + 测试通过；内部 API 不变 |
+| 3 | 渠道（`ac_channel_config`） | totalfrank | ⬜ TODO | 同上 |
+| 4 | 技能（skill 相关表） | lucas-xzp | ⬜ TODO | 同上 |
+| 5 | MCP 配置 | totalfrank | ⬜ TODO | 同上 |
+| 6 | 例程（Routines） | lucas-xzp | ⬜ TODO | 同上 |
 
 > Stage 1 同时构建了后续每个阶段都会复制的**可复用机制**（见下文）。它是地基，
 > 不只是"机器人"。
 
 ### Track B —— 公共 API 实现（端点真正落地之处 —— 尚未开始）
-| 类别 | 路由（今天是桩） | 状态 | 依赖 |
-|---|---|---|---|
-| bots | `openapi_v1/bots/router.py` | ⬜ TODO | Track A 阶段 1（PR #456） |
-| channels | `openapi_v1/channels/router.py` | ⬜ TODO | Track A channels |
-| identity | `openapi_v1/identity/router.py` | ⬜ TODO | 调用方身份（见下文的验证器） |
-| mcp | `openapi_v1/mcp/router.py` | ⬜ TODO | Track A mcp |
-| resources | `openapi_v1/resources/router.py` | ⬜ TODO | Track A resources |
-| routines | `openapi_v1/routines/router.py` | ⬜ TODO | Track A routines |
-| skills | `openapi_v1/skills/router.py` | ⬜ TODO | Track A skills |
+| 类别 | 负责人 | 路由（今天是桩） | 状态 | 依赖 |
+|---|---|---|---|---|
+| bots | totalfrank | `openapi_v1/bots/router.py` | ⬜ TODO | Track A 阶段 1（PR #456） |
+| channels | totalfrank | `openapi_v1/channels/router.py` | ⬜ TODO | Track A channels（totalfrank） |
+| mcp | totalfrank | `openapi_v1/mcp/router.py` | ⬜ TODO | Track A mcp（totalfrank） |
+| resources | lucas-xzp | `openapi_v1/resources/router.py` | ⬜ TODO | Track A resources（lucas-xzp） |
+| skills | lucas-xzp | `openapi_v1/skills/router.py` | ⬜ TODO | Track A skills（lucas-xzp） |
+| routines | lucas-xzp | `openapi_v1/routines/router.py` | ⬜ TODO | Track A routines（lucas-xzp） |
+| identity | lucas-xzp | `openapi_v1/identity/router.py` | ⬜ TODO | bots 隔离（Stage 1 ✅） |
 
 ### 横切事项（非按阶段划分）
 | 事项 | 状态 | 备注 |
@@ -93,9 +105,9 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 | 租户前导索引（F2，**强制**策略） | ⬜ TODO | 多租户上线前必须完成 |
 | 后台/定时任务的复查 | ⬜ TODO | 在第二个租户持有真实数据之前完成 |
 
-> **尚未决定的排序问题（规划下一个会话时定夺）：** 是按类别把 Track A 和 Track B 背靠背地
-> 做（隔离 resources → 实现 resources 端点），还是先把整个 Track A 做完，再做整个 Track B？
-> 规格文档把它们当作彼此独立处理；请选定一个顺序，并在做出决定时记入 Changelog。
+> **排序决定 —— 已定（2026-07-27）：** 采用按类别的**纵向切片**。每位负责人先隔离一个类别
+> （Track A），紧接着就实现它的端点（Track B），而不是先把整个 Track A 全部做完再做
+> Track B。这正是让我们两人彼此不阻塞的做法。
 
 ---
 
@@ -169,6 +181,119 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 
 ---
 
+## 各组件端点清单（每个切片需要实现哪些端点）
+
+下面的表格就是 Track B 的**各组件端点清单** —— 谁负责、以及具体要落地哪些端点。**权威来源是
+已服务的路由**（`openapi_v1/<category>/router.py` —— 这些桩里已经带有这些路由定义）；描述则与
+**PR #363**（`docs/api-endpoints.zh-CN.md`，totalfrank 写的中文端点参考 —— 目前仍是
+open/draft，很快会关闭；此处作为参考保留）中的 v1 契约总览做了交叉核对。
+
+> ⚠️ **需要对齐的路径分歧。** 路由桩把所有非 `bots` 的组都嵌套在 `/openapi/v1/bots/...` 之下
+> （如 `/openapi/v1/bots/resources`、`/openapi/v1/bots/mcp`）。而 PR #363 的总览用的是
+> **顶层**路径（`/openapi/v1/resources`、`/openapi/v1/mcp` 等）。实现以**路由为准** ——
+> 下面的路径与路由一致。负责人：如果顶层形态才是想要的对外形状，请修改路由的 `prefix`，并在
+> 同一个 PR 里更新本节。
+
+除注明外，所有响应都使用 `openapi_v1/contracts.py` 里的 `Envelope[T]` / `Page[T]` 结构
+（二进制流不走信封）。
+
+### 🟦 totalfrank —— bots（13 个端点）· `openapi_v1/bots/router.py`
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| POST | `/openapi/v1/bots` | 创建 Agent；可能需要 Passport 授权 | `201 Envelope[Bot]` 或 `202 Envelope[BotAuthPending]` |
+| GET | `/openapi/v1/bots` | 列出调用者的 Agent（`keyword`、`engine`、`status`、分页） | `Envelope[Page[Bot]]` |
+| GET | `/openapi/v1/bots/check-name` | 重名检查（`name`） | `Envelope[NameCheck]` |
+| GET | `/openapi/v1/bots/ceiling` | 创建配额上限 | `Envelope[Ceiling]` |
+| GET | `/openapi/v1/bots/{bot_id}` | 获取详情 | `Envelope[Bot]` |
+| PUT | `/openapi/v1/bots/{bot_id}` | 更新（`engine` 不可改） | `Envelope[Bot]` |
+| DELETE | `/openapi/v1/bots/{bot_id}` | 删除 | `Envelope[Deleted]` |
+| POST | `/openapi/v1/bots/{bot_id}/restart` | 重启（重新置备设备） | `Envelope[Bot]` |
+| GET | `/openapi/v1/bots/{bot_id}/auth-status` | 轮询 Passport 授权；ISSUED 时完成创建 | `Envelope[BotAuthStatus]` |
+| GET | `/openapi/v1/bots/{bot_id}/status` | 运行时/设备就绪状态 | `Envelope[BotStatus]` |
+| GET | `/openapi/v1/bots/{bot_id}/passport` | 获取 Agent Passport | `Envelope[Passport]` |
+| GET | `/openapi/v1/bots/{bot_id}/engine-config` | 读取引擎配置（自由格式 JSON） | `Envelope[dict]` |
+| PUT | `/openapi/v1/bots/{bot_id}/engine-config` | 写入引擎配置（自由格式 JSON） | `Envelope[dict]` |
+
+### 🟦 totalfrank —— channels（6 个端点）· `openapi_v1/channels/router.py`
+钉钉（`dingding`）渠道配置 CRUD + 状态切换。
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/channels` | 列出渠道（可选 `bot_id`） | `Envelope[list[Channel]]` |
+| POST | `/openapi/v1/bots/channels` | 创建渠道（初始为停用） | `201 Envelope[Channel]` |
+| GET | `/openapi/v1/bots/channels/{channel_id}` | 获取渠道 | `Envelope[Channel]` |
+| PUT | `/openapi/v1/bots/channels/{channel_id}` | 全量更新 | `Envelope[Channel]` |
+| PATCH | `/openapi/v1/bots/channels/{channel_id}` | 启用/停用切换 | `Envelope[Channel]` |
+| DELETE | `/openapi/v1/bots/channels/{channel_id}` | 删除 | `Envelope[Deleted]` |
+
+_注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #363 里写的是
+`Page[Channel]`。接线时请确认用哪种。_
+
+### 🟦 totalfrank —— mcp（6 个端点）· `openapi_v1/mcp/router.py`
+市场 + 租户 + 调用者的统一 per-server 配置。
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/mcp/servers` | 列出市场 MCP 服务器（`keyword`、分页） | `Envelope[Page[McpServer]]` |
+| GET | `/openapi/v1/bots/mcp/tenants` | 列出 MCP 租户 | `Envelope[list[McpTenant]]` |
+| GET | `/openapi/v1/bots/mcp/servers/{server_code}` | 服务器详情 | `Envelope[McpServerDetail]` |
+| GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | 查询调用者对该服务器的权限 | `Envelope[McpPermission]` |
+| GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 读取调用者的统一服务器配置 | `Envelope[McpConfig]` |
+| PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 写入配置（下发到设备） | `Envelope[McpConfig]` |
+
+### 🟩 lucas-xzp —— resources（9 个端点）· `openapi_v1/resources/router.py`
+文件/链接/文件夹的统一抽象；存储位置从不暴露。
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/resources` | 列表（`bot_id`、`type`、分页） | `Envelope[Page[Resource]]` |
+| GET | `/openapi/v1/bots/resources/check-name` | 重名检查（`name`） | `Envelope[NameCheck]` |
+| POST | `/openapi/v1/bots/resources` | 创建（文件占位 / 链接 / 文件夹） | `201 Envelope[Resource]` |
+| POST | `/openapi/v1/bots/resources/upload` | 上传原始字节为资源（`application/octet-stream`） | `201 Envelope[Resource]` |
+| GET | `/openapi/v1/bots/resources/{resource_id}` | 获取 | `Envelope[Resource]` |
+| PUT | `/openapi/v1/bots/resources/{resource_id}` | 更新 | `Envelope[Resource]` |
+| DELETE | `/openapi/v1/bots/resources/{resource_id}` | 删除 | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/resources/{resource_id}/download` | 下载字节（**原始，不走信封**） | `application/octet-stream` |
+| GET | `/openapi/v1/bots/resources/{resource_id}/preview` | 预览 | `Envelope[Preview]` |
+
+_注：桩里的上传是原始 `octet-stream`；PR #363 描述的是 `multipart`。接线时二选一。_
+
+### 🟩 lucas-xzp —— skills（桩里 5 个 + 提议新增 2 个）· `openapi_v1/skills/router.py`
+目录在 `/openapi/v1/bots/skills`；某个 Agent 已安装的技能是 bot 的子资源。
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/skills` | 技能目录（`keyword`、分页） | `Envelope[Page[Skill]]` |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` |
+| GET | `/openapi/v1/bots/{bot_id}/skills` | 列出某个 Agent 已安装的技能 | `Envelope[list[BotSkill]]` |
+| POST | `/openapi/v1/bots/{bot_id}/skills` | 为 Agent 安装技能（默认启用） | `201 Envelope[BotSkill]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 卸载（解除绑定） | `Envelope[Deleted]` |
+
+**来自 PR #363 的提议新增（★ —— 尚未在路由桩里；实现前请与 totalfrank 确认）：**
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| POST ★ | `/openapi/v1/skills/upload` | 上传自定义技能（全局，归属调用者） | `Envelope[Skill]` |
+| PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 启用/停用已安装技能（`status`） | `Envelope[BotSkill]` |
+
+### 🟩 lucas-xzp —— routines（7 个端点）· `openapi_v1/routines/router.py`
+定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/routines` | 列表（`bot_id`、`status`、分页） | `Envelope[Page[Routine]]` |
+| POST | `/openapi/v1/bots/routines` | 创建 | `201 Envelope[Routine]` |
+| GET | `/openapi/v1/bots/routines/{routine_id}` | 获取 | `Envelope[Routine]` |
+| PATCH | `/openapi/v1/bots/routines/{routine_id}` | 局部更新 | `Envelope[Routine]` |
+| DELETE | `/openapi/v1/bots/routines/{routine_id}` | 删除 | `Envelope[Deleted]` |
+| POST | `/openapi/v1/bots/routines/{routine_id}/run` | 立即执行一次 | `Envelope[RoutineRun]` |
+| GET | `/openapi/v1/bots/routines/{routine_id}/runs` | 执行历史（分页） | `Envelope[Page[RoutineRun]]` |
+
+### 🟩 lucas-xzp —— identity（3 个端点）· `openapi_v1/identity/router.py`
+读写某个 Agent 的身份 markdown 文件（RULES、SOUL 等），`file_type` 是枚举白名单。没有自己的
+Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/identity/bot/{bot_id}` | 列出身份文件（含是否存在） | `Envelope[IdentityFileList]` |
+| GET | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | 读取单个身份文件 | `Envelope[IdentityFile]` |
+| PUT | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | 覆写单个身份文件（`content`） | `Envelope[IdentityFileRef]` |
+
+---
+
 ## 完成的定义（整个 `/openapi/v1` 工作）
 
 1. **Track A：** 每一类数据（bots、resources、channels、skills、mcp、routines）都带有
@@ -221,4 +346,8 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
 - **2026-07-27** —— 交接 README 创建。Track A Stage 1（bots + 可复用机制）已完成，位于
-  **PR #456**，等待审批。Track B 尚未开始。排序决定（按类别 vs. 先全 A 再全 B）仍待定。
+  **PR #456**，等待审批。Track B 尚未开始。
+- **2026-07-27** —— 按**纵向切片**完成分工（无跨人阻塞）：**totalfrank** = bots、channels、
+  mcp；**lucas-xzp** = resources、skills、routines、identity。排序问题已定 → 按类别纵向切片。
+  新增**各组件端点清单**（来自路由桩 + PR #363），并标注 `/openapi/v1/bots/...` 与顶层路径的
+  分歧、以及两个提议的 ★ skills 端点。
