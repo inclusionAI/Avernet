@@ -77,36 +77,88 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
         log.info("update_result: run_id=%s", run_id)
         from sqlalchemy import func
 
-        self._session.query(BotRunModel).filter(BotRunModel.run_id == run_id).update(
-            {
-                "status": "COMPLETED",
-                "result_content": content_long[:256] if content_long else "",
-                "result_content_long": content_long,
-                "result_extra": json.dumps(extra, ensure_ascii=False)
-                if extra
-                else None,
-                "completed_at": func.now(),
-                "gmt_modified": func.now(),
-            },
-            synchronize_session=False,
+        updated = (
+            self._session.query(BotRunModel)
+            .filter(
+                BotRunModel.run_id == run_id,
+                BotRunModel.status.in_(("PENDING", "RUNNING")),
+            )
+            .update(
+                {
+                    "status": "COMPLETED",
+                    "result_content": content_long[:256] if content_long else "",
+                    "result_content_long": content_long,
+                    "result_extra": json.dumps(extra, ensure_ascii=False)
+                    if extra
+                    else None,
+                    "completed_at": func.now(),
+                    "gmt_modified": func.now(),
+                },
+                synchronize_session=False,
+            )
         )
-        log.info("[bot-run:update_result] result: done")
+        if updated == 0:
+            log.warning(
+                "[bot-run:update_result] skipped (already terminal) run_id=%s", run_id
+            )
+        else:
+            log.info("[bot-run:update_result] result: done")
 
     @with_orm_session
     def update_error(self, run_id: str, error: str) -> None:
         log.info("update_error: run_id=%s", run_id)
         from sqlalchemy import func
 
-        self._session.query(BotRunModel).filter(BotRunModel.run_id == run_id).update(
-            {
-                "status": "FAILED",
-                "error": error,
-                "completed_at": func.now(),
-                "gmt_modified": func.now(),
-            },
-            synchronize_session=False,
+        updated = (
+            self._session.query(BotRunModel)
+            .filter(
+                BotRunModel.run_id == run_id,
+                BotRunModel.status.in_(("PENDING", "RUNNING")),
+            )
+            .update(
+                {
+                    "status": "FAILED",
+                    "error": error,
+                    "completed_at": func.now(),
+                    "gmt_modified": func.now(),
+                },
+                synchronize_session=False,
+            )
         )
-        log.info("[bot-run:update_error] result: done")
+        if updated == 0:
+            log.warning(
+                "[bot-run:update_error] skipped (already terminal) run_id=%s", run_id
+            )
+        else:
+            log.info("[bot-run:update_error] result: done")
+
+    @with_orm_session
+    def update_timeout(self, run_id: str, error: str) -> None:
+        log.info("update_timeout: run_id=%s", run_id)
+        from sqlalchemy import func
+
+        updated = (
+            self._session.query(BotRunModel)
+            .filter(
+                BotRunModel.run_id == run_id,
+                BotRunModel.status.in_(("PENDING", "RUNNING")),
+            )
+            .update(
+                {
+                    "status": "TIME_OUT",
+                    "error": error,
+                    "completed_at": func.now(),
+                    "gmt_modified": func.now(),
+                },
+                synchronize_session=False,
+            )
+        )
+        if updated == 0:
+            log.warning(
+                "[bot-run:update_timeout] skipped (already terminal) run_id=%s", run_id
+            )
+        else:
+            log.info("[bot-run:update_timeout] result: done")
 
     @with_orm_session
     def update_session_id(self, run_id: str, session_id: str) -> None:

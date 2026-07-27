@@ -366,8 +366,8 @@ class TestSendMessage:
         await client.connect()
 
         # Don't fire chat_complete — timeout will occur
-        content, _ = await client.send_message("Hi", timeout=0.01)
-        assert content == ""
+        with pytest.raises(TimeoutError):
+            await client.send_message("Hi", timeout=0.01)
 
     @pytest.mark.asyncio
     async def test_send_message_resets_state(self, mock_bot_ws, mock_bot_ws_instance):
