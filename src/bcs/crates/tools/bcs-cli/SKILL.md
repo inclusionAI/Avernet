@@ -171,7 +171,11 @@ bcs-cli list
 
 ```bash
 bcs-cli discover --query "database"
+bcs-cli discover --query "deployment" --skill "code_review" --skill "sql"
 ```
+
+`--skill` 按技能名精确匹配并忽略大小写，可重复指定；多个 skill 以及
+`--query` 之间均为 AND 关系。
 
 ---
 

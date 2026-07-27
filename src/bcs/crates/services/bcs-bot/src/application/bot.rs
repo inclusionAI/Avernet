@@ -1182,51 +1182,27 @@ fn is_organization_discover_visible(visibility: &str) -> bool {
 fn provider_discovery_selector(command: &BotDiscoveryCommand) -> ProviderBotDiscoverySelector {
     if let Some(q) = command.q.as_deref() {
         ProviderBotDiscoverySelector::Query(q.to_string())
-    } else if let Some(name) = command.name.as_deref() {
-        ProviderBotDiscoverySelector::Name(name.to_string())
-    } else if let Some(skills_str) = command.skills.as_deref() {
-        ProviderBotDiscoverySelector::Skills(split_csv_strings(skills_str))
-    } else if let Some(domains_str) = command.domains.as_deref() {
-        ProviderBotDiscoverySelector::Domains(split_csv_strings(domains_str))
-    } else if let Some(scopes_str) = command.scopes.as_deref() {
-        ProviderBotDiscoverySelector::Scopes(split_csv_strings(scopes_str))
+    } else if !command.skills.is_empty() {
+        ProviderBotDiscoverySelector::RequiredSkills(command.skills.clone())
     } else {
         ProviderBotDiscoverySelector::All
     }
 }
 
 fn matches_discovery_selector(bot: &RegisteredBot, command: &BotDiscoveryCommand) -> bool {
-    if let Some(q) = command.q.as_deref() {
-        matches_query(bot, q)
-    } else if let Some(name) = command.name.as_deref() {
-        bot.capabilities
-            .name
-            .as_deref()
-            .is_some_and(|value| contains_ignore_case(value, name))
-    } else if let Some(skills_str) = command.skills.as_deref() {
-        split_csv(skills_str).iter().all(|skill| {
-            bot.capabilities
-                .skills
-                .iter()
-                .any(|candidate| contains_ignore_case(&candidate.name, skill))
-        })
-    } else if let Some(domains_str) = command.domains.as_deref() {
-        split_csv(domains_str).iter().all(|domain| {
-            bot.capabilities
-                .domains
-                .iter()
-                .any(|candidate| contains_ignore_case(candidate, domain))
-        })
-    } else if let Some(scopes_str) = command.scopes.as_deref() {
-        split_csv(scopes_str).iter().all(|scope| {
-            bot.capabilities
-                .scopes
-                .iter()
-                .any(|candidate| contains_ignore_case(candidate, scope))
-        })
-    } else {
-        true
-    }
+    let matches_q = command
+        .q
+        .as_deref()
+        .is_none_or(|query| matches_query(bot, query));
+    let matches_skills = command.skills.iter().all(|skill| {
+        bot
+            .capabilities
+            .skills
+            .iter()
+            .any(|candidate| candidate.name.eq_ignore_ascii_case(skill))
+    });
+
+    matches_q && matches_skills
 }
 
 fn matches_query(bot: &RegisteredBot, query: &str) -> bool {
@@ -1264,14 +1240,6 @@ fn matches_query(bot: &RegisteredBot, query: &str) -> bool {
 
 fn contains_ignore_case(value: &str, query: &str) -> bool {
     value.to_lowercase().contains(&query.to_lowercase())
-}
-
-fn split_csv(value: &str) -> Vec<&str> {
-    value.split(',').map(str::trim).collect()
-}
-
-fn split_csv_strings(value: &str) -> Vec<String> {
-    split_csv(value).into_iter().map(str::to_string).collect()
 }
 
 fn non_empty_text(value: Option<&str>) -> Option<String> {

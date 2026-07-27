@@ -41,6 +41,7 @@ tower-http      = { workspace = true, features = ["trace"] }
 opentelemetry   = { workspace = true }
 opentelemetry-http = { workspace = true }
 urlencoding     = { workspace = true }
+url             = { workspace = true }
 uuid            = { workspace = true }
 sha2            = { workspace = true }
 hex             = { workspace = true }
