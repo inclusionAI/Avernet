@@ -248,6 +248,14 @@
 - **Threads:** wrapped the 5 mis-classified sites above with
   `bind_current_avernet_tenant`. Regression test proves a repo read inside a
   bound thread stays tenant-scoped (and a bare thread drops to the default).
+- **Threads (2nd pass, Codex review note on #478):** two more in-request bare
+  threads that touch `BotModel` were wrapped for completeness —
+  `device_service.py` `_trigger_data_init_on_device_ready` `_run_init` (data-init
+  → `trigger_init` updates `bot.ext.data_init_status`) and its local variant
+  `local_device_service.py` `start_service_async` (→ `_mark_service_start_failed`
+  → `_bot_query.get_by_binding_id`). The `bot_public_service.py:300`
+  auth-relationship-rebuild executor is left alone — it touches auth-relationship
+  data, not `ac_bots` (a later category's stage).
 - **Both are latent** (single-tenant-safe today); they bite once a 2nd tenant /
   the real resolver exists. Delivered as a new PR off `dev` (the merged PR can't
   be reopened).
