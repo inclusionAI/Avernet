@@ -82,8 +82,9 @@ Engine Layout Descriptor 仍不在本期范围内。
   引擎按 OpenClaw、Claude Code、AICoding、Hermes 的固定
   顺序人工晋级；每次扩大同引擎批次必须引用最近一次已冻结验收，除首个
   引擎外，晋级还必须引用上一引擎已冻结的验收批次。配置写入使用完整旧值
-  加逻辑 revision CAS，冲突 fail closed；配置和包含前后 revision、原因及
-  验收快照的独立审计事件在同一事务提交。
+  加逻辑 revision CAS，冲突 fail closed；缺少可选默认字段的旧配置按规范化
+  语义参与 CAS，并在首次成功写入时原子升级为完整形状；配置和包含前后
+  revision、原因及验收快照的独立审计事件在同一事务提交。
 - 单 Bot 运维视图合成 engine、provider、runtime form、rollout 决策、
   layout/generation、probe/failure 和 quarantine 证据；批次视图只有在
   全部 eligible Bot 激活、无失败且负对照与 Teclaw 对照均健康时才报告
