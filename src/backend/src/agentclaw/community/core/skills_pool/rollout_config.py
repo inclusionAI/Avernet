@@ -64,3 +64,39 @@ def is_valid_rollout_config_value(value: Any) -> bool:
     return all(
         _valid_entries(value.get(key, [])) for key in ("whitelist", *CONTROL_KEYS)
     )
+
+
+def normalize_rollout_config_value(value: Any) -> dict[str, object] | None:
+    """Return the canonical persisted shape for a valid rollout config.
+
+    Older records predate optional control fields.  Their missing keys are
+    semantically equivalent to empty lists, but the canonical shape always
+    writes every field so the first successful operator mutation upgrades the
+    record atomically.
+    """
+
+    if not is_valid_rollout_config_value(value):
+        return None
+    assert isinstance(value, dict)
+
+    def entries(key: str) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
+        for raw in value.get(key, []):
+            assert isinstance(raw, dict)
+            entry = {
+                "owner_id": str(raw["owner_id"]),
+                "bot_id": str(raw["bot_id"]),
+            }
+            if raw.get("batch_id") is not None:
+                entry["batch_id"] = str(raw["batch_id"])
+            normalized.append(entry)
+        return normalized
+
+    return {
+        "enable_all": value["enable_all"],
+        "full_rollout_engines": list(value.get("full_rollout_engines", [])),
+        "promoted_engines": list(value["promoted_engines"]),
+        "whitelist": entries("whitelist"),
+        "negative_controls": entries(CONTROL_KEYS[0]),
+        "teclaw_controls": entries(CONTROL_KEYS[1]),
+    }
