@@ -15,6 +15,7 @@ from agentclaw.community.core.bot_chat.service import (
 )
 from agentclaw.community.core.bot_chat.schemas import ConversationDetail, ConversationObservation, ConversationSession, SessionMetadata
 from agentclaw.community.core.bot_chat.errors import SessionNotFoundError, LangfuseAPIError
+from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.di.config import BotChatConfig
 
 # Langfuse creds are deployment config (BotChatConfig) now, injected into the
@@ -1740,8 +1741,66 @@ class TestBotChatServiceGetSession:
 
 
 # ---------------------------------------------------------------------------
+# BotChatService open exact queries
+# ---------------------------------------------------------------------------
+
+
+class TestBotChatServiceOpenQueries:
+
+    @pytest.fixture
+    def service(self):
+        return BotChatService(db=MagicMock(), config=_TEST_BOTCHAT_CONFIG)
+
+    @pytest.mark.asyncio
+    async def test_open_group_query_uses_open_scope_without_owner(self, service):
+        service._db_repo = MagicMock()
+        service._db_repo.list_ocb_traces.return_value = ([], 0)
+        service._db_repo.list_traces.return_value = ([], 0)
+
+        await service.list_open_sessions(group_id=" group_fixture ")
+
+        kwargs = service._db_repo.list_ocb_traces.call_args.kwargs
+        assert kwargs["owner_id"] is None
+        assert kwargs["group_id"] == "group_fixture"
+        assert kwargs["query_scope"] == QueryScope.OPEN
+        assert kwargs["match_mode"] == "exact"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {},
+            {"biz_scene": "scene_fixture"},
+            {"biz_task_id": "task_fixture"},
+            {
+                "session_key": "session_fixture",
+                "group_id": "group_fixture",
+            },
+        ],
+    )
+    async def test_open_query_rejects_invalid_mode_combinations(
+        self, service, params
+    ):
+        with pytest.raises(ValueError):
+            await service.list_open_sessions(**params)
+
+    @pytest.mark.asyncio
+    async def test_open_detail_skips_owner_filter(self, service):
+        detail = MagicMock(spec=ConversationDetail)
+        service._get_session_db = AsyncMock(return_value=detail)
+
+        result = await service.get_open_session(" trace_fixture ")
+
+        assert result is detail
+        service._get_session_db.assert_awaited_once_with(
+            "trace_fixture", owner_id=None
+        )
+
+
+# ---------------------------------------------------------------------------
 # BotChatService.health_check
 # ---------------------------------------------------------------------------
+
 
 class TestBotChatServiceHealthCheck:
 
