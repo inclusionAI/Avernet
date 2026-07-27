@@ -1,0 +1,7 @@
+#!/usr/bin/env just --justfile
+
+test:
+    bash scripts/ci_test.sh --resolve-base
+
+test-no-cov:
+    bash scripts/ci_test.sh

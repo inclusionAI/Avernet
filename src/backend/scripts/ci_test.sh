@@ -12,6 +12,7 @@ line_coverage_min="${BACKEND_CI_LINE_COVERAGE_MIN:-75}"
 python_bin="$(command -v python || command -v python3 || true)"
 base=""
 head="HEAD"
+resolve_base=0
 
 run_without_git_local_env() {
   env \
@@ -37,9 +38,18 @@ while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --base) base="$2"; shift 2 ;;
     --head) head="$2"; shift 2 ;;
+    --resolve-base) resolve_base=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+if [[ "$resolve_base" -eq 1 && -z "$base" ]]; then
+  base="$("$repo_root/scripts/ci/resolve_base_ref.sh")"
+fi
+
+if [[ "${AVERNET_CI_RESOLVE_BASE:-0}" == "1" && -z "$base" ]]; then
+  base="$("$repo_root/scripts/ci/resolve_base_ref.sh")"
+fi
 
 cd "$backend_dir"
 mkdir -p "$report_dir"

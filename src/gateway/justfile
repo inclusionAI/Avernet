@@ -22,7 +22,10 @@ test-e2e-one test:
 test-ci group='ci' mode='bare' overlay='e2e-sqlite':
     ./scripts/ci_test.sh --group {{group}} {{mode}} {{overlay}}
 
-test mode='bare' overlay='e2e-sqlite':
+test:
+    bash scripts/ci_test.sh --resolve-base
+
+test-no-cov mode='bare' overlay='e2e-sqlite':
     source scripts/lib/pipeline.sh && run_ci_pipeline {{mode}} {{overlay}}
 
 test-full:

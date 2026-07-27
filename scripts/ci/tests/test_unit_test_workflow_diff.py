@@ -16,6 +16,7 @@ MODULE_JOBS = {
     "backend": ("BACKEND_BASE_REF", "src/backend"),
     "engine": ("ENGINE_BASE_REF", "src/engine"),
     "baas": ("BAAS_BASE_REF", "src/baas"),
+    "gateway": ("GATEWAY_BASE_REF", "src/gateway"),
 }
 
 
@@ -51,6 +52,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             '--base "$BACKEND_BASE_REF"',
             '--base "$ENGINE_BASE_REF"',
             '--base "${BAAS_BASE_REF}"',
+            '--base "${GATEWAY_BASE_REF}"',
         ):
             self.assertIn(coverage_argument, workflow)
         self.assertIn(
@@ -107,6 +109,30 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             self.assertEqual(changed_by_module["backend"], "")
             self.assertEqual(changed_by_module["engine"], "")
             self.assertEqual(changed_by_module["baas"], "")
+            self.assertEqual(changed_by_module["gateway"], "")
+
+    def test_ci_test_sh_supports_resolve_base_flag(self) -> None:
+        """Verify that all Python module ci_test.sh scripts accept --resolve-base."""
+        for module_path in ("src/backend", "src/engine", "src/baas", "src/gateway"):
+            script = REPO_ROOT / module_path / "scripts/ci_test.sh"
+            with self.subTest(module=module_path):
+                self.assertTrue(script.exists(), f"{script} missing")
+                text = script.read_text(encoding="utf-8")
+                self.assertIn("--resolve-base", text)
+
+    def test_resolve_base_ref_script_exists_and_runs(self) -> None:
+        """Verify the shared baseline resolution script is present and runnable."""
+        script = REPO_ROOT / "scripts/ci/resolve_base_ref.sh"
+        self.assertTrue(script.exists(), f"{script} missing")
+        result = subprocess.run(
+            ["bash", str(script)],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, f"script failed: {result.stderr}")
+        base_ref = result.stdout.strip()
+        self.assertTrue(len(base_ref) > 0, "script produced empty output")
 
 
 if __name__ == "__main__":

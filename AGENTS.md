@@ -141,6 +141,14 @@ resolved, or if it has no merge base with the pushed commit. It must not fall
 back to a stale target, the pushed branch's old remote SHA, or the root commit,
 because those ranges can run unrelated module tests.
 
+The shared `scripts/ci/resolve_base_ref.sh` implements the same resolution
+precedence for `just test` and `ci_test.sh --resolve-base`: `AVERNET_BASE_REF`
+env var, `AVERNET_PRE_PUSH_MERGE_TARGET` env var,
+`avernet.prePush.mergeTarget` git config, the tracking branch, then
+`origin/dev` as the final default. When the resolved ref cannot be verified,
+the script exits with an actionable error message rather than silently
+degrading.
+
 Module gates are selected from the committed files in the resulting diff:
 
 | Changed path | Pre-push gate |
@@ -241,6 +249,24 @@ uv sync
 # BCS
 cd src/bcs
 cargo test --workspace
+
+# Run coverage-gated tests for all Python modules
+just test
+
+# Run tests without coverage gate (fast iteration)
+just test-no-cov
+
+# Run coverage-gated tests for a single module
+cd src/backend && just test
+cd src/engine && just test
+cd src/baas && just test
+cd src/gateway && just test
+
+# Override the baseline branch for the coverage gate
+AVERNET_BASE_REF=origin/dev just test
+
+# Persist a non-dev baseline for the current worktree
+git config --worktree avernet.prePush.mergeTarget origin/release/2026-07
 ```
 
 Frontend public setup is still being finalized. Do not replace unresolved
