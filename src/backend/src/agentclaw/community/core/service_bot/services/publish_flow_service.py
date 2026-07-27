@@ -864,7 +864,7 @@ class PublishFlowService(
         """Fetch a publish record by id (``None`` if absent)."""
         return self._publish_service.get_publish_by_id(publish_id)
 
-    def is_online_release_recorded(self, publish_id: int) -> bool:
+    def is_current_online_deployment(self, publish_id: int) -> bool:
         """True when this record's online release is the *live* deployment on its
         bot — i.e. the latest version-setting op that has landed on the shared
         online bot belongs to this publish.

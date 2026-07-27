@@ -394,7 +394,7 @@ def test_is_online_release_recorded_reads_ledger():
                 publish_service=publish_service)
 
     # No online release op for this publish → not recorded.
-    assert svc.is_online_release_recorded(1) is False
+    assert svc.is_current_online_deployment(1) is False
 
     # An online op with only the workflow recorded (ID_RECORDED, binding/ext not
     # yet written) is NOT "recorded": the crash-resume guard must let the release
@@ -403,12 +403,12 @@ def test_is_online_release_recorded_reads_ledger():
         publish_id=1, kind="first_release", stage=PublishStage.ONLINE
     )
     ledger.record_workflow(op.id, baas_publish_id=901, bot_uuid="BOT-x")
-    assert svc.is_online_release_recorded(1) is False
+    assert svc.is_current_online_deployment(1) is False
 
     # Once the op COMPLETES it is the latest deploy that landed on the bot → the
     # live online release.
     ledger.complete(op.id)
-    assert svc.is_online_release_recorded(1) is True
+    assert svc.is_current_online_deployment(1) is True
 
 
 def test_is_online_release_recorded_false_for_rolled_back_completed_op():
@@ -431,14 +431,14 @@ def test_is_online_release_recorded_false_for_rolled_back_completed_op():
     # This record's online upgrade completed and is the latest deploy on the bot.
     _land_completed_op(svc, ledger, publish_id=1, kind="upgrade",
                        bot_uuid="BOT-live", baas_id=901)
-    assert svc.is_online_release_recorded(1) is True
+    assert svc.is_current_online_deployment(1) is True
 
     # Rollback re-deploys the previous version onto the SAME bot (higher baas id),
     # on the target record (publish_id=2). The demoted record's op 901 is no longer
     # the latest deploy → stale → not recorded → a re-publish runs the release.
     _land_completed_op(svc, ledger, publish_id=2, kind="rollback_deploy",
                        bot_uuid="BOT-live", baas_id=902)
-    assert svc.is_online_release_recorded(1) is False
+    assert svc.is_current_online_deployment(1) is False
 
 
 def test_is_online_release_recorded_true_after_restart_or_scale():
@@ -460,7 +460,7 @@ def test_is_online_release_recorded_true_after_restart_or_scale():
                        bot_uuid="BOT-live", baas_id=902)
     _land_completed_op(svc, ledger, publish_id=1, kind="scale",
                        bot_uuid="BOT-live", baas_id=903)
-    assert svc.is_online_release_recorded(1) is True
+    assert svc.is_current_online_deployment(1) is True
 
 
 def test_is_online_release_recorded_ignores_ext_marker():
@@ -474,7 +474,7 @@ def test_is_online_release_recorded_ignores_ext_marker():
     rec = _record(PublishStatus.ONLINE_PUB.value)
     rec.ext = {"publish": {"online": 500}}
     svc._publish_service.get_publish_by_id = Mock(return_value=rec)
-    assert svc.is_online_release_recorded(2) is False
+    assert svc.is_current_online_deployment(2) is False
 
 
 def test_abandon_inflight_operations_marks_nonterminal():
