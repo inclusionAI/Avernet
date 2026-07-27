@@ -17,7 +17,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
+from agentclaw.community.core.bot_public.services.bot_discover_service import (
+    BotDiscoverService,
+)
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
+from agentclaw.community.di.config import BcsFuseConfig
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugins.bot_repository import BotRepository
 from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
@@ -107,6 +111,49 @@ def test_list_public_bots_excludes_non_public_and_deleted(repo):
 
 def test_list_public_bots_empty_pairs(repo):
     assert repo.list_public_bots_by_owner_bot_pairs([]) == []
+
+
+# ── Comment 1: the real caller (_batch_get_public_bots) end-to-end ──
+
+def _discover_service(repo):
+    return BotDiscoverService(bot_repository=repo, bcsfuse_config=BcsFuseConfig())
+
+
+def test_batch_get_public_bots_returns_detail_and_is_tenant_scoped(repo):
+    with avernet_tenant_scope("tenant-a"):
+        repo.insert(
+            _data(
+                bot_id="bot-a",
+                owner_id="own-a",
+                bot_name="Alpha",
+                public="1",
+                ext={"owner_name": "Bob"},
+            )
+        )
+    svc = _discover_service(repo)
+    rec = {"score": 0.9}
+    entries = [("own-a:worker", "bot-a", "own-a", rec)]
+
+    # Under tenant-a: the detail comes back, ext parsed, rec threaded through.
+    with avernet_tenant_scope("tenant-a"):
+        result = svc._batch_get_public_bots(entries, user_id="own-a")
+    assert len(result) == 1
+    bot_detail, got_rec = result[0]
+    assert bot_detail["bot_id"] == "bot-a"
+    assert bot_detail["public"] == "1"
+    assert bot_detail["ext"] == {"owner_name": "Bob"}  # already parsed by to_dict
+    assert bot_detail["owner_name"] == "Bob"
+    assert got_rec is rec
+
+    # Under tenant-b: the ORM guard hides tenant-a's bot — the real leak the
+    # raw SQL allowed is now closed at the service entry point.
+    with avernet_tenant_scope("tenant-b"):
+        assert svc._batch_get_public_bots(entries, user_id="own-a") == []
+
+
+def test_batch_get_public_bots_empty_entries(repo):
+    svc = _discover_service(repo)
+    assert svc._batch_get_public_bots([], user_id="u") == []
 
 
 # ── Comment 2: a repo read inside a bound thread keeps the tenant ───
