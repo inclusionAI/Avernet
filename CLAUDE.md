@@ -20,3 +20,8 @@ Before changing Git hooks, module CI entrypoints, Singlebox orchestration,
 acceptance E2E tests, coverage manifests, or coverage reporting, read the
 `Pre-push Module Selection` section in `AGENTS.md` and treat it together with
 the referenced scripts as one contract.
+
+For local `just test` / `just test-no-cov`, read the `Local just test Baseline`
+section in `AGENTS.md` and treat `scripts/ci/resolve_test_baseline.sh`,
+`scripts/ci/local_test.sh`, and the root `justfile` as one contract with the
+pre-push merge-target resolution.

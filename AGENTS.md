@@ -191,6 +191,53 @@ fresh focused run, then run the default all-module gate to catch shared-stack
 interference. Do not inflate a result by excluding production Core paths or by
 adding test-only calls to domain logic.
 
+## Local `just test` Baseline
+
+The repository-root `justfile` exposes local test entry points that run the
+same changed-line coverage gate as GitHub CI
+(`.github/workflows/unit-tests.yml`) and the pre-push hook:
+
+```bash
+just test              # run affected modules WITH the changed-line coverage gate
+just test-base <ref>   # explicit baseline (commit-ish or <remote>/<branch>)
+just test-no-cov       # fast iteration: skip the changed-line coverage gate
+```
+
+`just test` dispatches to `scripts/ci/local_test.sh`, which mirrors
+`scripts/ci/pre_push.sh`'s module selection and invokes each affected module's
+`scripts/ci_test.sh --base <baseline> --head HEAD` — the same entry GitHub CI
+uses. The baseline is resolved by `scripts/ci/resolve_test_baseline.sh`, which
+reuses the pre-push merge-target contract (`fetch -> rev-parse -> merge-base`)
+with this priority (high to low):
+
+1. `--base <commit-or-ref>` on the recipe / script (see `just test-base`)
+2. `AVERNET_TEST_BASE_REF` environment variable (same semantics as `--base`)
+3. `git config avernet.test.mergeTarget <remote>/<branch>` (persistent)
+4. the current branch's upstream tracking branch (`@{upstream}`)
+5. `origin/dev` — last-resort default, used **only** when it can be fetched
+   and shares a merge-base with HEAD
+
+The resolver is fail-closed: if no baseline can be resolved it exits non-zero
+with an actionable message listing the four explicit overrides above, and it
+never silently falls back to a stale target, the old remote SHA, or the root
+commit. This matches the pre-push hook's contract — when the eventual PR
+targets a non-`dev` branch (`release/*`, `stable/*`, etc.), set
+`avernet.test.mergeTarget` (or pass `--base` / `AVERNET_TEST_BASE_REF`) so the
+local diff range matches the PR's real base; otherwise the local gate can
+drift from the remote gate.
+
+`just test-no-cov` runs unit tests without the changed-line coverage gate for
+fast iteration. It is **not** a substitute for the pre-push / PR coverage
+gate; the script's banner says so explicitly, and the pre-push hook and
+GitHub CI continue to enforce the changed-line gate regardless of local
+`--no-cov` use. Empty change sets (`base..HEAD` is empty) print "coverage gate
+skipped" and exit 0, matching the pre-push hook's empty-range behavior.
+
+Automated tests for baseline resolution live in
+`scripts/test_local_test_baseline.sh` (run
+`bash scripts/test_local_test_baseline.sh`). Add a case whenever the priority
+order, the fail-closed message, or the module-dispatch forwarding changes.
+
 ## Development Guidelines
 
 Start from the requirement and the existing contract. Keep changes small and
