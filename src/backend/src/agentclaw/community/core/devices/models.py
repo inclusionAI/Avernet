@@ -129,11 +129,12 @@ class DeviceConnectionInfo:
     tenant: str = ""
     engine_port: int = 20003
     url: str = ""
-    """HTTP base_url（如 "http://10.0.0.1:20010"）—— plan-01 新增字段。
+    """连接 URL；随模式返回 HTTP base URL 或 WebSocket URL。
 
-    由 LocalDeviceService._compose_device_conn_info 通过 BaaS get_http_info 填充；
+    LocalDeviceService 通过 BaaS get_http_info 填充 HTTP URL；BaaS relay
+    WebSocket 链路透传 ws-info 返回的 ws_url。BaaS 非 relay 模式保持为空。
     expert_chat 等 3 处 caller 已用 `conn.get("url") or f"http://{conn['target']}"`
-    模式优先取 url，故 plan-01 填它即可让 caller 自动走 BaaS 路由（无需 caller 改动）。
+    模式优先取 url，保持现有调用方兼容。
     """
 
 
