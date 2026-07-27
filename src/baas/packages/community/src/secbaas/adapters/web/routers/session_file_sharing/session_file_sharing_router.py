@@ -8,7 +8,6 @@ deletion.
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
-
 from secbaas.api import ApiResponse, DomainError
 from secbaas.api.session_file_sharing import (
     SessionCancelUploadResponse,
