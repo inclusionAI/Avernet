@@ -1019,6 +1019,58 @@ class TestAddSkillsToSetOwnerIdResolution:
         )
 
     @pytest.mark.asyncio
+    async def test_auto_activate_false_is_reported_and_not_synced(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id.return_value = {
+            "id": "bot-1",
+            "owner_id": "owner_abc",
+        }
+        skill_repo = MagicMock()
+        skill_repo.get_by_id.return_value = {
+            "id": "10",
+            "name": "skill-a",
+            "git_path": "local:///legacy/skills-local/skill-a",
+        }
+        skill_service = MagicMock()
+        skill_service.activate_skill = AsyncMock(return_value=False)
+        skill_service.RESERVED_SKILL_NAMES = set()
+        mock_set_repo = MagicMock()
+        mock_set_repo.get_by_id.return_value = {
+            "id": "1",
+            "is_default": False,
+            "is_active": True,
+        }
+        mock_set_repo.get_skills_in_set.return_value = []
+        mock_set_repo.list_all.return_value = []
+        mock_set_repo.add_skill_to_set.return_value = True
+        svc = self._make_svc(
+            bot_repo=bot_repo,
+            skill_repo=skill_repo,
+            skill_service=skill_service,
+        )
+        svc.skill_set_repo = mock_set_repo
+        svc._sync_symlinks_to_device_if_needed = MagicMock()
+
+        with patch(
+            "agentclaw.community.core.skill_center.services."
+            "skill_set_service.SkillSetMetadataWriter"
+        ):
+            result = await svc.add_skills_to_set(
+                "1",
+                ["10"],
+                user_id="user1",
+            )
+
+        assert result["activation_failed"] == [
+            {
+                "skill_id": "10",
+                "name": "skill-a",
+                "reason": "activation source is unavailable",
+            }
+        ]
+        svc._sync_symlinks_to_device_if_needed.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_auto_activate_fallback_to_entity_id_when_no_owner(self):
         """When bot exists but owner_id is None, fallback to entity_id."""
         bot_repo = MagicMock()

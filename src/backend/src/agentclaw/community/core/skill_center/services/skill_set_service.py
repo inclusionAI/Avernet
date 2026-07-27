@@ -664,6 +664,17 @@ class SkillSetService:
                             "name": skill_name,
                             "reason": str(result)
                         })
+                    elif result is not True:
+                        logger.warning(
+                            "[add_skills_to_set] Auto-activation source is "
+                            "unavailable for skill %s",
+                            skill_name,
+                        )
+                        activation_failed.append({
+                            "skill_id": skill_id,
+                            "name": skill_name,
+                            "reason": "activation source is unavailable",
+                        })
                     else:
                         logger.debug(f"[add_skills_to_set] Auto-activated skill {skill_name}: {result}")
 
@@ -672,8 +683,11 @@ class SkillSetService:
                     results["activation_failed"] = activation_failed
                     logger.warning(f"[add_skills_to_set] {len(activation_failed)} skills failed to auto-activate")
 
-            # 关键修复：同步软链到设备（本地模式和 Arca 模式都需要）
-            self._sync_symlinks_to_device_if_needed(user_id)
+            # Do not publish a mapping set containing a missing source. A
+            # failed local activation is intentionally fail-closed so the
+            # runtime never receives a dangling active link.
+            if not results["activation_failed"]:
+                self._sync_symlinks_to_device_if_needed(user_id)
 
         return results
 

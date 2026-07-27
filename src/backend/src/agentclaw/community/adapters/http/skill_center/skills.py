@@ -381,6 +381,9 @@ async def upload_skill(
         repo_dir=repo_dir,
         local_dir=local_dir,
         local_skill_path_adapter=local_skill_adapter,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     logger.info(f"[skills.upload_skill] Processing {len(files)} files")
@@ -576,7 +579,12 @@ async def create_skill(
     repo_dir = path_factory.get_bot_skills_repo_dir(
         entity_id, bot_id, engine_type, entity_type, is_desktop=is_desktop
     )
-    service = skill_service_factory.create(repo_dir=repo_dir)
+    service = skill_service_factory.create(
+        repo_dir=repo_dir,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        engine_type=engine_type,
+    )
     try:
         skill = service.create_skill(
             name=request.name,
@@ -643,6 +651,9 @@ async def get_active_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     active_skills = service.get_active_skills()
@@ -932,6 +943,9 @@ async def activate_skill(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     actual_skill_id = request.relative_path if request.relative_path else skill_id
@@ -1007,6 +1021,9 @@ async def deactivate_skill(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # deactivate_skill is async — must await; previously a direct sync call
@@ -1137,6 +1154,9 @@ async def get_skill_readme(
         repo_dir=initial_repo_dir,
         local_dir=initial_local_dir,
         local_skill_path_adapter=None,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     skill = _get_skill_by_id_or_link_name(service, skill_id, effective_bot_id, ctx.bot_id)
@@ -1217,6 +1237,9 @@ async def get_skill_readme(
         repo_dir=read_repo_dir,
         local_dir=read_local_dir,
         local_skill_path_adapter=read_local_skill_adapter,
+        entity_id=read_owner_id,
+        bot_id=read_bot_id,
+        engine_type=read_engine,
     )
 
     # Default: local://, git://, or repo lookup via service.
@@ -1304,6 +1327,9 @@ async def list_local_market_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     skills = service.get_skills_in_path("")
@@ -1339,6 +1365,9 @@ async def get_market_tree(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     tree = service.get_market_tree()
@@ -1384,6 +1413,9 @@ async def list_market_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # 从数据库查询 git_path 以 git:// 开头的技能 (marketplace 不区分 bolt_id)
@@ -1426,6 +1458,9 @@ async def activate_skills_batch(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # activate_skills_batch is async — direct await. run_in_threadpool over
@@ -1499,6 +1534,9 @@ async def search_market_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # 使用缓存搜索市场技能（复用 list_git_skills 缓存，limit=100）
@@ -1545,6 +1583,9 @@ async def sync_market(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # Step 1: Sync repository (git pull/clone)
@@ -1621,6 +1662,9 @@ async def get_sync_status(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     status = service.get_sync_status()
@@ -1975,6 +2019,9 @@ async def delete_skill(
         repo_dir=repo_dir,
         local_dir=local_dir,
         local_skill_path_adapter=local_skill_adapter,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
     try:
         if bot is None:
@@ -2069,6 +2116,9 @@ async def save_skill_parameters(
         repo_dir=path_factory.get_bot_skills_repo_dir(entity_id, bot_id, engine_type, is_desktop=is_desktop),
         local_dir=path_factory.get_bot_skills_local_dir(entity_id, bot_id, engine_type, is_desktop=is_desktop, is_teclaw=is_teclaw),
         local_skill_path_adapter=local_skill_adapter,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        engine_type=engine_type,
     )
     if is_teclaw:
         skill_info = await service.parse_local_skill_config(skill.get('git_path', ''), bot_id, entity_id)
