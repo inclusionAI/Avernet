@@ -1782,6 +1782,121 @@ mod tests {
         assert!(tagged_task("[SERVICE GROUP CONTEXT]").is_none());
     }
 
+    #[tokio::test]
+    async fn cancelled_instance_reports_starting_then_stopped() {
+        let behavior = BehaviorConfig::Fixed {
+            replies: vec!["你好".to_string()],
+            scope: StateScope::Session,
+        };
+        let config = instance_config(behavior);
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let (status_tx, mut status_rx) = mpsc::unbounded_channel();
+
+        run_instance(config, cancellation, status_tx)
+            .await
+            .unwrap_or_else(|error| panic!("cancelled instance should stop cleanly: {error}"));
+
+        assert!(matches!(
+            status_rx
+                .try_recv()
+                .unwrap_or_else(|error| panic!("starting status is missing: {error}")),
+            StatusCommand::Update(StatusUpdate {
+                state: InstanceState::Starting,
+                ..
+            })
+        ));
+        assert!(matches!(
+            status_rx
+                .try_recv()
+                .unwrap_or_else(|error| panic!("stopped status is missing: {error}")),
+            StatusCommand::Update(StatusUpdate {
+                state: InstanceState::Stopped,
+                ..
+            })
+        ));
+        assert!(status_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn incoming_dispatch_rejects_invalid_requests_and_ignores_notifications() {
+        let behavior = BehaviorConfig::Fixed {
+            replies: vec!["你好".to_string()],
+            scope: StateScope::Session,
+        };
+        let config = instance_config(behavior.clone());
+        let mut state = RuntimeState::new(&behavior);
+        let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel();
+        let (internal_tx, _internal_rx) = mpsc::unbounded_channel();
+        let cases = [
+            ("send", "chat.send", json!({})),
+            ("inject", "chat.inject", json!({})),
+            ("history", "chat.history", json!({})),
+            ("abort", "chat.abort", json!({"run_id": false})),
+            ("delete", "session.delete", json!({})),
+            ("unknown", "unsupported.method", json!({})),
+        ];
+
+        for (id, method, params) in cases {
+            handle_incoming(
+                &config,
+                &mut state,
+                BcsFrame::Request(RequestFrame::new(id, method, Some(params))),
+                &outgoing_tx,
+                &internal_tx,
+            )
+            .unwrap_or_else(|error| panic!("{method} should return a protocol error: {error}"));
+            let BcsFrame::Response(response) = outgoing_rx
+                .try_recv()
+                .unwrap_or_else(|error| panic!("{method} response is missing: {error}"))
+            else {
+                panic!("{method} should return a response frame");
+            };
+            assert_eq!(response.id, id);
+            assert!(!response.ok);
+            assert!(response.error.is_some());
+        }
+
+        for (id, method, params) in [
+            ("history-ok", "chat.history", json!({"session_key": "missing"})),
+            ("abort-ok", "chat.abort", json!({"session_key": "missing"})),
+        ] {
+            handle_incoming(
+                &config,
+                &mut state,
+                BcsFrame::Request(RequestFrame::new(id, method, Some(params))),
+                &outgoing_tx,
+                &internal_tx,
+            )
+            .unwrap_or_else(|error| panic!("{method} should succeed: {error}"));
+            let BcsFrame::Response(response) = outgoing_rx
+                .try_recv()
+                .unwrap_or_else(|error| panic!("{method} response is missing: {error}"))
+            else {
+                panic!("{method} should return a response frame");
+            };
+            assert!(response.ok);
+        }
+
+        handle_incoming(
+            &config,
+            &mut state,
+            BcsFrame::Response(ResponseFrame::ok("untracked", json!({}))),
+            &outgoing_tx,
+            &internal_tx,
+        )
+        .unwrap_or_else(|error| panic!("untracked response should be ignored: {error}"));
+        handle_incoming(
+            &config,
+            &mut state,
+            BcsFrame::Event(bcs_protocol::EventFrame::new("noop", None, None)),
+            &outgoing_tx,
+            &internal_tx,
+        )
+        .unwrap_or_else(|error| panic!("notification should be ignored: {error}"));
+        assert!(outgoing_rx.try_recv().is_err());
+    }
+
     #[test]
     fn system_supervisor_task_prefers_session_task_and_falls_back_to_group_goal() {
         let goal_only = "\

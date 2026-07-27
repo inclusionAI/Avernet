@@ -103,4 +103,37 @@ mod tests {
         assert_eq!(actual.token, expected.token);
         assert_eq!(actual.bcs_url, expected.bcs_url);
     }
+
+    #[test]
+    fn missing_and_empty_tokens_are_not_restored() {
+        let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+        let store = SessionStore::new(temp.path());
+
+        assert!(
+            store
+                .load()
+                .unwrap_or_else(|error| panic!("missing token should be accepted: {error}"))
+                .is_none()
+        );
+        fs::create_dir_all(
+            store
+                .path()
+                .parent()
+                .unwrap_or_else(|| panic!("session path should have a parent")),
+        )
+        .unwrap_or_else(|error| panic!("session directory should be created: {error}"));
+        fs::write(
+            store.path(),
+            r#"{"bot_uuid":null,"token":"  ","bcs_url":"ws://localhost"}"#,
+        )
+        .unwrap_or_else(|error| panic!("empty session fixture should be written: {error}"));
+
+        assert!(
+            store
+                .load()
+                .unwrap_or_else(|error| panic!("empty token should be accepted: {error}"))
+                .is_none()
+        );
+        assert!(store.path().ends_with(".bcs/session.json"));
+    }
 }

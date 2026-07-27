@@ -423,4 +423,366 @@ mod tests {
 
         assert!(result.is_err());
     }
+
+    #[test]
+    fn loads_mixed_manifest_and_resolves_runtime_metadata() {
+        let temp = tempfile::tempdir()
+            .unwrap_or_else(|error| panic!("temporary directory should be created: {error}"));
+        let path = temp.path().join("bots.json");
+        let value = serde_json::json!({
+            "version": 2,
+            "name": "mixed",
+            "port_start": 18_000,
+            "port_step": 10,
+            "scopes": "group",
+            "bots": [
+                {
+                    "source": "assistant",
+                    "profile": "openclaw",
+                    "name": "OpenClaw",
+                    "summary": "LLM assistant",
+                    "domains": "general",
+                    "skills": "reasoning"
+                },
+                {
+                    "profile": "echo",
+                    "name": "Echo",
+                    "summary": "Repeats messages",
+                    "domains": "utility",
+                    "skills": "reply",
+                    "scopes": "local",
+                    "runtime": {
+                        "type": "rule",
+                        "behavior": {
+                            "type": "echo"
+                        }
+                    }
+                }
+            ]
+        });
+        fs::write(
+            &path,
+            serde_json::to_vec(&value)
+                .unwrap_or_else(|error| panic!("manifest should serialize: {error}")),
+        )
+        .unwrap_or_else(|error| panic!("manifest fixture should be written: {error}"));
+
+        let manifest = Manifest::load(&path)
+            .unwrap_or_else(|error| panic!("mixed manifest should load: {error}"));
+
+        assert_eq!(manifest.name, "mixed");
+        assert_eq!(manifest.rule_bots().count(), 1);
+        assert_eq!(manifest.bots[0].response_delay_ms(), 0);
+        assert!(manifest.bots[0].behavior().is_none());
+        assert_eq!(manifest.bots[0].behavior_name(), "openclaw");
+        assert_eq!(manifest.bots[0].effective_scopes(&manifest), "group");
+        assert_eq!(manifest.bots[1].effective_scopes(&manifest), "local");
+        assert_eq!(manifest.bots[1].behavior_name(), "echo");
+        match manifest.bots[1].behavior() {
+            Some(BehaviorConfig::Echo { repeat, .. }) => assert_eq!(*repeat, 1),
+            other => panic!("expected echo behavior, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn effective_scopes_default_to_local() {
+        let manifest = parse(serde_json::json!({
+            "version": 2,
+            "name": "rules",
+            "bots": [rule_bot(serde_json::json!({
+                "type": "fixed",
+                "replies": ["ok"]
+            }))]
+        }))
+        .unwrap_or_else(|error| panic!("rule manifest should parse: {error}"));
+
+        assert_eq!(manifest.bots[0].effective_scopes(&manifest), "local");
+        assert_eq!(manifest.bots[0].behavior_name(), "fixed");
+    }
+
+    #[test]
+    fn rejects_invalid_manifest_structure() {
+        let openclaw = serde_json::json!({
+            "source": "assistant",
+            "profile": "openclaw",
+            "name": "OpenClaw",
+            "summary": "LLM assistant",
+            "domains": "general",
+            "skills": "reasoning"
+        });
+        let cases = vec![
+            (
+                serde_json::json!({
+                    "version": 1,
+                    "name": "invalid",
+                    "bots": [rule_bot(serde_json::json!({
+                        "type": "fixed",
+                        "replies": ["ok"]
+                    }))]
+                }),
+                "manifest version 2",
+            ),
+            (
+                serde_json::json!({
+                    "version": 2,
+                    "name": " ",
+                    "bots": [rule_bot(serde_json::json!({
+                        "type": "fixed",
+                        "replies": ["ok"]
+                    }))]
+                }),
+                "name must not be empty",
+            ),
+            (
+                serde_json::json!({"version": 2, "name": "empty", "bots": []}),
+                "bots must not be empty",
+            ),
+            (
+                serde_json::json!({
+                    "version": 2,
+                    "name": "duplicate",
+                    "bots": [
+                        rule_bot(serde_json::json!({
+                            "type": "fixed",
+                            "replies": ["ok"]
+                        })),
+                        rule_bot(serde_json::json!({
+                            "type": "echo"
+                        }))
+                    ]
+                }),
+                "profile is duplicated",
+            ),
+            (
+                serde_json::json!({
+                    "version": 2,
+                    "name": "openclaw",
+                    "bots": [openclaw.clone()]
+                }),
+                "port_start is required",
+            ),
+            (
+                serde_json::json!({
+                    "version": 2,
+                    "name": "openclaw",
+                    "port_start": 18_000,
+                    "bots": [openclaw.clone()]
+                }),
+                "port_step must be greater than 0",
+            ),
+            (
+                serde_json::json!({
+                    "version": 2,
+                    "name": "openclaw",
+                    "port_start": 18_000,
+                    "port_step": 0,
+                    "bots": [openclaw]
+                }),
+                "port_step must be greater than 0",
+            ),
+        ];
+
+        for (value, expected) in cases {
+            let error = parse(value)
+                .err()
+                .unwrap_or_else(|| panic!("invalid manifest should fail"));
+            assert!(
+                error.to_string().contains(expected),
+                "expected {expected:?}, got {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_profile_fields_and_sources() {
+        let mutations = [
+            ("profile", serde_json::json!("bad/name"), "profile must match"),
+            ("name", serde_json::json!(" "), "name must not be empty"),
+            (
+                "summary",
+                serde_json::json!(" "),
+                "summary must not be empty",
+            ),
+            (
+                "domains",
+                serde_json::json!(" "),
+                "domains must not be empty",
+            ),
+            ("skills", serde_json::json!(" "), "skills must not be empty"),
+        ];
+        for (field, value, expected) in mutations {
+            let mut bot = rule_bot(serde_json::json!({
+                "type": "fixed",
+                "replies": ["ok"]
+            }));
+            bot[field] = value;
+            let error = parse(serde_json::json!({
+                "version": 2,
+                "name": "invalid",
+                "bots": [bot]
+            }))
+            .err()
+            .unwrap_or_else(|| panic!("invalid profile field should fail"));
+            assert!(
+                error.to_string().contains(expected),
+                "expected {expected:?}, got {error}"
+            );
+        }
+
+        for source in [None, Some(" "), Some("nested/source"), Some("..")] {
+            let mut bot = serde_json::json!({
+                "profile": "openclaw",
+                "name": "OpenClaw",
+                "summary": "LLM assistant",
+                "domains": "general",
+                "skills": "reasoning"
+            });
+            if let Some(source) = source {
+                bot["source"] = serde_json::json!(source);
+            }
+            let error = parse(serde_json::json!({
+                "version": 2,
+                "name": "invalid",
+                "port_start": 18_000,
+                "port_step": 10,
+                "bots": [bot]
+            }))
+            .err()
+            .unwrap_or_else(|| panic!("invalid source should fail"));
+            assert!(error.to_string().contains("source"));
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_behavior_contracts() {
+        let cases = vec![
+            (
+                serde_json::json!({"type": "fixed", "replies": []}),
+                "replies must not be empty",
+            ),
+            (
+                serde_json::json!({"type": "random_reply", "replies": ["ok", " "]}),
+                "replies[1] must not be empty",
+            ),
+            (
+                serde_json::json!({"type": "echo", "repeat": 0}),
+                "repeat must be greater than 0",
+            ),
+            (
+                serde_json::json!({"type": "random_number", "min": 2, "max": 1}),
+                "min must be less than or equal",
+            ),
+            (
+                serde_json::json!({
+                    "type": "task_worker",
+                    "result": {
+                        "type": "task_worker",
+                        "result": {"type": "fixed", "replies": ["ok"]}
+                    }
+                }),
+                "result must be fixed",
+            ),
+            (
+                serde_json::json!({
+                    "type": "task_worker",
+                    "result": {"type": "fixed", "replies": []}
+                }),
+                "replies must not be empty",
+            ),
+            (
+                serde_json::json!({
+                    "type": "supervisor",
+                    "assignment": {
+                        "mode": "each_member",
+                        "task_template": " "
+                    },
+                    "completion": {"timeout_ms": 1},
+                    "summary_template": "done"
+                }),
+                "task_template must not be empty",
+            ),
+            (
+                serde_json::json!({
+                    "type": "supervisor",
+                    "assignment": {
+                        "mode": "each_member",
+                        "task_template": "{task}"
+                    },
+                    "completion": {"timeout_ms": 0},
+                    "summary_template": "done"
+                }),
+                "timeout_ms must be greater than 0",
+            ),
+            (
+                serde_json::json!({
+                    "type": "supervisor",
+                    "assignment": {
+                        "mode": "each_member",
+                        "task_template": "{task}"
+                    },
+                    "completion": {"timeout_ms": 1},
+                    "summary_template": " "
+                }),
+                "summary_template must not be empty",
+            ),
+        ];
+
+        for (behavior, expected) in cases {
+            let error = parse(serde_json::json!({
+                "version": 2,
+                "name": "invalid",
+                "bots": [rule_bot(behavior)]
+            }))
+            .err()
+            .unwrap_or_else(|| panic!("invalid behavior should fail"));
+            assert!(
+                error.to_string().contains(expected),
+                "expected {expected:?}, got {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn behavior_names_cover_every_supported_variant() {
+        let values = [
+            (
+                serde_json::json!({"type": "fixed", "replies": ["ok"]}),
+                "fixed",
+            ),
+            (
+                serde_json::json!({"type": "random_reply", "replies": ["ok"]}),
+                "random_reply",
+            ),
+            (serde_json::json!({"type": "echo"}), "echo"),
+            (
+                serde_json::json!({"type": "random_number", "min": 1, "max": 2}),
+                "random_number",
+            ),
+            (
+                serde_json::json!({
+                    "type": "task_worker",
+                    "result": {"type": "fixed", "replies": ["done"]}
+                }),
+                "task_worker",
+            ),
+            (
+                serde_json::json!({
+                    "type": "supervisor",
+                    "assignment": {
+                        "mode": "each_member",
+                        "task_template": "{task}"
+                    },
+                    "completion": {"timeout_ms": 1},
+                    "summary_template": "done"
+                }),
+                "supervisor",
+            ),
+        ];
+
+        for (value, expected) in values {
+            let behavior: BehaviorConfig = serde_json::from_value(value)
+                .unwrap_or_else(|error| panic!("behavior should parse: {error}"));
+            assert_eq!(behavior.name(), expected);
+        }
+    }
 }

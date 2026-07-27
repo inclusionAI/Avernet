@@ -144,3 +144,79 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| duration.as_millis() as u64)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_names_match_the_status_contract() {
+        assert_eq!(InstanceState::Starting.as_str(), "starting");
+        assert_eq!(InstanceState::Connected.as_str(), "connected");
+        assert_eq!(InstanceState::Reconnecting.as_str(), "reconnecting");
+        assert_eq!(InstanceState::Error.as_str(), "error");
+        assert_eq!(InstanceState::Stopped.as_str(), "stopped");
+    }
+
+    #[test]
+    fn reporter_writes_updates_and_heartbeats_atomically() {
+        let temp = tempfile::tempdir()
+            .unwrap_or_else(|error| panic!("temporary directory should be created: {error}"));
+        let status_path = temp.path().join("nested").join("status.json");
+        let manifest_path = temp.path().join("bots.json");
+        let mut reporter = StatusReporter::new(status_path.clone(), manifest_path.clone());
+
+        reporter
+            .apply(StatusUpdate {
+                profile: "friendly".to_owned(),
+                name: "Friendly".to_owned(),
+                behavior: "fixed".to_owned(),
+                state: InstanceState::Connected,
+                bot_uuid: Some("bot-1".to_owned()),
+                last_error: None,
+            })
+            .unwrap_or_else(|error| panic!("connected status should be written: {error}"));
+        reporter
+            .apply(StatusUpdate {
+                profile: "random".to_owned(),
+                name: "Random".to_owned(),
+                behavior: "random".to_owned(),
+                state: InstanceState::Error,
+                bot_uuid: None,
+                last_error: Some("connection lost".to_owned()),
+            })
+            .unwrap_or_else(|error| panic!("error status should be written: {error}"));
+        reporter
+            .touch("friendly")
+            .unwrap_or_else(|error| panic!("heartbeat should be written: {error}"));
+        reporter
+            .touch("unknown")
+            .unwrap_or_else(|error| panic!("unknown heartbeat should be harmless: {error}"));
+
+        let contents = fs::read_to_string(&status_path)
+            .unwrap_or_else(|error| panic!("status file should be readable: {error}"));
+        let status: serde_json::Value = serde_json::from_str(&contents)
+            .unwrap_or_else(|error| panic!("status file should contain JSON: {error}"));
+        assert_eq!(status["pid"], std::process::id());
+        assert_eq!(
+            status["manifest"],
+            manifest_path.to_string_lossy().as_ref()
+        );
+        assert_eq!(status["bots"]["friendly"]["name"], "Friendly");
+        assert_eq!(status["bots"]["friendly"]["bot_uuid"], "bot-1");
+        assert_eq!(status["bots"]["friendly"]["state"], "connected");
+        assert_eq!(status["bots"]["random"]["behavior"], "random");
+        assert_eq!(status["bots"]["random"]["state"], "error");
+        assert_eq!(
+            status["bots"]["random"]["last_error"],
+            "connection lost"
+        );
+        assert!(status["updated_at"].as_u64().is_some());
+        assert!(
+            status["bots"]["friendly"]["last_heartbeat_at"]
+                .as_u64()
+                .is_some()
+        );
+        assert!(!status_path.with_extension("json.tmp").exists());
+    }
+}

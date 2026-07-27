@@ -198,4 +198,106 @@ mod tests {
 
         assert_eq!(message_text(&message), "你好");
     }
+
+    #[test]
+    fn chat_history_params_use_the_default_limit() {
+        let params: ChatHistoryParams = serde_json::from_value(serde_json::json!({
+            "session_key": "group-1"
+        }))
+        .unwrap_or_else(|error| panic!("history params should deserialize: {error}"));
+
+        assert_eq!(params.session_key, "group-1");
+        assert_eq!(params.limit, 50);
+        assert!(params.before.is_none());
+        assert!(params.after.is_none());
+    }
+
+    #[test]
+    fn error_response_preserves_error_details() {
+        let response = error_response("request-1", "not_supported", "not supported", false);
+
+        match response {
+            BcsFrame::Response(response) => {
+                assert_eq!(response.id, "request-1");
+                assert!(!response.ok);
+                assert!(response.payload.is_none());
+                let error = response
+                    .error
+                    .unwrap_or_else(|| panic!("error details should be present"));
+                assert_eq!(error.code, "not_supported");
+                assert_eq!(error.message, "not supported");
+                assert!(!error.retryable);
+            }
+            other => panic!("expected response frame, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_chat_event_includes_error_details() {
+        let event = error_chat_event("run-1", "group-1", "behavior", "boom");
+
+        match event {
+            BcsFrame::Event(event) => {
+                assert_eq!(event.event, "chat.event");
+                let params = event
+                    .payload
+                    .unwrap_or_else(|| panic!("event params should be present"));
+                assert_eq!(params["run_id"], "run-1");
+                assert_eq!(params["bcs_group_id"], "group-1");
+                assert_eq!(params["state"], "error");
+                assert_eq!(params["errorKind"], "behavior");
+                assert_eq!(params["errorMessage"], "boom");
+                assert_eq!(params["is_error"], true);
+                assert_eq!(params["success"], false);
+            }
+            other => panic!("expected event frame, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn history_response_filters_and_limits_newest_messages() {
+        let messages = vec![
+            HistoryMessage {
+                id: "message-1".to_owned(),
+                role: "user".to_owned(),
+                content: "first".to_owned(),
+                timestamp: 10,
+            },
+            HistoryMessage {
+                id: "message-2".to_owned(),
+                role: "assistant".to_owned(),
+                content: "second".to_owned(),
+                timestamp: 20,
+            },
+            HistoryMessage {
+                id: "message-3".to_owned(),
+                role: "user".to_owned(),
+                content: "third".to_owned(),
+                timestamp: 30,
+            },
+        ];
+        let params = ChatHistoryParams {
+            session_key: "group-1".to_owned(),
+            limit: 1,
+            before: Some(30),
+            after: Some(5),
+        };
+
+        let response = history_response("request-1", "group-1", &messages, &params);
+
+        match response {
+            BcsFrame::Response(response) => {
+                assert!(response.ok);
+                let result = response
+                    .payload
+                    .unwrap_or_else(|| panic!("history result should be present"));
+                assert_eq!(result["session_key"], "group-1");
+                assert_eq!(result["messages"][0]["id"], "message-2");
+                assert_eq!(result["messages"][0]["content"], "second");
+                assert_eq!(result["messages"][0]["timestamp"], 20);
+                assert_eq!(result["has_more"], true);
+            }
+            other => panic!("expected response frame, got {other:?}"),
+        }
+    }
 }
