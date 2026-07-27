@@ -31,6 +31,7 @@ PAST = NOW - _timedelta(days=30)
 def mock_session():
     """Mock SQLAlchemy ORM session."""
     session = MagicMock()
+    session.query.return_value.filter.return_value.update.return_value = 0
     return session
 
 
@@ -333,14 +334,7 @@ class TestTryAcquireLock:
         mock_session.flush.assert_called()
 
     def test_acquire_reentrant_same_holder(self, repository, mock_session):
-        mock_model = _make_model(
-            lock_name="existing-lock",
-            lock_holder="holder-A",
-            expire_time=FUTURE,
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            mock_model
-        )
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
 
         result = repository.try_acquire_lock(
             lock_name="existing-lock",
@@ -349,7 +343,8 @@ class TestTryAcquireLock:
         )
 
         assert result is True
-        mock_session.flush.assert_called_once()
+        mock_session.add.assert_not_called()
+        mock_session.delete.assert_not_called()
 
     def test_acquire_fails_when_held_by_other(self, repository, mock_session):
         mock_model = _make_model(
@@ -369,20 +364,30 @@ class TestTryAcquireLock:
 
         assert result is False
 
-    def test_acquire_takes_over_expired_lock(self, repository, mock_session):
+    def test_acquire_reentrant_same_holder_after_zero_rowcount(
+        self, repository, mock_session
+    ):
         mock_model = _make_model(
-            lock_name="expired-lock",
-            lock_holder="old-holder",
-            expire_time=PAST,
+            lock_name="existing-lock",
+            lock_holder="holder-A",
+            expire_time=FUTURE,
         )
         mock_session.query.return_value.filter.return_value.first.return_value = (
             mock_model
         )
 
-        def _add_side_effect(model):
-            model.id = 2
+        result = repository.try_acquire_lock(
+            lock_name="existing-lock",
+            lock_holder="holder-A",
+            expire_time=FUTURE,
+        )
 
-        mock_session.add.side_effect = _add_side_effect
+        assert result is True
+        mock_session.add.assert_not_called()
+        mock_session.delete.assert_not_called()
+
+    def test_acquire_takes_over_expired_lock(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
 
         result = repository.try_acquire_lock(
             lock_name="expired-lock",
@@ -391,9 +396,8 @@ class TestTryAcquireLock:
         )
 
         assert result is True
-        mock_session.delete.assert_called_once_with(mock_model)
-        mock_session.flush.assert_called()
-        mock_session.add.assert_called_once()
+        mock_session.delete.assert_not_called()
+        mock_session.add.assert_not_called()
 
     def test_acquire_handles_unique_constraint_conflict(self, repository, mock_session):
         from sqlalchemy.exc import IntegrityError as SAIntegrityError
@@ -429,6 +433,25 @@ class TestTryAcquireLock:
 
         added_model = mock_session.add.call_args[0][0]
         assert added_model.env == "dev"
+
+    def test_acquire_handles_oceanbase_lock_wait_timeout(self, repository, mock_session):
+        from sqlalchemy.exc import DatabaseError as SADatabaseError
+
+        orig = MagicMock()
+        orig.errno = 1205
+        orig.__str__.return_value = "Lock wait timeout exceeded; try restarting transaction"
+        mock_session.query.return_value.filter.return_value.update.side_effect = (
+            SADatabaseError("UPDATE ...", {}, orig)
+        )
+
+        result = repository.try_acquire_lock(
+            lock_name="busy-lock",
+            lock_holder="holder-A",
+            expire_time=FUTURE,
+        )
+
+        assert result is False
+        mock_session.rollback.assert_called_once()
 
 
 # ==================== DistributedLockRepository Protocol Tests ====================
