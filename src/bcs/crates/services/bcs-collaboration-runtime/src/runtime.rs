@@ -1640,17 +1640,12 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let definition = &compiled.definition;
         let authenticated_human = cmd.authenticated_human.clone();
         let has_human_input = compiled_has_human_input(&compiled);
-        // COSEC: caller_id is not proof of Human identity. HumanInput runs
-        // require identity established by the server-side authentication port.
-        if has_human_input && authenticated_human.is_none() {
-            return Err(CollaborationRuntimeError::Unauthenticated);
-        }
         let resolved_participant_bindings =
             resolve_participant_bindings(&group, &compiled, group_binding.as_ref())?;
         if should_upsert_definition {
             self.definitions.upsert(definition.clone()).await?;
         }
-        let (session_id, session_title, session) = match cmd.session_id {
+        let (session_id, session_title, mut session) = match cmd.session_id {
             Some(session_id) => {
                 let session = self
                     .sessions
@@ -1703,6 +1698,48 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     "state-machine session does not belong to the target group".to_string(),
                 ));
             }
+            // COSEC: caller_id is not proof of Human identity. Only a Human
+            // established by the server-side authentication port may be
+            // materialized into the session.
+            if let Some(human) = authenticated_human.as_ref() {
+                let existing = session
+                    .participants
+                    .iter()
+                    .find(|participant| participant.bot_uuid == human.actor_id);
+                if existing.is_some_and(|participant| !participant.is_human()) {
+                    return Err(CollaborationRuntimeError::Forbidden(
+                        "authenticated Human actor ID conflicts with a non-Human session participant"
+                            .to_string(),
+                    ));
+                }
+                if existing.is_none() {
+                    let mut participant =
+                        Participant::human(human.actor_id.clone(), ParticipantRole::Observer);
+                    participant.bot_name = human.display_name.clone();
+                    participant.mode = Some(ParticipantMode::Present);
+                    session = self
+                        .sessions
+                        .add_participant(&session_id, participant)
+                        .await
+                        .map_err(|error| {
+                            CollaborationRuntimeError::InvalidRequest(error.to_string())
+                        })?;
+                } else if existing.is_some_and(|participant| {
+                    participant.effective_mode() != ParticipantMode::Present
+                }) {
+                    session = self
+                        .sessions
+                        .update_participant_mode(
+                            &session_id,
+                            &human.actor_id,
+                            ParticipantMode::Present,
+                        )
+                        .await
+                        .map_err(|error| {
+                            CollaborationRuntimeError::InvalidRequest(error.to_string())
+                        })?;
+                }
+            }
             let present_humans = session
                 .participants
                 .iter()
@@ -1715,15 +1752,6 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 return Err(CollaborationRuntimeError::InvalidRequest(
                     "state-machine definitions with human_input require a Present Human session participant"
                         .to_string(),
-                ));
-            }
-            if let Some(human) = authenticated_human.as_ref()
-                && !present_humans
-                    .iter()
-                    .any(|participant| participant.bot_uuid == human.actor_id)
-            {
-                return Err(CollaborationRuntimeError::Forbidden(
-                    "authenticated Human is not present in the selected session".to_string(),
                 ));
             }
         }
