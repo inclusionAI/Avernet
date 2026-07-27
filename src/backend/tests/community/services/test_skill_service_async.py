@@ -146,9 +146,9 @@ class TestSkillServiceAsyncRouting:
         repo.update.return_value = updated
         service, device_fs, _ = self._service(tmp_path, mock_repo=repo)
         service.local_dir = pool_local
-        service._local_skill_path_adapter = build_pool_local_path_adapter(
-            pool_local
-        )
+        pool_adapter = build_pool_local_path_adapter(pool_local)
+        service._local_skill_path_adapter = pool_adapter
+        service._local_skill_locator_adapter = pool_adapter
 
         result = await service.upload_skill(
             [
