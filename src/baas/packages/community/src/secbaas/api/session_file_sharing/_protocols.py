@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from secbaas.api.session_file_sharing._models import (
+from ._models import (
     SessionCancelUploadResponse,
     SessionCompleteUploadResponse,
     SessionDeleteTransferResponse,
