@@ -20,6 +20,7 @@ from agentclaw.community.core.bot_collaborator.models import BotCollaboratorMode
 from agentclaw.community.core.bot_chat.query_support import (
     QueryScope,
     enrich_group_labels,
+    enrich_task_labels,
     enrich_trace_labels,
     list_group_sessions,
     load_bot_names,
@@ -582,6 +583,7 @@ class BotChatDbRepository:
 
             detached = [self._detach_trace_row(row) for row in rows]
             enrich_group_labels(session, detached, group_id, group_sessions)
+            enrich_task_labels(session, detached)
             bot_names = load_bot_names(
                 session, {row.bot_id for row in detached if row.bot_id}
             )
@@ -707,6 +709,7 @@ class BotChatDbRepository:
                 ):
                     sources.append("biz_ref")
                 row.match_sources = sources
+            enrich_task_labels(session, detached)
             sessions = [
                 self._row_to_session(row)
                 for row in detached

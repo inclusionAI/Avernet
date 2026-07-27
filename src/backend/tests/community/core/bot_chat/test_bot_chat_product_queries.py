@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_chat.models import (
+    AcOtelLogBizRef,
     AcOtelLogTrace,
     AwLangfuseTrace,
     BcsGroupSession,
@@ -18,6 +19,7 @@ from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
 from agentclaw.community.core.bot_chat.query_support import (
     QueryScope,
     enrich_group_labels,
+    enrich_task_labels,
 )
 from agentclaw.community.core.bot_chat.service import (
     BotChatService,
@@ -426,6 +428,87 @@ def test_group_label_enrichment_failure_keeps_regular_list_compatible():
 
     assert row.group_id is None
     assert row.session_kind is None
+
+
+def test_task_label_enrichment_batches_100_traces_and_uses_latest_relation():
+    db = _LocalDb()
+    rows = []
+    with db.orm_session() as session:
+        for index in range(100):
+            session_key = f"agent:main:session_{index}:user_fixture"
+            rows.append(
+                SimpleNamespace(
+                    trace_id=f"trace_{index}",
+                    session_id=f"session_{index}",
+                    session_key=session_key,
+                    biz_scene=None,
+                    biz_task_id=None,
+                )
+            )
+            digest = BotChatDbRepository._ref_digest(None, session_key)
+            session.add(
+                AcOtelLogBizRef(
+                    biz_scene=f"scene_{index}",
+                    biz_task_id=f"task_{index}",
+                    ref_type="session_key",
+                    ref_value=session_key,
+                    ref_digest=digest,
+                )
+            )
+        session.add(
+            AcOtelLogBizRef(
+                biz_scene="newest_scene",
+                biz_task_id="newest_task",
+                ref_type="trace_id",
+                ref_value="trace_0",
+                ref_digest=BotChatDbRepository._ref_digest(None, "trace_0"),
+                gmt_modified=datetime.now(timezone.utc) + timedelta(seconds=1),
+            )
+        )
+
+    with db.orm_session() as session:
+        enrich_task_labels(session, rows)
+
+    assert rows[0].biz_scene == "newest_scene"
+    assert rows[0].biz_task_id == "newest_task"
+    assert {
+        (row.biz_scene, row.biz_task_id) for row in rows[1:]
+    } == {
+        (f"scene_{index}", f"task_{index}") for index in range(1, 100)
+    }
+
+
+def test_task_label_enrichment_preserves_direct_trace_values():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    session_key = "agent:main:session_fixture:user_fixture"
+    _write_trace(
+        repo,
+        trace_id="trace_fixture",
+        session_id="session_fixture",
+        session_key=session_key,
+        biz_scene="direct_scene",
+        biz_task_id="direct_task",
+    )
+    repo.upsert_biz_refs(
+        {
+            "biz_scene": "relation_scene",
+            "biz_task_id": "relation_task",
+            "refs": [{"ref_type": "session_key", "ref_value": session_key}],
+        }
+    )
+
+    rows, total = repo.list_ocb_traces(
+        owner_id="user_fixture",
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+    )
+
+    assert total == 1
+    assert rows[0].biz_scene == "direct_scene"
+    assert rows[0].biz_task_id == "direct_task"
 
 
 def test_group_query_supports_legacy_trace_storage():
