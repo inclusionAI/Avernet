@@ -407,9 +407,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
 
         # Conditional fields per status
         download_url = (
-            record.download_url
-            if record.status == "DONE" and record.direction == "DOWNLOAD"
-            else None
+            record.download_url if record.status == "DONE" else None
         )
         error_message = record.error_message if record.status == "FAILED" else None
 
