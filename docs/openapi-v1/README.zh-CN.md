@@ -267,7 +267,7 @@ _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #
 
 _注：桩里的上传是原始 `octet-stream`；PR #363 描述的是 `multipart`。接线时二选一。_
 
-### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（桩里 5 个 + 提议新增 2 个）· `openapi_v1/skills/router.py`
+### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（7 个端点：桩里 5 个 + 提议新增 2 个 ★）· `openapi_v1/skills/router.py`
 目录在 `/openapi/v1/bots/skills`；某个 Agent 已安装的技能是 bot 的子资源。
 
 > **共担 —— 最棘手的类别。** skills 有三层生命周期（全局**上传** → per-bot **安装** →
@@ -275,19 +275,19 @@ _注：桩里的上传是原始 `octet-stream`；PR #363 描述的是 `multipart
 > skill-set 模型是否要升为一等公民。因此**两人共担**。动手前先商定一份共同的子计划 ——
 > 例如把 目录/上传 与 per-bot 安装/生命周期 分开 —— 并为它单独走一遍 SDD。在各自的 P1/P2
 > 切片之后再做。
-| 方法 | 路径 | 用途 | 成功响应 |
-|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | 技能目录（`keyword`、分页） | `Envelope[Page[Skill]]` |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` |
-| GET | `/openapi/v1/bots/{bot_id}/skills` | 列出某个 Agent 已安装的技能 | `Envelope[list[BotSkill]]` |
-| POST | `/openapi/v1/bots/{bot_id}/skills` | 为 Agent 安装技能（默认启用） | `201 Envelope[BotSkill]` |
-| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 卸载（解除绑定） | `Envelope[Deleted]` |
 
-**来自 PR #363 的提议新增（★ —— 尚未在路由桩里；实现前请与 totalfrank 确认）：**
-| 方法 | 路径 | 用途 | 成功响应 |
-|---|---|---|---|
-| POST ★ | `/openapi/v1/skills/upload` | 上传自定义技能（全局，归属调用者） | `Envelope[Skill]` |
-| PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 启用/停用已安装技能（`status`） | `Envelope[BotSkill]` |
+**状态**列标明每个端点是已经在路由桩里（`桩内`），还是来自 PR #363 的提议新增
+（`★ 提议` —— 尚未在桩里；实现前请与 totalfrank 确认）。
+
+| 方法 | 路径 | 用途 | 成功响应 | 状态 |
+|---|---|---|---|---|
+| GET | `/openapi/v1/bots/skills` | 技能目录（`keyword`、分页） | `Envelope[Page[Skill]]` | 桩内 |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` | 桩内 |
+| POST ★ | `/openapi/v1/skills/upload` | 上传自定义技能（全局，归属调用者） | `Envelope[Skill]` | ★ 提议 |
+| GET | `/openapi/v1/bots/{bot_id}/skills` | 列出某个 Agent 已安装的技能 | `Envelope[list[BotSkill]]` | 桩内 |
+| POST | `/openapi/v1/bots/{bot_id}/skills` | 为 Agent 安装技能（默认启用） | `201 Envelope[BotSkill]` | 桩内 |
+| PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 启用/停用已安装技能（`status`） | `Envelope[BotSkill]` | ★ 提议 |
+| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 卸载（解除绑定） | `Envelope[Deleted]` | 桩内 |
 
 ### 🟩 lucas-xzp · P1 —— routines（7 个端点）· `openapi_v1/routines/router.py`
 定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。
@@ -373,3 +373,5 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   channels、identity；P3 = skills。**skills 改为共担**（totalfrank + lucas-xzp，包含它的
   Track A 阶段与端点），因为它是最复杂的类别。两个状态看板都加了优先级列；各组件标题也标注了
   层级。
+- **2026-07-27** —— skills 端点从两张表（桩里 5 个 + 提议 2 个）合并为**一张带"状态"列的
+  7 行表**，这样一眼就能看出是 7 个端点，而不是看起来像 2 个。
