@@ -129,9 +129,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             subdir=staging_subdir,
         )
 
-        expires_at = (
-            datetime.now(UTC) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
 
         # SINGLE / MULTIPART routing
         if file_size >= self.MULTIPART_THRESHOLD:
@@ -198,9 +196,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 operator=operator,
             )
 
-            logger.info(
-                "Ticket created (MULTIPART): transfer_id=%s", transfer_id
-            )
+            logger.info("Ticket created (MULTIPART): transfer_id=%s", transfer_id)
 
             return SessionGetUploadUrlResponse(
                 type="MULTIPART",
@@ -238,9 +234,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 operator=operator,
             )
 
-            logger.info(
-                "Ticket created (SINGLE): transfer_id=%s", transfer_id
-            )
+            logger.info("Ticket created (SINGLE): transfer_id=%s", transfer_id)
 
             return SessionGetUploadUrlResponse(
                 upload_url=upload_url,
@@ -450,9 +444,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 )
             raise
 
-        return SessionCancelUploadResponse(
-            transfer_id=transfer_id, status="CANCELLED"
-        )
+        return SessionCancelUploadResponse(transfer_id=transfer_id, status="CANCELLED")
 
     # ------------------------------------------------------------------
     # dispatch_get_share_link
@@ -507,9 +499,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         # show=False -> attachment (download); show=True -> inline (preview)
         response_params = None
         if not show:
-            response_params = {
-                "response-content-disposition": "attachment"
-            }
+            response_params = {"response-content-disposition": "attachment"}
 
         share_url = await asyncio.to_thread(
             self._file_transfer_backend.generate_download_url,
@@ -528,9 +518,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             show,
         )
 
-        expires_at = (
-            datetime.now(UTC) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
 
         return SessionShareLinkResponse(
             share_url=share_url,
@@ -555,8 +543,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         the transfer_id exists for another session.
         """
         logger.info(
-            "dispatch_get_transfer_status: transfer_id=%s, tenant=%s, "
-            "session_id=%s",
+            "dispatch_get_transfer_status: transfer_id=%s, tenant=%s, session_id=%s",
             transfer_id,
             tenant,
             session_id,
@@ -575,9 +562,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Conditional fields per status
-        error_message = (
-            record.error_message if record.status == "FAILED" else None
-        )
+        error_message = record.error_message if record.status == "FAILED" else None
 
         return SessionGetTransferStatusResponse(
             transfer_id=record.transfer_id,

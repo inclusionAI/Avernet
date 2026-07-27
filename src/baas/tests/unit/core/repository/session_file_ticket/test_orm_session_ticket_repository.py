@@ -129,7 +129,10 @@ class TestCreateTicket:
         assert model.status == "CREATED"
         assert model.staging_subdir == "my-subdir"
         assert model.filename == "data.csv"
-        assert model.fileservice_staging_path == "file-transfers/test/t1/sess-001/tf-001/data.csv"
+        assert (
+            model.fileservice_staging_path
+            == "file-transfers/test/t1/sess-001/tf-001/data.csv"
+        )
         assert model.error_message is None
         assert model.multipart_session_id == "upload-123"
         assert model.operator == "test-user"

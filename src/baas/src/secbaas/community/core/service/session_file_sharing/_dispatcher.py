@@ -518,9 +518,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             show,
         )
 
-        expires_at = (
-            datetime.now(UTC) + timedelta(seconds=expire_seconds)
-        ).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
 
         return SessionShareLinkResponse(
             share_url=share_url,
