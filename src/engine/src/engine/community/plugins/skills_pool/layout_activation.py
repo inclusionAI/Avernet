@@ -177,6 +177,74 @@ class _Layout:
         )
 
 
+def mapping_sources_use_pool(
+    *,
+    engine: str,
+    sources: list[str | Path],
+    home: str | Path = "/home/admin",
+) -> bool:
+    """Return whether a mapping set selects canonical Pool managed sources.
+
+    The regular bindpath API predates Skills Pool and has no explicit layout
+    field.  Backend nevertheless sends the complete desired mapping set with
+    canonical Pool sources once runtime cutover has committed.  Engine
+    adapters use this shared classifier to avoid recreating retired Legacy
+    corpus bridges during subsequent CRUD reconciliation. External mappings
+    may coexist with managed Pool mappings; a managed Legacy/Pool mixture is
+    rejected because it cannot represent one authoritative runtime layout.
+    """
+
+    if not sources:
+        return False
+    layout = _Layout.for_engine(engine, Path(home))
+    pool_roots = tuple(
+        Path(os.path.abspath(root))
+        for root in (layout.pool_local, layout.pool_repo)
+    )
+    legacy_roots = tuple(
+        Path(os.path.abspath(root))
+        for root in (
+            layout.legacy_local,
+            layout.legacy_repo,
+            layout.local_bridge,
+            layout.repo_bridge,
+        )
+    )
+    has_pool = False
+    has_legacy = False
+    for raw_source in sources:
+        source = Path(raw_source)
+        if not source.is_absolute():
+            continue
+        normalized = Path(os.path.abspath(source))
+        if any(normalized.is_relative_to(root) for root in pool_roots):
+            has_pool = True
+        elif any(normalized.is_relative_to(root) for root in legacy_roots):
+            has_legacy = True
+    if has_pool and has_legacy:
+        raise ValueError("mapping sources mix Legacy and Pool managed roots")
+    return has_pool
+
+
+def _retired_storage_entries(
+    *,
+    layout: _Layout,
+    engine: str,
+) -> tuple[Path, ...]:
+    """Entries that must disappear once the active layout is Pool.
+
+    AICoding and Hermes keep a stable repo namespace outside their engine's
+    active scan root.  It remains a valid read-only bridge to canonical Pool.
+    OpenClaw and Claude Code place the repo bridge inside the active root, so
+    it must be retired together with the local corpus bridge.
+    """
+
+    entries = [layout.legacy_local, layout.local_bridge]
+    if engine in {"openclaw", "claude_code"}:
+        entries.append(layout.repo_bridge)
+    return tuple(dict.fromkeys(entries))
+
+
 @dataclass(frozen=True, slots=True)
 class _MappingPlan:
     managed: dict[Path, Path]
@@ -321,10 +389,11 @@ def _finalize_active_root(
         layout.local_bridge,
         allowed_targets=(layout.legacy_local, layout.pool_local),
     )
-    _retire_bridge(
-        layout.repo_bridge,
-        allowed_targets=(layout.legacy_repo, layout.pool_repo),
-    )
+    if engine in {"openclaw", "claude_code"}:
+        _retire_bridge(
+            layout.repo_bridge,
+            allowed_targets=(layout.legacy_repo, layout.pool_repo),
+        )
     if layout.legacy_local != layout.local_bridge:
         _retire_bridge(
             layout.legacy_local,
@@ -332,11 +401,7 @@ def _finalize_active_root(
         )
     remaining_storage_entries = [
         str(path)
-        for path in {
-            layout.legacy_local,
-            layout.local_bridge,
-            layout.repo_bridge,
-        }
+        for path in _retired_storage_entries(layout=layout, engine=engine)
         if path.exists() or path.is_symlink()
     ]
     if remaining_storage_entries:
@@ -1815,6 +1880,7 @@ __all__ = [
     "activate_hermes_pool",
     "activate_openclaw_pool",
     "atomic_exchange_paths",
+    "mapping_sources_use_pool",
     "publish_pool_mappings",
     "rollback_aicoding_pool",
     "rollback_claude_code_pool",

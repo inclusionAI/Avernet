@@ -3,7 +3,8 @@
 Skills Pool 控制面的 Bot 级布局状态、首次迁移认领和激活编排边界。
 容器目录准备由镜像负责；本模块通过当前 runtime adapter 完成 probe、
 受支持文件型引擎的原子数据面切换与 Pool mapping，并在最后事务性提交
-locator 和 `POOL_ACTIVE`。当前已接入 OpenClaw、Claude Code 与 AICoding；完整多引擎
+locator 和 `POOL_ACTIVE`。当前已接入 OpenClaw、Claude Code、AICoding 与
+Hermes；完整多引擎
 Engine Layout Descriptor 仍不在本期范围内。
 
 ## 核心语义
@@ -37,11 +38,12 @@ Engine Layout Descriptor 仍不在本期范围内。
 - 激活只处理当前仍可编辑、已经认领、引擎已显式接入且由当前 worker 持有
   lease 的 Bot；每次执行都重新读取 Bot 和当前 provider binding，并重新
   probe 对应引擎 marker。未知引擎不回退到 OpenClaw。
-- 容器内以系统原生原子 exchange 完成最终 local 同步；随后先发布并验证
-  直接指向 canonical Pool 的 active mapping，再通过持久化
-  `.pool-active` 的 `finalizing → active` 状态移除 active root 中
-  `skills-local`、`skills-repo` 两个 corpus 入口。不支持原子 exchange
-  时保持 Legacy。
+- 容器内先把 Legacy local 以 generation-scoped rename 移入隔离区，再执行
+  best-effort 后置合并；随后发布并验证直接指向 canonical Pool 的 active
+  mapping。持久化 `.pool-active` 的 `finalizing → active` 后，active root
+  中的 local corpus bridge 必须退役；OpenClaw、Claude Code 位于 active
+  root 内的 repo bridge 同时退役，AICoding、Hermes 位于 active root 外的
+  稳定 repo namespace 则保留并继续只读指向 canonical Pool。
 - 激活前同时核对已登记 local，并从文件系统枚举未登记 local、受管 active
   entry 与外部 entry；完整 local 内容进入 Pool，但不会为未登记内容创建
   数据库记录，外部 entry 保持原目标。
@@ -56,7 +58,7 @@ Engine Layout Descriptor 仍不在本期范围内。
   与 `POOL_ACTIVE`，不恢复隔离副本。
 - 在递归版 OpenClaw 发布前的 Pool 独立 rollout 窗口，显式回滚先持久化
   `LEGACY_ROLLBACK_PREPARING` 作为 Bot 级编辑暂停状态，
-  再从当前 Pool 全量重建新的 Legacy local 并原子交换。交换后即使 mapping
+  再从当前 Pool 全量重建新的 Legacy local 并提交切换。切换后即使 mapping
   或数据库失败也保持 `LEGACY_ROLLBACK_COMMITTED`，同一 generation 可由
   lease 过期后的新 worker 接管并继续提交 Legacy mapping 和 locator。
 - Backend 上传、删除和显式回滚共用 Bot 级互斥锁；回滚阶段内的新 local
@@ -64,8 +66,8 @@ Engine Layout Descriptor 仍不在本期范围内。
   `pool`，显式回滚前后使用 `legacy`。
 - 显式回滚不会读取迁移隔离副本，Pool 激活后产生的 local 新增和修改会被
   带入新的 Legacy；Pool 本身保留用于证据和后续恢复。
-- local 后置合并采用 best-effort 原子 exchange：一般的切换前修改、切换后
-  Pool 修改和新增路径竞争均可收敛；无写栅栏时，跨 exchange 的已打开文件
+- local 后置合并采用 best-effort、无覆盖的文件级收敛：一般的切换前修改、
+  切换后 Pool 修改和新增路径竞争均可收敛；无写栅栏时，跨 rename 的已打开文件
   描述符或连续同文件写入仍存在极窄竞态，作为 #370 的显式接受限制。
 - 原子切换留下的旧 local 以 Bot 与 migration generation 独立登记为
   Migration Quarantine，只用于审计和人工取证，不参与 locator、mapping、
