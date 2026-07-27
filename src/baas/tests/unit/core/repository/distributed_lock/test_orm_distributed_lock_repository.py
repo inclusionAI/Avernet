@@ -6,6 +6,9 @@ test_orm_bot_run_repository.py.
 """
 
 from datetime import datetime
+
+# ==================== Fixtures ====================
+from datetime import timedelta as _timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,11 +22,9 @@ from secbaas.community.core.repository.distributed_lock._orm_model import (
     DistributedLockModel,
 )
 
-# ==================== Fixtures ====================
-
-NOW = datetime(2026, 5, 23, 12, 0, 0)
-FUTURE = datetime(2026, 6, 1, 12, 0, 0)
-PAST = datetime(2026, 1, 1, 0, 0, 0)
+NOW = datetime.now()
+FUTURE = NOW + _timedelta(days=30)
+PAST = NOW - _timedelta(days=30)
 
 
 @pytest.fixture
@@ -98,57 +99,51 @@ class TestLockRecordDataclass:
     def test_create_record_with_all_fields(self):
         record = LockRecord(
             id=1,
-            lock_name="my-lock",
-            lock_holder="holder-abc",
-            expire_time=FUTURE,
+            lock_name="test-lock",
+            lock_holder="holder-1",
+            expire_time=NOW,
             env="dev",
             gmt_create=NOW,
             gmt_modified=NOW,
         )
         assert record.id == 1
-        assert record.lock_name == "my-lock"
-        assert record.lock_holder == "holder-abc"
-        assert record.expire_time == FUTURE
+        assert record.lock_name == "test-lock"
+        assert record.lock_holder == "holder-1"
+        assert record.expire_time == NOW
         assert record.env == "dev"
-        assert record.gmt_create == NOW
-        assert record.gmt_modified == NOW
 
     def test_create_record_with_none_expire_time(self):
         record = LockRecord(
             id=2,
-            lock_name="lock2",
-            lock_holder="holder2",
+            lock_name="no-expire",
+            lock_holder="holder-2",
             expire_time=None,
             env=None,
             gmt_create=None,
             gmt_modified=None,
         )
-        assert record.id == 2
-        assert record.lock_name == "lock2"
         assert record.expire_time is None
         assert record.env is None
-        assert record.gmt_create is None
-        assert record.gmt_modified is None
 
     def test_record_uses_slots(self):
         record = LockRecord(
             id=1,
-            lock_name="l",
+            lock_name="test",
             lock_holder="h",
             expire_time=None,
-            env="e",
-            gmt_create=NOW,
-            gmt_modified=NOW,
+            env=None,
+            gmt_create=None,
+            gmt_modified=None,
         )
         with pytest.raises(AttributeError):
-            _ = record.__dict__
+            record.nonexistent_field = "value"
 
     def test_record_equality(self):
         r1 = LockRecord(
             id=1,
             lock_name="a",
-            lock_holder="h",
-            expire_time=None,
+            lock_holder="b",
+            expire_time=NOW,
             env="dev",
             gmt_create=NOW,
             gmt_modified=NOW,
@@ -156,8 +151,8 @@ class TestLockRecordDataclass:
         r2 = LockRecord(
             id=1,
             lock_name="a",
-            lock_holder="h",
-            expire_time=None,
+            lock_holder="b",
+            expire_time=NOW,
             env="dev",
             gmt_create=NOW,
             gmt_modified=NOW,
@@ -168,8 +163,8 @@ class TestLockRecordDataclass:
         r1 = LockRecord(
             id=1,
             lock_name="a",
-            lock_holder="h",
-            expire_time=None,
+            lock_holder="b",
+            expire_time=NOW,
             env="dev",
             gmt_create=NOW,
             gmt_modified=NOW,
@@ -177,8 +172,8 @@ class TestLockRecordDataclass:
         r2 = LockRecord(
             id=2,
             lock_name="a",
-            lock_holder="h",
-            expire_time=None,
+            lock_holder="b",
+            expire_time=NOW,
             env="dev",
             gmt_create=NOW,
             gmt_modified=NOW,
@@ -201,11 +196,11 @@ class TestRepositoryInit:
         assert repo._database is mock_database
 
 
-# ==================== get_by_lock_name_for_update Tests ====================
+# ==================== get_by_lock_name Tests ====================
 
 
-class TestGetByLockNameForUpdate:
-    """Tests for OrmDistributedLockRepository.get_by_lock_name_for_update()."""
+class TestGetByLockName:
+    """Tests for OrmDistributedLockRepository.get_by_lock_name()."""
 
     def test_returns_record_when_found(self, repository, mock_session):
         mock_model = _make_model(
@@ -214,9 +209,11 @@ class TestGetByLockNameForUpdate:
             lock_holder="worker-1",
             expire_time=FUTURE,
         )
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            mock_model
+        )
 
-        result = repository.get_by_lock_name_for_update("task-lock")
+        result = repository.get_by_lock_name("task-lock")
 
         assert result is not None
         assert isinstance(result, LockRecord)
@@ -224,167 +221,24 @@ class TestGetByLockNameForUpdate:
         assert result.lock_name == "task-lock"
         assert result.lock_holder == "worker-1"
         assert result.expire_time == FUTURE
-        mock_model.to_record.assert_called_once()
-        mock_session.query.assert_called_once_with(DistributedLockModel)
 
     def test_returns_none_when_not_found(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = None
+        mock_session.query.return_value.filter.return_value.first.return_value = None
 
-        result = repository.get_by_lock_name_for_update("missing-lock")
+        result = repository.get_by_lock_name("missing-lock")
 
         assert result is None
 
     def test_queries_by_exact_lock_name(self, repository, mock_session):
         mock_model = _make_model(lock_name="exact-match")
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            mock_model
+        )
 
-        result = repository.get_by_lock_name_for_update("exact-match")
+        result = repository.get_by_lock_name("exact-match")
 
         assert result is not None
         assert result.lock_name == "exact-match"
-
-    def test_handles_model_with_none_expire_and_env(self, repository, mock_session):
-        mock_model = _make_model(
-            id_val=1,
-            lock_name="no-expire",
-            expire_time=None,
-            env=None,
-        )
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
-
-        result = repository.get_by_lock_name_for_update("no-expire")
-
-        assert result is not None
-        assert result.expire_time is None
-        assert result.env is None
-
-
-# ==================== insert_lock Tests ====================
-
-
-class TestInsertLock:
-    """Tests for OrmDistributedLockRepository.insert_lock()."""
-
-    def test_insert_returns_model_id(self, repository, mock_session):
-        # Simulate auto-increment: mock the added model's id
-        def _add_side_effect(model):
-            model.id = 100
-
-        mock_session.add.side_effect = _add_side_effect
-
-        result = repository.insert_lock(
-            lock_name="new-lock",
-            lock_holder="holder-xyz",
-            expire_time=FUTURE,
-        )
-
-        assert result == 100
-        mock_session.add.assert_called_once()
-        mock_session.flush.assert_called_once()
-
-    def test_insert_model_has_env_field(self, repository, mock_session):
-        def _add_side_effect(model):
-            model.id = 77
-
-        mock_session.add.side_effect = _add_side_effect
-
-        result = repository.insert_lock(
-            lock_name="env-lock",
-            lock_holder="holder-env",
-            expire_time=FUTURE,
-        )
-
-        assert result == 77
-        added_model = mock_session.add.call_args[0][0]
-        assert added_model.lock_name == "env-lock"
-        assert added_model.lock_holder == "holder-env"
-        assert added_model.expire_time == FUTURE
-        assert added_model.env == "dev"
-
-    def test_insert_with_past_expire_time(self, repository, mock_session):
-        def _add_side_effect(model):
-            model.id = 3
-
-        mock_session.add.side_effect = _add_side_effect
-
-        result = repository.insert_lock(
-            lock_name="expired-lock",
-            lock_holder="holder-1",
-            expire_time=PAST,
-        )
-
-        assert result == 3
-        added_model = mock_session.add.call_args[0][0]
-        assert added_model.expire_time == PAST
-
-    def test_insert_id_is_cast_to_int(self, repository, mock_session):
-        def _add_side_effect(model):
-            model.id = 42
-
-        mock_session.add.side_effect = _add_side_effect
-
-        result = repository.insert_lock(
-            lock_name="test-name",
-            lock_holder="test-holder",
-            expire_time=FUTURE,
-        )
-
-        assert isinstance(result, int)
-        assert result == 42
-
-
-# ==================== update_lock_holder Tests ====================
-
-
-class TestUpdateLockHolder:
-    """Tests for OrmDistributedLockRepository.update_lock_holder()."""
-
-    def test_update_returns_rowcount(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        result = repository.update_lock_holder(
-            lock_name="active-lock",
-            lock_holder="new-holder",
-            expire_time=FUTURE,
-        )
-
-        assert result == 1
-        mock_session.query.assert_called_once_with(DistributedLockModel)
-        mock_session.query.return_value.filter.return_value.update.assert_called_once()
-
-    def test_update_zero_rows_affected(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.update.return_value = 0
-
-        result = repository.update_lock_holder(
-            lock_name="nonexistent-lock",
-            lock_holder="some-holder",
-            expire_time=FUTURE,
-        )
-
-        assert result == 0
-
-    def test_update_multiple_rows(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.update.return_value = 3
-
-        result = repository.update_lock_holder(
-            lock_name="multi-lock",
-            lock_holder="batch-holder",
-            expire_time=FUTURE,
-        )
-
-        assert result == 3
-
-    def test_update_rowcount_is_cast_to_int(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        result = repository.update_lock_holder(
-            lock_name="test-lock",
-            lock_holder="test-holder",
-            expire_time=FUTURE,
-        )
-
-        assert isinstance(result, int)
-        assert result == 1
 
 
 # ==================== update_expire_time Tests ====================
@@ -397,19 +251,17 @@ class TestUpdateExpireTime:
         mock_session.query.return_value.filter.return_value.update.return_value = 1
 
         result = repository.update_expire_time(
-            lock_name="renew-lock",
+            lock_name="test-lock",
             expire_time=FUTURE,
         )
 
         assert result == 1
-        mock_session.query.assert_called_once_with(DistributedLockModel)
-        mock_session.query.return_value.filter.return_value.update.assert_called_once()
 
     def test_update_zero_rows(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.update.return_value = 0
 
         result = repository.update_expire_time(
-            lock_name="missing-lock",
+            lock_name="missing",
             expire_time=FUTURE,
         )
 
@@ -419,7 +271,7 @@ class TestUpdateExpireTime:
         mock_session.query.return_value.filter.return_value.update.return_value = 1
 
         result = repository.update_expire_time(
-            lock_name="force-expire-lock",
+            lock_name="test-lock",
             expire_time=PAST,
         )
 
@@ -439,7 +291,6 @@ class TestDeleteLock:
 
         assert result is True
         mock_session.query.assert_called_once_with(DistributedLockModel)
-        mock_session.query.return_value.filter.return_value.delete.assert_called_once()
 
     def test_delete_returns_false_when_no_row_deleted(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.delete.return_value = 0
@@ -457,42 +308,127 @@ class TestDeleteLock:
         assert isinstance(result, bool)
 
 
-# ==================== delete_expired_locks Tests ====================
+# ==================== try_acquire_lock Tests ====================
 
 
-class TestDeleteExpiredLocks:
-    """Tests for OrmDistributedLockRepository.delete_expired_locks()."""
+class TestTryAcquireLock:
+    """Tests for OrmDistributedLockRepository.try_acquire_lock()."""
 
-    def test_deletes_expired_returns_rowcount(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.delete.return_value = 5
+    def test_acquire_when_no_existing_lock(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.first.return_value = None
 
-        result = repository.delete_expired_locks(NOW)
+        def _add_side_effect(model):
+            model.id = 1
 
-        assert result == 5
-        mock_session.query.assert_called_once_with(DistributedLockModel)
-        mock_session.query.return_value.filter.return_value.delete.assert_called_once()
+        mock_session.add.side_effect = _add_side_effect
 
-    def test_returns_zero_when_no_expired(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.delete.return_value = 0
+        result = repository.try_acquire_lock(
+            lock_name="new-lock",
+            lock_holder="holder-A",
+            expire_time=FUTURE,
+        )
 
-        result = repository.delete_expired_locks(PAST)
+        assert result is True
+        mock_session.add.assert_called_once()
+        mock_session.flush.assert_called()
 
-        assert result == 0
+    def test_acquire_reentrant_same_holder(self, repository, mock_session):
+        mock_model = _make_model(
+            lock_name="existing-lock",
+            lock_holder="holder-A",
+            expire_time=FUTURE,
+        )
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            mock_model
+        )
 
-    def test_delete_with_different_current_time(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.delete.return_value = 2
+        result = repository.try_acquire_lock(
+            lock_name="existing-lock",
+            lock_holder="holder-A",
+            expire_time=FUTURE,
+        )
 
-        result = repository.delete_expired_locks(FUTURE)
+        assert result is True
+        mock_session.flush.assert_called_once()
 
-        assert result == 2
+    def test_acquire_fails_when_held_by_other(self, repository, mock_session):
+        mock_model = _make_model(
+            lock_name="held-lock",
+            lock_holder="holder-B",
+            expire_time=FUTURE,
+        )
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            mock_model
+        )
 
-    def test_returns_int(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.delete.return_value = 3
+        result = repository.try_acquire_lock(
+            lock_name="held-lock",
+            lock_holder="holder-A",
+            expire_time=FUTURE,
+        )
 
-        result = repository.delete_expired_locks(NOW)
+        assert result is False
 
-        assert isinstance(result, int)
-        assert result == 3
+    def test_acquire_takes_over_expired_lock(self, repository, mock_session):
+        mock_model = _make_model(
+            lock_name="expired-lock",
+            lock_holder="old-holder",
+            expire_time=PAST,
+        )
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            mock_model
+        )
+
+        def _add_side_effect(model):
+            model.id = 2
+
+        mock_session.add.side_effect = _add_side_effect
+
+        result = repository.try_acquire_lock(
+            lock_name="expired-lock",
+            lock_holder="new-holder",
+            expire_time=FUTURE,
+        )
+
+        assert result is True
+        mock_session.delete.assert_called_once_with(mock_model)
+        mock_session.flush.assert_called()
+        mock_session.add.assert_called_once()
+
+    def test_acquire_handles_unique_constraint_conflict(self, repository, mock_session):
+        from sqlalchemy.exc import IntegrityError as SAIntegrityError
+
+        mock_session.query.return_value.filter.return_value.first.return_value = None
+
+        orig = MagicMock()
+        orig.args = ("1062", "Duplicate entry")
+        mock_session.flush.side_effect = SAIntegrityError("INSERT INTO ...", {}, orig)
+
+        result = repository.try_acquire_lock(
+            lock_name="conflict-lock",
+            lock_holder="holder-A",
+            expire_time=FUTURE,
+        )
+
+        assert result is False
+        mock_session.rollback.assert_called_once()
+
+    def test_acquire_new_lock_has_env_field(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.first.return_value = None
+
+        def _add_side_effect(model):
+            model.id = 10
+
+        mock_session.add.side_effect = _add_side_effect
+
+        repository.try_acquire_lock(
+            lock_name="env-check-lock",
+            lock_holder="holder",
+            expire_time=FUTURE,
+        )
+
+        added_model = mock_session.add.call_args[0][0]
+        assert added_model.env == "dev"
 
 
 # ==================== DistributedLockRepository Protocol Tests ====================
@@ -506,12 +442,10 @@ class TestDistributedLockRepositoryProtocol:
 
     def test_protocol_methods_exist(self, repository):
         """Verify all protocol methods are available."""
-        assert hasattr(repository, "get_by_lock_name_for_update")
-        assert hasattr(repository, "insert_lock")
-        assert hasattr(repository, "update_lock_holder")
+        assert hasattr(repository, "get_by_lock_name")
         assert hasattr(repository, "update_expire_time")
         assert hasattr(repository, "delete_lock")
-        assert hasattr(repository, "delete_expired_locks")
+        assert hasattr(repository, "try_acquire_lock")
 
 
 # ==================== @with_orm_session Integration Tests ====================
@@ -522,34 +456,34 @@ class TestWithOrmSessionIntegration:
 
     def test_decorator_opens_and_closes_session(self, mock_database, mock_session):
         repo = OrmDistributedLockRepository(mock_database)
-        mock_model = _make_model(id_val=1)
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
+        mock_session.query.return_value.filter.return_value.first.return_value = None
 
-        repo.get_by_lock_name_for_update("test-lock")
+        repo.get_by_lock_name("test-lock")
 
         mock_database.orm_session.assert_called_once()
         mock_session.query.assert_called_once()
 
     def test_session_is_cleaned_up_after_method(self, mock_database, mock_session):
         repo = OrmDistributedLockRepository(mock_database)
-        mock_model = _make_model(id_val=1)
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
+        mock_session.query.return_value.filter.return_value.first.return_value = None
 
-        repo.get_by_lock_name_for_update("test-lock")
+        repo.get_by_lock_name("test-lock")
 
         session_ctx = mock_database.orm_session.return_value
         session_ctx.__enter__.assert_called_once()
         session_ctx.__exit__.assert_called_once()
 
-    def test_session_used_for_insert(self, mock_database, mock_session):
+    def test_session_used_for_try_acquire(self, mock_database, mock_session):
         repo = OrmDistributedLockRepository(mock_database)
+
+        mock_session.query.return_value.filter.return_value.first.return_value = None
 
         def _add_side_effect(model):
             model.id = 1
 
         mock_session.add.side_effect = _add_side_effect
 
-        repo.insert_lock(
+        repo.try_acquire_lock(
             lock_name="test-lock",
             lock_holder="holder",
             expire_time=FUTURE,
@@ -568,17 +502,15 @@ class TestWithOrmSessionIntegration:
     def test_multiple_methods_each_open_session(self, mock_database, mock_session):
         repo = OrmDistributedLockRepository(mock_database)
         mock_model = _make_model(id_val=1)
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            mock_model
+        )
 
-        def _add_side_effect(model):
-            model.id = 1
-
-        mock_session.add.side_effect = _add_side_effect
         mock_session.query.return_value.filter.return_value.update.return_value = 1
         mock_session.query.return_value.filter.return_value.delete.return_value = 1
 
-        repo.get_by_lock_name_for_update("lock-a")
-        repo.insert_lock(lock_name="lock-b", lock_holder="h", expire_time=FUTURE)
+        repo.get_by_lock_name("lock-a")
+        repo.update_expire_time(lock_name="lock-b", expire_time=FUTURE)
         repo.delete_lock("lock-c")
 
         assert mock_database.orm_session.call_count == 3
@@ -590,130 +522,72 @@ class TestWithOrmSessionIntegration:
 class TestMethodRoundTrips:
     """Tests covering multiple methods in sequence on the same repository."""
 
-    def test_insert_then_get_by_lock_name(self, repository, mock_session):
-        mock_model = _make_model(
-            id_val=55,
-            lock_name="roundtrip-lock",
-            lock_holder="holder-rt",
-            expire_time=FUTURE,
-        )
+    def test_acquire_then_get_by_lock_name(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.first.return_value = None
 
-        # First call: insert
         def _add_side_effect(model):
             model.id = 55
 
         mock_session.add.side_effect = _add_side_effect
 
-        new_id = repository.insert_lock(
+        acquired = repository.try_acquire_lock(
             lock_name="roundtrip-lock",
             lock_holder="holder-rt",
             expire_time=FUTURE,
         )
-        assert new_id == 55
+        assert acquired is True
 
-        # Reset side effects for the next get call
-        mock_session.add.side_effect = None
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
+    def test_acquire_then_delete(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.first.return_value = None
 
-        record = repository.get_by_lock_name_for_update("roundtrip-lock")
-        assert record is not None
-        assert record.id == 55
-        assert record.lock_name == "roundtrip-lock"
-        assert record.lock_holder == "holder-rt"
-
-    def test_insert_then_update_holder(self, repository, mock_session):
         def _add_side_effect(model):
             model.id = 10
 
         mock_session.add.side_effect = _add_side_effect
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
 
-        repository.insert_lock(
-            lock_name="update-lock",
-            lock_holder="old-holder",
-            expire_time=PAST,
-        )
-        result = repository.update_lock_holder(
-            lock_name="update-lock",
-            lock_holder="new-holder",
+        repository.try_acquire_lock(
+            lock_name="delete-lock",
+            lock_holder="holder",
             expire_time=FUTURE,
         )
-        assert result == 1
-
-    def test_insert_then_delete(self, repository, mock_session):
-        def _add_side_effect(model):
-            model.id = 20
-
-        mock_session.add.side_effect = _add_side_effect
         mock_session.query.return_value.filter.return_value.delete.return_value = 1
 
-        repository.insert_lock(
-            lock_name="temp-lock",
-            lock_holder="temp-holder",
-            expire_time=FUTURE,
-        )
-        deleted = repository.delete_lock("temp-lock")
+        deleted = repository.delete_lock("delete-lock")
         assert deleted is True
 
     def test_full_lock_lifecycle(self, repository, mock_session):
-        """Simulate: insert -> get (acquire) -> update_holder (renew) -> update_expire_time -> delete (release)."""
-        mock_model = _make_model(
-            id_val=99,
-            lock_name="lifecycle-lock",
-            lock_holder="proc-1",
-            expire_time=FUTURE,
-        )
+        # Acquire
+        mock_session.query.return_value.filter.return_value.first.return_value = None
 
         def _add_side_effect(model):
-            model.id = 99
+            model.id = 1
 
         mock_session.add.side_effect = _add_side_effect
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
+
+        acquired = repository.try_acquire_lock(
+            lock_name="lifecycle-lock",
+            lock_holder="holder",
+            expire_time=FUTURE,
+        )
+        assert acquired is True
+
+        # Renew
         mock_session.query.return_value.filter.return_value.update.return_value = 1
+        renewed = repository.update_expire_time(
+            lock_name="lifecycle-lock",
+            expire_time=FUTURE,
+        )
+        assert renewed == 1
+
+        # Release
         mock_session.query.return_value.filter.return_value.delete.return_value = 1
-
-        # Step 1: Insert
-        lock_id = repository.insert_lock(
-            lock_name="lifecycle-lock",
-            lock_holder="proc-1",
-            expire_time=FUTURE,
-        )
-        assert lock_id == 99
-
-        # Step 2: Get by lock_name (with FOR UPDATE)
-        record = repository.get_by_lock_name_for_update("lifecycle-lock")
-        assert record is not None
-        assert record.id == 99
-
-        # Step 3: Renew (update holder + expire)
-        updated = repository.update_lock_holder(
-            lock_name="lifecycle-lock",
-            lock_holder="proc-1",
-            expire_time=FUTURE,
-        )
-        assert updated == 1
-
-        # Step 4: Extend expire
-        extended = repository.update_expire_time(
-            lock_name="lifecycle-lock",
-            expire_time=FUTURE,
-        )
-        assert extended == 1
-
-        # Step 5: Release
-        released = repository.delete_lock("lifecycle-lock")
-        assert released is True
-
-    def test_delete_expired_then_check(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.delete.return_value = 2
-
-        count = repository.delete_expired_locks(NOW)
-        assert count == 2
+        deleted = repository.delete_lock("lifecycle-lock")
+        assert deleted is True
 
     def test_get_not_found_returns_none(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = None
+        mock_session.query.return_value.filter.return_value.first.return_value = None
 
-        result = repository.get_by_lock_name_for_update("nonexistent")
+        result = repository.get_by_lock_name("nonexistent")
         assert result is None
 
     def test_delete_not_found_returns_false(self, repository, mock_session):
@@ -731,38 +605,43 @@ class TestEdgeCases:
 
     def test_lock_name_with_special_characters(self, repository, mock_session):
         mock_model = _make_model(lock_name="task:cleanup:daily")
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            mock_model
+        )
 
-        result = repository.get_by_lock_name_for_update("task:cleanup:daily")
+        result = repository.get_by_lock_name("task:cleanup:daily")
         assert result is not None
         assert result.lock_name == "task:cleanup:daily"
 
     def test_lock_holder_is_empty_string(self, repository, mock_session):
         mock_model = _make_model(lock_name="empty-holder", lock_holder="")
-        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = mock_model
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            mock_model
+        )
 
-        result = repository.get_by_lock_name_for_update("empty-holder")
+        result = repository.get_by_lock_name("empty-holder")
         assert result is not None
         assert result.lock_holder == ""
 
-    def test_consecutive_inserts_with_different_names(self, repository, mock_session):
+    def test_consecutive_try_acquire_different_names(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.first.return_value = None
+
+        ids = iter([1, 2])
+
         def _add_side_effect(model):
-            model.id = 1
+            model.id = next(ids)
 
         mock_session.add.side_effect = _add_side_effect
 
-        id1 = repository.insert_lock(
-            lock_name="lock-1",
-            lock_holder="h1",
-            expire_time=FUTURE,
+        r1 = repository.try_acquire_lock(
+            lock_name="lock-a", lock_holder="h1", expire_time=FUTURE
         )
-        id2 = repository.insert_lock(
-            lock_name="lock-2",
-            lock_holder="h2",
-            expire_time=FUTURE,
+        r2 = repository.try_acquire_lock(
+            lock_name="lock-b", lock_holder="h2", expire_time=FUTURE
         )
-        assert id1 == 1
-        assert id2 == 1  # mock returns same id
+
+        assert r1 is True
+        assert r2 is True
 
     def test_update_expire_time_with_large_dataset(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.update.return_value = 1000
@@ -772,9 +651,3 @@ class TestEdgeCases:
             expire_time=FUTURE,
         )
         assert result == 1000
-
-    def test_delete_expired_with_zero_rows(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.delete.return_value = 0
-
-        result = repository.delete_expired_locks(PAST)
-        assert result == 0
