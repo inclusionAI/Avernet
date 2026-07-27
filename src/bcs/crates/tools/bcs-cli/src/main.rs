@@ -1018,9 +1018,9 @@ enum Commands {
         #[arg(short, long)]
         query: Option<String>,
 
-        /// Filter by skills (comma-separated)
-        #[arg(short, long, hide = true)]
-        skills: Option<String>,
+        /// Require an exact skill match (repeat for multiple required skills)
+        #[arg(long = "skill")]
+        skills: Vec<String>,
 
         /// Filter by visibility ("public" or "protected")
         #[arg(long)]
@@ -2535,7 +2535,7 @@ async fn main() -> Result<()> {
         Commands::Discover {
             token,
             query,
-            skills: _,
+            skills,
             visibility,
             collaborate_bot,
             organization_code,
@@ -2556,6 +2556,7 @@ async fn main() -> Result<()> {
                 "/bots/discover",
                 json!({
                     "q": &query,
+                    "skills": &skills,
                     "visibility": &visibility,
                     "collaborate_bot": &collaborate_bot,
                     "organization_code": &organization_code,
@@ -2566,6 +2567,7 @@ async fn main() -> Result<()> {
             let result = client
                 .discover_bots_extended(
                     query.as_deref(),
+                    &skills,
                     visibility.as_deref(),
                     collaborate_bot.as_deref(),
                     organization_code.as_deref(),
@@ -5458,6 +5460,32 @@ mod tests {
             } => {
                 assert_eq!(organization_code.as_deref(), Some("promo-2026"));
                 assert_eq!(role.as_deref(), Some("traffic_analyst"));
+            }
+            _ => panic!("expected discover command"),
+        }
+    }
+
+    #[test]
+    fn test_discover_command_accepts_repeated_skill_filters() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "discover",
+            "-q",
+            "deployment",
+            "--skill",
+            "code_review",
+            "--skill",
+            "sql",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Discover { query, skills, .. } => {
+                assert_eq!(query.as_deref(), Some("deployment"));
+                assert_eq!(
+                    skills,
+                    vec!["code_review".to_string(), "sql".to_string()]
+                );
             }
             _ => panic!("expected discover command"),
         }

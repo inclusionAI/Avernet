@@ -17,7 +17,7 @@ pub enum ProviderBotDiscoverySelector {
     All,
     ProviderIds(Vec<String>),
     Query(String),
-    Skill(String),
+    RequiredSkills(Vec<String>),
 }
 
 impl Default for ProviderBotDiscoverySelector {

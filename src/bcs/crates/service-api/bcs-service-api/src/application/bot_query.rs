@@ -86,7 +86,7 @@ pub struct BotQueryByIdsResult {
 #[derive(Debug, Clone, Default)]
 pub struct BotDiscoveryCommand {
     pub q: Option<String>,
-    pub skill: Option<String>,
+    pub skills: Vec<String>,
     pub visibility: Option<String>,
     pub collaborate_bot: Option<String>,
     /// Authenticated bot requester. When present, discovery excludes this bot.

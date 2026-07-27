@@ -8,7 +8,7 @@
 //!
 //! Tests cover:
 //! - Discover gracefully degrades when bcsfuse is unreachable (returns registry-only results)
-//! - Discover `name` parameter filtering (case-insensitive contains, q-priority)
+//! - Discover repeated exact skill filtering combined with `q` using AND semantics
 //! - leave_bot completes without errors (set_worker_offline call was removed)
 //! - set_visibility succeeds with fire-and-forget sync (sync failure is non-blocking)
 //!
@@ -141,33 +141,56 @@ async fn discover_without_fuse_returns_registry_results() {
 }
 
 // ============================================================================
-// 12.2: Discover name parameter tests
+// 12.2: Discover query + repeated skill parameter tests
 // ============================================================================
 
-/// Discover with `?name=xxx` returns bots matching by name (case-insensitive contains).
+/// Repeated `skill` values are exact, case-insensitive, and all combine with
+/// `q` using AND semantics.
 #[tokio::test]
-async fn discover_by_name_returns_matching_bots() {
+async fn discover_q_and_repeated_skills_use_and_semantics() {
     let tmp = create_temp_bots_dir();
     let bots_dir = tmp.path().to_path_buf();
     let (addr, _handle) = start_test_server(&bots_dir).await;
 
-    let mut bot1 = MockBot::connect(addr).await;
-    bot1.register("ArchBot", &["architecture"], addr).await;
-    bot1.send_heartbeat().await;
+    let mut exact = MockBot::connect(addr).await;
+    exact
+        .register("Deployment Reviewer", &["Code_Review", "SQL"], addr)
+        .await;
+    exact.send_heartbeat().await;
 
-    let mut bot2 = MockBot::connect(addr).await;
-    bot2.register("DBABot", &["database"], addr).await;
-    bot2.send_heartbeat().await;
+    let mut missing_skill = MockBot::connect(addr).await;
+    missing_skill
+        .register("Deployment Generalist", &["code_review"], addr)
+        .await;
+    missing_skill.send_heartbeat().await;
 
-    let mut bot3 = MockBot::connect(addr).await;
-    bot3.register("ArchHelper", &["design"], addr).await;
-    bot3.send_heartbeat().await;
+    let mut partial_skill = MockBot::connect(addr).await;
+    partial_skill
+        .register(
+            "Deployment Extended SQL",
+            &["code_review", "sql_extended"],
+            addr,
+        )
+        .await;
+    partial_skill.send_heartbeat().await;
 
-    // Search by name "arch" — should match ArchBot and ArchHelper (case-insensitive)
-    let url = format!("http://{}/bots/discover?name=arch", addr);
+    let mut skills_without_query = MockBot::connect(addr).await;
+    skills_without_query
+        .register("Documentation Reviewer", &["code_review", "sql"], addr)
+        .await;
+    skills_without_query.send_heartbeat().await;
+
+    let mut caller = MockBot::connect(addr).await;
+    caller.register("Caller", &["coordination"], addr).await;
+    caller.send_heartbeat().await;
+
+    let url = format!(
+        "http://{}/bots/discover?q=deployment&skill=code_review&skill=sql",
+        addr
+    );
     let response: serde_json::Value = reqwest::Client::new()
         .get(&url)
-        .header("Authorization", format!("Bearer {}", bot2.token.as_str()))
+        .header("Authorization", format!("Bearer {}", caller.token.as_str()))
         .send()
         .await
         .expect("Failed to call discover")
@@ -176,84 +199,11 @@ async fn discover_by_name_returns_matching_bots() {
         .expect("Failed to parse response");
 
     let bots = response["bots"].as_array().expect("bots should be array");
-    assert!(bots.len() >= 2, "Should match at least 2 bots with 'arch' in name, got {}", bots.len());
-
-    // All returned bots should have "arch" in their name (case-insensitive)
-    for bot in bots {
-        let name = bot["capabilities"]["name"].as_str().unwrap_or("");
-        assert!(
-            name.to_lowercase().contains("arch"),
-            "Bot name '{}' should contain 'arch'", name
-        );
-    }
-}
-
-/// Discover with `?name=xxx` does NOT trigger fuse recommend (name-only path).
-#[tokio::test]
-async fn discover_by_name_does_not_trigger_fuse() {
-    let tmp = create_temp_bots_dir();
-    let bots_dir = tmp.path().to_path_buf();
-
-    let config = create_config_bcsfuse_enabled(&bots_dir);
-    let server = BcsServer::new(config);
-    let (addr, _handle) = server.run_on_random_port().await.expect("start server");
-
-    let mut bot1 = MockBot::connect(addr).await;
-    bot1.register("TestBot", &["testing"], addr).await;
-    bot1.send_heartbeat().await;
-
-    let mut bot2 = MockBot::connect(addr).await;
-    bot2.register("ObserverBot", &["observation"], addr).await;
-    bot2.send_heartbeat().await;
-
-    // name search should NOT call fuse recommend — should succeed even with fuse unreachable
-    let url = format!("http://{}/bots/discover?name=test", addr);
-    let response = reqwest::Client::new()
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", bot2.token.as_str()))
-        .send()
-        .await
-        .expect("Failed to call discover");
-    assert!(response.status().is_success(), "name search should succeed without fuse");
-
-    let body: serde_json::Value = response.json().await.expect("Failed to parse");
-    let bots = body["bots"].as_array().expect("bots should be array");
-    assert!(!bots.is_empty(), "Should find bot by name");
-}
-
-/// When both `q` and `name` are provided, `q` takes priority.
-#[tokio::test]
-async fn discover_q_takes_priority_over_name() {
-    let tmp = create_temp_bots_dir();
-    let bots_dir = tmp.path().to_path_buf();
-    let (addr, _handle) = start_test_server(&bots_dir).await;
-
-    let mut bot1 = MockBot::connect(addr).await;
-    bot1.register("ArchBot", &["architecture"], addr).await;
-    bot1.send_heartbeat().await;
-
-    let mut bot2 = MockBot::connect(addr).await;
-    bot2.register("DBABot", &["database"], addr).await;
-    bot2.send_heartbeat().await;
-
-    // q=database&name=arch — q should take priority, returning DBABot not ArchBot
-    let url = format!("http://{}/bots/discover?q=database&name=arch", addr);
-    let response: serde_json::Value = reqwest::Client::new()
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", bot1.token.as_str()))
-        .send()
-        .await
-        .expect("Failed to call discover")
-        .json()
-        .await
-        .expect("Failed to parse response");
-
-    let bots = response["bots"].as_array().expect("bots should be array");
-    // q=database should match DBABot (by domain), not ArchBot (by name)
-    let has_dba = bots.iter().any(|b| {
-        b["capabilities"]["name"].as_str().unwrap_or("") == "DBABot"
-    });
-    assert!(has_dba, "q should take priority: DBABot should be in results");
+    let names = bots
+        .iter()
+        .filter_map(|bot| bot["capabilities"]["name"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["Deployment Reviewer"]);
 }
 
 // ============================================================================

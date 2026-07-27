@@ -98,7 +98,9 @@ async fn discover_route_delegates_filters_to_bot_discovery_service() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/bots/discover?collaborate_bot=driver&q=planner")
+                .uri(
+                    "/bots/discover?collaborate_bot=driver&q=planner&skill=%20code_review%20&skill=Code_Review&skill=sql",
+                )
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -121,10 +123,52 @@ async fn discover_route_delegates_filters_to_bot_discovery_service() {
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].collaborate_bot.as_deref(), Some("driver"));
     assert_eq!(commands[0].q.as_deref(), Some("planner"));
-    assert_eq!(commands[0].name, None);
-    assert_eq!(commands[0].skills, None);
+    assert_eq!(
+        commands[0].skills,
+        vec!["code_review".to_string(), "sql".to_string()]
+    );
 }
 
+#[tokio::test]
+async fn discover_route_rejects_empty_removed_unknown_and_duplicate_scalar_parameters() {
+    let discovery = Arc::new(RecordingBotDiscoveryService::default());
+    let services = Services::builder()
+        .bot_discovery(discovery.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(chain),
+    )));
+
+    for query in [
+        "skill=code_review&skill=%20%20",
+        "name=legacy",
+        "skills=legacy",
+        "domains=legacy",
+        "scopes=legacy",
+        "unknown=value",
+        "q=one&q=two",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/bots/discover?{query}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "query should be rejected: {query}"
+        );
+    }
+
+    assert!(discovery.commands.lock().await.is_empty());
+}
 
 #[tokio::test]
 async fn discover_route_forwards_organization_scope_for_bot_callers() {

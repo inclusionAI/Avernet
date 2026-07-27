@@ -1,10 +1,11 @@
+use std::collections::HashSet;
+
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::State,
     http::{HeaderMap, Uri},
 };
 use bcs_service_api::{BotDiscoveryCommand, BotDiscoveryEntry, BotUseCaseError};
-use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::HttpAdapterError;
@@ -13,34 +14,74 @@ use crate::state::HttpAppState;
 
 use super::{bot_id_from_headers, require_caller_actor_id_from_headers};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default)]
 pub struct DiscoverBotsQuery {
-    #[serde(default)]
     pub q: Option<String>,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub skills: Option<String>,
-    #[serde(default)]
-    pub domains: Option<String>,
-    #[serde(default)]
-    pub scopes: Option<String>,
-    #[serde(default)]
+    pub skills: Vec<String>,
     pub visibility: Option<String>,
-    #[serde(default)]
     pub collaborate_bot: Option<String>,
-    #[serde(default)]
     pub organization_code: Option<String>,
-    #[serde(default)]
     pub role: Option<String>,
+}
+
+impl DiscoverBotsQuery {
+    fn parse(raw_query: Option<&str>) -> Result<Self, HttpAdapterError> {
+        let mut query = Self::default();
+        let mut seen_skills = HashSet::new();
+
+        for (key, value) in
+            url::form_urlencoded::parse(raw_query.unwrap_or_default().as_bytes())
+        {
+            let key = key.into_owned();
+            let value = value.into_owned();
+            match key.as_str() {
+                "q" => set_once(&mut query.q, &key, value)?,
+                "skill" => {
+                    let skill = value.trim();
+                    if skill.is_empty() {
+                        return Err(HttpAdapterError::BadRequest(
+                            "skill must not be empty".to_string(),
+                        ));
+                    }
+                    if seen_skills.insert(skill.to_ascii_lowercase()) {
+                        query.skills.push(skill.to_string());
+                    }
+                }
+                "visibility" => set_once(&mut query.visibility, &key, value)?,
+                "collaborate_bot" => set_once(&mut query.collaborate_bot, &key, value)?,
+                "organization_code" => set_once(&mut query.organization_code, &key, value)?,
+                "role" => set_once(&mut query.role, &key, value)?,
+                _ => {
+                    return Err(HttpAdapterError::BadRequest(format!(
+                        "unknown discover query parameter '{key}'"
+                    )));
+                }
+            }
+        }
+
+        Ok(query)
+    }
+}
+
+fn set_once(
+    target: &mut Option<String>,
+    key: &str,
+    value: String,
+) -> Result<(), HttpAdapterError> {
+    if target.replace(value).is_some() {
+        return Err(HttpAdapterError::BadRequest(format!(
+            "discover query parameter '{key}' must not be repeated"
+        )));
+    }
+    Ok(())
 }
 
 pub async fn discover_bots(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Query(query): Query<DiscoverBotsQuery>,
 ) -> Result<Json<Value>, HttpAdapterError> {
+    let query = DiscoverBotsQuery::parse(uri.query())?;
     let _caller_actor_id =
         require_caller_actor_id_from_headers(&state, &headers, &uri).await?;
     let requester_bot_id = bot_id_from_headers(&state, &headers).await;
@@ -54,10 +95,7 @@ pub async fn discover_bots(
         .bot_discovery
         .discover_bots(BotDiscoveryCommand {
             q: query.q,
-            name: query.name,
             skills: query.skills,
-            domains: query.domains,
-            scopes: query.scopes,
             visibility: query.visibility,
             collaborate_bot: query.collaborate_bot,
             requester_bot_id,

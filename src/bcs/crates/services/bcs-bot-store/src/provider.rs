@@ -1172,10 +1172,12 @@ fn append_provider_discovery_selector_sql(
                 params.push(DbValue::from(pattern.as_str()));
             }
         }
-        ProviderBotDiscoverySelector::Skill(skill) => {
-            sql.push_str(" AND LOWER(COALESCE(b.bot_info, '')) LIKE ?");
-            let pattern = like_pattern(skill);
-            params.push(DbValue::from(pattern.as_str()));
+        ProviderBotDiscoverySelector::RequiredSkills(skills) => {
+            for skill in skills {
+                sql.push_str(" AND LOWER(COALESCE(b.bot_info, '')) LIKE ?");
+                let pattern = like_pattern(skill);
+                params.push(DbValue::from(pattern.as_str()));
+            }
         }
     }
 }
@@ -1645,9 +1647,12 @@ mod tests {
         assert_eq!(query_records[0].bot_uuid, "bot-query");
 
         let skill_records = store
-            .list_discoverable_provider_bot_records(&ProviderBotDiscoverySelector::Skill(
-                "sql".to_string(),
-            ))
+            .list_discoverable_provider_bot_records(
+                &ProviderBotDiscoverySelector::RequiredSkills(vec![
+                    "sql".to_string(),
+                    "ops".to_string(),
+                ]),
+            )
             .await
             .expect("skill records");
         assert_eq!(skill_records.len(), 1);

@@ -825,7 +825,7 @@ async fn discover_bots_matches_one_skill_exactly_ignoring_case() {
 
     let result = service
         .discover_bots(BotDiscoveryCommand {
-            skill: Some(" code_review ".to_string()),
+            skills: vec!["code_review".to_string()],
             ..Default::default()
         })
         .await
@@ -840,19 +840,67 @@ async fn discover_bots_matches_one_skill_exactly_ignoring_case() {
 }
 
 #[tokio::test]
-async fn discover_bots_combines_q_and_skill() {
+async fn discover_bots_requires_all_exact_skills() {
     let fixture = RegistryFixture::new();
     let service = fixture.service();
 
-    for (bot_id, summary, skill) in [
-        ("query-and-skill", "deployment helper", "code_review"),
-        ("query-only", "deployment helper", "release"),
-        ("skill-only", "documentation helper", "code_review"),
+    for (bot_id, skills) in [
+        ("all-exact", vec!["code_review", "SQL"]),
+        ("missing-sql", vec!["code_review"]),
+        ("partial-sql", vec!["code_review", "sql_extended"]),
     ] {
         register_bot(
             &fixture.registry,
             bot_id,
-            caps_with_skill(Some(bot_id), Some(summary), "public", skill),
+            caps_with_skills(
+                Some(bot_id),
+                Some("review helper"),
+                "public",
+                skills.as_slice(),
+            ),
+            None,
+        )
+        .await;
+    }
+
+    let result = service
+        .discover_bots(BotDiscoveryCommand {
+            skills: vec!["code_review".to_string(), "sql".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("discover by all exact skills");
+
+    let bot_ids = result
+        .bots
+        .iter()
+        .map(|entry| entry.bot_uuid.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(bot_ids, vec!["all-exact"]);
+}
+
+#[tokio::test]
+async fn discover_bots_combines_q_and_all_skills() {
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+
+    for (bot_id, summary, skills) in [
+        (
+            "query-and-skills",
+            "deployment helper",
+            vec!["code_review", "sql"],
+        ),
+        ("query-one-skill", "deployment helper", vec!["code_review"]),
+        (
+            "skills-only",
+            "documentation helper",
+            vec!["code_review", "sql"],
+        ),
+    ] {
+        register_bot(
+            &fixture.registry,
+            bot_id,
+            caps_with_skills(Some(bot_id), Some(summary), "public", skills.as_slice()),
             None,
         )
         .await;
@@ -861,18 +909,18 @@ async fn discover_bots_combines_q_and_skill() {
     let result = service
         .discover_bots(BotDiscoveryCommand {
             q: Some("deployment".to_string()),
-            skill: Some("code_review".to_string()),
+            skills: vec!["code_review".to_string(), "sql".to_string()],
             ..Default::default()
         })
         .await
-        .expect("discover by query and exact skill");
+        .expect("discover by query and all exact skills");
 
     let bot_ids = result
         .bots
         .iter()
         .map(|entry| entry.bot_uuid.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(bot_ids, vec!["query-and-skill"]);
+    assert_eq!(bot_ids, vec!["query-and-skills"]);
 }
 
 #[tokio::test]
@@ -901,16 +949,55 @@ async fn discover_provider_bots_returns_provider_metadata_and_agent_code() {
                 summary: Some("Finds provider bots".to_string()),
                 owners: vec!["alice".to_string()],
                 provider_bot_ref: "agent-code-1".to_string(),
-                skills: vec![bcs_service_api::Skill::new("search")],
+                skills: vec![
+                    bcs_service_api::Skill::new("search"),
+                    bcs_service_api::Skill::new("sql"),
+                ],
                 ..Default::default()
             },
         )
         .await
         .expect("register provider bot");
+    fixture
+        .provider
+        .register_provider_bot_with_bot_uuid(
+            &provider.provider.provider_id,
+            &provider.provider_admin_token,
+            RegisterProviderBotParams {
+                bot_name: "Provider Searcher Missing Skill".to_string(),
+                summary: Some("Finds provider bots".to_string()),
+                owners: vec!["alice".to_string()],
+                provider_bot_ref: "agent-code-2".to_string(),
+                skills: vec![bcs_service_api::Skill::new("search")],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register provider query-only bot");
+    fixture
+        .provider
+        .register_provider_bot_with_bot_uuid(
+            &provider.provider.provider_id,
+            &provider.provider_admin_token,
+            RegisterProviderBotParams {
+                bot_name: "Provider Writer".to_string(),
+                summary: Some("Writes documentation".to_string()),
+                owners: vec!["alice".to_string()],
+                provider_bot_ref: "agent-code-3".to_string(),
+                skills: vec![
+                    bcs_service_api::Skill::new("search"),
+                    bcs_service_api::Skill::new("sql"),
+                ],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register provider skills-only bot");
 
     let result = service
         .discover_bots(BotDiscoveryCommand {
             q: Some("searcher".to_string()),
+            skills: vec!["search".to_string(), "sql".to_string()],
             ..Default::default()
         })
         .await
@@ -935,6 +1022,7 @@ async fn organization_scoped_discovery_filters_effective_members_and_attaches_me
         org_member("bot-b", "traffic_analyst"),
         org_member("bot-c", "traffic_analyst"),
         org_member("bot-d", "traffic_analyst"),
+        org_member("bot-e", "traffic_analyst"),
     ]));
     let service = Bot::new_with_friend(
         registry,
@@ -944,14 +1032,71 @@ async fn organization_scoped_discovery_filters_effective_members_and_attaches_me
     .with_organization(organization);
 
     register_bot(&fixture.registry, "bot-a", caps(Some("Requester"), Some("traffic"), "public"), None).await;
-    register_bot(&fixture.registry, "bot-b", caps(Some("Traffic Public"), Some("traffic"), "protected"), None).await;
-    register_bot(&fixture.registry, "bot-c", caps(Some("Traffic Private"), Some("traffic"), "private"), None).await;
-    register_bot(&fixture.registry, "bot-d", caps(Some("Traffic Friend"), Some("traffic"), "private"), None).await;
-    register_bot(&fixture.registry, "bot-x", caps(Some("Traffic Global"), Some("traffic"), "public"), None).await;
+    register_bot(
+        &fixture.registry,
+        "bot-b",
+        caps_with_skills(
+            Some("Traffic Public"),
+            Some("traffic"),
+            "protected",
+            &["routing", "sql"],
+        ),
+        None,
+    )
+    .await;
+    register_bot(
+        &fixture.registry,
+        "bot-c",
+        caps_with_skills(
+            Some("Traffic Private"),
+            Some("traffic"),
+            "private",
+            &["routing", "sql"],
+        ),
+        None,
+    )
+    .await;
+    register_bot(
+        &fixture.registry,
+        "bot-d",
+        caps_with_skills(
+            Some("Traffic Friend"),
+            Some("traffic"),
+            "private",
+            &["routing", "sql"],
+        ),
+        None,
+    )
+    .await;
+    register_bot(
+        &fixture.registry,
+        "bot-e",
+        caps_with_skills(
+            Some("Traffic Missing Skill"),
+            Some("traffic"),
+            "public",
+            &["routing"],
+        ),
+        None,
+    )
+    .await;
+    register_bot(
+        &fixture.registry,
+        "bot-x",
+        caps_with_skills(
+            Some("Traffic Global"),
+            Some("traffic"),
+            "public",
+            &["routing", "sql"],
+        ),
+        None,
+    )
+    .await;
 
     let result = service
         .discover_bots(BotDiscoveryCommand {
             q: Some("traffic".to_string()),
+            skills: vec!["routing".to_string(), "sql".to_string()],
             requester_bot_id: Some("bot-a".to_string()),
             organization_code: Some("promo-2026".to_string()),
             role: Some("traffic_analyst".to_string()),
@@ -1801,6 +1946,21 @@ fn caps_with_skill(
 ) -> BotCapabilities {
     BotCapabilities {
         skills: vec![bcs_service_api::Skill::new(skill)],
+        ..caps(name, summary, visibility)
+    }
+}
+
+fn caps_with_skills(
+    name: Option<&str>,
+    summary: Option<&str>,
+    visibility: &str,
+    skills: &[&str],
+) -> BotCapabilities {
+    BotCapabilities {
+        skills: skills
+            .iter()
+            .map(|skill| bcs_service_api::Skill::new(*skill))
+            .collect(),
         ..caps(name, summary, visibility)
     }
 }

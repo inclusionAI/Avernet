@@ -1182,8 +1182,8 @@ fn is_organization_discover_visible(visibility: &str) -> bool {
 fn provider_discovery_selector(command: &BotDiscoveryCommand) -> ProviderBotDiscoverySelector {
     if let Some(q) = command.q.as_deref() {
         ProviderBotDiscoverySelector::Query(q.to_string())
-    } else if let Some(skill) = command.skill.as_deref() {
-        ProviderBotDiscoverySelector::Skill(skill.trim().to_string())
+    } else if !command.skills.is_empty() {
+        ProviderBotDiscoverySelector::RequiredSkills(command.skills.clone())
     } else {
         ProviderBotDiscoverySelector::All
     }
@@ -1194,17 +1194,15 @@ fn matches_discovery_selector(bot: &RegisteredBot, command: &BotDiscoveryCommand
         .q
         .as_deref()
         .is_none_or(|query| matches_query(bot, query));
-    let matches_skill = command.skill.as_deref().is_none_or(|skill| {
-        let skill = skill.trim();
-        !skill.is_empty()
-            && bot
-                .capabilities
-                .skills
-                .iter()
-                .any(|candidate| candidate.name.eq_ignore_ascii_case(skill))
+    let matches_skills = command.skills.iter().all(|skill| {
+        bot
+            .capabilities
+            .skills
+            .iter()
+            .any(|candidate| candidate.name.eq_ignore_ascii_case(skill))
     });
 
-    matches_q && matches_skill
+    matches_q && matches_skills
 }
 
 fn matches_query(bot: &RegisteredBot, query: &str) -> bool {
