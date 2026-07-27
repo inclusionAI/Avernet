@@ -122,6 +122,7 @@ class SkillServiceFactory:
         bot_id: str | None = None,
         engine_type: str | None = None,
     ) -> SkillService:
+        uses_pool_paths = False
         if entity_id is not None and bot_id is not None:
             pool_paths = self.resolve_pool_paths(
                 str(entity_id),
@@ -129,6 +130,7 @@ class SkillServiceFactory:
                 engine_type or "",
             )
             if pool_paths is not None:
+                uses_pool_paths = True
                 active_path, local_path, repo_path = pool_paths
                 active_dir = Path(active_path)
                 local_dir = Path(local_path)
@@ -150,6 +152,7 @@ class SkillServiceFactory:
             git_sync_service_factory=self._git_sync_service_factory,
             local_skill_path_adapter=local_skill_path_adapter,
             local_skill_locator_adapter=local_skill_locator_adapter,
+            runtime_uses_pool_paths=uses_pool_paths,
         )
 
 
