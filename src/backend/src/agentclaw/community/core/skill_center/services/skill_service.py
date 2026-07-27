@@ -517,6 +517,28 @@ class SkillService:
             logger.error(f"[SkillService.activate_skill] Invalid skill_path: {e}")
             return False
 
+        device_fs = self._device_fs_factory(bolt_id, user_id)
+        if protocol == "local":
+            source = Path(self._local_skill_path_adapter(str(source)))
+            try:
+                source_exists = await device_fs.exists(str(source))
+            except Exception as e:
+                logger.warning(
+                    "[SkillService.activate_skill] Failed to verify local "
+                    "source %s: %s",
+                    source,
+                    e,
+                    exc_info=True,
+                )
+                return False
+            if not source_exists:
+                logger.error(
+                    "[SkillService.activate_skill] Refusing to activate "
+                    "missing local source: %s",
+                    source,
+                )
+                return False
+
         # 生成链接名称 —— 软链名取尾名 patent-quality-audit，与 local 分支
         # (Path(path).name) 及 get_symlink_mappings (split('/')[-1]) 对齐。
         # 注意：DB link_name 字段仍用全路径下划线格式（get_link_name），二者口径不同。
@@ -563,7 +585,6 @@ class SkillService:
 
         if target_link.exists() or target_link.is_symlink():
             # Phase 4: engine-view path — 让 engine 在 VM 内删，不要宿主机 shutil.rmtree
-            device_fs = self._device_fs_factory(bolt_id, user_id)
             success = await self._delete_active_entry(device_fs, target_link)
             if not success:
                 logger.error(
@@ -1808,18 +1829,21 @@ class SkillService:
             if existing_skill is not None
             else ""
         )
-        skill_dir = (
+        locator_skill_dir = (
             Path(existing_locator)
             if existing_locator.startswith("/")
             else self.local_dir / skill_name
         )
-        skill_dir_str = str(skill_dir)
-        # The DB ``git_path`` keeps ``skill_dir_str`` (logical for teclaw, host for
-        # arca); the device-fs delete/write use the adapter-expanded engine path
-        # (identity for non-teclaw, ``workspace/skills-local/...`` for teclaw).
-        engine_skill_dir_str = self._local_skill_path_adapter(skill_dir_str)
+        # During cutover the existing DB locator can still point at Legacy.
+        # Resolve it before both file I/O and persistence so a same-name upload
+        # becomes a controlled copy-forward into canonical Pool rather than
+        # continuing to write Legacy.
+        skill_dir_str = self._local_skill_path_adapter(
+            str(locator_skill_dir)
+        )
+        engine_skill_dir_str = skill_dir_str
         logger.info(
-            f"[SkillService.upload_skill] Skill directory: {skill_dir} "
+            f"[SkillService.upload_skill] Skill directory: {skill_dir_str} "
             f"(engine: {engine_skill_dir_str})"
         )
 
@@ -1846,6 +1870,7 @@ class SkillService:
                     'description': skill_info.get("description", ""),
                     'category': skill_info.get("category", "general"),
                     'tags': json.dumps(skill_info.get("tags", [])),
+                    'git_path': skill_path,
                     'gmt_modified': datetime.utcnow()
                 }
                 if user_id:
