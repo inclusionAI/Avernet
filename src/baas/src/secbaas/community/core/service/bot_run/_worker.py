@@ -204,7 +204,7 @@ class BotRequestWorker:
         """
         records = self._queue.scan_timeout()
         for record in records:
-            marked = self._safety_mark_failed(record.run_id, "time out")
+            marked = self._safety_mark_timeout(record.run_id)
             with contextlib.suppress(Exception):
                 self._queue.force_done(record.run_id)
             if marked:
@@ -419,6 +419,22 @@ class BotRequestWorker:
         except Exception as e:
             logger.error(
                 "[BotRequestWorker] safety mark failed run_id=%s: %s", run_id, e
+            )
+        return False
+
+    def _safety_mark_timeout(self, run_id: str) -> bool:
+        """将 baas_bot_run 标记为 TIME_OUT（仅当仍 PENDING/RUNNING）。
+
+        返回 True 表示本次标记生效，False 表示已是终态（no-op）。
+        """
+        try:
+            current = self._run.get_by_run_id(run_id)
+            if current is not None and current.status in ("PENDING", "RUNNING"):
+                self._run.update_timeout(run_id, "worker safety-net: time out")
+                return True
+        except Exception as e:
+            logger.error(
+                "[BotRequestWorker] safety mark timeout run_id=%s: %s", run_id, e
             )
         return False
 

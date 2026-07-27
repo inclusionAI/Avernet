@@ -533,9 +533,9 @@ async def test_run_one_releases_bucket_slot(repo, queue):
 
 
 class _LateCompletingExecutor:
-    """先被 timeout scan 标记 FAILED，之后才正常完成（模拟慢 executor）。
+    """先被 timeout scan 标记 TIME_OUT，之后才正常完成（模拟慢 executor）。
 
-    execute() 先把 baas_bot_run 标记为 FAILED（模拟 timeout scan 截胡），
+    execute() 先把 baas_bot_run 标记为 TIME_OUT（模拟 timeout scan 截胡），
     然后调 update_result（模拟 executor 最终完成）。
     """
 
@@ -546,13 +546,13 @@ class _LateCompletingExecutor:
     async def execute(self, record: BotRunQueueRecord) -> None:
         self.executed.append(record.run_id)
         # 模拟 timeout scan 先到了
-        self._repo.update_error(record.run_id, "worker safety-net: time out")
-        # executor 最终完成，尝试写 result（CAS 应阻止覆盖 FAILED）
+        self._repo.update_timeout(record.run_id, "worker safety-net: time out")
+        # executor 最终完成，尝试写 result（CAS 应阻止覆盖 TIME_OUT）
         self._repo.update_result(record.run_id, "late result", {"session_id": "s"})
 
 
 async def test_executor_completes_after_timeout_scan_keeps_failed(repo, queue):
-    """executor 完成时如果 baas_bot_run 已被 timeout scan 标记 FAILED，
+    """executor 完成时如果 baas_bot_run 已被 timeout scan 标记 TIME_OUT，
     update_result 不应覆盖终态，且 _run_one 应跳过 post_run callback。"""
     _insert(repo, queue, "bot-1")
     ex = _LateCompletingExecutor(repo)
@@ -570,7 +570,7 @@ async def test_executor_completes_after_timeout_scan_keeps_failed(repo, queue):
         await worker._run_one(record)
 
     rec = repo.get_by_run_id(record.run_id)
-    assert rec.status == "FAILED"
+    assert rec.status == "TIME_OUT"
     assert rec.error is not None
     assert "time out" in rec.error
 
@@ -616,7 +616,7 @@ async def test_timeout_scan_once_marks_and_callbacks(repo, queue):
         await worker._timeout_scan_once()
 
     rec = repo.get_by_run_id(run_id)
-    assert rec.status == "FAILED"
+    assert rec.status == "TIME_OUT"
     assert callback_called.is_set()
 
 
