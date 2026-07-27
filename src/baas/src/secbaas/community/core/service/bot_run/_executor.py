@@ -234,6 +234,7 @@ class BotRunRequestExecutor:
             request_type,
             stream,
         )
+
         try:
             if request_type == "inject":
                 await self._do_inject(
@@ -256,7 +257,7 @@ class BotRunRequestExecutor:
                 )
 
         except TimeoutError:
-            self._repo.update_error(run.run_id, "Task execution timeout")
+            self._repo.update_timeout(run.run_id, "Task execution timeout")
         except Exception as e:
             logger.exception("[BotRunExecutor] failed run_id=%s: %s", run.run_id, e)
             self._repo.update_error(run.run_id, str(e))
