@@ -39,8 +39,51 @@ from engine.community.plugins.openclaw.layout_sync import (
 )
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 from engine.community.plugins.skills_pool import layout_atomic
+from engine.community.plugins.skills_pool.layout_activation import (
+    mapping_sources_use_pool,
+)
 
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
+
+
+def test_mapping_source_classifier_selects_one_managed_layout(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    pool_source = (
+        home
+        / ".openclaw"
+        / "workspace"
+        / "skills-pool"
+        / "skills-local"
+        / "pool-skill"
+    )
+    legacy_source = (
+        home
+        / ".openclaw"
+        / "workspace"
+        / "skills"
+        / "skills-local"
+        / "legacy-skill"
+    )
+    external_source = home / "external-skills" / "external"
+
+    assert mapping_sources_use_pool(
+        engine="openclaw",
+        sources=[pool_source, external_source],
+        home=home,
+    )
+    assert not mapping_sources_use_pool(
+        engine="openclaw",
+        sources=[legacy_source, external_source],
+        home=home,
+    )
+    with pytest.raises(ValueError, match="mix Legacy and Pool"):
+        mapping_sources_use_pool(
+            engine="openclaw",
+            sources=[legacy_source, pool_source],
+            home=home,
+        )
 
 
 def _prepared_home(tmp_path: Path) -> tuple[Path, Path, Path, Path]:

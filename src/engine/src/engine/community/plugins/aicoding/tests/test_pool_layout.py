@@ -145,9 +145,16 @@ def test_aicoding_activation_switches_local_and_keeps_repo_namespace(
     assert not legacy_local.is_symlink()
     assert not local_bridge.exists()
     assert not local_bridge.is_symlink()
-    assert not repo_bridge.exists()
-    assert not repo_bridge.is_symlink()
+    assert repo_bridge.is_symlink()
+    assert repo_bridge.resolve() == pool_repo.resolve()
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
+
+    ready = inspect_aicoding_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert ready.status is RuntimeLayoutInspectionStatus.READY
+    assert ready.evidence["checks"]["stable_repo_bridge_valid"] is True
 
 
 def test_aicoding_rollback_rebuilds_legacy_from_current_pool(
