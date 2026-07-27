@@ -563,6 +563,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     http_callback = providers.Singleton(
         HttpCallback,
         run_repository=bot_run_repository,
+        origin=config.bot_runner.origin,
     )
 
     task_message_dispatcher = providers.Singleton(
