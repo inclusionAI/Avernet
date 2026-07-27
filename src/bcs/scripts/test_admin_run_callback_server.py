@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -105,10 +106,13 @@ class CallbackStoreTest(unittest.TestCase):
 class CallbackHttpServerTest(unittest.TestCase):
     def setUp(self) -> None:
         self.store = callback_server.CallbackStore()
+        self.start_server(callback_server.ServerConfig())
+
+    def start_server(self, config: callback_server.ServerConfig) -> None:
         self.server = callback_server.create_server(
             "127.0.0.1",
             0,
-            callback_server.ServerConfig(),
+            config,
             self.store,
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -116,10 +120,22 @@ class CallbackHttpServerTest(unittest.TestCase):
         host, port = self.server.server_address
         self.base_url = f"http://{host}:{port}"
 
+    def restart_server(self, config: callback_server.ServerConfig) -> None:
+        self.stop_server()
+        self.start_server(config)
+
+    def stop_server(self) -> None:
+        if not hasattr(self, "server"):
+            return
+        server = self.server
+        thread = self.thread
+        del self.server
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
     def tearDown(self) -> None:
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=2)
+        self.stop_server()
 
     def test_health_reports_callback_count(self) -> None:
         status, body = http_json(f"{self.base_url}/health")
@@ -181,6 +197,106 @@ class CallbackHttpServerTest(unittest.TestCase):
 
         self.assertEqual(status, 404)
         self.assertEqual(body, {"ok": False, "error": "not_found"})
+
+    def test_expected_bearer_token_is_required_before_recording(self) -> None:
+        self.restart_server(
+            callback_server.ServerConfig(expected_token="callback-secret")
+        )
+        callback = {"run_id": "run-token", "status": "completed"}
+
+        missing_status, missing = http_json(
+            f"{self.base_url}/callback",
+            method="POST",
+            body=callback,
+        )
+        wrong_status, wrong = http_json(
+            f"{self.base_url}/callback",
+            method="POST",
+            body=callback,
+            headers={"Authorization": "Bearer wrong"},
+        )
+        valid_status, _ = http_json(
+            f"{self.base_url}/callback",
+            method="POST",
+            body=callback,
+            headers={"Authorization": "Bearer callback-secret"},
+        )
+
+        self.assertEqual(missing_status, 401)
+        self.assertEqual(missing, {"ok": False, "error": "invalid_token"})
+        self.assertEqual(wrong_status, 401)
+        self.assertEqual(wrong, {"ok": False, "error": "invalid_token"})
+        self.assertEqual(valid_status, 200)
+        self.assertEqual(len(self.store.snapshot()["callbacks"]), 1)
+
+    def test_expected_provider_id_is_required_before_recording(self) -> None:
+        self.restart_server(
+            callback_server.ServerConfig(expected_provider_id="provider-1")
+        )
+        callback = {"run_id": "run-provider", "status": "completed"}
+
+        missing_status, missing = http_json(
+            f"{self.base_url}/callback",
+            method="POST",
+            body=callback,
+        )
+        wrong_status, wrong = http_json(
+            f"{self.base_url}/callback",
+            method="POST",
+            body=callback,
+            headers={"X-BCN-Provider-Id": "provider-2"},
+        )
+        valid_status, _ = http_json(
+            f"{self.base_url}/callback",
+            method="POST",
+            body=callback,
+            headers={"X-BCN-Provider-Id": "provider-1"},
+        )
+
+        self.assertEqual(missing_status, 403)
+        self.assertEqual(
+            missing,
+            {"ok": False, "error": "provider_id_mismatch"},
+        )
+        self.assertEqual(wrong_status, 403)
+        self.assertEqual(
+            wrong,
+            {"ok": False, "error": "provider_id_mismatch"},
+        )
+        self.assertEqual(valid_status, 200)
+        self.assertEqual(len(self.store.snapshot()["callbacks"]), 1)
+
+    def test_configured_callback_status_is_returned_after_recording(self) -> None:
+        self.restart_server(callback_server.ServerConfig(response_status=500))
+
+        status, body = http_json(
+            f"{self.base_url}/callback",
+            method="POST",
+            body={"run_id": "run-500", "status": "failed"},
+        )
+
+        self.assertEqual(status, 500)
+        self.assertEqual(body, {"ok": True, "recorded": True})
+        self.assertEqual(len(self.store.snapshot()["callbacks"]), 1)
+
+    def test_delay_applies_only_to_callback_endpoint(self) -> None:
+        self.restart_server(callback_server.ServerConfig(response_delay_ms=100))
+
+        health_started = time.perf_counter()
+        health_status, _ = http_json(f"{self.base_url}/health")
+        health_elapsed = time.perf_counter() - health_started
+        callback_started = time.perf_counter()
+        callback_status, _ = http_json(
+            f"{self.base_url}/callback",
+            method="POST",
+            body={"run_id": "run-slow", "status": "completed"},
+        )
+        callback_elapsed = time.perf_counter() - callback_started
+
+        self.assertEqual(health_status, 200)
+        self.assertEqual(callback_status, 200)
+        self.assertGreaterEqual(callback_elapsed, 0.08)
+        self.assertGreaterEqual(callback_elapsed - health_elapsed, 0.05)
 
 
 if __name__ == "__main__":

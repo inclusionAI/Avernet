@@ -158,6 +158,23 @@ class CallbackRequestHandler(BaseHTTPRequestHandler):
         if path != "/callback":
             self.write_json(404, {"ok": False, "error": "not_found"})
             return
+        expected_token = self.server.config.expected_token
+        if (
+            expected_token is not None
+            and self.headers.get("Authorization") != f"Bearer {expected_token}"
+        ):
+            self.write_json(401, {"ok": False, "error": "invalid_token"})
+            return
+        expected_provider_id = self.server.config.expected_provider_id
+        if (
+            expected_provider_id is not None
+            and self.headers.get("X-BCN-Provider-Id") != expected_provider_id
+        ):
+            self.write_json(
+                403,
+                {"ok": False, "error": "provider_id_mismatch"},
+            )
+            return
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(content_length))
@@ -177,6 +194,8 @@ class CallbackRequestHandler(BaseHTTPRequestHandler):
             + json.dumps(record, ensure_ascii=False, indent=2),
             flush=True,
         )
+        if self.server.config.response_delay_ms:
+            time.sleep(self.server.config.response_delay_ms / 1000)
         self.write_json(
             self.server.config.response_status,
             {"ok": True, "recorded": True},
