@@ -1762,20 +1762,20 @@ class TestListDomainBots:
         assert data["error_code"] == 500
         assert "查询失败" in data["message"] or "失败" in data["message"]
 
-    def test_list_domain_bots_non_operator_forbidden(self, client):
-        """An authenticated non-operator cannot enumerate domain bots."""
+    def test_list_domain_bots_strips_iam_token(self, client):
+        """iam_token 是调用方 IAM 凭据,公开域 Bot 列表响应中必须剔除。"""
         tc, svc, _ = client
-
-        async def _deny_operator():
-            raise HTTPException(status_code=403, detail="operator required")
-
-        tc.app.dependency_overrides[require_operator] = _deny_operator
-        svc.list_domain_bots.reset_mock()
+        bot_with_token = {**BOT_SAMPLE, "ext": {"iam_token": "secret-token", "is_domain_bot": True}}
+        svc.list_domain_bots.return_value = {"total": 1, "items": [bot_with_token]}
 
         resp = tc.get("/api/bots/search/domain-bots")
 
-        assert resp.status_code == 403
-        svc.list_domain_bots.assert_not_called()
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        item = data["data"]["items"][0]
+        assert "iam_token" not in item["ext"]
+        assert item["ext"]["is_domain_bot"] is True
 
 
 # ---------------------------------------------------------------------------
