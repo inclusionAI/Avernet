@@ -4091,10 +4091,14 @@ class BotService:
                     return index, None, str(e)
 
             # 使用线程池并行申请设备
+            # ThreadPoolExecutor threads do NOT copy context vars, so bind the
+            # request's tenant onto the submitted callable (captured now, in the
+            # request thread) — each worker then runs under the right tenant.
+            _apply_single_device = bind_current_avernet_tenant(apply_single_device)
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(instance_count, 10)) as executor:
                 # 提交所有任务
                 future_to_index = {
-                    executor.submit(apply_single_device, i): i for i in range(instance_count)
+                    executor.submit(_apply_single_device, i): i for i in range(instance_count)
                 }
 
                 # 收集结果

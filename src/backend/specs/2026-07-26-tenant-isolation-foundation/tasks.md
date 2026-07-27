@@ -206,3 +206,34 @@
 - **Group D — Finalize & verify:** Tasks 9, 10
   - Theme: resolve the checked-in-DDL decision and prove all spec acceptance
     criteria; green gates.
+
+---
+
+## Follow-ups (post-review)
+
+### F1: Extend request-spawned tenant inheritance beyond the first 5 sites  `[x]`
+- **Trigger:** review question — was the Task 8 enumeration comprehensive?
+- **Audit:** `asyncio.to_thread` and `asyncio.create_task` **copy the current
+  context**, so every such offload (the large majority in the codebase) inherits
+  the tenant automatically — no wrapping needed. Only raw `threading.Thread` and
+  bare `ThreadPoolExecutor`/`run_in_executor` don't.
+- **Wrapped now** (in-request threads whose body touches `BotModel`):
+  - `bot_dormant/activate_service.py` `_reactivate_async` (reactivate flow).
+  - `bot_management/services/bot_service.py` `create_bot_instances` — the
+    device-allocation `ThreadPoolExecutor` (bind the submitted callable).
+  - `desktop_bot/services/desktop_bot_service.py` `_poll_publish_progress`
+    (calls `_bot_repo.get_by_id_and_owner` / `update_by_owner`).
+- **Deferred** (out of Stage-1 scope — touch non-bot tables, not `ac_bots`):
+  `bot_public_service.py` auth-relationship rebuild executors;
+  `device_service.py` MCP-sync / service-start threads. Revisit when those data
+  categories get their own guards (later stages).
+- **Recommended (not done):** an arch guard that flags new raw
+  `threading.Thread` / `ThreadPoolExecutor` in core so future in-request spawns
+  can't silently drop the tenant. Tracked for follow-up.
+- **Verification:** 1005 tests pass across bot_dormant / desktop_bot /
+  bot_management.
+
+### F2: Tenant index — deferred (see plan Data Model Changes)
+- No index in Stage 1 (cardinality-1 column; existing indexes stay effective).
+  At multi-tenant, prepend `avernet_tenant` to the hot composites via
+  create-new-then-drop-old (naming convention ties index name to columns).

@@ -34,6 +34,7 @@ from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, SU
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportPlugin, PassportError
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:
@@ -1606,7 +1607,7 @@ class DesktopBotService:
     ) -> None:
         """启动后台线程轮询 publish 进度。"""
         thread = threading.Thread(
-            target=self._poll_publish_progress,
+            target=bind_current_avernet_tenant(self._poll_publish_progress),
             args=(publish_id, binding_id, bot_id, owner_id, device_id, engine_type),
             daemon=True,
             name=f"poll-publish-{publish_id}",
