@@ -54,16 +54,27 @@ Track A，所以两者都归同一个人。）
 
 | 成员 | 负责（纵向切片） | Track A 阶段 | Track B 端点组 |
 |---|---|---|---|
-| **totalfrank** | bots、channels、mcp | 1（bots ✅）、3（channels）、5（mcp） | bots、channels、mcp |
-| **lucas-xzp** | resources、skills、routines、identity | 2（resources）、4（skills）、6（routines） | resources、skills、routines、identity |
+| **totalfrank** | bots、mcp、channels、**skills**（共担） | 1（bots ✅）、5（mcp）、3（channels）、4（skills，共担） | bots、mcp、channels、skills（共担） |
+| **lucas-xzp** | resources、routines、identity、**skills**（共担） | 2（resources）、6（routines）、4（skills，共担） | resources、routines、identity、skills（共担） |
 
 - **totalfrank** 同时负责**可复用的 Track A 机制**（在 Stage 1 / PR #456 中构建）—— 其余
   阶段都复制这套模式。
+- **skills 由两人共担**（第三优先级，但也是最棘手的 —— 见其端点表里的说明）。把它的 Track A
+  阶段和端点在两人之间分好，动手前先商定一份共同的子计划。
 - **identity**（仅 Track B）没有自己独立的 Track A 阶段：它的数据是 bot 的子资源，因此已由
   **bots 隔离（Stage 1 ✅）** 覆盖。为均衡工作量分给 **lucas-xzp**；它唯一的依赖已经满足，
   因此不构成跨人阻塞。
-- 大致均衡：totalfrank ≈ 剩余 2 个 A 阶段 + 约 25 个 B 端点；lucas-xzp ≈ 剩余 3 个 A 阶段 +
-  约 24 个 B 端点。
+
+### 优先级分层（先做哪些）
+
+| 层级 | 类别 | 负责人 |
+|---|---|---|
+| **P1 —— 第一优先** | bots、mcp、resources、routines | bots + mcp → totalfrank；resources + routines → lucas-xzp |
+| **P2 —— 第二优先** | channels、identity | channels → totalfrank；identity → lucas-xzp |
+| **P3 —— 第三优先** | skills | **共担**（totalfrank + lucas-xzp）—— 最复杂的类别 |
+
+在各自的分工里，先做 **P1** 切片，再做 P2，最后做 P3。skills（P3）是共担且最复杂的那个 ——
+等 P1/P2 的工作跑起来后两人一起攻。
 
 > **共同的闸口：** 任何触及 bots 的工作（两人都有）都要等 **PR #456** 合并 —— 这是一次性的
 > 闸口，不是持续的跨人依赖。一旦合并，两位负责人就能各自并行推进自己的切片。
@@ -75,28 +86,29 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 ## 状态看板（工作落地时请更新）
 
 ### Track A —— 租户隔离基础设施
-| 阶段 | 范围（数据） | 负责人 | 状态 | 完成判据 |
-|---|---|---|---|---|
-| 1 | 机器人记录（`ac_bots` / `BotModel`） | totalfrank | ✅ DONE —— **PR #456（等待审批，尚未合并）** | PR #456 合并后 |
-| 2 | 资源（`ac_resource`） | lucas-xzp | ⬜ TODO | 列 + 守卫 + 测试通过；内部 API 不变 |
-| 3 | 渠道（`ac_channel_config`） | totalfrank | ⬜ TODO | 同上 |
-| 4 | 技能（skill 相关表） | lucas-xzp | ⬜ TODO | 同上 |
-| 5 | MCP 配置 | totalfrank | ⬜ TODO | 同上 |
-| 6 | 例程（Routines） | lucas-xzp | ⬜ TODO | 同上 |
+| 阶段 | 范围（数据） | 负责人 | 优先级 | 状态 | 完成判据 |
+|---|---|---|---|---|---|
+| 1 | 机器人记录（`ac_bots` / `BotModel`） | totalfrank | P1 | ✅ DONE —— **PR #456（等待审批，尚未合并）** | PR #456 合并后 |
+| 2 | 资源（`ac_resource`） | lucas-xzp | P1 | ⬜ TODO | 列 + 守卫 + 测试通过；内部 API 不变 |
+| 3 | 渠道（`ac_channel_config`） | totalfrank | P2 | ⬜ TODO | 同上 |
+| 4 | 技能（skill 相关表） | totalfrank + lucas-xzp | P3 | ⬜ TODO | 同上 |
+| 5 | MCP 配置 | totalfrank | P1 | ⬜ TODO | 同上 |
+| 6 | 例程（Routines） | lucas-xzp | P1 | ⬜ TODO | 同上 |
 
 > Stage 1 同时构建了后续每个阶段都会复制的**可复用机制**（见下文）。它是地基，
 > 不只是"机器人"。
 
 ### Track B —— 公共 API 实现（端点真正落地之处 —— 尚未开始）
-| 类别 | 负责人 | 路由（今天是桩） | 状态 | 依赖 |
-|---|---|---|---|---|
-| bots | totalfrank | `openapi_v1/bots/router.py` | ⬜ TODO | Track A 阶段 1（PR #456） |
-| channels | totalfrank | `openapi_v1/channels/router.py` | ⬜ TODO | Track A channels（totalfrank） |
-| mcp | totalfrank | `openapi_v1/mcp/router.py` | ⬜ TODO | Track A mcp（totalfrank） |
-| resources | lucas-xzp | `openapi_v1/resources/router.py` | ⬜ TODO | Track A resources（lucas-xzp） |
-| skills | lucas-xzp | `openapi_v1/skills/router.py` | ⬜ TODO | Track A skills（lucas-xzp） |
-| routines | lucas-xzp | `openapi_v1/routines/router.py` | ⬜ TODO | Track A routines（lucas-xzp） |
-| identity | lucas-xzp | `openapi_v1/identity/router.py` | ⬜ TODO | bots 隔离（Stage 1 ✅） |
+_按优先级分层排序。_
+| 类别 | 负责人 | 优先级 | 路由（今天是桩） | 状态 | 依赖 |
+|---|---|---|---|---|---|
+| bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ⬜ TODO | Track A 阶段 1（PR #456） |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ⬜ TODO | Track A mcp（totalfrank） |
+| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | ⬜ TODO | Track A resources（lucas-xzp） |
+| routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | ⬜ TODO | Track A routines（lucas-xzp） |
+| channels | totalfrank | P2 | `openapi_v1/channels/router.py` | ⬜ TODO | Track A channels（totalfrank） |
+| identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | ⬜ TODO | bots 隔离（Stage 1 ✅） |
+| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | ⬜ TODO | Track A skills（共担） |
 
 ### 横切事项（非按阶段划分）
 | 事项 | 状态 | 备注 |
@@ -197,7 +209,7 @@ open/draft，很快会关闭；此处作为参考保留）中的 v1 契约总览
 除注明外，所有响应都使用 `openapi_v1/contracts.py` 里的 `Envelope[T]` / `Page[T]` 结构
 （二进制流不走信封）。
 
-### 🟦 totalfrank —— bots（13 个端点）· `openapi_v1/bots/router.py`
+### 🟦 totalfrank · P1 —— bots（13 个端点）· `openapi_v1/bots/router.py`
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
 | POST | `/openapi/v1/bots` | 创建 Agent；可能需要 Passport 授权 | `201 Envelope[Bot]` 或 `202 Envelope[BotAuthPending]` |
@@ -214,7 +226,7 @@ open/draft，很快会关闭；此处作为参考保留）中的 v1 契约总览
 | GET | `/openapi/v1/bots/{bot_id}/engine-config` | 读取引擎配置（自由格式 JSON） | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine-config` | 写入引擎配置（自由格式 JSON） | `Envelope[dict]` |
 
-### 🟦 totalfrank —— channels（6 个端点）· `openapi_v1/channels/router.py`
+### 🟦 totalfrank · P2 —— channels（6 个端点）· `openapi_v1/channels/router.py`
 钉钉（`dingding`）渠道配置 CRUD + 状态切换。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
@@ -228,7 +240,7 @@ open/draft，很快会关闭；此处作为参考保留）中的 v1 契约总览
 _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #363 里写的是
 `Page[Channel]`。接线时请确认用哪种。_
 
-### 🟦 totalfrank —— mcp（6 个端点）· `openapi_v1/mcp/router.py`
+### 🟦 totalfrank · P1 —— mcp（6 个端点）· `openapi_v1/mcp/router.py`
 市场 + 租户 + 调用者的统一 per-server 配置。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
@@ -239,7 +251,7 @@ _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 读取调用者的统一服务器配置 | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 写入配置（下发到设备） | `Envelope[McpConfig]` |
 
-### 🟩 lucas-xzp —— resources（9 个端点）· `openapi_v1/resources/router.py`
+### 🟩 lucas-xzp · P1 —— resources（9 个端点）· `openapi_v1/resources/router.py`
 文件/链接/文件夹的统一抽象；存储位置从不暴露。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
@@ -255,8 +267,14 @@ _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #
 
 _注：桩里的上传是原始 `octet-stream`；PR #363 描述的是 `multipart`。接线时二选一。_
 
-### 🟩 lucas-xzp —— skills（桩里 5 个 + 提议新增 2 个）· `openapi_v1/skills/router.py`
+### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（桩里 5 个 + 提议新增 2 个）· `openapi_v1/skills/router.py`
 目录在 `/openapi/v1/bots/skills`；某个 Agent 已安装的技能是 bot 的子资源。
+
+> **共担 —— 最棘手的类别。** skills 有三层生命周期（全局**上传** → per-bot **安装** →
+> per-bot **启用/停用**）、两个尚未纳入桩的 ★ 端点，以及一个悬而未决的问题：后端更丰富的
+> skill-set 模型是否要升为一等公民。因此**两人共担**。动手前先商定一份共同的子计划 ——
+> 例如把 目录/上传 与 per-bot 安装/生命周期 分开 —— 并为它单独走一遍 SDD。在各自的 P1/P2
+> 切片之后再做。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/skills` | 技能目录（`keyword`、分页） | `Envelope[Page[Skill]]` |
@@ -271,7 +289,7 @@ _注：桩里的上传是原始 `octet-stream`；PR #363 描述的是 `multipart
 | POST ★ | `/openapi/v1/skills/upload` | 上传自定义技能（全局，归属调用者） | `Envelope[Skill]` |
 | PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 启用/停用已安装技能（`status`） | `Envelope[BotSkill]` |
 
-### 🟩 lucas-xzp —— routines（7 个端点）· `openapi_v1/routines/router.py`
+### 🟩 lucas-xzp · P1 —— routines（7 个端点）· `openapi_v1/routines/router.py`
 定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
@@ -283,7 +301,7 @@ _注：桩里的上传是原始 `octet-stream`；PR #363 描述的是 `multipart
 | POST | `/openapi/v1/bots/routines/{routine_id}/run` | 立即执行一次 | `Envelope[RoutineRun]` |
 | GET | `/openapi/v1/bots/routines/{routine_id}/runs` | 执行历史（分页） | `Envelope[Page[RoutineRun]]` |
 
-### 🟩 lucas-xzp —— identity（3 个端点）· `openapi_v1/identity/router.py`
+### 🟩 lucas-xzp · P2 —— identity（3 个端点）· `openapi_v1/identity/router.py`
 读写某个 Agent 的身份 markdown 文件（RULES、SOUL 等），`file_type` 是枚举白名单。没有自己的
 Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 | 方法 | 路径 | 用途 | 成功响应 |
@@ -351,3 +369,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   mcp；**lucas-xzp** = resources、skills、routines、identity。排序问题已定 → 按类别纵向切片。
   新增**各组件端点清单**（来自路由桩 + PR #363），并标注 `/openapi/v1/bots/...` 与顶层路径的
   分歧、以及两个提议的 ★ skills 端点。
+- **2026-07-27** —— 新增**优先级分层**：P1 = bots、mcp、resources、routines；P2 =
+  channels、identity；P3 = skills。**skills 改为共担**（totalfrank + lucas-xzp，包含它的
+  Track A 阶段与端点），因为它是最复杂的类别。两个状态看板都加了优先级列；各组件标题也标注了
+  层级。
