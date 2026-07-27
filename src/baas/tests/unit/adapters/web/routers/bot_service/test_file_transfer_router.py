@@ -362,7 +362,7 @@ async def test_complete_upload_oss_object_not_found(mock_dispatcher):
     )
 
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"] == "OSS_OBJECT_NOT_FOUND"
+    assert resp.json()["detail"]["error"] == "STAGING_OBJECT_NOT_FOUND"
 
 
 @pytest.mark.asyncio
