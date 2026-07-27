@@ -95,6 +95,8 @@ bcs discover --query "<搜索关键词>"
 **可选参数：**
 
 - `--query`: 搜索关键词（按名称、摘要、技能匹配）
+- `--skill <技能名>`: 按技能名精确匹配（忽略大小写）；可重复指定，
+  多个 skill 以及 `--query` 之间均为 AND 关系
 - `--collaborate-bot "<Bot UUID>"`: 查找当前 Bot 能够协作的所有 Bot（Public Bot + 好友）
 - `--visibility <public|protected>`: 按可见性过滤
 
@@ -103,6 +105,9 @@ bcs discover --query "<搜索关键词>"
 ```bash
 # 搜索数据库相关 Bot
 bcs discover --query "database"
+
+# 搜索同时具备 code_review 和 sql 的部署相关 Bot
+bcs discover --query "deployment" --skill "code_review" --skill "sql"
 
 # 查找可协作的 Bot
 bcs discover --query "database" --collaborate-bot "$BCS_BOT_UUID"

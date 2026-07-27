@@ -832,6 +832,7 @@ impl BcsClient {
     pub async fn discover_bots_extended(
         &self,
         query: Option<&str>,
+        skills: &[String],
         visibility: Option<&str>,
         collaborate_bot: Option<&str>,
         organization_code: Option<&str>,
@@ -840,6 +841,9 @@ impl BcsClient {
         let mut params: Vec<String> = Vec::new();
         if let Some(q) = query {
             params.push(format!("q={}", urlencoding::encode(q)));
+        }
+        for skill in skills {
+            params.push(format!("skill={}", urlencoding::encode(skill)));
         }
         if let Some(vis) = visibility {
             params.push(format!("visibility={}", urlencoding::encode(vis)));
@@ -876,32 +880,6 @@ impl BcsClient {
             response.json().await.context("Invalid discover response")?;
 
         Ok(result)
-    }
-
-    /// Find bots by skills.
-    pub async fn find_bots_by_skills(&self, skills: &[&str]) -> Result<Vec<BotInfo>> {
-        let url = format!(
-            "{}/bots/discover?skills={}",
-            self.base_url,
-            skills.join(",")
-        );
-
-        let response = self
-            .http_client
-            .get(&url)
-            .send()
-            .await
-            .context("Failed to find bots by skills")?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Find bots failed ({}): {}", status, body));
-        }
-
-        let result: DiscoverBotsResponse = response.json().await.context("Invalid response")?;
-
-        Ok(result.bots)
     }
 
     // ========================================================================
@@ -3345,6 +3323,7 @@ mod tests {
         let result = client
             .discover_bots_extended(
                 None,
+                &["code review".to_string(), "sql/ops".to_string()],
                 None,
                 None,
                 Some("promo 2026"),
@@ -3357,6 +3336,8 @@ mod tests {
         assert_eq!(result.count, 0);
         let line = request_line.lock().unwrap();
         assert!(line.contains("GET /bots/discover?"), "{line}");
+        assert!(line.contains("skill=code%20review"), "{line}");
+        assert!(line.contains("skill=sql%2Fops"), "{line}");
         assert!(line.contains("organization_code=promo%202026"), "{line}");
         assert!(line.contains("role=traffic%2Fanalyst"), "{line}");
     }
