@@ -97,7 +97,9 @@ def test_probe_requires_verified_hermes_legacy_bridge(tmp_path: Path) -> None:
     )
 
 
-def test_activation_retires_hermes_legacy_storage_bridges(tmp_path: Path) -> None:
+def test_activation_retires_hermes_local_bridges_and_keeps_repo_namespace(
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "home" / "admin"
     active_root = home / ".hermes" / "skills"
     legacy_local = home / ".hermes" / "workspace" / "skills" / "skills-local"
@@ -174,9 +176,16 @@ def test_activation_retires_hermes_legacy_storage_bridges(tmp_path: Path) -> Non
     assert not legacy_local.is_symlink()
     assert not local_bridge.exists()
     assert not local_bridge.is_symlink()
-    assert not repo_bridge.exists()
-    assert not repo_bridge.is_symlink()
+    assert repo_bridge.is_symlink()
+    assert repo_bridge.resolve() == pool_repo.resolve()
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
+
+    ready = inspect_hermes_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert ready.status is RuntimeLayoutInspectionStatus.READY
+    assert ready.evidence["checks"]["stable_repo_bridge_valid"] is True
 
     mapping = SkillMapping(
         source=str(pool_local / "handmade"),
