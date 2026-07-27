@@ -4095,7 +4095,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(create_response.status(), StatusCode::ACCEPTED);
+        assert_eq!(create_response.status(), StatusCode::OK);
         let create_body = response_json(create_response).await;
         let run_id = create_body["data"]["run_id"].as_str().unwrap().to_string();
 
