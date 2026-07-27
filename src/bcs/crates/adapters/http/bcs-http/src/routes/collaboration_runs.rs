@@ -253,7 +253,7 @@ async fn authenticated_human(
         .ok_or_else(unauthenticated_response)
 }
 
-async fn optional_authenticated_human(
+pub(super) async fn optional_authenticated_human(
     state: &HttpAppState,
     headers: &HeaderMap,
     uri: &Uri,

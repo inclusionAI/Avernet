@@ -6,6 +6,7 @@ use bcs_auth_api::{AuthConfig, AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::BotCore;
 use bcs_group::GroupStore;
+use bcs_group_store::MemoryGroupRepo;
 use bcs_http::{
     router::build_router,
     state::{ChainUserIdentityPort, HttpAppState},
@@ -31,7 +32,12 @@ use bcs_service_api::{
     StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, StateMachineRunView, Workspace,
     ValidateCollaborationDefinitionYamlCommand,
 };
+use bcs_service_api::{
+    CreateOrReactivateCommand, NewSessionParams, SessionKind, SessionManagementService,
+};
 use bcs_services_container::Services;
+use bcs_session::SessionManagementServiceImpl;
+use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
 use serde_json::Value;
 use std::sync::Arc;
@@ -61,6 +67,7 @@ fn static_bot_auth_chain(bot_uuid: &str) -> Arc<AuthPluginChain> {
 #[derive(Default)]
 struct RecordingGroupManagement {
     create_calls: Mutex<Vec<GroupCreateCommand>>,
+    latest_running_session_id: Mutex<Option<String>>,
     create_dm_calls: Mutex<Vec<DmCreateCommand>>,
     status_calls: Mutex<Vec<GroupStatusCommand>>,
     add_member_calls: Mutex<Vec<GroupAddMemberCommand>>,
@@ -339,7 +346,8 @@ impl GroupManagementService for RecordingGroupManagement {
         &self,
         cmd: GroupCreateCommand,
     ) -> Result<GroupDetailResult, bcs_service_api::GroupUseCaseError> {
-        let result = detail_from_create(&cmd);
+        let mut result = detail_from_create(&cmd);
+        result.latest_running_session_id = self.latest_running_session_id.lock().await.clone();
         self.create_calls.lock().await.push(cmd);
         Ok(result)
     }
@@ -820,6 +828,94 @@ runtime:
             .get("speaker_b")
             .map(|binding| (binding.source.as_str(), binding.bot_ids.as_slice())),
         Some(("manual", &["target-bot".to_string()][..]))
+    );
+}
+
+#[tokio::test]
+async fn post_groups_auto_start_forwards_authenticated_human_to_runtime() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    register_bot(&registry, "driver-bot", "Driver").await;
+    let session_management = Arc::new(SessionManagementServiceImpl::new(
+        Arc::new(MemorySessionRepo::new()),
+        Arc::new(MemoryGroupRepo::new()),
+    ));
+    let session = session_management
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: "group-human-auto-start".to_string(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::ServiceInvocation,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed service invocation session")
+        .session;
+    let recorder = Arc::new(RecordingGroupManagement::default());
+    *recorder.latest_running_session_id.lock().await = Some(session.id);
+    let collaboration_runtime = Arc::new(RecordingCollaborationRuntime::default());
+    let services = Services::builder()
+        .registry(registry)
+        .group(Arc::new(GroupStore::new()))
+        .group_management(recorder)
+        .session_management(session_management)
+        .collaboration_runtime(collaboration_runtime.clone())
+        .build_for_test();
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(static_auth_chain("alice", "Alice")),
+    )));
+    let definition_yaml = r#"
+api_version: bcs.collaboration/v1
+name: Human Auto Start
+participants:
+  driver:
+    bot_id: driver-bot
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      review:
+        kind: human_input
+        display_name: Review
+        instruction: Review the input.
+        node_timeout_ms: 60000
+"#;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "id": "group-human-auto-start",
+                        "driver_bot": "driver-bot",
+                        "group_strategy": "state_machine",
+                        "auto_start_on_service_invocation": true,
+                        "collaboration_definition_yaml": definition_yaml
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let commands = collaboration_runtime.start_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].caller_id.as_deref(), Some("human_alice"));
+    assert_eq!(
+        commands[0]
+            .authenticated_human
+            .as_ref()
+            .map(|human| (human.actor_id.as_str(), human.display_name.as_deref())),
+        Some(("human_alice", Some("Alice")))
     );
 }
 
@@ -2432,7 +2528,7 @@ fn detail_from_create(cmd: &GroupCreateCommand) -> GroupDetailResult {
         service_mode: None,
         group_kind: Default::default(),
         dm_pair_key: None,
-        group_strategy: Default::default(),
+        group_strategy: cmd.group_strategy.unwrap_or_default(),
         created_at: 10,
         updated_at: 10,
         chat_url: None,

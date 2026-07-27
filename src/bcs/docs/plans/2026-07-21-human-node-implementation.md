@@ -179,6 +179,12 @@ session。这样既不改变 Bot creator 语义，也能满足 HumanInput 的权
 不能由请求体指定，普通 Chat session 不执行这项自动加入逻辑。创建协作群时自动生成的首个
 `ServiceInvocation` session 与后续手工新建的 session 使用相同规则。
 
+启动包含 `human_input` 的 State Machine 不要求启动者本身是 Human。若请求中有服务端认证的
+Human，Runtime 会将其幂等加入目标 session，并确保其 mode 为 `Present`；若请求中没有 Human
+身份，但 session 已经存在至少一个 `Present Human`，也允许启动。两者都不满足时按业务参数
+错误返回 `400`，而不是认证错误 `401`。读取 pending 节点和提交 Human response 仍然要求可信
+Human 身份及对应 session 的 `Present` 成员资格。
+
 ```text
 GET  /state-machine-runs/{run_id}/pending-human-nodes
 POST /state-machine-runs/{run_id}/nodes/{node_id}/respond
