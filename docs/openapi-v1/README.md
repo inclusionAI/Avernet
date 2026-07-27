@@ -55,45 +55,60 @@ The work therefore splits into **two tracks**:
 
 ## Who's working on what
 
-Two of us on this. Claim your lane here so we don't collide, and keep it live.
+We split by **vertical slice**: each person owns a data category end-to-end —
+its **Track A** isolation stage *and* its **Track B** endpoints. That way a
+Track B category is never blocked on a Track A stage the *other* person owns.
+(Your `mcp` example: `mcp` Track B depends on `mcp` Track A, so both go to one
+owner.)
 
-| Person | Current focus | Branch | Notes |
+| Person | Owns (vertical slices) | Track A stages | Track B endpoint groups |
 |---|---|---|---|
-| _(unassigned)_ | — | — | pick a Track A stage or a Track B category |
-| _(unassigned)_ | — | — | |
+| **totalfrank** | bots, channels, mcp | 1 (bots ✅), 3 (channels), 5 (mcp) | bots, channels, mcp |
+| **lucas-xzp** | resources, skills, routines, identity | 2 (resources), 4 (skills), 6 (routines) | resources, skills, routines, identity |
 
-> Suggested split to discuss: one person drives **Track A stages** (isolate
-> data categories), the other follows one category behind on **Track B**
-> (wire endpoints for an already-isolated category). See the open sequencing
-> decision below before committing to an order.
+- **totalfrank** also owns the **reusable Track A mechanism** (built in Stage 1 /
+  PR #456) — the pattern every other stage copies.
+- **identity** (Track B only) has no Track A stage of its own: its data is a bot
+  sub-resource, so it's already scoped by **bots isolation (Stage 1 ✅)**. It's
+  assigned to **lucas-xzp** for balance; its one dependency is already satisfied,
+  so this creates no cross-person block.
+- Rough balance: totalfrank ≈ 2 remaining A stages + ~25 B endpoints; lucas-xzp ≈
+  3 remaining A stages + ~24 B endpoints.
+
+> **Shared gate:** anything touching bots (both people) waits on **PR #456**
+> merging — a one-time gate, not an ongoing cross-person dependency. Once it
+> merges, both owners are free to run their slices in parallel.
+
+_See **Endpoints per component** below for exactly which endpoints each slice
+must implement._
 
 ---
 
 ## Status board (update as work lands)
 
 ### Track A — Tenant-isolation foundation
-| Stage | Scope (data) | State | Done-when |
-|---|---|---|---|
-| 1 | Bot records (`ac_bots` / `BotModel`) | ✅ DONE — **PR #456 (awaiting approval, not yet merged)** | PR #456 merges |
-| 2 | Resources (`ac_resource`) | ⬜ TODO | column + guards + tests green; internal API unchanged |
-| 3 | Channels (`ac_channel_config`) | ⬜ TODO | same |
-| 4 | Skills (skill tables) | ⬜ TODO | same |
-| 5 | MCP configuration | ⬜ TODO | same |
-| 6 | Routines | ⬜ TODO | same |
+| Stage | Scope (data) | Owner | State | Done-when |
+|---|---|---|---|---|
+| 1 | Bot records (`ac_bots` / `BotModel`) | totalfrank | ✅ DONE — **PR #456 (awaiting approval, not yet merged)** | PR #456 merges |
+| 2 | Resources (`ac_resource`) | lucas-xzp | ⬜ TODO | column + guards + tests green; internal API unchanged |
+| 3 | Channels (`ac_channel_config`) | totalfrank | ⬜ TODO | same |
+| 4 | Skills (skill tables) | lucas-xzp | ⬜ TODO | same |
+| 5 | MCP configuration | totalfrank | ⬜ TODO | same |
+| 6 | Routines | lucas-xzp | ⬜ TODO | same |
 
 > Stage 1 also builds the **reusable mechanism** (see below) that every later
 > stage copies. It's the foundation, not just "bots."
 
 ### Track B — Public API implementation (where the endpoints land — NOT STARTED)
-| Category | Router (stubs today) | State | Depends on |
-|---|---|---|---|
-| bots | `openapi_v1/bots/router.py` | ⬜ TODO | Track A stage 1 (PR #456) |
-| channels | `openapi_v1/channels/router.py` | ⬜ TODO | Track A channels |
-| identity | `openapi_v1/identity/router.py` | ⬜ TODO | caller identity (see verifier below) |
-| mcp | `openapi_v1/mcp/router.py` | ⬜ TODO | Track A mcp |
-| resources | `openapi_v1/resources/router.py` | ⬜ TODO | Track A resources |
-| routines | `openapi_v1/routines/router.py` | ⬜ TODO | Track A routines |
-| skills | `openapi_v1/skills/router.py` | ⬜ TODO | Track A skills |
+| Category | Owner | Router (stubs today) | State | Depends on |
+|---|---|---|---|---|
+| bots | totalfrank | `openapi_v1/bots/router.py` | ⬜ TODO | Track A stage 1 (PR #456) |
+| channels | totalfrank | `openapi_v1/channels/router.py` | ⬜ TODO | Track A channels (totalfrank) |
+| mcp | totalfrank | `openapi_v1/mcp/router.py` | ⬜ TODO | Track A mcp (totalfrank) |
+| resources | lucas-xzp | `openapi_v1/resources/router.py` | ⬜ TODO | Track A resources (lucas-xzp) |
+| skills | lucas-xzp | `openapi_v1/skills/router.py` | ⬜ TODO | Track A skills (lucas-xzp) |
+| routines | lucas-xzp | `openapi_v1/routines/router.py` | ⬜ TODO | Track A routines (lucas-xzp) |
+| identity | lucas-xzp | `openapi_v1/identity/router.py` | ⬜ TODO | bots isolation (Stage 1 ✅) |
 
 ### Cross-cutting (not per-stage)
 | Item | State | Note |
@@ -102,11 +117,10 @@ Two of us on this. Claim your lane here so we don't collide, and keep it live.
 | Tenant-leading indexes (F2, **MANDATORY** policy) | ⬜ TODO | before multi-tenant go-live |
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
 
-> **Open sequencing decision (decide when planning the next session):** do
-> Track A and Track B per category back-to-back (isolate resources → implement
-> resources endpoints), or finish all of Track A first, then all of Track B?
-> The spec treats them as separate; pick a sequence and record it in the
-> Changelog when you do.
+> **Sequencing decision — DECIDED 2026-07-27:** per-category **vertical slices**.
+> Each owner isolates a category (Track A) then implements its endpoints
+> (Track B) back-to-back, rather than finishing all of Track A before any
+> Track B. This is precisely what keeps the two of us from blocking each other.
 
 ---
 
@@ -191,6 +205,126 @@ session starts.)
 
 ---
 
+## Endpoints per component (what each slice must implement)
+
+The tables below are the **per-component endpoint checklists** for Track B —
+who owns them, and exactly what lands. Source of truth is the **served router**
+(`openapi_v1/<category>/router.py` — the stubs already carry these route
+definitions); descriptions are cross-checked against the v1 contract overview
+in **PR #363** (`docs/api-endpoints.zh-CN.md`, a Chinese endpoint reference by
+totalfrank — still open/draft, being closed soon; kept here as reference).
+
+> ⚠️ **Path divergence to reconcile.** The router stubs nest every non-`bots`
+> group under `/openapi/v1/bots/...` (e.g. `/openapi/v1/bots/resources`,
+> `/openapi/v1/bots/mcp`). PR #363's overview used **top-level** paths
+> (`/openapi/v1/resources`, `/openapi/v1/mcp`, …). The **router is
+> authoritative** for implementation — the paths below match it. Owners: if the
+> top-level shape is the intended public surface, change the router `prefix`
+> and update this section in the same PR.
+
+All responses use the `Envelope[T]` / `Page[T]` shapes from
+`openapi_v1/contracts.py` unless noted (binary streams bypass the envelope).
+
+### 🟦 totalfrank — bots (13 endpoints) · `openapi_v1/bots/router.py`
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| POST | `/openapi/v1/bots` | Create a bot; may need Passport authorization | `201 Envelope[Bot]` or `202 Envelope[BotAuthPending]` |
+| GET | `/openapi/v1/bots` | List caller's bots (`keyword`, `engine`, `status`, paged) | `Envelope[Page[Bot]]` |
+| GET | `/openapi/v1/bots/check-name` | Bot-name availability (`name`) | `Envelope[NameCheck]` |
+| GET | `/openapi/v1/bots/ceiling` | Bot-creation quota ceiling | `Envelope[Ceiling]` |
+| GET | `/openapi/v1/bots/{bot_id}` | Bot details | `Envelope[Bot]` |
+| PUT | `/openapi/v1/bots/{bot_id}` | Update bot (engine immutable) | `Envelope[Bot]` |
+| DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
+| POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
+| GET | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth; completes creation when ISSUED | `Envelope[BotAuthStatus]` |
+| GET | `/openapi/v1/bots/{bot_id}/status` | Runtime / device readiness | `Envelope[BotStatus]` |
+| GET | `/openapi/v1/bots/{bot_id}/passport` | Get the bot's Agent Passport | `Envelope[Passport]` |
+| GET | `/openapi/v1/bots/{bot_id}/engine-config` | Read engine config (free-form JSON) | `Envelope[dict]` |
+| PUT | `/openapi/v1/bots/{bot_id}/engine-config` | Write engine config (free-form JSON) | `Envelope[dict]` |
+
+### 🟦 totalfrank — channels (6 endpoints) · `openapi_v1/channels/router.py`
+DingTalk (`dingding`) config CRUD + status toggle.
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/channels` | List channels (optional `bot_id`) | `Envelope[list[Channel]]` |
+| POST | `/openapi/v1/bots/channels` | Create channel (starts inactive) | `201 Envelope[Channel]` |
+| GET | `/openapi/v1/bots/channels/{channel_id}` | Get channel | `Envelope[Channel]` |
+| PUT | `/openapi/v1/bots/channels/{channel_id}` | Full update | `Envelope[Channel]` |
+| PATCH | `/openapi/v1/bots/channels/{channel_id}` | Toggle active/inactive | `Envelope[Channel]` |
+| DELETE | `/openapi/v1/bots/channels/{channel_id}` | Delete | `Envelope[Deleted]` |
+
+_Note: the stub returns `Envelope[list[Channel]]` for list (not `Page`); PR #363
+showed `Page[Channel]`. Confirm which you want when you wire it._
+
+### 🟦 totalfrank — mcp (6 endpoints) · `openapi_v1/mcp/router.py`
+Marketplace + tenants + the caller's unified per-server config.
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/mcp/servers` | List marketplace servers (`keyword`, paged) | `Envelope[Page[McpServer]]` |
+| GET | `/openapi/v1/bots/mcp/tenants` | List MCP tenants | `Envelope[list[McpTenant]]` |
+| GET | `/openapi/v1/bots/mcp/servers/{server_code}` | Server detail | `Envelope[McpServerDetail]` |
+| GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | Caller's permission for a server | `Envelope[McpPermission]` |
+| GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Read caller's unified server config | `Envelope[McpConfig]` |
+| PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Write config (pushed to devices) | `Envelope[McpConfig]` |
+
+### 🟩 lucas-xzp — resources (9 endpoints) · `openapi_v1/resources/router.py`
+Unified file/link/folder abstraction; storage location never exposed.
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/resources` | List (`bot_id`, `type`, paged) | `Envelope[Page[Resource]]` |
+| GET | `/openapi/v1/bots/resources/check-name` | Name availability (`name`) | `Envelope[NameCheck]` |
+| POST | `/openapi/v1/bots/resources` | Create (file placeholder / link / folder) | `201 Envelope[Resource]` |
+| POST | `/openapi/v1/bots/resources/upload` | Upload raw bytes as a resource (`application/octet-stream`) | `201 Envelope[Resource]` |
+| GET | `/openapi/v1/bots/resources/{resource_id}` | Get | `Envelope[Resource]` |
+| PUT | `/openapi/v1/bots/resources/{resource_id}` | Update | `Envelope[Resource]` |
+| DELETE | `/openapi/v1/bots/resources/{resource_id}` | Delete | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/resources/{resource_id}/download` | Download bytes (**raw, not enveloped**) | `application/octet-stream` |
+| GET | `/openapi/v1/bots/resources/{resource_id}/preview` | Preview | `Envelope[Preview]` |
+
+_Note: the stub's upload is raw `octet-stream`; PR #363 described `multipart`.
+Pick one when wiring._
+
+### 🟩 lucas-xzp — skills (5 in stub + 2 proposed) · `openapi_v1/skills/router.py`
+Catalog at `/openapi/v1/bots/skills`; a bot's installed skills are a bot
+sub-resource.
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/skills` | Skill catalog (`keyword`, paged) | `Envelope[Page[Skill]]` |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[SkillDetail]` |
+| GET | `/openapi/v1/bots/{bot_id}/skills` | List a bot's installed skills | `Envelope[list[BotSkill]]` |
+| POST | `/openapi/v1/bots/{bot_id}/skills` | Install a skill on a bot (default enabled) | `201 Envelope[BotSkill]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Remove (unbind) a skill from a bot | `Envelope[Deleted]` |
+
+**Proposed additions from PR #363 (★ — NOT in the router stubs yet; decide with
+totalfrank before implementing):**
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| POST ★ | `/openapi/v1/skills/upload` | Upload a custom skill (global, owned by caller) | `Envelope[Skill]` |
+| PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Enable/disable an installed skill (`status`) | `Envelope[BotSkill]` |
+
+### 🟩 lucas-xzp — routines (7 endpoints) · `openapi_v1/routines/router.py`
+Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/routines` | List (`bot_id`, `status`, paged) | `Envelope[Page[Routine]]` |
+| POST | `/openapi/v1/bots/routines` | Create | `201 Envelope[Routine]` |
+| GET | `/openapi/v1/bots/routines/{routine_id}` | Get | `Envelope[Routine]` |
+| PATCH | `/openapi/v1/bots/routines/{routine_id}` | Update (partial) | `Envelope[Routine]` |
+| DELETE | `/openapi/v1/bots/routines/{routine_id}` | Delete | `Envelope[Deleted]` |
+| POST | `/openapi/v1/bots/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun]` |
+| GET | `/openapi/v1/bots/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[Page[RoutineRun]]` |
+
+### 🟩 lucas-xzp — identity (3 endpoints) · `openapi_v1/identity/router.py`
+Read/write a bot's identity markdown files (RULES, SOUL, …), `file_type` is an
+enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/identity/bot/{bot_id}` | List identity files + whether each exists | `Envelope[IdentityFileList]` |
+| GET | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | Read one identity file | `Envelope[IdentityFile]` |
+| PUT | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | Overwrite one identity file (`content`) | `Envelope[IdentityFileRef]` |
+
+---
+
 ## Definition of done (whole `/openapi/v1` effort)
 
 1. **Track A:** every data category (bots, resources, channels, skills, mcp,
@@ -255,4 +389,10 @@ session starts.)
 
 - **2026-07-27** — Handoff README created. Track A Stage 1 (bots + reusable
   mechanism) complete and in **PR #456**, awaiting approval. Track B not
-  started. Sequencing decision (per-category vs. all-A-then-all-B) still open.
+  started.
+- **2026-07-27** — Work split assigned by **vertical slice** (no cross-person
+  blocking): **totalfrank** = bots, channels, mcp; **lucas-xzp** = resources,
+  skills, routines, identity. Sequencing decision resolved → per-category
+  vertical slices. Added **Endpoints per component** checklists (from the stub
+  routers + PR #363), flagged the `/openapi/v1/bots/...` vs top-level path
+  divergence and the two proposed ★ skills endpoints.
