@@ -105,7 +105,12 @@ class FileTransferBackend(Protocol):
         """
         ...
 
-    def generate_download_url(self, staging_path: str, expire_seconds: int) -> str:
+    def generate_download_url(
+        self,
+        staging_path: str,
+        expire_seconds: int,
+        response_params: dict | None = None,
+    ) -> str:
         """Generate a presigned GET URL for downloading a file from the staging path.
 
         The staging_path is a complete OSS object key constructed by the
@@ -114,6 +119,10 @@ class FileTransferBackend(Protocol):
         Args:
             staging_path: Complete OSS object key.
             expire_seconds: URL validity duration in seconds.
+            response_params: Optional query parameters to append to the
+                presigned URL (e.g. ``{"response-content-disposition":
+                "attachment"}`` for forced download).  None means no
+                additional parameters.
 
         Returns:
             Presigned GET URL string.
@@ -214,5 +223,37 @@ class FileTransferBackend(Protocol):
 
         Returns:
             Complete OSS object key string.
+        """
+        ...
+
+    def build_session_staging_path(
+        self,
+        tenant: str,
+        session_id: str,
+        transfer_id: str,
+        filename: str,
+        subdir: str | None = None,
+    ) -> str:
+        """Construct full OSS object key for Session file transfer staging.
+
+        The Session Dispatcher calls this instead of hardcoding paths.
+        Pattern: ``{staging_root}/{env}/{tenant}/{session_id}/[{subdir}/]{transfer_id}/{filename}``
+
+        Distinct from ``build_staging_path`` (Bot file transfer) because
+        Session staging includes ``session_id`` and ``env`` scoping with
+        no device-level component.
+
+        Args:
+            tenant: Tenant identifier for scoping.
+            session_id: Session identifier for scoping within the tenant.
+            transfer_id: Transfer ticket ID for uniqueness.
+            filename: Target filename on the OSS object.
+            subdir: Optional subdirectory under the session scope.
+
+        Returns:
+            Complete OSS object key string.
+
+        Raises:
+            ValueError: If any input field contains ``..`` (path traversal).
         """
         ...
