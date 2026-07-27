@@ -245,7 +245,7 @@ class ClawBotService(BotService):
                 chat_metadata=chat_metadata,
             )
             return BotResponse(content=content)
-        except BotServiceError:
+        except TimeoutError:
             raise
         except ConcurrentSessionError as e:
             raise BotServiceError(

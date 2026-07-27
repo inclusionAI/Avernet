@@ -277,7 +277,7 @@ class QueueTaskMessageDispatcher:
 
                 # 4. 检查 run 是否已终结（Worker 可能已崩溃）
                 run = self._run_repository.get_by_run_id(run_id)
-                if run and run.status in ("FAILED", "TIMEOUT"):
+                if run and run.status in ("FAILED", "TIME_OUT"):
                     yield StreamChunk(
                         type="error",
                         content=f"run terminated with status {run.status}",
