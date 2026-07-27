@@ -60,6 +60,7 @@ from agentclaw.community.core.workspace.path_factory import (
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.devices.errors import (
     DeviceNotFoundError,
@@ -1615,7 +1616,9 @@ class BotService:
                         )
 
         # Start device allocation in background thread
-        thread = threading.Thread(target=do_allocate, daemon=True)
+        thread = threading.Thread(
+            target=bind_current_avernet_tenant(do_allocate), daemon=True
+        )
         thread.start()
         logger.info(f"[bot_service._allocate_device_async] Started background thread for bot {bot_id} device allocation")
 
@@ -2253,7 +2256,7 @@ class BotService:
                                 )
 
                         threading.Thread(
-                            target=_update_cron_workflow,
+                            target=bind_current_avernet_tenant(_update_cron_workflow),
                             name=f"cron-workflow-update-{bot_id}",
                             daemon=True,
                         ).start()
@@ -2369,7 +2372,7 @@ class BotService:
             return
 
         thread = threading.Thread(
-            target=self._refresh_codefuse_token_on_device,
+            target=bind_current_avernet_tenant(self._refresh_codefuse_token_on_device),
             kwargs={"bot_id": bot_id, "user_id": user_id, "plaintext_token": plaintext},
             daemon=True,
             name=f"refresh-codefuse-token-{bot_id}",
@@ -4088,10 +4091,14 @@ class BotService:
                     return index, None, str(e)
 
             # 使用线程池并行申请设备
+            # ThreadPoolExecutor threads do NOT copy context vars, so bind the
+            # request's tenant onto the submitted callable (captured now, in the
+            # request thread) — each worker then runs under the right tenant.
+            _apply_single_device = bind_current_avernet_tenant(apply_single_device)
             with concurrent.futures.ThreadPoolExecutor(max_workers=min(instance_count, 10)) as executor:
                 # 提交所有任务
                 future_to_index = {
-                    executor.submit(apply_single_device, i): i for i in range(instance_count)
+                    executor.submit(_apply_single_device, i): i for i in range(instance_count)
                 }
 
                 # 收集结果
