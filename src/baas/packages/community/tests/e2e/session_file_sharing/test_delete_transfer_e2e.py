@@ -44,7 +44,10 @@ async def test_delete_terminal_transfer(
 
     # 1. Upload + put content + complete
     upload_resp = await dispatcher.dispatch_get_upload_url(
-        tenant="t1", session_id="sess-001", filename="delete_me.txt", file_size=100,
+        tenant="t1",
+        session_id="sess-001",
+        filename="delete_me.txt",
+        file_size=100,
     )
     original_content = b"content to be deleted"
     stub_oss_backend.put_content(upload_resp.upload_url, original_content)

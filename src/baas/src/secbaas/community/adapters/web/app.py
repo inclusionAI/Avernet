@@ -31,9 +31,6 @@ from secbaas.community.adapters.web.routers.bot_service import (
 from secbaas.community.adapters.web.routers.bot_service.bot_start_progress_router import (
     router as bot_start_progress_router,
 )
-from secbaas.community.adapters.web.routers.session_file_sharing import (
-    session_file_sharing_router,
-)
 from secbaas.community.adapters.web.routers.config_management import (
     api_gateway_router,
     bot_qpm_router,
@@ -62,6 +59,9 @@ from secbaas.community.adapters.web.routers.paas_service import (
 )
 from secbaas.community.adapters.web.routers.relay_session_router import (
     router as relay_session_router,
+)
+from secbaas.community.adapters.web.routers.session_file_sharing import (
+    session_file_sharing_router,
 )
 from secbaas.community.adapters.web.websocket import local_management_router
 from secbaas.community.api import DomainError

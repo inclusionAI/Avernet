@@ -43,7 +43,10 @@ async def test_upload_single_complete_flow(
 
     # 3. Get upload URL (SINGLE — file_size=100 < 100MB threshold)
     upload_resp = await dispatcher.dispatch_get_upload_url(
-        tenant="t1", session_id="sess-001", filename="test.txt", file_size=100,
+        tenant="t1",
+        session_id="sess-001",
+        filename="test.txt",
+        file_size=100,
     )
     assert upload_resp.type == "SINGLE", f"Expected SINGLE, got {upload_resp.type}"
     assert upload_resp.upload_url is not None, "upload_url should not be None"
@@ -72,9 +75,7 @@ async def test_upload_single_complete_flow(
     complete_resp = await dispatcher.dispatch_complete_upload(
         upload_resp.transfer_id,
     )
-    assert complete_resp.status == "DONE", (
-        f"Expected DONE, got {complete_resp.status}"
-    )
+    assert complete_resp.status == "DONE", f"Expected DONE, got {complete_resp.status}"
     assert complete_resp.transfer_id == upload_resp.transfer_id
 
     # 7. Verify content is in stub OSS (check_object_exists)
@@ -102,7 +103,10 @@ async def test_upload_and_cancel_flow(
 
     # 1. Get upload URL
     upload_resp = await dispatcher.dispatch_get_upload_url(
-        tenant="t1", session_id="sess-001", filename="test.txt", file_size=100,
+        tenant="t1",
+        session_id="sess-001",
+        filename="test.txt",
+        file_size=100,
     )
 
     # 2. Configure get_by_transfer_id -> CREATED ticket
@@ -214,8 +218,6 @@ def test_upload_staging_path_format(stub_oss_backend) -> None:
     assert "t1" in path, f"tenant 't1' should appear in path: {path}"
     assert "sess-001" in path, f"session_id should appear in path: {path}"
     assert "tf-001" in path, f"transfer_id should appear in path: {path}"
-    assert path.endswith("test.txt"), (
-        f"Path should end with filename: {path}"
-    )
+    assert path.endswith("test.txt"), f"Path should end with filename: {path}"
     # Verify path does NOT end with "/" (no trailing subdir marker)
     assert not path.endswith("/"), f"Path should not end with /: {path}"
