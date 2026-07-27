@@ -11,6 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from agentclaw.community.core.skills_pool.repository.models import (
     SkillsPoolRolloutAuditModel,
 )
+from agentclaw.community.core.skills_pool.rollout_config import (
+    normalize_rollout_config_value,
+)
 from agentclaw.community.core.skills_pool.rollout_gate import (
     SKILLS_POOL_ROLLOUT_BUSINESS_CODE,
     SKILLS_POOL_ROLLOUT_PARAM_CODE,
@@ -107,11 +110,15 @@ class SkillsPoolRolloutRepository:
                 current_value = (
                     json.loads(row.param_value) if row.param_value else None
                 )
+                normalized_current = normalize_rollout_config_value(current_value)
+                normalized_expected = normalize_rollout_config_value(expected_value)
                 if (
                     row.id != config_id
                     or current_ext.get("revision") != expected_revision
                     or (row.enable == "1") is not expected_enable
-                    or current_value != expected_value
+                    or normalized_current is None
+                    or normalized_expected is None
+                    or normalized_current != normalized_expected
                 ):
                     return False
                 row.param_value = json.dumps(value, ensure_ascii=False)

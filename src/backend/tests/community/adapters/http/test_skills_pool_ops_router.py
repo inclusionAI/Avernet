@@ -1,5 +1,6 @@
 """Skills Pool operator API surface contract."""
 
+import json
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -13,18 +14,34 @@ from agentclaw.community.adapters.http.skills_pool.router import (
     rollback_bot,
     router,
     set_full_rollout,
+    set_rollout_feature,
 )
 from agentclaw.community.adapters.http.skills_pool.schemas import (
     ControlBotRequest,
+    FeatureToggleRequest,
     FullRolloutRequest,
     RollbackRequest,
+)
+from agentclaw.community.api.skills_pool_rollout_service import (
+    SkillsPoolRolloutServiceProtocol,
+)
+from agentclaw.community.core.common_config.repository import (
+    CommonConfigRepository,
 )
 from agentclaw.community.core.skills_pool.recovery_service import (
     SkillsPoolRollbackOutcome,
     SkillsPoolRollbackResult,
 )
 from agentclaw.community.core.skills_pool.operations import RolloutOperationError
+from agentclaw.community.core.skills_pool.rollout_gate import (
+    SKILLS_POOL_ROLLOUT_BUSINESS_CODE,
+    SKILLS_POOL_ROLLOUT_PARAM_CODE,
+)
+from agentclaw.community.core.skills_pool.rollout_repository import (
+    SkillsPoolRolloutRepositoryProtocol,
+)
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
 def test_all_skills_pool_operations_are_operator_only() -> None:
@@ -51,6 +68,71 @@ def test_all_skills_pool_operations_are_operator_only() -> None:
             dependency.call for dependency in route.dependant.dependencies
         }
         assert require_operator in dependency_calls
+
+
+@pytest.mark.asyncio
+async def test_feature_post_normalizes_legacy_config_and_audits_once(
+    test_injector,
+) -> None:
+    database = test_injector.get(DatabasePlugin)
+    await database.bootstrap()
+    configs = CommonConfigRepository(database)
+    config_id = configs.create_config(
+        business_code=SKILLS_POOL_ROLLOUT_BUSINESS_CODE,
+        business_name="Skills Pool",
+        param_code=SKILLS_POOL_ROLLOUT_PARAM_CODE,
+        param_name="Skills Pool layout rollout",
+        param_value=json.dumps(
+            {
+                "enable_all": False,
+                "promoted_engines": ["openclaw"],
+                "whitelist": [],
+                "negative_controls": [],
+                "teclaw_controls": [],
+            }
+        ),
+        enable="0",
+        ext_info=json.dumps({"revision": "legacy-revision"}),
+        env="dev",
+    )
+    service = test_injector.get(SkillsPoolRolloutServiceProtocol)
+
+    response = await set_rollout_feature(
+        request=FeatureToggleRequest(
+            enabled=True,
+            reason="resume pre canary",
+        ),
+        user=SimpleNamespace(staffId="freddie"),
+        service=service,
+    )
+    repeated = await set_rollout_feature(
+        request=FeatureToggleRequest(
+            enabled=True,
+            reason="idempotent retry",
+        ),
+        user=SimpleNamespace(staffId="freddie"),
+        service=service,
+    )
+
+    assert response.success is True
+    assert repeated.success is True
+    assert response.data["enabled"] is True
+    assert response.data["enable_all"] is False
+    assert response.data["full_rollout_engines"] == ()
+    stored = configs.get_by_id(config_id=config_id)
+    assert stored is not None
+    assert json.loads(stored.param_value or "{}") == {
+        "enable_all": False,
+        "full_rollout_engines": [],
+        "promoted_engines": ["openclaw"],
+        "whitelist": [],
+        "negative_controls": [],
+        "teclaw_controls": [],
+    }
+    audit = test_injector.get(SkillsPoolRolloutRepositoryProtocol).list_audit_events(
+        env="dev"
+    )
+    assert [event["action"] for event in audit] == ["enable"]
 
 
 def test_control_bot_request_rejects_empty_batch_id() -> None:
