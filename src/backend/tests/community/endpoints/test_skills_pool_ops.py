@@ -74,6 +74,7 @@ def _seed_happy_services(world) -> None:
             patch.object(SkillsPoolRolloutOperations, method, mutation)
             for method in (
                 "set_feature_enabled",
+                "set_full_rollout",
                 "promote_engine",
                 "add_bot",
                 "remove_bot",
@@ -134,6 +135,14 @@ _HAPPY_CASES = (
         CaseInput(
             headers=_HEADERS,
             json_body={"engine": "openclaw", "reason": "first engine"},
+        ),
+    ),
+    (
+        "POST",
+        "/api/ops/skills-pool/rollout/full",
+        CaseInput(
+            headers=_HEADERS,
+            json_body={"enabled": True, "reason": "promote environment"},
         ),
     ),
     (

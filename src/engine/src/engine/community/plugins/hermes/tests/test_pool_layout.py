@@ -172,8 +172,10 @@ def test_activation_switches_hermes_local_bridge_to_pool(tmp_path: Path) -> None
     assert result.status is PoolActivationStatus.COMMITTED
     assert legacy_local.is_symlink()
     assert legacy_local.resolve() == pool_local.resolve()
-    assert local_bridge.readlink() == legacy_local
-    assert local_bridge.resolve() == pool_local.resolve()
+    assert not local_bridge.exists()
+    assert not local_bridge.is_symlink()
+    assert not repo_bridge.exists()
+    assert not repo_bridge.is_symlink()
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
 
     mapping = SkillMapping(

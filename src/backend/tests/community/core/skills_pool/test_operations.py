@@ -172,6 +172,8 @@ def build_operations(
 def rollout_config(
     *,
     enabled: bool = True,
+    enable_all: bool = False,
+    full_rollout_engines: list[str] | None = None,
     promoted_engines: list[str] | None = None,
     whitelist: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
@@ -182,7 +184,8 @@ def rollout_config(
         "gmt_modified": "2026-07-25T09:00:00+00:00",
         "ext_info": {},
         "param_value": {
-            "enable_all": False,
+            "enable_all": enable_all,
+            "full_rollout_engines": full_rollout_engines or [],
             "promoted_engines": promoted_engines or [],
             "whitelist": whitelist or [],
             "negative_controls": [],
@@ -207,6 +210,7 @@ def test_enabling_missing_rollout_creates_safe_exact_bot_configuration() -> None
     assert snapshot.whitelist == ()
     assert configs.upserts[0]["param_value"] == {
         "enable_all": False,
+        "full_rollout_engines": [],
         "promoted_engines": [],
         "whitelist": [],
         "negative_controls": [],
@@ -241,6 +245,99 @@ def test_engine_promotion_is_manual_ordered_and_idempotent() -> None:
     assert promoted.promoted_engines == ("openclaw",)
     assert repeated.promoted_engines == ("openclaw",)
     assert len(configs.upserts) == 1
+
+
+def test_full_rollout_requires_accepted_promoted_engine_then_admits_environment(
+) -> None:
+    operations, configs, _, _ = build_operations(
+        config=rollout_config(promoted_engines=["openclaw"])
+    )
+
+    with pytest.raises(RolloutOperationError, match="accepted openclaw batch"):
+        operations.set_full_rollout(
+            env=ENV,
+            enabled=True,
+            operator="freddie",
+            reason="too early",
+        )
+
+    operations.accept_batch(
+        env=ENV,
+        operator="freddie",
+        reason="canary passed",
+        acceptance=BatchPromotionEvidence(
+            engine="openclaw",
+            batch_id="openclaw-canary-1",
+            promotion_ready=True,
+            report={
+                "rollout_config_version": "2026-07-25T09:00:00+00:00",
+                "promotion_ready": True,
+            },
+        ),
+    )
+    snapshot = operations.set_full_rollout(
+        env=ENV,
+        enabled=True,
+        operator="freddie",
+        reason="promote pre openclaw",
+    )
+
+    assert snapshot.enable_all is True
+    assert configs.config is not None
+    assert configs.config["param_value"]["enable_all"] is True
+    assert snapshot.audit_log[-1].action == "full_rollout:environment:enable"
+
+
+def test_engine_full_rollout_does_not_admit_other_promoted_engine() -> None:
+    operations, configs, _, _ = build_operations(
+        config=rollout_config(promoted_engines=["openclaw"])
+    )
+    operations.accept_batch(
+        env=ENV,
+        operator="freddie",
+        reason="canary passed",
+        acceptance=BatchPromotionEvidence(
+            engine="openclaw",
+            batch_id="openclaw-canary-1",
+            promotion_ready=True,
+            report={
+                "rollout_config_version": "2026-07-25T09:00:00+00:00",
+                "promotion_ready": True,
+            },
+        ),
+    )
+
+    snapshot = operations.set_full_rollout(
+        env=ENV,
+        engine="openclaw",
+        enabled=True,
+        operator="freddie",
+        reason="promote only openclaw",
+    )
+
+    assert snapshot.enable_all is False
+    assert snapshot.full_rollout_engines == ("openclaw",)
+    assert configs.config["param_value"]["full_rollout_engines"] == ["openclaw"]
+    assert snapshot.audit_log[-1].action == "full_rollout:openclaw:enable"
+
+
+def test_full_rollout_can_be_disabled_without_reverting_claimed_bots() -> None:
+    operations, _, _, _ = build_operations(
+        config=rollout_config(
+            enable_all=True,
+            promoted_engines=["openclaw"],
+        )
+    )
+
+    snapshot = operations.set_full_rollout(
+        env=ENV,
+        enabled=False,
+        operator="freddie",
+        reason="pause new claims",
+    )
+
+    assert snapshot.enable_all is False
+    assert snapshot.promoted_engines == ("openclaw",)
 
 
 def test_next_engine_requires_and_audits_a_passing_batch() -> None:

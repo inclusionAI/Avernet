@@ -157,6 +157,71 @@ async def test_skills_local_injected_for_arca_when_present():
 
 
 @pytest.mark.asyncio
+async def test_pool_skills_local_is_injected_when_legacy_bridge_is_retired():
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(side_effect=[
+        [
+            {"name": "skills-pool", "is_dir": True},
+            {"name": "data", "is_dir": True},
+        ],
+        [],
+        [
+            {
+                "name": "skills-local",
+                "is_dir": True,
+                "path": (
+                    "/home/admin/.openclaw/workspace/"
+                    "skills-pool/skills-local"
+                ),
+            }
+        ],
+    ])
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    items = await svc.list_dir(**_COORDS, path="")
+
+    assert {item["name"] for item in items} == {"data", "skills-local"}
+    injected = next(item for item in items if item["name"] == "skills-local")
+    assert injected["path"] == "skills-pool/skills-local"
+    assert injected["absolute_path"].endswith("/skills-pool/skills-local")
+
+
+@pytest.mark.asyncio
+async def test_root_returns_only_one_skills_local_when_both_layouts_exist():
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(side_effect=[
+        [{"name": "data", "is_dir": True}],
+        [
+            {
+                "name": "skills-local",
+                "is_dir": True,
+                "path": (
+                    "/home/admin/.openclaw/workspace/skills/skills-local"
+                ),
+            }
+        ],
+        [
+            {
+                "name": "skills-local",
+                "is_dir": True,
+                "path": (
+                    "/home/admin/.openclaw/workspace/"
+                    "skills-pool/skills-local"
+                ),
+            }
+        ],
+    ])
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    items = await svc.list_dir(**_COORDS, path="")
+
+    injected = [item for item in items if item["name"] == "skills-local"]
+    assert len(injected) == 1
+    assert injected[0]["path"] == "skills/skills-local"
+    assert device_fs.list_dir.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_skills_local_not_injected_for_teclaw():
     device_fs = MagicMock()
     device_fs.list_dir = AsyncMock(return_value=[{"name": "skills-local", "is_dir": True}])
@@ -194,12 +259,13 @@ async def test_root_listing_survives_skills_probe_404():
     device_fs.list_dir = AsyncMock(side_effect=[
         [{"name": "data", "is_dir": True}],                 # root → 200
         FileNotFoundError("workspace/skills not found"),    # skills probe → 404
+        FileNotFoundError("workspace/skills-pool not found"),
     ])
     svc, _ = _svc(provider="baas", device_fs=device_fs)
     items = await svc.list_dir(**_COORDS, path="")
     assert [i["name"] for i in items] == ["data"]
     assert all(i["path"] != "skills/skills-local" for i in items)
-    assert device_fs.list_dir.await_count == 2
+    assert device_fs.list_dir.await_count == 3
 
 
 # ── read / download-limit forwarding ─────────────────────────────────────────

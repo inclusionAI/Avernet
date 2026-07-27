@@ -112,10 +112,10 @@ def test_registered_local_cutover_syncs_latest_content_and_atomically_bridges(
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
-    assert legacy_local.is_symlink()
-    assert legacy_local.resolve() == pool_local.resolve()
-    assert (legacy_local / "handmade" / "SKILL.md").read_text() == "latest"
-    assert not (legacy_local / "handmade" / "stale.txt").exists()
+    assert not legacy_local.exists()
+    assert not legacy_local.is_symlink()
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
+    assert not (pool_local / "handmade" / "stale.txt").exists()
     quarantine = (
         pool_local.parent
         / ".migration-quarantine"
@@ -136,8 +136,15 @@ def test_registered_local_cutover_syncs_latest_content_and_atomically_bridges(
     assert published.published
     assert external_entry.is_symlink()
     assert unclassified_entry.is_symlink()
-    assert legacy_local.is_symlink()
-    assert (legacy_local.parent / "skills-repo").is_symlink()
+    assert not legacy_local.exists()
+    assert not legacy_local.is_symlink()
+    assert not (legacy_local.parent / "skills-repo").exists()
+    assert not (legacy_local.parent / "skills-repo").is_symlink()
+    active_marker = json.loads(
+        (pool_local.parent / ".pool-active").read_text()
+    )
+    assert active_marker["activation_state"] == "active"
+    assert active_marker["mappings"] == []
     verification = verify_skill_mappings(mappings=mappings, home=home)
     assert verification.valid
     assert (legacy_local.parent / "handmade" / "SKILL.md").read_text() == "latest"
@@ -225,6 +232,12 @@ def test_legacy_mapping_can_replace_pool_mapping_during_explicit_rollback(
     )
     assert activated.committed
     assert publish_pool_mappings(mappings=[pool_mapping], home=home).published
+    rolled_back = rollback_openclaw_pool(
+        rollback_generation="rollback-1",
+        registered_local_names=["handmade"],
+        home=home,
+    )
+    assert rolled_back.committed
 
     legacy_mapping = SkillMapping(
         source=str(legacy_local / "handmade"),
@@ -776,7 +789,7 @@ def test_post_exchange_new_file_uses_atomic_no_clobber(
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
-    assert (legacy_local / "handmade" / "raced.txt").read_text() == (
+    assert (pool_local / "handmade" / "raced.txt").read_text() == (
         "pool-after-exchange"
     )
     assert result.evidence["post_sync"]["conflicts_preserved_in_pool"] == [

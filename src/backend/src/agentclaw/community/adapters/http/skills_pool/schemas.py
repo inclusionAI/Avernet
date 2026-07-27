@@ -21,6 +21,12 @@ class FeatureToggleRequest(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class FullRolloutRequest(BaseModel):
+    enabled: bool
+    engine: str | None = None
+    reason: str = Field(min_length=1)
+
+
 class EnginePromotionRequest(BaseModel):
     engine: str
     reason: str = Field(min_length=1)

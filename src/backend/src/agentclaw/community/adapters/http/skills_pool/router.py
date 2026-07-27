@@ -31,6 +31,7 @@ from agentclaw.community.adapters.http.skills_pool.schemas import (
     ControlBotRequest,
     EnginePromotionRequest,
     FeatureToggleRequest,
+    FullRolloutRequest,
     RepairRequest,
     RollbackRequest,
     WhitelistAddRequest,
@@ -121,6 +122,28 @@ async def promote_engine(
                 operator=user.staffId,
                 reason=request.reason,
                 acceptance_batch_id=request.acceptance_batch_id,
+            )
+        )
+    except RolloutOperationError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/rollout/full", response_model=ApiResponse)
+async def set_full_rollout(
+    request: FullRolloutRequest,
+    user: AuthenticatedUser = Depends(require_operator),
+    service: SkillsPoolRolloutServiceProtocol = Injected(
+        SkillsPoolRolloutServiceProtocol
+    ),
+):
+    try:
+        return _response(
+            service.set_full_rollout(
+                env=get_current_env(),
+                enabled=request.enabled,
+                engine=request.engine,
+                operator=user.staffId,
+                reason=request.reason,
             )
         )
     except RolloutOperationError as error:

@@ -27,6 +27,7 @@ This module never branches on mode. Local / test boots layer
 ``TestingSkillCenterModule`` on top to override the database-mode-keyed
 plugin_api and repos.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -36,17 +37,31 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.git_sync_service import GitSyncServiceProtocol
 from agentclaw.community.api.skill_auth_service import SkillAuthServiceProtocol
-from agentclaw.community.api.skill_batch_sync_service import SkillBatchSyncServiceProtocol
-from agentclaw.community.api.skill_center_sync_service import SkillCenterSyncServiceProtocol
+from agentclaw.community.api.skill_batch_sync_service import (
+    SkillBatchSyncServiceProtocol,
+)
+from agentclaw.community.api.skill_center_sync_service import (
+    SkillCenterSyncServiceProtocol,
+)
 from agentclaw.community.api.skill_member_service import SkillMemberServiceProtocol
-from agentclaw.community.api.skill_parameter_service_factory import SkillParameterServiceFactoryProtocol
-from agentclaw.community.api.skill_propagation_service import SkillPropagationServiceProtocol
+from agentclaw.community.api.skill_parameter_service_factory import (
+    SkillParameterServiceFactoryProtocol,
+)
+from agentclaw.community.api.skill_propagation_service import (
+    SkillPropagationServiceProtocol,
+)
 from agentclaw.community.api.skill_publish_service import SkillPublishServiceProtocol
 from agentclaw.community.api.skill_scan_service import SkillScanServiceProtocol
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-from agentclaw.community.api.skill_set_activator_factory import SkillSetActivatorFactoryProtocol
-from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
-from agentclaw.community.api.skill_set_switcher_factory import SkillSetSwitcherFactoryProtocol
+from agentclaw.community.api.skill_set_activator_factory import (
+    SkillSetActivatorFactoryProtocol,
+)
+from agentclaw.community.api.skill_set_service_factory import (
+    SkillSetServiceFactoryProtocol,
+)
+from agentclaw.community.api.skill_set_switcher_factory import (
+    SkillSetSwitcherFactoryProtocol,
+)
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -54,14 +69,19 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
-from agentclaw.community.core.skill_center.services.git_sync import GitSyncConfig, GitSyncService
+from agentclaw.community.core.skill_center.services.git_sync import (
+    GitSyncConfig,
+    GitSyncService,
+)
 from agentclaw.community.core.skill_center.services.repositories import (
     SkillCategoryRepository,
     SkillMemberRepository,
     SkillRepository,
     SkillSetRepository,
 )
-from agentclaw.community.core.skill_center.services.skill_auth_service import SkillAuthService
+from agentclaw.community.core.skill_center.services.skill_auth_service import (
+    SkillAuthService,
+)
 from agentclaw.community.core.skill_center.services.skill_batch_sync_service import (
     SkillBatchSyncService,
 )
@@ -69,7 +89,9 @@ from agentclaw.community.core.skill_center.services.skill_center_sync_service im
     SkillCenterSyncService,
     SkillCenterSyncLogRepository,
 )
-from agentclaw.community.core.skill_center.services.skill_member_service import SkillMemberService
+from agentclaw.community.core.skill_center.services.skill_member_service import (
+    SkillMemberService,
+)
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
@@ -77,7 +99,9 @@ from agentclaw.community.core.skill_center.services.skill_propagation_service im
     SkillPropagationLogRepository,
     SkillPropagationService,
 )
-from agentclaw.community.core.skill_center.services.skill_publish_service import SkillPublishService
+from agentclaw.community.core.skill_center.services.skill_publish_service import (
+    SkillPublishService,
+)
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.core.skill_center.factories import (
     SkillParameterServiceFactory,
@@ -89,13 +113,23 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetSwitcherFactory,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+from agentclaw.community.core.skills_pool.repository.protocol import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
+from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    runtime_uses_pool_paths,
+)
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+    DeviceSyncDispatcher,
+)
 from agentclaw.community.core.devices.services.device_filesystem_dispatcher import (
     DeviceFilesystemDispatcher,
     DeviceFileSystemResolver,
@@ -274,7 +308,8 @@ class SkillCenterModule(Module):
         # LOCAL → permissive; community → CommunitySecretResolver, unregistered →
         # permissive.)
         _bound_modes = {
-            entry.mode for entry in IMPL_REGISTRY
+            entry.mode
+            for entry in IMPL_REGISTRY
             if entry.cls is secret_resolver.__class__
         }
         allow_missing_repo_url = Mode.PROD not in _bound_modes
@@ -387,11 +422,35 @@ class SkillCenterModule(Module):
         bot_repo: BotRepository,
         device_plugin: DeviceAccessor,
         path_factory: WorkspacePathFactory,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
         injector: Injector,
     ) -> SkillSetServiceFactory:
         # resolver / device_sync_dispatcher 走 lazy thunk:防止构造期 DI 循环
         # ``BotService → SkillSetServiceFactory → DeviceContextResolver
         # → ArcaConnInfoBuilder → DeviceService → BotService``。
+        def resolve_pool_paths(
+            owner_id: str,
+            bot_id: str,
+            _requested_engine: str,
+        ) -> tuple[str, str, str] | None:
+            bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
+            if bot is None or bot.get("bot_type") == "desktop":
+                return None
+            engine = bot.get("active_engine")
+            if not isinstance(engine, str):
+                return None
+            state = layout_repository.get(
+                BotSkillLayoutScope(
+                    env=str(bot["env"]),
+                    entity_id=str(bot["entity_id"]),
+                    bot_id=str(bot["bot_id"]),
+                )
+            )
+            if not runtime_uses_pool_paths(state):
+                return None
+            paths = pool_paths_for_engine(engine)
+            return paths.active, paths.pool_local, paths.pool_repo
+
         return SkillSetServiceFactory(
             skill_repo=skill_repo,
             skill_set_repo=skill_set_repo,
@@ -404,6 +463,7 @@ class SkillCenterModule(Module):
             bot_repo=bot_repo,
             device_plugin=device_plugin,
             path_factory=path_factory,
+            pool_layout_paths=resolve_pool_paths,
         )
 
     @singleton
@@ -587,7 +647,9 @@ class SkillCenterModule(Module):
     @singleton
     @provider
     @inject
-    def _skill_auth_service_protocol(self, svc: SkillAuthService) -> SkillAuthServiceProtocol:
+    def _skill_auth_service_protocol(
+        self, svc: SkillAuthService
+    ) -> SkillAuthServiceProtocol:
         return svc
 
     @singleton

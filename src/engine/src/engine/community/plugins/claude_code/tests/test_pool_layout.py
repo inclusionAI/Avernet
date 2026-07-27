@@ -168,9 +168,10 @@ def test_claude_code_activation_atomically_switches_physical_local(
     assert result.status is PoolActivationStatus.COMMITTED
     assert legacy_local.is_symlink()
     assert legacy_local.resolve() == pool_local.resolve()
-    assert local_bridge.readlink() == legacy_local
-    assert local_bridge.resolve() == pool_local.resolve()
-    assert repo_bridge.resolve() == pool_repo.resolve()
+    assert not local_bridge.exists()
+    assert not local_bridge.is_symlink()
+    assert not repo_bridge.exists()
+    assert not repo_bridge.is_symlink()
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
 
 

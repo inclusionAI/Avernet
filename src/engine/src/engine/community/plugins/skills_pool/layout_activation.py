@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import re
+import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Callable
@@ -98,6 +100,7 @@ class _Layout:
     legacy_repo: Path
     local_bridge: Path
     repo_bridge: Path
+    active_marker: Path
 
     @classmethod
     def for_home(cls, home: Path) -> "_Layout":
@@ -119,6 +122,7 @@ class _Layout:
                 legacy_repo=home / ".hermes" / "skills-repo",
                 local_bridge=legacy_root / "skills-local",
                 repo_bridge=home / ".hermes" / "skills-repo",
+                active_marker=pool_root / ".pool-active",
             )
         if engine == "aicoding":
             workspace = home / ".aicoding" / "workspace"
@@ -134,6 +138,7 @@ class _Layout:
                 legacy_repo=home / ".aicoding" / "skills-repo",
                 local_bridge=legacy_root / "skills-local",
                 repo_bridge=home / ".aicoding" / "skills-repo",
+                active_marker=pool_root / ".pool-active",
             )
         if engine == "claude_code":
             workspace = home / ".claude_code" / "workspace"
@@ -149,6 +154,7 @@ class _Layout:
                 legacy_repo=home / ".claude_code" / "skills-repo",
                 local_bridge=legacy_root / "skills-local",
                 repo_bridge=legacy_root / "skills-repo",
+                active_marker=pool_root / ".pool-active",
             )
         if engine != "openclaw":
             raise ValueError(f"unsupported filesystem Pool engine: {engine}")
@@ -166,6 +172,7 @@ class _Layout:
             legacy_repo=legacy_repo,
             local_bridge=legacy_local,
             repo_bridge=legacy_repo,
+            active_marker=pool_root / ".pool-active",
         )
 
 
@@ -182,6 +189,141 @@ class _PostCutoverFinalization:
     post_sync: dict[str, object]
     cleanup_pending: bool
     failure: PoolActivationResult | None = None
+
+
+def _read_active_marker(path: Path) -> dict[str, object] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (
+        FileNotFoundError,
+        OSError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _write_active_marker(
+    *,
+    layout: _Layout,
+    engine: str,
+    migration_generation: str,
+    preparation_id: str,
+    mappings: list[SkillMapping],
+    activation_state: str,
+) -> None:
+    value = {
+        "engine": engine,
+        "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+        "preparation_id": preparation_id,
+        "migration_generation": migration_generation,
+        "activation_state": activation_state,
+        "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        # Keep the key for compatibility with already-published image startup
+        # scripts. Only finalizing carries recovery mappings; active is stable.
+        "mappings": [],
+    }
+    if activation_state == "finalizing":
+        # Recovery material for the short cutover window only. Once active,
+        # skill mappings are mutable product state and must not become part of
+        # the persisted layout contract.
+        value["mappings"] = [
+            {"source": mapping.source, "target": mapping.target}
+            for mapping in mappings
+        ]
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    temporary = layout.pool_root / (f".pool-active.tmp-{migration_generation}")
+    with temporary.open("wb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, layout.active_marker)
+    directory_fd = os.open(layout.pool_root, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _retire_bridge(path: Path, *, allowed_targets: tuple[Path, ...]) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if not path.is_symlink():
+        raise OSError(f"legacy storage entry is not a symlink: {path}")
+    target = _lexical_target(path)
+    normalized_targets = {
+        Path(os.path.abspath(candidate)) for candidate in allowed_targets
+    }
+    if target not in normalized_targets:
+        raise OSError(f"legacy storage entry points elsewhere: {path}")
+    path.unlink()
+
+
+def _finalize_active_root(
+    *,
+    layout: _Layout,
+    engine: str,
+    migration_generation: str,
+    preparation_id: str,
+    mappings: list[SkillMapping],
+) -> PoolActivationResult | None:
+    published = publish_pool_mappings(
+        mappings=mappings,
+        home=layout.pool_root.parents[2],
+        engine=engine,
+    )
+    if not published.published:
+        return PoolActivationResult(
+            PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+            {
+                "reason": "pool_mapping_publish_failed",
+                "mapping": published.evidence,
+            },
+        )
+    verified = verify_skill_mappings(
+        mappings=mappings,
+        home=layout.pool_root.parents[2],
+        engine=engine,
+    )
+    if not verified.valid:
+        return PoolActivationResult(
+            PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+            {
+                "reason": "pool_mapping_verify_failed",
+                "mapping": verified.evidence,
+            },
+        )
+    _write_active_marker(
+        layout=layout,
+        engine=engine,
+        migration_generation=migration_generation,
+        preparation_id=preparation_id,
+        mappings=mappings,
+        activation_state="finalizing",
+    )
+    _retire_bridge(
+        layout.local_bridge,
+        allowed_targets=(layout.legacy_local, layout.pool_local),
+    )
+    _retire_bridge(
+        layout.repo_bridge,
+        allowed_targets=(layout.legacy_repo, layout.pool_repo),
+    )
+    _write_active_marker(
+        layout=layout,
+        engine=engine,
+        migration_generation=migration_generation,
+        preparation_id=preparation_id,
+        mappings=mappings,
+        activation_state="active",
+    )
+    return None
 
 
 def _lexical_target(link: Path) -> Path:
@@ -534,6 +676,43 @@ def _activate_pool(
             preparation_id=inspection.preparation_id,
         )
 
+    active_marker = _read_active_marker(layout.active_marker)
+    if active_marker is not None:
+        if (
+            active_marker.get("engine") != engine
+            or active_marker.get("layout_contract_version") != LAYOUT_CONTRACT_VERSION
+            or active_marker.get("preparation_id") != preparation_id
+            or active_marker.get("migration_generation") != migration_generation
+            or active_marker.get("activation_state") not in {"finalizing", "active"}
+        ):
+            return _invalid("active_marker_identity_mismatch")
+        try:
+            completion_failure = _finalize_active_root(
+                layout=layout,
+                engine=engine,
+                migration_generation=migration_generation,
+                preparation_id=preparation_id,
+                mappings=mappings,
+            )
+        except OSError as error:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_root_retirement_failed",
+                    "error_type": type(error).__name__,
+                    "errno": error.errno,
+                },
+            )
+        if completion_failure is not None:
+            return completion_failure
+        return PoolActivationResult(
+            PoolActivationStatus.ALREADY_COMMITTED,
+            {
+                "active_marker": str(layout.active_marker),
+                "legacy_storage_entries_absent": True,
+            },
+        )
+
     temporary = layout.legacy_local.parent / (
         f".skills-local.pool-cutover-{migration_generation}"
     )
@@ -581,11 +760,20 @@ def _activate_pool(
                 )
                 if finalization.failure is not None:
                     return finalization.failure
+            completion_failure = _finalize_active_root(
+                layout=layout,
+                engine=engine,
+                migration_generation=migration_generation,
+                preparation_id=preparation_id,
+                mappings=mappings,
+            )
+            if completion_failure is not None:
+                return completion_failure
             return PoolActivationResult(
                 PoolActivationStatus.ALREADY_COMMITTED,
                 {
-                    "bridge": str(layout.legacy_local),
-                    "target": str(layout.pool_local),
+                    "active_marker": str(layout.active_marker),
+                    "legacy_storage_entries_absent": True,
                     "quarantine": str(quarantine),
                     "quarantine_cleanup_pending": (finalization.cleanup_pending),
                     "post_sync": finalization.post_sync,
@@ -671,11 +859,20 @@ def _activate_pool(
         )
         if finalization.failure is not None:
             return finalization.failure
+        completion_failure = _finalize_active_root(
+            layout=layout,
+            engine=engine,
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            mappings=mappings,
+        )
+        if completion_failure is not None:
+            return completion_failure
         return PoolActivationResult(
             PoolActivationStatus.COMMITTED,
             {
-                "bridge": str(layout.legacy_local),
-                "target": str(layout.pool_local),
+                "active_marker": str(layout.active_marker),
+                "legacy_storage_entries_absent": True,
                 "quarantine": str(quarantine),
                 "quarantine_cleanup_pending": finalization.cleanup_pending,
                 "registered_local_count": len(normalized_names),
@@ -818,11 +1015,9 @@ def _rollback_pool(
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
 ) -> PoolActivationResult:
-    """Rebuild Legacy from the current authoritative Pool tree, then swap."""
+    """Rebuild Legacy from Pool for the pre-recursive-engine rollout window."""
 
-    if not re.fullmatch(
-        r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", rollback_generation
-    ):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", rollback_generation):
         return _invalid("rollback_generation_invalid")
     layout = _Layout.for_engine(engine, Path(home))
     normalized_names: list[str] = []
@@ -841,9 +1036,7 @@ def _rollback_pool(
     rebuild = layout.legacy_local.parent / (
         f".skills-local.pool-rollback-{rollback_generation}"
     )
-    copy_staging = layout.pool_root / (
-        f".rollback-copy-{rollback_generation}"
-    )
+    copy_staging = layout.pool_root / (f".rollback-copy-{rollback_generation}")
     try:
         if layout.legacy_local.is_dir() and not layout.legacy_local.is_symlink():
             for name in normalized_names:
@@ -861,18 +1054,21 @@ def _rollback_pool(
                     "source": str(layout.pool_local),
                 },
             )
-        if not layout.legacy_local.is_symlink() or _lexical_target(
-            layout.legacy_local
-        ) != Path(os.path.abspath(layout.pool_local)):
+        legacy_local_absent = (
+            not layout.legacy_local.exists() and not layout.legacy_local.is_symlink()
+        )
+        if not legacy_local_absent and (
+            not layout.legacy_local.is_symlink()
+            or _lexical_target(layout.legacy_local)
+            != Path(os.path.abspath(layout.pool_local))
+        ):
             return _invalid("pool_local_bridge_invalid")
         if not layout.pool_local.is_dir() or layout.pool_local.is_symlink():
             return _data_inconsistent(
                 "pool_local_not_directory",
                 source=str(layout.pool_local),
             )
-        if rebuild.is_symlink() or (
-            rebuild.exists() and not rebuild.is_dir()
-        ):
+        if rebuild.is_symlink() or (rebuild.exists() and not rebuild.is_dir()):
             return _invalid("rollback_temporary_path_occupied", path=str(rebuild))
         rebuild.mkdir(exist_ok=True)
         local_names = mirror_local_tree(
@@ -888,7 +1084,9 @@ def _rollback_pool(
                     registered_name=name,
                     source=str(source),
                 )
-        if not exchange_paths(layout.legacy_local, rebuild):
+        if legacy_local_absent:
+            os.replace(rebuild, layout.legacy_local)
+        elif not exchange_paths(layout.legacy_local, rebuild):
             return PoolActivationResult(
                 PoolActivationStatus.NOT_ATOMIC,
                 {"reason": "atomic_exchange_unavailable"},
@@ -898,6 +1096,23 @@ def _rollback_pool(
         # The displaced object is only the compatibility symlink. Pool content
         # itself remains intact for evidence and forward recovery.
         rebuild.unlink(missing_ok=True)
+        layout.repo_bridge.parent.mkdir(parents=True, exist_ok=True)
+        if not layout.repo_bridge.exists() and not layout.repo_bridge.is_symlink():
+            layout.repo_bridge.symlink_to(
+                layout.pool_repo,
+                target_is_directory=True,
+            )
+        if layout.local_bridge != layout.legacy_local:
+            layout.local_bridge.parent.mkdir(parents=True, exist_ok=True)
+            if (
+                not layout.local_bridge.exists()
+                and not layout.local_bridge.is_symlink()
+            ):
+                layout.local_bridge.symlink_to(
+                    layout.legacy_local,
+                    target_is_directory=True,
+                )
+        layout.active_marker.unlink(missing_ok=True)
         return PoolActivationResult(
             PoolActivationStatus.COMMITTED,
             {
@@ -905,17 +1120,14 @@ def _rollback_pool(
                 "source": str(layout.pool_local),
                 "local_inventory": {
                     "registered": len(normalized_names),
-                    "unregistered": len(
-                        set(local_names) - set(normalized_names)
-                    ),
+                    "unregistered": len(set(local_names) - set(normalized_names)),
                     "total": len(local_names),
                 },
             },
         )
     except OSError as error:
         committed = (
-            layout.legacy_local.is_dir()
-            and not layout.legacy_local.is_symlink()
+            layout.legacy_local.is_dir() and not layout.legacy_local.is_symlink()
         )
         return PoolActivationResult(
             (

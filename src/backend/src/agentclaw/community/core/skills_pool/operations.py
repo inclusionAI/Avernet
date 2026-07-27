@@ -104,6 +104,7 @@ class RolloutConfigSnapshot:
     negative_controls: tuple[RolloutBotEntry, ...]
     teclaw_controls: tuple[RolloutBotEntry, ...]
     audit_log: tuple[RolloutAuditEvent, ...]
+    full_rollout_engines: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,9 +136,7 @@ class SkillsPoolRolloutOperations:
         snapshot = self._parse_config(env=env, config=self._get_config(env))
         return replace(
             snapshot,
-            audit_log=self._audit_events(
-                self._repository.list_audit_events(env=env)
-            ),
+            audit_log=self._audit_events(self._repository.list_audit_events(env=env)),
         )
 
     def set_feature_enabled(
@@ -162,6 +161,83 @@ class SkillsPoolRolloutOperations:
             action="enable" if enabled else "disable",
         )
 
+    def set_full_rollout(
+        self,
+        *,
+        env: str,
+        enabled: bool,
+        engine: str | None = None,
+        operator: str,
+        reason: str,
+    ) -> RolloutConfigSnapshot:
+        """Enable future claims for one engine or the whole environment."""
+
+        self._validate_change(operator=operator, reason=reason)
+        current = self.get_snapshot(env=env)
+        if engine is not None and engine not in ENGINE_PROMOTION_ORDER:
+            raise RolloutOperationError(f"unsupported engine: {engine}")
+        current_enabled = (
+            current.enable_all
+            if engine is None
+            else engine in current.full_rollout_engines
+        )
+        if current_enabled is enabled:
+            return current
+        if enabled:
+            if not current.enabled:
+                raise RolloutOperationError(
+                    "rollout feature must be enabled before full rollout"
+                )
+            target_engines = (
+                current.promoted_engines if engine is None else (engine,)
+            )
+            if not target_engines:
+                raise RolloutOperationError(
+                    "at least one engine must be promoted before full rollout"
+                )
+            if current.negative_controls:
+                raise RolloutOperationError(
+                    "negative controls must be cleared before full rollout"
+                )
+            for target_engine in target_engines:
+                if target_engine not in current.promoted_engines:
+                    raise RolloutOperationError(
+                        f"{target_engine} must be promoted before full rollout"
+                    )
+                if self._latest_accepted_batch(current, engine=target_engine) is None:
+                    raise RolloutOperationError(
+                        f"an accepted {target_engine} batch is required for full rollout"
+                    )
+                if self._open_batches(current, env=env, engine=target_engine):
+                    raise RolloutOperationError(
+                        f"{target_engine} still has an unaccepted batch"
+                    )
+        full_rollout_engines = current.full_rollout_engines
+        if engine is not None:
+            full_rollout_engines = tuple(
+                item for item in full_rollout_engines if item != engine
+            )
+            if enabled:
+                full_rollout_engines = (*full_rollout_engines, engine)
+        return self._write(
+            snapshot=RolloutConfigSnapshot(
+                **{
+                    **self._snapshot_values(current),
+                    "enable_all": enabled if engine is None else current.enable_all,
+                    "full_rollout_engines": full_rollout_engines,
+                }
+            ),
+            expected_snapshot=current,
+            enabled=current.enabled,
+            operator=operator,
+            reason=reason,
+            batch_id=None,
+            action=(
+                f"full_rollout:{engine or 'environment'}:"
+                f"{'enable' if enabled else 'disable'}"
+            ),
+        )
+
     def promote_engine(
         self,
         *,
@@ -177,6 +253,10 @@ class SkillsPoolRolloutOperations:
         current = self.get_snapshot(env=env)
         if engine in current.promoted_engines:
             return current
+        if current.enable_all:
+            raise RolloutOperationError(
+                "disable environment full rollout before promoting another engine"
+            )
         expected_previous = ENGINE_PROMOTION_ORDER[
             : ENGINE_PROMOTION_ORDER.index(engine)
         ]
@@ -184,9 +264,7 @@ class SkillsPoolRolloutOperations:
             raise RolloutOperationError(
                 f"previous engine promotion is incomplete for {engine}"
             )
-        previous_engine = (
-            expected_previous[-1] if expected_previous else None
-        )
+        previous_engine = expected_previous[-1] if expected_previous else None
         acceptance = None
         if previous_engine is not None:
             acceptance = self._accepted_batch(
@@ -238,10 +316,7 @@ class SkillsPoolRolloutOperations:
         ):
             raise RolloutOperationError("batch is not ready for acceptance")
         current = self.get_snapshot(env=env)
-        if (
-            acceptance.report.get("rollout_config_version")
-            != current.config_version
-        ):
+        if acceptance.report.get("rollout_config_version") != current.config_version:
             raise RolloutOperationError("batch report is stale")
         if acceptance.engine not in current.promoted_engines:
             raise RolloutOperationError("batch engine is not promoted")
@@ -325,9 +400,7 @@ class SkillsPoolRolloutOperations:
         whitelist = tuple(
             item
             for item in current.whitelist
-            if not (
-                item.owner_id == entry.owner_id and item.bot_id == entry.bot_id
-            )
+            if not (item.owner_id == entry.owner_id and item.bot_id == entry.bot_id)
         ) + (entry,)
         updated = self._write(
             snapshot=RolloutConfigSnapshot(
@@ -362,8 +435,7 @@ class SkillsPoolRolloutOperations:
             (
                 item
                 for item in current.whitelist
-                if item.owner_id == str(owner_id)
-                and item.bot_id == str(bot_id)
+                if item.owner_id == str(owner_id) and item.bot_id == str(bot_id)
             ),
             None,
         )
@@ -388,9 +460,7 @@ class SkillsPoolRolloutOperations:
         whitelist = tuple(
             item
             for item in current.whitelist
-            if not (
-                item.owner_id == str(owner_id) and item.bot_id == str(bot_id)
-            )
+            if not (item.owner_id == str(owner_id) and item.bot_id == str(bot_id))
         )
         if whitelist == current.whitelist:
             return WhitelistMutationResult(
@@ -455,9 +525,7 @@ class SkillsPoolRolloutOperations:
         retained = tuple(
             item
             for item in source
-            if not (
-                item.owner_id == entry.owner_id and item.bot_id == entry.bot_id
-            )
+            if not (item.owner_id == entry.owner_id and item.bot_id == entry.bot_id)
         )
         updated_entries = (*retained, entry) if present else retained
         if updated_entries == source:
@@ -602,10 +670,7 @@ class SkillsPoolRolloutOperations:
         engine: str,
     ) -> BatchPromotionEvidence | None:
         for event in reversed(snapshot.audit_log):
-            if (
-                event.action == f"accept_batch:{engine}"
-                and event.batch_id is not None
-            ):
+            if event.action == f"accept_batch:{engine}" and event.batch_id is not None:
                 return cls._accepted_batch(
                     snapshot,
                     engine=engine,
@@ -680,6 +745,7 @@ class SkillsPoolRolloutOperations:
                 config_revision=None,
                 enabled=False,
                 enable_all=False,
+                full_rollout_engines=(),
                 promoted_engines=(),
                 whitelist=(),
                 negative_controls=(),
@@ -691,11 +757,7 @@ class SkillsPoolRolloutOperations:
         config_id = config.get("id")
         record_version = config.get("gmt_modified")
         ext_info = config.get("ext_info")
-        revision = (
-            ext_info.get("revision")
-            if isinstance(ext_info, dict)
-            else None
-        )
+        revision = ext_info.get("revision") if isinstance(ext_info, dict) else None
         value = config.get("param_value")
         if (
             isinstance(config_id, bool)
@@ -719,7 +781,8 @@ class SkillsPoolRolloutOperations:
             record_version=record_version,
             config_revision=revision,
             enabled=config.get("enable") == "1",
-            enable_all=False,
+            enable_all=bool(value["enable_all"]),
+            full_rollout_engines=tuple(value.get("full_rollout_engines", [])),
             promoted_engines=promoted_engines,
             whitelist=cls._entries(whitelist),
             negative_controls=cls._entries(value.get(CONTROL_KEYS[0], [])),
@@ -744,8 +807,7 @@ class SkillsPoolRolloutOperations:
                 "effective_at",
             )
             if any(
-                not isinstance(item.get(key), str)
-                or not str(item[key]).strip()
+                not isinstance(item.get(key), str) or not str(item[key]).strip()
                 for key in required
             ):
                 raise RolloutOperationError("rollout audit event is invalid")
@@ -765,9 +827,7 @@ class SkillsPoolRolloutOperations:
                         if item.get("based_on_config_version") is not None
                         else None
                     ),
-                    effective_config_version=str(
-                        item["effective_config_version"]
-                    ),
+                    effective_config_version=str(item["effective_config_version"]),
                     effective_at=str(item["effective_at"]),
                     evidence=(
                         item.get("evidence")
@@ -783,15 +843,14 @@ class SkillsPoolRolloutOperations:
         snapshot: RolloutConfigSnapshot,
     ) -> dict[str, object]:
         return {
-            "enable_all": False,
+            "enable_all": snapshot.enable_all,
+            "full_rollout_engines": list(snapshot.full_rollout_engines),
             "promoted_engines": list(snapshot.promoted_engines),
             "whitelist": [item.to_dict() for item in snapshot.whitelist],
             "negative_controls": [
                 item.to_dict() for item in snapshot.negative_controls
             ],
-            "teclaw_controls": [
-                item.to_dict() for item in snapshot.teclaw_controls
-            ],
+            "teclaw_controls": [item.to_dict() for item in snapshot.teclaw_controls],
         }
 
     @classmethod
@@ -826,13 +885,10 @@ class SkillsPoolRolloutOperations:
             for value in values
         ):
             raise RolloutOperationError("rollout bot identity is invalid")
-        if (
-            batch_id is not None
-            and (
-                isinstance(batch_id, bool)
-                or not isinstance(batch_id, (str, int))
-                or str(batch_id).strip() in {"", "*"}
-            )
+        if batch_id is not None and (
+            isinstance(batch_id, bool)
+            or not isinstance(batch_id, (str, int))
+            or str(batch_id).strip() in {"", "*"}
         ):
             raise RolloutOperationError("rollout batch identity is invalid")
         return RolloutBotEntry(
@@ -867,6 +923,7 @@ class SkillsPoolRolloutOperations:
             "config_revision": snapshot.config_revision,
             "enabled": snapshot.enabled,
             "enable_all": snapshot.enable_all,
+            "full_rollout_engines": snapshot.full_rollout_engines,
             "promoted_engines": snapshot.promoted_engines,
             "whitelist": snapshot.whitelist,
             "negative_controls": snapshot.negative_controls,

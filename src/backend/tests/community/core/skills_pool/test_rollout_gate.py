@@ -38,6 +38,7 @@ def enabled_config(
     promoted_engines: object = None,
     whitelist: object = None,
     enable_all: object = False,
+    full_rollout_engines: object = None,
 ) -> dict[str, Any]:
     return {
         "id": 42,
@@ -46,6 +47,9 @@ def enabled_config(
         "gmt_modified": "2026-07-23T12:00:00",
         "param_value": {
             "enable_all": enable_all,
+            "full_rollout_engines": (
+                [] if full_rollout_engines is None else full_rollout_engines
+            ),
             "promoted_engines": (
                 ["openclaw"] if promoted_engines is None else promoted_engines
             ),
@@ -147,10 +151,6 @@ def test_logical_config_revision_is_frozen_into_claim_evidence() -> None:
             ),
             RolloutDecisionReason.CONFIG_INVALID,
         ),
-        (
-            make_gate(enabled_config(enable_all=True)),
-            RolloutDecisionReason.ENABLE_ALL_FORBIDDEN,
-        ),
     ],
 )
 def test_missing_disabled_failed_or_invalid_config_fails_closed(
@@ -178,6 +178,56 @@ def test_environment_engine_and_exact_identity_are_all_required() -> None:
         evaluate(gate, owner_id="other-owner").reason
         is RolloutDecisionReason.BOT_NOT_WHITELISTED
     )
+
+
+def test_full_rollout_admits_future_bot_in_promoted_engine() -> None:
+    decision = evaluate(
+        make_gate(enabled_config(enable_all=True, whitelist=[])),
+        owner_id="future-owner",
+        bot_id="future-bot",
+    )
+
+    assert decision.eligible
+    assert decision.evidence is not None
+    assert decision.evidence.batch_id is None
+    assert decision.evidence.decision_reason == "environment_full_rollout"
+
+
+def test_engine_full_rollout_admits_only_that_promoted_engine() -> None:
+    gate = make_gate(
+        enabled_config(
+            promoted_engines=["openclaw", "claude_code"],
+            full_rollout_engines=["openclaw"],
+            whitelist=[],
+        )
+    )
+
+    openclaw = evaluate(
+        gate,
+        owner_id="future-owner",
+        bot_id="future-bot",
+    )
+    claude = evaluate(
+        gate,
+        owner_id="future-owner",
+        bot_id="future-bot",
+        engine_type="claude_code",
+    )
+
+    assert openclaw.eligible
+    assert openclaw.evidence is not None
+    assert openclaw.evidence.decision_reason == "engine_full_rollout"
+    assert claude.reason is RolloutDecisionReason.BOT_NOT_WHITELISTED
+
+
+def test_full_rollout_still_rejects_unpromoted_engine() -> None:
+    decision = evaluate(
+        make_gate(enabled_config(enable_all=True, whitelist=[])),
+        engine_type="claude_code",
+    )
+
+    assert not decision.eligible
+    assert decision.reason is RolloutDecisionReason.ENGINE_NOT_PROMOTED
 
 
 @pytest.mark.parametrize("engine_type", ["teclaw", "moltis", "", "unknown"])

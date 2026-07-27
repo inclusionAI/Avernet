@@ -19,7 +19,9 @@ from agentclaw.community.adapters.http.resources.file_search_download_router imp
     _device_fs_for_bot,
     _download_arcname,
     _download_logical,
+    _passes_search_filter,
     _resolve_walk_device_fs,
+    _search_should_descend,
     _walk_device_fs,
     _zip_dir_entry,
     _zip_file_entry,
@@ -202,6 +204,13 @@ class TestWalkDeviceFs:
         rels = {e["rel"] for e in out}
         assert "skills/skills-local/a.md" in rels
         assert "skills/other/b.md" not in rels  # pruned before listing
+
+    def test_pool_local_subtree_is_visible_but_pool_repo_is_hidden(self):
+        assert _search_should_descend("skills-pool")
+        assert _search_should_descend("skills-pool/skills-local")
+        assert _passes_search_filter("skills-pool/skills-local/a/SKILL.md")
+        assert not _search_should_descend("skills-pool/skills-repo")
+        assert not _passes_search_filter("skills-pool/skills-repo/a/SKILL.md")
 
     @pytest.mark.asyncio
     async def test_root_list_failure_returns_none(self):
@@ -511,4 +520,3 @@ class TestDownloadDirectoryZipMetadata:
             assert file_attr & 0o170000 == stat.S_IFREG, oct(file_attr)
             assert zf.read("memory/foo.txt") == b"FOO"
         os.unlink(resp.path)
-

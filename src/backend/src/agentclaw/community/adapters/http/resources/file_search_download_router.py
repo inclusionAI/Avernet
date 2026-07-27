@@ -51,6 +51,7 @@ from agentclaw.community.adapters.http.resources.file_router import _resolve_par
 from agentclaw.community.core.services.resource_file_service import (
     _HIDDEN_BASENAMES,
     _HIDDEN_DIRNAMES,
+    _POOL_SKILLS_LOCAL_RELPATH,
     _SKILLS_LOCAL_RELPATH,
     is_readonly,
 )
@@ -109,9 +110,12 @@ def _passes_search_filter(rel_path: str) -> bool:
         return False
     top = segments[0]
     if top in _HIDDEN_DIRNAMES:
-        return (
-            rel_path == _SKILLS_LOCAL_RELPATH
-            or rel_path.startswith(_SKILLS_LOCAL_RELPATH + "/")
+        return any(
+            rel_path == local_path or rel_path.startswith(local_path + "/")
+            for local_path in (
+                _SKILLS_LOCAL_RELPATH,
+                _POOL_SKILLS_LOCAL_RELPATH,
+            )
         )
     if len(segments) == 1 and top in _HIDDEN_BASENAMES:
         return False
@@ -134,10 +138,14 @@ def _search_should_descend(ws_dir_rel: str) -> bool:
         return True
     # Hidden system dir: descend only along the skills/skills-local path so the
     # injected subtree stays reachable; everything else under it is pruned.
-    return (
-        ws_dir_rel == _SKILLS_LOCAL_RELPATH.split("/")[0]  # "skills" — on the way down
-        or ws_dir_rel == _SKILLS_LOCAL_RELPATH
-        or ws_dir_rel.startswith(_SKILLS_LOCAL_RELPATH + "/")
+    return any(
+        ws_dir_rel == local_path.split("/")[0]
+        or ws_dir_rel == local_path
+        or ws_dir_rel.startswith(local_path + "/")
+        for local_path in (
+            _SKILLS_LOCAL_RELPATH,
+            _POOL_SKILLS_LOCAL_RELPATH,
+        )
     )
 
 

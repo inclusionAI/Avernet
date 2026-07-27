@@ -40,7 +40,6 @@ class RolloutDecisionReason(StrEnum):
     CONFIG_READ_ERROR = "config_read_error"
     CONFIG_INVALID = "config_invalid"
     CONFIG_ENV_MISMATCH = "config_env_mismatch"
-    ENABLE_ALL_FORBIDDEN = "enable_all_forbidden"
     ENGINE_NOT_SUPPORTED = "engine_not_supported"
     ENGINE_NOT_PROMOTED = "engine_not_promoted"
     BOT_NOT_WHITELISTED = "bot_not_whitelisted"
@@ -115,15 +114,9 @@ class SkillsPoolRolloutGate:
 
         config_id = config.get("id")
         ext_info = config.get("ext_info")
-        revision = (
-            ext_info.get("revision")
-            if isinstance(ext_info, dict)
-            else None
-        )
+        revision = ext_info.get("revision") if isinstance(ext_info, dict) else None
         config_version = revision or config.get("gmt_modified")
         value = config.get("param_value")
-        if isinstance(value, dict) and value.get("enable_all") is True:
-            return self._reject(RolloutDecisionReason.ENABLE_ALL_FORBIDDEN)
         if (
             isinstance(config_id, bool)
             or not isinstance(config_id, int)
@@ -138,23 +131,30 @@ class SkillsPoolRolloutGate:
         if engine_type not in promoted_engines:
             return self._reject(RolloutDecisionReason.ENGINE_NOT_PROMOTED)
 
-        whitelist = value["whitelist"]
-        entry = self._whitelist_service.find_bot_whitelist_entry(
-            whitelist,
-            owner_id=owner_id,
-            bot_id=bot_id,
-        )
-        if entry is None:
-            return self._reject(RolloutDecisionReason.BOT_NOT_WHITELISTED)
-
-        batch_id = entry.get("batch_id")
+        batch_id = None
+        decision_reason = "environment_full_rollout"
+        if value["enable_all"] is False and engine_type not in value.get(
+            "full_rollout_engines", []
+        ):
+            whitelist = value["whitelist"]
+            entry = self._whitelist_service.find_bot_whitelist_entry(
+                whitelist,
+                owner_id=owner_id,
+                bot_id=bot_id,
+            )
+            if entry is None:
+                return self._reject(RolloutDecisionReason.BOT_NOT_WHITELISTED)
+            batch_id = entry.get("batch_id")
+            decision_reason = "exact_bot_whitelist"
+        elif value["enable_all"] is False:
+            decision_reason = "engine_full_rollout"
         evidence = RolloutEvidence(
             env=env,
             config_id=config_id,
             config_version=config_version,
             batch_id=str(batch_id) if batch_id is not None else None,
             engine_type=engine_type,
-            decision_reason=RolloutDecisionReason.ELIGIBLE.value,
+            decision_reason=decision_reason,
         )
         return RolloutDecision(
             eligible=True,

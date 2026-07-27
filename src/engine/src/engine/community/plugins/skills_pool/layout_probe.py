@@ -50,6 +50,7 @@ class _FilesystemPoolLayout:
     pool_local: Path
     pool_repo: Path
     marker: Path
+    active_marker: Path
     local_bridge: Path
     repo_bridge: Path
 
@@ -73,6 +74,7 @@ class _FilesystemPoolLayout:
                 pool_local=pool_root / "skills-local",
                 pool_repo=pool_root / "skills-repo",
                 marker=pool_root / ".pool-ready",
+                active_marker=pool_root / ".pool-active",
                 local_bridge=legacy_root / "skills-local",
                 repo_bridge=legacy_repo,
             )
@@ -90,6 +92,7 @@ class _FilesystemPoolLayout:
                 pool_local=pool_root / "skills-local",
                 pool_repo=pool_root / "skills-repo",
                 marker=pool_root / ".pool-ready",
+                active_marker=pool_root / ".pool-active",
                 local_bridge=legacy_root / "skills-local",
                 repo_bridge=legacy_repo,
             )
@@ -107,6 +110,7 @@ class _FilesystemPoolLayout:
                 pool_local=pool_root / "skills-local",
                 pool_repo=pool_root / "skills-repo",
                 marker=pool_root / ".pool-ready",
+                active_marker=pool_root / ".pool-active",
                 local_bridge=legacy_root / "skills-local",
                 repo_bridge=legacy_root / "skills-repo",
             )
@@ -125,6 +129,7 @@ class _FilesystemPoolLayout:
             pool_local=pool_root / "skills-local",
             pool_repo=pool_root / "skills-repo",
             marker=pool_root / ".pool-ready",
+            active_marker=pool_root / ".pool-active",
             local_bridge=legacy_local,
             repo_bridge=legacy_repo,
         )
@@ -343,6 +348,88 @@ def _managed_entries_valid(
     return True
 
 
+def _active_marker_valid(
+    marker: object,
+    *,
+    layout: _FilesystemPoolLayout,
+    engine: str,
+    expected_contract_version: str,
+    preparation_id: str,
+) -> bool:
+    if not isinstance(marker, dict):
+        return False
+    if (
+        marker.get("engine") != engine
+        or marker.get("layout_contract_version") != expected_contract_version
+        or marker.get("preparation_id") != preparation_id
+        or marker.get("activation_state") not in {"finalizing", "active"}
+        or not isinstance(marker.get("migration_generation"), str)
+    ):
+        return False
+    if marker["activation_state"] == "active":
+        return True
+    mappings = marker.get("mappings")
+    if not isinstance(mappings, list):
+        return False
+    seen_targets: set[Path] = set()
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            return False
+        source_value = mapping.get("source")
+        target_value = mapping.get("target")
+        if not isinstance(source_value, str) or not isinstance(target_value, str):
+            return False
+        source = Path(os.path.abspath(source_value))
+        target = Path(os.path.abspath(target_value))
+        if not (
+            source.is_relative_to(Path(os.path.abspath(layout.pool_local)))
+            or source.is_relative_to(Path(os.path.abspath(layout.pool_repo)))
+        ):
+            return False
+        if (
+            target.parent != Path(os.path.abspath(layout.legacy_root))
+            or target in {layout.local_bridge, layout.repo_bridge}
+            or target in seen_targets
+        ):
+            return False
+        seen_targets.add(target)
+    return True
+
+
+def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
+    """Validate mutable managed entries without freezing an old mapping set."""
+
+    pool_roots = tuple(
+        Path(os.path.abspath(root))
+        for root in (layout.pool_local, layout.pool_repo)
+    )
+    retired_roots = tuple(
+        Path(os.path.abspath(root))
+        for root in (
+            layout.legacy_local,
+            layout.legacy_repo,
+            layout.local_bridge,
+            layout.repo_bridge,
+        )
+    )
+    for entry in layout.legacy_root.iterdir():
+        if not entry.is_symlink():
+            continue
+        target = _lexical_symlink_target(entry)
+        if any(target.is_relative_to(root) for root in pool_roots):
+            try:
+                target_stat = entry.stat()
+            except (FileNotFoundError, NotADirectoryError):
+                return False
+            if not stat.S_ISDIR(target_stat.st_mode):
+                return False
+            continue
+        if any(target.is_relative_to(root) for root in retired_roots):
+            return False
+        # External active entries predate Pool and remain outside this migration.
+    return True
+
+
 def inspect_runtime_layout(
     *,
     engine: str,
@@ -525,6 +612,127 @@ def inspect_runtime_layout(
             reason="pool_repo_temporarily_unavailable",
             error=error,
             preparation_id=preparation_id,
+        )
+    active_marker: dict[str, Any] | None = None
+    try:
+        active_marker_stat = layout.active_marker.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        active_marker_stat = None
+    except PermissionError:
+        return _invalid(
+            engine=engine,
+            contract_version=expected_contract_version,
+            layout=layout,
+            reason="active_marker_unreadable",
+            preparation_id=preparation_id,
+        )
+    except OSError as error:
+        return _transient(
+            engine=engine,
+            contract_version=expected_contract_version,
+            layout=layout,
+            reason="active_marker_temporarily_unavailable",
+            error=error,
+            preparation_id=preparation_id,
+        )
+    if active_marker_stat is not None:
+        if not stat.S_ISREG(active_marker_stat.st_mode):
+            return _invalid(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="active_marker_not_regular_file",
+                preparation_id=preparation_id,
+            )
+        try:
+            active_marker = json.loads(layout.active_marker.read_bytes())
+        except (PermissionError, UnicodeDecodeError, json.JSONDecodeError):
+            return _invalid(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="active_marker_invalid",
+                preparation_id=preparation_id,
+            )
+        except OSError as error:
+            return _transient(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="active_marker_temporarily_unavailable",
+                error=error,
+                preparation_id=preparation_id,
+            )
+        if not _active_marker_valid(
+            active_marker,
+            layout=layout,
+            engine=engine,
+            expected_contract_version=expected_contract_version,
+            preparation_id=preparation_id,
+        ):
+            return _invalid(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="active_marker_contract_mismatch",
+                preparation_id=preparation_id,
+            )
+        if active_marker["activation_state"] == "active":
+            for bridge_name, bridge_path in (
+                ("local", layout.local_bridge),
+                ("repo", layout.repo_bridge),
+            ):
+                if bridge_path.exists() or bridge_path.is_symlink():
+                    return _invalid(
+                        engine=engine,
+                        contract_version=expected_contract_version,
+                        layout=layout,
+                        reason=f"retired_{bridge_name}_bridge_present",
+                        preparation_id=preparation_id,
+                    )
+            try:
+                active_entries_valid = _active_entries_valid(layout)
+            except PermissionError:
+                active_entries_valid = False
+            except OSError as error:
+                return _transient(
+                    engine=engine,
+                    contract_version=expected_contract_version,
+                    layout=layout,
+                    reason="active_entries_temporarily_unavailable",
+                    error=error,
+                    preparation_id=preparation_id,
+                )
+            if not active_entries_valid:
+                return _invalid(
+                    engine=engine,
+                    contract_version=expected_contract_version,
+                    layout=layout,
+                    reason="active_managed_entry_invalid",
+                    preparation_id=preparation_id,
+                )
+        return RuntimeLayoutInspection(
+            status=RuntimeLayoutInspectionStatus.READY,
+            engine=engine,
+            layout_contract_version=expected_contract_version,
+            preparation_id=preparation_id,
+            evidence={
+                "marker": str(layout.marker),
+                "active_marker": str(layout.active_marker),
+                "prepared_at": marker["prepared_at"],
+                "activation_state": active_marker["activation_state"],
+                "checks": {
+                    "marker_valid": True,
+                    "active_marker_valid": True,
+                    "pool_local_valid": True,
+                    "pool_repo_mounted": True,
+                    "pool_repo_readable": True,
+                    "pool_mappings_valid": True,
+                    "legacy_storage_entries_absent": (
+                        active_marker["activation_state"] == "active"
+                    ),
+                },
+            },
         )
     required_bridges = [("legacy_repo", layout.repo_bridge, layout.pool_repo)]
     if engine != "openclaw":
