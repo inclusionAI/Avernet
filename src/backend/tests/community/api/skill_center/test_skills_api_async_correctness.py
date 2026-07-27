@@ -36,7 +36,12 @@ def mock_ctx():
 
 
 @contextmanager
-def _skill_service_di_app(mock_ctx):
+def _skill_service_di_app(
+    mock_ctx,
+    *,
+    device_sync_result=None,
+    runtime_uses_pool_paths=False,
+):
     """Build a TestClient whose SkillService has AsyncMock methods.
 
     Yields (client, mock_skill_service).  The mock_skill_service is the SAME
@@ -51,6 +56,7 @@ def _skill_service_di_app(mock_ctx):
         return_value={"success": ["a"], "failed": []}
     )
     mock_skill_service.get_link_name = MagicMock(return_value="link_name")
+    mock_skill_service.runtime_uses_pool_paths = runtime_uses_pool_paths
 
     # Factory that returns the mock service from create()
     mock_skill_service_factory = MagicMock()
@@ -71,7 +77,11 @@ def _skill_service_di_app(mock_ctx):
 
     # Mock device_sync
     mock_device_sync = MagicMock()
-    mock_device_sync.sync_symlinks.return_value = MagicMock()
+    mock_device_sync.sync_symlinks.return_value = (
+        device_sync_result
+        if device_sync_result is not None
+        else {"success": True, "message": "synced"}
+    )
 
     # Mock bot_repo - runtime-checkable Protocol
     mock_bot_repo = MagicMock()
@@ -494,6 +504,23 @@ class TestActivateSkillAsyncAwait:
                 f"got {call.kwargs['user_id']!r}"
             )
 
+    def test_activate_skill_fails_when_runtime_mapping_sync_fails(self, mock_ctx):
+        with _skill_service_di_app(
+            mock_ctx,
+            device_sync_result={"success": False, "message": "source missing"},
+            runtime_uses_pool_paths=True,
+        ) as (client, mock_svc):
+            response = client.post(
+                "/api/skills/my-skill-id/activate",
+                json={"source_path": "local://skills-local/my-skill"},
+            )
+
+            assert response.status_code == 502
+            assert response.json()["detail"] == (
+                "Failed to synchronize activated skills to runtime"
+            )
+            mock_svc.activate_skill.assert_awaited_once()
+
 
 # ── deactivate_skill ─────────────────────────────────────────────────────────
 
@@ -533,6 +560,22 @@ class TestDeactivateSkillAsyncAwait:
                 f"user_id should be ctx.user_id ({mock_ctx.user_id!r}); "
                 f"got {call.kwargs['user_id']!r}"
             )
+
+    def test_deactivate_skill_fails_when_runtime_mapping_sync_fails(
+        self, mock_ctx
+    ):
+        with _skill_service_di_app(
+            mock_ctx,
+            device_sync_result={"success": False, "message": "runtime unavailable"},
+            runtime_uses_pool_paths=True,
+        ) as (client, mock_svc):
+            response = client.post("/api/skills/my-skill-id/deactivate")
+
+            assert response.status_code == 502
+            assert response.json()["detail"] == (
+                "Failed to synchronize deactivated skills to runtime"
+            )
+            mock_svc.deactivate_skill.assert_awaited_once()
 
 
 # ── activate_skills_batch ─────────────────────────────────────────────────────
@@ -582,3 +625,22 @@ class TestActivateSkillsBatchAsyncAwait:
                 f"bolt_id must be a kwarg; got call={call}"
             )
             assert call.kwargs["user_id"] == mock_ctx.user_id
+
+    def test_activate_skills_batch_fails_when_runtime_mapping_sync_fails(
+        self, mock_ctx
+    ):
+        with _skill_service_di_app(
+            mock_ctx,
+            device_sync_result={"success": False, "message": "source missing"},
+            runtime_uses_pool_paths=True,
+        ) as (client, mock_svc):
+            response = client.post(
+                "/api/skills/market/activate-batch",
+                json={"skill_paths": ["git://path/a"]},
+            )
+
+            assert response.status_code == 502
+            assert response.json()["detail"] == (
+                "Failed to synchronize activated skills to runtime"
+            )
+            mock_svc.activate_skills_batch.assert_awaited_once()

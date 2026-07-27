@@ -35,6 +35,7 @@ def test_real_skill_service_factory_create(test_injector):
     factory = test_injector.get(SkillServiceFactory)
     svc = factory.create()
     assert isinstance(svc, SkillService)
+    assert svc.runtime_uses_pool_paths is False
 
 
 def test_pool_active_factory_scopes_direct_skill_crud_to_canonical_pool(
@@ -63,6 +64,7 @@ def test_pool_active_factory_scopes_direct_skill_crud_to_canonical_pool(
     assert svc.repo_dir == Path(
         "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
     )
+    assert svc.runtime_uses_pool_paths is True
     assert svc._local_skill_path_adapter(
         "/home/admin/.openclaw/workspace/skills/skills-local/handmade"
     ) == (

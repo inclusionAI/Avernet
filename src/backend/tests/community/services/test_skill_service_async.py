@@ -193,6 +193,7 @@ class TestSkillServiceAsyncRouting:
         service._local_skill_path_adapter = build_pool_local_path_adapter(
             pool_local
         )
+        service.runtime_uses_pool_paths = True
         device_fs.exists = AsyncMock(return_value=False)
 
         activated = await service.activate_skill(
@@ -208,6 +209,22 @@ class TestSkillServiceAsyncRouting:
         device_fs.exists.assert_awaited_once_with(
             f"{pool_local}/writing-beats"
         )
+
+    @pytest.mark.asyncio
+    async def test_legacy_activate_keeps_best_effort_source_semantics(
+        self, tmp_path
+    ):
+        service, device_fs, _ = self._service(tmp_path)
+        device_fs.exists = AsyncMock(return_value=False)
+
+        activated = await service.activate_skill(
+            f"local://{service.local_dir}/legacy-skill",
+            user_id="user1",
+            bolt_id="bot1",
+        )
+
+        assert activated is True
+        device_fs.exists.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_upload_does_not_overwrite_global_local_skill(

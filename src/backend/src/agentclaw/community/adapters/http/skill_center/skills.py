@@ -302,6 +302,25 @@ def _get_skill_by_id_or_link_name(service, skill_id: str, *bolt_ids: str | None)
     return None
 
 
+def _require_pool_runtime_sync_success(
+    service,
+    sync_result,
+    *,
+    detail: str,
+) -> None:
+    """Fail closed when a Pool-owned CRUD could not reach runtime state.
+
+    Legacy bots retain their historical best-effort behavior. Pool-owned I/O
+    cannot do that safely: its DB locator, canonical files and active mapping
+    must describe one committed layout.
+    """
+
+    if getattr(service, "runtime_uses_pool_paths", False) is not True:
+        return
+    if not isinstance(sync_result, dict) or sync_result.get("success") is not True:
+        raise HTTPException(status_code=502, detail=detail)
+
+
 # ==================== Core CRUD APIs ====================
 
 @router.post("/upload", response_model=UploadSkillResponse)
@@ -984,6 +1003,17 @@ async def activate_skill(
         logger.info(f"[skills.activate_skill] Device sync result: {sync_result}")
     except Exception as e:
         logger.warning(f"[skills.activate_skill] Device sync skipped or failed: {e}")
+        _require_pool_runtime_sync_success(
+            service,
+            None,
+            detail="Failed to synchronize activated skills to runtime",
+        )
+    else:
+        _require_pool_runtime_sync_success(
+            service,
+            sync_result,
+            detail="Failed to synchronize activated skills to runtime",
+        )
 
     logger.info(f"[skills.activate_skill] Success: skill_id={actual_skill_id}, link_name={link_name}")
     return ActivateResponse(success=True, message="Skill activated successfully", link_name=link_name)
@@ -1057,6 +1087,17 @@ async def deactivate_skill(
         logger.info(f"[skills.deactivate_skill] Device sync result: {sync_result}")
     except Exception as e:
         logger.warning(f"[skills.deactivate_skill] Device sync skipped or failed: {e}")
+        _require_pool_runtime_sync_success(
+            service,
+            None,
+            detail="Failed to synchronize deactivated skills to runtime",
+        )
+    else:
+        _require_pool_runtime_sync_success(
+            service,
+            sync_result,
+            detail="Failed to synchronize deactivated skills to runtime",
+        )
 
     logger.info(f"[skills.deactivate_skill] Success: skill_id={skill_id}")
     return DeactivateResponse(success=True, message="Skill deactivated successfully")
@@ -1492,6 +1533,17 @@ async def activate_skills_batch(
         logger.info(f"[skills.activate_skills_batch] Device sync result: {sync_result}")
     except Exception as e:
         logger.warning(f"[skills.activate_skills_batch] Device sync skipped or failed: {e}")
+        _require_pool_runtime_sync_success(
+            service,
+            None,
+            detail="Failed to synchronize activated skills to runtime",
+        )
+    else:
+        _require_pool_runtime_sync_success(
+            service,
+            sync_result,
+            detail="Failed to synchronize activated skills to runtime",
+        )
 
     logger.info(f"[skills.activate_skills_batch] Success: {len(results['success'])} activated, {len(results['failed'])} failed")
     return ActivateSkillsResponse(
