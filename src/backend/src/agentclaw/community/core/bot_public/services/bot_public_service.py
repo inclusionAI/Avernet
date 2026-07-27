@@ -12,7 +12,10 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
+from agentclaw.community.utils.avernet_tenant import (
+    bind_current_avernet_tenant,
+    get_current_avernet_tenant,
+)
 from agentclaw.community.core.bot_public.repository.bot_friend_repository import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey, BotFriendStatus, ApprovalStatus, ApprovalType
 from agentclaw.community.core.operator_context import OperatorContext
@@ -129,7 +132,14 @@ class BotPublicService:
         普通发布流程保留后台执行语义；失败会被线程入口记录。审批回调必须改用
         ``_sync_access_mode_and_relations_or_raise``，同步等待并传播失败。
         """
-        sync_key = f"{owner_id}:{bot_id}"
+        # Tenant-scope the coalescing key: (owner_id, bot_id) is unique only
+        # WITHIN a tenant, but _syncing_bots / _pending_syncs are process-wide.
+        # Without the tenant prefix, a second tenant's sync for a colliding
+        # (owner_id, bot_id) would be queued under the first tenant's key and
+        # applied to the first tenant's bot by its (tenant-bound) thread, while
+        # its own bot is never synced. The key is built in the request thread,
+        # so get_current_avernet_tenant() is the request's tenant.
+        sync_key = f"{get_current_avernet_tenant()}:{owner_id}:{bot_id}"
         with self._sync_lock:
             if sync_key in self._syncing_bots:
                 # 当前已有同步任务在执行，把最新参数存入 pending。
