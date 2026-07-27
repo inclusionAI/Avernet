@@ -29,8 +29,7 @@ git diff --check
 
 ## Task 2：Mock Server 与 Singlebox 生命周期 — [x] 完成
 
-目标：提供本地 OpenAI-compatible Server，并只在 mock 模式下由需要模型配置的
-Singlebox 目标管理。
+目标：提供本地 OpenAI-compatible Server，并把它作为整个 Singlebox 的共享服务管理。
 
 完成条件：
 
@@ -39,8 +38,11 @@ Singlebox 目标管理。
 - [x] 生成指向 loopback 地址的 OpenClaw provider。
 - [x] 支持默认端口和 `SINGLEBOX_MOCK_MODEL_PORT` 覆盖。
 - [x] start、restart 和 stop 管理 Mock Server 进程。
-- [x] manual 和 home 模式不管理 Mock Server。
+- [x] manual 和 home 模式不启动新的 Mock Server。
 - [x] 不使用未消费的 ready file。
+- [x] stop 根据 owned PID 和命令身份清理，不依赖新 shell 的 mode。
+- [x] `stop all` 清理 owned process，部分服务 stop 不停止共享 Mock Server。
+- [x] 跨 shell stop、外部健康服务和身份不匹配 PID 的回归测试通过。
 
 ## Task 3：OpenClaw sender metadata 映射 — [x] 完成
 
@@ -53,6 +55,9 @@ Singlebox 目标管理。
 - [x] `chat.inject` 使用同一套 sender 映射规则。
 - [x] Human 和 Bot sender label 测试通过。
 - [x] 不修改 BCS Service API、Plugin API 或消息协议。
+- [x] 原有 `From` 解析和取值保持不变。
+- [x] 新的 `actor_name`、`actor_id` 只用于 `SenderName`、`SenderId`。
+- [x] actor 信息与旧 `From` 来源冲突的 `chat.send`、`chat.inject` 回归测试通过。
 
 ## Task 4：完整 BCS 回复闭环 — [ ] 后续任务
 

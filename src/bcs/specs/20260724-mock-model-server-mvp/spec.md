@@ -195,11 +195,19 @@ Mock Server 从该 metadata JSON 的 `label` 字段提取 sender label，并原�
 
 - 默认端口为 `18080`，`SINGLEBOX_MOCK_MODEL_PORT` 可覆盖。
 - 不允许配置远程默认地址。
-- `manual`、`home` 或其他模式不得启动或停止 Mock Server。
+- Mock Server 是整个 Singlebox 的共享服务，同时服务 5 个本地 OpenClaw Bot 和
+  BAAS/backend 创建的 OpenClaw Bot，不归属于任一单独消费者。
+- `SINGLEBOX_MODEL_CONFIG_MODE=mock` 决定是否需要启动 Mock Server；owned PID 文件决定
+  Singlebox 是否有权停止它。stop 不依赖当前 shell 是否仍设置 mode。
+- `manual`、`home` 或其他模式不得启动新的 Mock Server。
 - `setup` 只生成配置。
-- `start` 在 OpenClaw bot 前启动并等待精确健康响应。
-- `restart` 确保 Mock Server 可用后再重启服务。
-- `stop` 只停止 PID 与命令身份均匹配的 owned process。
+- `start all`、`start baas`、`start bots` 和 `start bcs_bots` 在消费者前确保 Mock Server
+  可用并等待精确健康响应。
+- `restart all` 先停止消费者和旧 owned Mock Server，再按当前 mode/端口启动共享服务和
+  整个栈；部分服务 restart 只确保共享服务可用，不重启它。
+- `stop baas`、`stop bots` 和 `stop bcs_bots` 不停止共享 Mock Server。
+- `stop all` 在其他 Singlebox 服务停止后，清理 PID 与命令身份均匹配的 owned process。
+- stop 必须先确认进程退出，再删除 PID 文件；身份不匹配的 PID 不得被结束。
 - 已有精确健康服务时复用，但不取得进程所有权。
 - 端口被其他服务占用时启动失败，不自动换端口。
 
@@ -252,9 +260,13 @@ Sender 名称不保证一次请求的全局唯一性。MVP 的目标是验证真
 
 ### AC-03 Singlebox
 
-- 只有 `SINGLEBOX_MODEL_CONFIG_MODE=mock` 管理 Mock Server。
+- 只有 `SINGLEBOX_MODEL_CONFIG_MODE=mock` 启动 Mock Server。
 - 默认和覆盖端口生成正确本地 provider。
 - 重复 start 不产生第二个进程。
+- 一个 shell 以 mock 模式启动 owned process 后，另一个未设置 mode 的 shell 执行
+  `stop all`，该进程仍会被正确停止。
+- `stop baas`、`stop bots` 和 `stop bcs_bots` 不停止共享 Mock Server。
+- 复用的外部健康服务没有 owned PID，`stop all` 不停止它。
 - stop 不误杀身份不匹配进程。
 
 ### AC-04 回归
@@ -282,6 +294,10 @@ Sender 名称不保证一次请求的全局唯一性。MVP 的目标是验证真
 Mock Server 位于 scripts/test bootstrap，不进入 BCS core。OpenClaw BCN Plugin 只把
 BCS 已有的 `actor_name` 和 `actor_id` 映射到 OpenClaw sender metadata，不改变 BCS
 Service API、Plugin API 或消息协议。
+
+OpenClaw 入站上下文原有的 `From` 字段继续使用修改前的解析顺序和取值。新的 actor
+信息只用于 `SenderName` 和 `SenderId`；即使 actor name 与旧 `From` 来源不同，也不得
+顺带改变 `From`。`chat.send` 与 `chat.inject` 遵循同一规则。
 
 Human Actor 历史名称同步、BCS group-flow sender 语义等通用修复不属于本次提交。完整
 BCS → OpenClaw → Mock Model → BCS E2E 仍是后续独立任务，Server HTTP 测试不能替代

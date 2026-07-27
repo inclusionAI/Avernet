@@ -26,9 +26,10 @@ singlebox_mock_model_is_ready() {
 }
 
 singlebox_mock_model_start() {
+    SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND=0
     [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "mock" ] || return 0
 
-    local base_url pid_file log_file pid
+    local base_url pid_file log_file pid command
     base_url="$(singlebox_mock_model_base_url)"
     pid_file="$(singlebox_mock_model_pid_file)"
     log_file="${LOG_DIR}/mock-model.log"
@@ -39,14 +40,40 @@ singlebox_mock_model_start() {
     fi
 
     mkdir -p "$(dirname "$pid_file")" "$LOG_DIR"
+    if [ -f "$pid_file" ]; then
+        pid="$(tr -d '\r\n' < "$pid_file")"
+        case "$pid" in
+            ''|*[!0-9]*)
+                rm -f "$pid_file"
+                ;;
+            *)
+                if kill -0 "$pid" 2>/dev/null; then
+                    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+                    case "$command" in
+                        *"${PROJECT_ROOT}/scripts/modules/mock_model_server.py"*)
+                            log_error "Owned mock model server PID ${pid} is running but is not ready at ${base_url}."
+                            log_error "Run 'restart all' to apply a mode or port change."
+                            ;;
+                        *)
+                            log_error "Mock model PID file points to another process: ${pid}."
+                            ;;
+                    esac
+                    return 1
+                fi
+                rm -f "$pid_file"
+                ;;
+        esac
+    fi
+
     python3 "${PROJECT_ROOT}/scripts/modules/mock_model_server.py" \
         --port "${SINGLEBOX_MOCK_MODEL_PORT:-18080}" >"$log_file" 2>&1 &
     pid=$!
-    printf '%s\n' "$pid" > "$pid_file"
 
     local attempt
     for attempt in $(seq 1 100); do
-        if singlebox_mock_model_is_ready "$base_url"; then
+        if kill -0 "$pid" 2>/dev/null && singlebox_mock_model_is_ready "$base_url"; then
+            printf '%s\n' "$pid" > "$pid_file"
+            SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND=1
             log_info "Mock model server started: ${base_url}"
             return 0
         fi
@@ -66,17 +93,20 @@ singlebox_mock_model_start() {
 }
 
 singlebox_mock_model_stop() {
-    [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "mock" ] || return 0
-
-    local pid_file pid command
+    local pid_file pid command attempt
     pid_file="$(singlebox_mock_model_pid_file)"
     [ -f "$pid_file" ] || return 0
     pid="$(tr -d '\r\n' < "$pid_file")"
-    rm -f "$pid_file"
     case "$pid" in
-        ''|*[!0-9]*) return 0 ;;
+        ''|*[!0-9]*)
+            rm -f "$pid_file"
+            return 0
+            ;;
     esac
-    kill -0 "$pid" 2>/dev/null || return 0
+    if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$pid_file"
+        return 0
+    fi
     command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
     case "$command" in
         *"${PROJECT_ROOT}/scripts/modules/mock_model_server.py"*) ;;
@@ -85,8 +115,20 @@ singlebox_mock_model_stop() {
             return 0
             ;;
     esac
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+    if ! kill "$pid" 2>/dev/null; then
+        log_error "Failed to stop mock model server PID ${pid}; preserving ${pid_file}."
+        return 1
+    fi
+    for attempt in $(seq 1 100); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$pid_file"
+            log_info "Mock model server stopped."
+            return 0
+        fi
+        sleep 0.05
+    done
+    log_error "Mock model server PID ${pid} did not exit; preserving ${pid_file}."
+    return 1
 }
 
 singlebox_model_config_required_for_services() {
@@ -97,6 +139,16 @@ singlebox_model_config_required_for_services() {
                 return 0
                 ;;
         esac
+    done
+    return 1
+}
+
+singlebox_mock_model_stop_required_for_services() {
+    local service
+    for service in "$@"; do
+        if [ "$service" = "all" ]; then
+            return 0
+        fi
     done
     return 1
 }
