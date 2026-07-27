@@ -18,6 +18,9 @@ from agentclaw.community.core.bot_chat.models import (
 )
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.bot_chat.query_support import (
+    QueryScope,
+    enrich_group_labels,
+    enrich_task_labels,
     enrich_trace_labels,
     list_group_sessions,
     load_bot_names,
@@ -468,7 +471,7 @@ class BotChatDbRepository:
 
     def list_traces(
         self,
-        owner_id: str,
+        owner_id: str | None,
         from_ms: int,
         to_ms: int,
         page: int,
@@ -483,6 +486,7 @@ class BotChatDbRepository:
         group_id: str | None = None,
         match_mode: str = "exact",
         include_output_match: bool = False,
+        query_scope: QueryScope = QueryScope.OWNER,
     ) -> tuple[list[ConversationSession], int]:
         """List traces from DB with pagination."""
         with self._db.orm_session() as session:
@@ -496,14 +500,17 @@ class BotChatDbRepository:
             # - bot_id is None: filter by user_id = owner_id
             # - bot_id == "default": filter by user_id = owner_id AND bot_id = "default"
             # - bot_id != "default": caller must verify ownership; here only filter by bot_id
-            if bot_id is None:
-                conditions.append(AwLangfuseTrace.user_id == owner_id)
-            elif bot_id == "default":
-                conditions.append(AwLangfuseTrace.user_id == owner_id)
-                conditions.append(AwLangfuseTrace.bot_id == "default")
-            else:
-                # Non-default bot: only filter by bot_id (ownership verified by caller)
-                conditions.append(AwLangfuseTrace.bot_id == bot_id)
+            if query_scope == QueryScope.OWNER:
+                if not owner_id:
+                    raise ValueError("owner_id is required for owner-scoped queries")
+                if bot_id is None:
+                    conditions.append(AwLangfuseTrace.user_id == owner_id)
+                elif bot_id == "default":
+                    conditions.append(AwLangfuseTrace.user_id == owner_id)
+                    conditions.append(AwLangfuseTrace.bot_id == "default")
+                else:
+                    # Non-default bot: only filter by bot_id (ownership verified by caller)
+                    conditions.append(AwLangfuseTrace.bot_id == bot_id)
 
             if trace_id:
                 conditions.append(match_column(AwLangfuseTrace.trace_id, trace_id, match_mode))
@@ -523,6 +530,7 @@ class BotChatDbRepository:
                 match_mode,
                 owner_id,
                 bot_id,
+                query_scope,
             )
             if biz_scene or biz_task_id:
                 ref_conditions = []
@@ -574,14 +582,13 @@ class BotChatDbRepository:
             )
 
             detached = [self._detach_trace_row(row) for row in rows]
+            enrich_group_labels(session, detached, group_id, group_sessions)
+            enrich_task_labels(session, detached)
             bot_names = load_bot_names(
                 session, {row.bot_id for row in detached if row.bot_id}
             )
             for row in detached:
                 row.bot_name = bot_names.get(row.bot_id)
-                if group_id:
-                    row.group_id = group_id
-                    row.session_kind = group_sessions.get(row.session_key)
                 if biz_scene or biz_task_id:
                     row.match_sources = ["biz_ref"]
             sessions = [self._row_to_session(row) for row in detached]
@@ -589,7 +596,7 @@ class BotChatDbRepository:
 
     def list_ocb_traces(
         self,
-        owner_id: str,
+        owner_id: str | None,
         from_ms: int,
         to_ms: int,
         page: int,
@@ -604,19 +611,23 @@ class BotChatDbRepository:
         group_id: str | None = None,
         match_mode: str = "exact",
         include_output_match: bool = False,
+        query_scope: QueryScope = QueryScope.OWNER,
     ) -> tuple[list[ConversationSession], int]:
         with self._db.orm_session() as session:
             conditions = [
                 AcOtelLogTrace.start_time_ms >= from_ms,
                 AcOtelLogTrace.start_time_ms <= to_ms,
             ]
-            if bot_id is None:
-                conditions.append(AcOtelLogTrace.user_id == owner_id)
-            elif bot_id == "default":
-                conditions.append(AcOtelLogTrace.user_id == owner_id)
-                conditions.append(AcOtelLogTrace.bot_id.in_(["default", f"{owner_id}_default"]))
-            else:
-                conditions.append(AcOtelLogTrace.bot_id == bot_id)
+            if query_scope == QueryScope.OWNER:
+                if not owner_id:
+                    raise ValueError("owner_id is required for owner-scoped queries")
+                if bot_id is None:
+                    conditions.append(AcOtelLogTrace.user_id == owner_id)
+                elif bot_id == "default":
+                    conditions.append(AcOtelLogTrace.user_id == owner_id)
+                    conditions.append(AcOtelLogTrace.bot_id.in_(["default", f"{owner_id}_default"]))
+                else:
+                    conditions.append(AcOtelLogTrace.bot_id == bot_id)
             if trace_id:
                 conditions.append(match_column(AcOtelLogTrace.trace_id, trace_id, match_mode))
             if session_key:
@@ -630,6 +641,7 @@ class BotChatDbRepository:
                 match_mode,
                 owner_id,
                 bot_id,
+                query_scope,
             )
             if biz_scene or biz_task_id:
                 conditions.append(
@@ -667,6 +679,7 @@ class BotChatDbRepository:
                 self._detach_ocb_trace_row(row)
                 for row in rows
             ]
+            enrich_group_labels(session, detached, group_id, group_sessions)
             bot_names = load_bot_names(
                 session,
                 {row.bot_id for row in detached if row.bot_id},
@@ -676,9 +689,6 @@ class BotChatDbRepository:
             ref_session_keys = task_refs.get("session_key", set())
             for row in detached:
                 row.bot_name = bot_names.get(row.bot_id)
-                if group_id:
-                    row.group_id = group_id
-                    row.session_kind = group_sessions.get(row.session_key)
                 sources = []
                 direct_scene = not biz_scene or (
                     biz_scene in (row.biz_scene or "")
@@ -699,6 +709,7 @@ class BotChatDbRepository:
                 ):
                     sources.append("biz_ref")
                 row.match_sources = sources
+            enrich_task_labels(session, detached)
             sessions = [
                 self._row_to_session(row)
                 for row in detached
