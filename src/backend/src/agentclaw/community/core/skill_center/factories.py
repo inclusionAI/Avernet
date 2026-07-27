@@ -115,6 +115,9 @@ class SkillServiceFactory:
         global_repo_dir: Optional[Path] = None,
         device_fs_factory=None,
         local_skill_path_adapter: Optional[Callable[[str], str]] = None,
+        local_skill_locator_adapter: Optional[
+            Callable[[str], str]
+        ] = None,
         entity_id: str | None = None,
         bot_id: str | None = None,
         engine_type: str | None = None,
@@ -130,9 +133,9 @@ class SkillServiceFactory:
                 active_dir = Path(active_path)
                 local_dir = Path(local_path)
                 repo_dir = Path(repo_path)
-                local_skill_path_adapter = build_pool_local_path_adapter(
-                    local_dir
-                )
+                pool_local_adapter = build_pool_local_path_adapter(local_dir)
+                local_skill_path_adapter = pool_local_adapter
+                local_skill_locator_adapter = pool_local_adapter
 
         return SkillService(
             skill_repo=self._skill_repo,
@@ -146,6 +149,7 @@ class SkillServiceFactory:
             device_fs_factory=device_fs_factory or self._device_fs_dispatcher.for_bot,
             git_sync_service_factory=self._git_sync_service_factory,
             local_skill_path_adapter=local_skill_path_adapter,
+            local_skill_locator_adapter=local_skill_locator_adapter,
         )
 
 

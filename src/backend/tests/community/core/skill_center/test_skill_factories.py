@@ -69,6 +69,12 @@ def test_pool_active_factory_scopes_direct_skill_crud_to_canonical_pool(
         "/home/admin/.openclaw/workspace/skills-pool/"
         "skills-local/handmade"
     )
+    assert svc._local_skill_locator_adapter(
+        "/home/admin/.openclaw/workspace/skills/skills-local/handmade"
+    ) == (
+        "/home/admin/.openclaw/workspace/skills-pool/"
+        "skills-local/handmade"
+    )
 
 
 def test_real_skill_set_service_factory_create_default_branch(test_injector):
