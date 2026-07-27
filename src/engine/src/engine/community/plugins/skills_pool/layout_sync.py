@@ -10,10 +10,6 @@ import stat
 from pathlib import Path
 from uuid import uuid4
 
-from engine.community.plugins.skills_pool.layout_atomic import (
-    atomic_exchange_paths,
-)
-
 Fingerprint = tuple[str, str]
 Manifest = dict[str, Fingerprint]
 
@@ -23,21 +19,39 @@ def mirror_local_tree(
     source_root: Path,
     pool_local: Path,
     staging_root: Path,
-) -> list[str]:
-    """交换前把 Legacy local 的完整文件系统真相精确镜像到 Pool。"""
+) -> tuple[list[str], Manifest]:
+    """把 Legacy local 收敛到 Pool，同时保留同步窗口内的 Pool 新写入。
 
+    调用前 Backend 已开始把路径消费者切到 canonical Pool。先记录 Pool
+    baseline，再把 Legacy 复制到 staging，最后做三方 best-effort 合并：
+    Pool 仍等于 baseline 的路径应用 Legacy；已变化的路径保留 Pool。Legacy
+    已删除且 Pool 未变化的路径才会被清理。
+    """
+
+    pool_baseline = snapshot_local(pool_local)
     _remove_path(staging_root)
     staging_root.mkdir()
     source_entries = sorted(source_root.iterdir(), key=lambda path: path.name)
     for source in source_entries:
         _copy_entry(source, staging_root / source.name)
 
-    for destination in list(pool_local.iterdir()):
-        _remove_path(destination)
-    for staged in list(staging_root.iterdir()):
-        staged.rename(pool_local / staged.name)
-    staging_root.rmdir()
-    return [entry.name for entry in source_entries]
+    staged_manifest = snapshot_local(staging_root)
+    merge_post_cutover_changes(
+        source_root=staging_root,
+        pool_local=pool_local,
+        baseline=pool_baseline,
+    )
+    deleted = sorted(
+        set(pool_baseline) - set(staged_manifest),
+        key=lambda key: (-key.count("/"), key),
+    )
+    for key in deleted:
+        _remove_if_unchanged(
+            target=pool_local / key,
+            expected=pool_baseline[key],
+        )
+    _remove_path(staging_root)
+    return [entry.name for entry in source_entries], staged_manifest
 
 
 def write_baseline_manifest(
@@ -45,17 +59,29 @@ def write_baseline_manifest(
     pool_local: Path,
     local_names: list[str],
     manifest_path: Path,
+    manifest: Manifest | None = None,
 ) -> Manifest:
-    """持久化交换前 Pool 快照，供交换后或失败重试执行三方合并。"""
+    """持久化 retire 前的 Legacy 快照，供失败重试执行三方合并。
 
-    manifest = snapshot_local(pool_local, local_names=local_names)
+    ``pool_local`` 参数名为向前兼容保留；调用方传入的是 final sync 完成后
+    尚未退役的 Legacy local。Pool 可能已承接 Backend 新写入，不能作为
+    Legacy 窗口变化的比较基线。
+    """
+
+    effective_manifest = (
+        manifest
+        if manifest is not None
+        else snapshot_local(pool_local, local_names=local_names)
+    )
     temporary = manifest_path.with_name(f".{manifest_path.name}.{uuid4().hex}.tmp")
     temporary.write_text(
-        json.dumps({key: list(value) for key, value in manifest.items()}),
+        json.dumps(
+            {key: list(value) for key, value in effective_manifest.items()}
+        ),
         encoding="utf-8",
     )
     os.replace(temporary, manifest_path)
-    return manifest
+    return effective_manifest
 
 
 def load_baseline_manifest(manifest_path: Path) -> Manifest:
@@ -81,18 +107,17 @@ def merge_post_cutover_changes(
     pool_local: Path,
     baseline: Manifest,
 ) -> dict[str, object]:
-    """三方合并交换窗口内的 Legacy 变化，保留交换后的 Pool 新写入。
+    """三方合并 rename 窗口内的 Legacy 变化，保留 Pool 新写入。
 
-    ``baseline`` 是首次 final sync 后的 Pool；``source_root`` 是原子交换
-    后换出的 Legacy 快照；``pool_local`` 是交换后继续承接新写入的目标。
-    交换后 Pool 是唯一写入权威源：新路径使用原子 no-clobber 创建；已有
-    路径使用原子 exchange 检查交换瞬间换出的实际版本，Pool 已变化时立即
-    回滚并保留 Pool。删除和无法安全收敛的 delta 留在 quarantine 供审计。
+    ``baseline`` 是首次 staging copy 得到的 Legacy 快照；``source_root``
+    是普通 rename 后进入 quarantine 的 Legacy；``pool_local`` 已承接
+    Backend 新写入。新路径使用 no-clobber 创建；已有路径仅在 Pool 仍等于
+    baseline 时以普通 replace 发布。Pool 已变化时保留 Pool，无法安全收敛
+    的 delta 留在 quarantine 供审计。
 
-    这是本期明确接受的 best-effort 边界：没有写栅栏时，跨 exchange 持有
-    的已打开文件描述符，或连续命中回滚后再次交换窗口的同文件写入，仍可能
-    落到随后清理的临时 inode。完整消除此竞态需要所有 writer 遵守共享的
-    quiesce/lock 协议，不属于 #370。
+    这是本期明确接受的 best-effort 边界：没有共享写栅栏时，fingerprint
+    校验与 replace 之间仍有极窄 TOCTOU。完整消除此竞态需要所有 writer
+    遵守 quiesce/lock 协议，不属于本期。
     """
 
     source = snapshot_local(source_root)
@@ -260,12 +285,12 @@ def _replace_if_unchanged(
     expected: Fingerprint,
     desired: Fingerprint,
 ) -> bool:
-    """以 exchange 瞬间换出的对象判断 Pool 是否仍为 baseline。
+    """当 Pool 仍为 baseline 时，以普通 rename 发布 Legacy 窗口变化。
 
-    先交换再检查，避免 check-then-replace 的 TOCTOU。若换出的 Pool 已变化，
-    立即原子换回；若回滚窗口内 canonical path 又收到写入，则该更晚写入
-    随临时项再次换回 canonical。调用方接受无协作写锁时跨 inode 写入仍有
-    极窄残余竞态；此处不声称提供文件内容 CAS。
+    目标 NAS/FUSE 不支持 ``RENAME_EXCHANGE``，因此这里在最后一次 fingerprint
+    校验后使用同文件系统 ``os.replace``。校验与 replace 之间仍存在极窄
+    TOCTOU；这是无共享写栅栏方案明确接受的 best-effort 边界。若校验时
+    Pool 已变化，则保留 Pool 权威版本并把 Legacy 变化留在 quarantine。
     """
 
     if desired == expected:
@@ -280,23 +305,39 @@ def _replace_if_unchanged(
             temporary.mkdir()
         else:
             return False
-        if not atomic_exchange_paths(temporary, target):
-            raise OSError("atomic file exchange unavailable")
-        displaced = _fingerprint(temporary)
-        if displaced == expected:
-            return _fingerprint(target) == desired
-
-        if not atomic_exchange_paths(temporary, target):
-            raise OSError("failed to restore concurrently changed Pool file")
-        candidate_after_rollback = _fingerprint(temporary)
-        if candidate_after_rollback != desired:
-            if not atomic_exchange_paths(temporary, target):
-                raise OSError("failed to restore newer Pool file")
+        if _fingerprint(target) != expected:
+            return False
+        try:
+            os.replace(temporary, target)
+        except (IsADirectoryError, NotADirectoryError):
+            # POSIX rename cannot replace across entry kinds on every
+            # filesystem. Recheck above, then remove only the exact baseline
+            # entry; a non-empty concurrently changed directory is preserved.
+            if expected[0] == "dir":
+                target.rmdir()
+            else:
+                target.unlink()
+            os.replace(temporary, target)
         return _fingerprint(target) == desired
-    except (FileNotFoundError, NotADirectoryError):
+    except (FileNotFoundError, NotADirectoryError, OSError):
         return False
     finally:
         _remove_path(temporary)
+
+
+def _remove_if_unchanged(*, target: Path, expected: Fingerprint) -> bool:
+    """仅清理仍等于同步前 baseline 的 Legacy deletion。"""
+
+    if _fingerprint(target) != expected:
+        return False
+    try:
+        if expected[0] == "dir":
+            target.rmdir()
+        else:
+            target.unlink()
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return False
+    return _fingerprint(target) is None
 
 
 def _remove_path(path: Path) -> None:
