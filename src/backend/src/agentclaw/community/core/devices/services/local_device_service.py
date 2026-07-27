@@ -56,6 +56,7 @@ from agentclaw.community.core.devices.services.device_service import (
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils import env_utils
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 
 
 logger = get_logger()
@@ -726,7 +727,9 @@ class LocalDeviceService(DeviceService):
                     error=str(e),
                 )
 
-        thread = threading.Thread(target=start_service_async, daemon=True)
+        thread = threading.Thread(
+            target=bind_current_avernet_tenant(start_service_async), daemon=True
+        )
         thread.start()
 
         return result

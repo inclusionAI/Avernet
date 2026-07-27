@@ -1644,7 +1644,11 @@ class DeviceService:
                         exc_info=True,
                     )
 
-            thread = threading.Thread(target=_run_init, daemon=True, name=f"data-init-{bot_id}")
+            thread = threading.Thread(
+                target=bind_current_avernet_tenant(_run_init),
+                daemon=True,
+                name=f"data-init-{bot_id}",
+            )
             thread.start()
 
             logger.info(f"bot_id={bot_id} data_init_trigger dispatched source=status_succeeded thread={thread.name}")
