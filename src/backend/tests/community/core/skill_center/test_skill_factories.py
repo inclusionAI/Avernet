@@ -38,14 +38,42 @@ def test_real_skill_service_factory_create(test_injector):
     assert svc.runtime_uses_pool_paths is False
 
 
+@pytest.mark.parametrize(
+    ("engine", "engine_root", "active_dir"),
+    [
+        (
+            "openclaw",
+            "/home/admin/.openclaw/workspace",
+            "/home/admin/.openclaw/workspace/skills",
+        ),
+        (
+            "claude_code",
+            "/home/admin/.claude_code/workspace",
+            "/home/admin/.claude/skills",
+        ),
+        (
+            "aicoding",
+            "/home/admin/.aicoding/workspace",
+            "/home/admin/.claude/skills",
+        ),
+        (
+            "hermes",
+            "/home/admin/.hermes/workspace",
+            "/home/admin/.hermes/skills",
+        ),
+    ],
+)
 def test_pool_active_factory_scopes_direct_skill_crud_to_canonical_pool(
     test_injector,
+    engine,
+    engine_root,
+    active_dir,
 ):
     factory = test_injector.get(SkillServiceFactory)
     factory._pool_layout_paths = lambda *_: (
-        "/home/admin/.openclaw/workspace/skills",
-        "/home/admin/.openclaw/workspace/skills-pool/skills-local",
-        "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+        active_dir,
+        f"{engine_root}/skills-pool/skills-local",
+        f"{engine_root}/skills-pool/skills-repo",
     )
 
     svc = factory.create(
@@ -54,29 +82,19 @@ def test_pool_active_factory_scopes_direct_skill_crud_to_canonical_pool(
         repo_dir="/legacy/skills/skills-repo",
         entity_id="staff-1",
         bot_id="bot-1",
-        engine_type="openclaw",
+        engine_type=engine,
     )
 
-    assert svc.active_dir == Path("/home/admin/.openclaw/workspace/skills")
-    assert svc.local_dir == Path(
-        "/home/admin/.openclaw/workspace/skills-pool/skills-local"
-    )
-    assert svc.repo_dir == Path(
-        "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
-    )
+    assert svc.active_dir == Path(active_dir)
+    assert svc.local_dir == Path(f"{engine_root}/skills-pool/skills-local")
+    assert svc.repo_dir == Path(f"{engine_root}/skills-pool/skills-repo")
     assert svc.runtime_uses_pool_paths is True
     assert svc._local_skill_path_adapter(
-        "/home/admin/.openclaw/workspace/skills/skills-local/handmade"
-    ) == (
-        "/home/admin/.openclaw/workspace/skills-pool/"
-        "skills-local/handmade"
-    )
+        f"{engine_root}/skills/skills-local/handmade"
+    ) == f"{engine_root}/skills-pool/skills-local/handmade"
     assert svc._local_skill_locator_adapter(
-        "/home/admin/.openclaw/workspace/skills/skills-local/handmade"
-    ) == (
-        "/home/admin/.openclaw/workspace/skills-pool/"
-        "skills-local/handmade"
-    )
+        f"{engine_root}/skills/skills-local/handmade"
+    ) == f"{engine_root}/skills-pool/skills-local/handmade"
 
 
 def test_real_skill_set_service_factory_create_default_branch(test_injector):
