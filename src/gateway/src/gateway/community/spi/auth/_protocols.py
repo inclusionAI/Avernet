@@ -11,10 +11,11 @@ class AuthPlugin(Protocol):
     """Plugin protocol for authentication and authorization.
 
     Unifies login (`get_login_user`) and authorization (`is_allowed`,
-    `check_permission`) into one contract. The gateway's authn flow uses only
-    `get_login_user` (via the ``cookie`` strategy); the authorization methods are
-    kept on this SPI for component-side use — the gateway itself is auth-only and
-    does not call them. Removing them is explicitly out of scope (see spec).
+    `check_permission`) into one contract. The gateway's authn flow no longer
+    calls any of these — it resolves user identity via Google userinfo and bot
+    identity via the bot registry — so this SPI is currently **unused by the
+    gateway**. It is kept for component-side use (authorization in components);
+    removing it is explicitly out of scope (see spec).
 
     Implementations:
     - BareAuthPlugin: returns a hardcoded user, always-allowed for tests.

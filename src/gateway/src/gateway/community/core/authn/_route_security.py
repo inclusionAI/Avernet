@@ -17,6 +17,8 @@ import yaml
 
 from gateway.community.spi.authn import PrincipalType
 
+from ._parsing import parse_principal_type
+
 # A requirement is the set of identity types a route demands; the runner must
 # produce one Principal of each.
 Requirement = frozenset[PrincipalType]
@@ -79,15 +81,8 @@ def _parse_req(value: Any) -> Requirement:
             raise ValueError(
                 f"route requirement must be a list of type strings, got {item!r}"
             )
-        types.add(_parse_type(item))
+        types.add(parse_principal_type(item, source="route_security"))
     return frozenset(types)
-
-
-def _parse_type(name: str) -> PrincipalType:
-    try:
-        return PrincipalType(name)
-    except ValueError as ex:
-        raise ValueError(f"unknown identity type in route_security: {name!r}") from ex
 
 
 # ── matching (spec §8.3) ─────────────────────────────────────────────────────

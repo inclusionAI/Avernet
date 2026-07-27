@@ -19,6 +19,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
+
 from gateway.community.core.authn import (
     Identities,
     RouteSecurity,
@@ -40,7 +42,7 @@ _BOT_TOKEN_HEADER = "x-bot-token"
 
 
 def _strategy_pool(
-    google_transport: object | None,
+    google_transport: httpx.BaseTransport | None,
 ) -> dict[str, AuthStrategy]:
     """The bare flavor's available strategies, keyed by authn.yaml name."""
     bot_registry = InMemoryBotRegistry()
@@ -48,7 +50,7 @@ def _strategy_pool(
         "google": GoogleUserStrategy(
             token_header=_USER_TOKEN_HEADER,
             default_tenant=_DEFAULT_TENANT,
-            transport=google_transport,  # type: ignore[arg-type]
+            transport=google_transport,
         ),
         "bot_token": BotTokenStrategy(
             registry=bot_registry, token_header=_BOT_TOKEN_HEADER
@@ -72,7 +74,9 @@ class Authenticator:
         return await run_auth(creds, requirement, self.strategies)
 
 
-def build_authenticator(*, google_transport: object | None = None) -> Authenticator:
+def build_authenticator(
+    *, google_transport: httpx.BaseTransport | None = None
+) -> Authenticator:
     """Build the auth registry + route table (called once from ``create_app``).
 
     ``google_transport`` is an HTTP-transport seam: production omits it (real

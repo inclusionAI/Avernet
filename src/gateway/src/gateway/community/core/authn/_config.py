@@ -16,6 +16,8 @@ import yaml
 
 from gateway.community.spi.authn import AuthStrategy, PrincipalType
 
+from ._parsing import parse_principal_type
+
 # Parsed chains: identity type -> ordered list of strategy names.
 Chains = dict[PrincipalType, list[str]]
 
@@ -26,7 +28,7 @@ def load_chains(path: str | Path) -> Chains:
     table = raw.get("identity_strategies", {})
     chains: Chains = {}
     for type_name, spec in table.items():
-        ptype = _parse_type(type_name)
+        ptype = parse_principal_type(type_name, source="authn.yaml")
         chain = _parse_chain(spec)
         if not chain:
             raise ValueError(f"empty strategy chain for type {type_name!r}")
@@ -62,13 +64,6 @@ def build_strategy_registry(
 
 
 # ── parsing helpers ──────────────────────────────────────────────────────────
-
-
-def _parse_type(name: str) -> PrincipalType:
-    try:
-        return PrincipalType(name)
-    except ValueError as ex:
-        raise ValueError(f"unknown identity type in authn.yaml: {name!r}") from ex
 
 
 def _parse_chain(spec: Any) -> list[str]:

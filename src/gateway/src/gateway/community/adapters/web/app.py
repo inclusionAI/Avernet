@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 from fastapi import FastAPI
 
 from gateway.community import __version__
@@ -20,7 +21,7 @@ DOCS_TAGS = [
 ]
 
 
-def create_app(google_transport: object | None = None) -> FastAPI:
+def create_app(google_transport: httpx.BaseTransport | None = None) -> FastAPI:
     """Build and configure the gateway FastAPI application.
 
     ``google_transport`` is an optional HTTP-transport seam for the ``google``
