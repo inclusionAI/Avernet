@@ -69,6 +69,10 @@ logger = get_logger()
 # the publish-flow orchestration package.
 _BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
 
+# Draft restoration copies a potentially large historical workspace. Bound the
+# whole operation, rather than granting each individual command a fresh timeout.
+_DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
+
 
 class BotBuildServiceError(Exception):
     """Bot build service error."""
@@ -651,6 +655,7 @@ class BotBuildService:
         cmd: list[str],
         command_name: str,
         error_message: str,
+        timeout_seconds: float | None = None,
     ) -> subprocess.CompletedProcess:
         """执行本地命令并统一处理日志和错误。
 
@@ -671,13 +676,15 @@ class BotBuildService:
         )
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+            run_kwargs = {
+                "capture_output": True,
+                "text": True,
+                "encoding": "utf-8",
+                "errors": "replace",
+            }
+            if timeout_seconds is not None:
+                run_kwargs["timeout"] = timeout_seconds
+            result = subprocess.run(cmd, **run_kwargs)
         except FileNotFoundError:
             logger.error(
                 f"[BotBuildService._run_local_command] "
@@ -686,6 +693,15 @@ class BotBuildService:
             raise BotBuildMigrationError(
                 f"{command_name} command not found"
             )
+        except subprocess.TimeoutExpired as exc:
+            logger.error(
+                f"[BotBuildService._run_local_command] "
+                f"{command_name} timed out after {timeout_seconds} seconds"
+            )
+            raise BotBuildMigrationError(
+                f"{error_message}: command timed out after "
+                f"{timeout_seconds:g} seconds"
+            ) from exc
 
         if result.returncode != 0:
             logger.error(
@@ -1160,6 +1176,15 @@ class BotBuildService:
         """
         provider = self._resolve_sandbox_provider(bot)
         build_plan = provider.get_build_plan()
+        deadline = time.monotonic() + _DRAFT_RESTORE_TIMEOUT_SECONDS
+
+        def remaining_timeout() -> float:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BotBuildMigrationError(
+                    "恢复草稿超时（默认限制 30 分钟）"
+                )
+            return remaining
 
         if not artifact_ext.get("migration_path"):
             raise BotBuildServiceError("历史版本缺少 migration_path")
@@ -1187,6 +1212,7 @@ class BotBuildService:
             cmd=["sudo", "chmod", "755", str(draft_nas_dir)],
             command_name="sudo chmod",
             error_message="chmod draft NAS directory failed",
+            timeout_seconds=remaining_timeout(),
         )
         draft_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1207,6 +1233,7 @@ class BotBuildService:
             ],
             command_name="rsync draft restore",
             error_message="restore draft workspace failed",
+            timeout_seconds=remaining_timeout(),
         )
 
         if build_plan.extra_sync_source_relpath and build_plan.extra_sync_target_relpath:
@@ -1227,6 +1254,7 @@ class BotBuildService:
                 ],
                 command_name="rsync draft restore (extra)",
                 error_message="restore draft extra workspace failed",
+                timeout_seconds=remaining_timeout(),
             )
 
         return {
