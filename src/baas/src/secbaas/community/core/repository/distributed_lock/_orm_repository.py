@@ -16,6 +16,27 @@ from ._record import LockRecord
 log = get_logger("orm-repository")
 
 
+def _is_lock_wait_timeout(exc: Exception) -> bool:
+    """Return True for OceanBase/MySQL-compatible lock wait timeouts."""
+    from sqlalchemy.exc import DatabaseError as SADatabaseError
+
+    if not isinstance(exc, SADatabaseError):
+        return False
+
+    orig = getattr(exc, "orig", None)
+    errno = getattr(orig, "errno", None)
+    if errno == 1205:
+        return True
+
+    msg = str(orig or exc).lower()
+    args = getattr(orig, "args", ())
+    return (
+        "lock wait timeout" in msg
+        or "lock wait timeout" in " ".join(str(arg).lower() for arg in args)
+        or any(arg == 1205 or str(arg) == "1205" for arg in args)
+    )
+
+
 class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository):
     """ORM-based distributed lock repository using SQLAlchemy."""
 
@@ -87,9 +108,17 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
     ) -> bool:
         """Atomically try to acquire a lock in a single session.
 
-        SELECT → if absent/expired → DELETE expired → INSERT.
-        If INSERT hits unique constraint, return False (concurrent race).
+        Prefer conditional UPDATE over DELETE + INSERT. Existing lock rows are
+        treated as stable state: an expired row, a row with no expire_time, or
+        a row already held by the same holder can be acquired by updating its
+        holder and expiry. A missing row is initialized by INSERT.
+
+        Concurrent INSERT conflicts and OceanBase/MySQL-compatible lock wait
+        timeouts are normal lock contention for this try-acquire API and are
+        returned as ``False``.
         """
+        from sqlalchemy import func, or_
+        from sqlalchemy.exc import DatabaseError as SADatabaseError
         from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
         from secbaas.community.core.utils.env_utils import get_current_env
@@ -100,42 +129,72 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
             lock_holder,
         )
         now = datetime.now()
+        env = get_current_env()
 
-        row = (
-            self._session.query(DistributedLockModel)
-            .filter(DistributedLockModel.lock_name == lock_name)
-            .first()
-        )
+        try:
+            updated = (
+                self._session.query(DistributedLockModel)
+                .filter(
+                    DistributedLockModel.lock_name == lock_name,
+                    or_(
+                        DistributedLockModel.lock_holder == lock_holder,
+                        DistributedLockModel.expire_time.is_(None),
+                        DistributedLockModel.expire_time <= now,
+                    ),
+                )
+                .update(
+                    {
+                        "lock_holder": lock_holder,
+                        "expire_time": expire_time,
+                        "gmt_modified": func.now(),
+                        "env": env,
+                    },
+                    synchronize_session=False,
+                )
+            )
 
-        if row is not None and row.lock_holder == lock_holder:
-            row.expire_time = expire_time
+            if int(updated) > 0:
+                log.info(
+                    "[distributed-lock:try_acquire_lock] acquired by update: lock_name=%s",
+                    lock_name,
+                )
+                return True
+
+            row = (
+                self._session.query(DistributedLockModel)
+                .filter(DistributedLockModel.lock_name == lock_name)
+                .first()
+            )
+            if row is not None:
+                if row.lock_holder == lock_holder:
+                    log.info(
+                        "[distributed-lock:try_acquire_lock] reentrant already held: lock_name=%s",
+                        lock_name,
+                    )
+                    return True
+
+                log.info(
+                    "[distributed-lock:try_acquire_lock] lock held by %s, not acquired",
+                    row.lock_holder,
+                )
+                return False
+
+            new_row = DistributedLockModel(
+                lock_name=lock_name,
+                lock_holder=lock_holder,
+                expire_time=expire_time,
+                env=env,
+            )
+            self._session.add(new_row)
             self._session.flush()
+
             log.info(
-                "[distributed-lock:try_acquire_lock] reentrant renew: lock_name=%s",
+                "[distributed-lock:try_acquire_lock] acquired by insert: lock_name=%s, id=%s",
                 lock_name,
+                new_row.id,
             )
             return True
 
-        if row is not None and row.expire_time is not None and row.expire_time > now:
-            log.info(
-                "[distributed-lock:try_acquire_lock] lock held by %s, not acquired",
-                row.lock_holder,
-            )
-            return False
-
-        if row is not None:
-            self._session.delete(row)
-            self._session.flush()
-
-        new_row = DistributedLockModel(
-            lock_name=lock_name,
-            lock_holder=lock_holder,
-            expire_time=expire_time,
-            env=get_current_env(),
-        )
-        self._session.add(new_row)
-        try:
-            self._session.flush()
         except SAIntegrityError:
             self._session.rollback()
             log.warning(
@@ -143,10 +202,12 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
                 lock_name,
             )
             return False
-
-        log.info(
-            "[distributed-lock:try_acquire_lock] acquired: lock_name=%s, id=%s",
-            lock_name,
-            new_row.id,
-        )
-        return True
+        except SADatabaseError as exc:
+            if _is_lock_wait_timeout(exc):
+                self._session.rollback()
+                log.warning(
+                    "[distributed-lock:try_acquire_lock] lock wait timeout, treated as contention: lock_name=%s",
+                    lock_name,
+                )
+                return False
+            raise
