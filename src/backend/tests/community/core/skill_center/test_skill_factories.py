@@ -9,6 +9,8 @@ These resolve the REAL factories from the test injector and invoke
 ``create()`` the way the routers do — covering every skill-center
 factory ``create()`` body (both branches where they differ).
 """
+from pathlib import Path
+
 import pytest
 
 from agentclaw.community.core.skill_center.factories import (
@@ -33,6 +35,40 @@ def test_real_skill_service_factory_create(test_injector):
     factory = test_injector.get(SkillServiceFactory)
     svc = factory.create()
     assert isinstance(svc, SkillService)
+
+
+def test_pool_active_factory_scopes_direct_skill_crud_to_canonical_pool(
+    test_injector,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: (
+        "/home/admin/.openclaw/workspace/skills",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-local",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+    )
+
+    svc = factory.create(
+        active_dir="/legacy/skills",
+        local_dir="/legacy/skills/skills-local",
+        repo_dir="/legacy/skills/skills-repo",
+        entity_id="staff-1",
+        bot_id="bot-1",
+        engine_type="openclaw",
+    )
+
+    assert svc.active_dir == Path("/home/admin/.openclaw/workspace/skills")
+    assert svc.local_dir == Path(
+        "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+    )
+    assert svc.repo_dir == Path(
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
+    )
+    assert svc._local_skill_path_adapter(
+        "/home/admin/.openclaw/workspace/skills/skills-local/handmade"
+    ) == (
+        "/home/admin/.openclaw/workspace/skills-pool/"
+        "skills-local/handmade"
+    )
 
 
 def test_real_skill_set_service_factory_create_default_branch(test_injector):
