@@ -126,9 +126,7 @@ class TestDispatchCompleteUploadSingle:
         assert result.status == "DONE"
 
     @pytest.mark.asyncio
-    async def test_transfer_not_found_raises(
-        self, dispatcher, ticket_repo
-    ):
+    async def test_transfer_not_found_raises(self, dispatcher, ticket_repo):
         """When ticket is not found, raise TransferNotFoundError."""
         ticket_repo.get_by_transfer_id.return_value = None
 
@@ -145,11 +143,11 @@ class TestDispatchGetUploadUrl:
     """Tests for dispatch_get_upload_url covering SINGLE, MULTIPART, and validation."""
 
     @pytest.mark.asyncio
-    async def test_single_upload_success(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_single_upload_success(self, dispatcher, file_backend, ticket_repo):
         """file_size=0 routes to SINGLE mode with upload_url present."""
-        file_backend.generate_upload_url.return_value = "https://oss.example.com/put?token=abc"
+        file_backend.generate_upload_url.return_value = (
+            "https://oss.example.com/put?token=abc"
+        )
         file_backend.build_session_staging_path.return_value = (
             "file-transfers/test/t1/sess-001/tf-single/data.csv"
         )
@@ -217,9 +215,7 @@ class TestDispatchGetUploadUrl:
             )
 
     @pytest.mark.asyncio
-    async def test_negative_file_size(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_negative_file_size(self, dispatcher, file_backend, ticket_repo):
         """file_size=-1 raises ValueError (400)."""
         with pytest.raises(ValueError):
             await dispatcher.dispatch_get_upload_url(
@@ -234,7 +230,9 @@ class TestDispatchGetUploadUrl:
         self, dispatcher, file_backend, ticket_repo
     ):
         """operator='' defaults to 'unknown' — no crash; ticket created with operator='unknown'."""
-        file_backend.generate_upload_url.return_value = "https://oss.example.com/put?token=abc"
+        file_backend.generate_upload_url.return_value = (
+            "https://oss.example.com/put?token=abc"
+        )
         file_backend.build_session_staging_path.return_value = (
             "file-transfers/test/t1/sess-001/tf-op/data.csv"
         )
@@ -274,7 +272,9 @@ class TestDispatchGetUploadUrl:
     ):
         """file_size=100GB → dispatcher auto-adjusts part_size; no ValueError, type=MULTIPART."""
         # 100GB = 107_374_182_400 bytes, default 10MB parts = 10,240 parts > 10,000
-        mock_parts = [MagicMock(part_number=1, upload_url="https://oss.example.com/part/1")]
+        mock_parts = [
+            MagicMock(part_number=1, upload_url="https://oss.example.com/part/1")
+        ]
         mock_session = MagicMock()
         mock_session.session_id = "mp-sess-huge"
         mock_session.parts = mock_parts
@@ -296,11 +296,11 @@ class TestDispatchGetUploadUrl:
         assert result.part_count <= 10_000
 
     @pytest.mark.asyncio
-    async def test_operator_preserved(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_operator_preserved(self, dispatcher, file_backend, ticket_repo):
         """operator='alice' → ticket_repo.create_ticket called with operator='alice'."""
-        file_backend.generate_upload_url.return_value = "https://oss.example.com/put?token=abc"
+        file_backend.generate_upload_url.return_value = (
+            "https://oss.example.com/put?token=abc"
+        )
         file_backend.build_session_staging_path.return_value = (
             "file-transfers/test/t1/sess-001/tf-alice/data.csv"
         )
@@ -427,9 +427,7 @@ class TestDispatchCompleteUploadFull:
             await dispatcher.dispatch_complete_upload(transfer_id="tf-001")
 
     @pytest.mark.asyncio
-    async def test_ownership_mismatch(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_ownership_mismatch(self, dispatcher, file_backend, ticket_repo):
         """ticket.session_id != provided session_id → raises TransferNotFoundError (does NOT reveal existence)."""
         ticket = _make_ticket(session_id="sess-001")
         ticket_repo.get_by_transfer_id.return_value = ticket
@@ -441,9 +439,7 @@ class TestDispatchCompleteUploadFull:
             )
 
     @pytest.mark.asyncio
-    async def test_tenant_scope_respected(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_tenant_scope_respected(self, dispatcher, file_backend, ticket_repo):
         """get_by_transfer_id called with tenant param."""
         file_backend.check_object_exists.return_value = True
 
@@ -453,9 +449,7 @@ class TestDispatchCompleteUploadFull:
         )
 
         # Verify repo was called with tenant param
-        ticket_repo.get_by_transfer_id.assert_called_with(
-            "tf-001", tenant="my-tenant"
-        )
+        ticket_repo.get_by_transfer_id.assert_called_with("tf-001", tenant="my-tenant")
 
 
 # ============================================================================
@@ -467,9 +461,7 @@ class TestCancelUpload:
     """Tests for dispatch_cancel_upload covering success, idempotency, multipart, and errors."""
 
     @pytest.mark.asyncio
-    async def test_cancel_upload_success(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_cancel_upload_success(self, dispatcher, file_backend, ticket_repo):
         """ticket CREATED, no multipart → status CANCELLED."""
         ticket = _make_ticket()
         ticket_repo.get_by_transfer_id.return_value = ticket
@@ -535,7 +527,9 @@ class TestCancelUpload:
         """abort_multipart_upload raises NoSuchUpload → caught, ticket still CANCELLED."""
         ticket = _make_ticket(multipart_session_id="mp-sess-01")
         ticket_repo.get_by_transfer_id.return_value = ticket
-        file_backend.abort_multipart_upload.side_effect = Exception("NoSuchUpload: upload session not found")
+        file_backend.abort_multipart_upload.side_effect = Exception(
+            "NoSuchUpload: upload session not found"
+        )
 
         result = await dispatcher.dispatch_cancel_upload(transfer_id="tf-001")
 
@@ -544,9 +538,7 @@ class TestCancelUpload:
         assert result.status == "CANCELLED"
 
     @pytest.mark.asyncio
-    async def test_cancel_not_found(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_cancel_not_found(self, dispatcher, file_backend, ticket_repo):
         """ticket None → raises TransferNotFoundError."""
         ticket_repo.get_by_transfer_id.return_value = None
 
@@ -597,13 +589,13 @@ class TestGetShareLink:
     """Tests for dispatch_get_share_link covering success, show flag, and errors."""
 
     @pytest.mark.asyncio
-    async def test_share_link_success(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_share_link_success(self, dispatcher, file_backend, ticket_repo):
         """ticket DONE → generate_download_url called with response-disposition: attachment when show=False."""
         ticket = _make_ticket(status="DONE")
         ticket_repo.get_by_transfer_id.return_value = ticket
-        file_backend.generate_download_url.return_value = "https://oss.example.com/dl?token=abc"
+        file_backend.generate_download_url.return_value = (
+            "https://oss.example.com/dl?token=abc"
+        )
 
         result = await dispatcher.dispatch_get_share_link(
             transfer_id="tf-001",
@@ -619,18 +611,16 @@ class TestGetShareLink:
         # response_params is passed as positional arg (3rd position after staging_path, expire_seconds)
         call_args = file_backend.generate_download_url.call_args
         response_params_arg = call_args[0][2] if len(call_args[0]) > 2 else None
-        assert response_params_arg == {
-            "response-content-disposition": "attachment"
-        }
+        assert response_params_arg == {"response-content-disposition": "attachment"}
 
     @pytest.mark.asyncio
-    async def test_share_link_show_true(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_share_link_show_true(self, dispatcher, file_backend, ticket_repo):
         """show=True → generate_download_url called with response_params=None (inline preview)."""
         ticket = _make_ticket(status="DONE")
         ticket_repo.get_by_transfer_id.return_value = ticket
-        file_backend.generate_download_url.return_value = "https://oss.example.com/dl?token=abc"
+        file_backend.generate_download_url.return_value = (
+            "https://oss.example.com/dl?token=abc"
+        )
 
         await dispatcher.dispatch_get_share_link(
             transfer_id="tf-001",
@@ -701,9 +691,7 @@ class TestGetTransferStatus:
     """Tests for dispatch_get_transfer_status covering success, not-found, ownership, and FAILED."""
 
     @pytest.mark.asyncio
-    async def test_status_success(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_status_success(self, dispatcher, file_backend, ticket_repo):
         """ticket found → returns SessionGetTransferStatusResponse with all fields."""
         ticket = _make_ticket()
         ticket_repo.get_by_transfer_id.return_value = ticket
@@ -717,9 +705,7 @@ class TestGetTransferStatus:
         assert result.session_id == "sess-001"
 
     @pytest.mark.asyncio
-    async def test_status_not_found(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_status_not_found(self, dispatcher, file_backend, ticket_repo):
         """ticket None → raises TransferNotFoundError."""
         ticket_repo.get_by_transfer_id.return_value = None
 
@@ -765,9 +751,7 @@ class TestDeleteTransfer:
     """Tests for dispatch_delete_transfer covering success, idempotency, and errors."""
 
     @pytest.mark.asyncio
-    async def test_delete_success(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_delete_success(self, dispatcher, file_backend, ticket_repo):
         """ticket DONE → delete_object called, ticket transitions to DELETED."""
         ticket = _make_ticket(status="DONE")
         ticket_repo.get_by_transfer_id.return_value = ticket
@@ -778,7 +762,9 @@ class TestDeleteTransfer:
         assert result.transfer_id == ticket.transfer_id
         assert result.previous_status == "DONE"
         assert result.new_status == "DELETED"
-        file_backend.delete_object.assert_called_once_with(ticket.fileservice_staging_path)
+        file_backend.delete_object.assert_called_once_with(
+            ticket.fileservice_staging_path
+        )
         ticket_repo.update_status.assert_called_once_with(ticket.transfer_id, "DELETED")
 
     @pytest.mark.asyncio
@@ -798,9 +784,7 @@ class TestDeleteTransfer:
         file_backend.delete_object.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_delete_not_found(
-        self, dispatcher, file_backend, ticket_repo
-    ):
+    async def test_delete_not_found(self, dispatcher, file_backend, ticket_repo):
         """ticket None → raises TransferNotFoundError."""
         ticket_repo.get_by_transfer_id.return_value = None
 

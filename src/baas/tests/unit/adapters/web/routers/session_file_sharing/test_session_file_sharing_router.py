@@ -24,10 +24,10 @@ from secbaas.community.api.session_file_sharing import (
     SessionCompleteUploadResponse,
     SessionDeleteTransferResponse,
     SessionFileSharingDispatcher,
+    SessionFileSharingError,
     SessionGetTransferStatusResponse,
     SessionGetUploadUrlResponse,
     SessionShareLinkResponse,
-    SessionFileSharingError,
     SourceTransferNotFoundError,
     SourceTransferNotReadyError,
     StagingObjectNotFoundError,
@@ -56,8 +56,8 @@ def mock_dispatcher():
     """
     mock_instance = AsyncMock()
     old_overrides = dict(app.dependency_overrides)
-    app.dependency_overrides[_get_session_file_sharing_dispatcher] = (
-        lambda: mock_instance
+    app.dependency_overrides[_get_session_file_sharing_dispatcher] = lambda: (
+        mock_instance
     )
     yield mock_instance
     app.dependency_overrides = old_overrides
@@ -182,9 +182,7 @@ class TestGetUploadUrl:
     @pytest.mark.asyncio
     async def test_upload_url_unhandled_500(self, mock_dispatcher):
         """Generic Exception returns 500 with INTERNAL_ERROR."""
-        mock_dispatcher.dispatch_get_upload_url.side_effect = RuntimeError(
-            "unexpected"
-        )
+        mock_dispatcher.dispatch_get_upload_url.side_effect = RuntimeError("unexpected")
 
         resp = await _post(
             "/api/v1/sessions/t1/sess-001/files/upload-url",
@@ -242,8 +240,8 @@ class TestCompleteUpload:
     @pytest.mark.asyncio
     async def test_complete_transfer_not_found_404(self, mock_dispatcher):
         """TransferNotFoundError returns 404."""
-        mock_dispatcher.dispatch_complete_upload.side_effect = (
-            TransferNotFoundError("no ticket")
+        mock_dispatcher.dispatch_complete_upload.side_effect = TransferNotFoundError(
+            "no ticket"
         )
 
         resp = await _post(
@@ -303,8 +301,8 @@ class TestCompleteUpload:
     @pytest.mark.asyncio
     async def test_complete_domain_error(self, mock_dispatcher):
         """Generic SessionFileSharingError (DomainError) returns 400."""
-        mock_dispatcher.dispatch_complete_upload.side_effect = (
-            SessionFileSharingError("session file sharing error")
+        mock_dispatcher.dispatch_complete_upload.side_effect = SessionFileSharingError(
+            "session file sharing error"
         )
 
         resp = await _post(
@@ -346,8 +344,8 @@ class TestCancelUpload:
     @pytest.mark.asyncio
     async def test_cancel_not_found_404(self, mock_dispatcher):
         """TransferNotFoundError returns 404."""
-        mock_dispatcher.dispatch_cancel_upload.side_effect = (
-            TransferNotFoundError("no ticket")
+        mock_dispatcher.dispatch_cancel_upload.side_effect = TransferNotFoundError(
+            "no ticket"
         )
 
         resp = await _delete(
@@ -361,8 +359,8 @@ class TestCancelUpload:
     @pytest.mark.asyncio
     async def test_cancel_state_conflict_409(self, mock_dispatcher):
         """TransferStateConflictError returns 409."""
-        mock_dispatcher.dispatch_cancel_upload.side_effect = (
-            TransferStateConflictError("bad state")
+        mock_dispatcher.dispatch_cancel_upload.side_effect = TransferStateConflictError(
+            "bad state"
         )
 
         resp = await _delete(
@@ -400,12 +398,10 @@ class TestGenerateShareLink:
     @pytest.mark.asyncio
     async def test_share_link_success(self, mock_dispatcher):
         """Generate share link returns 200 with share_url."""
-        mock_dispatcher.dispatch_get_share_link.return_value = (
-            SessionShareLinkResponse(
-                share_url="https://oss.example.com/dl?token=abc",
-                transfer_id="tf-001",
-                expires_at="2099-01-01T00:00:00",
-            )
+        mock_dispatcher.dispatch_get_share_link.return_value = SessionShareLinkResponse(
+            share_url="https://oss.example.com/dl?token=abc",
+            transfer_id="tf-001",
+            expires_at="2099-01-01T00:00:00",
         )
 
         resp = await _post(
@@ -460,9 +456,7 @@ class TestGenerateShareLink:
     @pytest.mark.asyncio
     async def test_share_link_value_error_422(self, mock_dispatcher):
         """ValueError returns 422 with INVALID_TRANSITION."""
-        mock_dispatcher.dispatch_get_share_link.side_effect = ValueError(
-            "not DONE"
-        )
+        mock_dispatcher.dispatch_get_share_link.side_effect = ValueError("not DONE")
 
         resp = await _post(
             "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
@@ -588,8 +582,8 @@ class TestDeleteTransfer:
     @pytest.mark.asyncio
     async def test_delete_not_found_404(self, mock_dispatcher):
         """TransferNotFoundError returns 404."""
-        mock_dispatcher.dispatch_delete_transfer.side_effect = (
-            TransferNotFoundError("no ticket")
+        mock_dispatcher.dispatch_delete_transfer.side_effect = TransferNotFoundError(
+            "no ticket"
         )
 
         resp = await _delete(
@@ -603,8 +597,8 @@ class TestDeleteTransfer:
     @pytest.mark.asyncio
     async def test_delete_not_terminal_409(self, mock_dispatcher):
         """TransferNotTerminalError returns 409 with transfer_id in detail."""
-        mock_dispatcher.dispatch_delete_transfer.side_effect = (
-            TransferNotTerminalError(transfer_id="tf-001", status="CREATED")
+        mock_dispatcher.dispatch_delete_transfer.side_effect = TransferNotTerminalError(
+            transfer_id="tf-001", status="CREATED"
         )
 
         resp = await _delete(
@@ -634,8 +628,8 @@ class TestDeleteTransfer:
     @pytest.mark.asyncio
     async def test_delete_domain_error(self, mock_dispatcher):
         """Generic SessionFileSharingError (DomainError) returns 400."""
-        mock_dispatcher.dispatch_delete_transfer.side_effect = (
-            SessionFileSharingError("session file sharing error")
+        mock_dispatcher.dispatch_delete_transfer.side_effect = SessionFileSharingError(
+            "session file sharing error"
         )
 
         resp = await _delete(
