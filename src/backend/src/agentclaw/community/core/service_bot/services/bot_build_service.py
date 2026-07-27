@@ -1145,6 +1145,103 @@ class BotBuildService:
             logger.error(f"[BotBuildService.upgrade] Upgrade failed: {e}")
             raise BotBuildServiceError(f"Bot upgrade failed: {e}")
 
+    def restore_draft(
+        self,
+        *,
+        bot: Dict[str, Any],
+        source_version: int,
+        artifact_ext: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Restore an ARCA/BAAS mounted draft from a historical artifact.
+
+        The historical version is restored host-side with ``rsync --delete``
+        into the draft NAS workspace; runtime/session exclusions are preserved.
+        Only versioned ``migration_path`` artifacts participate in this operation.
+        """
+        provider = self._resolve_sandbox_provider(bot)
+        build_plan = provider.get_build_plan()
+
+        if not artifact_ext.get("migration_path"):
+            raise BotBuildServiceError("历史版本缺少 migration_path")
+
+        bot_id = bot.get("bot_id")
+        entity_id = bot.get("entity_id", "")
+        entity_type = bot.get("entity_type", "staff")
+        if not bot_id or not entity_id:
+            raise BotBuildServiceError("恢复草稿缺少 bot_id/entity_id")
+
+        # Never trust a DB path as an arbitrary rsync source. Reconstruct the
+        # exact versioned artifact path from the Bot identity and version.
+        artifact_dir = get_bot_dir(entity_id, bot_id, entity_type) / str(source_version) / build_plan.migration_subpath
+        draft_nas_dir = get_bot_nas_dir(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=build_plan.engine_type,
+            entity_type=entity_type,
+        )
+        draft_dir = draft_nas_dir / build_plan.source_root_name
+        if not artifact_dir.exists():
+            raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
+
+        self._run_local_command(
+            cmd=["sudo", "chmod", "755", str(draft_nas_dir)],
+            command_name="sudo chmod",
+            error_message="chmod draft NAS directory failed",
+        )
+        draft_dir.mkdir(parents=True, exist_ok=True)
+
+        excludes = [f"--exclude={item}" for item in build_plan.rsync_excludes]
+        # Extra snapshots (for example target/claude -> draft/.claude) are not
+        # part of the primary engine root and must not leak into it.
+        if build_plan.extra_sync_target_relpath:
+            excludes.append(f"--exclude={build_plan.extra_sync_target_relpath}")
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "rsync",
+                "-av",
+                "--delete",
+                *excludes,
+                f"{artifact_dir}/",
+                f"{draft_dir}/",
+            ],
+            command_name="rsync draft restore",
+            error_message="restore draft workspace failed",
+        )
+
+        if build_plan.extra_sync_source_relpath and build_plan.extra_sync_target_relpath:
+            extra_artifact_dir = artifact_dir / build_plan.extra_sync_target_relpath
+            if not extra_artifact_dir.exists():
+                raise BotBuildMigrationError(f"历史附加构造物目录不存在: {extra_artifact_dir}")
+            extra_draft_dir = draft_dir.parent / build_plan.extra_sync_source_relpath
+            extra_draft_dir.mkdir(parents=True, exist_ok=True)
+            self._run_local_command(
+                cmd=[
+                    "sudo",
+                    "rsync",
+                    "-av",
+                    "--delete",
+                    *excludes,
+                    f"{extra_artifact_dir}/",
+                    f"{extra_draft_dir}/",
+                ],
+                command_name="rsync draft restore (extra)",
+                error_message="restore draft extra workspace failed",
+            )
+
+        return {
+            "restore_type": "migration_path",
+            "artifact_path": str(artifact_dir),
+            "draft_path": str(draft_dir),
+        }
+
+    async def restore_draft_async(
+        self,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Run :meth:`restore_draft` outside the event loop."""
+        return await asyncio.to_thread(self.restore_draft, **kwargs)
+
     def refresh_teclaw_mcp_outbound_rule(
         self,
         *,

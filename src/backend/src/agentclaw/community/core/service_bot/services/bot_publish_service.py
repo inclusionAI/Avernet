@@ -8,6 +8,17 @@ from agentclaw.community.core.bot_management.repository.protocol import BotRepos
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.service_bot.services.publish_draft_restore_mixin import PublishDraftRestoreMixin
+from agentclaw.community.core.service_bot.services.publish_exceptions import (
+    BotAlreadyServiceTypeError,
+    BotNotFoundError,
+    BotNotServiceTypeError,
+    BotPublishServiceError,
+    BotTypeNotSupportedError,
+    PublishAlreadyExistsError,
+    PublishNotFoundError,
+    PublishStatusInvalidError,
+)
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
@@ -23,47 +34,7 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
-class BotPublishServiceError(Exception):
-    """Bot publish service error."""
-    pass
-
-
-class BotNotFoundError(BotPublishServiceError):
-    """Bot 不存在错误。"""
-    pass
-
-
-class BotNotServiceTypeError(BotPublishServiceError):
-    """Bot 不是服务型错误。"""
-    pass
-
-
-class PublishAlreadyExistsError(BotPublishServiceError):
-    """发布单已存在错误。"""
-    pass
-
-
-class PublishNotFoundError(BotPublishServiceError):
-    """发布单不存在错误。"""
-    pass
-
-
-class PublishStatusInvalidError(BotPublishServiceError):
-    """发布单状态无效错误。"""
-    pass
-
-
-class BotAlreadyServiceTypeError(BotPublishServiceError):
-    """Bot 已经是服务型错误。"""
-    pass
-
-
-class BotTypeNotSupportedError(BotPublishServiceError):
-    """Bot 类型不支持升级错误（如 aicoding 类型）。"""
-    pass
-
-
-class BotPublishService(PublishRollbackMixin):
+class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
     """Bot发布服务 - 管理Bot发布生命周期。"""
 
     def __init__(

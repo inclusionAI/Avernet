@@ -3462,3 +3462,47 @@ async def test_retry_from_built_source_enqueues_verify_flow():
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
     assert result.action == "process"
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_uses_migration_path_and_keeps_state():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    svc = _pf(
+        publish_service, build_service, Mock(), bot_service, _arca_router(build_service)
+    )
+    draft = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    source = _make_publish_record(
+        id=1,
+        status=PublishStatus.UPGRADED.value,
+        version=1,
+        ext={"migration_path": "/artifact/v1/openclaw"},
+    )
+    publish_service.get_publish_by_id.side_effect = [draft, source]
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-draft", status="ACTIVE"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source", "entity_id": "u1", "binding_id": 77
+    }
+    build_service.restore_draft_async = AsyncMock(return_value={
+        "restore_type": "migration_path",
+        "artifact_path": "/artifact/v1/openclaw",
+        "draft_path": "/draft/openclaw",
+    })
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2, source_publish_id=1, operator="admin"
+    )
+
+    assert result["status"] == "success"
+    assert result["draft_binding_id"] == 77
+    kwargs = build_service.restore_draft_async.await_args.kwargs
+    assert "bot_uuid" not in kwargs
+    assert kwargs["source_version"] == 1
+    assert kwargs["artifact_ext"]["migration_path"] == "/artifact/v1/openclaw"
+    assert "config_artifact" not in kwargs["artifact_ext"]
+    publish_service.update_publish_status.assert_not_called()
