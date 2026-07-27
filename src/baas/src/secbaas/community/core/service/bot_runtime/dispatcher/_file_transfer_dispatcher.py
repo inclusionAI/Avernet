@@ -406,9 +406,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Conditional fields per status
-        download_url = (
-            record.download_url if record.status == "DONE" else None
-        )
+        download_url = record.download_url if record.status == "DONE" else None
         error_message = record.error_message if record.status == "FAILED" else None
 
         return GetTransferStatusResponse(
