@@ -3469,7 +3469,11 @@ class BotService:
             )
 
         bot_status = str(bot.get("status") or "").upper()
-        if bot_status in {"REACTIVATING", "PENDING"}:
+        # REACTIVATING is an explicit lifecycle operation. PENDING is not:
+        # failed startup reporting can strand a bot there indefinitely, so a
+        # restart request must be allowed to reach the durable restart lock
+        # below instead of being treated as proof that work is still running.
+        if bot_status == "REACTIVATING":
             logger.info(
                 "[bot_service.restart_bot] skip restart while activation is in progress: "
                 "bot_id=%s user_id=%s bot_status=%s",
@@ -3479,7 +3483,7 @@ class BotService:
             )
             return self._activation_in_progress_result(bot)
 
-        if bot_status not in {"ACTIVE", "FAILED"}:
+        if bot_status not in {"ACTIVE", "FAILED", "PENDING"}:
             logger.warning(
                 "[bot_service.restart_bot] reject restart for invalid lifecycle state: "
                 "bot_id=%s user_id=%s bot_status=%s",
@@ -3516,7 +3520,13 @@ class BotService:
                     binding_id=binding_id,
                 )
             )
-            if binding_status == DeviceBindingStatus.PENDING.value:
+            # An ACTIVE bot with a PENDING binding is still converging. When
+            # both records are PENDING, however, allow the explicit restart to
+            # recover the stranded lifecycle through the lock-protected path.
+            if (
+                binding_status == DeviceBindingStatus.PENDING.value
+                and bot_status != "PENDING"
+            ):
                 logger.info(
                     "[bot_service.restart_bot] skip restart while binding is pending: "
                     "bot_id=%s user_id=%s binding_id=%s",
@@ -3529,6 +3539,7 @@ class BotService:
                 return current
             if binding_status and binding_status not in {
                 DeviceBindingStatus.ACTIVE.value,
+                DeviceBindingStatus.PENDING.value,
                 DeviceBindingStatus.FAILED.value,
                 DeviceBindingStatus.STOPPED.value,
             }:
