@@ -314,6 +314,21 @@ class TestCompleteUpload:
         detail = resp.json()["detail"]
         assert detail["error_code"] == "SESSION_FILE_SHARING_ERROR"
 
+    @pytest.mark.asyncio
+    async def test_complete_unhandled_500(self, mock_dispatcher):
+        """Generic Exception returns 500 with INTERNAL_ERROR."""
+        mock_dispatcher.dispatch_complete_upload.side_effect = RuntimeError(
+            "unexpected"
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/upload-url/tf-001/complete",
+        )
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert detail["error_code"] == "INTERNAL_ERROR"
+
 
 # ==========================================================================
 # Cancel Upload endpoint tests
@@ -386,6 +401,21 @@ class TestCancelUpload:
         assert resp.status_code == 422
         detail = resp.json()["detail"]
         assert detail["error_code"] == "INVALID_TRANSITION"
+
+    @pytest.mark.asyncio
+    async def test_cancel_unhandled_500(self, mock_dispatcher):
+        """Generic Exception returns 500 with INTERNAL_ERROR."""
+        mock_dispatcher.dispatch_cancel_upload.side_effect = RuntimeError(
+            "unexpected"
+        )
+
+        resp = await _delete(
+            "/api/v1/sessions/t1/sess-001/files/upload-url/tf-001",
+        )
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert detail["error_code"] == "INTERNAL_ERROR"
 
 
 # ==========================================================================
@@ -484,6 +514,22 @@ class TestGenerateShareLink:
         detail = resp.json()["detail"]
         assert detail["error_code"] == "TRANSFER_STATE_CONFLICT"
 
+    @pytest.mark.asyncio
+    async def test_share_link_unhandled_500(self, mock_dispatcher):
+        """Generic Exception returns 500 with INTERNAL_ERROR."""
+        mock_dispatcher.dispatch_get_share_link.side_effect = RuntimeError(
+            "unexpected"
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
+            json_data={"expire_seconds": 3600, "show": False, "operator": "test-user"},
+        )
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert detail["error_code"] == "INTERNAL_ERROR"
+
 
 # ==========================================================================
 # Get Transfer Status endpoint tests
@@ -549,6 +595,21 @@ class TestGetTransferStatus:
         assert resp.status_code == 409
         detail = resp.json()["detail"]
         assert detail["error_code"] == "TRANSFER_STATE_CONFLICT"
+
+    @pytest.mark.asyncio
+    async def test_status_unhandled_500(self, mock_dispatcher):
+        """Generic Exception returns 500 with INTERNAL_ERROR."""
+        mock_dispatcher.dispatch_get_transfer_status.side_effect = RuntimeError(
+            "unexpected"
+        )
+
+        resp = await _get(
+            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
+        )
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert detail["error_code"] == "INTERNAL_ERROR"
 
 
 # ==========================================================================
@@ -640,3 +701,18 @@ class TestDeleteTransfer:
         assert resp.status_code == 400
         detail = resp.json()["detail"]
         assert detail["error_code"] == "SESSION_FILE_SHARING_ERROR"
+
+    @pytest.mark.asyncio
+    async def test_delete_unhandled_500(self, mock_dispatcher):
+        """Generic Exception returns 500 with INTERNAL_ERROR."""
+        mock_dispatcher.dispatch_delete_transfer.side_effect = RuntimeError(
+            "unexpected"
+        )
+
+        resp = await _delete(
+            "/api/v1/sessions/t1/sess-001/transfers/tf-001",
+        )
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert detail["error_code"] == "INTERNAL_ERROR"
