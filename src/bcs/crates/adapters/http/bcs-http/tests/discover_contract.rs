@@ -228,24 +228,34 @@ async fn discover_route_rejects_organization_scope_for_human_callers() {
 }
 
 #[tokio::test]
-async fn discover_route_rejects_missing_caller() {
+async fn discover_route_rejects_missing_caller_before_validating_query() {
     let discovery = Arc::new(RecordingBotDiscoveryService::default());
     let services = Services::builder()
         .bot_discovery(discovery.clone())
         .build_for_test();
     let app = build_router(HttpAppState::new(services));
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/bots/discover?collaborate_bot=driver&q=planner")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    for uri in [
+        "/bots/discover?collaborate_bot=driver&q=planner",
+        "/bots/discover?query=legacy",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "missing caller must take precedence for {uri}"
+        );
+    }
     assert!(discovery.commands.lock().await.is_empty());
 }
 

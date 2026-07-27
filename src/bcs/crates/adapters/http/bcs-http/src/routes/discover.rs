@@ -81,9 +81,9 @@ pub async fn discover_bots(
     headers: HeaderMap,
     uri: Uri,
 ) -> Result<Json<Value>, HttpAdapterError> {
-    let query = DiscoverBotsQuery::parse(uri.query())?;
     let _caller_actor_id =
         require_caller_actor_id_from_headers(&state, &headers, &uri).await?;
+    let query = DiscoverBotsQuery::parse(uri.query())?;
     let requester_bot_id = bot_id_from_headers(&state, &headers).await;
     if query.organization_code.is_some() && requester_bot_id.is_none() {
         return Err(HttpAdapterError::Forbidden(
