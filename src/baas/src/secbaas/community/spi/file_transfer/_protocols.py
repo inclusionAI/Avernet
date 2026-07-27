@@ -203,6 +203,27 @@ class FileTransferBackend(Protocol):
         """
         ...
 
+    def list_objects(
+        self,
+        prefix: str,
+        limit: int,
+        marker: str | None,
+    ) -> ObjectListing:
+        """List staging objects with marker pagination.
+
+        Used for staging management (e.g., listing objects under a
+        tenant/subdir prefix).  ``limit`` is capped at 1000 (OSS max).
+
+        Args:
+            prefix: Object storage key prefix to filter by.
+            limit: Maximum number of objects to return (capped at 1000).
+            marker: Opaque pagination marker from previous response.
+
+        Returns:
+            ObjectListing with items, truncated flag, and next_marker.
+        """
+        ...
+
     def build_staging_path(
         self,
         tenant: str,

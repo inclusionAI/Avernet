@@ -9,6 +9,7 @@ feature-flag checks before invoking transfer operations.
 from secbaas.spi.file_transfer import (
     FileTransferBackend,
     MultipartSession,
+    ObjectListing,
     PartInfo,
 )
 
@@ -73,6 +74,17 @@ class NoopFileTransferBackend(FileTransferBackend):
         )
 
     def delete_object(self, key: str) -> None:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'real' to enable."
+        )
+
+    def list_objects(
+        self,
+        prefix: str,
+        limit: int,
+        marker: str | None,
+    ) -> ObjectListing:
         raise NotImplementedError(
             "File transfer is not configured. "
             "Set config.plugins.file_transfer to 'real' to enable."
