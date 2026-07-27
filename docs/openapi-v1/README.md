@@ -1,5 +1,7 @@
 # `/openapi/v1` Public API + Tenant Isolation — Team Handoff
 
+**English** | [简体中文](README.zh-CN.md)
+
 _Living coordination doc for the multi-session effort to ship the public
 `/openapi/v1` API. This is the shared map: what's done, what's left, who's on
 what, and how the pieces fit together._
