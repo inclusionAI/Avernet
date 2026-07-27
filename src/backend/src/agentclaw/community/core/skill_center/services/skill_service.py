@@ -76,6 +76,7 @@ class SkillService:
         local_dir: Path | None = None,
         global_repo_dir: Path | None = None,
         local_skill_path_adapter: "Callable[[str], str] | None" = None,
+        local_skill_locator_adapter: "Callable[[str], str] | None" = None,
     ):
         """
         Args:
@@ -116,6 +117,14 @@ class SkillService:
         # ``git_path`` always keeps the un-adapted logical/host path.
         self._local_skill_path_adapter: "Callable[[str], str]" = (
             local_skill_path_adapter or (lambda p: p)
+        )
+        # Adapter applied only when persisting a local:// DB locator. It is
+        # deliberately separate from the device-I/O adapter above: Teclaw
+        # expands its logical locator for container I/O but must keep the
+        # minimal logical value in DB. Pool-active file engines set both
+        # adapters to the canonical Pool resolver.
+        self._local_skill_locator_adapter: "Callable[[str], str]" = (
+            local_skill_locator_adapter or (lambda p: p)
         )
 
         # Lazy GitSyncService lookup — eager injection would close the cycle
@@ -1838,10 +1847,10 @@ class SkillService:
         # Resolve it before both file I/O and persistence so a same-name upload
         # becomes a controlled copy-forward into canonical Pool rather than
         # continuing to write Legacy.
-        skill_dir_str = self._local_skill_path_adapter(
+        skill_dir_str = self._local_skill_locator_adapter(
             str(locator_skill_dir)
         )
-        engine_skill_dir_str = skill_dir_str
+        engine_skill_dir_str = self._local_skill_path_adapter(skill_dir_str)
         logger.info(
             f"[SkillService.upload_skill] Skill directory: {skill_dir_str} "
             f"(engine: {engine_skill_dir_str})"
