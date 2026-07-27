@@ -11,6 +11,10 @@
 
 ---
 
+> **结论（2026-07-26）：corp 用 `xoneid`；本 OAuth 设计是 *community* 路径。** 团队评审认为为 corp 自建 OAuth 授权服务器过重 —— 在共享 IdP（BUService）下跳转/授权收益甚微且带来可见的"闪一下"。corp 改用 **`xoneid`**，即 corp 标准的服务器到服务器主体传递（auth-design §15），且**不是**本文所警示的原始 `IAM_TOKEN` cookie 透传。本 OAuth 方案适用于 **community**（无共享 IdP → 真正的信任边界）。corp 后续：确认 `xoneid` sender-constrained 且调用方 App 已认证；确认无需按用户授权。详见 [`SYSTEM-FLOW.zh-CN.md`](./SYSTEM-FLOW.zh-CN.md) → **结论**。这关闭了 corp 的探索。
+
+---
+
 ## 1. 背景与要解决的问题
 
 我们的 OpenAPI（`/openapi/v1/*`，由网关承接）对第三方开发者开放，由第三方**服务器**调用。当前一次第三方调用要带**两个令牌**：
