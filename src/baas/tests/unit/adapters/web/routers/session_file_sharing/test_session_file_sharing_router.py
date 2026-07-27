@@ -16,7 +16,6 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from secbaas.community.adapters.web.routers.session_file_sharing.session_file_sharing_router import (  # noqa: E501
-    _get_session_file_sharing_dispatcher,
     router,
 )
 from secbaas.community.api.session_file_sharing import (
@@ -35,6 +34,7 @@ from secbaas.community.api.session_file_sharing import (
     TransferNotTerminalError,
     TransferStateConflictError,
 )
+from tests.unit.adapters.web.conftest import iter_api_routes
 
 app = FastAPI()
 app.include_router(router)
@@ -47,18 +47,19 @@ app.include_router(router)
 
 @pytest.fixture
 def mock_dispatcher():
-    """Override _get_session_file_sharing_dispatcher to return a mock.
+    """Override the Provide dependency to return a mock dispatcher.
 
-    Session Router uses Depends(_get_session_file_sharing_dispatcher) — a
-    plain callable — not Provide[...] + @inject.  The override therefore
-    targets the callable directly (not iter_api_routes, which is for
-    Provide[...] injection).
+    Session Router uses Depends(Provide[...]) + @inject.  The fixture
+    walks all routes, finds each ``dispatcher`` dependency, and overrides
+    it with a mock — identical to the pattern used by bot_cmd_router and
+    other Provide[...] router tests.
     """
     mock_instance = AsyncMock()
     old_overrides = dict(app.dependency_overrides)
-    app.dependency_overrides[_get_session_file_sharing_dispatcher] = lambda: (
-        mock_instance
-    )
+    for route in iter_api_routes(app):
+        for dep in route.dependant.dependencies:
+            if dep.name == "dispatcher":
+                app.dependency_overrides[dep.call] = lambda: mock_instance
     yield mock_instance
     app.dependency_overrides = old_overrides
 
