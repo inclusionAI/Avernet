@@ -314,13 +314,33 @@ async def get_bot_rsync_excludes(
     try:
         # 1. 获取bot信息
         bot = bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
-        if not bot:
+    except Exception as e:
+        # Bot不存在时会抛出异常
+        if "not found" in str(e).lower() or "不存在" in str(e):
             return ApiResponse(
                 success=False,
                 message=f"Bot不存在: {bot_id}",
                 error_code=404,
                 data=None
             )
+        # 其他异常返回500
+        logger.error(f"[get_bot_rsync_excludes] Error getting bot: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"获取rsync excludes配置失败: {str(e)}",
+            error_code=500,
+            data=None
+        )
+
+    if not bot:
+        return ApiResponse(
+            success=False,
+            message=f"Bot不存在: {bot_id}",
+            error_code=404,
+            data=None
+        )
+
+    try:
 
         # 2. 解析引擎类型
         engine_type = resolve_engine_for_bot(bot_id, owner_id, bot_repo=bot_repo)
