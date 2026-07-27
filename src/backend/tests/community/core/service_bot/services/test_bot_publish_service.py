@@ -2639,3 +2639,261 @@ class TestGetBotStageBindingInfo:
             "device_provider": "arca",
             "device_id": "BOT-UUID-NON-SERVICE",
         }
+
+
+class TestDraftRestore:
+    @staticmethod
+    def _stateful_repo(draft: BotPublishRecord, source: BotPublishRecord) -> Mock:
+        repo = Mock()
+        records = {draft.id: draft, source.id: source}
+        repo.get_by_id.side_effect = lambda publish_id: records.get(publish_id)
+
+        def update_status_with_ext(
+            publish_id, target_status, ext, source_status
+        ):
+            record = records.get(publish_id)
+            if not record or record.status != source_status:
+                return None
+            record.ext = ext
+            return record
+
+        repo.update_status_with_ext.side_effect = update_status_with_ext
+        return repo
+
+    def test_first_draft_has_no_restore_action(self):
+        repo = Mock()
+        repo.get_by_id.return_value = _create_mock_record(
+            record_id=1, status=PublishStatus.DRAFT, version=1, last_pub_id=0
+        )
+        service = _make_service(repo)
+
+        can_restore, reason, source = service.can_restore_draft(1)
+
+        assert can_restore is False
+        assert "首次创建" in reason
+        assert source is None
+
+    @pytest.mark.parametrize(
+        ("draft", "source", "expected_reason"),
+        [
+            (None, None, "发布单不存在"),
+            (
+                _create_mock_record(record_id=2, status=PublishStatus.SUCCESS),
+                None,
+                "只有 DRAFT 状态可以恢复草稿",
+            ),
+            (
+                _create_mock_record(
+                    record_id=2,
+                    status=PublishStatus.DRAFT,
+                    version=2,
+                    last_pub_id=1,
+                ),
+                None,
+                "上一版本不存在",
+            ),
+            (
+                _create_mock_record(
+                    record_id=2,
+                    status=PublishStatus.DRAFT,
+                    version=2,
+                    last_pub_id=1,
+                ),
+                _create_mock_record(
+                    record_id=1,
+                    status=PublishStatus.UPGRADED,
+                    ext={"migration_path": "/artifact/v1/openclaw"},
+                ),
+                "上一版本与当前草稿不属于同一个 Bot 或环境",
+            ),
+        ],
+    )
+    def test_restore_target_rejects_invalid_record_chain(
+        self, draft, source, expected_reason
+    ):
+        repo = Mock()
+        if draft is None:
+            repo.get_by_id.return_value = None
+        elif source is None:
+            repo.get_by_id.side_effect = [draft, None]
+        else:
+            source.source_bot_pk = draft.source_bot_pk + 1
+            repo.get_by_id.side_effect = [draft, source]
+        service = _make_service(repo)
+
+        can_restore, reason, restore_source = service.can_restore_draft(2)
+
+        assert can_restore is False
+        assert expected_reason in reason
+        assert restore_source is None
+
+    def test_restore_state_update_skips_changed_or_stale_draft(self):
+        repo = Mock()
+        service = _make_service(repo)
+
+        repo.get_by_id.return_value = None
+        assert service._update_draft_restore_state(
+            2, "task-new", {"status": "success"}, require_existing_task=True
+        ) is False
+
+        repo.get_by_id.return_value = _create_mock_record(
+            record_id=2,
+            status=PublishStatus.DRAFT,
+            ext={"draft_restore": {"task_id": "task-current"}},
+        )
+        assert service._update_draft_restore_state(
+            2, "task-stale", {"status": "failed"}, require_existing_task=True
+        ) is False
+        repo.update_status_with_ext.assert_not_called()
+
+    def test_draft_uses_immediately_previous_artifact(self):
+        repo = Mock()
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"migration_path": "/artifact/v1/openclaw"},
+        )
+        repo.get_by_id.side_effect = [draft, source]
+        service = _make_service(repo)
+
+        can_restore, reason, restore_source = service.can_restore_draft(2)
+
+        assert can_restore is True
+        assert reason == "可以恢复草稿"
+        assert restore_source == {"source_publish_id": 1, "source_version": 1}
+
+    def test_artifact_without_migration_path_is_not_restoreable(self):
+        repo = Mock()
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"other_artifact": {"schema_version": 4}},
+        )
+        repo.get_by_id.side_effect = [draft, source]
+        service = _make_service(repo)
+
+        can_restore, reason, restore_source = service.can_restore_draft(2)
+
+        assert can_restore is False
+        assert reason == "上一版本没有可用的 migration_path 构造物"
+        assert restore_source is None
+
+    @pytest.mark.asyncio
+    async def test_restore_draft_returns_immediately_then_records_success(self):
+        draft = _create_mock_record(
+            record_id=2,
+            status=PublishStatus.DRAFT,
+            version=2,
+            last_pub_id=1,
+            ext={"existing": True},
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"migration_path": "/artifact/v1/openclaw"},
+        )
+        repo = self._stateful_repo(draft, source)
+        release_flow = asyncio.Event()
+        flow = MagicMock()
+
+        async def execute_restore(**_kwargs):
+            await release_flow.wait()
+            return {
+                "status": "success",
+                "restore_type": "migration_path",
+                "draft_binding_id": 802,
+            }
+
+        flow.execute_restore_draft = AsyncMock(side_effect=execute_restore)
+        service = _make_service(repo, publish_flow_service_provider=lambda: flow)
+
+        result = await service.restore_draft(2, operator="u1")
+
+        assert result["status"] == "restoring"
+        assert result["task_id"].startswith("draft_restore_")
+        assert draft.status == PublishStatus.DRAFT
+        assert draft.ext["existing"] is True
+        assert draft.ext["draft_restore"]["status"] == "restoring"
+        assert draft.ext["draft_restore"]["source_publish_id"] == 1
+
+        await asyncio.sleep(0)
+        flow.execute_restore_draft.assert_awaited_once_with(
+            draft_publish_id=2, source_publish_id=1, operator="u1"
+        )
+        assert draft.ext["draft_restore"]["status"] == "restoring"
+
+        release_flow.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert draft.status == PublishStatus.DRAFT
+        assert draft.ext["draft_restore"]["status"] == "success"
+        assert draft.ext["draft_restore"]["restore_type"] == "migration_path"
+        assert draft.ext["draft_restore"]["draft_binding_id"] == 802
+        assert "migration_path" not in draft.ext
+        assert "binding" not in draft.ext
+
+    @pytest.mark.asyncio
+    async def test_restore_draft_records_failure_and_can_retry(self):
+        draft = _create_mock_record(
+            record_id=2,
+            status=PublishStatus.DRAFT,
+            version=2,
+            last_pub_id=1,
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"migration_path": "/artifact/v1/openclaw"},
+        )
+        repo = self._stateful_repo(draft, source)
+        flow = MagicMock()
+        flow.execute_restore_draft = AsyncMock(side_effect=RuntimeError("rsync failed"))
+        service = _make_service(repo, publish_flow_service_provider=lambda: flow)
+
+        result = await service.restore_draft(2, operator="u1")
+        assert result["status"] == "restoring"
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert draft.status == PublishStatus.DRAFT
+        assert draft.ext["draft_restore"]["status"] == "failed"
+        assert draft.ext["draft_restore"]["error"] == "rsync failed"
+
+        can_restore, reason, restore_source = service.can_restore_draft(2)
+        assert can_restore is True
+        assert reason == "可以恢复草稿"
+        assert restore_source == {"source_publish_id": 1, "source_version": 1}
+
+    @pytest.mark.asyncio
+    async def test_restore_draft_rejects_duplicate_while_restoring(self):
+        draft = _create_mock_record(
+            record_id=2,
+            status=PublishStatus.DRAFT,
+            version=2,
+            last_pub_id=1,
+            ext={
+                "draft_restore": {
+                    "status": "restoring",
+                    "task_id": "draft_restore_existing",
+                }
+            },
+        )
+        repo = Mock()
+        repo.get_by_id.return_value = draft
+        service = _make_service(repo)
+
+        with pytest.raises(BotPublishServiceError, match="正在恢复中"):
+            await service.restore_draft(2, operator="u1")
+
+        repo.update_status_with_ext.assert_not_called()

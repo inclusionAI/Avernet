@@ -30,8 +30,6 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowServiceError
-from tests.community.framework.case import CaseInput, ExpectError, ExpectSuccess
-from tests.community.framework.registry import endpoint_test
 
 
 _USER = AuthenticatedUser(id="u1", staffId="u1", operatorName="u1")
@@ -986,3 +984,64 @@ async def test_check_and_process_approval_success_and_errors():
     assert_error(resp, 500, "检查审批状态失败")
 
 
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_draft_restore_query_and_execute_endpoints():
+    publish_service = MagicMock()
+    publish_service.can_restore_draft.return_value = (
+        True, "可以恢复草稿", {"source_publish_id": 1, "source_version": 1}
+    )
+
+    query = await router_publish.can_restore_draft(
+        2, user=_USER, publish_service=publish_service
+    )
+    assert query.success is True
+    assert query.data["can_restore_draft"] is True
+    assert query.data["restore_source"]["source_publish_id"] == 1
+
+    publish_service.restore_draft = AsyncMock(return_value={
+        "draft_publish_id": 2,
+        "source_publish_id": 1,
+        "source_version": 1,
+        "status": "restoring",
+        "task_id": "draft_restore_test",
+    })
+    restored = await router_publish.restore_draft(
+        2, user=_USER, publish_service=publish_service
+    )
+    assert restored.success is True
+    assert restored.message == "草稿恢复已启动"
+    assert restored.data["status"] == "restoring"
+    publish_service.restore_draft.assert_awaited_once_with(
+        publish_id=2, operator=_USER.staffId
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_draft_restore_endpoint_error_paths():
+    publish_service = MagicMock()
+
+    query = await router_publish.can_restore_draft(
+        2, user=_ANON, publish_service=publish_service
+    )
+    assert_error(query, 400, "无法获取用户信息")
+
+    restored = await router_publish.restore_draft(
+        2, user=_ANON, publish_service=publish_service
+    )
+    assert_error(restored, 400, "无法获取用户信息")
+
+    for exc, code, message in [
+        (PublishNotFoundError("missing"), 404, "missing"),
+        (PublishStatusInvalidError("bad status"), 400, "bad status"),
+        (PublishFlowServiceError("flow failed"), 500, "flow failed"),
+        (RuntimeError("unexpected"), 500, "恢复草稿失败: unexpected"),
+    ]:
+        publish_service.restore_draft = AsyncMock(side_effect=exc)
+        restored = await router_publish.restore_draft(
+            2, user=_USER, publish_service=publish_service
+        )
+        assert_error(restored, code, message)
