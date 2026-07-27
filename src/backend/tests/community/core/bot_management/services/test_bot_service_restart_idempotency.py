@@ -165,30 +165,129 @@ def _make_service(
     return svc
 
 
+def _stateful_bot_repository(bot: dict) -> tuple[MagicMock, dict]:
+    state = dict(bot)
+    repository = MagicMock()
+    repository.get_by_id_and_owner.side_effect = (
+        lambda _bot_id, _owner_id: dict(state)
+    )
+
+    def update_bot(_bot_id, _owner_id, values):
+        state.update(values)
+        return dict(state)
+
+    repository.update_by_owner.side_effect = update_bot
+    return repository, state
+
+
 # ===========================================================================
 # restart_bot orchestration
 # ===========================================================================
 
 
 class TestRestartGuardOrchestration:
-    @pytest.mark.parametrize("status", ["REACTIVATING", "PENDING"])
-    def test_restart_during_activation_is_idempotent(self, status):
-        """Activation owns the lifecycle while the bot is starting."""
+    def test_restart_during_reactivation_is_idempotent(self):
+        """Dormant reactivation owns the lifecycle while it is running."""
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
-        bot = _make_bot(status=status)
+        bot = _make_bot(status="REACTIVATING")
         svc._repository.get_by_id_and_owner.return_value = bot
 
         with patch.object(svc, "stop_bot") as stop, \
              patch.object(svc, "start_bot") as start:
             result = svc.restart_bot(bot_id="bot001", user_id="user001")
 
-        assert result["status"] == status
+        assert result["status"] == "REACTIVATING"
         assert result["restart_in_progress"] is True
         assert result["message"] == "Bot activation is in progress"
         assert repo.acquire_calls == 0
         stop.assert_not_called()
         start.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("binding_id", "device_id"),
+        [(None, None), (42, "device-42")],
+        ids=["without-binding", "pending-binding"],
+    )
+    def test_pending_arca_bot_without_active_restart_can_recover(
+        self,
+        binding_id,
+        device_id,
+    ):
+        """A stranded PENDING Arca bot can allocate a replacement runtime."""
+        bot_repository, state = _stateful_bot_repository(
+            _make_bot(status="PENDING", binding_id=binding_id)
+        )
+        state["device_id"] = device_id
+        device_service = MagicMock()
+        if binding_id is not None:
+            device_service.get_device.return_value = SimpleNamespace(
+                id=binding_id,
+                device_id=device_id,
+                device_provider="arca",
+                status=DeviceBindingStatus.PENDING.value,
+            )
+        device_service.apply_device.return_value = SimpleNamespace(
+            id=7,
+            device_id="device-7",
+            device_provider="arca",
+            status=DeviceBindingStatus.PENDING.value,
+        )
+
+        svc = _make_service(
+            FakeRestartLockRepo(),
+            bot_repository=bot_repository,
+            device_provider=device_service,
+        )
+        (
+            svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value
+        ) = []
+        svc._template_service.get_template_config.return_value = None
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _SyncThread,
+        ):
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result["status"] == "PENDING"
+        assert result["binding_id"] == 7
+        assert result["device_id"] == "device-7"
+        assert "restart_in_progress" not in result
+
+    def test_pending_baas_bot_can_recover_in_place(self):
+        """A stranded personal BaaS bot can start a new update operation."""
+        bot_repository, state = _stateful_bot_repository(
+            _make_bot(status="PENDING", binding_id=42)
+        )
+        state["device_id"] = "BOT-device-42"
+        state["ext"] = {}
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_id="BOT-device-42",
+            device_provider="baas",
+            status=DeviceBindingStatus.PENDING.value,
+        )
+        baas_service = MagicMock()
+        baas_service.upgrade_bot.return_value = {"publish_id": 9377}
+
+        svc = _make_service(
+            FakeRestartLockRepo(),
+            bot_repository=bot_repository,
+            device_provider=device_service,
+            baas_service_provider=lambda: baas_service,
+            task_queue_service=MagicMock(),
+        )
+        svc._template_service.get_template_config.return_value = None
+
+        result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result["status"] == "PENDING"
+        assert result["binding_id"] == 42
+        assert result["ext"]["restart_publish_id"] == "9377"
+        assert "restart_in_progress" not in result
 
     def test_recycled_bot_restart_is_rejected_without_side_effects(self):
         """RECYCLED bots must only return through the explicit activate flow."""
@@ -964,9 +1063,16 @@ class TestRestartGuardOrchestration:
         bot = _make_bot(status="ACTIVE")
         svc._repository.get_by_id_and_owner.return_value = bot
 
-        # start_bot is mocked and never releases → lock stays held after #1.
+        def start_pending(**_kwargs):
+            bot["status"] = "PENDING"
+            bot["binding_id"] = None
+            bot["device_id"] = None
+            return bot
+
+        # start_bot is mocked and never releases → lock stays held after #1,
+        # while the second request observes the persisted PENDING shape.
         with patch.object(svc, "stop_bot", return_value=True) as stop, \
-             patch.object(svc, "start_bot", return_value=bot) as start:
+             patch.object(svc, "start_bot", side_effect=start_pending) as start:
             svc.restart_bot(bot_id="bot001", user_id="user001")
             result2 = svc.restart_bot(bot_id="bot001", user_id="user001")
 
