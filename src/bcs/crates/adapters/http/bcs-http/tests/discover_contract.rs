@@ -141,6 +141,7 @@ async fn discover_route_rejects_empty_removed_unknown_and_duplicate_scalar_param
     )));
 
     for query in [
+        "skill=",
         "skill=code_review&skill=%20%20",
         "name=legacy",
         "skills=legacy",

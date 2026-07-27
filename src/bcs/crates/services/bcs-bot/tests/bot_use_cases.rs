@@ -980,10 +980,29 @@ async fn discover_provider_bots_returns_provider_metadata_and_agent_code() {
             &provider.provider.provider_id,
             &provider.provider_admin_token,
             RegisterProviderBotParams {
+                bot_name: "Provider Searcher Partial Skill".to_string(),
+                summary: Some("Finds provider bots".to_string()),
+                owners: vec!["alice".to_string()],
+                provider_bot_ref: "agent-code-3".to_string(),
+                skills: vec![
+                    bcs_service_api::Skill::new("search"),
+                    bcs_service_api::Skill::new("sql_extended"),
+                ],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register provider partial-skill bot");
+    fixture
+        .provider
+        .register_provider_bot_with_bot_uuid(
+            &provider.provider.provider_id,
+            &provider.provider_admin_token,
+            RegisterProviderBotParams {
                 bot_name: "Provider Writer".to_string(),
                 summary: Some("Writes documentation".to_string()),
                 owners: vec!["alice".to_string()],
-                provider_bot_ref: "agent-code-3".to_string(),
+                provider_bot_ref: "agent-code-4".to_string(),
                 skills: vec![
                     bcs_service_api::Skill::new("search"),
                     bcs_service_api::Skill::new("sql"),
@@ -1023,6 +1042,7 @@ async fn organization_scoped_discovery_filters_effective_members_and_attaches_me
         org_member("bot-c", "traffic_analyst"),
         org_member("bot-d", "traffic_analyst"),
         org_member("bot-e", "traffic_analyst"),
+        org_member("bot-f", "traffic_analyst"),
     ]));
     let service = Bot::new_with_friend(
         registry,
@@ -1076,6 +1096,18 @@ async fn organization_scoped_discovery_filters_effective_members_and_attaches_me
             Some("traffic"),
             "public",
             &["routing"],
+        ),
+        None,
+    )
+    .await;
+    register_bot(
+        &fixture.registry,
+        "bot-f",
+        caps_with_skills(
+            Some("Traffic Partial Skill"),
+            Some("traffic"),
+            "public",
+            &["routing", "sql_extended"],
         ),
         None,
     )

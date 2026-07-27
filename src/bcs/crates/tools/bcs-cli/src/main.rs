@@ -5492,6 +5492,15 @@ mod tests {
     }
 
     #[test]
+    fn test_discover_command_rejects_legacy_plural_skills_filter() {
+        let error = Cli::try_parse_from(["bcs-cli", "discover", "--skills", "sql"])
+            .err()
+            .expect("legacy --skills must be rejected");
+
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
     fn test_chat_command_accepts_organization_code() {
         let cli = Cli::try_parse_from([
             "bcs-cli",
