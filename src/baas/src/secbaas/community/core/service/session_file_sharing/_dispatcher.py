@@ -114,6 +114,11 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 raise ValueError("staging_subdir contains invalid path traversal")
             staging_subdir = staging_subdir.strip("/")
 
+        # Validate filename — reject path traversal (defence in depth;
+        # build_session_staging_path also validates, but fail-fast here)
+        if ".." in filename:
+            raise ValueError("filename contains invalid path traversal")
+
         # Validate file_size
         if file_size < 0:
             raise ValueError(f"file_size must be non-negative, got {file_size}")
