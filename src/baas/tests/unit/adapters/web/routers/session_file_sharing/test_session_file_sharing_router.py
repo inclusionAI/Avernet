@@ -405,9 +405,7 @@ class TestCancelUpload:
     @pytest.mark.asyncio
     async def test_cancel_unhandled_500(self, mock_dispatcher):
         """Generic Exception returns 500 with INTERNAL_ERROR."""
-        mock_dispatcher.dispatch_cancel_upload.side_effect = RuntimeError(
-            "unexpected"
-        )
+        mock_dispatcher.dispatch_cancel_upload.side_effect = RuntimeError("unexpected")
 
         resp = await _delete(
             "/api/v1/sessions/t1/sess-001/files/upload-url/tf-001",
@@ -517,9 +515,7 @@ class TestGenerateShareLink:
     @pytest.mark.asyncio
     async def test_share_link_unhandled_500(self, mock_dispatcher):
         """Generic Exception returns 500 with INTERNAL_ERROR."""
-        mock_dispatcher.dispatch_get_share_link.side_effect = RuntimeError(
-            "unexpected"
-        )
+        mock_dispatcher.dispatch_get_share_link.side_effect = RuntimeError("unexpected")
 
         resp = await _post(
             "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
