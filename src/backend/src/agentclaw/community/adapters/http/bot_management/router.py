@@ -2299,11 +2299,17 @@ async def update_bot(
         if avatar_url:
             ext = {**(ext or {}), "avatar_url": avatar_url}
 
+        # ``template_config`` is optional for a metadata-only update.  Some
+        # callers serialize an omitted object field as ``{}``; normalize that
+        # representation at the HTTP boundary so it does not trigger an
+        # invalid empty template create/update in the domain service.
         template_config = data.get("template_config")
+        if template_config == {}:
+            template_config = None
         logger.info(
             "[bot_router.update_bot] bot_id=%s, template_config=%s",
             bot_id,
-            "provided" if template_config else "None",
+            "provided" if template_config is not None else "None",
         )
 
         resolved_owner_id = owner_id or operator_id

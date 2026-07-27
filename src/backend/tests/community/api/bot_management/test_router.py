@@ -673,6 +673,19 @@ class TestUpdateBot:
         svc.update_bot.assert_called_once()
         assert svc.update_bot.call_args.kwargs.get("bot_name") is None
 
+    def test_empty_template_config_is_treated_as_omitted(self, client):
+        # 部分调用方会把未填写的可选对象序列化为 {}。这不应触发模板写入，
+        # 否则模板服务会因空内容校验失败。
+        tc, svc, _ = client
+        resp = tc.put("/api/bots/default", json={
+            "bot_name": "NewName",
+            "template_config": {},
+        })
+
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        assert svc.update_bot.call_args.kwargs["template_config"] is None
+
     def test_valid_name_strips_and_passes(self, client):
         # 合法名首尾空格被 strip 后透传给 service。
         tc, svc, _ = client
