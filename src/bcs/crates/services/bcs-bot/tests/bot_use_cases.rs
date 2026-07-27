@@ -804,6 +804,78 @@ async fn discover_bots_applies_visibility_and_friend_matrix() {
 }
 
 #[tokio::test]
+async fn discover_bots_matches_one_skill_exactly_ignoring_case() {
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+
+    for (bot_id, skill) in [
+        ("exact-lower", "code_review"),
+        ("exact-mixed", "Code_Review"),
+        ("partial", "code_review_extended"),
+        ("unrelated", "deployment"),
+    ] {
+        register_bot(
+            &fixture.registry,
+            bot_id,
+            caps_with_skill(Some(bot_id), Some("review helper"), "public", skill),
+            None,
+        )
+        .await;
+    }
+
+    let result = service
+        .discover_bots(BotDiscoveryCommand {
+            skill: Some(" code_review ".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("discover by exact skill");
+
+    let bot_ids = result
+        .bots
+        .iter()
+        .map(|entry| entry.bot_uuid.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(bot_ids, vec!["exact-lower", "exact-mixed"]);
+}
+
+#[tokio::test]
+async fn discover_bots_combines_q_and_skill() {
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+
+    for (bot_id, summary, skill) in [
+        ("query-and-skill", "deployment helper", "code_review"),
+        ("query-only", "deployment helper", "release"),
+        ("skill-only", "documentation helper", "code_review"),
+    ] {
+        register_bot(
+            &fixture.registry,
+            bot_id,
+            caps_with_skill(Some(bot_id), Some(summary), "public", skill),
+            None,
+        )
+        .await;
+    }
+
+    let result = service
+        .discover_bots(BotDiscoveryCommand {
+            q: Some("deployment".to_string()),
+            skill: Some("code_review".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("discover by query and exact skill");
+
+    let bot_ids = result
+        .bots
+        .iter()
+        .map(|entry| entry.bot_uuid.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(bot_ids, vec!["query-and-skill"]);
+}
+
+#[tokio::test]
 async fn discover_provider_bots_returns_provider_metadata_and_agent_code() {
     let fixture = ProviderRegistryFixture::new();
     let service = fixture.service();
@@ -1718,5 +1790,17 @@ fn caps(name: Option<&str>, summary: Option<&str>, visibility: &str) -> BotCapab
         summary: summary.map(str::to_string),
         visibility: visibility.to_string(),
         ..Default::default()
+    }
+}
+
+fn caps_with_skill(
+    name: Option<&str>,
+    summary: Option<&str>,
+    visibility: &str,
+    skill: &str,
+) -> BotCapabilities {
+    BotCapabilities {
+        skills: vec![bcs_service_api::Skill::new(skill)],
+        ..caps(name, summary, visibility)
     }
 }
