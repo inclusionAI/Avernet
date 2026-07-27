@@ -84,9 +84,22 @@ One column on `ac_bots`. No new tables, no code-side migration.
 ```sql
 ALTER TABLE ac_bots
   ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
-    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant',
-  ADD KEY idx_bots_avernet_tenant_env (avernet_tenant, env) GLOBAL;
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
 ```
+
+**No index in Stage 1** (decision 2026-07-27, after inspecting `ac_bots`'s
+current indexes and every query method). With a single tenant `avernet_tenant`
+has cardinality 1, so an index on it prunes nothing; and every current query
+already leads with a more selective, already-indexed predicate (`owner_id`,
+`bot_id`/`entity_id`, `status`, `binding_id`), against which the guard's
+`avernet_tenant = 'teamclaw'` is a free residual filter — so a
+`(avernet_tenant, env)` index would never be chosen. It only earns its keep once
+(a) a second tenant makes the column selective and (b) a tenant-scoped list query
+(no more-selective predicate) exists. Revisit then — and prefer *prepending*
+`avernet_tenant` to the hot composites (`idx_owner` → `(avernet_tenant, owner_id)`,
+`idx_bot_id_entity_id` → `(avernet_tenant, bot_id, entity_id)`) so mandatory
+tenant-scoping composes with the existing access paths, rather than a standalone
+`(avernet_tenant, env)` the queries can't fully use.
 
 The fallback ("default") tenant is identified as **`teamclaw`** — the internal
 product's own name (already used throughout the code, e.g.
