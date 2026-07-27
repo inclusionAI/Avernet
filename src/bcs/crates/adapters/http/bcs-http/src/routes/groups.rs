@@ -35,6 +35,7 @@ use super::{
     reject_judge_definition_when_unavailable, reject_judge_yaml_when_unavailable,
     validate_container_header,
 };
+use super::collaboration_runs::optional_authenticated_human;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -323,9 +324,14 @@ pub async fn create_group(
             .await
             .map_err(collaboration_runtime_error_to_http)?;
         if result.group_strategy == bcs_service_api::GroupStrategy::StateMachine {
-            if let Some(run_id) =
-                start_initial_state_machine_run_for_group(&state, &result, caller_actor_id.clone())
-                    .await?
+            let authenticated_human = optional_authenticated_human(&state, &headers, &uri).await;
+            if let Some(run_id) = start_initial_state_machine_run_for_group(
+                &state,
+                &result,
+                caller_actor_id.clone(),
+                authenticated_human,
+            )
+            .await?
             {
                 tracing::info!(
                     group_id = %result.group_id,
@@ -352,6 +358,7 @@ async fn start_initial_state_machine_run_for_group(
     state: &HttpAppState,
     group: &GroupDetailResult,
     caller_id: Option<String>,
+    authenticated_human: Option<bcs_service_api::AuthenticatedHumanCaller>,
 ) -> Result<Option<String>, HttpAdapterError> {
     let Some(session_id) = group.latest_running_session_id.as_deref() else {
         return Ok(None);
@@ -386,7 +393,7 @@ async fn start_initial_state_machine_run_for_group(
             definition_ref: None,
             input: session.input.clone().unwrap_or(Value::Null),
             caller_id,
-            authenticated_human: None,
+            authenticated_human,
         })
         .await
         .map_err(collaboration_runtime_error_to_http)?;
