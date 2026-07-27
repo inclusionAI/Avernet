@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Query
 from agentclaw.community.adapters.http.service_bot.schemas import (
     ApiResponse,
     BotBuildRequest,
+    BotRsyncExcludesResponse,
     ReadOnlyRuleItem,
     ReadOnlyTreeItem,
     ReadOnlyTreeResponse,
@@ -277,3 +278,93 @@ async def get_read_only_tree(
     except Exception as e:
         logger.error(f"[get_read_only_tree] Error: {e}")
         return ApiResponse(success=False, message=f"查询目录树失败: {str(e)}", error_code=500, data=None)
+
+
+# ---------------------------------------------------------------------------
+# Rsync excludes configuration
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/rsync-excludes",
+    response_model=ApiResponse,
+    summary="获取Bot的rsync excludes配置",
+)
+@with_interceptors(CollaboratorPermissionInterceptor(
+    bot_id="$bot_id",
+    owner_id="$owner_id",
+    persist_audit_log=False,  # 只读操作
+))
+async def get_bot_rsync_excludes(
+    bot_id: str = Query(..., description="Bot ID"),
+    owner_id: str = Query(..., description="Bot owner ID"),
+    user: AuthenticatedUser = Depends(get_current_user),
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+) -> ApiResponse:
+    """获取Bot的rsync excludes配置信息。
+
+    返回三部分信息：
+    1. default_excludes: 引擎默认的rsync排除规则
+    2. custom_excludes: Bot ext中配置的自定义排除规则
+    3. merged_excludes: 合并后的最终排除规则（默认值+自定义项，去重）
+
+    GET /api/service-bot/rsync-excludes?bot_id=xxx&owner_id=xxx
+    """
+    try:
+        # 1. 获取bot信息
+        bot = bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
+        if not bot:
+            return ApiResponse(
+                success=False,
+                message=f"Bot不存在: {bot_id}",
+                error_code=404,
+                data=None
+            )
+
+        # 2. 解析引擎类型
+        engine_type = resolve_engine_for_bot(bot_id, owner_id, bot_repo=bot_repo)
+
+        # 3. 获取引擎默认配置
+        from agentclaw.community.core.workspace.engines.openclaw import _OPENCLAW_RSYNC_EXCLUDES
+        from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_RSYNC_EXCLUDES
+
+        if engine_type == "openclaw":
+            default_excludes = list(_OPENCLAW_RSYNC_EXCLUDES)
+        elif engine_type == "claude_code":
+            default_excludes = list(_CLAUDE_CODE_RSYNC_EXCLUDES)
+        else:
+            default_excludes = []
+
+        # 4. 解析Bot自定义配置
+        from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
+        ext = bot.get("ext")
+        custom_excludes = parse_build_rsync_excludes_from_ext(ext)
+
+        # 5. 计算合并结果
+        merged_excludes = list(default_excludes)
+        if custom_excludes:
+            for item in custom_excludes:
+                if item not in merged_excludes:
+                    merged_excludes.append(item)
+
+        # 6. 构造响应
+        result = BotRsyncExcludesResponse(
+            bot_id=bot_id,
+            engine_type=engine_type,
+            default_excludes=default_excludes,
+            custom_excludes=custom_excludes,
+            merged_excludes=merged_excludes,
+            excludes_source="default_only" if not custom_excludes else "default_plus_custom"
+        )
+
+        return ApiResponse(success=True, data=result.model_dump(), message="OK")
+
+    except Exception as e:
+        logger.error(f"[get_bot_rsync_excludes] Error: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"获取rsync excludes配置失败: {str(e)}",
+            error_code=500,
+            data=None
+        )
