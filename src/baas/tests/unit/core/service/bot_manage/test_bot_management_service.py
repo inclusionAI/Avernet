@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from secbaas.community.api.bot_manage import BotConfig, BotStatus, StopBotResponse
+from secbaas.community.api.bot_manage import (
+    BotConfig,
+    BotStatus,
+    StopBotResponse,
+    UpdateDevicesResponse,
+)
 from secbaas.community.api.bot_runtime import BotNotFoundError
 from secbaas.community.api.publish_manage import (
     DEFAULT_CALLBACK_TIMEOUT_SECONDS,
@@ -4885,3 +4890,105 @@ class TestStopBot:
         assert result is not None
         call_kwargs = mock_publish_service.create_publish.call_args.kwargs
         assert call_kwargs["config"].auto_approve is True
+
+
+class TestUpdateDevicesConfigMerge:
+    """Tests for BotManagementService.update_devices with config merge."""
+
+    @pytest.mark.asyncio
+    async def test_update_devices_merges_config(self):
+        mock_record = MagicMock()
+        mock_record.id = 1
+        mock_record.bot_uuid = "BOT-001"
+        mock_record.status = "ACTIVE"
+        mock_record.extra_config = {
+            "share_policy": {"old": "value"},
+            "deploy_config": None,
+        }
+        mock_record.model_dump = MagicMock(
+            return_value={"id": 1, "bot_uuid": "BOT-001"}
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 888
+
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.status = "ACTIVE"
+        mock_bot_response.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "ACTIVE",
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+            }
+        )
+
+        mock_bot_repo = MagicMock()
+        mock_bot_repo.get_by_bot_uuid.return_value = mock_record
+        mock_device_repo = MagicMock()
+        mock_device = MagicMock()
+        mock_device.device_uuid = "DEV-001"
+        mock_device_repo.list_by_bot_id.return_value = [mock_device]
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+
+        record_for_get = MagicMock()
+        record_for_get.id = 1
+        record_for_get.extra_config = {
+            "share_policy": {"old": "value"},
+            "deploy_config": None,
+        }
+
+        with (
+            patch.object(
+                service,
+                "get_bot",
+                new_callable=AsyncMock,
+                return_value=mock_bot_response,
+            ),
+            patch.object(
+                service, "_get_bot_record_by_uuid", return_value=record_for_get
+            ),
+        ):
+            bot_config = BotConfig(
+                share_policy={"new": "policy"},
+                deploy_config=None,
+                entity_id="",
+                entity_type="",
+                sla_grade="standard",
+                callback_timeout_seconds=None,
+                auto_approve_publish=False,
+            )
+
+            result = await service.update_devices(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                device_uuids=["DEV-001"],
+                config=bot_config,
+            )
+
+        assert result is not None
+        assert result.publish_id == 888

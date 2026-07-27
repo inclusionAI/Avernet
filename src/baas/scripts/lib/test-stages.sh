@@ -73,7 +73,7 @@ run_e2e_asgi_tests() {
     # TestClient does not need a running app — it runs against the ASGI app
     # in the same process using ASGITransport. The bootstrap_init fixture
     # initializes the full DI container with it-sqlite overlay.
-    _run_pytest uv run pytest tests/e2e/asgi/ -v --durations=0 --log-cli-level=INFO \
+    _run_pytest uv run pytest tests/e2e/asgi/ -v --durations=0 \
         --tb=short \
         --cov=src/secbaas \
         --cov-report=xml:"$REPORT_DIR/cov-asgi.xml" \
