@@ -60,7 +60,7 @@ class SourceTransferNotReadyError(SessionFileSharingError):
 
 
 # ---------------------------------------------------------------------------
-from secbaas.api.bot_runtime import (  # noqa: E402
+from secbaas.api.bot_runtime import (  # noqa: E402, F401
     StagingObjectNotFoundError,
     TransferNotFoundError,
     TransferNotTerminalError,
