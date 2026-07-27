@@ -6,6 +6,7 @@ This utility intentionally uses only Python standard library modules.
 
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 import threading
@@ -216,3 +217,81 @@ def create_server(
         config,
         store if store is not None else CallbackStore(),
     )
+
+
+def bounded_integer(name: str, minimum: int, maximum: int):
+    def parse(value: str) -> int:
+        try:
+            parsed = int(value)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(f"{name} must be an integer") from error
+        if parsed < minimum or parsed > maximum:
+            raise argparse.ArgumentTypeError(
+                f"{name} must be between {minimum} and {maximum}"
+            )
+        return parsed
+
+    return parse
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Capture organization admin-run callbacks on this machine.",
+    )
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--port",
+        type=bounded_integer("port", 0, 65535),
+        default=28081,
+    )
+    parser.add_argument(
+        "--expected-token",
+        help="Require this Bearer token on POST /callback.",
+    )
+    parser.add_argument(
+        "--expected-provider-id",
+        help="Require this X-BCN-Provider-Id value on POST /callback.",
+    )
+    parser.add_argument(
+        "--response-status",
+        type=bounded_integer("response status", 100, 599),
+        default=200,
+        help="HTTP status returned after recording a valid callback (default: 200).",
+    )
+    parser.add_argument(
+        "--response-delay-ms",
+        type=bounded_integer("response delay", 0, 86_400_000),
+        default=0,
+        help="Delay callback acknowledgement by this many milliseconds.",
+    )
+    return parser.parse_args(argv)
+
+
+def main() -> int:
+    args = parse_args()
+    config = ServerConfig(
+        response_status=args.response_status,
+        response_delay_ms=args.response_delay_ms,
+        expected_token=args.expected_token,
+        expected_provider_id=args.expected_provider_id,
+    )
+    server = create_server(args.host, args.port, config)
+    host, port = server.server_address
+    base_url = f"http://{host}:{port}"
+    print(
+        f"Admin run callback test server listening on {base_url}\n"
+        f"Configure admin_callback_url as {base_url}/callback\n"
+        f"Inspect callbacks at {base_url}/callbacks",
+        flush=True,
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nAdmin run callback test server stopped.", flush=True)
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

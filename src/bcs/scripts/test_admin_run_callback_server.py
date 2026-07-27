@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import threading
 import time
@@ -297,6 +299,58 @@ class CallbackHttpServerTest(unittest.TestCase):
         self.assertEqual(callback_status, 200)
         self.assertGreaterEqual(callback_elapsed, 0.08)
         self.assertGreaterEqual(callback_elapsed - health_elapsed, 0.05)
+
+
+class CallbackServerCliTest(unittest.TestCase):
+    def test_parser_defaults(self) -> None:
+        args = callback_server.parse_args([])
+
+        self.assertEqual(args.host, "127.0.0.1")
+        self.assertEqual(args.port, 28081)
+        self.assertIsNone(args.expected_token)
+        self.assertIsNone(args.expected_provider_id)
+        self.assertEqual(args.response_status, 200)
+        self.assertEqual(args.response_delay_ms, 0)
+
+    def test_parser_accepts_explicit_configuration(self) -> None:
+        args = callback_server.parse_args(
+            [
+                "--host",
+                "localhost",
+                "--port",
+                "31000",
+                "--expected-token",
+                "callback-secret",
+                "--expected-provider-id",
+                "provider-1",
+                "--response-status",
+                "503",
+                "--response-delay-ms",
+                "250",
+            ]
+        )
+
+        self.assertEqual(args.host, "localhost")
+        self.assertEqual(args.port, 31000)
+        self.assertEqual(args.expected_token, "callback-secret")
+        self.assertEqual(args.expected_provider_id, "provider-1")
+        self.assertEqual(args.response_status, 503)
+        self.assertEqual(args.response_delay_ms, 250)
+
+    def test_parser_rejects_invalid_numeric_arguments(self) -> None:
+        invalid_arguments = [
+            ["--port", "-1"],
+            ["--port", "65536"],
+            ["--response-status", "99"],
+            ["--response-status", "600"],
+            ["--response-delay-ms", "-1"],
+        ]
+
+        for arguments in invalid_arguments:
+            with self.subTest(arguments=arguments):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        callback_server.parse_args(arguments)
 
 
 if __name__ == "__main__":
