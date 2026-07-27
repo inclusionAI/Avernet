@@ -93,6 +93,47 @@ class TestGetSymlinkMappings:
         assert mappings[0].source == pool_source
         assert mappings[0].target.endswith("/openclaw/workspace/skills/handmade")
 
+    def test_cutover_finalizing_rewrites_legacy_locator_to_pool_source(
+        self, skill_set_service, mock_skill_set_repo
+    ):
+        pool_local = (
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+        )
+        skill_set_service.engine_type = "openclaw"
+        skill_set_service.entity_id = "100015"
+        skill_set_service._pool_layout_paths = lambda *_: (
+            "/home/admin/.openclaw/workspace/skills",
+            pool_local,
+            "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+        )
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "Pool cutover", "is_default": False}
+        ]
+        mock_skill_set_repo.get_skills_in_set.return_value = [
+            {
+                "id": "1",
+                "name": "handmade",
+                "git_path": (
+                    "local:///home/admin/.openclaw/workspace/skills/"
+                    "skills-local/handmade"
+                ),
+            }
+        ]
+
+        with patch(
+            "agentclaw.community.utils.env_utils.is_local_mode",
+            return_value=False,
+        ):
+            mappings = skill_set_service.get_symlink_mappings(
+                user_id="100015",
+                bolt_id="default",
+            )
+
+        assert mappings[0].source == f"{pool_local}/handmade"
+        assert mappings[0].target == (
+            "/home/admin/.openclaw/workspace/skills/handmade"
+        )
+
     def test_claude_pool_locators_drive_restart_mappings(
         self, skill_set_service, mock_skill_set_repo
     ):

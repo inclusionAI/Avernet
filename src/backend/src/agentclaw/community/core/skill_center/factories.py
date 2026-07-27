@@ -29,6 +29,9 @@ from agentclaw.community.core.skill_center.services.repositories import (
     SkillSetRepository,
 )
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
+from agentclaw.community.core.skill_center.path_resolution import (
+    build_pool_local_path_adapter,
+)
 from agentclaw.community.core.skill_center.services.skill_parameter_service import (
     SkillParameterService,
 )
@@ -193,6 +196,7 @@ class SkillSetServiceFactory:
             resolved_repo = repo_dir or SKILLS_REPO_DIR
             resolved_local = local_dir or SKILLS_LOCAL_DIR
         effective_owner = entity_id or user_id
+        local_skill_path_adapter = None
         if effective_owner is not None and bot_id is not None:
             pool_paths = self._pool_layout_paths(
                 str(effective_owner),
@@ -204,11 +208,15 @@ class SkillSetServiceFactory:
                 resolved_skills = Path(active_path)
                 resolved_local = Path(local_path)
                 resolved_repo = Path(repo_path)
+                local_skill_path_adapter = build_pool_local_path_adapter(
+                    resolved_local
+                )
 
         skill_service = self._skill_service_factory.create(
             active_dir=resolved_skills,
             repo_dir=resolved_repo,
             local_dir=resolved_local,
+            local_skill_path_adapter=local_skill_path_adapter,
         )
 
         return SkillSetService(

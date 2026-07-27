@@ -72,6 +72,11 @@ def test_pool_active_factory_scopes_skill_writes_to_canonical_pool(test_injector
     assert str(svc.skill_service.repo_dir).endswith(
         "/skills-pool/skills-repo"
     )
+    assert str(svc.local_dir).endswith("/skills-pool/skills-local")
+    assert str(svc.repo_dir).endswith("/skills-pool/skills-repo")
+    assert svc.skill_service._local_skill_path_adapter(
+        "/home/admin/.openclaw/workspace/skills/skills-local/handmade"
+    ).endswith("/skills-pool/skills-local/handmade")
 
 
 @pytest.mark.asyncio
@@ -115,3 +120,29 @@ def test_real_skill_set_switcher_factory_create(test_injector):
 def test_real_skill_set_activator_factory_create(test_injector):
     factory = test_injector.get(SkillSetActivatorFactory)
     assert isinstance(factory.create(), SkillSetActivator)
+
+
+def test_pool_paths_propagate_to_switcher_and_activator(test_injector):
+    pool_paths = (
+        "/home/admin/.openclaw/workspace/skills",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-local",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+    )
+    skill_set_factory = test_injector.get(SkillSetServiceFactory)
+    skill_set_factory._pool_layout_paths = lambda *_: pool_paths
+
+    switcher = test_injector.get(SkillSetSwitcherFactory).create(
+        entity_id="staff_1",
+        bot_id="bot-1",
+        engine_type="openclaw",
+    )
+    activator = test_injector.get(SkillSetActivatorFactory).create(
+        entity_id="staff_1",
+        bot_id="bot-1",
+        engine_type="openclaw",
+    )
+
+    assert str(switcher.local_dir).endswith("/skills-pool/skills-local")
+    assert str(switcher.repo_dir).endswith("/skills-pool/skills-repo")
+    assert str(activator.local_dir).endswith("/skills-pool/skills-local")
+    assert str(activator.repo_dir).endswith("/skills-pool/skills-repo")

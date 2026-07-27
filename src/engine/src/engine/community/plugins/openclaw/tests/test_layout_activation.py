@@ -140,6 +140,11 @@ def test_registered_local_cutover_syncs_latest_content_and_atomically_bridges(
     assert not legacy_local.is_symlink()
     assert not (legacy_local.parent / "skills-repo").exists()
     assert not (legacy_local.parent / "skills-repo").is_symlink()
+    active_marker = json.loads(
+        (pool_local.parent / ".pool-active").read_text()
+    )
+    assert active_marker["activation_state"] == "active"
+    assert active_marker["mappings"] == []
     verification = verify_skill_mappings(mappings=mappings, home=home)
     assert verification.valid
     assert (legacy_local.parent / "handmade" / "SKILL.md").read_text() == "latest"

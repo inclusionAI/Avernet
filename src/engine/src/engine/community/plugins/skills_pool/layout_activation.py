@@ -220,10 +220,18 @@ def _write_active_marker(
         "migration_generation": migration_generation,
         "activation_state": activation_state,
         "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "mappings": [
-            {"source": mapping.source, "target": mapping.target} for mapping in mappings
-        ],
+        # Keep the key for compatibility with already-published image startup
+        # scripts. Only finalizing carries recovery mappings; active is stable.
+        "mappings": [],
     }
+    if activation_state == "finalizing":
+        # Recovery material for the short cutover window only. Once active,
+        # skill mappings are mutable product state and must not become part of
+        # the persisted layout contract.
+        value["mappings"] = [
+            {"source": mapping.source, "target": mapping.target}
+            for mapping in mappings
+        ]
     payload = json.dumps(
         value,
         ensure_ascii=False,

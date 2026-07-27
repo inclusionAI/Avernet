@@ -87,9 +87,6 @@ def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(
                 "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
                 "migration_generation": "generation-1",
                 "activation_state": "active",
-                "mappings": [
-                    {"source": str(source), "target": str(target)}
-                ],
             }
         )
     )
@@ -104,6 +101,73 @@ def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(
     assert result.status is RuntimeLayoutInspectionStatus.READY
     assert result.evidence["activation_state"] == "active"
     assert result.evidence["checks"]["legacy_storage_entries_absent"] is True
+
+
+def test_active_marker_allows_normal_skill_deactivation(tmp_path):
+    home, active_root, pool_local, pool_repo = _ready_home(tmp_path)
+    source = pool_local / "handmade"
+    source.mkdir()
+    target = active_root / "handmade"
+    target.symlink_to(source, target_is_directory=True)
+    (active_root / "skills-repo").unlink()
+    _write_active_marker(
+        home,
+        activation_state="active",
+        mappings=[{"source": str(source), "target": str(target)}],
+    )
+
+    target.unlink()
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+
+
+def test_finalizing_marker_allows_concurrent_skill_deactivation(tmp_path):
+    home, active_root, pool_local, pool_repo = _ready_home(tmp_path)
+    source = pool_local / "handmade"
+    source.mkdir()
+    target = active_root / "handmade"
+    target.symlink_to(source, target_is_directory=True)
+    _write_active_marker(
+        home,
+        activation_state="finalizing",
+        mappings=[{"source": str(source), "target": str(target)}],
+    )
+
+    target.unlink()
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+
+
+def test_active_marker_allows_normal_skill_activation(tmp_path):
+    home, active_root, pool_local, pool_repo = _ready_home(tmp_path)
+    (active_root / "skills-repo").unlink()
+    _write_active_marker(home, activation_state="active")
+    source = pool_local / "new-skill"
+    source.mkdir()
+    (active_root / "new-skill").symlink_to(source, target_is_directory=True)
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
 
 
 def _active_marker_path(home: Path) -> Path:
@@ -123,17 +187,17 @@ def _write_active_marker(
     mappings: object = None,
 ) -> Path:
     marker_path = _active_marker_path(home)
+    marker = {
+        "engine": "openclaw",
+        "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+        "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
+        "migration_generation": "generation-1",
+        "activation_state": activation_state,
+    }
+    if activation_state == "finalizing" or mappings is not None:
+        marker["mappings"] = [] if mappings is None else mappings
     marker_path.write_text(
-        json.dumps(
-            {
-                "engine": "openclaw",
-                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
-                "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
-                "migration_generation": "generation-1",
-                "activation_state": activation_state,
-                "mappings": [] if mappings is None else mappings,
-            }
-        )
+        json.dumps(marker)
     )
     return marker_path
 

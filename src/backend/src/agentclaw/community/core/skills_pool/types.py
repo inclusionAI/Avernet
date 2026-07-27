@@ -89,3 +89,24 @@ class BotSkillLayoutState:
             migration_generation=None,
             persisted=False,
         )
+
+
+def runtime_uses_pool_paths(state: BotSkillLayoutState) -> bool:
+    """Whether canonical Pool paths already own runtime reads and writes.
+
+    Runtime cutover retires Legacy storage bridges before the Backend CAS can
+    persist ``POOL_ACTIVE``. ``begin_cutover`` is the durable fence immediately
+    before that remote call; from that point onward, consumers must stop
+    dereferencing Legacy locators even while ``active_layout`` is still Legacy.
+    """
+
+    return (
+        state.active_layout is SkillLayout.POOL
+        or state.data_plane_cutover_committed
+        or state.phase
+        in {
+            SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER,
+            SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+        }
+    )

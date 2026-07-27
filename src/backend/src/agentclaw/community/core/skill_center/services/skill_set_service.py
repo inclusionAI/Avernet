@@ -30,6 +30,9 @@ from agentclaw.community.core.skill_center.services.repositories import (
     SkillSetRepository,
 )
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
+from agentclaw.community.core.skill_center.path_resolution import (
+    canonical_pool_local_path,
+)
 from agentclaw.community.core.skill_center.utils.skill_metadata_writer import SkillSetMetadataWriter
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
@@ -226,14 +229,27 @@ class SkillSetService:
             self.repo_dir = repo_dir or SKILLS_REPO_DIR
             self.local_dir = local_dir or SKILLS_LOCAL_DIR
 
+        self._pool_layout_paths = pool_layout_paths or (
+            lambda _owner_id, _bot_id, _engine: None
+        )
+        effective_owner = entity_id or user_id
+        if not self.is_desktop and effective_owner is not None:
+            pool_paths = self._pool_layout_paths(
+                str(effective_owner),
+                str(self.bot_id),
+                self.engine_type,
+            )
+            if pool_paths is not None:
+                active_path, local_path, repo_path = pool_paths
+                self.skills_dir = Path(active_path)
+                self.local_dir = Path(local_path)
+                self.repo_dir = Path(repo_path)
+
         self.CURRENT_SET_FILE = self.skills_dir / ".current_skill_set"
 
         self._resolver = resolver
         self._device_sync_dispatcher = device_sync_dispatcher
         self._mcp_sync_service = mcp_sync_service
-        self._pool_layout_paths = pool_layout_paths or (
-            lambda _owner_id, _bot_id, _engine: None
-        )
 
     def _get_current_active_skill_set_id(self) -> str | None:
         """Get currently active skill set ID from database (is_active=1)."""
@@ -1251,7 +1267,11 @@ class SkillSetService:
                 if path_part.startswith('/'):
                     # 绝对路径格式: /aidesktop/.../skills-local/skill-name
                     skill_name = path_part.rstrip('/').split('/')[-1]
-                    source = path_part.rstrip('/')
+                    source = (
+                        canonical_pool_local_path(path_part, skills_local_dir)
+                        if pool_layout_paths is not None
+                        else path_part.rstrip('/')
+                    )
                 else:
                     # 相对名称格式: skill-name
                     skill_name = path_part.split('/')[-1] if '/' in path_part else path_part
@@ -1987,6 +2007,11 @@ class SkillSetSwitcher(_DeviceSyncMixin):
             skills_dir=self.skills_dir, repo_dir=self.repo_dir, local_dir=self.local_dir,
             user_id=user_id, entity_id=entity_id, bot_id=bot_id, engine_type=engine_type
         )
+        if isinstance(self.skill_set_service.skills_dir, Path):
+            self.skills_dir = self.skill_set_service.skills_dir
+            self.repo_dir = self.skill_set_service.repo_dir
+            self.local_dir = self.skill_set_service.local_dir
+            self.CURRENT_SET_FILE = self.skills_dir / ".current_skill_set"
 
     def get_current_skill_set(self) -> dict[str, Any] | None:
         """Get the currently active skill set."""
@@ -2463,6 +2488,10 @@ class SkillSetActivator(_DeviceSyncMixin):
             skills_dir=self.skills_dir, repo_dir=self.repo_dir, local_dir=self.local_dir,
             user_id=user_id, entity_id=entity_id, bot_id=bot_id, engine_type=engine_type
         )
+        if isinstance(self.skill_set_service.skills_dir, Path):
+            self.skills_dir = self.skill_set_service.skills_dir
+            self.repo_dir = self.skill_set_service.repo_dir
+            self.local_dir = self.skill_set_service.local_dir
 
     async def activate_skill_set(
         self,

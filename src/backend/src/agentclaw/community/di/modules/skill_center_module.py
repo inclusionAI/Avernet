@@ -119,7 +119,7 @@ from agentclaw.community.core.skills_pool.repository.protocol import (
 from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
-    SkillLayout,
+    runtime_uses_pool_paths,
 )
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
@@ -446,7 +446,7 @@ class SkillCenterModule(Module):
                     bot_id=str(bot["bot_id"]),
                 )
             )
-            if state.active_layout is not SkillLayout.POOL:
+            if not runtime_uses_pool_paths(state):
                 return None
             paths = pool_paths_for_engine(engine)
             return paths.active, paths.pool_local, paths.pool_repo

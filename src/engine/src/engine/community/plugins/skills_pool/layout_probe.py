@@ -366,6 +366,8 @@ def _active_marker_valid(
         or not isinstance(marker.get("migration_generation"), str)
     ):
         return False
+    if marker["activation_state"] == "active":
+        return True
     mappings = marker.get("mappings")
     if not isinstance(mappings, list):
         return False
@@ -388,12 +390,43 @@ def _active_marker_valid(
             target.parent != Path(os.path.abspath(layout.legacy_root))
             or target in {layout.local_bridge, layout.repo_bridge}
             or target in seen_targets
-            or not source.is_dir()
-            or not target.is_symlink()
-            or _lexical_symlink_target(target) != source
         ):
             return False
         seen_targets.add(target)
+    return True
+
+
+def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
+    """Validate mutable managed entries without freezing an old mapping set."""
+
+    pool_roots = tuple(
+        Path(os.path.abspath(root))
+        for root in (layout.pool_local, layout.pool_repo)
+    )
+    retired_roots = tuple(
+        Path(os.path.abspath(root))
+        for root in (
+            layout.legacy_local,
+            layout.legacy_repo,
+            layout.local_bridge,
+            layout.repo_bridge,
+        )
+    )
+    for entry in layout.legacy_root.iterdir():
+        if not entry.is_symlink():
+            continue
+        target = _lexical_symlink_target(entry)
+        if any(target.is_relative_to(root) for root in pool_roots):
+            try:
+                target_stat = entry.stat()
+            except (FileNotFoundError, NotADirectoryError):
+                return False
+            if not stat.S_ISDIR(target_stat.st_mode):
+                return False
+            continue
+        if any(target.is_relative_to(root) for root in retired_roots):
+            return False
+        # External active entries predate Pool and remain outside this migration.
     return True
 
 
@@ -657,6 +690,27 @@ def inspect_runtime_layout(
                         reason=f"retired_{bridge_name}_bridge_present",
                         preparation_id=preparation_id,
                     )
+            try:
+                active_entries_valid = _active_entries_valid(layout)
+            except PermissionError:
+                active_entries_valid = False
+            except OSError as error:
+                return _transient(
+                    engine=engine,
+                    contract_version=expected_contract_version,
+                    layout=layout,
+                    reason="active_entries_temporarily_unavailable",
+                    error=error,
+                    preparation_id=preparation_id,
+                )
+            if not active_entries_valid:
+                return _invalid(
+                    engine=engine,
+                    contract_version=expected_contract_version,
+                    layout=layout,
+                    reason="active_managed_entry_invalid",
+                    preparation_id=preparation_id,
+                )
         return RuntimeLayoutInspection(
             status=RuntimeLayoutInspectionStatus.READY,
             engine=engine,
