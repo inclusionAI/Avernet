@@ -106,8 +106,8 @@ async def wait_for_publish_status(
     api: APITestHelper,
     publish_id: int,
     target_statuses: set[str],
-    timeout_seconds: float = 5.0,
-    poll_interval: float = 0.1,
+    timeout_seconds: float = 0.5,
+    poll_interval: float = 0.05,
 ) -> str:
     """Poll until publish reaches one of the target statuses."""
     t0 = time.monotonic()
@@ -166,8 +166,8 @@ async def send_callbacks_for_hook_devices(
     exit_code: int = 0,
     stdout: str = "mock hook output",
     stderr: str = "",
-    timeout_seconds: float = 5.0,
-    poll_interval: float = 0.1,
+    timeout_seconds: float = 0.5,
+    poll_interval: float = 0.05,
 ) -> list[dict]:
     """Find CREATED devices in the current running batch and send callback for each."""
     t0 = time.monotonic()
@@ -240,8 +240,8 @@ async def try_send_callbacks_for_hook_devices(
     exit_code: int = 0,
     stdout: str = "mock hook output",
     stderr: str = "",
-    timeout_seconds: float = 5.0,
-    poll_interval: float = 0.1,
+    timeout_seconds: float = 0.5,
+    poll_interval: float = 0.05,
 ) -> list[dict] | None:
     """Try to find and callback CREATED devices. Returns None if none found (no assert)."""
     t0 = time.monotonic()
@@ -303,8 +303,8 @@ async def send_mixed_callbacks(
     api: APITestHelper,
     publish_id: int,
     fail_index: int = -1,
-    timeout_seconds: float = 5.0,
-    poll_interval: float = 0.1,
+    timeout_seconds: float = 0.5,
+    poll_interval: float = 0.05,
 ) -> list[dict]:
     """Send SUCCESS to all current-stage devices except device at fail_index (gets FAILED)."""
     t0 = time.monotonic()
@@ -473,6 +473,7 @@ async def approve_and_complete(
     publish_id: int,
     max_iterations: int = 15,
     bot_uuid: str | None = None,
+    timeout_seconds: float = 0.5,
 ) -> str:
     """Approve publish, send SUCCESS callbacks, and return final status.
 
@@ -528,7 +529,11 @@ async def approve_and_complete(
                 return "APPROVE_FAILED"
 
         t_cb = time.monotonic()
-        result = await try_send_callbacks_for_hook_devices(api, publish_id)
+        result = await try_send_callbacks_for_hook_devices(
+            api,
+            publish_id,
+            timeout_seconds=timeout_seconds,
+        )
         t_callback = time.monotonic() - t_cb
         if result is None:
             log.info(
@@ -541,7 +546,10 @@ async def approve_and_complete(
 
         t_w = time.monotonic()
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED", "APPROVING"}
+            api,
+            publish_id,
+            {"SUCCESS", "FAILED", "APPROVING"},
+            timeout_seconds=timeout_seconds,
         )
         t_wait = time.monotonic() - t_w
         if status in ("SUCCESS", "FAILED"):
@@ -567,13 +575,15 @@ async def approve_and_complete(
     return status
 
 
-async def activate_bot(api: APITestHelper, bot: dict) -> None:
+async def activate_bot(
+    api: APITestHelper, bot: dict, timeout_seconds: float = 0.5
+) -> None:
     """Activate a bot: approve + callback loop until complete."""
     t0 = time.monotonic()
     publish_id = bot.get("publish_id")
     if not publish_id:
         return
-    final = await approve_and_complete(api, publish_id)
+    final = await approve_and_complete(api, publish_id, timeout_seconds=timeout_seconds)
     log.info(
         f"[TIMING] activate_bot: {time.monotonic() - t0:.2f}s, final_status={final}"
     )

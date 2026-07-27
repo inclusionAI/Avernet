@@ -7,8 +7,8 @@ repo_root="$(cd "$baas_root/../.." && pwd)"
 baas_dir="${BAAS_COMMUNITY_DIR:-$baas_root}"
 ci_workspace="${CITEST_WORKSPACE:-$repo_root}"
 report_dir="$baas_dir/pytest_report"
-unit_report="$report_dir/TEST-unit.xml"
-coverage_report="$report_dir/TEST-cov.xml"
+unit_report="$report_dir/ci.xml"
+coverage_report="$report_dir/cov-ci.xml"
 line_coverage_min="${BAAS_CI_LINE_COVERAGE_MIN:-90}"
 python_bin="$(command -v python || command -v python3 || true)"
 base=""
@@ -56,8 +56,8 @@ if [[ "$baas_ci_status" -ne 0 ]]; then
   exit "$baas_ci_status"
 fi
 
-echo "--- unit coverage report ---"
-check_args=(
+echo "=== CI COVERAGE REPORT ==="
+ci_check_args=(
   "$repo_root/scripts/ci/report_check.py"
   --junit "$unit_report"
   --coverage "$coverage_report"
@@ -66,8 +66,24 @@ check_args=(
   --min-line-coverage "$line_coverage_min"
 )
 if [[ -n "$base" ]]; then
-  check_args+=(--base "$base" --head "$head" --min-change-line-coverage 90)
+  ci_check_args+=(--base "$base" --head "$head" --min-change-line-coverage 90)
 fi
-"$python_bin" "${check_args[@]}"
-echo "--- end unit coverage report ---"
-echo "baas CI gate passed"
+"$python_bin" "${ci_check_args[@]}"
+echo "=== END CI COVERAGE REPORT ==="
+echo "BAAS CI GATE PASSED"
+
+echo "=== E2E COVERAGE REPORT ==="
+asgi_check_args=(
+  "$repo_root/scripts/ci/report_check.py"
+  --junit "$report_dir/asgi.xml"
+  --coverage "$report_dir/cov-asgi.xml"
+  --source-root "$baas_dir/src"
+  --min-case-pass-rate 100
+  --min-line-coverage "40"
+)
+#if [[ -n "$base" ]]; then
+#  asgi_check_args+=(--base "$base" --head "$head" --min-change-line-coverage 40)
+#fi
+"$python_bin" "${asgi_check_args[@]}"
+echo "=== END ASGI COVERAGE REPORT ==="
+echo "BAAS ASGI GATE PASSED"

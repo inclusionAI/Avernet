@@ -53,7 +53,7 @@ class CronLifecycle:
         try:
             self._app_scheduler.stop()
         except Exception:
-            log.exception("Error stopping AppScheduler")
+            log.warning("Error stopping AppScheduler")
 
         log.info("Cron lifecycle stopped")
 
