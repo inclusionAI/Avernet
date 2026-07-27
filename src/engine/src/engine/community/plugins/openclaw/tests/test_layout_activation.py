@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 import json
 import os
 import shutil
@@ -36,6 +38,7 @@ from engine.community.plugins.openclaw.layout_sync import (
     write_baseline_manifest,
 )
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
+from engine.community.plugins.skills_pool import layout_atomic
 
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
 
@@ -919,6 +922,84 @@ def test_cutover_stays_legacy_when_atomic_exchange_is_unavailable(
     assert not legacy_local.is_symlink()
 
 
+def test_atomic_exchange_treats_einval_as_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeRenameAt2:
+        argtypes: list[object] = []
+        restype: object | None = None
+
+        def __call__(self, *_args: object) -> int:
+            ctypes.set_errno(errno.EINVAL)
+            return -1
+
+    class FakeLibc:
+        renameat2 = FakeRenameAt2()
+
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.symlink_to(left, target_is_directory=True)
+    monkeypatch.setattr(layout_atomic.sys, "platform", "linux")
+    monkeypatch.setattr(
+        layout_atomic.ctypes,
+        "CDLL",
+        lambda *_args, **_kwargs: FakeLibc(),
+    )
+
+    assert layout_atomic.atomic_exchange_paths(left, right) is False
+
+
+def test_cutover_retry_recovers_owned_temporary_symlink(tmp_path: Path) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    temporary = legacy_local.parent / ".skills-local.pool-cutover-generation-1"
+    temporary.symlink_to(pool_local, target_is_directory=True)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=[],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        exchange_paths=lambda _left, _right: False,
+    )
+
+    assert result.status is PoolActivationStatus.NOT_ATOMIC
+    assert result.evidence["reason"] == "atomic_exchange_unavailable"
+    assert result.evidence["recovered_temporary"] is True
+    assert legacy_local.is_dir()
+    assert not legacy_local.is_symlink()
+    assert not temporary.exists()
+    assert not temporary.is_symlink()
+
+
+def test_cutover_retry_rejects_noncanonical_temporary_symlink(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, _pool_local, pool_repo = _prepared_home(tmp_path)
+    temporary = legacy_local.parent / ".skills-local.pool-cutover-generation-1"
+    external = tmp_path / "external"
+    external.mkdir()
+    temporary.symlink_to(external, target_is_directory=True)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=[],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.INVALID
+    assert result.evidence["reason"] == "cutover_temporary_path_occupied"
+    assert temporary.is_symlink()
+    assert temporary.readlink() == external
+    assert legacy_local.is_dir()
+
+
 @pytest.mark.parametrize(
     ("generation", "preparation_id", "names", "reason"),
     [
@@ -1023,6 +1104,7 @@ def test_cutover_rejects_occupied_temporary_and_ambiguous_exchange(
 
 def test_cutover_reports_transient_filesystem_failure(tmp_path: Path) -> None:
     home, legacy_local, _pool_local, pool_repo = _prepared_home(tmp_path)
+    temporary = legacy_local.parent / ".skills-local.pool-cutover-generation-1"
 
     def fail_exchange(_left: Path, _right: Path) -> bool:
         raise OSError(5, "io")
@@ -1040,6 +1122,20 @@ def test_cutover_reports_transient_filesystem_failure(tmp_path: Path) -> None:
     assert result.status is PoolActivationStatus.TRANSIENT_ERROR
     assert result.evidence["reason"] == "filesystem_operation_failed"
     assert legacy_local.is_dir()
+    assert not temporary.exists()
+    assert not temporary.is_symlink()
+
+    retry = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=[],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        exchange_paths=lambda _left, _right: False,
+    )
+    assert retry.status is PoolActivationStatus.NOT_ATOMIC
+    assert retry.evidence["reason"] == "atomic_exchange_unavailable"
 
 
 def test_mapping_verifier_reports_each_drift_class(tmp_path: Path) -> None:
