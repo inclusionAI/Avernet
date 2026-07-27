@@ -24,7 +24,6 @@ from engine.community.plugins.openclaw.layout_activation import (
     PoolActivationStatus,
     SkillMapping,
     activate_openclaw_pool,
-    atomic_exchange_paths,
     publish_pool_mappings,
     rollback_openclaw_pool,
     verify_skill_mappings,
@@ -35,6 +34,7 @@ from engine.community.plugins.openclaw.layout_probe import (
     RuntimeLayoutInspectionStatus,
 )
 from engine.community.plugins.openclaw.layout_sync import (
+    mirror_local_tree,
     write_baseline_manifest,
 )
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
@@ -90,7 +90,7 @@ def _prepared_home(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     return home, legacy_local, pool_local, pool_repo
 
 
-def test_registered_local_cutover_syncs_latest_content_and_atomically_bridges(
+def test_registered_local_cutover_syncs_latest_content_and_retires_bridges(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
@@ -599,16 +599,15 @@ def test_mapping_source_cannot_escape_canonical_pool_root(
     assert not legacy_local.is_symlink()
 
 
-def test_post_exchange_sync_captures_write_after_initial_copy(
+def test_post_rename_sync_captures_write_after_initial_copy(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
-    def write_then_exchange(left: Path, right: Path) -> bool:
-        (left / "handmade" / "created-during-cutover.txt").write_text(
+    def write_before_retire() -> None:
+        (legacy_local / "handmade" / "created-during-cutover.txt").write_text(
             "must-survive"
         )
-        return atomic_exchange_paths(left, right)
 
     result = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -617,7 +616,7 @@ def test_post_exchange_sync_captures_write_after_initial_copy(
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=write_then_exchange,
+        before_legacy_retire=write_before_retire,
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
@@ -626,16 +625,97 @@ def test_post_exchange_sync_captures_write_after_initial_copy(
     ).read_text() == "must-survive"
 
 
-def test_post_exchange_sync_captures_new_unregistered_skill_root(
+def test_initial_mirror_preserves_pool_write_during_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import layout_sync
+
+    home, _legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    real_copy2 = layout_sync.shutil.copy2
+    wrote_pool = False
+
+    def copy_and_write_pool(
+        source: Path,
+        destination: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> Path:
+        nonlocal wrote_pool
+        if not wrote_pool and ".final-sync-generation-1" in str(destination):
+            wrote_pool = True
+            (pool_local / "handmade" / "SKILL.md").write_text(
+                "backend-write-during-sync"
+            )
+        return real_copy2(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(layout_sync.shutil, "copy2", copy_and_write_pool)
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert wrote_pool is True
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == (
+        "backend-write-during-sync"
+    )
+
+
+def test_staging_baseline_detects_legacy_write_before_retire(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import layout_activation
+
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    real_write_baseline = layout_activation.write_baseline_manifest
+    wrote_legacy = False
+
+    def write_baseline_after_legacy_change(
+        **kwargs: object,
+    ) -> dict[str, tuple[str, str]]:
+        nonlocal wrote_legacy
+        wrote_legacy = True
+        (legacy_local / "handmade" / "SKILL.md").write_text(
+            "legacy-write-after-staging"
+        )
+        return real_write_baseline(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        layout_activation,
+        "write_baseline_manifest",
+        write_baseline_after_legacy_change,
+    )
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert wrote_legacy is True
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == (
+        "legacy-write-after-staging"
+    )
+
+
+def test_post_rename_sync_captures_new_unregistered_skill_root(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
-    def create_skill_then_exchange(left: Path, right: Path) -> bool:
-        late_skill = left / "created-during-cutover"
+    def create_skill_before_retire() -> None:
+        late_skill = legacy_local / "created-during-cutover"
         late_skill.mkdir()
         (late_skill / "SKILL.md").write_text("must-survive")
-        return atomic_exchange_paths(left, right)
 
     result = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -644,7 +724,7 @@ def test_post_exchange_sync_captures_new_unregistered_skill_root(
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=create_skill_then_exchange,
+        before_legacy_retire=create_skill_before_retire,
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
@@ -657,14 +737,15 @@ def test_post_exchange_sync_captures_new_unregistered_skill_root(
     ]
 
 
-def test_post_exchange_sync_captures_existing_file_update_before_exchange(
+def test_post_rename_sync_captures_existing_file_update_before_retire(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
-    def update_then_exchange(left: Path, right: Path) -> bool:
-        (left / "handmade" / "SKILL.md").write_text("updated-before-exchange")
-        return atomic_exchange_paths(left, right)
+    def update_before_retire() -> None:
+        (legacy_local / "handmade" / "SKILL.md").write_text(
+            "updated-before-retire"
+        )
 
     result = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -673,27 +754,26 @@ def test_post_exchange_sync_captures_existing_file_update_before_exchange(
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=update_then_exchange,
+        before_legacy_retire=update_before_retire,
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
     assert (pool_local / "handmade" / "SKILL.md").read_text() == (
-        "updated-before-exchange"
+        "updated-before-retire"
     )
     assert result.evidence["post_sync"]["applied"] == ["handmade/SKILL.md"]
 
 
-def test_post_exchange_sync_preserves_new_pool_write_on_same_file(
+def test_post_rename_sync_preserves_new_pool_write_on_same_file(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
-    def update_legacy_then_exchange(left: Path, right: Path) -> bool:
-        (left / "handmade" / "SKILL.md").write_text("pre-exchange")
-        return atomic_exchange_paths(left, right)
+    def update_legacy_before_retire() -> None:
+        (legacy_local / "handmade" / "SKILL.md").write_text("pre-retire")
 
     def update_pool_after_exchange() -> None:
-        (legacy_local / "handmade" / "SKILL.md").write_text("post-exchange")
+        (pool_local / "handmade" / "SKILL.md").write_text("post-retire")
 
     result = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -702,18 +782,18 @@ def test_post_exchange_sync_preserves_new_pool_write_on_same_file(
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=update_legacy_then_exchange,
+        before_legacy_retire=update_legacy_before_retire,
         before_post_sync=update_pool_after_exchange,
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
-    assert (pool_local / "handmade" / "SKILL.md").read_text() == "post-exchange"
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == "post-retire"
     assert result.evidence["post_sync"]["conflicts_preserved_in_pool"] == [
         "handmade/SKILL.md"
     ]
 
 
-def test_atomic_file_exchange_preserves_write_at_replacement_boundary(
+def test_post_rename_sync_publishes_update_with_plain_replace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -721,24 +801,22 @@ def test_atomic_file_exchange_preserves_write_at_replacement_boundary(
 
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
-    def update_then_exchange(left: Path, right: Path) -> bool:
-        (left / "handmade" / "SKILL.md").write_text("legacy-window")
-        return atomic_exchange_paths(left, right)
+    def update_before_retire() -> None:
+        (legacy_local / "handmade" / "SKILL.md").write_text("legacy-window")
 
-    real_exchange = layout_sync.atomic_exchange_paths
-    exchange_count = 0
+    real_replace = layout_sync.os.replace
+    pool_replace_count = 0
 
-    def write_pool_at_exchange(left: Path, right: Path) -> bool:
-        nonlocal exchange_count
-        if exchange_count == 0:
-            right.write_text("pool-at-exchange")
-        exchange_count += 1
-        return real_exchange(left, right)
+    def track_replace(left: Path, right: Path) -> None:
+        nonlocal pool_replace_count
+        if Path(right) == pool_local / "handmade" / "SKILL.md":
+            pool_replace_count += 1
+        real_replace(left, right)
 
     monkeypatch.setattr(
-        layout_sync,
-        "atomic_exchange_paths",
-        write_pool_at_exchange,
+        layout_sync.os,
+        "replace",
+        track_replace,
     )
     result = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -747,19 +825,15 @@ def test_atomic_file_exchange_preserves_write_at_replacement_boundary(
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=update_then_exchange,
+        before_legacy_retire=update_before_retire,
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
-    assert (pool_local / "handmade" / "SKILL.md").read_text() == (
-        "pool-at-exchange"
-    )
-    assert result.evidence["post_sync"][
-        "conflicts_preserved_in_pool"
-    ] == ["handmade/SKILL.md"]
+    assert pool_replace_count >= 1
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == "legacy-window"
 
 
-def test_post_exchange_new_file_uses_atomic_no_clobber(
+def test_post_rename_new_file_uses_no_clobber_create(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -769,9 +843,8 @@ def test_post_exchange_new_file_uses_atomic_no_clobber(
 
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
-    def add_legacy_file_then_exchange(left: Path, right: Path) -> bool:
-        (left / "handmade" / "raced.txt").write_text("legacy-window")
-        return atomic_exchange_paths(left, right)
+    def add_legacy_file_before_retire() -> None:
+        (legacy_local / "handmade" / "raced.txt").write_text("legacy-window")
 
     real_link = os.link
 
@@ -788,7 +861,7 @@ def test_post_exchange_new_file_uses_atomic_no_clobber(
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=add_legacy_file_then_exchange,
+        before_legacy_retire=add_legacy_file_before_retire,
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
@@ -800,17 +873,18 @@ def test_post_exchange_new_file_uses_atomic_no_clobber(
     ]
 
 
-def test_post_exchange_pool_parent_deletion_is_not_resurrected(
+def test_post_rename_pool_parent_deletion_is_not_resurrected(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
-    def add_child_then_exchange(left: Path, right: Path) -> bool:
-        (left / "handmade" / "late-child.txt").write_text("legacy-window")
-        return atomic_exchange_paths(left, right)
+    def add_child_before_retire() -> None:
+        (legacy_local / "handmade" / "late-child.txt").write_text(
+            "legacy-window"
+        )
 
     def delete_pool_parent() -> None:
-        shutil.rmtree(legacy_local / "handmade")
+        shutil.rmtree(pool_local / "handmade")
 
     result = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -819,7 +893,7 @@ def test_post_exchange_pool_parent_deletion_is_not_resurrected(
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=add_child_then_exchange,
+        before_legacy_retire=add_child_before_retire,
         before_post_sync=delete_pool_parent,
     )
 
@@ -830,19 +904,18 @@ def test_post_exchange_pool_parent_deletion_is_not_resurrected(
     ] == ["handmade/late-child.txt"]
 
 
-def test_post_exchange_deleted_parent_does_not_stall_new_subdirectory(
+def test_post_rename_deleted_parent_does_not_stall_new_subdirectory(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
-    def add_subtree_then_exchange(left: Path, right: Path) -> bool:
-        new_dir = left / "handmade" / "late-directory"
+    def add_subtree_before_retire() -> None:
+        new_dir = legacy_local / "handmade" / "late-directory"
         new_dir.mkdir()
         (new_dir / "child.txt").write_text("legacy-window")
-        return atomic_exchange_paths(left, right)
 
     def delete_pool_parent() -> None:
-        shutil.rmtree(legacy_local / "handmade")
+        shutil.rmtree(pool_local / "handmade")
 
     result = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -851,7 +924,7 @@ def test_post_exchange_deleted_parent_does_not_stall_new_subdirectory(
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=add_subtree_then_exchange,
+        before_legacy_retire=add_subtree_before_retire,
         before_post_sync=delete_pool_parent,
     )
 
@@ -897,7 +970,249 @@ def test_retry_after_exchange_finishes_quarantine_move(tmp_path: Path) -> None:
     assert not temporary.exists()
 
 
-def test_cutover_stays_legacy_when_atomic_exchange_is_unavailable(
+def test_retry_after_legacy_rename_finishes_from_quarantine(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    mirror_local_tree(
+        source_root=legacy_local,
+        pool_local=pool_local,
+        staging_root=pool_local.parent / ".final-sync-generation-1",
+    )
+    write_baseline_manifest(
+        pool_local=pool_local,
+        local_names=["handmade"],
+        manifest_path=pool_local.parent
+        / ".cutover-baseline-generation-1.json",
+    )
+    quarantine = (
+        pool_local.parent
+        / ".migration-quarantine"
+        / "generation-1"
+        / "skills-local"
+    )
+    quarantine.parent.mkdir(parents=True)
+    legacy_local.rename(quarantine)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(legacy_local.parent / "handmade"),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert quarantine.is_dir()
+    assert not legacy_local.exists()
+    assert (legacy_local.parent / "handmade").resolve() == (
+        pool_local / "handmade"
+    )
+
+
+def test_finalizing_marker_retry_collects_recreated_legacy_local(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    mirror_local_tree(
+        source_root=legacy_local,
+        pool_local=pool_local,
+        staging_root=pool_local.parent / ".final-sync-generation-1",
+    )
+    write_baseline_manifest(
+        pool_local=pool_local,
+        local_names=["handmade"],
+        manifest_path=pool_local.parent
+        / ".cutover-baseline-generation-1.json",
+    )
+    quarantine = (
+        pool_local.parent
+        / ".migration-quarantine"
+        / "generation-1"
+        / "skills-local"
+    )
+    quarantine.parent.mkdir(parents=True)
+    legacy_local.rename(quarantine)
+    (pool_local.parent / ".pool-active").write_text(
+        json.dumps(
+            {
+                "engine": "openclaw",
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "preparation_id": PREPARATION_ID,
+                "migration_generation": "generation-1",
+                "activation_state": "finalizing",
+                "mappings": [],
+            }
+        )
+    )
+    late_skill = legacy_local / "created-after-finalizing"
+    late_skill.mkdir(parents=True)
+    (late_skill / "SKILL.md").write_text("must-survive")
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert not legacy_local.exists()
+    assert (
+        pool_local / "created-after-finalizing" / "SKILL.md"
+    ).read_text() == "must-survive"
+    marker = json.loads((pool_local.parent / ".pool-active").read_text())
+    assert marker["activation_state"] == "active"
+
+
+def test_cutover_collects_recreated_legacy_local_before_commit(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+
+    def recreate_legacy_local() -> None:
+        late_skill = legacy_local / "created-after-retire"
+        late_skill.mkdir(parents=True)
+        (late_skill / "SKILL.md").write_text("must-survive")
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        before_post_sync=recreate_legacy_local,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert not legacy_local.exists()
+    assert (
+        pool_local / "created-after-retire" / "SKILL.md"
+    ).read_text() == "must-survive"
+    assert result.evidence["legacy_residue"]["captured_count"] == 1
+
+
+def test_cutover_retry_replays_residue_after_merge_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import layout_activation
+
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    real_merge = layout_activation.merge_post_cutover_changes
+    fail_residue_once = True
+
+    def recreate_legacy_local() -> None:
+        late_skill = legacy_local / "created-before-merge-failure"
+        late_skill.mkdir(parents=True)
+        (late_skill / "SKILL.md").write_text("must-survive")
+
+    def flaky_merge(**kwargs: object) -> dict[str, object]:
+        nonlocal fail_residue_once
+        source_root = Path(str(kwargs["source_root"]))
+        if (
+            fail_residue_once
+            and source_root.name.startswith("skills-local-residue-")
+        ):
+            fail_residue_once = False
+            raise OSError(5, "injected merge failure")
+        return real_merge(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        layout_activation,
+        "merge_post_cutover_changes",
+        flaky_merge,
+    )
+    first = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        before_post_sync=recreate_legacy_local,
+    )
+
+    assert first.status is PoolActivationStatus.TRANSIENT_ERROR
+    assert (
+        pool_local.parent / ".cutover-baseline-generation-1.json"
+    ).is_file()
+
+    retry = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert retry.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert not legacy_local.exists()
+    assert (
+        pool_local / "created-before-merge-failure" / "SKILL.md"
+    ).read_text() == "must-survive"
+
+
+def test_cutover_retry_continues_after_repeated_legacy_recreation(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    recreate_count = 0
+
+    def recreate_legacy_local() -> None:
+        late_skill = legacy_local / f"created-{recreate_count}"
+        late_skill.mkdir(parents=True)
+        (late_skill / "SKILL.md").write_text("must-survive")
+
+    def retire_and_recreate(source: Path, target: Path) -> None:
+        nonlocal recreate_count
+        os.replace(source, target)
+        if target.name.startswith("skills-local-residue-"):
+            recreate_count += 1
+            recreate_legacy_local()
+
+    first = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        retire_path=retire_and_recreate,
+        before_post_sync=recreate_legacy_local,
+    )
+
+    assert first.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert first.evidence["reason"] == "legacy_local_recreated_during_cutover"
+
+    retry = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert retry.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert not legacy_local.exists()
+    for index in range(4):
+        assert (
+            pool_local / f"created-{index}" / "SKILL.md"
+        ).read_text() == "must-survive"
+
+
+def test_cutover_commits_without_atomic_exchange_and_retires_storage_bridges(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
@@ -917,9 +1232,13 @@ def test_cutover_stays_legacy_when_atomic_exchange_is_unavailable(
         exchange_paths=lambda _left, _right: False,
     )
 
-    assert result.status is PoolActivationStatus.NOT_ATOMIC
-    assert legacy_local.is_dir()
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert not legacy_local.exists()
     assert not legacy_local.is_symlink()
+    assert not (legacy_local.parent / "skills-repo").exists()
+    assert (legacy_local.parent / "handmade").resolve() == (
+        pool_local / "handmade"
+    )
 
 
 def test_atomic_exchange_treats_einval_as_unavailable(
@@ -966,10 +1285,9 @@ def test_cutover_retry_recovers_owned_temporary_symlink(tmp_path: Path) -> None:
         exchange_paths=lambda _left, _right: False,
     )
 
-    assert result.status is PoolActivationStatus.NOT_ATOMIC
-    assert result.evidence["reason"] == "atomic_exchange_unavailable"
+    assert result.status is PoolActivationStatus.COMMITTED
     assert result.evidence["recovered_temporary"] is True
-    assert legacy_local.is_dir()
+    assert not legacy_local.exists()
     assert not legacy_local.is_symlink()
     assert not temporary.exists()
     assert not temporary.is_symlink()
@@ -1072,7 +1390,7 @@ def test_cutover_cleans_stale_staging_and_replaces_pool_symlink(
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
 
 
-def test_cutover_rejects_occupied_temporary_and_ambiguous_exchange(
+def test_cutover_rejects_occupied_legacy_exchange_temporary(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, _pool_local, pool_repo = _prepared_home(tmp_path)
@@ -1089,24 +1407,112 @@ def test_cutover_rejects_occupied_temporary_and_ambiguous_exchange(
     )
     assert occupied.evidence["reason"] == "cutover_temporary_path_occupied"
 
-    temporary.unlink()
-    ambiguous = activate_openclaw_pool(
+
+def test_cutover_rejects_unowned_quarantine_generation(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    generation_dir = (
+        pool_local.parent
+        / ".migration-quarantine"
+        / "generation-1"
+    )
+    generation_dir.mkdir(parents=True)
+    unknown = generation_dir / "unknown"
+    unknown.write_text("external")
+
+    result = activate_openclaw_pool(
         migration_generation="generation-1",
         preparation_id=PREPARATION_ID,
-        registered_local_names=[],
+        registered_local_names=["handmade"],
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=lambda _left, _right: True,
     )
-    assert ambiguous.evidence["reason"] == "cutover_result_ambiguous"
+
+    assert result.status is PoolActivationStatus.INVALID
+    assert result.evidence["reason"] == (
+        "cutover_quarantine_ownership_unproven"
+    )
+    assert legacy_local.is_dir()
+    assert unknown.read_text() == "external"
+    assert not (pool_local.parent / ".pool-active").exists()
+
+
+def test_cutover_recovers_truncated_quarantine_owner(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    generation_dir = (
+        pool_local.parent
+        / ".migration-quarantine"
+        / "generation-1"
+    )
+    generation_dir.mkdir(parents=True)
+    (generation_dir / ".owner.json").write_text("{")
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert not legacy_local.exists()
+    owner = json.loads((generation_dir / ".owner.json").read_text())
+    assert owner["migration_generation"] == "generation-1"
+    assert list(generation_dir.glob(".owner.invalid-*"))
+
+
+def test_cutover_accepts_same_owner_marker_publish_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import layout_activation
+
+    home, legacy_local, _pool_local, pool_repo = _prepared_home(tmp_path)
+    real_link = layout_activation.os.link
+    raced = False
+
+    def race_owner_link(source: Path, target: Path) -> None:
+        nonlocal raced
+        if not raced and Path(target).name == ".owner.json":
+            raced = True
+            Path(target).write_text(
+                json.dumps(
+                    {
+                        "engine": "openclaw",
+                        "migration_generation": "generation-1",
+                        "preparation_id": PREPARATION_ID,
+                    }
+                )
+            )
+            raise FileExistsError
+        real_link(source, target)
+
+    monkeypatch.setattr(layout_activation.os, "link", race_owner_link)
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert raced is True
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert not legacy_local.exists()
 
 
 def test_cutover_reports_transient_filesystem_failure(tmp_path: Path) -> None:
     home, legacy_local, _pool_local, pool_repo = _prepared_home(tmp_path)
     temporary = legacy_local.parent / ".skills-local.pool-cutover-generation-1"
 
-    def fail_exchange(_left: Path, _right: Path) -> bool:
+    def fail_retire(_left: Path, _right: Path) -> None:
         raise OSError(5, "io")
 
     result = activate_openclaw_pool(
@@ -1116,7 +1522,7 @@ def test_cutover_reports_transient_filesystem_failure(tmp_path: Path) -> None:
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=fail_exchange,
+        retire_path=fail_retire,
     )
 
     assert result.status is PoolActivationStatus.TRANSIENT_ERROR
@@ -1132,10 +1538,8 @@ def test_cutover_reports_transient_filesystem_failure(tmp_path: Path) -> None:
         mappings=[],
         home=home,
         repo_is_mounted=lambda path: path == pool_repo,
-        exchange_paths=lambda _left, _right: False,
     )
-    assert retry.status is PoolActivationStatus.NOT_ATOMIC
-    assert retry.evidence["reason"] == "atomic_exchange_unavailable"
+    assert retry.status is PoolActivationStatus.COMMITTED
 
 
 def test_mapping_verifier_reports_each_drift_class(tmp_path: Path) -> None:
