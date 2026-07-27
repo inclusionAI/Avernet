@@ -1,6 +1,7 @@
 """SQL query construction and display-label enrichment for bot-chat reads."""
 
 from enum import Enum
+from hashlib import sha256
 from typing import Any
 
 from sqlalchemy import and_, or_
@@ -128,6 +129,113 @@ def list_group_sessions(
         )
         result.setdefault(session_key, row.session_kind)
     return result
+
+
+def enrich_group_labels(
+    session: Any,
+    rows: list[Any],
+    group_id: str | None = None,
+    group_sessions: dict[str, str | None] | None = None,
+) -> None:
+    """Batch-attach group labels to one page of detached trace rows."""
+    if group_id:
+        labels = {
+            session_key: (group_id, session_kind)
+            for session_key, session_kind in (group_sessions or {}).items()
+        }
+    else:
+        candidate_to_keys: dict[str, set[str]] = {}
+        for row in rows:
+            session_key = getattr(row, "session_key", None)
+            if not session_key:
+                continue
+            candidate_to_keys.setdefault(session_key, set()).add(session_key)
+            if session_key.startswith(_GROUP_SESSION_KEY_PREFIX):
+                fragment = session_key[len(_GROUP_SESSION_KEY_PREFIX):]
+                candidate_to_keys.setdefault(fragment, set()).add(session_key)
+        labels: dict[str, tuple[str, str | None]] = {}
+        if candidate_to_keys:
+            try:
+                relations = (
+                    session.query(BcsGroupSession)
+                    .filter(
+                        BcsGroupSession.env == get_current_env(),
+                        BcsGroupSession.session_id.in_(list(candidate_to_keys)),
+                    )
+                    .order_by(
+                        BcsGroupSession.gmt_create.desc(),
+                        BcsGroupSession.id.desc(),
+                    )
+                    .all()
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Group label enrichment failed; returning null labels: "
+                    "error_type=%s",
+                    type(exc).__name__,
+                )
+                return
+            for relation in relations:
+                for session_key in candidate_to_keys.get(relation.session_id, ()):
+                    labels.setdefault(
+                        session_key,
+                        (relation.group_id, relation.session_kind),
+                    )
+    for row in rows:
+        label = labels.get(getattr(row, "session_key", None))
+        if label:
+            row.group_id, row.session_kind = label
+
+
+def enrich_task_labels(session: Any, rows: list[Any]) -> None:
+    """Batch-fill missing task labels using indexed runtime-ID relations."""
+    candidate_rows: dict[tuple[str, str], list[Any]] = {}
+    digests_by_type: dict[str, set[str]] = {}
+    for row in rows:
+        for ref_type, attribute in (
+            ("trace_id", "trace_id"),
+            ("session_id", "session_id"),
+            ("session_key", "session_key"),
+        ):
+            ref_value = getattr(row, attribute, None)
+            if not ref_value:
+                continue
+            candidate_rows.setdefault((ref_type, ref_value), []).append(row)
+            digest = f"sha256:{sha256(ref_value.encode('utf-8')).hexdigest()}"
+            digests_by_type.setdefault(ref_type, set()).add(digest)
+
+    if not candidate_rows:
+        return
+    conditions = [
+        and_(
+            AcOtelLogBizRef.ref_type == ref_type,
+            AcOtelLogBizRef.ref_digest.in_(digests),
+        )
+        for ref_type, digests in digests_by_type.items()
+    ]
+    relations = (
+        session.query(AcOtelLogBizRef)
+        .filter(or_(*conditions))
+        .order_by(
+            AcOtelLogBizRef.gmt_modified.desc(),
+            AcOtelLogBizRef.gmt_create.desc(),
+            AcOtelLogBizRef.id.desc(),
+        )
+        .all()
+    )
+    enriched_rows: set[int] = set()
+    for relation in relations:
+        for row in candidate_rows.get(
+            (relation.ref_type, relation.ref_value), ()
+        ):
+            row_identity = id(row)
+            if row_identity in enriched_rows:
+                continue
+            if not getattr(row, "biz_scene", None):
+                row.biz_scene = relation.biz_scene
+            if not getattr(row, "biz_task_id", None):
+                row.biz_task_id = relation.biz_task_id
+            enriched_rows.add(row_identity)
 
 
 def load_bot_names(session: Any, bot_ids: set[str]) -> dict[str, str]:

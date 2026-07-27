@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -9,12 +10,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_chat.models import (
+    AcOtelLogBizRef,
     AcOtelLogTrace,
     AwLangfuseTrace,
     BcsGroupSession,
 )
 from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
-from agentclaw.community.core.bot_chat.query_support import QueryScope
+from agentclaw.community.core.bot_chat.query_support import (
+    QueryScope,
+    enrich_group_labels,
+    enrich_task_labels,
+)
 from agentclaw.community.core.bot_chat.service import (
     BotChatService,
     _apply_client_side_filters,
@@ -371,6 +377,140 @@ def test_group_query_supports_multiple_sessions_and_existing_agent_prefix():
     assert {row.session_kind for row in rows} == {"chat", "service_invocation"}
 
 
+def test_regular_list_batch_enriches_group_labels_for_100_traces():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    with db.orm_session() as session:
+        for index in range(100):
+            fragment = f"group_fixture:session_{index}"
+            session.add(
+                BcsGroupSession(
+                    session_id=fragment,
+                    group_id=f"group_{index}",
+                    env=get_current_env(),
+                    session_kind="chat",
+                )
+            )
+    for index in range(100):
+        _write_trace(
+            repo,
+            trace_id=f"trace_{index}",
+            session_id=f"session_{index}",
+            session_key=f"agent:main:group_fixture:session_{index}",
+        )
+
+    rows, total = repo.list_ocb_traces(
+        owner_id="user_fixture",
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=100,
+    )
+
+    assert total == 100
+    assert len(rows) == 100
+    assert {row.group_id for row in rows} == {
+        f"group_{index}" for index in range(100)
+    }
+    assert all(row.session_kind == "chat" for row in rows)
+
+
+def test_group_label_enrichment_failure_keeps_regular_list_compatible():
+    session = MagicMock()
+    session.query.side_effect = RuntimeError("synthetic table unavailable")
+    row = SimpleNamespace(
+        session_key="agent:main:session_fixture",
+        group_id=None,
+        session_kind=None,
+    )
+
+    enrich_group_labels(session, [row])
+
+    assert row.group_id is None
+    assert row.session_kind is None
+
+
+def test_task_label_enrichment_batches_100_traces_and_uses_latest_relation():
+    db = _LocalDb()
+    rows = []
+    with db.orm_session() as session:
+        for index in range(100):
+            session_key = f"agent:main:session_{index}:user_fixture"
+            rows.append(
+                SimpleNamespace(
+                    trace_id=f"trace_{index}",
+                    session_id=f"session_{index}",
+                    session_key=session_key,
+                    biz_scene=None,
+                    biz_task_id=None,
+                )
+            )
+            digest = BotChatDbRepository._ref_digest(None, session_key)
+            session.add(
+                AcOtelLogBizRef(
+                    biz_scene=f"scene_{index}",
+                    biz_task_id=f"task_{index}",
+                    ref_type="session_key",
+                    ref_value=session_key,
+                    ref_digest=digest,
+                )
+            )
+        session.add(
+            AcOtelLogBizRef(
+                biz_scene="newest_scene",
+                biz_task_id="newest_task",
+                ref_type="trace_id",
+                ref_value="trace_0",
+                ref_digest=BotChatDbRepository._ref_digest(None, "trace_0"),
+                gmt_modified=datetime.now(timezone.utc) + timedelta(seconds=1),
+            )
+        )
+
+    with db.orm_session() as session:
+        enrich_task_labels(session, rows)
+
+    assert rows[0].biz_scene == "newest_scene"
+    assert rows[0].biz_task_id == "newest_task"
+    assert {
+        (row.biz_scene, row.biz_task_id) for row in rows[1:]
+    } == {
+        (f"scene_{index}", f"task_{index}") for index in range(1, 100)
+    }
+
+
+def test_task_label_enrichment_preserves_direct_trace_values():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    session_key = "agent:main:session_fixture:user_fixture"
+    _write_trace(
+        repo,
+        trace_id="trace_fixture",
+        session_id="session_fixture",
+        session_key=session_key,
+        biz_scene="direct_scene",
+        biz_task_id="direct_task",
+    )
+    repo.upsert_biz_refs(
+        {
+            "biz_scene": "relation_scene",
+            "biz_task_id": "relation_task",
+            "refs": [{"ref_type": "session_key", "ref_value": session_key}],
+        }
+    )
+
+    rows, total = repo.list_ocb_traces(
+        owner_id="user_fixture",
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+    )
+
+    assert total == 1
+    assert rows[0].biz_scene == "direct_scene"
+    assert rows[0].biz_task_id == "direct_task"
+
+
 def test_group_query_supports_legacy_trace_storage():
     db = _LocalDb()
     repo = BotChatDbRepository(db)
@@ -410,6 +550,19 @@ def test_group_query_supports_legacy_trace_storage():
     assert total == 1
     assert rows[0].id == "trace_legacy_fixture"
     assert rows[0].group_id == "group_fixture"
+
+    regular_rows, regular_total = repo.list_traces(
+        owner_id=None,
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+        query_scope=QueryScope.OPEN,
+    )
+
+    assert regular_total == 1
+    assert regular_rows[0].group_id == "group_fixture"
+    assert regular_rows[0].session_kind == "chat"
 
 
 def test_bot_id_falls_back_to_metadata_and_missing_bot_name_stays_null():

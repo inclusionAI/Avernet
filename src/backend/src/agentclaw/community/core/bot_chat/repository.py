@@ -19,6 +19,8 @@ from agentclaw.community.core.bot_chat.models import (
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.bot_chat.query_support import (
     QueryScope,
+    enrich_group_labels,
+    enrich_task_labels,
     enrich_trace_labels,
     list_group_sessions,
     load_bot_names,
@@ -580,14 +582,13 @@ class BotChatDbRepository:
             )
 
             detached = [self._detach_trace_row(row) for row in rows]
+            enrich_group_labels(session, detached, group_id, group_sessions)
+            enrich_task_labels(session, detached)
             bot_names = load_bot_names(
                 session, {row.bot_id for row in detached if row.bot_id}
             )
             for row in detached:
                 row.bot_name = bot_names.get(row.bot_id)
-                if group_id:
-                    row.group_id = group_id
-                    row.session_kind = group_sessions.get(row.session_key)
                 if biz_scene or biz_task_id:
                     row.match_sources = ["biz_ref"]
             sessions = [self._row_to_session(row) for row in detached]
@@ -678,6 +679,7 @@ class BotChatDbRepository:
                 self._detach_ocb_trace_row(row)
                 for row in rows
             ]
+            enrich_group_labels(session, detached, group_id, group_sessions)
             bot_names = load_bot_names(
                 session,
                 {row.bot_id for row in detached if row.bot_id},
@@ -687,9 +689,6 @@ class BotChatDbRepository:
             ref_session_keys = task_refs.get("session_key", set())
             for row in detached:
                 row.bot_name = bot_names.get(row.bot_id)
-                if group_id:
-                    row.group_id = group_id
-                    row.session_kind = group_sessions.get(row.session_key)
                 sources = []
                 direct_scene = not biz_scene or (
                     biz_scene in (row.biz_scene or "")
@@ -710,6 +709,7 @@ class BotChatDbRepository:
                 ):
                     sources.append("biz_ref")
                 row.match_sources = sources
+            enrich_task_labels(session, detached)
             sessions = [
                 self._row_to_session(row)
                 for row in detached
