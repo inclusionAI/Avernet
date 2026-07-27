@@ -77,6 +77,7 @@ class SkillService:
         global_repo_dir: Path | None = None,
         local_skill_path_adapter: "Callable[[str], str] | None" = None,
         local_skill_locator_adapter: "Callable[[str], str] | None" = None,
+        runtime_uses_pool_paths: bool = False,
     ):
         """
         Args:
@@ -126,6 +127,11 @@ class SkillService:
         self._local_skill_locator_adapter: "Callable[[str], str]" = (
             local_skill_locator_adapter or (lambda p: p)
         )
+        # Public request-scope policy consumed by the HTTP adapter. Legacy
+        # runtimes historically tolerate an unavailable device-sync endpoint;
+        # once Pool owns I/O, reporting CRUD success without committing the
+        # runtime mapping would leave DB/filesystem/runtime inconsistent.
+        self.runtime_uses_pool_paths = runtime_uses_pool_paths
 
         # Lazy GitSyncService lookup — eager injection would close the cycle
         # GitSyncService → SkillServiceFactory → SkillService → GitSyncService.
@@ -513,10 +519,10 @@ class SkillService:
             bolt_id: Bolt ID（用于 device_fs 路由）
 
         Note:
-            不再检查源路径是否存在，因为：
-            1. 管理时 repo_dir 可能是空目录或不存在（软链接未创建）
-            2. 运行时 skills-repo 被 mount，软链接才能解析
-            3. 软链接指向相对路径 skills-repo/... 或 skills-local/...
+            Pool-owned local skill 必须先通过 DeviceFileSystem 验证源路径
+            存在，避免向运行时发布 dangling mapping。Legacy 保留历史
+            best-effort 行为；git skill 继续由运行时 repo mount 解析，不在
+            Backend 管理视图预检源路径。
         """
         logger.info(f"[SkillService.activate_skill] Start: skill_path={skill_path}")
 
@@ -527,7 +533,7 @@ class SkillService:
             return False
 
         device_fs = self._device_fs_factory(bolt_id, user_id)
-        if protocol == "local":
+        if protocol == "local" and self.runtime_uses_pool_paths:
             source = Path(self._local_skill_path_adapter(str(source)))
             try:
                 source_exists = await device_fs.exists(str(source))

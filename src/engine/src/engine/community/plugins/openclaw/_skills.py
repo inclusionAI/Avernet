@@ -444,6 +444,19 @@ class _SkillsPortMixin:
         removed: list[str] = []
         to_recreate: set[Path] = set()
 
+        # Validate the complete desired set before mutating any target. This
+        # boundary is shared by direct CRUD sync and restart reconciliation;
+        # rejecting here prevents both paths from creating dangling active
+        # links. The source can disappear after this check, but that unavoidable
+        # filesystem race is narrower than committing a known-missing source.
+        missing_sources = sorted(
+            {str(source) for source in desired.values() if not source.exists()}
+        )
+        if missing_sources:
+            raise RuntimeError(
+                "bindpath source does not exist: " + ", ".join(missing_sources)
+            )
+
         for target, source in desired.items():
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.is_symlink():
