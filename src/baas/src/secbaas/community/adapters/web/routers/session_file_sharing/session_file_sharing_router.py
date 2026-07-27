@@ -162,7 +162,7 @@ async def complete_upload(
         )
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error_code": "INVALID_TRANSITION", "message": str(e)},
         )
     except NotImplementedError as e:
@@ -229,7 +229,7 @@ async def cancel_upload(
         )
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error_code": "INVALID_TRANSITION", "message": str(e)},
         )
     except NotImplementedError as e:
@@ -315,7 +315,7 @@ async def generate_share_link(
         )
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error_code": "INVALID_TRANSITION", "message": str(e)},
         )
     except NotImplementedError as e:

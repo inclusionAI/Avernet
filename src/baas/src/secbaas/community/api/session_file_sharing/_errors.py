@@ -12,6 +12,12 @@ semantics (not-found, state-conflict, etc.) hold for Session transfers.
 from __future__ import annotations
 
 from secbaas.community.api import DomainError
+from secbaas.community.api.bot_runtime import (
+    StagingObjectNotFoundError,
+    TransferNotFoundError,
+    TransferNotTerminalError,
+    TransferStateConflictError,
+)
 
 
 class SessionFileSharingError(DomainError):
@@ -59,10 +65,3 @@ class SourceTransferNotReadyError(SessionFileSharingError):
         )
 
 
-# ---------------------------------------------------------------------------
-from secbaas.community.api.bot_runtime import (  # noqa: E402, F401
-    StagingObjectNotFoundError,
-    TransferNotFoundError,
-    TransferNotTerminalError,
-    TransferStateConflictError,
-)
