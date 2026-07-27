@@ -1,5 +1,8 @@
 
+import subprocess
 from unittest.mock import MagicMock
+
+import pytest
 
 from agentclaw.community.core.service_bot.services import bot_build_service as module
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
@@ -45,6 +48,7 @@ def test_restore_draft_arca_rsyncs_versioned_artifact_into_draft_nas(monkeypatch
     nas_root.mkdir()
     monkeypatch.setattr(module, "get_bot_dir", lambda *args, **kwargs: bot_root)
     monkeypatch.setattr(module, "get_bot_nas_dir", lambda *args, **kwargs: nas_root)
+    monkeypatch.setattr(module.time, "monotonic", lambda: 100.0)
 
     result = svc.restore_draft(
         bot={
@@ -63,3 +67,25 @@ def test_restore_draft_arca_rsyncs_versioned_artifact_into_draft_nas(monkeypatch
     assert rsync_call[:4] == ["sudo", "rsync", "-av", "--delete"]
     assert "--exclude=agents/*/sessions" in rsync_call
     assert rsync_call[-2:] == [f"{artifact_dir}/", f"{nas_root / '.openclaw'}/"]
+    for command_call in svc._run_local_command.call_args_list:
+        assert command_call.kwargs["timeout_seconds"] == 1800
+
+
+def test_run_local_command_reports_timeout(monkeypatch):
+    svc = object.__new__(BotBuildService)
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        MagicMock(side_effect=subprocess.TimeoutExpired(cmd="rsync", timeout=1800)),
+    )
+
+    with pytest.raises(
+        module.BotBuildMigrationError,
+        match="restore draft workspace failed: command timed out after 1800 seconds",
+    ):
+        svc._run_local_command(
+            cmd=["rsync"],
+            command_name="rsync draft restore",
+            error_message="restore draft workspace failed",
+            timeout_seconds=1800,
+        )
