@@ -45,6 +45,9 @@ from secbaas.community.core.service.bot_runtime.dispatcher import (
     DefaultBotOpenFolderDispatcher,
     DefaultBotWssDispatcher,
 )
+from secbaas.community.core.service.session_file_sharing import (
+    DefaultSessionFileSharingDispatcher,
+)
 from secbaas.community.core.service.bot_session import DefaultSessionService
 from secbaas.community.core.service.callback import HttpCallback
 from secbaas.community.core.service.config_manage import (
@@ -195,6 +198,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     cache_plugin = providers.Dependency()
     ws_relay_session_repo = providers.Dependency()
     ticket_repository = providers.Dependency()
+    session_ticket_repository = providers.Dependency()
 
     # ── Auth service ──────────────────────────────────────────────────────────
 
@@ -366,6 +370,12 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         paas_facade=paas_facade,
         file_transfer_backend=file_transfer_backend,
         ticket_repo=ticket_repository,
+    )
+
+    session_file_sharing_dispatcher = providers.Singleton(
+        DefaultSessionFileSharingDispatcher,
+        file_transfer_backend=file_transfer_backend,
+        ticket_repo=session_ticket_repository,
     )
 
     bot_binding_resolver = providers.Singleton(
