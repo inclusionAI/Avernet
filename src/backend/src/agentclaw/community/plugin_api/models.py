@@ -6,7 +6,8 @@ in the full OpenClaw server layer.
 """
 import json
 
-from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, SmallInteger, String, Text, UniqueConstraint, event
+from sqlalchemy.orm import Session, with_loader_criteria
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base  # noqa: F401  — canonical registry lives in core/
@@ -14,6 +15,7 @@ from agentclaw.community.core.workspace.constants import (  # noqa: E402,F401
     DEFAULT_ENGINE_TYPE,
     SUPPORTED_ENGINE_TYPES,
 )
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant  # noqa: E402
 from agentclaw.community.utils.env_utils import get_current_env  # noqa: E402
 
 
@@ -56,6 +58,13 @@ class BotModel(Base):
     template_type = Column(String(64), nullable=True)  # 模板类型，如 applicationCoding
     call_type = Column(String(16), default="owner", nullable=False)
     caller_config_revision = Column(BigInteger, default=0, nullable=False)
+    # Data-isolation tenant (see utils/avernet_tenant + the BotModel guards
+    # below). server_default (not a Python default=) so create_all emits the
+    # same DEFAULT 'teamclaw' prod's out-of-band DDL applies, backfilling
+    # existing rows and covering any non-ORM insert; the context-aware value on
+    # ORM inserts comes from the before_insert guard. Deliberately absent from
+    # to_dict() so no current API response body changes.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -87,6 +96,94 @@ class BotModel(Base):
             "call_type": self.call_type,
             "caller_config_revision": self.caller_config_revision,
         }
+
+
+# ── Avernet tenant guards (welded to BotModel) ──────────────────────
+#
+# Two active halves of one isolation guarantee, both keyed on the request's
+# current tenant (utils/avernet_tenant) and both impossible to forget because
+# neither lives at a call site:
+#
+#   * read guard  — a do_orm_execute listener that appends a tenant WHERE
+#     clause to every SELECT/UPDATE/DELETE touching BotModel (the spike in
+#     specs/.../tasks.md Task 1 confirmed with_loader_criteria constrains the
+#     Query.update()/delete() shape bot_repository uses, so writes need no
+#     per-method filter);
+#   * insert guard — a before_insert listener that stamps the tenant on every
+#     new row (an INSERT has no WHERE, so the read guard cannot reach it) and
+#     refuses a row that explicitly names a different tenant.
+#
+# Registered on the Session class / the mapped class, so they apply in every
+# runtime (local SQLite, prod OceanBase, the out-of-tree corp DatabasePlugin).
+
+
+class CrossTenantInsertError(RuntimeError):
+    """A ``BotModel`` insert named a tenant other than the request's current one."""
+
+
+def _avernet_tenant_read_guard(orm_execute_state) -> None:
+    """Confine every ``BotModel`` SELECT/UPDATE/DELETE to the current tenant.
+
+    Column and relationship loads are skipped: they only reload an object that a
+    prior (already tenant-filtered) SELECT put in the session, so they carry no
+    new exposure. This holds because nothing maps a ``relationship()`` to
+    ``BotModel``; if one is ever added, a lazy load would emit an unfiltered
+    ``ac_bots`` SELECT — revisit this skip then. An explicit
+    ``skip_avernet_tenant_guard`` execution option opts a statement out (the
+    guard's own tests seeding/inspecting across tenants).
+    """
+    if orm_execute_state.is_column_load or orm_execute_state.is_relationship_load:
+        return
+    if not (
+        orm_execute_state.is_select
+        or orm_execute_state.is_update
+        or orm_execute_state.is_delete
+    ):
+        return
+    if orm_execute_state.execution_options.get("skip_avernet_tenant_guard"):
+        return
+    orm_execute_state.statement = orm_execute_state.statement.options(
+        with_loader_criteria(
+            BotModel,
+            BotModel.avernet_tenant == get_current_avernet_tenant(),
+            include_aliases=True,
+        )
+    )
+
+
+def _avernet_tenant_insert_guard(_mapper, _connection, target: "BotModel") -> None:
+    """Stamp the current tenant on a new ``BotModel``; reject a conflicting one.
+
+    ``before_insert`` covers ORM unit-of-work inserts (``session.add`` + flush),
+    which is the only insert path today (``bot_repository.insert``). Core/bulk
+    inserts (``session.execute(insert(BotModel))``, ``bulk_insert_mappings``)
+    bypass this event and would fall to ``server_default="teamclaw"``; none
+    exist now — add an equivalent stamp if one is ever introduced.
+    """
+    current = get_current_avernet_tenant()
+    if target.avernet_tenant is None:
+        target.avernet_tenant = current
+    elif target.avernet_tenant != current:
+        raise CrossTenantInsertError(
+            f"bot insert names tenant {target.avernet_tenant!r} but the request "
+            f"tenant is {current!r}"
+        )
+
+
+_AVERNET_TENANT_GUARDS_INSTALLED = False
+
+
+def _install_avernet_tenant_guards() -> None:
+    """Register both guards once. Idempotent so a re-import cannot double-register."""
+    global _AVERNET_TENANT_GUARDS_INSTALLED
+    if _AVERNET_TENANT_GUARDS_INSTALLED:
+        return
+    event.listen(Session, "do_orm_execute", _avernet_tenant_read_guard)
+    event.listen(BotModel, "before_insert", _avernet_tenant_insert_guard)
+    _AVERNET_TENANT_GUARDS_INSTALLED = True
+
+
+_install_avernet_tenant_guards()
 
 
 class ResourceModel(Base):

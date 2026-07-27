@@ -19,6 +19,7 @@ internal_dependencies:
   - agentclaw.community.core.service_bot.types                  # PublishStage enum, default value in BaasServiceProtocol signatures
   - agentclaw.community.core.workspace
   - agentclaw.community.kernel.device_dto                       # OutBoundOperationRule — typed in OutboundRuleProvider + BaasServiceProtocol (B6)
+  - agentclaw.community.utils.avernet_tenant                    # BotModel tenant guards read the request's current tenant
   - agentclaw.community.utils.env_utils
 ```
 

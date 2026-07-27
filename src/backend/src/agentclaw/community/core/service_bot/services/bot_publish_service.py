@@ -10,6 +10,7 @@ from agentclaw.community.core.devices.repository.protocol import DeviceBindingRe
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
@@ -1160,7 +1161,9 @@ class BotPublishService(PublishRollbackMixin):
                 except Exception as e:
                     logger.warning(f"[upgrade_bot_to_service] Failed to restart bot: bot_id={bot_id}, owner_id={owner_id}, error={e}")
 
-            threading.Thread(target=_do_restart, daemon=True).start()
+            threading.Thread(
+                target=bind_current_avernet_tenant(_do_restart), daemon=True
+            ).start()
 
         # 8. 检查是否已有发布记录，有则不创建
         existing = self._repo.get_by_publish_bot_id(bot_id, owner_id, self._env)

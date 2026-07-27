@@ -27,6 +27,7 @@ internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.plugin_api.cache
   - agentclaw.community.plugin_api.passport
+  - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
 ```
 

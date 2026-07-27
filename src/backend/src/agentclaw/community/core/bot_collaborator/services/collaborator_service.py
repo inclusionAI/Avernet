@@ -13,6 +13,7 @@ from agentclaw.community.core.bot_collaborator.models import (
 )
 from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
@@ -50,7 +51,9 @@ def _run_coro_blocking(coro: Any) -> Any:
         except BaseException as e:  # noqa: BLE001 - 透传给调用线程统一处理
             box["error"] = e
 
-    thread = threading.Thread(target=_runner, daemon=True)
+    thread = threading.Thread(
+        target=bind_current_avernet_tenant(_runner), daemon=True
+    )
     thread.start()
     thread.join()
 
