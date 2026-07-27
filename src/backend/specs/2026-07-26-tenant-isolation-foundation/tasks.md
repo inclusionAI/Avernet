@@ -223,15 +223,34 @@
     device-allocation `ThreadPoolExecutor` (bind the submitted callable).
   - `desktop_bot/services/desktop_bot_service.py` `_poll_publish_progress`
     (calls `_bot_repo.get_by_id_and_owner` / `update_by_owner`).
-- **Deferred** (out of Stage-1 scope — touch non-bot tables, not `ac_bots`):
-  `bot_public_service.py` auth-relationship rebuild executors;
-  `device_service.py` MCP-sync / service-start threads. Revisit when those data
-  categories get their own guards (later stages).
+- **CORRECTION (post-merge review, FreddieSun on PR #456):** the "deferred —
+  non-bot tables" classification below was **wrong**. Re-traced, these sites DO
+  read/write `BotModel` on bare `Thread`/`ThreadPoolExecutor`, so they were fixed
+  in the follow-up PR (F3):
+  - `bot_public_service.py:176` `_do_sync` → `get_by_id_and_owner`; `:1119`
+    `ThreadPoolExecutor` → `get_by_id_and_owner`.
+  - `device_service.py:729` `start_service_async` → `_mark_service_start_failed`
+    → `_bot_query.get_by_binding_id`; `:1545` `report_device_alive` `_run` →
+    `_bot_query.get_by_binding_id`.
+  - `baas_publish_poller.py:55` `_poll` → updates `BotModel` on publish completion.
 - **Recommended (not done):** an arch guard that flags new raw
   `threading.Thread` / `ThreadPoolExecutor` in core so future in-request spawns
   can't silently drop the tenant. Tracked for follow-up.
 - **Verification:** 1005 tests pass across bot_dormant / desktop_bot /
-  bot_management.
+  bot_management (original 3 sites); the 5 corrected sites are covered in F3.
+
+### F3: Fix post-merge review findings (raw SQL + thread mis-classification)  `[x]`
+- **Trigger:** two P1 review comments on merged PR #456 (FreddieSun).
+- **Raw SQL bypass:** `bot_discover_service._batch_get_public_bots` read `ac_bots`
+  via a raw `cursor.execute` — never triggers `do_orm_execute`, so unguarded.
+  Migrated to `BotRepository.list_public_bots_by_owner_bot_pairs` (ORM →
+  guard-covered). Regression test proves it is tenant-scoped.
+- **Threads:** wrapped the 5 mis-classified sites above with
+  `bind_current_avernet_tenant`. Regression test proves a repo read inside a
+  bound thread stays tenant-scoped (and a bare thread drops to the default).
+- **Both are latent** (single-tenant-safe today); they bite once a 2nd tenant /
+  the real resolver exists. Delivered as a new PR off `dev` (the merged PR can't
+  be reopened).
 
 ### F2: Tenant-leading indexes — MANDATORY policy, deferred  `[ ]`
 - Tenant-leading indexes on a tenant-columned table are a **mandatory corp

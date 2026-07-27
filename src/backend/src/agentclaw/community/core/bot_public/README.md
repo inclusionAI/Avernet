@@ -29,6 +29,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.device_sync
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.passport
+  - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
 ```
 
