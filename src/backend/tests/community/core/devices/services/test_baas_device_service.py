@@ -270,6 +270,7 @@ class TestUpdateDeviceHeaders:
 class TestGetDeviceConnection:
     def _ws_info(self):
         info = MagicMock()
+        info.ws_url = "wss://proxy.example/wsrelay/session-1"
         info.target = "BAAS_DEVICE@template:20003"
         info.token = "token-1"
         info.baas_base_url = "http://baas.local"
@@ -302,6 +303,32 @@ class TestGetDeviceConnection:
         assert result.token == "token-1"
         assert result.engine_type == "claude_code"
         assert result.bot_uuid == "BOT-1"
+        assert result.url == ""
+
+    def test_relay_mode_returns_baas_ws_url_in_compatible_url_field(self):
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "desktop-1",
+            "bot_type": "desktop",
+            "active_engine": "openclaw",
+        }
+        svc = _make_service(baas_service=baas, bot_query=bot_query)
+
+        result = svc.get_device_connection(
+            binding_id=8,
+            operator=_operator("u001"),
+            ws_conn_mode="relay",
+        )
+
+        baas.get_ws_info.assert_called_once_with(
+            bind_id=8,
+            device_affinity="u001",
+            device_uuid=None,
+            ws_conn_mode="relay",
+        )
+        assert result.url == "wss://proxy.example/wsrelay/session-1"
 
     def test_desktop_bot_returns_desktop_connection_type(self):
         baas = MagicMock()
