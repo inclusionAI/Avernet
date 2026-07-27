@@ -1,9 +1,10 @@
-"""Route → auth-requirement table (auth design §8).
+"""Route → required-identity-types table (spec §8, rev 3).
 
-Loads the ``route_security`` table (a ``"[METHOD ]<path-glob>" -> OR-list``
-mapping) and resolves an incoming ``(method, path)`` to the **most specific**
-matching rule's requirement. Fail-closed: an unmatched route resolves to
-``None`` and the caller must deny.
+Loads the ``route_security`` table (a ``"[METHOD ]<path-glob>" -> list of type
+strings`` mapping) and resolves an incoming ``(method, path)`` to the **most
+specific** matching rule's ``frozenset[PrincipalType]`` requirement. Fail-closed:
+an unmatched route resolves to ``None`` and the caller must deny. Unknown type
+strings are rejected at parse time.
 """
 
 from __future__ import annotations
@@ -14,17 +15,17 @@ from typing import Any
 
 import yaml
 
-from gateway.community.spi.authn import Delegation, StrategyParams
+from gateway.community.spi.authn import PrincipalType
 
-# A requirement is an OR-list of alternatives; each alternative is an AND-map of
-# strategy name -> params (one strategy per alternative in practice today).
-Requirement = list[dict[str, StrategyParams]]
+# A requirement is the set of identity types a route demands; the runner must
+# produce one Principal of each.
+Requirement = frozenset[PrincipalType]
 
 
 @dataclass(frozen=True)
 class _Rule:
     method: str | None  # None = applies to every method
-    segments: tuple[str, ...]  # path split on "/", e.g. ("openapi", "v1", "bots", "**")
+    segments: tuple[str, ...]
     requirement: Requirement
 
 
@@ -72,26 +73,24 @@ def _segments(path: str) -> tuple[str, ...]:
 
 
 def _parse_req(value: Any) -> Requirement:
-    requirement: Requirement = []
+    types: set[PrincipalType] = set()
     for item in value or []:
-        if isinstance(item, str):
-            requirement.append({item: StrategyParams()})
-        elif isinstance(item, dict):
-            requirement.append(
-                {name: _parse_params(params) for name, params in item.items()}
+        if not isinstance(item, str):
+            raise ValueError(
+                f"route requirement must be a list of type strings, got {item!r}"
             )
-    return requirement
+        types.add(_parse_type(item))
+    return frozenset(types)
 
 
-def _parse_params(params: Any) -> StrategyParams:
-    params = params or {}
-    return StrategyParams(
-        scopes=frozenset(params.get("scopes", [])),
-        delegation=Delegation(params.get("delegation", Delegation.OPTIONAL.value)),
-    )
+def _parse_type(name: str) -> PrincipalType:
+    try:
+        return PrincipalType(name)
+    except ValueError as ex:
+        raise ValueError(f"unknown identity type in route_security: {name!r}") from ex
 
 
-# ── matching (§8.3) ──────────────────────────────────────────────────────────
+# ── matching (spec §8.3) ─────────────────────────────────────────────────────
 
 
 def _is_param(seg: str) -> bool:
@@ -108,7 +107,7 @@ def _match_segments(pattern: tuple[str, ...], segs: tuple[str, ...]) -> bool:
     if not pattern:
         return not segs
     head, rest = pattern[0], pattern[1:]
-    if head == "**":  # matches any remaining segments, including none
+    if head == "**":
         return True
     if not segs:
         return False

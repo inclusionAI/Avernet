@@ -1,20 +1,16 @@
-# Route → auth-strategy table for the gateway (auth design §8).
+# Route → required identity types (spec rev 3 §8).
 #
-# Keys are "[METHOD ]<path-glob>" (method optional; omit it to cover all
-# methods). More specific rules override more general ones; "/**" is the
-# top-level default. Each value is an OR-list of alternatives; an alternative is
-# a strategy name (default params) or `{ strategy: { scopes: [...],
-# delegation: optional|forbidden } }`.
+# Keys are "[METHOD ]<path-glob>" (method optional). More specific rules
+# override more general ones; "/**" is the top-level default. Each value is a
+# list of identity-type strings (e.g. [user], [bot, user]). The gateway must
+# produce one Principal of each listed type or reject (401).
 #
-# The authoritative per-operation source is each route's `x-avernet-security`
-# marker; this file is the aggregated table the gateway resolves at request time
-# (v1 authors it by hand until the publish/register compiler lands).
+# Which *plugin chain* produces each type is declared in configs/authn.yaml
+# (orthogonal to this table). Routes declare types, not strategy names.
 
 route_security:
   # Top-level default: every route requires an authenticated user.
-  "/**":
-    - first_party_user
+  "/**": [user]
 
   # Sample group — the bots endpoints (explicit, more-specific rule).
-  "/openapi/v1/bots/**":
-    - first_party_user: {}
+  "/openapi/v1/bots/**": [user]

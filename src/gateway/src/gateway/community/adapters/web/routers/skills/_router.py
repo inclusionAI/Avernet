@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from gateway.community.adapters.web import require_principal
+from gateway.community.adapters.web import require_identities
 from gateway.community.adapters.web.contracts import (
     Deleted,
     Envelope,
@@ -19,19 +19,19 @@ from gateway.community.adapters.web.contracts import (
     PageParamsDep,
     requires_user_principal,
 )
-from gateway.community.spi.authn import Principal
+from gateway.community.spi.authn import Identities
 
 from ._schemas import BotSkill, Skill, SkillDetail, SkillInstall
 
 router = APIRouter(prefix="/openapi/v1", tags=["skills"])
 
 _SEC = requires_user_principal()
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
+IdentitiesDep = Annotated[Identities, Depends(require_identities)]
 
 
 @router.get("/skills", response_model=Envelope[Page[Skill]], openapi_extra=_SEC)
 async def list_skills(
-    page: PageParamsDep, principal: PrincipalDep, keyword: str | None = None
+    page: PageParamsDep, identities: IdentitiesDep, keyword: str | None = None
 ) -> Envelope[Page[Skill]]:
     """List the skill catalog (filter + paginate)."""
     raise NotImplementedError
@@ -40,7 +40,7 @@ async def list_skills(
 @router.get(
     "/skills/{skill_id}", response_model=Envelope[SkillDetail], openapi_extra=_SEC
 )
-async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[SkillDetail]:
+async def get_skill(skill_id: str, identities: IdentitiesDep) -> Envelope[SkillDetail]:
     """Get a skill's detail."""
     raise NotImplementedError
 
@@ -51,7 +51,7 @@ async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[SkillDet
     openapi_extra=_SEC,
 )
 async def list_bot_skills(
-    bot_id: str, principal: PrincipalDep
+    bot_id: str, identities: IdentitiesDep
 ) -> Envelope[list[BotSkill]]:
     """List the skills installed on a bot."""
     raise NotImplementedError
@@ -64,7 +64,7 @@ async def list_bot_skills(
     openapi_extra=_SEC,
 )
 async def install_bot_skill(
-    bot_id: str, body: SkillInstall, principal: PrincipalDep
+    bot_id: str, body: SkillInstall, identities: IdentitiesDep
 ) -> Envelope[BotSkill]:
     """Install a skill on a bot."""
     raise NotImplementedError
@@ -76,7 +76,7 @@ async def install_bot_skill(
     openapi_extra=_SEC,
 )
 async def remove_bot_skill(
-    bot_id: str, skill_id: str, principal: PrincipalDep
+    bot_id: str, skill_id: str, identities: IdentitiesDep
 ) -> Envelope[Deleted]:
     """Remove a skill from a bot."""
     raise NotImplementedError

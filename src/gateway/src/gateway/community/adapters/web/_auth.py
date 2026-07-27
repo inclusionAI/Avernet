@@ -1,13 +1,11 @@
 """Delivery-layer auth dependency.
 
-``require_principal`` snapshots the FastAPI request into a framework-agnostic
+``require_identities`` snapshots the FastAPI request into a framework-agnostic
 ``CredentialBundle`` and delegates to the ``Authenticator`` built by the
 composition root (stored on ``app.state``), mapping auth failure to HTTP 401.
-The adapter imports only ``spi`` — the runner, route table, and strategies live
-behind the ``Authenticator`` it receives.
-
-NOTE: auth failures use FastAPI's default error body; wrapping them in the
-standard response envelope is a follow-up (a global exception handler).
+The adapter imports only the SPI — the runner, route table, and strategies live
+behind the ``Authenticator`` it receives. It has no awareness of ``source``;
+that header is just an ordinary entry in the credential bundle a plugin reads.
 """
 
 from __future__ import annotations
@@ -15,7 +13,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 
 from gateway.community.spi.auth import AuthError
-from gateway.community.spi.authn import CredentialBundle, Principal
+from gateway.community.spi.authn import CredentialBundle, Identities
 
 
 def _bundle(request: Request) -> CredentialBundle:
@@ -26,13 +24,13 @@ def _bundle(request: Request) -> CredentialBundle:
     )
 
 
-async def require_principal(request: Request) -> Principal:
+async def require_identities(request: Request) -> Identities:
     """FastAPI dependency: authenticate the request or raise 401."""
     authenticator = request.app.state.authenticator
     try:
-        principal: Principal = await authenticator.authenticate(
+        identities: Identities = await authenticator.authenticate(
             request.method, request.url.path, _bundle(request)
         )
     except AuthError as err:
         raise HTTPException(status_code=401, detail=str(err)) from err
-    return principal
+    return identities

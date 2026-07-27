@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from gateway.community.adapters.web import require_principal
+from gateway.community.adapters.web import require_identities
 from gateway.community.adapters.web.contracts import (
     Deleted,
     Envelope,
@@ -19,20 +19,20 @@ from gateway.community.adapters.web.contracts import (
     PageParamsDep,
     requires_user_principal,
 )
-from gateway.community.spi.authn import Principal
+from gateway.community.spi.authn import Identities
 
 from ._schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate
 
 router = APIRouter(prefix="/openapi/v1/routines", tags=["routines"])
 
 _SEC = requires_user_principal()
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
+IdentitiesDep = Annotated[Identities, Depends(require_identities)]
 
 
 @router.get("", response_model=Envelope[Page[Routine]], openapi_extra=_SEC)
 async def list_routines(
     page: PageParamsDep,
-    principal: PrincipalDep,
+    identities: IdentitiesDep,
     bot_id: str | None = None,
     status: str | None = None,
 ) -> Envelope[Page[Routine]]:
@@ -42,28 +42,30 @@ async def list_routines(
 
 @router.post("", status_code=201, response_model=Envelope[Routine], openapi_extra=_SEC)
 async def create_routine(
-    body: RoutineCreate, principal: PrincipalDep
+    body: RoutineCreate, identities: IdentitiesDep
 ) -> Envelope[Routine]:
     """Create a routine."""
     raise NotImplementedError
 
 
 @router.get("/{routine_id}", response_model=Envelope[Routine], openapi_extra=_SEC)
-async def get_routine(routine_id: str, principal: PrincipalDep) -> Envelope[Routine]:
+async def get_routine(routine_id: str, identities: IdentitiesDep) -> Envelope[Routine]:
     """Get a routine."""
     raise NotImplementedError
 
 
 @router.patch("/{routine_id}", response_model=Envelope[Routine], openapi_extra=_SEC)
 async def update_routine(
-    routine_id: str, body: RoutineUpdate, principal: PrincipalDep
+    routine_id: str, body: RoutineUpdate, identities: IdentitiesDep
 ) -> Envelope[Routine]:
     """Update a routine (partial)."""
     raise NotImplementedError
 
 
 @router.delete("/{routine_id}", response_model=Envelope[Deleted], openapi_extra=_SEC)
-async def delete_routine(routine_id: str, principal: PrincipalDep) -> Envelope[Deleted]:
+async def delete_routine(
+    routine_id: str, identities: IdentitiesDep
+) -> Envelope[Deleted]:
     """Delete a routine."""
     raise NotImplementedError
 
@@ -71,7 +73,9 @@ async def delete_routine(routine_id: str, principal: PrincipalDep) -> Envelope[D
 @router.post(
     "/{routine_id}/run", response_model=Envelope[RoutineRun], openapi_extra=_SEC
 )
-async def run_routine(routine_id: str, principal: PrincipalDep) -> Envelope[RoutineRun]:
+async def run_routine(
+    routine_id: str, identities: IdentitiesDep
+) -> Envelope[RoutineRun]:
     """Run a routine now."""
     raise NotImplementedError
 
@@ -82,7 +86,7 @@ async def run_routine(routine_id: str, principal: PrincipalDep) -> Envelope[Rout
     openapi_extra=_SEC,
 )
 async def list_routine_runs(
-    routine_id: str, page: PageParamsDep, principal: PrincipalDep
+    routine_id: str, page: PageParamsDep, identities: IdentitiesDep
 ) -> Envelope[Page[RoutineRun]]:
     """List a routine's execution history."""
     raise NotImplementedError

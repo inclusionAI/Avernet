@@ -1,23 +1,28 @@
-"""Auth runner — execute a route's requirement to produce a Principal (§7).
+"""Auth runner — produce an Identities set for a request (spec §7, rev 3).
 
-Given the request credentials, a route's requirement (OR-list of alternatives),
-and the strategy registry, try each alternative in order:
+For each required identity type, run its configured ordered plugin chain:
 
-- a strategy returning ``None`` (credential absent) fails that alternative and
-  falls through to the next one;
-- a strategy raising ``AuthError`` (credential present but invalid) is
-  **terminal** — it propagates immediately, with no OR fallback, so a bad
-  credential can never be masked by a later alternative;
-- a Principal with insufficient scope fails that alternative;
-- otherwise the alternative succeeds and its Principal is adopted.
+- a plugin returning ``None`` (not applicable / no credential) **falls through**
+  to the next plugin in the chain;
+- a plugin raising ``AuthError`` (applicable but invalid) is **terminal** — no
+  fallback, so a bad credential can never be masked by a later plugin;
+- the first plugin that returns a ``Principal`` wins for that type.
 
-If no alternative applies, raise the last error (fail-closed).
+If a type's chain is exhausted with no ``Principal`` (all declined), raise
+``AuthError`` (fail-closed) for that type. The runner never reads the ``source``
+header; plugin self-selection is fully inside each plugin's ``build``.
 """
 
 from __future__ import annotations
 
 from gateway.community.spi.auth import AuthError
-from gateway.community.spi.authn import AuthStrategy, CredentialBundle, Principal
+from gateway.community.spi.authn import (
+    AuthStrategy,
+    CredentialBundle,
+    Identities,
+    Principal,
+    PrincipalType,
+)
 
 from ._route_security import Requirement
 
@@ -25,29 +30,26 @@ from ._route_security import Requirement
 async def authenticate(
     creds: CredentialBundle,
     requirement: Requirement,
-    registry: dict[str, AuthStrategy],
+    registry: dict[PrincipalType, tuple[AuthStrategy, ...]],
+) -> Identities:
+    """Build an Identities set for the request, or raise ``AuthError`` (401)."""
+    collected: dict[PrincipalType, Principal] = {}
+    for ptype in requirement:
+        chain = registry.get(ptype)
+        if chain is None:  # misconfigured: required type has no plugin chain
+            raise AuthError(f"no auth strategy registered for type: {ptype}")
+        principal = await _run_chain(ptype, creds, chain)
+        collected[ptype] = principal
+    return Identities(collected)
+
+
+async def _run_chain(
+    ptype: PrincipalType, creds: CredentialBundle, chain: tuple[AuthStrategy, ...]
 ) -> Principal:
-    """Build a Principal for the request, or raise ``AuthError`` (401/403)."""
-    last_err: AuthError | None = None
-    for alternative in requirement:  # OR across alternatives
-        built: Principal | None = None
-        ok = True
-        for name, params in alternative.items():  # AND within an alternative
-            strategy = registry.get(name)
-            if strategy is None:  # misconfigured route → fail closed, terminal
-                raise AuthError(f"unknown auth strategy: {name}")
-            # A strategy raising AuthError means the credential is present but
-            # INVALID — that is terminal (no OR fallback), so let it propagate.
-            # Only a None result (credential absent) falls through to the next
-            # alternative.
-            principal = await strategy.build(creds, params)
-            if principal is None:  # credential absent → this alternative is N/A
-                ok = False
-                break
-            if not params.scopes <= principal.scopes:  # required ⊆ granted
-                ok, last_err = False, AuthError("insufficient scope")
-                break
-            built = principal
-        if ok and built is not None:
-            return built
-    raise last_err or AuthError("unauthorized")
+    for strategy in chain:
+        # A plugin raising AuthError is terminal: present-but-invalid credential,
+        # never masked by a later plugin.
+        principal = await strategy.build(creds)
+        if principal is not None:
+            return principal
+    raise AuthError(f"unauthenticated: no credential for {ptype}")

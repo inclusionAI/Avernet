@@ -11,14 +11,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from gateway.community.adapters.web import require_principal
+from gateway.community.adapters.web import require_identities
 from gateway.community.adapters.web.contracts import (
     Envelope,
     Page,
     PageParamsDep,
     requires_user_principal,
 )
-from gateway.community.spi.authn import Principal
+from gateway.community.spi.authn import Identities
 
 from ._schemas import (
     McpConfig,
@@ -32,19 +32,19 @@ from ._schemas import (
 router = APIRouter(prefix="/openapi/v1/mcp", tags=["mcp"])
 
 _SEC = requires_user_principal()
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
+IdentitiesDep = Annotated[Identities, Depends(require_identities)]
 
 
 @router.get("/servers", response_model=Envelope[Page[McpServer]], openapi_extra=_SEC)
 async def list_mcp_servers(
-    page: PageParamsDep, principal: PrincipalDep, keyword: str | None = None
+    page: PageParamsDep, identities: IdentitiesDep, keyword: str | None = None
 ) -> Envelope[Page[McpServer]]:
     """List marketplace MCP servers (filter + paginate)."""
     raise NotImplementedError
 
 
 @router.get("/tenants", response_model=Envelope[list[McpTenant]], openapi_extra=_SEC)
-async def list_mcp_tenants(principal: PrincipalDep) -> Envelope[list[McpTenant]]:
+async def list_mcp_tenants(identities: IdentitiesDep) -> Envelope[list[McpTenant]]:
     """List MCP tenants."""
     raise NotImplementedError
 
@@ -55,7 +55,7 @@ async def list_mcp_tenants(principal: PrincipalDep) -> Envelope[list[McpTenant]]
     openapi_extra=_SEC,
 )
 async def get_mcp_server(
-    server_code: str, principal: PrincipalDep
+    server_code: str, identities: IdentitiesDep
 ) -> Envelope[McpServerDetail]:
     """Get an MCP server's detail."""
     raise NotImplementedError
@@ -67,7 +67,7 @@ async def get_mcp_server(
     openapi_extra=_SEC,
 )
 async def check_mcp_permission(
-    server_code: str, principal: PrincipalDep
+    server_code: str, identities: IdentitiesDep
 ) -> Envelope[McpPermission]:
     """Check the caller's permission for an MCP server."""
     raise NotImplementedError
@@ -79,7 +79,7 @@ async def check_mcp_permission(
     openapi_extra=_SEC,
 )
 async def get_mcp_config(
-    server_code: str, principal: PrincipalDep
+    server_code: str, identities: IdentitiesDep
 ) -> Envelope[McpConfig]:
     """Read the caller's unified config for an MCP server."""
     raise NotImplementedError
@@ -91,7 +91,7 @@ async def get_mcp_config(
     openapi_extra=_SEC,
 )
 async def update_mcp_config(
-    server_code: str, body: McpConfigWrite, principal: PrincipalDep
+    server_code: str, body: McpConfigWrite, identities: IdentitiesDep
 ) -> Envelope[McpConfig]:
     """Write the caller's unified config for an MCP server (pushed to devices)."""
     raise NotImplementedError

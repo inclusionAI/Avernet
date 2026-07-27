@@ -1,24 +1,25 @@
-"""Per-route auth requirement metadata (OpenAPI `x-avernet-security`).
+"""Per-route required-identity-types metadata (OpenAPI ``x-avernet-security``).
 
-Each public route declares the auth it requires via an OpenAPI extension the
-gateway's route-security compiler reads. The format mirrors
-``src/gateway/docs/2026-07-21-auth-design.md`` §8.1: a list of OR alternatives,
-each a map of ``strategy -> params``.
+Each public route declares the identity **types** it requires via the
+``x-avernet-security`` extension. The gateway's route-security compiler resolves
+the most-specific rule per request (spec §8). v1 routes require an authenticated
+**user** by default; routes that need a bot (or bot+user) declare so.
 
-v1 routes require an authenticated **user principal**
-(``gateway.community.spi.authn.UserPrincipal``). Attach the requirement with::
-
-    @router.get("/{bot_id}", openapi_extra=requires_user_principal())
-    async def get_bot(bot_id: str) -> Envelope[Bot]: ...
-
-This helper only emits the OpenAPI *requirement marker*; it is not the principal
-itself (that domain model lives in ``spi/authn``). The scope vocabulary is
-intentionally out of scope this session, so params are left empty.
+The marker lists identity-type strings (e.g. ``["user"]``, ``["bot", "user"]``).
+It declares *types*, not strategy names — which plugin chain produces each type
+is configured in ``authn.yaml`` and is orthogonal to routes.
 """
 
 from typing import Any
 
+from gateway.community.spi.authn import PrincipalType
+
+
+def requires_identities(*types: PrincipalType) -> dict[str, Any]:
+    """OpenAPI extra marking a route as requiring the given identity types."""
+    return {"x-avernet-security": [str(t) for t in types]}
+
 
 def requires_user_principal() -> dict[str, Any]:
-    """OpenAPI extra marking a route as requiring an authenticated user principal."""
-    return {"x-avernet-security": [{"first_party_user": {}}]}
+    """Convenience for the common case: a single authenticated user identity."""
+    return requires_identities(PrincipalType.USER)

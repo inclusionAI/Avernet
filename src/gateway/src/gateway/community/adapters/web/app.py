@@ -20,8 +20,13 @@ DOCS_TAGS = [
 ]
 
 
-def create_app() -> FastAPI:
-    """Build and configure the gateway FastAPI application."""
+def create_app(google_transport: object | None = None) -> FastAPI:
+    """Build and configure the gateway FastAPI application.
+
+    ``google_transport`` is an optional HTTP-transport seam for the ``google``
+    auth strategy (tests pass an :class:`httpx.MockTransport` so the Google
+    userinfo call is not made against the real endpoint). Production omits it.
+    """
     config = ConfigLoader.load()
 
     # Configure logging early so startup messages are visible.
@@ -68,7 +73,7 @@ def create_app() -> FastAPI:
     # call time).
     from gateway.community.bootstrap import build_authenticator
 
-    app.state.authenticator = build_authenticator()
+    app.state.authenticator = build_authenticator(google_transport=google_transport)
 
     # Mount the public /openapi/v1 API group routers.
     include_all(app)

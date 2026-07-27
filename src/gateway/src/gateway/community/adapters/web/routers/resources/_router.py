@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Response
 
-from gateway.community.adapters.web import require_principal
+from gateway.community.adapters.web import require_identities
 from gateway.community.adapters.web.contracts import (
     Deleted,
     Envelope,
@@ -20,20 +20,20 @@ from gateway.community.adapters.web.contracts import (
     PageParamsDep,
     requires_user_principal,
 )
-from gateway.community.spi.authn import Principal
+from gateway.community.spi.authn import Identities
 
 from ._schemas import Preview, Resource, ResourceCreate, ResourceType, ResourceUpdate
 
 router = APIRouter(prefix="/openapi/v1/resources", tags=["resources"])
 
 _SEC = requires_user_principal()
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
+IdentitiesDep = Annotated[Identities, Depends(require_identities)]
 
 
 @router.get("", response_model=Envelope[Page[Resource]], openapi_extra=_SEC)
 async def list_resources(
     page: PageParamsDep,
-    principal: PrincipalDep,
+    identities: IdentitiesDep,
     bot_id: str | None = None,
     type: ResourceType | None = None,
 ) -> Envelope[Page[Resource]]:
@@ -43,7 +43,7 @@ async def list_resources(
 
 @router.get("/check-name", response_model=Envelope[NameCheck], openapi_extra=_SEC)
 async def check_resource_name(
-    name: str, principal: PrincipalDep
+    name: str, identities: IdentitiesDep
 ) -> Envelope[NameCheck]:
     """Check whether a resource name is available."""
     raise NotImplementedError
@@ -51,7 +51,7 @@ async def check_resource_name(
 
 @router.post("", status_code=201, response_model=Envelope[Resource], openapi_extra=_SEC)
 async def create_resource(
-    body: ResourceCreate, principal: PrincipalDep
+    body: ResourceCreate, identities: IdentitiesDep
 ) -> Envelope[Resource]:
     """Create a resource (file placeholder, link, or folder)."""
     raise NotImplementedError
@@ -61,7 +61,7 @@ async def create_resource(
     "/upload", status_code=201, response_model=Envelope[Resource], openapi_extra=_SEC
 )
 async def upload_resource(
-    principal: PrincipalDep,
+    identities: IdentitiesDep,
     name: str,
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
 ) -> Envelope[Resource]:
@@ -70,14 +70,16 @@ async def upload_resource(
 
 
 @router.get("/{resource_id}", response_model=Envelope[Resource], openapi_extra=_SEC)
-async def get_resource(resource_id: str, principal: PrincipalDep) -> Envelope[Resource]:
+async def get_resource(
+    resource_id: str, identities: IdentitiesDep
+) -> Envelope[Resource]:
     """Get a resource."""
     raise NotImplementedError
 
 
 @router.put("/{resource_id}", response_model=Envelope[Resource], openapi_extra=_SEC)
 async def update_resource(
-    resource_id: str, body: ResourceUpdate, principal: PrincipalDep
+    resource_id: str, body: ResourceUpdate, identities: IdentitiesDep
 ) -> Envelope[Resource]:
     """Update a resource."""
     raise NotImplementedError
@@ -85,7 +87,7 @@ async def update_resource(
 
 @router.delete("/{resource_id}", response_model=Envelope[Deleted], openapi_extra=_SEC)
 async def delete_resource(
-    resource_id: str, principal: PrincipalDep
+    resource_id: str, identities: IdentitiesDep
 ) -> Envelope[Deleted]:
     """Delete a resource."""
     raise NotImplementedError
@@ -96,7 +98,7 @@ async def delete_resource(
     openapi_extra=_SEC,
     responses={200: {"content": {"application/octet-stream": {}}}},
 )
-async def download_resource(resource_id: str, principal: PrincipalDep) -> Response:
+async def download_resource(resource_id: str, identities: IdentitiesDep) -> Response:
     """Download a resource's bytes (raw, not enveloped)."""
     raise NotImplementedError
 
@@ -105,7 +107,7 @@ async def download_resource(resource_id: str, principal: PrincipalDep) -> Respon
     "/{resource_id}/preview", response_model=Envelope[Preview], openapi_extra=_SEC
 )
 async def preview_resource(
-    resource_id: str, principal: PrincipalDep
+    resource_id: str, identities: IdentitiesDep
 ) -> Envelope[Preview]:
     """Get a resource preview."""
     raise NotImplementedError

@@ -10,25 +10,25 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from gateway.community.adapters.web import require_principal
+from gateway.community.adapters.web import require_identities
 from gateway.community.adapters.web.contracts import (
     Deleted,
     Envelope,
     requires_user_principal,
 )
-from gateway.community.spi.authn import Principal
+from gateway.community.spi.authn import Identities
 
 from ._schemas import Channel, ChannelCreate, ChannelStatusUpdate, ChannelUpdate
 
 router = APIRouter(prefix="/openapi/v1/channels", tags=["channels"])
 
 _SEC = requires_user_principal()
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
+IdentitiesDep = Annotated[Identities, Depends(require_identities)]
 
 
 @router.get("", response_model=Envelope[list[Channel]], openapi_extra=_SEC)
 async def list_channels(
-    principal: PrincipalDep, bot_id: str | None = None
+    identities: IdentitiesDep, bot_id: str | None = None
 ) -> Envelope[list[Channel]]:
     """List channels (optionally filtered by bot)."""
     raise NotImplementedError
@@ -36,21 +36,21 @@ async def list_channels(
 
 @router.post("", status_code=201, response_model=Envelope[Channel], openapi_extra=_SEC)
 async def create_channel(
-    body: ChannelCreate, principal: PrincipalDep
+    body: ChannelCreate, identities: IdentitiesDep
 ) -> Envelope[Channel]:
     """Create a channel (starts inactive)."""
     raise NotImplementedError
 
 
 @router.get("/{channel_id}", response_model=Envelope[Channel], openapi_extra=_SEC)
-async def get_channel(channel_id: str, principal: PrincipalDep) -> Envelope[Channel]:
+async def get_channel(channel_id: str, identities: IdentitiesDep) -> Envelope[Channel]:
     """Get a channel."""
     raise NotImplementedError
 
 
 @router.put("/{channel_id}", response_model=Envelope[Channel], openapi_extra=_SEC)
 async def update_channel(
-    channel_id: str, body: ChannelUpdate, principal: PrincipalDep
+    channel_id: str, body: ChannelUpdate, identities: IdentitiesDep
 ) -> Envelope[Channel]:
     """Full update of a channel."""
     raise NotImplementedError
@@ -58,13 +58,15 @@ async def update_channel(
 
 @router.patch("/{channel_id}", response_model=Envelope[Channel], openapi_extra=_SEC)
 async def update_channel_status(
-    channel_id: str, body: ChannelStatusUpdate, principal: PrincipalDep
+    channel_id: str, body: ChannelStatusUpdate, identities: IdentitiesDep
 ) -> Envelope[Channel]:
     """Toggle a channel active/inactive."""
     raise NotImplementedError
 
 
 @router.delete("/{channel_id}", response_model=Envelope[Deleted], openapi_extra=_SEC)
-async def delete_channel(channel_id: str, principal: PrincipalDep) -> Envelope[Deleted]:
+async def delete_channel(
+    channel_id: str, identities: IdentitiesDep
+) -> Envelope[Deleted]:
     """Delete a channel."""
     raise NotImplementedError

@@ -1,0 +1,17 @@
+# Identity-type → ordered plugin chain.
+#
+# Each type maps to an ordered list of strategy names. The runner tries them in
+# order; a plugin returning None falls through to the next; a plugin raising
+# AuthError is terminal (no fallback). Names reference strategies registered by
+# the composition root's strategy pool (per flavor).
+#
+# User identity comes only from a verified Google access token (the ``google``
+# strategy calls Google's userinfo endpoint, mirroring BCS ``bcs-auth-google``);
+# there is no cookie/session fallback in the gateway. Bot identity comes from
+# ``bot_token``.
+
+identity_strategies:
+  user:
+    chain: [google]
+  bot:
+    chain: [bot_token]

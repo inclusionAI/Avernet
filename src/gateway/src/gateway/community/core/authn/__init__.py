@@ -1,15 +1,20 @@
-"""Core authn — transport-agnostic route-security resolution + auth runner.
+"""Core authn: the runner, the route table, and the chain-config resolver.
 
-``RouteSecurity`` resolves a request to its required strategies; ``authenticate``
-runs them against the strategy registry to produce a Principal. Neither depends
-on any web framework (Rule 7).
+``Identities`` lives in the authn SPI (``gateway.community.spi.authn``) since
+adapters consume it as a boundary contract; it is re-exported here for
+convenience within core.
 """
 
-from ._route_security import Requirement, RouteSecurity
+from gateway.community.spi.authn import Identities
+
+from ._config import build_strategy_registry, load_chains
+from ._route_security import RouteSecurity
 from ._runner import authenticate
 
 __all__ = [
-    "Requirement",
+    "Identities",
     "RouteSecurity",
     "authenticate",
+    "build_strategy_registry",
+    "load_chains",
 ]

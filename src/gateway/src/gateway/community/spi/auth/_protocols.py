@@ -10,10 +10,14 @@ from ._models import AuthenticatedUser
 class AuthPlugin(Protocol):
     """Plugin protocol for authentication and authorization.
 
-    Unifies login, whitelist, and permission checking into a single contract.
+    Unifies login (`get_login_user`) and authorization (`is_allowed`,
+    `check_permission`) into one contract. The gateway's authn flow uses only
+    `get_login_user` (via the ``cookie`` strategy); the authorization methods are
+    kept on this SPI for component-side use — the gateway itself is auth-only and
+    does not call them. Removing them is explicitly out of scope (see spec).
 
     Implementations:
-    - BareAuthPlugin: returns hardcoded user, always-allowed for tests.
+    - BareAuthPlugin: returns a hardcoded user, always-allowed for tests.
     - Enterprise plugin: calls the enterprise SSO / identity API for login.
     """
 

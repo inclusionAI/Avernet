@@ -24,6 +24,10 @@ def _openapi() -> dict[str, Any]:
     return TestClient(create_app()).get("/openapi.json").json()
 
 
+def _client() -> TestClient:
+    return TestClient(create_app(), raise_server_exceptions=False)
+
+
 @pytest.mark.parametrize("prefix", _GROUP_PREFIXES)
 def test_group_is_mounted(prefix: str) -> None:
     paths = _openapi()["paths"]
@@ -41,7 +45,8 @@ def test_every_v1_operation_declares_security() -> None:
     ]
     assert operations
     for path, method, op in operations:
-        assert "x-avernet-security" in op, f"{method} {path} missing x-avernet-security"
+        marker = op.get("x-avernet-security")
+        assert marker, f"{method} {path} missing x-avernet-security"
 
 
 @pytest.mark.parametrize(
@@ -56,5 +61,4 @@ def test_every_v1_operation_declares_security() -> None:
     ],
 )
 def test_group_endpoints_require_auth(method: str, path: str) -> None:
-    client = TestClient(create_app(), raise_server_exceptions=False)
-    assert client.request(method, path).status_code == 401
+    assert _client().request(method, path).status_code == 401

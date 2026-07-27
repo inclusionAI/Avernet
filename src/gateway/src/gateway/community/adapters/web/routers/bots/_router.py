@@ -3,7 +3,7 @@
 Handlers are stubs: at runtime the gateway forwards to the backend and never
 runs these; they exist so FastAPI generates the OpenAPI contract. Every route
 requires an authenticated user principal — declared via ``x-avernet-security``
-and enforced by the ``require_principal`` dependency.
+and enforced by the ``require_identities`` dependency.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 
-from gateway.community.adapters.web import require_principal
+from gateway.community.adapters.web import require_identities
 from gateway.community.adapters.web.contracts import (
     Deleted,
     Envelope,
@@ -21,7 +21,7 @@ from gateway.community.adapters.web.contracts import (
     PageParamsDep,
     requires_user_principal,
 )
-from gateway.community.spi.authn import Principal
+from gateway.community.spi.authn import Identities
 
 from ._schemas import (
     Bot,
@@ -37,7 +37,7 @@ from ._schemas import (
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
 
 _SEC = requires_user_principal()
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
+IdentitiesDep = Annotated[Identities, Depends(require_identities)]
 
 
 @router.post(
@@ -52,7 +52,7 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
     },
     openapi_extra=_SEC,
 )
-async def create_bot(body: BotCreate, principal: PrincipalDep) -> Envelope[Bot]:
+async def create_bot(body: BotCreate, identities: IdentitiesDep) -> Envelope[Bot]:
     """Create a bot (201), or return 202 + a Passport iframe when authorization is needed."""
     raise NotImplementedError
 
@@ -60,7 +60,7 @@ async def create_bot(body: BotCreate, principal: PrincipalDep) -> Envelope[Bot]:
 @router.get("", response_model=Envelope[Page[Bot]], openapi_extra=_SEC)
 async def list_bots(
     page: PageParamsDep,
-    principal: PrincipalDep,
+    identities: IdentitiesDep,
     keyword: str | None = None,
     engine: str | None = None,
     status: str | None = None,
@@ -70,39 +70,39 @@ async def list_bots(
 
 
 @router.get("/check-name", response_model=Envelope[NameCheck], openapi_extra=_SEC)
-async def check_bot_name(name: str, principal: PrincipalDep) -> Envelope[NameCheck]:
+async def check_bot_name(name: str, identities: IdentitiesDep) -> Envelope[NameCheck]:
     """Check whether a bot name is available."""
     raise NotImplementedError
 
 
 @router.get("/ceiling", response_model=Envelope[Ceiling], openapi_extra=_SEC)
-async def get_bots_ceiling(principal: PrincipalDep) -> Envelope[Ceiling]:
+async def get_bots_ceiling(identities: IdentitiesDep) -> Envelope[Ceiling]:
     """Get the caller's bot-creation quota ceiling."""
     raise NotImplementedError
 
 
 @router.get("/{bot_id}", response_model=Envelope[Bot], openapi_extra=_SEC)
-async def get_bot(bot_id: str, principal: PrincipalDep) -> Envelope[Bot]:
+async def get_bot(bot_id: str, identities: IdentitiesDep) -> Envelope[Bot]:
     """Get a bot's details."""
     raise NotImplementedError
 
 
 @router.put("/{bot_id}", response_model=Envelope[Bot], openapi_extra=_SEC)
 async def update_bot(
-    bot_id: str, body: BotUpdate, principal: PrincipalDep
+    bot_id: str, body: BotUpdate, identities: IdentitiesDep
 ) -> Envelope[Bot]:
     """Update a bot (engine is immutable)."""
     raise NotImplementedError
 
 
 @router.delete("/{bot_id}", response_model=Envelope[Deleted], openapi_extra=_SEC)
-async def delete_bot(bot_id: str, principal: PrincipalDep) -> Envelope[Deleted]:
+async def delete_bot(bot_id: str, identities: IdentitiesDep) -> Envelope[Deleted]:
     """Delete a bot."""
     raise NotImplementedError
 
 
 @router.post("/{bot_id}/restart", response_model=Envelope[Bot], openapi_extra=_SEC)
-async def restart_bot(bot_id: str, principal: PrincipalDep) -> Envelope[Bot]:
+async def restart_bot(bot_id: str, identities: IdentitiesDep) -> Envelope[Bot]:
     """Restart a bot (re-provision its device)."""
     raise NotImplementedError
 
@@ -111,20 +111,22 @@ async def restart_bot(bot_id: str, principal: PrincipalDep) -> Envelope[Bot]:
     "/{bot_id}/auth-status", response_model=Envelope[BotAuthStatus], openapi_extra=_SEC
 )
 async def get_bot_auth_status(
-    bot_id: str, principal: PrincipalDep
+    bot_id: str, identities: IdentitiesDep
 ) -> Envelope[BotAuthStatus]:
     """Poll Passport authorization; completes creation when ISSUED."""
     raise NotImplementedError
 
 
 @router.get("/{bot_id}/status", response_model=Envelope[BotStatus], openapi_extra=_SEC)
-async def get_bot_status(bot_id: str, principal: PrincipalDep) -> Envelope[BotStatus]:
+async def get_bot_status(bot_id: str, identities: IdentitiesDep) -> Envelope[BotStatus]:
     """Get a bot's runtime / device readiness."""
     raise NotImplementedError
 
 
 @router.get("/{bot_id}/passport", response_model=Envelope[Passport], openapi_extra=_SEC)
-async def get_bot_passport(bot_id: str, principal: PrincipalDep) -> Envelope[Passport]:
+async def get_bot_passport(
+    bot_id: str, identities: IdentitiesDep
+) -> Envelope[Passport]:
     """Get a bot's Agent Passport."""
     raise NotImplementedError
 
@@ -135,7 +137,7 @@ async def get_bot_passport(bot_id: str, principal: PrincipalDep) -> Envelope[Pas
     openapi_extra=_SEC,
 )
 async def get_bot_engine_config(
-    bot_id: str, principal: PrincipalDep
+    bot_id: str, identities: IdentitiesDep
 ) -> Envelope[dict[str, Any]]:
     """Read a bot's engine configuration (free-form JSON)."""
     raise NotImplementedError
@@ -147,7 +149,7 @@ async def get_bot_engine_config(
     openapi_extra=_SEC,
 )
 async def update_bot_engine_config(
-    bot_id: str, body: dict[str, Any], principal: PrincipalDep
+    bot_id: str, body: dict[str, Any], identities: IdentitiesDep
 ) -> Envelope[dict[str, Any]]:
     """Write a bot's engine configuration (free-form JSON)."""
     raise NotImplementedError

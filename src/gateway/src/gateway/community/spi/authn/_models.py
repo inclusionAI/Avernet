@@ -1,21 +1,20 @@
 """Authn SPI — the neutral Principal the gateway produces after authentication.
 
-Seeds the ``Principal`` model from the API Gateway auth design
-(``src/gateway/docs/2026-07-21-auth-design.md`` §4). The gateway authenticates a
-request, builds a ``Principal``, and forwards it (signed) to downstream
-components, which project it onto their own domain DTOs. The gateway never
-lets a component see raw credentials.
+The gateway authenticates a request, builds one ``Principal`` per required
+identity type, and forwards the set (signed) to downstream components, which
+project each onto their own domain DTOs. The gateway never lets a component see
+raw credentials — except the bot credential, which the bot identity carries
+through by design (see the spec's Further Notes).
 
-This round defines the first-party :class:`UserPrincipal`. ``AppPrincipal``
-(third-party app) and the discriminated ``Principal`` union land when
-third-party / app-principal access is added; ``PrincipalType`` is left open for
-that.
+Identity types are modeled as a discriminated union on ``type``. Roles beyond
+the first-party ``UserPrincipal`` and the calling ``BotPrincipal`` (e.g. the
+deferred third-party ``AppPrincipal``) are added as new union members.
 """
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,16 +25,15 @@ class PrincipalType(StrEnum):
     """Discriminator for the kind of caller a ``Principal`` represents."""
 
     USER = "user"  # a first-party authenticated user
-    # THIRD_PARTY_APP = "third_party_app"  # added with app-principal access
+    BOT = "bot"  # a calling bot, acting in its own identity
 
 
 class UserPrincipal(BaseModel):
     """A first-party authenticated user, produced by the gateway.
 
-    The gateway builds this after authenticating the request, then forwards it
-    downstream. Ownership and authorization resolve to ``subject`` **within**
-    ``tenant`` — the tenant is always present so a caller is never ambiguous
-    about which tenant's data it may touch.
+    Ownership and authorization resolve to ``subject`` **within** ``tenant``.
+    Authorization scopes are NOT carried here — the gateway is auth-only; the
+    component decides permissions.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -44,16 +42,29 @@ class UserPrincipal(BaseModel):
     tenant: str = Field(
         description="Tenant id the caller belongs to (stable id, not a display name)."
     )
-    scopes: frozenset[str] = Field(
-        default_factory=frozenset,
-        description="Permission scopes granted to the caller.",
-    )
     subject: AuthenticatedUser = Field(description="The authenticated end user.")
 
 
-# `Principal` becomes a discriminated union (UserPrincipal | AppPrincipal | ...)
-# when app-principal access lands; for now the only member is UserPrincipal.
-Principal = UserPrincipal
+class BotPrincipal(BaseModel):
+    """A calling bot, acting in its own identity (not impersonating a user).
+
+    ``bot_uuid`` is the bot's stable id; ``owner_id`` is the user who owns it
+    (the resource-ownership anchor); ``token`` is the presented/verified bot
+    credential (a secret flowing downstream — components must treat it as such);
+    ``tenant`` is the owner's tenant, preserving the invariant that every
+    Principal carries a tenant.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[PrincipalType.BOT] = PrincipalType.BOT
+    tenant: str = Field(description="Owner's tenant (stable id).")
+    bot_uuid: str = Field(description="The bot's stable identifier.")
+    owner_id: str = Field(description="The user who owns the bot.")
+    token: str = Field(description="The presented/verified bot credential (secret).")
+
+
+Principal = Annotated[UserPrincipal | BotPrincipal, Field(discriminator="type")]
 
 
 # ── Strategy inputs (framework-agnostic) ─────────────────────────────────────
@@ -65,25 +76,11 @@ class CredentialBundle:
 
     A delivery adapter fills this from the incoming request (e.g. a FastAPI
     ``Request``); an ``AuthStrategy`` reads it without depending on any web
-    framework.
+    framework. ``source`` (if sent by the caller) is just another header here —
+    the runner never reads it; plugins may read ``headers["source"]`` to decide
+    whether they claim a request.
     """
 
     headers: Mapping[str, str]
     cookies: Mapping[str, str]
     query: Mapping[str, str]
-
-
-class Delegation(StrEnum):
-    """Whether a route lets the caller act on behalf of an end user."""
-
-    OPTIONAL = "optional"  # end-user handle allowed but not required (default)
-    FORBIDDEN = "forbidden"  # pure caller only; reject an end-user handle
-    # REQUIRED lands with verified delegation (app acting for a real user).
-
-
-@dataclass(frozen=True)
-class StrategyParams:
-    """Per-route parameters for one strategy, from its ``x-avernet-security`` block."""
-
-    scopes: frozenset[str] = frozenset()
-    delegation: Delegation = Delegation.OPTIONAL

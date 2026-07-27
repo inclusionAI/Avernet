@@ -1,31 +1,27 @@
 """Authn SPI — the ``AuthStrategy`` contract (how a Principal is built).
 
 A strategy is a named way to turn a request's credentials into a
-:class:`~gateway.community.spi.authn.Principal`. The gateway holds a small,
-closed set of them; each route names the one(s) it accepts via its
-``x-avernet-security`` marker (see the auth design doc §5).
+:class:`~gateway.community.spi.authn.Principal` of a specific identity type.
 """
 
 from __future__ import annotations
 
 from typing import Protocol
 
-from ._models import CredentialBundle, Principal, StrategyParams
+from ._models import CredentialBundle, Principal, PrincipalType
 
 
 class AuthStrategy(Protocol):
-    """Builds a Principal from a request, or signals inapplicability."""
+    """Builds a Principal of a specific type from a request, or declines."""
 
-    name: str  # stable id referenced by x-avernet-security
+    name: str  # stable id referenced by authn.yaml chains
+    principal_type: PrincipalType  # the identity type this strategy produces
 
-    async def build(
-        self, creds: CredentialBundle, params: StrategyParams
-    ) -> Principal | None:
-        """Try to build a Principal (tenant included) from the request.
+    async def build(self, creds: CredentialBundle) -> Principal | None:
+        """Try to build a Principal from the request.
 
-        Returns ``None`` when this strategy's credential is **absent** — not
-        applicable, so the next OR branch may try. Raises ``AuthError`` when the
-        credential is **present but invalid** (hard failure, no fallback).
-        Returns a ``Principal`` on success; the runner then checks scope.
+        Returns ``None`` (not applicable / no credential) → runner falls through.
+        Raises ``AuthError`` (applicable but invalid) → terminal, no fallback.
+        Returns a ``Principal`` → success.
         """
         ...

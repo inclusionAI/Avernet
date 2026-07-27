@@ -17,7 +17,7 @@ from ._envelope import (
     Page,
 )
 from ._pagination import PageParams, PageParamsDep
-from ._security import requires_user_principal
+from ._security import requires_identities, requires_user_principal
 
 __all__ = [
     "CODE_ACCEPTED",
@@ -30,5 +30,6 @@ __all__ = [
     "Page",
     "PageParams",
     "PageParamsDep",
+    "requires_identities",
     "requires_user_principal",
 ]
