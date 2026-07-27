@@ -93,16 +93,29 @@ def create_app() -> FastAPI:
     app.state.domain_map = forwarding.domain_map
     app.state.forwarder = forwarding.forwarder
 
+    # Save FastAPI's default openapi generator so we can merge local routes
+    # (/health, /api/test) into the served schema alongside upstream paths.
+    _default_openapi = app.openapi
+
     # Serve the generated OpenAPI (config ⋈ each domain's published description)
     # instead of FastAPI's route introspection. Regenerated per call so it tracks
     # the catalog's background refresh.
     def _served_openapi() -> dict[str, Any]:
-        return forwarding.served_openapi(
+        served = forwarding.served_openapi(
             authenticator.route_security,
             title=config.app_name,
             version=__version__,
             description=_API_DESCRIPTION,
         )
+        # Merge local gateway routes (health, test, docs) into the served schema
+        # so they appear in /docs and /redoc alongside upstream domain paths.
+        local = _default_openapi()
+        local_paths = local.get("paths", {})
+        served_paths = served.setdefault("paths", {})
+        for path, item in local_paths.items():
+            if path not in served_paths:
+                served_paths[path] = item
+        return served
 
     app.openapi = _served_openapi  # type: ignore[method-assign]
 
