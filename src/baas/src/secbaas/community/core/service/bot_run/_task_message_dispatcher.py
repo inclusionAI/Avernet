@@ -243,7 +243,7 @@ class TaskMessageDispatcher:
                 await _do_send()
 
         except TimeoutError:
-            self._run_repository.update_error(
+            self._run_repository.update_timeout(
                 run_id=run_id,
                 error="Task execution timeout",
             )

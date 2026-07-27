@@ -271,6 +271,35 @@ async def test_executor_send_flow():
     assert repo.update_result.call_args[1]["content_long"] == "hello back"
 
 
+async def test_executor_timeout_marks_timeout():
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-timeout",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.create_session = AsyncMock(return_value=MagicMock(session_id="sess-new"))
+    bot_svc.send_message = AsyncMock(side_effect=TimeoutError())
+    selector.select.return_value = bot_svc
+
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo()
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-timeout", bot_id="bot-1:ent", session_id="sess-1")
+    )
+
+    repo.update_timeout.assert_called_once()
+    assert repo.update_timeout.call_args[0][0] == "r-timeout"
+    repo.update_result.assert_not_called()
+
+
 async def test_executor_inject_flow():
     repo = MagicMock()
     plugin = MagicMock()

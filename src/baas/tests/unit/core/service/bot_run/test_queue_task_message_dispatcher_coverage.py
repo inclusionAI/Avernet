@@ -541,7 +541,7 @@ class TestDispatchSendStream:
         d = _make_dispatcher()
         d._cache_plugin.get.return_value = None
         run = MagicMock()
-        run.status = "TIMEOUT"
+        run.status = "TIME_OUT"
         d._run_repository.get_by_run_id.return_value = run
 
         chunks = []
