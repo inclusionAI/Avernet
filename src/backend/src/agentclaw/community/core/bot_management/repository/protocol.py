@@ -108,6 +108,12 @@ class BotRepository(Protocol):
         """List bots with pagination and search."""
         ...
 
+    def list_public_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]]
+    ) -> List[Dict[str, Any]]:
+        """Live public bots matching any ``(bot_id, owner_id)`` pair, this env."""
+        ...
+
     def list_domain_bots(
         self,
         page: int | None = None,

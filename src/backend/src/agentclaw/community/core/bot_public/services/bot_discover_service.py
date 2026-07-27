@@ -271,107 +271,62 @@ class BotDiscoverService:
             [(bot_detail, rec), ...] 列表，只包含 public 的 bot
         """
         try:
-            # 访问 repository 的 _db 属性执行 SQL
-            if not hasattr(self._bot_repository, "_db"):
-                logger.warning("[BotDiscover] Repository 没有 _db 属性，无法验证")
-                return []
-
-            db = self._bot_repository._db
-            from agentclaw.community.utils.env_utils import get_current_env
-
             # 构建 (bot_id, owner_id) 条件列表
-            conditions = []
-            params = []
-            bot_id_to_rec = {}  # (bot_id, owner_id) -> rec
+            pairs: list[tuple[str, str]] = []
+            bot_id_to_rec = {}  # (bot_id, owner_id) -> (worker_id, rec)
             for worker_id, bot_id, owner_id, rec in bot_entries:
-                conditions.append("(bot_id = %s AND owner_id = %s)")
-                params.extend([bot_id, owner_id])
+                pairs.append((bot_id, owner_id))
                 bot_id_to_rec[(bot_id, owner_id)] = (worker_id, rec)
 
-            if not conditions:
+            if not pairs:
                 return []
 
-            # 添加 env 条件
-            params.append(get_current_env())
+            # ORM 查询（经 do_orm_execute tenant guard 覆盖，自动按 tenant 隔离）。
+            # 曾经是对 ac_bots 的 raw cursor SQL —— raw SQL 绕过了 BotModel 的
+            # tenant guard（listener 只覆盖 ORM statement），故改走仓储的 ORM 方法。
+            bots = self._bot_repository.list_public_bots_by_owner_bot_pairs(pairs)
 
-            # 构建 IN 查询
-            where_clause = " OR ".join(conditions)
-            sql = f"""
-                SELECT id, bot_id, bot_name, bot_desc, entity_id, entity_type,
-                       creator_id, owner_id, engine_types, status, binding_id,
-                       gmt_create, gmt_modified, modifier_id, share_policy,
-                       is_delete, active_engine, device_id, env, ext, public
-                FROM ac_bots
-                WHERE ({where_clause}) AND is_delete = 0 AND env = %s AND public = '1'
-            """
+            result = []
+            for bot in bots:
+                key = (bot["bot_id"], bot["owner_id"])
+                worker_id, rec = bot_id_to_rec.get(key, (None, None))
+                if not rec:
+                    continue
 
-            with db.session() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(sql, params)
-                    rows = cursor.fetchall()
+                # 构建完整的 bot 详情（与 search 接口格式一致，to_dict() 已解析 JSON）
+                ext = bot.get("ext")
+                bot_detail = {
+                    "id": bot["id"],
+                    "bot_id": bot["bot_id"],
+                    "bot_name": bot["bot_name"],
+                    "bot_desc": bot["bot_desc"],
+                    "entity_id": bot["entity_id"],
+                    "entity_type": bot["entity_type"],
+                    "creator_id": bot["creator_id"],
+                    "owner_id": bot["owner_id"],
+                    "engine_types": bot["engine_types"],
+                    "status": bot["status"],
+                    "binding_id": bot["binding_id"],
+                    "gmt_create": bot["gmt_create"],
+                    "gmt_modified": bot["gmt_modified"],
+                    "modifier_id": bot["modifier_id"],
+                    "share_policy": bot["share_policy"],
+                    "is_delete": bot["is_delete"],
+                    "active_engine": bot["active_engine"],
+                    "device_id": bot["device_id"],
+                    "env": bot["env"],
+                    "ext": ext,
+                    "public": bot["public"],
+                    "owner_name": (ext or {}).get("owner_name") if ext else None,
+                }
+                result.append((bot_detail, rec))
 
-                    result = []
-                    for row in rows:
-                        bot_id = row[1]
-                        owner_id = row[7]
-                        worker_id, rec = bot_id_to_rec.get((bot_id, owner_id), (None, None))
-                        if not rec:
-                            continue
-
-                        # 构建完整的 bot 详情（与 search 接口格式一致）
-                        bot_detail = {
-                            "id": row[0],
-                            "bot_id": row[1],
-                            "bot_name": row[2],
-                            "bot_desc": row[3],
-                            "entity_id": row[4],
-                            "entity_type": row[5],
-                            "creator_id": row[6],
-                            "owner_id": row[7],
-                            "engine_types": self._parse_json(row[8]),
-                            "status": row[9],
-                            "binding_id": row[10],
-                            "gmt_create": row[11].isoformat() if row[11] else None,
-                            "gmt_modified": row[12].isoformat() if row[12] else None,
-                            "modifier_id": row[13],
-                            "share_policy": row[14],
-                            "is_delete": row[15],
-                            "active_engine": row[16],
-                            "device_id": row[17],
-                            "env": row[18],
-                            "ext": self._parse_json(row[19]),
-                            "public": row[20],
-                            "owner_name": self._parse_json(row[19], {}).get("owner_name") if row[19] else None,
-                        }
-                        result.append((bot_detail, rec))
-
-                    logger.debug(f"[BotDiscover] 批量查询完成: {len(result)}/{len(bot_entries)} 个 public")
-                    return result
+            logger.debug(f"[BotDiscover] 批量查询完成: {len(result)}/{len(bot_entries)} 个 public")
+            return result
 
         except Exception as e:
             logger.warning(f"[BotDiscover] 批量获取 public bot 信息失败: {e}")
             return []
-
-    @staticmethod
-    def _parse_json(value: Any, default: Any = None) -> Any:
-        """解析 JSON 字符串.
-
-        Args:
-            value: 可能是 JSON 字符串或 Python 对象
-            default: 默认值
-
-        Returns:
-            解析后的对象
-        """
-        if value is None:
-            return default
-        if isinstance(value, str):
-            import json
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return default
-        return value
 
     @staticmethod
     def _sanitize_ext_fields(items: list[dict[str, Any]]) -> None:

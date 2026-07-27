@@ -41,7 +41,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from injector import inject
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.bot_management.repository.protocol import (
     BotLookupAmbiguousError,
@@ -376,6 +376,41 @@ class BotRepository:
                 .all()
             )
             return total, [b.to_dict() for b in bots]
+
+    def list_public_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]]
+    ) -> List[Dict[str, Any]]:
+        """Live public bots matching any ``(bot_id, owner_id)`` pair, this env.
+
+        ORM-based replacement for a former raw ``cursor.execute("… FROM
+        ac_bots …")`` in ``bot_discover_service`` — raw SQL bypasses the
+        ``BotModel`` tenant guard (``do_orm_execute`` only fires for ORM
+        statements), so this read now goes through the ORM and is tenant-scoped
+        automatically. Returns ``to_dict()`` dicts (the search-interface shape
+        the caller wants).
+        """
+        if not pairs:
+            return []
+        with self._db.orm_session() as db:
+            bots = (
+                db.query(self.Model)
+                .filter(
+                    or_(
+                        *[
+                            and_(
+                                self.Model.bot_id == bot_id,
+                                self.Model.owner_id == owner_id,
+                            )
+                            for bot_id, owner_id in pairs
+                        ]
+                    ),
+                    self.Model.is_delete == 0,
+                    self._env(),
+                    self.Model.public == "1",
+                )
+                .all()
+            )
+            return [b.to_dict() for b in bots]
 
     def list_by_search(
         self,

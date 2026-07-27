@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.core.bot_public.repository.bot_friend_repository import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey, BotFriendStatus, ApprovalStatus, ApprovalType
 from agentclaw.community.core.operator_context import OperatorContext
@@ -173,7 +174,11 @@ class BotPublicService:
                     f"access_mode={access_mode}, public={public}"
                 )
 
-        thread = threading.Thread(target=_do_sync, daemon=False)
+        # Bare threads don't copy context vars; carry the request tenant so the
+        # BotRepository reads inside _do_sync stay tenant-scoped.
+        thread = threading.Thread(
+            target=bind_current_avernet_tenant(_do_sync), daemon=False
+        )
         thread.start()
         logger.info(f"[_sync_access_mode_and_relations] Started background thread: bot_id={bot_id}, owner_id={owner_id}")
 
@@ -1116,9 +1121,14 @@ class BotPublicService:
 
             # 并发查询 bot 信息
             bot_map = {}
+            # ThreadPoolExecutor workers don't copy context vars; bind the
+            # request tenant so these BotRepository reads stay tenant-scoped.
+            _get_bot = bind_current_avernet_tenant(
+                self._bot_repository.get_by_id_and_owner
+            )
             with ThreadPoolExecutor(max_workers=10) as executor:
                 future_to_key = {
-                    executor.submit(self._bot_repository.get_by_id_and_owner, bot_id, owner_id): (owner_id, bot_id)
+                    executor.submit(_get_bot, bot_id, owner_id): (owner_id, bot_id)
                     for owner_id, bot_id in unique_keys
                 }
                 for future in as_completed(future_to_key):
