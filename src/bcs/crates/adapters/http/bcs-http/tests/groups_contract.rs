@@ -868,7 +868,10 @@ async fn post_groups_auto_start_forwards_authenticated_human_to_runtime() {
     let definition_yaml = r#"
 api_version: bcs.collaboration/v1
 name: Human Auto Start
-participants: {}
+participants:
+  driver:
+    bot_id: driver-bot
+    required: true
 runtime:
   kind: state_machine
   state_machine:
