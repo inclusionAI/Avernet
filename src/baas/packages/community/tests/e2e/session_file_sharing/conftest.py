@@ -36,7 +36,7 @@ def stub_oss_backend() -> StubFileTransferBackend:
 @pytest.fixture
 def mock_session_ticket_repo() -> MagicMock:
     """MagicMock for SessionTicketRepository — configure return_value per test."""
-    from secbaas.core.repository.session_file_ticket import SessionTicketRepository
+    from secbaas.community.core.repository.session_file_ticket import SessionTicketRepository
 
     return MagicMock(spec=SessionTicketRepository)
 
@@ -58,7 +58,7 @@ def _make_session_ticket_record(**overrides) -> MagicMock:
         A MagicMock that passes isinstance(..., SessionTicketRecord) checks
         and supports attribute access for all 14 SessionTicketRecord fields.
     """
-    from secbaas.core.repository.session_file_ticket import SessionTicketRecord
+    from secbaas.community.core.repository.session_file_ticket import SessionTicketRecord
 
     now = datetime.now()
     return MagicMock(

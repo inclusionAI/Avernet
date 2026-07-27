@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from secbaas.api.session_file_sharing import (
+from secbaas.community.api.session_file_sharing import (
     SourceTransferNotReadyError,
 )
-from secbaas.core.service.session_file_sharing import (
+from secbaas.community.core.service.session_file_sharing import (
     DefaultSessionFileSharingDispatcher,
 )
 
