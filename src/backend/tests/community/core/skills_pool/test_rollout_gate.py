@@ -9,11 +9,43 @@ import pytest
 from agentclaw.community.core.common_config.whitelist_service import (
     CommonWhiteListService,
 )
+from agentclaw.community.core.skills_pool.rollout_config import (
+    normalize_rollout_config_value,
+)
 from agentclaw.community.core.skills_pool.rollout_gate import (
     BotRuntimeForm,
     RolloutDecisionReason,
     SkillsPoolRolloutGate,
 )
+
+
+def test_legacy_rollout_entries_are_normalized_to_canonical_shape() -> None:
+    assert normalize_rollout_config_value(
+        {
+            "enable_all": False,
+            "promoted_engines": ["openclaw"],
+            "whitelist": [
+                {
+                    "owner_id": 168944,
+                    "bot_id": 42,
+                    "batch_id": 7,
+                }
+            ],
+        }
+    ) == {
+        "enable_all": False,
+        "full_rollout_engines": [],
+        "promoted_engines": ["openclaw"],
+        "whitelist": [
+            {
+                "owner_id": "168944",
+                "bot_id": "42",
+                "batch_id": "7",
+            }
+        ],
+        "negative_controls": [],
+        "teclaw_controls": [],
+    }
 
 
 class FakeCommonConfigService:
