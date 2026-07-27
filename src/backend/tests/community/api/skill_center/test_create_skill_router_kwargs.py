@@ -32,7 +32,14 @@ class _StrictService:
 
 
 class _Factory:
-    def create(self, *, repo_dir=None):  # router scopes via repo_dir
+    def create(
+        self,
+        *,
+        repo_dir=None,
+        entity_id=None,
+        bot_id=None,
+        engine_type=None,
+    ):
         return _StrictService()
 
 

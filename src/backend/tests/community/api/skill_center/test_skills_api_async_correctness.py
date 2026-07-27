@@ -222,7 +222,7 @@ def _upload_skill_di_app(mock_ctx, bot_status="ACTIVE", bot_type="personal",
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
     client = TestClient(app, raise_server_exceptions=False)
-    yield client, mock_skill_service, mock_bot_repo
+    yield client, mock_skill_service, mock_bot_repo, mock_skill_service_factory
 
 
 # ── activate_skill ────────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ def _upload_skill_di_app(mock_ctx, bot_status="ACTIVE", bot_type="personal",
 
 class TestUploadSkillValidation:
     def test_upload_rejects_non_active_bot(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="PENDING") as (client, mock_svc, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="PENDING") as (client, mock_svc, _, _):
             response = client.post(
                 "/api/skills/upload",
                 files=[
@@ -246,7 +246,7 @@ class TestUploadSkillValidation:
             mock_svc.upload_skill.assert_not_called()
 
     def test_upload_rejects_missing_bot(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, mock_bot_repo):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, mock_bot_repo, _):
             mock_bot_repo.get_by_id_and_owner.return_value = None
 
             response = client.post(
@@ -263,7 +263,7 @@ class TestUploadSkillValidation:
             mock_svc.upload_skill.assert_not_called()
 
     def test_upload_rejects_file_paths_length_mismatch(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _, _):
             response = client.post(
                 "/api/skills/upload",
                 files=[
@@ -279,7 +279,7 @@ class TestUploadSkillValidation:
             mock_svc.upload_skill.assert_not_called()
 
     def test_upload_active_bot_calls_service(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _, _):
             response = client.post(
                 "/api/skills/upload",
                 files=[
@@ -292,8 +292,34 @@ class TestUploadSkillValidation:
             assert body["success"] is True
             assert mock_svc.upload_skill.await_count == 1
 
+    def test_upload_passes_bot_scope_to_layout_aware_factory(self, mock_ctx):
+        with _upload_skill_di_app(
+            mock_ctx,
+            bot_status="ACTIVE",
+        ) as (client, mock_svc, _, mock_factory):
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            assert response.json()["success"] is True
+            create_kwargs = mock_factory.create.call_args.kwargs
+            assert create_kwargs["entity_id"] == mock_ctx.user_id
+            assert create_kwargs["bot_id"] == mock_ctx.bot_id
+            assert create_kwargs["engine_type"] == "openclaw"
+
     def test_upload_normalizes_runtime_unavailable_error_message(self, mock_ctx):
-        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _, _):
             mock_svc.upload_skill.side_effect = ValueError(
                 "Upload processing error: 502 Bad Gateway"
             )
@@ -335,7 +361,7 @@ class TestUploadSkillDesktopLiveStatus:
             bot_type="desktop",
             device_id="dev-1",
             bot_service=mock_bot_service,
-        ) as (client, mock_svc, _):
+        ) as (client, mock_svc, _, _):
             response = self._post_upload(client)
             body = response.json()
             assert body["success"] is True
@@ -352,7 +378,7 @@ class TestUploadSkillDesktopLiveStatus:
             bot_type="desktop",
             device_id="dev-1",
             bot_service=mock_bot_service,
-        ) as (client, mock_svc, _):
+        ) as (client, mock_svc, _, _):
             response = self._post_upload(client)
             body = response.json()
             assert body["success"] is False
@@ -369,7 +395,7 @@ class TestUploadSkillDesktopLiveStatus:
             bot_type="desktop",
             device_id="dev-1",
             bot_service=mock_bot_service,
-        ) as (client, mock_svc, _):
+        ) as (client, mock_svc, _, _):
             response = self._post_upload(client)
             body = response.json()
             assert body["success"] is False
@@ -386,7 +412,7 @@ class TestUploadSkillDesktopLiveStatus:
             bot_type="desktop",
             device_id="dev-1",
             bot_service=mock_bot_service,
-        ) as (client, mock_svc, _):
+        ) as (client, mock_svc, _, _):
             response = self._post_upload(client)
             body = response.json()
             assert body["success"] is False
@@ -403,7 +429,7 @@ class TestUploadSkillDesktopLiveStatus:
             bot_status="ACTIVE",
             bot_type="personal",
             bot_service=mock_bot_service,
-        ) as (client, mock_svc, _):
+        ) as (client, mock_svc, _, _):
             response = self._post_upload(client)
             body = response.json()
             assert body["success"] is True
