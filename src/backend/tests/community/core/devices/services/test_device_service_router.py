@@ -986,3 +986,183 @@ class TestApplyDeviceTemplateConfigPassthrough:
 
             # Confirm template_config was forwarded to _do_allocate
             assert mock_alloc.call_args.kwargs.get("template_config") == {"image": "img"}
+
+
+# ---------------------------------------------------------------------------
+# Default tag binding resolution (get_device_connection_by_bot + default_tag)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveBindingIdByDefaultTag:
+    """DeviceServiceRouter._resolve_binding_id_by_default_tag 测试。"""
+
+    def _make_router_with_repo(self):
+        """构建 Router 并暴露 repo/bot_query mock。"""
+        router, repo, bot_query, _ = _make_router(is_local=False)
+        return router, repo, bot_query
+
+    def _make_tagged_record(self, *, id: int, tag: str, entity_id: str = "u001") -> DeviceBindingRecord:
+        """创建带 AGENTCLAW_DEFAULT_TAG 的 binding record。"""
+        return DeviceBindingRecord(
+            id=id,
+            entity_id=entity_id,
+            entity_type="staff",
+            device_id=f"device-{id}",
+            device_provider=ARCA_DEVICE_PROVIDER,
+            env="dev",
+            device_props={"AGENTCLAW_DEFAULT_TAG": tag, "callback_token": "tok"},
+            status=DeviceBindingStatus.ACTIVE.value,
+            apply_reason=None,
+            applied_by=entity_id,
+            release_reason=None,
+            released_by=None,
+            released_at=None,
+            last_alive_at=None,
+            gmt_create=datetime(2024, 1, 1),
+            gmt_modified=datetime(2024, 1, 1),
+        )
+
+    def test_exact_tag_match(self):
+        """default_tag 精确匹配返回对应 binding_id。"""
+        router, repo, bot_query = self._make_router_with_repo()
+        bot_query.get_by_id.return_value = {
+            "owner_id": "u001", "entity_type": "staff",
+        }
+        b1 = self._make_tagged_record(id=10, tag="eval-v2")
+        b2 = self._make_tagged_record(id=20, tag="default")
+        repo.get_active_bindings_by_entity.return_value = [b1, b2]
+
+        with patch("agentclaw.community.core.devices.services.device_service_router.env_utils") as mock_env:
+            mock_env.get_current_env.return_value = "dev"
+            result = router._resolve_binding_id_by_default_tag(
+                bot_id="bot001", default_tag="eval-v2",
+            )
+        assert result == 10
+
+    def test_fallback_when_no_exact_match(self):
+        """无精确匹配时取第一个含 AGENTCLAW_DEFAULT_TAG 的绑定。"""
+        router, repo, bot_query = self._make_router_with_repo()
+        bot_query.get_by_id.return_value = {
+            "owner_id": "u001", "entity_type": "staff",
+        }
+        b1 = self._make_tagged_record(id=30, tag="other")
+        repo.get_active_bindings_by_entity.return_value = [b1]
+
+        with patch("agentclaw.community.core.devices.services.device_service_router.env_utils") as mock_env:
+            mock_env.get_current_env.return_value = "dev"
+            result = router._resolve_binding_id_by_default_tag(
+                bot_id="bot001", default_tag="nonexistent",
+            )
+        assert result == 30
+
+    def test_bot_not_found_raises(self):
+        """bot 不存在时抛 DeviceNotBoundError。"""
+        router, repo, bot_query = self._make_router_with_repo()
+        bot_query.get_by_id.return_value = None
+
+        with pytest.raises(Exception, match="不存在"):
+            router._resolve_binding_id_by_default_tag(
+                bot_id="missing", default_tag="default",
+            )
+
+    def test_no_matching_binding_raises(self):
+        """无匹配的评测沙箱绑定时抛 DeviceNotBoundError。"""
+        router, repo, bot_query = self._make_router_with_repo()
+        bot_query.get_by_id.return_value = {
+            "owner_id": "u001", "entity_type": "staff",
+        }
+        # 只有生产 binding，没有 AGENTCLAW_DEFAULT_TAG
+        b1 = _make_record(id=5, entity_id="u001")
+        repo.get_active_bindings_by_entity.return_value = [b1]
+
+        with patch("agentclaw.community.core.devices.services.device_service_router.env_utils") as mock_env:
+            mock_env.get_current_env.return_value = "dev"
+            with pytest.raises(Exception, match="未找到"):
+                router._resolve_binding_id_by_default_tag(
+                    bot_id="bot001", default_tag="default",
+                )
+
+    def test_empty_bindings_raises(self):
+        """无任何 ACTIVE 绑定时抛 DeviceNotBoundError。"""
+        router, repo, bot_query = self._make_router_with_repo()
+        bot_query.get_by_id.return_value = {
+            "owner_id": "u001", "entity_type": "staff",
+        }
+        repo.get_active_bindings_by_entity.return_value = []
+
+        with patch("agentclaw.community.core.devices.services.device_service_router.env_utils") as mock_env:
+            mock_env.get_current_env.return_value = "dev"
+            with pytest.raises(Exception, match="未找到"):
+                router._resolve_binding_id_by_default_tag(
+                    bot_id="bot001", default_tag="default",
+                )
+
+
+class TestGetDeviceConnectionByBotWithDefaultTag:
+    """DeviceServiceRouter.get_device_connection_by_bot default_tag 透传测试。"""
+
+    def test_default_tag_triggers_resolve_by_tag(self):
+        """传 default_tag 时走 _resolve_binding_id_by_default_tag 路径。"""
+        router, repo, bot_query, _ = _make_router(is_local=False)
+        bot_query.get_by_id.return_value = {
+            "owner_id": "u001", "entity_type": "staff",
+        }
+        eval_record = DeviceBindingRecord(
+            id=42,
+            entity_id="u001",
+            entity_type="staff",
+            device_id="device-42",
+            device_provider=ARCA_DEVICE_PROVIDER,
+            env="dev",
+            device_props={"AGENTCLAW_DEFAULT_TAG": "default", "callback_token": "tok"},
+            status=DeviceBindingStatus.ACTIVE.value,
+            apply_reason=None,
+            applied_by="u001",
+            release_reason=None,
+            released_by=None,
+            released_at=None,
+            last_alive_at=None,
+            gmt_create=datetime(2024, 1, 1),
+            gmt_modified=datetime(2024, 1, 1),
+        )
+        repo.get_active_bindings_by_entity.return_value = [eval_record]
+
+        # mock get_device_connection 避免真正走 provider
+        conn_info = DeviceConnectionInfo(
+            type="arca", target="ws://eval", token="t1", engine_type="openclaw"
+        )
+        router.get_device_connection = MagicMock(return_value=conn_info)
+
+        with patch("agentclaw.community.core.devices.services.device_service_router.env_utils") as mock_env:
+            mock_env.get_current_env.return_value = "dev"
+            result = router.get_device_connection_by_bot(
+                bot_id="bot001",
+                operator=_make_operator(),
+                default_tag="default",
+            )
+        assert result is conn_info
+        router.get_device_connection.assert_called_once()
+        call_kwargs = router.get_device_connection.call_args.kwargs
+        assert call_kwargs["binding_id"] == 42
+
+    def test_no_default_tag_uses_production_path(self):
+        """不传 default_tag 时走 _resolve_binding_id_by_bot_id 生产路径。"""
+        router, _, _, _ = _make_router(is_local=False)
+
+        # mock 两条路径
+        production_binding_id = 99
+        router._instance_service = MagicMock()
+        router._instance_service()._resolve_binding_id_by_bot_id.return_value = production_binding_id
+
+        conn_info = DeviceConnectionInfo(
+            type="arca", target="ws://prod", token="t2", engine_type="openclaw"
+        )
+        router.get_device_connection = MagicMock(return_value=conn_info)
+
+        result = router.get_device_connection_by_bot(
+            bot_id="bot001",
+            operator=_make_operator(),
+        )
+        assert result is conn_info
+        call_kwargs = router.get_device_connection.call_args.kwargs
+        assert call_kwargs["binding_id"] == 99

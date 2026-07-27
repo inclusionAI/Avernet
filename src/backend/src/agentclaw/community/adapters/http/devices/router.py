@@ -481,6 +481,7 @@ async def get_device_connection_by_bot(
     port: int | None = None,
     device_uuid: str | None = Query(None, description="锁定多实例中的特定实例；不传则自动选活跃实例"),
     ws_conn_mode: str | None = Query(None, description="WebSocket connection mode: 'direct'(default)/'relay'"),
+    default_tag: str | None = Query(None, description="default 区标签（传入则路由到评测沙箱 binding）"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: DeviceServiceProtocol = Injected(DeviceServiceProtocol),
 ) -> ApiResponse[DeviceConnectionResponse]:
@@ -491,6 +492,11 @@ async def get_device_connection_by_bot(
     ``device_uuid`` (optional) targets a specific instance for multi-instance
     service bots; when it can't be resolved the provider raises instead of
     silently falling back to another instance.
+
+    When ``default_tag`` is provided, the binding resolution switches from
+    ``ext.binding.online`` to finding the ACTIVE binding whose
+    ``device_props.AGENTCLAW_DEFAULT_TAG`` matches the given tag value.
+    This routes the conversation to an eval sandbox device.
     """
     try:
         from agentclaw.community.core.devices.errors import (
@@ -506,6 +512,7 @@ async def get_device_connection_by_bot(
             port=port,
             device_uuid=device_uuid,
             ws_conn_mode=ws_conn_mode,
+            default_tag=default_tag,
         )
 
         return ApiResponse(

@@ -363,6 +363,31 @@ class DeviceRepository(_DeviceBindingRepositoryProtocol):
                 .count()
             )
 
+    def get_active_bindings_by_entity(
+        self,
+        *,
+        entity_id: str,
+        entity_type: str,
+        env: str,
+    ) -> list[DeviceBindingRecord]:
+        """按 entity_id + entity_type 查询所有 ACTIVE 状态的绑定记录。
+
+        不通过 ac_bots.binding_id JOIN，直接查 ac_entity_device_binding。
+        """
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(EntityDeviceBinding)
+                .filter(
+                    EntityDeviceBinding.entity_id == entity_id,
+                    EntityDeviceBinding.entity_type == entity_type,
+                    EntityDeviceBinding.env == env,
+                    EntityDeviceBinding.status == _DeviceBindingStatus.ACTIVE,
+                )
+                .order_by(EntityDeviceBinding.id.desc())
+                .all()
+            )
+            return [r for r in (_to_record(m) for m in rows) if r]
+
     # ── updates (single bulk statements; gmt_modified DB-side) ──
 
     def release_binding(
