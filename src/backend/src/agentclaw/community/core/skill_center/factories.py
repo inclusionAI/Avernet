@@ -84,6 +84,10 @@ class SkillServiceFactory:
         device_fs_dispatcher: "DeviceFilesystemDispatcher",
         market_cache: MarketCache,
         git_sync_service_factory: Callable[[], GitSyncService],
+        pool_layout_paths: Callable[
+            [str, str, str],
+            tuple[str, str, str] | None,
+        ],
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_repo_sync = skill_repo_sync
@@ -91,6 +95,17 @@ class SkillServiceFactory:
         self._device_fs_dispatcher = device_fs_dispatcher
         self._market_cache = market_cache
         self._git_sync_service_factory = git_sync_service_factory
+        self._pool_layout_paths = pool_layout_paths
+
+    def resolve_pool_paths(
+        self,
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> tuple[str, str, str] | None:
+        """Resolve canonical Pool paths for a Bot when its layout owns IO."""
+
+        return self._pool_layout_paths(entity_id, bot_id, engine_type)
 
     def create(
         self,
@@ -100,7 +115,25 @@ class SkillServiceFactory:
         global_repo_dir: Optional[Path] = None,
         device_fs_factory=None,
         local_skill_path_adapter: Optional[Callable[[str], str]] = None,
+        entity_id: str | None = None,
+        bot_id: str | None = None,
+        engine_type: str | None = None,
     ) -> SkillService:
+        if entity_id is not None and bot_id is not None:
+            pool_paths = self.resolve_pool_paths(
+                str(entity_id),
+                str(bot_id),
+                engine_type or "",
+            )
+            if pool_paths is not None:
+                active_path, local_path, repo_path = pool_paths
+                active_dir = Path(active_path)
+                local_dir = Path(local_path)
+                repo_dir = Path(repo_path)
+                local_skill_path_adapter = build_pool_local_path_adapter(
+                    local_dir
+                )
+
         return SkillService(
             skill_repo=self._skill_repo,
             skill_repo_sync=self._skill_repo_sync,

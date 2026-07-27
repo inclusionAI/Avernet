@@ -398,36 +398,9 @@ class SkillCenterModule(Module):
         device_fs_dispatcher: DeviceFilesystemDispatcher,
         market_cache: MarketCache,
         git_sync_service_factory: Callable[[], GitSyncService],
-    ) -> SkillServiceFactory:
-        return SkillServiceFactory(
-            skill_repo=skill_repo,
-            skill_repo_sync=skill_repo_sync,
-            category_repo=category_repo,
-            device_fs_dispatcher=device_fs_dispatcher,
-            market_cache=market_cache,
-            git_sync_service_factory=git_sync_service_factory,
-        )
-
-    @singleton
-    @provider
-    @inject
-    def skill_set_service_factory(
-        self,
-        skill_repo: SkillRepository,
-        skill_set_repo: SkillSetRepository,
-        mcp_center: MCPCenterPlugin,
-        mcp_config_service: MCPConfigService,
-        skill_service_factory: SkillServiceFactory,
-        mcp_sync_service: MCPSyncService,
         bot_repo: BotRepository,
-        device_plugin: DeviceAccessor,
-        path_factory: WorkspacePathFactory,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
-        injector: Injector,
-    ) -> SkillSetServiceFactory:
-        # resolver / device_sync_dispatcher 走 lazy thunk:防止构造期 DI 循环
-        # ``BotService → SkillSetServiceFactory → DeviceContextResolver
-        # → ArcaConnInfoBuilder → DeviceService → BotService``。
+    ) -> SkillServiceFactory:
         def resolve_pool_paths(
             owner_id: str,
             bot_id: str,
@@ -451,6 +424,32 @@ class SkillCenterModule(Module):
             paths = pool_paths_for_engine(engine)
             return paths.active, paths.pool_local, paths.pool_repo
 
+        return SkillServiceFactory(
+            skill_repo=skill_repo,
+            skill_repo_sync=skill_repo_sync,
+            category_repo=category_repo,
+            device_fs_dispatcher=device_fs_dispatcher,
+            market_cache=market_cache,
+            git_sync_service_factory=git_sync_service_factory,
+            pool_layout_paths=resolve_pool_paths,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def skill_set_service_factory(
+        self,
+        skill_repo: SkillRepository,
+        skill_set_repo: SkillSetRepository,
+        mcp_center: MCPCenterPlugin,
+        mcp_config_service: MCPConfigService,
+        skill_service_factory: SkillServiceFactory,
+        mcp_sync_service: MCPSyncService,
+        bot_repo: BotRepository,
+        device_plugin: DeviceAccessor,
+        path_factory: WorkspacePathFactory,
+        injector: Injector,
+    ) -> SkillSetServiceFactory:
         return SkillSetServiceFactory(
             skill_repo=skill_repo,
             skill_set_repo=skill_set_repo,
@@ -463,7 +462,7 @@ class SkillCenterModule(Module):
             bot_repo=bot_repo,
             device_plugin=device_plugin,
             path_factory=path_factory,
-            pool_layout_paths=resolve_pool_paths,
+            pool_layout_paths=skill_service_factory.resolve_pool_paths,
         )
 
     @singleton
