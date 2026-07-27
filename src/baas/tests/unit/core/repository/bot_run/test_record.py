@@ -26,13 +26,14 @@ class TestRunStatus:
 
     def test_all_statuses(self):
         values = {s.value for s in RunStatus}
-        assert values == {"PENDING", "RUNNING", "COMPLETED", "FAILED"}
+        assert values == {"PENDING", "RUNNING", "COMPLETED", "FAILED", "TIME_OUT"}
 
     def test_from_value(self):
         assert RunStatus("PENDING") is RunStatus.PENDING
         assert RunStatus("RUNNING") is RunStatus.RUNNING
         assert RunStatus("COMPLETED") is RunStatus.COMPLETED
         assert RunStatus("FAILED") is RunStatus.FAILED
+        assert RunStatus("TIME_OUT") is RunStatus.TIME_OUT
 
     def test_invalid_value_raises(self):
         with pytest.raises(ValueError):

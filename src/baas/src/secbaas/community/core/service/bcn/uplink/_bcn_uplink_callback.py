@@ -25,7 +25,7 @@ def _build_chat_event(
     task_exception: BaseException | None,
 ) -> ChatEvent:
     """根据 BotRunRecord 构造 ChatEvent"""
-    if record.status == "FAILED":
+    if record.status in ("FAILED", "TIME_OUT"):
         state = "error"
     else:
         state = "final"
@@ -97,7 +97,7 @@ class BcnUplinkCallback:
             )
             return
 
-        if run.status not in ("COMPLETED", "FAILED"):
+        if run.status not in ("COMPLETED", "FAILED", "TIME_OUT"):
             return  # 非终态：交由恢复流程在终态后上报
 
         event = _build_chat_event(run, None)
