@@ -381,9 +381,7 @@ class AsyncChatClient:
 
                 # 5. 等待主对话事件完成
                 if timeout:
-                    await asyncio.wait_for(
-                        state.chat_complete.wait(), timeout=timeout
-                    )
+                    await asyncio.wait_for(state.chat_complete.wait(), timeout=timeout)
                 else:
                     # 无超时等待
                     await state.chat_complete.wait()

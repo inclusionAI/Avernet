@@ -404,11 +404,13 @@ class TestSendMessage:
     async def test_send_message_error_state_marks_failed(
         self, service, wss_resolver, mock_pool
     ):
-        """ChatClient returning error state marks session as FAILED and raises."""
+        """ChatClient raising error marks session as FAILED and raises."""
         binding = _make_binding_info(baas_session_id="SESSION-xyz")
 
         mock_client = AsyncMock()
-        mock_client.send_message = AsyncMock(return_value=("error msg", "error"))
+        mock_client.send_message = AsyncMock(
+            side_effect=RuntimeError("error msg")
+        )
         mock_pool.get.return_value = mock_client
 
         with (
@@ -426,7 +428,9 @@ class TestSendMessage:
                     binding_info=binding,
                     timeout=30.0,
                 )
-            mock_failed.assert_called_once_with("SESSION-xyz", err_msg="error msg")
+            mock_failed.assert_called_once_with(
+                "SESSION-xyz", err_msg="error msg"
+            )
 
     @pytest.mark.asyncio
     async def test_send_message_exception_marks_failed(
