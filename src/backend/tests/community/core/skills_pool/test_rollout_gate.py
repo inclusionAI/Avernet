@@ -35,6 +35,7 @@ def test_legacy_rollout_entries_are_normalized_to_canonical_shape() -> None:
     ) == {
         "enable_all": False,
         "full_rollout_engines": [],
+        "full_rollout_owners": [],
         "promoted_engines": ["openclaw"],
         "whitelist": [
             {
@@ -71,6 +72,7 @@ def enabled_config(
     whitelist: object = None,
     enable_all: object = False,
     full_rollout_engines: object = None,
+    full_rollout_owners: object = None,
 ) -> dict[str, Any]:
     return {
         "id": 42,
@@ -81,6 +83,9 @@ def enabled_config(
             "enable_all": enable_all,
             "full_rollout_engines": (
                 [] if full_rollout_engines is None else full_rollout_engines
+            ),
+            "full_rollout_owners": (
+                [] if full_rollout_owners is None else full_rollout_owners
             ),
             "promoted_engines": (
                 ["openclaw"] if promoted_engines is None else promoted_engines
@@ -252,6 +257,86 @@ def test_engine_full_rollout_admits_only_that_promoted_engine() -> None:
     assert claude.reason is RolloutDecisionReason.BOT_NOT_WHITELISTED
 
 
+def test_owner_full_rollout_admits_future_and_restarted_bots_for_that_engine() -> None:
+    gate = make_gate(
+        enabled_config(
+            promoted_engines=["openclaw", "claude_code"],
+            full_rollout_owners=[
+                {"owner_id": "owner-1", "engine": "openclaw"},
+            ],
+            whitelist=[],
+        )
+    )
+
+    future_openclaw = evaluate(
+        gate,
+        owner_id="owner-1",
+        bot_id="future-bot",
+    )
+    restarted_claude = evaluate(
+        gate,
+        owner_id="owner-1",
+        bot_id="existing-bot",
+        engine_type="claude_code",
+    )
+    other_owner = evaluate(
+        gate,
+        owner_id="owner-2",
+        bot_id="future-bot",
+    )
+
+    assert future_openclaw.eligible
+    assert future_openclaw.evidence is not None
+    assert future_openclaw.evidence.decision_reason == "owner_full_rollout"
+    assert restarted_claude.reason is RolloutDecisionReason.BOT_NOT_WHITELISTED
+    assert other_owner.reason is RolloutDecisionReason.BOT_NOT_WHITELISTED
+
+
+def test_exact_negative_control_overrides_owner_full_rollout() -> None:
+    config = enabled_config(
+        full_rollout_owners=[
+            {"owner_id": "owner-1", "engine": "openclaw"},
+        ],
+        whitelist=[],
+    )
+    config["param_value"]["negative_controls"] = [
+        {
+            "owner_id": "owner-1",
+            "bot_id": "control-bot",
+            "batch_id": "openclaw-canary-1",
+        }
+    ]
+    gate = make_gate(config)
+
+    control = evaluate(gate, owner_id="owner-1", bot_id="control-bot")
+    ordinary = evaluate(gate, owner_id="owner-1", bot_id="ordinary-bot")
+
+    assert not control.eligible
+    assert control.reason is RolloutDecisionReason.BOT_NEGATIVE_CONTROL
+    assert ordinary.eligible
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"owner_id": "*", "engine": "openclaw"},
+        {"owner_id": "owner-1", "engine": "unknown"},
+        {"owner_id": "owner-1", "engine": "claude_code"},
+        {"owner_id": "owner-1"},
+        {"owner_id": "owner-1", "engine": "openclaw", "bot_id": "bot-1"},
+    ],
+)
+def test_invalid_owner_full_rollout_entry_fails_closed(
+    entry: dict[str, object],
+) -> None:
+    decision = evaluate(
+        make_gate(enabled_config(full_rollout_owners=[entry], whitelist=[]))
+    )
+
+    assert not decision.eligible
+    assert decision.reason is RolloutDecisionReason.CONFIG_INVALID
+
+
 def test_full_rollout_still_rejects_unpromoted_engine() -> None:
     decision = evaluate(
         make_gate(enabled_config(enable_all=True, whitelist=[])),
@@ -279,9 +364,7 @@ def test_service_draft_is_editable_but_published_service_is_not(
     promotion_order = ["openclaw", "claude_code", "aicoding", "hermes"]
     gate = make_gate(
         enabled_config(
-            promoted_engines=promotion_order[
-                : promotion_order.index(engine_type) + 1
-            ]
+            promoted_engines=promotion_order[: promotion_order.index(engine_type) + 1]
         )
     )
 

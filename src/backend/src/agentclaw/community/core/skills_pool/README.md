@@ -15,8 +15,10 @@ Engine Layout Descriptor 仍不在本期范围内。
   `migration_generation`、lease 和白名单审计证据。
 - 白名单仅控制首次认领。认领成功后状态具有粘性，移出白名单不会撤销迁移。
 - rollout 配置按环境隔离；缺失、禁用、读取失败、格式异常或通配配置均
-  fail closed。`full_rollout_engines` 可逐引擎放开未来新建和后续重启的
-  Bot；`enable_all=true` 则覆盖当前环境中全部已经人工晋级并验收的引擎。
+  fail closed。`full_rollout_owners` 可在一个已晋级且已有验收批次的引擎内，
+  按 owner 放开其未来新建和后续重启的全部 Bot；`full_rollout_engines`
+  可逐引擎放开全环境，`enable_all=true` 则覆盖当前环境中全部已经人工晋级
+  并验收的引擎。精确负对照优先于所有扩大规则，始终保持不认领。
   未晋级引擎始终拒绝，环境全量期间也禁止直接晋级新引擎。
 - owner 和 engine 来自当前 Bot 记录；服务草稿还必须由当前
   `ac_bot_publish` DRAFT 记录证明。认领入口不接受调用方自报运行形态，
@@ -79,6 +81,8 @@ Engine Layout Descriptor 仍不在本期范围内。
   幂等。容器只接受 generation，由固定 engine Pool 根推导删除目标，不能
   删除其他 Bot 或 generation。数据库保留清理时间与证据。
 - 灰度运维入口接受当前环境中的精确 `(owner_id, bot_id)`；单个已晋级引擎
+  完成批次验收后，可引用最近一次验收通过
+  `POST /rollout/owners` 按 `(owner_id, engine)` 放开该员工全部未来认领；
   完成批次验收且无负对照后，可写入 `full_rollout_engines` 单独全量；
   所有已晋级引擎均满足条件后，可显式打开或关闭环境级 `enable_all`。
   引擎按 OpenClaw、Claude Code、AICoding、Hermes 的固定
