@@ -13,6 +13,7 @@ from agentclaw.community.core.bot_collaborator.models import (
 )
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.notify.bot_lister import RepositoryNotifyBotLister
+from agentclaw.community.core.notify.protocol import NotifyTarget
 
 
 def _binding(
@@ -120,8 +121,8 @@ class TestRepositoryNotifyBotLister:
         result = lister.list_bot_mappings("u001")
 
         assert result == [
-            ("bot1", "Alpha", "sb1"),
-            ("bot2", "Beta", "sb2"),
+            NotifyTarget("bot1", "Alpha", "u001", "sb1"),
+            NotifyTarget("bot2", "Beta", "u001", "sb2"),
         ]
 
     def test_owner_bindings_without_sandbox_are_skipped(self):
@@ -138,7 +139,7 @@ class TestRepositoryNotifyBotLister:
         )
         result = lister.list_bot_mappings("u001")
         # bot_id comes from device_props.bolt_id; sandbox falls back to device_id
-        assert result == [("bot1", "Alpha", "dev1")]
+        assert result == [NotifyTarget("bot1", "Alpha", "u001", "dev1")]
 
     # ------------------------------------------------------------------
     # Collaborator fold-in
@@ -163,8 +164,8 @@ class TestRepositoryNotifyBotLister:
 
         result = lister.list_bot_mappings("u001")
 
-        assert ("owned", "Mine", "sb1") in result
-        assert ("cobra", "Collab", "sbCobra") in result
+        assert NotifyTarget("owned", "Mine", "u001", "sb1") in result
+        assert NotifyTarget("cobra", "Collab", "ownerA", "sbCobra") in result
 
         # collaborator binding resolved via owner's active binding (owner = ownerA)
         binding_repo.get_active_by_bot_and_owner.assert_any_call(
@@ -196,7 +197,7 @@ class TestRepositoryNotifyBotLister:
 
         result = lister.list_bot_mappings("u001")
 
-        assert result == [("shared", "Shared", "sb1")]
+        assert result == [NotifyTarget("shared", "Shared", "u001", "sb1")]
         # The collaborator branch should not ask for the owner binding because the
         # bot was already seen.
         binding_repo.get_active_by_bot_and_owner.assert_not_called()
@@ -218,7 +219,7 @@ class TestRepositoryNotifyBotLister:
 
         result = lister.list_bot_mappings("u001")
 
-        assert result == [("cbot1", "cbot1", "sbA")]
+        assert result == [NotifyTarget("cbot1", "cbot1", "ownerA", "sbA")]
         collab_repo.list_by_user.assert_called_once()
 
     def test_collaborator_record_with_empty_owner_id_is_skipped(self):
@@ -240,7 +241,7 @@ class TestRepositoryNotifyBotLister:
 
         result = lister.list_bot_mappings("u001")
 
-        assert result == [("cbot1", "cbot1", "sbA")]
+        assert result == [NotifyTarget("cbot1", "cbot1", "ownerA", "sbA")]
         # only the valid record triggers a binding lookup; the empty-owner
         # record is short-circuited.
         binding_repo.get_active_by_bot_and_owner.assert_called_once_with(
@@ -265,7 +266,7 @@ class TestRepositoryNotifyBotLister:
 
         result = lister.list_bot_mappings("u001")
 
-        assert result == [("cbot1", "cbot1", "sbA")]
+        assert result == [NotifyTarget("cbot1", "cbot1", "ownerA", "sbA")]
 
     def test_collaborator_repo_failure_does_not_break_owner_path(self):
         lister, _, _, collab_repo = _make_lister(
@@ -280,7 +281,7 @@ class TestRepositoryNotifyBotLister:
         result = lister.list_bot_mappings("u001")
 
         # owner path intact; collaborator branch degraded to empty (logged)
-        assert result == [("owned", "Mine", "sb1")]
+        assert result == [NotifyTarget("owned", "Mine", "u001", "sb1")]
 
     def test_collaborator_binding_lookup_failure_skips_that_bot(self):
         lister, binding_repo, _, collab_repo = _make_lister(
@@ -306,5 +307,5 @@ class TestRepositoryNotifyBotLister:
 
         result = lister.list_bot_mappings("u001")
 
-        assert result == [("cbot1", "cbot1", "sbA")]
+        assert result == [NotifyTarget("cbot1", "cbot1", "ownerA", "sbA")]
         collab_repo.list_by_user.assert_called_once()
