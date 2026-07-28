@@ -34,7 +34,6 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     ClusterMismatchError,
-    EngineOptionsUnsupportedError,
     MissingPrincipalError,
     UnsupportedEngineError,
 )
@@ -116,7 +115,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
-    EngineOptionsUnsupportedError: (400, "engine_options is not supported yet"),
     PassportError: (502, "Authorization service error"),
     # Engine-config failures. None of these is a BotServiceError, so the base
     # mapping below does not cover them and they would otherwise escape the

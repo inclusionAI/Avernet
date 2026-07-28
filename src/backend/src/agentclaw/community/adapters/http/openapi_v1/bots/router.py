@@ -31,10 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import (
-    EngineOptionsUnsupportedError,
-    UnsupportedEngineError,
-)
+from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngineError
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
@@ -146,6 +143,25 @@ def _reject_desktop(bot: dict[str, Any]) -> None:
         )
 
 
+def _bcn_auth_headers(request: Request) -> dict[str, str]:
+    """The caller's bearer token, for the downstream BCN identity check.
+
+    ``BotService._sync_bot_to_bcn`` forwards ``request_headers`` to
+    ``BcnService.onboard_bot``, which extracts ``Cookie`` / ``Authorization`` to
+    identify the caller. Passing nothing makes that call unauthenticated, and the
+    failure is swallowed (warning only) — so a rename would answer 200 while the
+    coordination-network name stayed stale, on every public update.
+
+    Only ``Authorization`` is forwarded. The ``Cookie`` half stays out on
+    purpose: a browser session credential has no business below the adapter
+    boundary, and this surface's callers are registered tenants presenting a
+    bearer token, not browser sessions. Returns ``{}`` when the caller sent no
+    Authorization header, which is the same "no credential" state as before.
+    """
+    authorization = request.headers.get("Authorization")
+    return {"Authorization": authorization} if authorization else {}
+
+
 def _sync_passport_identity(
     passport_plugin: PassportPlugin,
     *,
@@ -201,19 +217,11 @@ async def create_bot(
 ):
     """Create a bot (201), or return 202 + a Passport iframe when authorization is needed.
 
-    ``engine_options`` maps onto the spec's ``extra_properties`` bag — the
-    designated home for engine-specific inputs — but nothing downstream consumes
-    it yet, so a non-empty value is rejected rather than silently dropped.
+    Engine-specific inputs belong in ``BotCreateSpec.extra_properties``, but
+    nothing downstream reads that bag yet, so the request model does not expose
+    an ``engine_options`` field for it — see :class:`BotCreate`.
     """
     owner_id = caller_owner_id(principal)
-    # Accepting these would answer 201 while discarding configuration the caller
-    # explicitly asked for, and the 202 path could not recover them at all. The
-    # field stays in the schema so the contract does not change shape once
-    # create_bot reads extra_properties.
-    if body.engine_options:
-        raise EngineOptionsUnsupportedError(
-            "engine_options cannot be applied at creation yet"
-        )
     # Validate the engine against the configured registry FIRST: the cluster rule
     # below treats every non-teclaw value as ACRA, so an unknown engine would
     # otherwise sail through, allocate an id, apply for a Passport, and only fail
@@ -234,7 +242,6 @@ async def create_bot(
             bot_type=body.bot_type,
             bot_name=body.bot_name,
             bot_desc=body.bot_desc,
-            extra_properties=body.engine_options,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
@@ -291,10 +298,21 @@ async def check_bot_name(
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[NameCheck]:
-    """Check whether a bot name is available (within the caller's tenant)."""
+    """Check whether a bot name is available (within the caller's tenant).
+
+    Applies the same rule create and update do, because "available" has to mean
+    "you could create this". ``check_bot_name_exists`` only does a repository
+    lookup — it answers ``False`` for a blank or ``@``-bearing name, which would
+    report a name as free that the very next request would reject (400).
+    Rejecting here instead keeps one answer across the three endpoints.
+
+    The echoed ``name`` is the trimmed form actually checked, so a caller that
+    sends ``" Foo "`` sees which string the availability applies to.
+    """
     caller_owner_id(principal)  # require an authenticated caller
-    exists = bot_service.check_bot_name_exists(name)
-    return envelope(NameCheck(name=name, exists=exists), request)
+    checked = validate_bot_name(name)
+    exists = bot_service.check_bot_name_exists(checked)
+    return envelope(NameCheck(name=checked, exists=exists), request)
 
 
 @router.get("/ceiling", response_model=Envelope[Ceiling])
@@ -345,7 +363,13 @@ async def update_bot(
     # surface could persist names the rest of the lifecycle rejects.
     bot_name = validate_bot_name(body.bot_name) if body.bot_name is not None else None
     bot = bot_service.update_bot(
-        bot_id, owner_id, bot_name=bot_name, bot_desc=body.bot_desc
+        bot_id,
+        owner_id,
+        bot_name=bot_name,
+        bot_desc=body.bot_desc,
+        # Bearer token only — see _bcn_auth_headers. Without it the downstream
+        # BCN sync runs unauthenticated and fails silently.
+        request_headers=_bcn_auth_headers(request),
     )
     # Identity metadata lives in the Passport too; leaving it stale would make
     # Passport queries disagree with the bot API. Presence, not truthiness —

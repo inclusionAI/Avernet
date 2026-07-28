@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,11 +53,13 @@ class BotCreate(BaseModel):
     engine: str
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
     bot_type: BotType
-    engine_options: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Engine/vendor-specific inputs, kept nested rather than "
-        "flattened into the request body.",
-    )
+    # ``engine_options`` is deliberately absent. Nothing downstream consumes
+    # ``BotCreateSpec.extra_properties`` yet, so declaring the field would
+    # publish a contract slot the server rejects on every non-empty value —
+    # generated clients would compile a request that always fails. It returns
+    # here, unchanged in shape, once ``create_bot`` reads the bag; until then
+    # ``extra="forbid"`` names it in the error rather than the schema promising
+    # something untrue.
 
 
 class BotUpdate(BaseModel):

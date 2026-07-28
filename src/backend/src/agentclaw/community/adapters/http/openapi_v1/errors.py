@@ -32,15 +32,3 @@ class UnsupportedEngineError(Exception):
     allocated or a Passport is applied for — otherwise the request would create
     side effects and only fail later at device provisioning.
     """
-
-
-class EngineOptionsUnsupportedError(Exception):
-    """Raised when a create request supplies ``engine_options`` (→ 400).
-
-    ``BotCreateSpec.extra_properties`` is the designated home for these values,
-    but nothing downstream reads it yet, so accepting a non-empty bag would
-    answer 201 while silently discarding configuration the caller explicitly
-    asked for. Rejecting keeps the contract honest until the create service
-    consumes them; the request field stays in the schema so nothing changes
-    shape when it does.
-    """

@@ -577,24 +577,34 @@ def test_engine_config_conn_info_failure_is_enveloped(client, engine_config):
 
 
 def test_create_rejects_unappliable_engine_options(client, svc, passport, bot_repo):
-    """R5/F22: nothing reads extra_properties, so 201 would discard the input."""
+    """R5/F22 + R8/F35: nothing reads extra_properties, so 201 would discard it.
+
+    R5 rejected a non-empty value at runtime while the schema still advertised
+    the field — a contract slot the server always refused. The field is now
+    absent, so ``extra="forbid"`` names it in the validation error and the
+    published schema stops promising something untrue.
+    """
     body = {**_CREATE_BODY, "engine_options": {"model": "x"}}
     with patch.object(bots_router, "generate_bot_id", return_value="default") as gen:
         resp = client.post("/openapi/v1/bots", json=body)
-    assert resp.status_code == 400
-    assert resp.json()["code"] == 400000
+    assert resp.status_code == 422
     # Rejected up front — no id allocated, no Passport applied, nothing created.
     gen.assert_not_called()
     passport.apply_first_agent_passport.assert_not_called()
     svc.create_bot.assert_not_called()
 
 
-def test_create_still_accepts_empty_engine_options(client, svc, passport):
-    """The guard rejects only values it would drop; the field itself stays valid."""
-    passport.apply_first_agent_passport.return_value = {"token": "t", "agent_code": "a"}
+def test_create_rejects_even_an_empty_engine_options(client, svc):
+    """R8/F35: the field is gone from the contract, not merely constrained."""
     resp = client.post("/openapi/v1/bots", json={**_CREATE_BODY, "engine_options": {}})
-    assert resp.status_code == 201, resp.json()
-    svc.create_bot.assert_called_once()
+    assert resp.status_code == 422
+    svc.create_bot.assert_not_called()
+
+
+def test_create_schema_does_not_advertise_engine_options(client):
+    """A generated client must not be able to compile a request we always reject."""
+    schema = client.app.openapi()["components"]["schemas"]["BotCreate"]
+    assert "engine_options" not in schema["properties"]
 
 
 def test_auth_status_validates_cluster_against_default_engine(client, svc, passport):
@@ -679,3 +689,46 @@ def test_passport_absent_is_still_404(client, passport):
     """Neither identifier present still means no passport."""
     passport.query_agent_passport.return_value = {"agent_id": None, "agent_code": None}
     assert client.get("/openapi/v1/bots/b1/passport").status_code == 404
+
+
+# ----- round-8 review regressions ------------------------------------------
+
+
+def test_check_name_rejects_names_create_would_reject(client, svc):
+    """R8/F36: "available" has to mean "you could create this".
+
+    ``check_bot_name_exists`` only does a repository lookup, so an invalid name
+    came back ``exists: false`` — reported free, then rejected by the very next
+    create call.
+    """
+    for bad in ["bad@name", "   ", "x" * 33]:
+        resp = client.get("/openapi/v1/bots/check-name", params={"name": bad})
+        assert resp.status_code == 400, f"{bad!r} was accepted: {resp.json()}"
+        assert resp.json()["code"] == 400000
+    svc.check_bot_name_exists.assert_not_called()
+
+
+def test_check_name_echoes_the_normalized_name(client, svc):
+    """The answer applies to the trimmed name that was actually looked up."""
+    data = _ok(client.get("/openapi/v1/bots/check-name", params={"name": "  Foo  "}))
+    assert data == {"name": "Foo", "exists": True}
+    svc.check_bot_name_exists.assert_called_once_with("Foo")
+
+
+def test_update_forwards_bearer_token_for_bcn_sync(client, svc):
+    """R8/F37: without it the downstream BCN sync runs unauthenticated."""
+    client.put(
+        "/openapi/v1/bots/b1",
+        json={"bot_name": "Renamed"},
+        headers={"Authorization": "Bearer tok-1", "Cookie": "session=secret"},
+    )
+    headers = svc.update_bot.call_args.kwargs["request_headers"]
+    assert headers == {"Authorization": "Bearer tok-1"}
+    # The browser-session credential stays above the adapter boundary.
+    assert "Cookie" not in headers
+
+
+def test_update_without_authorization_forwards_nothing(client, svc):
+    """No credential in, no credential out — not a header with an empty value."""
+    client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"})
+    assert svc.update_bot.call_args.kwargs["request_headers"] == {}
