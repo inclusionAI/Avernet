@@ -3090,12 +3090,17 @@ impl BcsServer {
             crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
             outbound_url_guard.clone(),
         );
-        let _state_machine_timeout_handle = crate::state_machine_timeout_scanner::spawn(
-            services.collaboration_runtime.clone(),
-            crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
-            crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
-            crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
-        );
+        let _state_machine_timeout_handle =
+            if crate::state_machine_timeout_scanner::should_start(leader_election.as_ref()).await? {
+                Some(crate::state_machine_timeout_scanner::spawn(
+                    services.collaboration_runtime.clone(),
+                    crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
+                    crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
+                    crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
+                ))
+            } else {
+                None
+            };
 
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
