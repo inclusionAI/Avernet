@@ -30,7 +30,7 @@ class TestCreateRun:
         assert response.status_code == 401
         body = response.json()
         assert body["detail"]["code"] == 40101
-        assert body["detail"]["message"] == "Token 缺失"
+        assert body["detail"]["message"] == "Token missing"
 
     @pytest.mark.asyncio
     async def test_create_run_missing_message(self, api: APITestHelper) -> None:

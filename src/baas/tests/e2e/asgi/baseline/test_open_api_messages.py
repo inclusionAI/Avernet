@@ -97,7 +97,7 @@ class TestPostMessage:
         assert response.status_code == 401
         body = response.json()
         assert body["detail"]["code"] == 40101
-        assert body["detail"]["message"] == "Token 缺失"
+        assert body["detail"]["message"] == "Token missing"
 
     @pytest.mark.asyncio
     async def test_post_message_empty_body(self, api: APITestHelper) -> None:

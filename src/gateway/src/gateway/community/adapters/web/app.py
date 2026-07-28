@@ -26,7 +26,7 @@ DOCS_TAGS = [
     {"name": "test", "description": "Test and debug endpoints."},
 ]
 
-_API_DESCRIPTION = "Avernet gateway — config-driven forwarding surface."
+_API_DESCRIPTION = "Avernet Gateway — A configuration-driven forwarding plane (UNDER ACTIVE DEVELOPMENT)."
 
 
 def create_app() -> FastAPI:
@@ -70,6 +70,7 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if enable_docs else None,
         openapi_tags=DOCS_TAGS,
         lifespan=lifespan,
+        swagger_ui_parameters={"supportedSubmitMethods": []},
     )
 
     # Install tracing middleware (must happen before the app starts serving).
@@ -77,13 +78,21 @@ def create_app() -> FastAPI:
     tracer.setup(config.app_name)
     tracer.install_middleware(app)
 
-    @app.get("/api/test", tags=["test"])
+    @app.get(
+        "/api/test",
+        tags=["test"],
+        description="Test endpoint to verify API connectivity",
+    )
     async def hello() -> dict[str, str]:
         """Return a hello message."""
         logger.info("Hello endpoint called")
         return {"status": "healthy", "message": "hello, i am gw"}
 
-    @app.get("/health", tags=["health"])
+    @app.get(
+        "/health",
+        tags=["health"],
+        description="Kubernetes liveness probe endpoint for container orchestration",
+    )
     async def health() -> dict[str, str]:
         """Liveness probe."""
         return {"status": "ok"}
@@ -93,16 +102,29 @@ def create_app() -> FastAPI:
     app.state.domain_map = forwarding.domain_map
     app.state.forwarder = forwarding.forwarder
 
+    # Save FastAPI's default openapi generator so we can merge local routes
+    # (/health, /api/test) into the served schema alongside upstream paths.
+    _default_openapi = app.openapi
+
     # Serve the generated OpenAPI (config ⋈ each domain's published description)
     # instead of FastAPI's route introspection. Regenerated per call so it tracks
     # the catalog's background refresh.
     def _served_openapi() -> dict[str, Any]:
-        return forwarding.served_openapi(
+        served = forwarding.served_openapi(
             authenticator.route_security,
             title=config.app_name,
             version=__version__,
             description=_API_DESCRIPTION,
         )
+        # Merge local gateway routes (health, test, docs) into the served schema
+        # so they appear in /docs and /redoc alongside upstream domain paths.
+        local = _default_openapi()
+        local_paths = local.get("paths", {})
+        served_paths = served.setdefault("paths", {})
+        for path, item in local_paths.items():
+            if path not in served_paths:
+                served_paths[path] = item
+        return served
 
     app.openapi = _served_openapi  # type: ignore[method-assign]
 

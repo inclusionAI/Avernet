@@ -500,11 +500,14 @@ class TestHttpCallbackOrigin:
     async def test_response_body_logged(self):
         cb = HttpCallback(_make_repo())
         mock_resp = _make_response(status_code=200, text="all good")
-        with patch(
-            "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
-        ) as mock_client_cls, patch(
-            "secbaas.community.core.service.callback._http_callback.logger"
-        ) as mock_logger:
+        with (
+            patch(
+                "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
+            ) as mock_client_cls,
+            patch(
+                "secbaas.community.core.service.callback._http_callback.logger"
+            ) as mock_logger,
+        ):
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
@@ -521,18 +524,24 @@ class TestHttpCallbackOrigin:
             )
 
         resp_log_call = mock_logger.info.call_args_list[0]
-        assert resp_log_call.args[0] == "[callback] response: run_id=%s, url=%s, status=%s, body=%s"
+        assert (
+            resp_log_call.args[0]
+            == "[callback] response: run_id=%s, url=%s, status=%s, body=%s"
+        )
         assert "all good" in resp_log_call.args
 
     @pytest.mark.asyncio
     async def test_response_body_logged_on_failure(self):
         cb = HttpCallback(_make_repo())
         mock_resp = _make_response(status_code=500, text="server error")
-        with patch(
-            "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
-        ) as mock_client_cls, patch(
-            "secbaas.community.core.service.callback._http_callback.logger"
-        ) as mock_logger:
+        with (
+            patch(
+                "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
+            ) as mock_client_cls,
+            patch(
+                "secbaas.community.core.service.callback._http_callback.logger"
+            ) as mock_logger,
+        ):
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
@@ -548,8 +557,8 @@ class TestHttpCallbackOrigin:
                 ),
             )
 
-        log_messages = [
-            call.args[0] for call in mock_logger.info.call_args_list
-        ]
+        log_messages = [call.args[0] for call in mock_logger.info.call_args_list]
         assert any("response:" in msg for msg in log_messages)
-        assert any("failed:" in call.args[0] for call in mock_logger.error.call_args_list)
+        assert any(
+            "failed:" in call.args[0] for call in mock_logger.error.call_args_list
+        )
