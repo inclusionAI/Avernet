@@ -240,3 +240,127 @@ class TestMcpDefaultsPerEngineEndToEnd:
         assert BCS_MCP_SERVER_CODE in codes
         assert "hitl" in codes
         assert len(codes) == 12
+
+
+class TestClaudeCodeDefaultMcpNames:
+    """claude_code default MCPs declare name/description inline; the three merge
+    branches surface them, falling back to the legacy mock name when absent.
+
+    Icon is not shipped in community source, so we monkeypatch a declared icon
+    onto one entry to exercise the icon-passthrough branch (lines 1662 / 1730).
+    """
+
+    @pytest.fixture
+    def mock_skill_set_repo(self):
+        repo = MagicMock()
+        # No active/owned skill sets → collect_bot_*_mcps reaches its default-MCP
+        # merge loop (where icon passthrough lives) instead of short-circuiting
+        # via get_set_mcp_servers on a default set.
+        repo.get_all_active_skill_sets.return_value = []
+        repo.list_all.return_value = []
+        repo.get_mcp_servers_in_set.return_value = []
+        repo.get_excluded_mcps.return_value = []
+        repo.get_all_excluded_mcps.return_value = []
+        repo.get_by_id.return_value = {"id": 1, "name": "default", "is_default": True}
+        repo.get_skill_set.return_value = {"id": 1, "name": "default", "is_default": True}
+        repo.get_default.return_value = {"id": 1, "name": "default", "is_default": True}
+        return repo
+
+    def _make_service(self, engine_type, repo, tmp_path):
+        from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+
+        return SkillSetService(
+            skill_repo=MagicMock(),
+            skill_set_repo=repo,
+            mcp_center=MagicMock(),
+            mcp_config_service=MagicMock(),
+            skill_service=MagicMock(),
+            bot_repo=MagicMock(),
+            path_factory=MagicMock(),
+        )
+
+    def test_named_default_mcp_shows_real_name_and_description(self, mock_skill_set_repo, tmp_path):
+        """get_set_mcp_servers surfaces the declared name/description for claude_code."""
+        service = self._make_service("claude_code", mock_skill_set_repo, tmp_path)
+        mcps = service.get_set_mcp_servers(
+            skill_set_id="1", user_id="u1", bot_id="b1", engine_type="claude_code"
+        )
+        by_code = {m["server_code"]: m for m in mcps}
+
+        assert by_code["mcp.ant.antcodemcp.code.mcpserver"]["name"] == "AntCodeMCP"
+        assert by_code["mcp.ant.antcodemcp.code.mcpserver"]["description"] == "AntCode提供的 MCP 服务"
+        assert by_code["mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"]["name"] == "语雀 MCP"
+
+    def test_nameless_default_mcp_keeps_legacy_mock_name(self, mock_skill_set_repo, tmp_path):
+        """hitl has no declared name → legacy code.split('.')[-1] mock fallback."""
+        service = self._make_service("claude_code", mock_skill_set_repo, tmp_path)
+        mcps = service.get_set_mcp_servers(
+            skill_set_id="1", user_id="u1", bot_id="b1", engine_type="claude_code"
+        )
+        by_code = {m["server_code"]: m for m in mcps}
+
+        assert by_code["hitl"]["name"] == "hitl"
+        assert by_code["hitl"]["description"] == "默认 MCP"
+
+    def test_collect_active_surfaces_real_name_and_icon_passthrough(
+        self, mock_skill_set_repo, tmp_path, monkeypatch
+    ):
+        """collect_bot_active_mcps surfaces declared name; icon passthrough branch covered."""
+        from agentclaw.community.core.mcp.services import _defaults
+
+        original = _defaults.get_default_mcp_servers
+
+        def patched(engine_type=None):
+            servers = [dict(c) for c in original(engine_type)]
+            for c in servers:
+                if c["server_code"] == "mcp.ant.antcodemcp.code.mcpserver":
+                    c["icon"] = "https://icon.example/antcode.png"
+            return servers
+
+        monkeypatch.setattr(_defaults, "get_default_mcp_servers", patched)
+        # SkillSetService imported the name directly; patch its module reference too.
+        import agentclaw.community.core.skill_center.services.skill_set_service as svc_mod
+        monkeypatch.setattr(svc_mod, "get_default_mcp_servers", patched)
+
+        service = self._make_service("claude_code", mock_skill_set_repo, tmp_path)
+        mcps = service.collect_bot_active_mcps(
+            entity_id="u1", bot_id="b1", user_id="u1", engine_type="claude_code"
+        )
+        by_code = {m["server_code"]: m for m in mcps}
+
+        assert by_code["mcp.ant.antcodemcp.code.mcpserver"]["name"] == "AntCodeMCP"
+        assert by_code["mcp.ant.antcodemcp.code.mcpserver"]["description"] == "AntCode提供的 MCP 服务"
+        # icon passthrough branch (line 1662)
+        assert by_code["mcp.ant.antcodemcp.code.mcpserver"]["icon"] == "https://icon.example/antcode.png"
+        # nameless entry keeps legacy server_code fallback
+        assert by_code["hitl"]["name"] == "hitl"
+        assert by_code["hitl"]["description"] == "Default MCP"
+
+    def test_collect_all_surfaces_real_name_and_icon_passthrough(
+        self, mock_skill_set_repo, tmp_path, monkeypatch
+    ):
+        """collect_bot_mcps surfaces declared name; icon passthrough branch (line 1730)."""
+        from agentclaw.community.core.mcp.services import _defaults
+
+        original = _defaults.get_default_mcp_servers
+
+        def patched(engine_type=None):
+            servers = [dict(c) for c in original(engine_type)]
+            for c in servers:
+                if c["server_code"] == "mcp.ant.rgmcpserver.rgfastcheckmcpserver":
+                    c["icon"] = "https://icon.example/xinghai.png"
+            return servers
+
+        monkeypatch.setattr(_defaults, "get_default_mcp_servers", patched)
+        import agentclaw.community.core.skill_center.services.skill_set_service as svc_mod
+        monkeypatch.setattr(svc_mod, "get_default_mcp_servers", patched)
+
+        service = self._make_service("claude_code", mock_skill_set_repo, tmp_path)
+        mcps = service.collect_bot_mcps(
+            entity_id="u1", bot_id="b1", user_id="u1", engine_type="claude_code"
+        )
+        by_code = {m["server_code"]: m for m in mcps}
+
+        assert by_code["mcp.ant.rgmcpserver.rgfastcheckmcpserver"]["name"] == "星海MCP服务"
+        assert by_code["mcp.ant.rgmcpserver.rgfastcheckmcpserver"]["icon"] == "https://icon.example/xinghai.png"
+        assert by_code["hitl"]["name"] == "hitl"

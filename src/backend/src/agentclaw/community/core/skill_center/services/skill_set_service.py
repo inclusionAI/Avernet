@@ -23,7 +23,11 @@ if TYPE_CHECKING:
         DeviceFilesystemDispatcher,
     )
     from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
-from agentclaw.community.core.mcp.services._defaults import get_default_mcp_server_codes, get_default_mcp_servers
+from agentclaw.community.core.mcp.services._defaults import (
+    get_default_mcp_config,
+    get_default_mcp_server_codes,
+    get_default_mcp_servers,
+)
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.skill_center.services.repositories import (
     SkillRepository,
@@ -1574,12 +1578,13 @@ class SkillSetService:
                     # 分配 mock id，避免前端因 id 为 None 导致 checkbox key 冲突
                     # 用 adler32 保证同一 server_code 的 mock id 稳定，不受列表顺序/排除项影响
                     mock_id = (zlib.adler32(code.encode("utf-8")) % 99999) + 1
+                    default_cfg = get_default_mcp_config(effective_engine, code) or {}
                     associations.append({
                         "id": mock_id,
                         "server_code": code,
-                        "name": code.split(".")[-1],
-                        "description": "默认 MCP",
-                        "icon": None,
+                        "name": default_cfg.get("name") or code.split(".")[-1],
+                        "description": default_cfg.get("description", "默认 MCP"),
+                        "icon": default_cfg.get("icon"),
                         "is_default": True,
                     })
 
@@ -1649,10 +1654,12 @@ class SkillSetService:
                 continue  # Skip user-excluded default MCPs
             mcp_entry = {
                 "server_code": server_code,
-                "name": server_code,
-                "description": "Default MCP",
+                "name": config.get("name") or server_code,
+                "description": config.get("description", "Default MCP"),
                 "status": "ONLINE",
             }
+            if "icon" in config and config.get("icon"):
+                mcp_entry["icon"] = config["icon"]
             if "headers" in config:
                 mcp_entry["headers"] = config["headers"]
             default_mcps.append(mcp_entry)
@@ -1715,10 +1722,12 @@ class SkillSetService:
                 continue  # Skip user-excluded default MCPs
             mcp_entry = {
                 "server_code": server_code,
-                "name": server_code,
-                "description": "Default MCP",
+                "name": config.get("name") or server_code,
+                "description": config.get("description", "Default MCP"),
                 "status": "ONLINE",
             }
+            if "icon" in config and config.get("icon"):
+                mcp_entry["icon"] = config["icon"]
             if "headers" in config:
                 mcp_entry["headers"] = config["headers"]
             default_mcps.append(mcp_entry)
