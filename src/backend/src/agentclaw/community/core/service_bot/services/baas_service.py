@@ -49,9 +49,6 @@ from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxProvider, EngineSandboxRegistry
 
 from agentclaw.community.core.devices.protocols import StoragePathProtocol
-from agentclaw.community.core.devices.services.baas_bootstrap_guard import (
-    build_baas_bootstrap_guard_command,
-)
 from agentclaw.community.core.devices.services.sandbox_overrides import (
     InvalidSandboxOverridesError,
     SandboxOverrides,
@@ -2231,19 +2228,8 @@ class BaasService:  # pragma: no cover
         return "supervisorctl stop sync"
 
     def _get_bootstrap_cmp(self):
-        """等待镜像初始化结束，复用完整 checkout，必要时才执行 bootstrap 补偿。
-
-        arca-openclaw 的 root_init.sh 会先执行 bootstrap_minimal.sh。BaaS 的
-        after-create hook 可能在 root_init 尚未结束时进入；若此处无条件再次
-        bootstrap，两次脚本会并发清空同一个 DaaS checkout，随后
-        install_engine.sh 可能读到一个瞬时不完整的目录。
-
-        .install_dependency_file 在当前镜像中位于 root_init 之后创建；
-        supervisord 成为 PID 1 则兼容没有该 marker 的旧镜像。两种信号都能
-        证明 root_init 不会再修改 checkout。等待或补偿失败时返回非零，
-        由 after-create 的 ``&&`` 链阻止 install/start，保持 fail-closed。
-        """
-        return build_baas_bootstrap_guard_command(as_admin=True)
+        """执行 bootstrap 补偿脚本。"""
+        return "su admin -c 'bash /home/admin/bin/bootstrap_minimal.sh'"
 
     def _get_setup_sync_service_cmd(self, engine: str = ""):
         """执行 setup_supervisor_sync_service.sh 脚本。"""
