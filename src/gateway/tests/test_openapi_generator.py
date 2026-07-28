@@ -9,8 +9,8 @@ from gateway.community.core.forwarding import generate_openapi
 
 _RULES = RouteSecurity.from_table(
     {
-        "/**": ["first_party_user"],
-        "GET /openapi/v1/bots/{id}": [{"first_party_user": {"scopes": ["bots:read"]}}],
+        "/**": {"user": "required"},
+        "GET /openapi/v1/bots/{id}": {"user": "required", "app": "optional"},
     }
 )
 
@@ -79,13 +79,16 @@ def test_non_namespace_paths_filtered_out() -> None:
 def test_security_attached_from_default_rule() -> None:
     doc = generate_openapi(_description(), _RULES)
     op = doc["paths"]["/openapi/v1/bots"]["post"]
-    assert op["x-avernet-security"] == [{"first_party_user": {}}]
+    assert op["x-avernet-security"] == {"user": "required"}
 
 
 def test_security_attached_from_specific_rule() -> None:
     doc = generate_openapi(_description(), _RULES)
     op = doc["paths"]["/openapi/v1/bots/{id}"]["get"]
-    assert op["x-avernet-security"] == [{"first_party_user": {"scopes": ["bots:read"]}}]
+    assert op["x-avernet-security"] == {
+        "user": "required",
+        "app": "optional",
+    }
 
 
 def test_referenced_components_kept_transitively() -> None:
