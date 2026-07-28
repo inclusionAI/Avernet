@@ -1,0 +1,172 @@
+# Tasks: Online Bot Supersede Cleanup
+
+> Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
+>
+> Paths are relative to the backend module root `src/backend/src/`.
+
+## Task 1: `[ ]` Cleanup primitive — `retire_superseded_bot`
+
+- **Goal:** One best-effort, idempotent "destroy a superseded bot" method that
+  every seam can call. Never raises into the deploy path; never touches a live
+  bot (callers gate on the decision/error-code).
+- **Files:**
+  `src/agentclaw/community/core/service_bot/services/bot_build_service.py`,
+  `tests/community/core/service_bot/services/test_bot_build_service_teclaw_routing.py`
+  (or a new `test_bot_build_service_retire.py`)
+- **Done when:**
+  - [ ] `BotBuildService.retire_superseded_bot(self, bot_uuid: str) -> None`
+        added: calls `self._baas_service.destroy_bot(bot_uuid)`; wraps in
+        `try/except Exception` → `logger.warning(...)` and swallow; returns
+        `None` always.
+  - [ ] Docstring states it is best-effort, idempotent (BaaS `destroy` tolerates
+        already-gone), and must only be called for a bot the caller has decided
+        is superseded/gone.
+  - [ ] Unit: `destroy_bot` called once with the uuid on the happy path.
+  - [ ] Unit: `destroy_bot` raising is swallowed (method returns, no exception).
+  - [ ] `pytest tests/community/core/service_bot/services/` green.
+- **Depends on:** —
+
+## Task 2: `[ ]` Carry the gone-bot error code through `TargetBotGoneError`
+
+- **Goal:** Preserve the specific gone code (`BOT_NOT_FOUND` vs
+  `DEVICE_NOT_FOUND`) out of the deploy atom so the secondary fallback can branch.
+- **Files:**
+  `src/agentclaw/community/core/service_bot/services/publish_flow/operation_runner.py`,
+  `tests/community/core/service_bot/services/test_operation_runner.py`
+- **Done when:**
+  - [ ] `TargetBotGoneError.__init__(self, error_code: str = "BOT_NOT_FOUND")`
+        stores `self.error_code`; docstring updated.
+  - [ ] `acquire_deploy_workflow` raises `TargetBotGoneError(result.get(
+        "error_code"))` when `result["error_code"] in BOT_GONE_ERROR_CODES`.
+        `BOT_GONE_ERROR_CODES` unchanged (`{BOT_NOT_FOUND, DEVICE_NOT_FOUND}`).
+  - [ ] Unit: a `BOT_NOT_FOUND` result raises `TargetBotGoneError` with
+        `error_code == "BOT_NOT_FOUND"`; a `DEVICE_NOT_FOUND` result → `error_code
+        == "DEVICE_NOT_FOUND"`.
+  - [ ] `pytest tests/community/core/service_bot/services/test_operation_runner.py`
+        green.
+- **Depends on:** —
+
+## Task 3: `[ ]` Provider-aware unified decision
+
+- **Goal:** Replace `_should_upgrade_online` + `_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES`
+  with one candidate resolver and one provider-aware decision matrix.
+- **Files:**
+  `src/agentclaw/community/core/service_bot/services/publish_flow/upgrade_resolution_mixin.py`,
+  `src/agentclaw/community/core/service_bot/types.py` (decision enum),
+  `tests/community/core/service_bot/services/test_publish_flow_service.py`
+- **Done when:**
+  - [ ] `OnlineDeployDecision` enum `{UPGRADE, RETIRE_THEN_FIRST_RELEASE,
+        FIRST_RELEASE}` defined (types.py).
+  - [ ] `_resolve_online_reuse_target(publish_record) -> tuple[str | None, int |
+        None]`: this record's own `ext.binding.online` → binding → `device_id`
+        first; else `last_pub_id`'s online binding; else `(None, None)`.
+  - [ ] `_decide_online_deploy(publish_record, bot) -> OnlineDeployDecision`
+        implements the matrix: no candidate / `get_bot` failure / `RELEASED` /
+        `DESTROYING` → `FIRST_RELEASE`; `ACTIVE` → `UPGRADE`;
+        `FAILED`/`STOPPED`/`STOPPING` → `RETIRE_THEN_FIRST_RELEASE` iff
+        `resolve_container_provider(bot) == TECLAW_DEVICE_PROVIDER` else
+        `UPGRADE`; `PENDING`/unknown → `UPGRADE`.
+  - [ ] `_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES` and `_should_upgrade_online`
+        removed; `grep -rn "_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES\|_should_upgrade_online"
+        src/agentclaw` returns nothing (call sites migrated in Task 4).
+  - [ ] Unit (table-driven) over `(provider ∈ {teclaw, baas}) × (status ∈
+        {ACTIVE, FAILED, STOPPED, STOPPING, RELEASED, DESTROYING, PENDING, absent})`
+        asserting the decision, incl. `get_bot`-raises → `FIRST_RELEASE`.
+  - [ ] `pytest tests/community/core/service_bot/services/` green.
+- **Depends on:** —
+
+## Task 4: `[ ]` Wire the decision into the online-release dispatch
+
+- **Goal:** The online release consumes the 3-way decision; the upgrade target is
+  resolved own-binding-first (so the failed-first-release **retry** reuses).
+- **Files:**
+  `src/agentclaw/community/core/service_bot/services/publish_flow_service.py`,
+  `tests/community/core/service_bot/services/test_publish_flow_service.py`
+- **Done when:**
+  - [ ] `_execute_online_release` switches on `_decide_online_deploy(publish_record,
+        bot)`: `UPGRADE` → `_execute_upgrade_release`; `RETIRE_THEN_FIRST_RELEASE`
+        → `self._build_service.retire_superseded_bot(candidate_bot_uuid)` then
+        `_execute_first_release`; `FIRST_RELEASE` → `_execute_first_release`.
+  - [ ] `_execute_upgrade_release` resolves `bot_uuid`/`existing_binding_id` via
+        `_resolve_online_reuse_target` (own binding first, then `last_pub_id`) —
+        not `last_pub_id` only.
+  - [ ] Retry of a failed online first-release: `baas`/ARCA candidate `FAILED` →
+        upgrade against the **same** `bot_uuid` (no new bot); `teclaw` candidate
+        `FAILED` → `destroy(old)` then first_release (one live bot).
+  - [ ] Unit: retry-ARCA reuse (same uuid, no destroy, no new bot); retry-teclaw
+        (destroy once + first_release); re-publish prev `STOPPED` (baas upgrade /
+        teclaw destroy+recreate).
+  - [ ] `pytest tests/community/core/service_bot/services/` green.
+- **Depends on:** Task 1, Task 3
+
+## Task 5: `[ ]` Secondary net — retire on the upgrade-fallback error code
+
+- **Goal:** Keep the reactive path for the rare non-teclaw race: when an
+  attempted `upgrade` reports a gone bot, clean up before first-release only when
+  the record still lingers.
+- **Files:**
+  `src/agentclaw/community/core/service_bot/services/publish_flow/release_stage.py`,
+  `tests/community/core/service_bot/services/test_publish_flow_service.py`
+- **Done when:**
+  - [ ] `upgrade_release`'s `except TargetBotGoneError as e:` calls
+        `self._build_service.retire_superseded_bot(bot_uuid)` **iff**
+        `e.error_code == "DEVICE_NOT_FOUND"`, then `fallback(...)`; no destroy for
+        `BOT_NOT_FOUND`.
+  - [ ] Unit: `DEVICE_NOT_FOUND` fallback → `destroy` called once then first
+        release; `BOT_NOT_FOUND` fallback → no destroy, first release.
+  - [ ] `pytest tests/community/core/service_bot/services/` green.
+- **Depends on:** Task 1, Task 2
+
+## Task 6: `[ ]` Apply the decision + cleanup to restart
+
+- **Goal:** Restart uses the same provider-aware decision and cleanup, so a
+  restart against a `FAILED`/`STOPPED`/gone target never orphans a bot.
+- **Files:**
+  `src/agentclaw/community/core/service_bot/services/publish_flow/restart_mixin.py`,
+  `tests/community/core/service_bot/services/test_publish_flow_service.py`
+  (+ `tests/community/e2e/publish_boundary/test_chain_and_restart_flows.py` if
+  touched)
+- **Done when:**
+  - [ ] `execute_restart` decides via `_decide_online_deploy` on the restart
+        target: `UPGRADE` → existing upgrade path; `RETIRE_THEN_FIRST_RELEASE` →
+        `retire_superseded_bot(bot_uuid)` then `_recreate_restart_target`;
+        `FIRST_RELEASE` → `_recreate_restart_target`.
+  - [ ] `except TargetBotGoneError as e:` applies the same code-gated
+        `retire_superseded_bot` (DEVICE_NOT_FOUND only) before
+        `_recreate_restart_target`.
+  - [ ] Unit: restart `teclaw`+`STOPPED` → destroy + recreate; restart
+        `baas`+`FAILED` → upgrade (same uuid); restart `DEVICE_NOT_FOUND`
+        fallback → destroy + recreate; `BOT_NOT_FOUND` fallback → recreate, no
+        destroy.
+  - [ ] `pytest tests/community/core/service_bot/services/` green.
+- **Depends on:** Task 1, Task 2, Task 3
+
+## Task 7: `[ ]` Regression, crash-safety, and E2E guard
+
+- **Goal:** Existing tests reflect the new behavior; crash-safety and single-bot
+  end-states are proven; the wider suites stay green.
+- **Files:**
+  `tests/community/core/service_bot/services/test_publish_flow_service.py`,
+  `tests/community/core/service_bot/services/test_operation_runner.py`,
+  `tests/community/core/service_bot/services/test_bot_build_service_teclaw_routing.py`,
+  `tests/community/core/service_bot/services/test_publish_crash_windows.py`,
+  `tests/community/e2e/publish_boundary/` (chain/restart, retry/failure flows)
+- **Done when:**
+  - [ ] `dcce9a6` regression tests adapted: teclaw offline→re-publish yields a
+        single live bot **with the old `STOPPED` bot destroyed** (not orphaned);
+        non-teclaw `FAILED`/`STOPPED` now **reuses** (same uuid) rather than
+        recreating. No test still asserts the old orphan-leaving behavior.
+  - [ ] Crash-safety: redelivery after `destroy(old)` but before first-release —
+        candidate now reads `RELEASED` → decision `FIRST_RELEASE` → adopt the
+        in-doubt new bot by query; assert **no double-destroy, exactly one live
+        bot**.
+  - [ ] Invariant assertion helper/test: after each covered flow, exactly one
+        live (`is_deleted=0`, non-`RELEASED`) online `bot_uuid` per record/stage.
+  - [ ] `pytest tests/community/core/service_bot/` green.
+  - [ ] `pytest tests/community/e2e/publish_boundary/` green.
+- **Depends on:** Task 4, Task 5, Task 6
+
+## Notes
+- No schema/DDL/migration; no new BaaS endpoints, config, or feature flags.
+- Reconciliation of already-orphaned production bots is **out of scope** (a
+  separate one-off operational sweep — see `spec.md`).
