@@ -44,9 +44,11 @@ class HttpCallback:
         run_repository: BotRunRepository,
         *,
         default_timeout: float = _DEFAULT_TIMEOUT,
+        origin: str | None = None,
     ) -> None:
         self._run_repository = run_repository
         self._default_timeout = default_timeout
+        self._origin = origin
 
     async def __call__(self, run_id: str) -> None:
         """PostRunCallback 入口：查库、构造 payload、发送。"""
@@ -102,7 +104,11 @@ class HttpCallback:
     ) -> CallbackResult:
         """执行一次 POST，返回 CallbackResult。"""
         body = json.dumps(payload.to_dict(), ensure_ascii=False)
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+        }
+        if self._origin:
+            headers["Origin"] = self._origin
 
         try:
             async with httpx.AsyncClient(timeout=self._default_timeout) as client:
@@ -112,6 +118,15 @@ class HttpCallback:
                 "[callback] error: run_id=%s, url=%s, %s", payload.run_id, url, e
             )
             return CallbackResult(success=False, message=str(e))
+
+        resp_body = resp.text
+        logger.info(
+            "[callback] response: run_id=%s, url=%s, status=%s, body=%s",
+            payload.run_id,
+            url,
+            resp.status_code,
+            resp_body,
+        )
 
         success = 200 <= resp.status_code < 300
         if success:
