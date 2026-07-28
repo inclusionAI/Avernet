@@ -67,6 +67,7 @@ user_config:
     acquire_timeout: 0               # acquire 等待槽位超时秒数（0=不限）
     task_timeout: 660.0              # 单任务最大执行秒数（0=不限，默认660=10分钟+1分钟缓冲）
     default_timeout: 30.0            # 请求默认超时秒数（metadata 未指定 timeout 时使用）
+    origin: "https://teamclaw.example.com"
 
   teamclaw:
     base_url: "https://teamclaw.example.com"
