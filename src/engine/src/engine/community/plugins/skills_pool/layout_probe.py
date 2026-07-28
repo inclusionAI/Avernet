@@ -5,15 +5,20 @@ from __future__ import annotations
 import json
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from uuid import UUID
 
-
-LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
+from engine.community.core.skills.layout_planner import (
+    LAYOUT_CONTRACT_VERSION,
+)
+from engine.community.core.skills.layout_planner import (
+    ResolvedFilesystemLayoutPlan as _FilesystemPoolLayout,
+)
 
 
 class RuntimeLayoutInspectionStatus(str, Enum):
@@ -39,100 +44,6 @@ class RuntimeLayoutInspection:
             "preparation_id": self.preparation_id,
             "evidence": self.evidence,
         }
-
-
-@dataclass(frozen=True)
-class _FilesystemPoolLayout:
-    legacy_root: Path
-    legacy_local: Path
-    legacy_repo: Path
-    pool_root: Path
-    pool_local: Path
-    pool_repo: Path
-    marker: Path
-    active_marker: Path
-    local_bridge: Path
-    repo_bridge: Path
-
-    @classmethod
-    def for_home(cls, home: Path) -> "_FilesystemPoolLayout":
-        return cls.for_engine("openclaw", home)
-
-    @classmethod
-    def for_engine(cls, engine: str, home: Path) -> "_FilesystemPoolLayout":
-        if engine == "hermes":
-            workspace = home / ".hermes" / "workspace"
-            legacy_root = home / ".hermes" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            legacy_repo = home / ".hermes" / "skills-repo"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                legacy_repo=legacy_repo,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                marker=pool_root / ".pool-ready",
-                active_marker=pool_root / ".pool-active",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=legacy_repo,
-            )
-        if engine == "aicoding":
-            workspace = home / ".aicoding" / "workspace"
-            legacy_root = home / ".claude" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            legacy_repo = home / ".aicoding" / "skills-repo"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                legacy_repo=legacy_repo,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                marker=pool_root / ".pool-ready",
-                active_marker=pool_root / ".pool-active",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=legacy_repo,
-            )
-        if engine == "claude_code":
-            workspace = home / ".claude_code" / "workspace"
-            legacy_root = home / ".claude" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            legacy_repo = home / ".claude_code" / "skills-repo"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                legacy_repo=legacy_repo,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                marker=pool_root / ".pool-ready",
-                active_marker=pool_root / ".pool-active",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=legacy_root / "skills-repo",
-            )
-        if engine != "openclaw":
-            raise ValueError(f"unsupported filesystem Pool engine: {engine}")
-        workspace = home / ".openclaw" / "workspace"
-        legacy_root = workspace / "skills"
-        pool_root = workspace / "skills-pool"
-        legacy_local = legacy_root / "skills-local"
-        legacy_repo = legacy_root / "skills-repo"
-        return cls(
-            legacy_root=legacy_root,
-            legacy_local=legacy_local,
-            legacy_repo=legacy_repo,
-            pool_root=pool_root,
-            pool_local=pool_root / "skills-local",
-            pool_repo=pool_root / "skills-repo",
-            marker=pool_root / ".pool-ready",
-            active_marker=pool_root / ".pool-active",
-            local_bridge=legacy_local,
-            repo_bridge=legacy_repo,
-        )
 
 
 def _not_capable(
@@ -206,7 +117,7 @@ def _valid_timestamp(value: object) -> bool:
     if not isinstance(value, str):
         return False
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return False
     return parsed.tzinfo is not None
@@ -325,17 +236,16 @@ def _managed_entries_valid(
     marker: dict[str, Any],
     layout: _FilesystemPoolLayout,
 ) -> bool:
-    entries = layout.legacy_root.iterdir()
+    entries = layout.active_root.iterdir()
     for entry in entries:
         if entry in (layout.local_bridge, layout.repo_bridge):
             continue
         record = _managed_entry_record(entry, layout)
-        if record is not None:
-            if record["valid"] is not True:
-                return False
+        if record is not None and record["valid"] is not True:
+            return False
 
     declared = marker["validation_summary"]["managed_active_entries"]
-    if any(
+    return not any(
         not isinstance(record, dict)
         or record.get("source") not in {"local", "repo"}
         or not isinstance(record.get("path"), str)
@@ -343,9 +253,7 @@ def _managed_entries_valid(
         or not isinstance(record.get("pool_target"), str)
         or record.get("valid") is not True
         for record in declared
-    ):
-        return False
-    return True
+    )
 
 
 def _active_marker_valid(
@@ -387,7 +295,7 @@ def _active_marker_valid(
         ):
             return False
         if (
-            target.parent != Path(os.path.abspath(layout.legacy_root))
+            target.parent != Path(os.path.abspath(layout.active_root))
             or target in {layout.local_bridge, layout.repo_bridge}
             or target in seen_targets
         ):
@@ -400,8 +308,7 @@ def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
     """Validate mutable managed entries without freezing an old mapping set."""
 
     pool_roots = tuple(
-        Path(os.path.abspath(root))
-        for root in (layout.pool_local, layout.pool_repo)
+        Path(os.path.abspath(root)) for root in (layout.pool_local, layout.pool_repo)
     )
     retired_roots = tuple(
         Path(os.path.abspath(root))
@@ -412,7 +319,7 @@ def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
             layout.repo_bridge,
         )
     )
-    for entry in layout.legacy_root.iterdir():
+    for entry in layout.active_root.iterdir():
         if not entry.is_symlink():
             continue
         target = _lexical_symlink_target(entry)
@@ -755,9 +662,7 @@ def inspect_runtime_layout(
                     "legacy_storage_entries_absent": (
                         active_marker["activation_state"] == "active"
                     ),
-                    "stable_repo_bridge_valid": (
-                        engine in {"aicoding", "hermes"}
-                    ),
+                    "stable_repo_bridge_valid": (engine in {"aicoding", "hermes"}),
                 },
             },
         )
