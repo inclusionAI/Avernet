@@ -4,7 +4,7 @@
 >
 > Paths are relative to the backend module root `src/backend/src/`.
 
-## Task 1: `[ ]` Cleanup primitive — `retire_superseded_bot`
+## Task 1: `[x]` Cleanup primitive — `retire_superseded_bot`
 
 - **Goal:** One best-effort, idempotent "destroy a superseded bot" method that
   every seam can call. Never raises into the deploy path; never touches a live
@@ -14,16 +14,16 @@
   `tests/community/core/service_bot/services/test_bot_build_service_teclaw_routing.py`
   (or a new `test_bot_build_service_retire.py`)
 - **Done when:**
-  - [ ] `BotBuildService.retire_superseded_bot(self, bot_uuid: str) -> None`
+  - [x] `BotBuildService.retire_superseded_bot(self, bot_uuid: str) -> None`
         added: calls `self._baas_service.destroy_bot(bot_uuid)`; wraps in
         `try/except Exception` → `logger.warning(...)` and swallow; returns
         `None` always.
-  - [ ] Docstring states it is best-effort, idempotent (BaaS `destroy` tolerates
+  - [x] Docstring states it is best-effort, idempotent (BaaS `destroy` tolerates
         already-gone), and must only be called for a bot the caller has decided
         is superseded/gone.
-  - [ ] Unit: `destroy_bot` called once with the uuid on the happy path.
-  - [ ] Unit: `destroy_bot` raising is swallowed (method returns, no exception).
-  - [ ] `pytest tests/community/core/service_bot/services/` green.
+  - [x] Unit: `destroy_bot` called once with the uuid on the happy path.
+  - [x] Unit: `destroy_bot` raising is swallowed (method returns, no exception).
+  - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** —
 
 ## Task 2: `[ ]` Carry the gone-bot error code through `TargetBotGoneError`
