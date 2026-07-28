@@ -13,11 +13,17 @@ The Protocol carries two parallel surfaces:
 * **bulk-symlink** ops (`sync_symlinks`, `sync_bindpaths`, `clean_symlinks`)
   — used by engines that materialise skills as filesystem symlinks and
   reconcile the whole directory in one call (current OpenClaw deployment).
+* **Pool layout** ops (`probe_pool_layout`, `activate_pool_layout`,
+  `publish_pool_mappings`, `verify_pool_mappings`) — implemented by the
+  OpenClaw and Claude Code adapters/ports in this repository. Corp AICoding
+  and Hermes composition roots consume the same Protocol, mapping contract,
+  and shared Engine-owned layout planner.
 
 Engines implement only the surface they need; the unsupported methods
 should raise :class:`CapabilityNotSupportedError`.
 
-See src/engine/docs/heterogeneous-engine-architecture.md §7.1.
+The versioned Pool mapping wire contract and compatibility rules are recorded
+in ``src/engine/docs/heterogeneous-engine-architecture.md`` §7.3.
 """
 from __future__ import annotations
 
@@ -31,14 +37,15 @@ from engine.community.core.skills.models import (
     CleanSymlinksResult,
     PoolLayoutActivateRequest,
     PoolLayoutActivationResult,
-    PoolQuarantineCleanupRequest,
-    PoolQuarantineCleanupResult,
     PoolLayoutProbeRequest,
     PoolLayoutProbeResult,
     PoolLayoutRollbackRequest,
     PoolMappingPublishResult,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
+    PoolQuarantineCleanupRequest,
+    PoolQuarantineCleanupResult,
+    PoolSkillMappingIntent,
     Skill,
     SkillConfig,
     SkillExecutionRequest,
@@ -205,22 +212,28 @@ class SkillsService(Protocol):
 
     async def publish_pool_mappings(
         self,
-        mappings: list[SymlinkItem],
+        mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
-        """发布目标 Pool layout 的完整受管 mapping。"""
+        """Publish a complete mapping set.
+
+        ``skills-pool-mapping-v2`` carries logical intents. An omitted version
+        is the compatibility form for legacy physical ``SymlinkItem`` values.
+        """
         ...
 
     async def verify_pool_mappings(
         self,
-        mappings: list[SymlinkItem],
+        mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:
-        """验证当前受管入口精确指向请求中的 Pool source。"""
+        """Verify mappings using the same versioned contract as publication."""
         ...
 
 

@@ -20,7 +20,6 @@ from agentclaw.community.core.skills_pool.models import (
     PoolCutoverResult,
     PoolCutoverStatus,
     RegisteredSkillAsset,
-    pool_paths_for_engine,
 )
 from agentclaw.community.core.skills_pool.reconcile_service import (
     SkillsPoolReconcileOutcome,
@@ -104,6 +103,7 @@ class FakeLayoutRepository:
             phase=SkillLayoutPhase.POOL_READY,
             preparation_id=str(kwargs["preparation_id"]),
             last_probe_result="READY",
+            last_probe_evidence=dict(kwargs["evidence"]),
         )
         return True
 
@@ -139,6 +139,10 @@ class FakeLayoutRepository:
             self.state,
             phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
             data_plane_cutover_committed=True,
+            last_probe_evidence={
+                **(self.state.last_probe_evidence or {}),
+                "cutover": dict(kwargs["evidence"]),
+            },
         )
         return True
 
@@ -315,14 +319,33 @@ class FakeRuntime:
         pool_local: str | None = None,
         pool_repo: str | None = None,
     ) -> None:
-        paths = pool_paths_for_engine(engine)
         self.engine = engine
-        self.pool_local = pool_local or paths.pool_local
-        self.pool_repo = pool_repo or paths.pool_repo
+        defaults = {
+            "openclaw": (
+                "/home/admin/.openclaw/workspace/skills-pool/skills-local",
+                "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+            ),
+            "claude_code": (
+                "/home/admin/.claude_code/workspace/skills-pool/skills-local",
+                "/home/admin/.claude_code/workspace/skills-pool/skills-repo",
+            ),
+            "aicoding": (
+                "/home/admin/.aicoding/workspace/skills-pool/skills-local",
+                "/home/admin/.aicoding/workspace/skills-pool/skills-repo",
+            ),
+            "hermes": (
+                "/home/admin/.hermes/workspace/skills-pool/skills-local",
+                "/home/admin/.hermes/workspace/skills-pool/skills-repo",
+            ),
+        }
+        default_local, default_repo = defaults[engine]
+        self.pool_local = pool_local or default_local
+        self.pool_repo = pool_repo or default_repo
         self.events: list[str] = []
         self.publish_success = True
         self.verify_success = True
         self.physical_cutovers = 0
+        self.expected_registered_local_names = ["local-a", "local-b"]
         self.cutover_result = PoolCutoverResult(
             committed=True,
             status=PoolCutoverStatus.COMMITTED,
@@ -331,7 +354,11 @@ class FakeRuntime:
                     "registered": 2,
                     "unregistered": 1,
                     "total": 3,
-                }
+                },
+                "local_locators": {
+                    "local-a": f"local://{self.pool_local}/local-a",
+                    "local-b": f"local://{self.pool_local}/local-b",
+                },
             },
         )
         self.probe_result = RuntimeLayoutProbeResult(
@@ -339,7 +366,14 @@ class FakeRuntime:
             engine=engine,
             layout_contract_version="skills-pool-p3-v1",
             preparation_id=PREPARATION_ID,
-            evidence={"marker": "valid"},
+            evidence={
+                "marker": "valid",
+                "resolved_layout": {
+                    "active_root": "/runtime/skills",
+                    "local_root": self.pool_local,
+                    "repo_root": self.pool_repo,
+                },
+            },
         )
 
     async def probe(self, **kwargs: object) -> RuntimeLayoutProbeResult:
@@ -349,18 +383,44 @@ class FakeRuntime:
 
     async def cutover(self, **kwargs: object) -> PoolCutoverResult:
         self.events.append("cutover")
-        assert kwargs["registered_local_names"] == ["local-a", "local-b"]
+        assert (
+            kwargs["registered_local_names"]
+            == self.expected_registered_local_names
+        )
         mappings = kwargs["mappings"]
-        assert [mapping.source for mapping in mappings] == [
-            f"{self.pool_local}/local-a",
-            f"{self.pool_local}/local-b",
-            f"{self.pool_repo}/business/repo-skill",
+        assert [mapping.to_dict() for mapping in mappings] == [
+            {
+                "corpus": "local",
+                "relative_path": "local-a",
+                "link_name": "local-a",
+            },
+            {
+                "corpus": "local",
+                "relative_path": "local-b",
+                "link_name": "local-b",
+            },
+            {
+                "corpus": "repo",
+                "relative_path": "business/repo-skill",
+                "link_name": "repo-skill",
+            },
         ]
         if (
             self.cutover_result.committed
             and self.cutover_result.status is PoolCutoverStatus.COMMITTED
         ):
             self.physical_cutovers += 1
+        if self.cutover_result.committed:
+            return replace(
+                self.cutover_result,
+                evidence={
+                    **self.cutover_result.evidence,
+                    "local_locators": {
+                        "local-a": f"local://{self.pool_local}/local-a",
+                        "local-b": f"local://{self.pool_local}/local-b",
+                    },
+                },
+            )
         return self.cutover_result
 
     async def publish_mappings(self, **kwargs: object) -> bool:
@@ -377,11 +437,12 @@ def build_service(
     runtime: FakeRuntime,
     *,
     engine: str = "openclaw",
+    skills: FakeSkillRepository | None = None,
 ) -> SkillsPoolReconcileService:
     return SkillsPoolReconcileService(
         bot_repository=FakeBotRepository(engine),
         layout_repository=layouts,
-        skill_repository=FakeSkillRepository(engine),
+        skill_repository=skills or FakeSkillRepository(engine),
         runtime=runtime,
     )
 
@@ -407,6 +468,82 @@ async def test_ready_claimed_bot_completes_pool_activation() -> None:
             "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"
         ),
     }
+
+
+@pytest.mark.asyncio
+async def test_historical_local_versions_share_engine_locator_on_commit() -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    runtime.expected_registered_local_names = [
+        "local-a",
+        "local-b",
+        "local-a",
+    ]
+    skills = FakeSkillRepository()
+    skills.registered.append(
+        RegisteredSkillAsset(
+            skill_id=13,
+            name="local-a",
+            git_path="local:///legacy/older-version/local-a",
+        )
+    )
+
+    result = await build_service(
+        layouts,
+        runtime,
+        skills=skills,
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert layouts.committed_locators == {
+        11: (
+            "local:///home/admin/.openclaw/workspace/skills-pool/"
+            "skills-local/local-a"
+        ),
+        12: (
+            "local:///home/admin/.openclaw/workspace/skills-pool/"
+            "skills-local/local-b"
+        ),
+        13: (
+            "local:///home/admin/.openclaw/workspace/skills-pool/"
+            "skills-local/local-a"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_conflicting_same_name_sources_fail_before_cutover() -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    skills = FakeSkillRepository()
+    skills.active.append(
+        RegisteredSkillAsset(
+            skill_id=22,
+            name="local-a",
+            git_path="git://business/local-a",
+        )
+    )
+
+    result = await build_service(
+        layouts,
+        runtime,
+        skills=skills,
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.evidence == {
+        "reason": "duplicate managed target: local-a"
+    }
+    assert runtime.events == ["probe"]
+    assert runtime.physical_cutovers == 0
+    assert layouts.events == ["failure"]
+    assert layouts.state.data_plane_cutover_committed is False
 
 
 @pytest.mark.asyncio
@@ -1146,7 +1283,10 @@ async def test_pool_active_reconciliation_probes_current_runtime() -> None:
     )
 
     assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
-    assert result.evidence == {"marker": "valid"}
+    assert result.evidence["marker"] == "valid"
+    assert result.evidence["resolved_layout"]["local_root"] == (
+        "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+    )
     assert runtime.events == ["probe"]
 
 
@@ -1348,7 +1488,18 @@ class RecordingTransport:
                 "data": {
                     "committed": True,
                     "status": "COMMITTED",
-                    "evidence": {},
+                    "evidence": {
+                        "local_locators": {
+                            "local-a": (
+                                "local:///home/admin/.openclaw/workspace/"
+                                "skills-pool/skills-local/local-a"
+                            ),
+                            "local-b": (
+                                "local:///home/admin/.openclaw/workspace/"
+                                "skills-pool/skills-local/local-b"
+                            ),
+                        },
+                    },
                 },
             }
         if path.endswith("/publish"):

@@ -6,15 +6,13 @@ import json
 from dataclasses import asdict
 
 from injector import inject
-from sqlalchemy import func, or_, text
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.sql.elements import ColumnElement
 
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
 from agentclaw.community.core.models.skill import Skill
-from agentclaw.community.core.skills_pool.models import local_locator_prefixes
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -28,6 +26,12 @@ from agentclaw.community.plugins.skills_pool_cutover_diagnostics import (
 )
 from agentclaw.community.plugins.skills_pool_capability_repository import (
     SkillsPoolCapabilityRepositoryMixin,
+)
+from agentclaw.community.plugins.skills_pool_layout_persistence import (
+    encode_stage_evidence,
+    is_runtime_local_locator,
+    lease_expiry,
+    scope_filter,
 )
 from agentclaw.community.plugins.skills_pool_operational_repository import (
     SkillsPoolOperationalRepositoryMixin,
@@ -46,25 +50,12 @@ class SkillsPoolLayoutRepository(
     SkillsPoolPostCutoverRepositoryMixin,
     SkillsPoolQuarantineRepositoryMixin,
 ):
+    _scope_filter = staticmethod(scope_filter)
+    _now_plus = staticmethod(lease_expiry)
+
     @inject
     def __init__(self, database: DatabasePlugin) -> None:
         self._database = database
-
-    @staticmethod
-    def _scope_filter(scope: BotSkillLayoutScope):
-        return (
-            BotSkillLayoutStateModel.env == scope.env,
-            BotSkillLayoutStateModel.entity_id == scope.entity_id,
-            BotSkillLayoutStateModel.bot_id == scope.bot_id,
-        )
-
-    @staticmethod
-    def _now_plus(session, seconds: int) -> ColumnElement:
-        if seconds <= 0:
-            raise ValueError("lease_seconds must be positive")
-        if session.bind.dialect.name == "sqlite":
-            return func.datetime(func.now(), text(f"'+{seconds} seconds'"))
-        return func.date_add(func.now(), text(f"INTERVAL {seconds} SECOND"))
 
     def get(self, scope: BotSkillLayoutScope) -> BotSkillLayoutState:
         with self._database.transactional_orm_session() as session:
@@ -345,7 +336,11 @@ class SkillsPoolLayoutRepository(
                 return False
             row.phase = SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value
             row.data_plane_cutover_committed = 1
-            row.last_probe_evidence = evidence_json
+            row.last_probe_evidence = encode_stage_evidence(
+                row.last_probe_evidence,
+                stage="cutover",
+                evidence=evidence,
+            )
         return True
 
     def record_cutover_finalizing(
@@ -659,9 +654,9 @@ class SkillsPoolLayoutRepository(
     ) -> bool:
         """原子提交精确 Bot 范围内的全部 local locator 和布局状态。"""
 
-        pool_prefixes = local_locator_prefixes(pool=True)
         if any(
-            not isinstance(skill_id, int) or not locator.startswith(pool_prefixes)
+            not isinstance(skill_id, int)
+            or not is_runtime_local_locator(locator)
             for skill_id, locator in local_locators.items()
         ):
             return False
@@ -817,7 +812,16 @@ class SkillsPoolLayoutRepository(
                         BotSkillLayoutStateModel.last_failure_code: None,
                         BotSkillLayoutStateModel.last_failure_stage: None,
                         BotSkillLayoutStateModel.last_failure_retryable: None,
-                        BotSkillLayoutStateModel.last_failure_evidence: (evidence_json),
+                        BotSkillLayoutStateModel.last_failure_evidence: (
+                            evidence_json
+                        ),
+                        BotSkillLayoutStateModel.last_probe_evidence: (
+                            encode_stage_evidence(
+                                None,
+                                stage="rollback",
+                                evidence=evidence,
+                            )
+                        ),
                         BotSkillLayoutStateModel.last_failure_at: None,
                     },
                     synchronize_session=False,
@@ -923,9 +927,9 @@ class SkillsPoolLayoutRepository(
     ) -> bool:
         """同事务恢复全部 local locator 与 ``LEGACY_ACTIVE``。"""
 
-        legacy_prefixes = local_locator_prefixes(pool=False)
         if any(
-            not isinstance(skill_id, int) or not locator.startswith(legacy_prefixes)
+            not isinstance(skill_id, int)
+            or not is_runtime_local_locator(locator)
             for skill_id, locator in local_locators.items()
         ):
             return False

@@ -8,8 +8,8 @@ engine-view seam to its plugin.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from engine.community.plugins.skills_pool.layout_activation import (
     MappingPublishResult,
@@ -38,12 +38,14 @@ from engine.community.plugins.skills_pool.layout_probe import (
 def inspect_claude_code_runtime_layout(
     *,
     expected_contract_version: str = LAYOUT_CONTRACT_VERSION,
+    mapping_contract_version: str | None = None,
     home: Path = Path("/home/admin"),
     repo_is_mounted: Callable[[Path], bool] = os.path.ismount,
 ) -> RuntimeLayoutInspection:
     return inspect_runtime_layout(
         engine="claude_code",
         expected_contract_version=expected_contract_version,
+        mapping_contract_version=mapping_contract_version,
         home=home,
         repo_is_mounted=repo_is_mounted,
     )

@@ -91,13 +91,18 @@ class RegisteredSkillAsset:
 
 @dataclass(frozen=True, slots=True)
 class PoolSkillMapping:
-    """显式以声明 source layout 构造的运行时 mapping。"""
+    """Backend-owned logical intent; Engine resolves filesystem paths."""
 
-    source: str
-    target: str
+    corpus: str
+    relative_path: str
+    link_name: str
 
     def to_dict(self) -> dict[str, str]:
-        return {"source": self.source, "target": self.target}
+        return {
+            "corpus": self.corpus,
+            "relative_path": self.relative_path,
+            "link_name": self.link_name,
+        }
 
 
 class SkillMappingSourceLayout(StrEnum):
