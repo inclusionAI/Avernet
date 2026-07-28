@@ -31,7 +31,10 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
-from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.service_bot.types import (
+    OnlineDeployDecision,
+    PublishStage,
+)
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
@@ -697,23 +700,32 @@ class PublishFlowService(
             if not bot:
                 raise PublishFlowServiceError(f"Bot does not exist: {bot_id}")
 
-            # ========== Core logic: determine whether this is an upgrade scenario ==========
-            if self._should_upgrade_online(publish_record):
-                # Upgrade release: reuse the existing Bot
+            # ===== Core logic: provider-aware reuse-vs-recreate decision =====
+            # One shared decision (see UpgradeResolutionMixin._decide_online_deploy):
+            # reuse the existing bot in place when it is live/rebuildable, else
+            # create a fresh one — retiring the superseded bot first when it would
+            # otherwise be orphaned (e.g. a teclaw container an UPDATE can't rebuild).
+            decision = self._decide_online_deploy(publish_record, bot)
+            if decision == OnlineDeployDecision.UPGRADE:
                 return await self._execute_upgrade_release(
                     publish_record=publish_record,
                     operator=operator,
                     migration_path=migration_path,
                     bot=bot,
                 )
-            else:
-                # First release: create a new Bot
-                return await self._execute_first_release(
-                    publish_record=publish_record,
-                    operator=operator,
-                    migration_path=migration_path,
-                    bot=bot,
-                )
+            if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                candidate_bot_uuid, _ = self._resolve_online_reuse_target(publish_record)
+                if candidate_bot_uuid:
+                    self._build_service.retire_superseded_bot(
+                        candidate_bot_uuid, operator=operator
+                    )
+            # FIRST_RELEASE (and the post-retire path): create a new Bot.
+            return await self._execute_first_release(
+                publish_record=publish_record,
+                operator=operator,
+                migration_path=migration_path,
+                bot=bot,
+            )
 
         except Exception as e:
             logger.error(f"[PublishFlowService] Release failed: {e}")
@@ -759,38 +771,24 @@ class PublishFlowService(
     ) -> PublishFlowResult:
         """Run the online upgrade release (reuse the existing BaaS Bot).
 
-        First resolves the online binding / bot_uuid (online-specific) from last_pub_id, then delegates to the
-        unified ReleaseStageRunner.upgrade_release.
+        Resolves the reuse target via ``_resolve_online_reuse_target`` — this
+        record's own online binding first (so a retry of a failed first release
+        reuses the failed attempt's bot), else the previous record's — then
+        delegates to the unified ReleaseStageRunner.upgrade_release.
         """
         publish_id = publish_record.id
-        last_pub_id = publish_record.last_pub_id
 
-        # Resolve the previous publish record's online binding → bot_uuid (reuse the existing Bot, no new record).
-        last_publish = self._publish_service.get_publish_by_id(last_pub_id)
-        if not last_publish:
-            raise PublishFlowServiceError(f"Previous publish record does not exist: last_pub_id={last_pub_id}")
-
-        last_binding_info = (last_publish.ext or {}).get("binding", {})
-        online_binding_id = last_binding_info.get(PublishStage.ONLINE.value)
-        if not online_binding_id:
+        bot_uuid, online_binding_id = self._resolve_online_reuse_target(publish_record)
+        if not bot_uuid or not online_binding_id:
             raise PublishFlowServiceError(
-                f"Previous publish record has no online environment binding info: last_pub_id={last_pub_id}"
-            )
-
-        binding = self._publish_service.get_device_binding_by_id(online_binding_id)
-        if not binding:
-            raise PublishFlowServiceError(f"Device binding record does not exist: binding_id={online_binding_id}")
-
-        bot_uuid = binding.device_id
-        if not bot_uuid:
-            raise PublishFlowServiceError(
-                f"Device binding record has no device_id: binding_id={online_binding_id}"
+                f"No online reuse target resolved for upgrade: publish_id={publish_id}"
             )
 
         logger.info(
             f"[PublishFlowService._execute_upgrade_release] "
-            f"Upgrading bot: publish_id={publish_id}, last_pub_id={last_pub_id}, "
-            f"bot_uuid={bot_uuid}"
+            f"Upgrading bot: publish_id={publish_id}, "
+            f"last_pub_id={publish_record.last_pub_id}, bot_uuid={bot_uuid}, "
+            f"binding_id={online_binding_id}"
         )
 
         return await self._release_runner.upgrade_release(
