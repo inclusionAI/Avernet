@@ -354,12 +354,15 @@ def test_atom_bot_not_found_abandons_with_reason_and_raises(ledger, baas):
     async def issue():
         return {"success": False, "error_code": "BOT_NOT_FOUND"}
 
-    with pytest.raises(TargetBotGoneError):
+    with pytest.raises(TargetBotGoneError) as exc_info:
         run(acquire_deploy_workflow(
             r, publish_id=1, kind=PublishOperationKind.UPGRADE,
             stage=PublishStage.ONLINE, operator="op", issue=issue,
             bot_uuid="BOT-gone", bot_gone_reason="BOT_NOT_FOUND -> first release",
         ))
+    # The specific classified code is carried so the caller's fallback can decide
+    # whether to retire a lingering record (see the supersede-cleanup fallback).
+    assert exc_info.value.error_code == "BOT_NOT_FOUND"
     op = ledger.get_latest_by_kind(1, UPGRADE, "online")
     assert op.state == PublishOperationState.ABANDONED.value
     assert op.last_error == "BOT_NOT_FOUND -> first release"
@@ -375,12 +378,13 @@ def test_atom_device_not_found_abandons_with_reason_and_raises(ledger, baas):
     async def issue():
         return {"success": False, "error_code": "DEVICE_NOT_FOUND"}
 
-    with pytest.raises(TargetBotGoneError):
+    with pytest.raises(TargetBotGoneError) as exc_info:
         run(acquire_deploy_workflow(
             r, publish_id=1, kind=PublishOperationKind.UPGRADE,
             stage=PublishStage.ONLINE, operator="op", issue=issue,
             bot_uuid="BOT-gone", bot_gone_reason="DEVICE_NOT_FOUND -> first release",
         ))
+    assert exc_info.value.error_code == "DEVICE_NOT_FOUND"
     op = ledger.get_latest_by_kind(1, UPGRADE, "online")
     assert op.state == PublishOperationState.ABANDONED.value
     assert op.last_error == "DEVICE_NOT_FOUND -> first release"
