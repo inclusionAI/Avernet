@@ -168,8 +168,8 @@ class UpgradeResolutionMixin:
         Single, provider-aware rule shared by every online deploy seam. Reads the
         candidate's live BaaS status and the bot's container provider:
 
-        - no candidate / status unreadable / ``RELEASED`` / ``DESTROYING`` →
-          ``FIRST_RELEASE`` (nothing live to reuse or orphan).
+        - no candidate / ``RELEASED`` / ``DESTROYING`` → ``FIRST_RELEASE``
+          (nothing live to reuse or orphan).
         - ``ACTIVE`` → ``UPGRADE`` (re-deliver in place; works for both providers).
         - ``FAILED`` / ``STOPPED`` / ``STOPPING`` → ``UPGRADE`` for ``baas``/ARCA
           (the UPDATE destroys+recreates the device in place and recovers it), but
@@ -177,22 +177,20 @@ class UpgradeResolutionMixin:
           gone container — it would just fail the publish and strand the record).
         - anything else (``PENDING``/unknown) → ``UPGRADE`` (optimistic; the deploy
           atom / progress poll settles a still-provisioning bot).
+
+        ``get_bot`` already normalizes a genuine 404 to ``{"status":"RELEASED"}``,
+        so a raised error here means a transient/non-404 BaaS failure — NOT that
+        the candidate is gone. We let it propagate so the durable task retries the
+        status read rather than creating a replacement for a possibly-live bot.
         """
         bot_uuid, _ = self._resolve_online_reuse_target(publish_record)
         if not bot_uuid:
             return OnlineDeployDecision.FIRST_RELEASE
 
-        try:
-            baas_bot = self._baas_service.get_bot(bot_uuid=bot_uuid)
-            status = (baas_bot or {}).get("status")
-        except Exception as e:
-            # Unreadable (gone / BaaS error) — treat as gone, create fresh.
-            logger.info(
-                f"[PublishFlowService._decide_online_deploy] "
-                f"get_bot failed, treat as gone -> first release: "
-                f"bot_uuid={bot_uuid}, error={e}"
-            )
-            return OnlineDeployDecision.FIRST_RELEASE
+        # No try/except: a raised error is a transient/non-404 failure (a real 404
+        # is already normalized to RELEASED); propagate so the deploy retries.
+        baas_bot = self._baas_service.get_bot(bot_uuid=bot_uuid)
+        status = (baas_bot or {}).get("status")
 
         if not status or status in _ONLINE_GONE_BAAS_STATUSES:
             return OnlineDeployDecision.FIRST_RELEASE
