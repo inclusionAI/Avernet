@@ -349,6 +349,22 @@ def _trace_headers(request: Request) -> dict[str, str]:
     return {"X-Trace-ID": trace_id} if trace_id else {}
 
 
+def _is_public_api(request: Request) -> bool:
+    """Whether this request belongs to the public surface's envelope contract."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import is_public_api
+
+    return is_public_api(request)
+
+
+def _public_error_envelope(status: int, request: Request) -> JSONResponse:
+    """Envelope a public-surface failure that reached an app-level handler."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        unmapped_error_response,
+    )
+
+    return unmapped_error_response(status, request)
+
+
 @app.exception_handler(DomainError)
 async def _domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status = _DOMAIN_ERROR_STATUS_MAP.get(type(exc), 500)
@@ -360,6 +376,8 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
             "[DomainError 5xx] %s on %s %s: %s",
             type(exc).__name__, request.method, request.url.path, exc.detail,
         )
+    if _is_public_api(request):
+        return _public_error_envelope(status, request)
     return JSONResponse(
         status_code=status,
         content={"detail": exc.detail},
@@ -426,6 +444,14 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
         "[Unhandled exception] %s on %s %s",
         type(exc).__name__, request.method, request.url.path,
     )
+    # The public surface guarantees the Envelope on every response, including
+    # the ones nobody anticipated. Enumerating each new escapee in
+    # ENVELOPE_ERRORS is whack-a-mole — services keep growing error types, and
+    # transport failures (httpx, socket) are not domain errors at all. This
+    # backstop closes the class: a specific mapping still gives a precise
+    # status, and anything else at least stays in the contract.
+    if _is_public_api(request):
+        return _public_error_envelope(500, request)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal Server Error"},

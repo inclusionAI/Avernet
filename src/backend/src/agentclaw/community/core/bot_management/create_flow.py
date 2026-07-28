@@ -353,10 +353,21 @@ def create_bot_with_authorization(
 
     # No token yet → authorization pending; nothing is created.
     if not passport_token:
+        iframe_url = passport_result.get("iframe_url") if passport_result else None
+        redirect_url = passport_result.get("redirect_url") if passport_result else None
+        # "Pending" is only a real state if the caller has somewhere to go. With
+        # neither a token nor a handle — including the ``None`` result the plugin
+        # contract explicitly permits — the apply did not succeed, and reporting
+        # it as pending hands back a dead end that is indistinguishable from a
+        # genuine wait.
+        if not iframe_url and not redirect_url:
+            raise PassportError(
+                f"Passport returned no token and no authorization URL for bot {bot_id}"
+            )
         return AuthPending(
             bot_id=bot_id,
-            iframe_url=passport_result.get("iframe_url") if passport_result else None,
-            redirect_url=passport_result.get("redirect_url") if passport_result else None,
+            iframe_url=iframe_url,
+            redirect_url=redirect_url,
         )
 
     # Token present → create the bot inline.

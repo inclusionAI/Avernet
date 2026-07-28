@@ -31,7 +31,10 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngineError
+from agentclaw.community.adapters.http.openapi_v1.errors import (
+    EngineOptionsUnsupportedError,
+    UnsupportedEngineError,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
@@ -57,6 +60,7 @@ from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
+    BotOperationNotAllowedError,
     generate_bot_id,
     validate_bot_name,
 )
@@ -120,6 +124,28 @@ def _auth_status_error(status: str, request: Request) -> JSONResponse:
     return JSONResponse(status_code=400, content=body.model_dump())
 
 
+def _reject_desktop(bot: dict[str, Any]) -> None:
+    """Refuse destructive lifecycle operations on a desktop bot (→ 409).
+
+    Desktop bots have a dedicated service and their own internal namespace
+    (``/api/desktop/bots``): deletion there also destroys the BaaS container and
+    approves the destruction publish, and restart re-provisions through the same
+    path. The generic ``BotService`` methods this router calls do none of that,
+    so routing a desktop bot through them would soft-delete the local row and
+    leave its container running.
+
+    This surface already refuses to *create* desktop bots, so refusing to manage
+    their lifecycle keeps one consistent line: ``/openapi/v1/bots`` does not
+    handle desktop bots at all. Delegating instead would mean taking on the
+    desktop service as a public dependency — a wider change than this surface
+    should make on its own.
+    """
+    if (bot.get("bot_type") or "") == "desktop":
+        raise BotOperationNotAllowedError(
+            "desktop bots are managed by the desktop service"
+        )
+
+
 def _sync_passport_identity(
     passport_plugin: PassportPlugin,
     *,
@@ -176,11 +202,18 @@ async def create_bot(
     """Create a bot (201), or return 202 + a Passport iframe when authorization is needed.
 
     ``engine_options`` maps onto the spec's ``extra_properties`` bag — the
-    designated home for engine-specific inputs. Note it is carried but not yet
-    persisted: ``BotService.create_bot`` has no corresponding input, so the
-    values stop at the spec until that lands (flagged follow-up).
+    designated home for engine-specific inputs — but nothing downstream consumes
+    it yet, so a non-empty value is rejected rather than silently dropped.
     """
     owner_id = caller_owner_id(principal)
+    # Accepting these would answer 201 while discarding configuration the caller
+    # explicitly asked for, and the 202 path could not recover them at all. The
+    # field stays in the schema so the contract does not change shape once
+    # create_bot reads extra_properties.
+    if body.engine_options:
+        raise EngineOptionsUnsupportedError(
+            "engine_options cannot be applied at creation yet"
+        )
     # Validate the engine against the configured registry FIRST: the cluster rule
     # below treats every non-teclaw value as ACRA, so an unknown engine would
     # otherwise sail through, allocate an id, apply for a Passport, and only fail
@@ -338,8 +371,9 @@ async def delete_bot(
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Deleted]:
-    """Delete a bot."""
+    """Delete a bot. Desktop bots are rejected — see :func:`_reject_desktop`."""
     owner_id = caller_owner_id(principal)
+    _reject_desktop(bot_service.get_bot(bot_id, owner_id))
     bot_service.delete_bot(bot_id, owner_id)
     return deleted_envelope(request)
 
@@ -352,8 +386,9 @@ async def restart_bot(
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
-    """Restart a bot (re-provision its device)."""
+    """Restart a bot. Desktop bots are rejected — see :func:`_reject_desktop`."""
     owner_id = caller_owner_id(principal)
+    _reject_desktop(bot_service.get_bot(bot_id, owner_id))
     bot = bot_service.restart_bot(bot_id, owner_id)
     return envelope(_to_bot(bot), request)
 
@@ -389,11 +424,16 @@ async def get_bot_auth_status(
     would be a way to create exactly the bots ``POST`` rejects.
     """
     owner_id = caller_owner_id(principal)
-    if engine is not None:
-        if engine not in _get_engine_types():
-            raise UnsupportedEngineError(engine)
-        if cluster_name is not None:
-            validate_engine_cluster(engine, cluster_name)
+    # Validate against the engine completion will actually use, not against the
+    # query param: omitting ``engine`` does not mean "no engine", it means the
+    # default one. Checking only when ``engine`` was supplied let
+    # ``?cluster_name=ANDC`` alone through, and the bot was then provisioned on
+    # the ACRA default — a success response contradicting the request.
+    effective_engine = engine if engine is not None else DEFAULT_ENGINE_TYPE
+    if engine is not None and engine not in _get_engine_types():
+        raise UnsupportedEngineError(engine)
+    if cluster_name is not None:
+        validate_engine_cluster(effective_engine, cluster_name)
     result = complete_bot_authorization(
         user_id=owner_id,
         nick_name=owner_id,

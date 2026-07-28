@@ -17,6 +17,7 @@ a builder on success and let the decorator handle the mapped failures.
 from __future__ import annotations
 
 from functools import wraps
+from http import HTTPStatus
 from json import JSONDecodeError
 from typing import Awaitable, Callable, TypeVar
 
@@ -33,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     ClusterMismatchError,
+    EngineOptionsUnsupportedError,
     MissingPrincipalError,
     UnsupportedEngineError,
 )
@@ -114,6 +116,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
+    EngineOptionsUnsupportedError: (400, "engine_options is not supported yet"),
     PassportError: (502, "Authorization service error"),
     # Engine-config failures. None of these is a BotServiceError, so the base
     # mapping below does not cover them and they would otherwise escape the
@@ -140,6 +143,35 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # is not an Envelope and breaks the public contract.
     BotServiceError: (500, "Internal error"),
 }
+
+
+def is_public_api(request: Request) -> bool:
+    """True for requests on the public ``/openapi/v1`` surface.
+
+    The app-level error handlers use this to decide which contract a failure
+    belongs to: this surface promises the Envelope on every response, while the
+    internal ``/api`` routes keep the ``{"detail": ...}`` shape their existing
+    clients already parse. The prefix import is function-local to keep this
+    module importable from the package's own ``__init__``.
+    """
+    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+
+    return request.url.path.startswith(PUBLIC_API_PREFIX)
+
+
+def unmapped_error_response(http_status: int, request: Request) -> JSONResponse:
+    """Envelope for a public failure that reached an app-level handler.
+
+    The message is the standard HTTP reason phrase, never the exception's own
+    text: anything landing here was *not* mapped by :data:`ENVELOPE_ERRORS`, so
+    its message is internal-facing and may carry identifiers or internal-language
+    text that must not reach an external caller.
+    """
+    try:
+        message = HTTPStatus(http_status).phrase
+    except ValueError:  # non-standard status — say nothing specific
+        message = "Error"
+    return _error_response(http_status, message, request)
 
 
 def error_response(http_status: int, message: str, request: Request) -> JSONResponse:

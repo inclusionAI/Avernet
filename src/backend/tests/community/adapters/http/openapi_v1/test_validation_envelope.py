@@ -60,3 +60,58 @@ def test_internal_validation_error_keeps_fastapi_shape():
     resp = _app().post("/api/bots", json={})
     assert resp.status_code == 422
     assert "detail" in resp.json()
+
+
+# ----- R5/F24: nothing escapes the envelope ---------------------------------
+#
+# Enumerating each new escapee in ENVELOPE_ERRORS is whack-a-mole (F11 mapped
+# one of three siblings; F21 caught the other two; F24 found a transport failure
+# that is not a domain error at all). The app's catch-all now answers the public
+# prefix in the envelope, so the contract holds for exceptions nobody mapped.
+
+
+def _backstop_app() -> TestClient:
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        is_public_api,
+        unmapped_error_response,
+    )
+
+    app = FastAPI()
+
+    # Same registration the real app performs (adapters/http/app.py).
+    @app.exception_handler(Exception)
+    async def _handler(request: Request, exc: Exception) -> JSONResponse:
+        if is_public_api(request):
+            return unmapped_error_response(500, request)
+        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+
+    @app.get(f"{PUBLIC_API_PREFIX}/bots/boom")
+    async def _public():
+        # Stands in for httpx.HTTPStatusError out of a device file-transfer:
+        # not a BotServiceError, not a DomainError, mapped nowhere.
+        raise RuntimeError("device rejected the upload")
+
+    @app.get("/api/bots/boom")
+    async def _internal():
+        raise RuntimeError("device rejected the upload")
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_unmapped_public_exception_is_enveloped():
+    resp = _backstop_app().get(f"{PUBLIC_API_PREFIX}/bots/boom")
+    assert resp.status_code == 500
+    body = resp.json()
+    assert set(body) == {"code", "message", "data", "request_id"}
+    assert body["code"] == 500000
+    assert body["data"] is None
+    # The reason phrase, never the exception's own text.
+    assert body["message"] == "Internal Server Error"
+    assert "device rejected" not in str(body)
+
+
+def test_unmapped_internal_exception_keeps_detail_shape():
+    """Scoping guard: existing internal clients must be unaffected."""
+    resp = _backstop_app().get("/api/bots/boom")
+    assert resp.status_code == 500
+    assert resp.json() == {"detail": "Internal Server Error"}

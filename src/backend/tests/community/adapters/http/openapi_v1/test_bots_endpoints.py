@@ -571,3 +571,73 @@ def test_engine_config_conn_info_failure_is_enveloped(client, engine_config):
     assert resp.status_code == 502
     assert resp.json()["code"] == 502000
     assert resp.json()["data"] is None
+
+
+# ----- round-5 review regressions ------------------------------------------
+
+
+def test_create_rejects_unappliable_engine_options(client, svc, passport, bot_repo):
+    """R5/F22: nothing reads extra_properties, so 201 would discard the input."""
+    body = {**_CREATE_BODY, "engine_options": {"model": "x"}}
+    with patch.object(bots_router, "generate_bot_id", return_value="default") as gen:
+        resp = client.post("/openapi/v1/bots", json=body)
+    assert resp.status_code == 400
+    assert resp.json()["code"] == 400000
+    # Rejected up front — no id allocated, no Passport applied, nothing created.
+    gen.assert_not_called()
+    passport.apply_first_agent_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_still_accepts_empty_engine_options(client, svc, passport):
+    """The guard rejects only values it would drop; the field itself stays valid."""
+    passport.apply_first_agent_passport.return_value = {"token": "t", "agent_code": "a"}
+    resp = client.post("/openapi/v1/bots", json={**_CREATE_BODY, "engine_options": {}})
+    assert resp.status_code == 201, resp.json()
+    svc.create_bot.assert_called_once()
+
+
+def test_auth_status_validates_cluster_against_default_engine(client, svc, passport):
+    """R5/F23: omitting ``engine`` means the default engine, not "no engine".
+
+    Without this the ANDC cluster passed unchecked and completion provisioned
+    the ACRA default — a success response contradicting the request.
+    """
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    resp = client.get("/openapi/v1/bots/b1/auth-status?cluster_name=ANDC")
+    assert resp.status_code == 400
+    assert resp.json()["code"] == 400000
+    svc.create_bot.assert_not_called()
+
+
+def test_auth_status_default_engine_accepts_matching_cluster(client, svc, passport):
+    """…and the cluster the default engine *does* belong to still passes."""
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": "ac"}
+    _ok(client.get("/openapi/v1/bots/b1/auth-status?cluster_name=ACRA"))
+    svc.create_bot.assert_called_once()
+
+
+def test_delete_desktop_bot_is_rejected(client, svc):
+    """R5/F26: generic delete leaves the BaaS container running."""
+    svc.get_bot.return_value = {**BOT, "bot_type": "desktop"}
+    resp = client.delete("/openapi/v1/bots/b1")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == 409000
+    svc.delete_bot.assert_not_called()
+
+
+def test_restart_desktop_bot_is_rejected(client, svc):
+    """Same policy for restart — desktop re-provisioning has its own path."""
+    svc.get_bot.return_value = {**BOT, "bot_type": "desktop"}
+    resp = client.post("/openapi/v1/bots/b1/restart")
+    assert resp.status_code == 409
+    svc.restart_bot.assert_not_called()
+
+
+def test_non_desktop_lifecycle_operations_still_work(client, svc):
+    """The guard must not block the bot types this surface does manage."""
+    _ok(client.delete("/openapi/v1/bots/b1"))
+    svc.delete_bot.assert_called_once_with("b1", "u1")
+    _ok(client.post("/openapi/v1/bots/b1/restart"))
+    svc.restart_bot.assert_called_once()
