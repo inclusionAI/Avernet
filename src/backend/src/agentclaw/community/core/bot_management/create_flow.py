@@ -93,17 +93,19 @@ class BotCreateSpec:
     ``x or <default>`` to them, so a concrete value is equivalent to leaving
     them unset, and the flow never has to reason about an absent engine.
 
-    ``bot_name`` keeps its unset state: ``None`` means "no name given" and
-    ``create_bot`` derives the default name from the owner, which is not
-    something a caller can pre-compute.
+    ``bot_name`` is the one field that keeps an unset state, and it is
+    load-bearing: ``None`` means "no name given" so ``_resolve_bot_name``
+    derives one (the owner's nick name for a first bot, else the bot id). No
+    string can stand in — ``validate_bot_name("")`` rejects the request — and
+    the default needs a first-bot lookup the caller cannot pre-compute.
     """
 
     entity_id: str
     engine_type: str
+    bot_type: str
+    bot_name: str | None
     entity_type: str = "staff"
-    bot_name: str | None = None
     bot_desc: str | None = None
-    bot_type: str | None = None
     avatar_url: str | None = None
     share_policy: dict[str, Any] | None = None
     template_type: str | None = None

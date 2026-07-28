@@ -130,9 +130,9 @@ async def create_bot(
         spec=BotCreateSpec(
             entity_id=owner_id,
             engine_type=body.engine,
+            bot_type=body.bot_type,
             bot_name=body.bot_name,
             bot_desc=body.bot_desc,
-            bot_type=body.bot_type,
         ),
         cookie=request.headers.get("cookie", ""),
         bot_service=bot_service,
@@ -301,9 +301,9 @@ async def get_bot_auth_status(
         spec=BotCreateSpec(
             entity_id=owner_id,
             engine_type=engine or DEFAULT_ENGINE_TYPE,
+            bot_type=bot_type or "personal",
             bot_name=bot_name,
             bot_desc=bot_desc,
-            bot_type=bot_type,
         ),
         cookie=request.headers.get("cookie", ""),
         bot_service=bot_service,

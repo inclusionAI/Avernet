@@ -115,7 +115,7 @@ def _bot_create_spec(data: dict[str, Any], user_id: str) -> BotCreateSpec:
         engine_type=data.get("engine_type") or DEFAULT_ENGINE_TYPE,
         bot_name=data.get("bot_name"),
         bot_desc=data.get("bot_desc"),
-        bot_type=data.get("bot_type"),
+        bot_type=data.get("bot_type") or "personal",
         avatar_url=data.get("avatar_url"),
         share_policy=data.get("share_policy"),
         template_type=data.get("template_type"),
