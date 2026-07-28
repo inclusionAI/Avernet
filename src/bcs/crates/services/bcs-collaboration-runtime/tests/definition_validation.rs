@@ -156,12 +156,14 @@ fn authoring_validation_rejects_fields_not_supported_by_the_current_runtime() {
 #[test]
 fn validates_collaboration_template_seed_definitions() {
     for file_name in [
+        "en-US/bot-human-bot-review.yaml",
         "en-US/solution-and-risk-review.yaml",
         "en-US/single-bot-guided-answer.yaml",
         "en-US/parallel-expert-review.yaml",
         "en-US/write-and-review.yaml",
         "en-US/world-cup-preview-content-production.yaml",
         "en-US/micro-merchant-event-orchestration.yaml",
+        "zh-CN/bot-human-bot-review.yaml",
         "zh-CN/solution-and-risk-review.yaml",
         "zh-CN/single-bot-guided-answer.yaml",
         "zh-CN/parallel-expert-review.yaml",
