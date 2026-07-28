@@ -141,7 +141,7 @@
   - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** Task 1, Task 2, Task 3
 
-## Task 7: `[ ]` Regression, crash-safety, and E2E guard
+## Task 7: `[x]` Regression, crash-safety, and E2E guard
 
 - **Goal:** Existing tests reflect the new behavior; crash-safety and single-bot
   end-states are proven; the wider suites stay green.
@@ -152,18 +152,18 @@
   `tests/community/core/service_bot/services/test_publish_crash_windows.py`,
   `tests/community/e2e/publish_boundary/` (chain/restart, retry/failure flows)
 - **Done when:**
-  - [ ] `dcce9a6` regression tests adapted: teclaw offline→re-publish yields a
+  - [x] `dcce9a6` regression tests adapted: teclaw offline→re-publish yields a
         single live bot **with the old `STOPPED` bot destroyed** (not orphaned);
         non-teclaw `FAILED`/`STOPPED` now **reuses** (same uuid) rather than
         recreating. No test still asserts the old orphan-leaving behavior.
-  - [ ] Crash-safety: redelivery after `destroy(old)` but before first-release —
+  - [x] Crash-safety: redelivery after `destroy(old)` but before first-release —
         candidate now reads `RELEASED` → decision `FIRST_RELEASE` → adopt the
         in-doubt new bot by query; assert **no double-destroy, exactly one live
         bot**.
-  - [ ] Invariant assertion helper/test: after each covered flow, exactly one
+  - [x] Invariant assertion helper/test: after each covered flow, exactly one
         live (`is_deleted=0`, non-`RELEASED`) online `bot_uuid` per record/stage.
-  - [ ] `pytest tests/community/core/service_bot/` green.
-  - [ ] `pytest tests/community/e2e/publish_boundary/` green.
+  - [x] `pytest tests/community/core/service_bot/` green.
+  - [x] `pytest tests/community/e2e/publish_boundary/` green.
 - **Depends on:** Task 4, Task 5, Task 6
 
 ## Notes
