@@ -91,22 +91,25 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
         unified repo incl. new test: 33).
 - **Depends on:** —
 
-## Task 6: Read endpoints — get, list, check-name, ceiling, status, passport  `[ ]`
+## Task 6: Read endpoints — get, list, check-name, ceiling, status, passport  `[x]`
 - **Goal:** Wire the six read handlers.
-- **Files:** `adapters/http/openapi_v1/bots/router.py`.
+- **Files:** `adapters/http/openapi_v1/bots/router.py`,
+  `adapters/http/openapi_v1/principal.py` (new — caller-id seam),
+  `adapters/http/openapi_v1/errors.py` + `responses.py` (MissingPrincipalError→401),
+  `tests/.../openapi_v1/test_bots_endpoints.py` (new).
 - **Done when:**
-  - [ ] `GET /bots/{id}` → `bot_service.get_bot(id, user_id=principal)` →
-        `_to_bot` (incl. `cluster_name` via `cluster_for_engine`).
-  - [ ] `GET /bots` → `list_bots_by_conditions` with keyword/engine/status +
-        pagination → `Page[Bot]`.
-  - [ ] `GET /bots/check-name` → `check_bot_name_exists(name)` → `NameCheck`.
-  - [ ] `GET /bots/ceiling` → `PolicyService.get_bots_ceiling(entity_id=principal)`
+  - [x] `GET /bots/{id}` → `bot_service.get_bot(id, owner)` → `_to_bot`
+        (incl. `cluster_name` via `cluster_for_engine`).
+  - [x] `GET /bots` → `list_bots_by_conditions(owner_id, keyword→bot_name,
+        engine, status, page)` → `Page[Bot]`.
+  - [x] `GET /bots/check-name` → `check_bot_name_exists(name)` → `NameCheck`.
+  - [x] `GET /bots/ceiling` → `PolicyService.get_bots_ceiling(entity_id=owner)`
         → `Ceiling`.
-  - [ ] `GET /bots/{id}/status` → `get_bot` + assemble → `BotStatus`.
-  - [ ] `GET /bots/{id}/passport` → `get_bot` guard + `query_agent_passport` →
-        `Passport`.
-  - [ ] All six wrapped by `@envelope_errors`; identity from `require_principal`,
-        tenant via the middleware/seam.
+  - [x] `GET /bots/{id}/status` → `get_bot` + assemble → `BotStatus`.
+  - [x] `GET /bots/{id}/passport` → `get_bot` guard + `query_agent_passport` →
+        `Passport` (missing passport → 404).
+  - [x] All six wrapped by `@envelope_errors`; owner from `caller_owner_id`,
+        tenant bound by middleware. 10 endpoint tests pass (incl. 401/404-mask).
 - **Depends on:** 1, 2, 5
 
 ## Task 7: Mutating endpoints — update, delete, restart, engine-config r/w  `[ ]`

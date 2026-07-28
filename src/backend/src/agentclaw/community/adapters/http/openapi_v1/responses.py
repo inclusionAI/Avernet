@@ -30,7 +30,10 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
     Page,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import ClusterMismatchError
+from agentclaw.community.adapters.http.openapi_v1.errors import (
+    ClusterMismatchError,
+    MissingPrincipalError,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotLimitExceededError,
@@ -88,6 +91,7 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    MissingPrincipalError: (401, "Unauthorized"),
     BotNotFoundError: (404, "Not found"),
     BotPermissionError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
