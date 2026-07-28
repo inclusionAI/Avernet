@@ -5,13 +5,16 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable
 from uuid import uuid4
 
+from engine.community.core.skills.layout_planner import (
+    ResolvedFilesystemLayoutPlan as _Layout,
+)
 from engine.community.plugins.skills_pool.layout_atomic import (
     atomic_exchange_paths,
 )
@@ -89,92 +92,6 @@ class MappingPublishResult:
 
     def to_data(self) -> dict[str, object]:
         return {"published": self.published, "evidence": self.evidence}
-
-
-@dataclass(frozen=True, slots=True)
-class _Layout:
-    legacy_root: Path
-    legacy_local: Path
-    pool_root: Path
-    pool_local: Path
-    pool_repo: Path
-    legacy_repo: Path
-    local_bridge: Path
-    repo_bridge: Path
-    active_marker: Path
-
-    @classmethod
-    def for_home(cls, home: Path) -> "_Layout":
-        return cls.for_engine("openclaw", home)
-
-    @classmethod
-    def for_engine(cls, engine: str, home: Path) -> "_Layout":
-        if engine == "hermes":
-            workspace = home / ".hermes" / "workspace"
-            legacy_root = home / ".hermes" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                legacy_repo=home / ".hermes" / "skills-repo",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=home / ".hermes" / "skills-repo",
-                active_marker=pool_root / ".pool-active",
-            )
-        if engine == "aicoding":
-            workspace = home / ".aicoding" / "workspace"
-            legacy_root = home / ".claude" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                legacy_repo=home / ".aicoding" / "skills-repo",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=home / ".aicoding" / "skills-repo",
-                active_marker=pool_root / ".pool-active",
-            )
-        if engine == "claude_code":
-            workspace = home / ".claude_code" / "workspace"
-            legacy_root = home / ".claude" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                legacy_repo=home / ".claude_code" / "skills-repo",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=legacy_root / "skills-repo",
-                active_marker=pool_root / ".pool-active",
-            )
-        if engine != "openclaw":
-            raise ValueError(f"unsupported filesystem Pool engine: {engine}")
-        workspace = home / ".openclaw" / "workspace"
-        legacy_root = workspace / "skills"
-        pool_root = workspace / "skills-pool"
-        legacy_local = legacy_root / "skills-local"
-        legacy_repo = legacy_root / "skills-repo"
-        return cls(
-            legacy_root=legacy_root,
-            legacy_local=legacy_local,
-            pool_root=pool_root,
-            pool_local=pool_root / "skills-local",
-            pool_repo=pool_root / "skills-repo",
-            legacy_repo=legacy_repo,
-            local_bridge=legacy_local,
-            repo_bridge=legacy_repo,
-            active_marker=pool_root / ".pool-active",
-        )
 
 
 def mapping_sources_use_pool(
@@ -576,7 +493,7 @@ def _active_entry_inventory(
     external: list[Path] = []
     occupied: list[Path] = []
     reserved = {layout.local_bridge, layout.repo_bridge}
-    for entry in sorted(layout.legacy_root.iterdir(), key=lambda path: path.name):
+    for entry in sorted(layout.active_root.iterdir(), key=lambda path: path.name):
         if entry in reserved or entry.name.startswith(".skills-local.pool-cutover-"):
             continue
         if not entry.is_symlink():
@@ -621,7 +538,7 @@ def _mapping_plan(
             )
         if not reason and (
             not target.is_absolute()
-            or target.parent != layout.legacy_root
+            or target.parent != layout.active_root
             or target
             in {
                 layout.legacy_local,
