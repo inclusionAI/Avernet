@@ -51,15 +51,200 @@ bots_dynamic_group_key() {
     base="$(basename "$dir")"
     safe_base="$(printf '%s' "$base" | tr -c 'A-Za-z0-9_-' '-')"
     if command -v shasum >/dev/null 2>&1; then
-        hash="$(printf '%s' "$dir" | shasum -a 256 | awk '{print substr($1,1,12)}')"
+        hash="$(printf '%s' "$dir" | LC_ALL=C LANG=C shasum -a 256 | awk '{print substr($1,1,12)}')"
     else
         hash="$(printf '%s' "$dir" | cksum | awk '{print $1}')"
     fi
     printf '%s-%s\n' "${safe_base:-bots}" "$hash"
 }
 
+bots_dynamic_manifest_version() {
+    jq -r '.version // empty' "$(bots_dynamic_manifest)"
+}
+
+bots_dynamic_has_runtime() {
+    local runtime="$1"
+    jq -e --arg runtime "$runtime" \
+        'any(.bots[]; (.runtime.type // "openclaw") == $runtime)' \
+        "$(bots_dynamic_manifest)" >/dev/null 2>&1
+}
+
 bots_dynamic_log_file() {
     printf '%s/bots_%s.log\n' "$LOG_DIR" "$(bots_dynamic_group_key)"
+}
+
+bots_dynamic_rule_pid_file() {
+    printf '%s/bots_%s_rule.pid\n' "$DEP_DIR" "$(bots_dynamic_group_key)"
+}
+
+bots_dynamic_rule_status_file() {
+    printf '%s/bots_%s_rule.status.json\n' "$LOG_DIR" "$(bots_dynamic_group_key)"
+}
+
+bots_dynamic_rule_log_file() {
+    printf '%s/bots_%s_rule.log\n' "$LOG_DIR" "$(bots_dynamic_group_key)"
+}
+
+bots_dynamic_rule_binary() {
+    if [ -n "${BCS_RULE_BOT_BIN:-}" ]; then
+        printf '%s\n' "$BCS_RULE_BOT_BIN"
+        return
+    fi
+
+    local target_dir="${CARGO_TARGET_DIR:-${BCS_DIR}/target}"
+    case "$target_dir" in
+        /*) printf '%s/debug/bcs-rule-bot\n' "$target_dir" ;;
+        *) printf '%s/%s/debug/bcs-rule-bot\n' "$BCS_DIR" "$target_dir" ;;
+    esac
+}
+
+bots_dynamic_rule_process_matches() {
+    local pid_file pid command manifest binary
+    pid_file="$(bots_dynamic_rule_pid_file)"
+    [ -f "$pid_file" ] || return 1
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    case "$pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    kill -0 "$pid" 2>/dev/null || return 1
+
+    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    manifest="$(bots_dynamic_manifest)"
+    binary="$(bots_dynamic_rule_binary)"
+    case "$command" in
+        *"${binary}"*" run "*"--manifest ${manifest}"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+bots_dynamic_rule_profile_ready() {
+    local profile="$1"
+    local status_file updated_at now_ms max_age_ms
+    bots_dynamic_rule_process_matches || return 1
+    status_file="$(bots_dynamic_rule_status_file)"
+    [ -f "$status_file" ] || return 1
+    jq -e --arg profile "$profile" \
+        '.bots[$profile].state == "connected"' \
+        "$status_file" >/dev/null 2>&1 || return 1
+    updated_at="$(jq -r '.updated_at // 0' "$status_file" 2>/dev/null)"
+    case "$updated_at" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    now_ms=$(( $(date +%s) * 1000 ))
+    max_age_ms="${BCS_RULE_BOT_STATUS_MAX_AGE_MS:-90000}"
+    case "$max_age_ms" in
+        ''|*[!0-9]*) max_age_ms=90000 ;;
+    esac
+    [ "$updated_at" -le "$now_ms" ] && [ $((now_ms - updated_at)) -le "$max_age_ms" ]
+}
+
+bots_dynamic_rule_profile_behavior() {
+    local profile="$1"
+    jq -r --arg profile "$profile" \
+        '.bots[$profile].behavior // "unknown"' \
+        "$(bots_dynamic_rule_status_file)" 2>/dev/null
+}
+
+bots_dynamic_build_rule_bot() {
+    local binary
+    binary="$(bots_dynamic_rule_binary)"
+    if [ -n "${BCS_RULE_BOT_BIN:-}" ] && [ -x "$binary" ]; then
+        return 0
+    fi
+    if ! check_command cargo; then
+        if [ -x "$binary" ]; then
+            return 0
+        fi
+        log_error "cargo not found; it is required to build bcs-rule-bot"
+        return 1
+    fi
+
+    log_info "Building bcs-rule-bot..."
+    if ! (cd "$BCS_DIR" && cargo build -p bcs-rule-bot) >> "$(bots_dynamic_log_file)" 2>&1; then
+        log_error "Failed to build bcs-rule-bot; check $(bots_dynamic_log_file)"
+        return 1
+    fi
+    if [ ! -x "$binary" ]; then
+        log_error "bcs-rule-bot binary not found after build: ${binary}"
+        return 1
+    fi
+}
+
+bots_dynamic_validate_v2_manifest() {
+    bots_dynamic_build_rule_bot || return 1
+    if ! "$(bots_dynamic_rule_binary)" validate \
+        --manifest "$(bots_dynamic_manifest)" >> "$(bots_dynamic_log_file)" 2>&1; then
+        log_error "Invalid version 2 bot manifest; check $(bots_dynamic_log_file)"
+        return 1
+    fi
+}
+
+bots_dynamic_start_rule_host() {
+    local pid_file status_file log_file binary profile_root profile_prefix pid waited=0
+    if bots_dynamic_rule_process_matches; then
+        log_error "Rule bot host is already running for --profile-dir ${BOTS_PROFILE_DIR}"
+        return 1
+    fi
+
+    pid_file="$(bots_dynamic_rule_pid_file)"
+    status_file="$(bots_dynamic_rule_status_file)"
+    log_file="$(bots_dynamic_rule_log_file)"
+    binary="$(bots_dynamic_rule_binary)"
+    profile_root="${OPENCLAW_PROFILE_ROOT:-$HOME}"
+    profile_prefix="${OPENCLAW_PROFILE_PREFIX-.openclaw-}"
+    rm -f "$pid_file" "$status_file"
+
+    log_info "Starting rule bot host for --profile-dir ${BOTS_PROFILE_DIR}..."
+    RUST_LOG="${RUST_LOG:-bcs_rule_bot=info}" \
+    nohup "$binary" run \
+        --manifest "$(bots_dynamic_manifest)" \
+        --bcs-url "ws://127.0.0.1:${BCS_PORT}/ws/bot" \
+        --profile-root "$profile_root" \
+        --profile-prefix "$profile_prefix" \
+        --status-file "$status_file" > "$log_file" 2>&1 < /dev/null &
+    pid="$!"
+    printf '%s\n' "$pid" > "$pid_file"
+
+    while [ "$waited" -lt 5 ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            log_error "Rule bot host exited during startup; check ${log_file}"
+            rm -f "$pid_file"
+            return 1
+        fi
+        if [ -f "$status_file" ]; then
+            log_info "Rule bot host started (PID: ${pid})"
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    log_info "Rule bot host started (PID: ${pid}); waiting for BCS connections"
+}
+
+bots_dynamic_stop_rule_host() {
+    local pid_file pid waited=0
+    pid_file="$(bots_dynamic_rule_pid_file)"
+    if ! bots_dynamic_rule_process_matches; then
+        if [ -f "$pid_file" ]; then
+            log_warn "Removing stale rule bot PID file: ${pid_file}"
+        fi
+        rm -f "$pid_file" "$(bots_dynamic_rule_status_file)"
+        return 0
+    fi
+
+    pid="$(cat "$pid_file")"
+    log_info "Stopping rule bot host (PID: ${pid})..."
+    kill "$pid" 2>/dev/null || true
+    while [ "$waited" -lt 10 ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null && bots_dynamic_rule_process_matches; then
+        log_warn "Rule bot host did not stop gracefully; terminating PID ${pid}"
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pid_file" "$(bots_dynamic_rule_status_file)"
 }
 
 bots_dynamic_workspace_root() {
@@ -110,22 +295,24 @@ bots_dynamic_specs() {
     manifest="$(bots_dynamic_manifest)"
     jq -r '
       . as $root
-      | ($root.port_start | tonumber) as $start
-      | ($root.port_step | tonumber) as $step
+      | ($root.port_start // 0 | tonumber) as $start
+      | ($root.port_step // 1 | tonumber) as $step
       | ($root.scopes // "local") as $default_scopes
       | $root.bots
       | to_entries[]
       | .key as $idx
       | .value as $bot
+      | ($bot.runtime.type // "openclaw") as $runtime
       | [
           $bot.name,
           $bot.profile,
-          ($start + ($idx * $step) | tostring),
-          $bot.source,
+          (if $runtime == "openclaw" then ($start + ($idx * $step) | tostring) else "-" end),
+          ($bot.source // "-"),
           $bot.summary,
           $bot.domains,
           $bot.skills,
-          ($bot.scopes // $default_scopes)
+          ($bot.scopes // $default_scopes),
+          $runtime
         ]
       | @tsv
     ' "$manifest"
@@ -158,62 +345,108 @@ bots_dynamic_validate_manifest() {
         return 1
     fi
     if ! jq -e '
-        .version == 1
-        and (.port_start | type == "number")
-        and (.port_step | type == "number")
-        and (.port_step > 0)
-        and (.bots | type == "array")
-        and (.bots | length > 0)
-        and all(.bots[];
-            (.source | type == "string" and length > 0)
-            and (.profile | type == "string" and test("^[A-Za-z0-9_-]+$"))
+        def keys_allowed($allowed):
+            ((keys - $allowed) | length) == 0;
+        def common_bot:
+            (.profile | type == "string" and test("^[A-Za-z0-9_-]+$"))
             and (.name | type == "string" and length > 0)
             and (.summary | type == "string" and length > 0)
             and (.domains | type == "string" and length > 0)
-            and (.skills | type == "string" and length > 0)
+            and (.skills | type == "string" and length > 0);
+        def ports:
+            (.port_start | type == "number")
+            and (.port_step | type == "number")
+            and (.port_step > 0);
+        (.bots | type == "array")
+        and (.bots | length > 0)
+        and (
+            (
+                .version == 1
+                and ports
+                and all(.bots[];
+                    common_bot
+                    and (.source | type == "string" and length > 0)
+                )
+            )
+            or
+            (
+                .version == 2
+                and keys_allowed(["version", "name", "port_start", "port_step", "scopes", "bots"])
+                and (.name | type == "string" and length > 0)
+                and all(.bots[];
+                    common_bot
+                    and keys_allowed(["source", "profile", "name", "summary", "domains", "skills", "scopes", "runtime"])
+                    and ((.runtime.type // "openclaw") as $runtime
+                        | ($runtime == "openclaw" or $runtime == "rule")
+                        and (
+                            if has("runtime")
+                            then (.runtime | type == "object")
+                                and (.runtime | keys_allowed(
+                                    if $runtime == "rule"
+                                    then ["type", "response_delay_ms", "behavior"]
+                                    else ["type"]
+                                    end
+                                ))
+                            else true
+                            end
+                        )
+                        and if $runtime == "rule"
+                            then ((has("source") | not) and (.runtime.behavior | type == "object"))
+                            else (.source | type == "string" and length > 0)
+                            end)
+                )
+                and (
+                    if any(.bots[]; (.runtime.type // "openclaw") == "openclaw")
+                    then ports
+                    else true
+                    end
+                )
+            )
         )
       ' "$manifest" >/dev/null; then
         log_error "Invalid bot manifest schema: ${manifest}"
-        log_error "Required root fields: version=1, port_start, port_step, bots[]."
-        log_error "Required per-bot fields: source, profile, name, summary, domains, skills."
+        log_error "Supported versions: 1 (OpenClaw only) and 2 (OpenClaw/rule runtimes)."
+        log_error "Required per-bot fields: profile, name, summary, domains, skills."
         log_error "Runtime profile must match: [A-Za-z0-9_-]"
         return 1
     fi
 
     local seen_profiles="" seen_ports="" has_error=false
-    local name profile port source summary domains skills scopes source_dir file
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
-        case "$source" in
-            ""|*/*|*..*)
-                log_error "${name}: source must be a direct child directory name, got: ${source}"
-                has_error=true
-                ;;
-        esac
-        source_dir="${dir}/${source}"
-        if [ ! -d "$source_dir" ]; then
-            log_error "${name}: source directory not found: ${source_dir}"
-            has_error=true
-        else
-            for file in "${BOTS_DYNAMIC_PROFILE_FILES[@]}"; do
-                if [ ! -f "${source_dir}/${file}" ]; then
-                    log_error "${name}: required profile file missing: ${source_dir}/${file}"
+    local name profile port source summary domains skills scopes runtime source_dir file
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
+        if [ "$runtime" = "openclaw" ]; then
+            case "$source" in
+                ""|"-"|*/*|*..*)
+                    log_error "${name}: source must be a direct child directory name, got: ${source}"
                     has_error=true
-                fi
-            done
-        fi
+                    ;;
+            esac
+            source_dir="${dir}/${source}"
+            if [ ! -d "$source_dir" ]; then
+                log_error "${name}: source directory not found: ${source_dir}"
+                has_error=true
+            else
+                for file in "${BOTS_DYNAMIC_PROFILE_FILES[@]}"; do
+                    if [ ! -f "${source_dir}/${file}" ]; then
+                        log_error "${name}: required profile file missing: ${source_dir}/${file}"
+                        has_error=true
+                    fi
+                done
+            fi
 
-        case "$port" in
-            ''|*[!0-9]*)
-                log_error "${name}: computed port is not numeric: ${port}"
-                has_error=true
-                ;;
-            *)
-                if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-                    log_error "${name}: computed port out of range: ${port}"
+            case "$port" in
+                ''|*[!0-9]*)
+                    log_error "${name}: computed port is not numeric: ${port}"
                     has_error=true
-                fi
-                ;;
-        esac
+                    ;;
+                *)
+                    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                        log_error "${name}: computed port out of range: ${port}"
+                        has_error=true
+                    fi
+                    ;;
+            esac
+        fi
 
         case " ${seen_profiles} " in
             *" ${profile} "*)
@@ -221,14 +454,16 @@ bots_dynamic_validate_manifest() {
                 has_error=true
                 ;;
         esac
-        case " ${seen_ports} " in
-            *" ${port} "*)
-                log_error "Duplicate computed bot port in manifest: ${port}"
-                has_error=true
-                ;;
-        esac
+        if [ "$runtime" = "openclaw" ]; then
+            case " ${seen_ports} " in
+                *" ${port} "*)
+                    log_error "Duplicate computed bot port in manifest: ${port}"
+                    has_error=true
+                    ;;
+            esac
+            seen_ports="${seen_ports} ${port}"
+        fi
         seen_profiles="${seen_profiles} ${profile}"
-        seen_ports="${seen_ports} ${port}"
     done < <(bots_dynamic_specs)
 
     [ "$has_error" = false ]
@@ -299,10 +534,14 @@ bots_dynamic_runtime_matches() {
 
 bots_dynamic_group_fully_running() {
     local count=0
-    local name profile port source summary domains skills scopes
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    local name profile port source summary domains skills scopes runtime
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
         count=$((count + 1))
-        bots_dynamic_runtime_matches "$name" "$profile" "$port" "$source" || return 1
+        if [ "$runtime" = "rule" ]; then
+            bots_dynamic_rule_profile_ready "$profile" || return 1
+        else
+            bots_dynamic_runtime_matches "$name" "$profile" "$port" "$source" || return 1
+        fi
     done < <(bots_dynamic_specs)
     [ "$count" -gt 0 ]
 }
@@ -359,8 +598,9 @@ bots_dynamic_agent_model_fields_json() {
 
 bots_dynamic_check_profile_configs() {
     local has_error=false
-    local name profile port source summary domains skills scopes profile_dir
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    local name profile port source summary domains skills scopes runtime profile_dir
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
+        [ "$runtime" = "openclaw" ] || continue
         profile_dir="$(bcs_bot_profile_dir "$profile")"
         if [ -f "${profile_dir}/openclaw.json" ] && ! bots_dynamic_config_matches "$name" "$profile" "$port" "$source"; then
             if bots_dynamic_config_base_matches "$name" "$profile" "$port" "$source"; then
@@ -378,8 +618,9 @@ bots_dynamic_check_profile_configs() {
 
 bots_dynamic_check_ports_free() {
     local has_error=false
-    local name profile port source summary domains skills scopes listener
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    local name profile port source summary domains skills scopes runtime listener
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
+        [ "$runtime" = "openclaw" ] || continue
         if port_is_listening "$port"; then
             listener="$(port_listener_summary "$port")"
             log_error "${name} port ${port} is already in use. Current listener: ${listener}"
@@ -673,13 +914,21 @@ bots_dynamic_wait_ready() {
     while [ "$elapsed" -lt "$max_wait" ]; do
         local all_ready=true
         missing=""
-        local name profile port source summary domains skills scopes session_file
-        while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+        local name profile port source summary domains skills scopes runtime session_file
+        while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
             session_file="$(bcs_bot_profile_dir "$profile")/.bcs/session.json"
-            if ! port_is_listening "$port"; then
-                all_ready=false
-                missing="${missing}${name}:port ${port}; "
-                continue
+            if [ "$runtime" = "rule" ]; then
+                if ! bots_dynamic_rule_profile_ready "$profile"; then
+                    all_ready=false
+                    missing="${missing}${name}:rule connection; "
+                    continue
+                fi
+            else
+                if ! port_is_listening "$port"; then
+                    all_ready=false
+                    missing="${missing}${name}:port ${port}; "
+                    continue
+                fi
             fi
             if ! session_has_token "$session_file"; then
                 all_ready=false
@@ -704,9 +953,9 @@ bots_dynamic_wait_ready() {
 
 bots_dynamic_onboard() {
     local bcs_cli; bcs_cli="$(bcs_cli_path)"
-    local name profile port source summary domains skills scopes profile_dir session_file token
+    local name profile port source summary domains skills scopes runtime profile_dir session_file token
 
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
         profile_dir="$(bcs_bot_profile_dir "$profile")"
         session_file="${profile_dir}/.bcs/session.json"
         token="$(bots_session_token "$session_file")"
@@ -746,8 +995,8 @@ bots_dynamic_capture_session_uuids() {
     rm -rf "$sessions_dir"
     mkdir -p "$sessions_dir"
 
-    local name profile port source summary domains skills scopes session_file bot_uuid token_present
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    local name profile port source summary domains skills scopes runtime session_file bot_uuid token_present
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
         session_file="$(bcs_bot_profile_dir "$profile")/.bcs/session.json"
         bot_uuid="$(bots_session_bot_uuid "$session_file")"
         if session_has_token "$session_file"; then
@@ -765,9 +1014,9 @@ bots_dynamic_capture_session_uuids() {
 bots_dynamic_preflight_existing_sessions() {
     local token_count=0
     local missing_count=0
-    local name profile port source summary domains skills scopes session_file token
+    local name profile port source summary domains skills scopes runtime session_file token
 
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
         session_file="$(bcs_bot_profile_dir "$profile")/.bcs/session.json"
         token="$(bots_session_token "$session_file")"
         if [ -n "$token" ]; then
@@ -820,9 +1069,15 @@ bots_dynamic_validate_session_uuids() {
 
 bots_dynamic_setup() {
     bots_dynamic_validate_manifest || return 1
-    bots_dynamic_check_ports_free || return 1
     mkdir -p "${LOG_DIR}"
-    setup_bcn_plugin || return 1
+    : > "$(bots_dynamic_log_file)"
+    if [ "$(bots_dynamic_manifest_version)" = "2" ] && bots_dynamic_has_runtime rule; then
+        bots_dynamic_validate_v2_manifest || return 1
+    fi
+    bots_dynamic_check_ports_free || return 1
+    if bots_dynamic_has_runtime openclaw; then
+        setup_bcn_plugin || return 1
+    fi
     log_info "Dynamic bot profile directory is valid: $(bots_dynamic_profile_dir)"
     log_info "Dynamic bot count: $(bots_dynamic_count)"
 }
@@ -842,12 +1097,22 @@ bots_dynamic_start() {
     bots_dynamic_check_profile_configs || return 1
     bots_dynamic_check_ports_free || return 1
 
-    setup_bcn_plugin || return 1
+    if [ "$(bots_dynamic_manifest_version)" = "2" ] && bots_dynamic_has_runtime rule; then
+        bots_dynamic_validate_v2_manifest || return 1
+    fi
+    if bots_dynamic_has_runtime openclaw; then
+        setup_bcn_plugin || return 1
+    fi
 
-    local name profile port source summary domains skills scopes
-    log_info "Preparing $(bots_dynamic_count) OpenClaw bot profile(s) from ${BOTS_PROFILE_DIR}..."
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
-        if ! bots_dynamic_setup_profile "$name" "$profile" "$port" "$source" "$summary" "$domains" "$skills" "$scopes"; then
+    local name profile port source summary domains skills scopes runtime
+    log_info "Preparing $(bots_dynamic_count) bot profile(s) from ${BOTS_PROFILE_DIR}..."
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
+        if [ "$runtime" = "rule" ]; then
+            if ! mkdir -p "$(bcs_bot_profile_dir "$profile")/.bcs"; then
+                log_error "Failed to prepare rule bot profile: ${name}"
+                return 1
+            fi
+        elif ! bots_dynamic_setup_profile "$name" "$profile" "$port" "$source" "$summary" "$domains" "$skills" "$scopes"; then
             log_error "Failed to prepare dynamic bot profile: ${name}"
             return 1
         fi
@@ -867,9 +1132,23 @@ bots_dynamic_start() {
     fi
     bots_dynamic_capture_session_uuids "$snapshot"
 
-    log_info "Starting $(bots_dynamic_count) OpenClaw bot(s) from ${BOTS_PROFILE_DIR}..."
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    local rule_host_started=false
+    if bots_dynamic_has_runtime rule; then
+        if ! bots_dynamic_start_rule_host; then
+            bots_restore_session_snapshot "$snapshot"
+            bots_remove_session_snapshot "$snapshot"
+            return 1
+        fi
+        rule_host_started=true
+    fi
+
+    log_info "Starting configured bot runtime(s) from ${BOTS_PROFILE_DIR}..."
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
+        [ "$runtime" = "openclaw" ] || continue
         if ! bots_dynamic_start_openclaw "$name" "$profile" "$port" "$(dirname "$(bots_dynamic_log_file)")/${profile}.log" "$source"; then
+            if [ "$rule_host_started" = true ]; then
+                bots_dynamic_stop_rule_host
+            fi
             bots_restore_session_snapshot "$snapshot"
             bots_remove_session_snapshot "$snapshot"
             return 1
@@ -877,12 +1156,18 @@ bots_dynamic_start() {
     done < <(bots_dynamic_specs)
 
     if ! bots_dynamic_wait_ready "${BCS_LOCAL_BOTS_READY_TIMEOUT:-120}"; then
+        if [ "$rule_host_started" = true ]; then
+            bots_dynamic_stop_rule_host
+        fi
         bots_restore_session_snapshot "$snapshot"
         bots_remove_session_snapshot "$snapshot"
-        log_error "Dynamic OpenClaw bots did not become ready; check $(bots_dynamic_log_file)"
+        log_error "Dynamic bots did not become ready; check $(bots_dynamic_log_file) and $(bots_dynamic_rule_log_file)"
         return 1
     fi
     if ! bots_dynamic_validate_session_uuids "$snapshot"; then
+        if [ "$rule_host_started" = true ]; then
+            bots_dynamic_stop_rule_host
+        fi
         bots_restore_session_snapshot "$snapshot"
         bots_remove_session_snapshot "$snapshot"
         return 1
@@ -890,7 +1175,7 @@ bots_dynamic_start() {
     bots_remove_session_snapshot "$snapshot"
 
     if bots_dynamic_onboard; then
-        log_info "Dynamic OpenClaw bots onboarded"
+        log_info "Dynamic bots onboarded"
     else
         return 1
     fi
@@ -900,31 +1185,40 @@ bots_dynamic_stop() {
     bots_dynamic_validate_manifest || return 1
     mkdir -p "${LOG_DIR}"
 
-    local name profile port source summary domains skills scopes
-    log_info "Stopping $(bots_dynamic_count) OpenClaw bot(s) from ${BOTS_PROFILE_DIR}..."
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    local name profile port source summary domains skills scopes runtime
+    log_info "Stopping dynamic bot runtime(s) from ${BOTS_PROFILE_DIR}..."
+    if bots_dynamic_has_runtime rule; then
+        bots_dynamic_stop_rule_host
+    fi
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
+        [ "$runtime" = "openclaw" ] || continue
         if bots_dynamic_runtime_matches "$name" "$profile" "$port" "$source"; then
             stop_port_processes_if_owned "$port" "${PROJECT_ROOT}" "${name} OpenClaw bot" || true
         elif port_is_listening "$port"; then
             log_warn "Skipping ${name} port ${port}: listener does not match this --profile-dir bot config"
         fi
     done < <(bots_dynamic_specs)
-    log_info "Dynamic OpenClaw bots stopped"
+    log_info "Dynamic bots stopped"
 }
 
 bots_dynamic_clean() {
     bots_dynamic_validate_manifest || return 1
     bots_dynamic_stop || true
 
-    local name profile port source summary domains skills scopes profile_dir workspace_dir
+    local name profile port source summary domains skills scopes runtime profile_dir workspace_dir
     log_info "Cleaning dynamic bot runtime data from ${BOTS_PROFILE_DIR}..."
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
         profile_dir="$(bcs_bot_profile_dir "$profile")"
-        workspace_dir="$(bots_dynamic_workspace_dir "$name" "$profile" "$source")"
-        rm -rf "$profile_dir" "$workspace_dir"
-        rm -f "$(dirname "$(bots_dynamic_log_file)")/${profile}.log"
+        if [ "$runtime" = "openclaw" ]; then
+            workspace_dir="$(bots_dynamic_workspace_dir "$name" "$profile" "$source")"
+            rm -rf "$profile_dir" "$workspace_dir"
+            rm -f "$(dirname "$(bots_dynamic_log_file)")/${profile}.log"
+        else
+            rm -rf "$profile_dir"
+        fi
     done < <(bots_dynamic_specs)
-    rm -f "$(bots_dynamic_log_file)"
+    rm -f "$(bots_dynamic_log_file)" "$(bots_dynamic_rule_log_file)" \
+        "$(bots_dynamic_rule_status_file)" "$(bots_dynamic_rule_pid_file)"
     log_info "Dynamic bot runtime data cleaned"
 }
 
@@ -932,11 +1226,20 @@ bots_dynamic_status() {
     bots_dynamic_validate_manifest || return 1
     echo "  Bots (--profile-dir ${BOTS_PROFILE_DIR}):"
 
-    local name profile port source summary domains skills scopes session_file bot_uuid
-    while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+    local name profile port source summary domains skills scopes runtime session_file bot_uuid behavior
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
         session_file="$(bcs_bot_profile_dir "$profile")/.bcs/session.json"
         bot_uuid="$(bots_session_bot_uuid "$session_file")"
-        if port_is_listening "$port"; then
+        if [ "$runtime" = "rule" ] && bots_dynamic_rule_profile_ready "$profile"; then
+            behavior="$(bots_dynamic_rule_profile_behavior "$profile")"
+            if [ -n "$bot_uuid" ]; then
+                echo "    ${name}: Running (runtime: rule, behavior: ${behavior}, profile: ${profile}, bot_uuid: ${bot_uuid})"
+            else
+                echo "    ${name}: Connected (runtime: rule, behavior: ${behavior}, profile: ${profile}, session: missing bot_uuid)"
+            fi
+        elif [ "$runtime" = "rule" ]; then
+            echo "    ${name}: Stopped (runtime: rule, profile: ${profile})"
+        elif port_is_listening "$port"; then
             if [ -n "$bot_uuid" ]; then
                 echo "    ${name}: Running (port: ${port}, profile: ${profile}, bot_uuid: ${bot_uuid})"
             else
@@ -958,13 +1261,6 @@ bots_dynamic_prereqs() {
 
     echo -e "${CYAN}[bots:${BOTS_PROFILE_DIR}] Prerequisites${NC}"
 
-    if check_openclaw_installed; then
-        prereq_ok "openclaw: $(command -v openclaw)"
-    else
-        prereq_error "openclaw command not found. Run: ./scripts/singlebox.sh install-tools"
-        has_error=true
-    fi
-
     if check_command jq; then
         prereq_ok "jq: $(command -v jq)"
     else
@@ -979,26 +1275,46 @@ bots_dynamic_prereqs() {
         has_error=true
     fi
 
-    if [ "$(bcn_plugin_mode)" = "source" ]; then
-        if check_node_available; then
-            prereq_ok "node: $(node --version 2>&1)"
-        else
-            prereq_error "Node.js >= 22 not found (required to build BCN plugin in source mode). Install: brew install node@22 (macOS)"
-            has_error=true
-        fi
-
-        if check_command npm; then
-            prereq_ok "npm: $(npm --version 2>&1)"
-        else
-            prereq_error "npm not found (required to build BCN plugin in source mode). Install Node.js 22+ with npm."
-            has_error=true
-        fi
-    else
-        prereq_ok "BCN plugin mode: npm (source build not required)"
-    fi
-
     if bots_dynamic_validate_manifest; then
         prereq_ok "profile-dir manifest: $(bots_dynamic_manifest)"
+
+        if bots_dynamic_has_runtime openclaw; then
+            if check_openclaw_installed; then
+                prereq_ok "openclaw: $(command -v openclaw)"
+            else
+                prereq_error "openclaw command not found. Run: ./scripts/singlebox.sh install-tools"
+                has_error=true
+            fi
+
+            if [ "$(bcn_plugin_mode)" = "source" ]; then
+                if check_node_available; then
+                    prereq_ok "node: $(node --version 2>&1)"
+                else
+                    prereq_error "Node.js >= 22 not found (required to build BCN plugin in source mode). Install: brew install node@22 (macOS)"
+                    has_error=true
+                fi
+
+                if check_command npm; then
+                    prereq_ok "npm: $(npm --version 2>&1)"
+                else
+                    prereq_error "npm not found (required to build BCN plugin in source mode). Install Node.js 22+ with npm."
+                    has_error=true
+                fi
+            else
+                prereq_ok "BCN plugin mode: npm (source build not required)"
+            fi
+        fi
+
+        if [ "$(bots_dynamic_manifest_version)" = "2" ] && bots_dynamic_has_runtime rule; then
+            if [ -x "$(bots_dynamic_rule_binary)" ]; then
+                prereq_ok "bcs-rule-bot: $(bots_dynamic_rule_binary)"
+            elif check_command cargo; then
+                prereq_ok "cargo: $(command -v cargo) (will build bcs-rule-bot)"
+            else
+                prereq_error "cargo not found and bcs-rule-bot has not been built"
+                has_error=true
+            fi
+        fi
     else
         has_error=true
     fi
@@ -1009,8 +1325,9 @@ bots_dynamic_prereqs() {
             return 1
         fi
 
-        local name profile port source summary domains skills scopes listener
-        while IFS=$'\t' read -r name profile port source summary domains skills scopes; do
+        local name profile port source summary domains skills scopes runtime listener
+        while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
+            [ "$runtime" = "openclaw" ] || continue
             if port_is_listening "$port"; then
                 listener="$(port_listener_summary "$port")"
                 prereq_error "${name} port ${port} is in use. Current listener: ${listener}"
