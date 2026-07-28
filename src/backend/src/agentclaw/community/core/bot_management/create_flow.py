@@ -83,13 +83,13 @@ def get_bot_mcp_codes(
     entity_type: str,
     engine_type: str | None = None,
 ) -> list[str]:
-    """Resolve AgentPass MCP codes for a bot using the injected factory.
+    """Resolve the passport-service MCP codes for a bot using the injected factory.
 
     Pure helper — the factory is passed in by the caller (obtained via
     ``Injected(SkillSetServiceFactory)``), so this contains no service-locator
     calls. ``engine_type`` scopes the skill-set query to the bot's active
     engine; when omitted the factory falls back to ``DEFAULT_ENGINE_TYPE``.
-    LOCAL/stdio MCPs are filtered because AgentPass does not own them.
+    LOCAL/stdio MCPs are filtered because the passport service does not own them.
     """
     skill_set_service = factory.create(
         user_id=user_id,
@@ -132,7 +132,8 @@ def _record_owner_relationship(
             )
         else:
             logger.warning(
-                "[create_flow] AceAgent returned failure for create_relationship: "
+                "[create_flow] authorization-relationship service returned failure "
+                "for create_relationship: "
                 "bot_id=%s owner=%s agent_code=%s", bot_id, user_id, agent_code,
             )
     except AuthRelationshipError as e:

@@ -60,6 +60,9 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
     "dependencies",  # router-local DI helpers
     "converter",     # domain-model → API Response transforms
     "models",        # adapter-owned identity / response dataclasses
+    "errors",        # adapter-owned error types (kept import-light on purpose)
+    "clusters",      # public-API domain rule (engine ↔ cluster bijection)
+    "principal",     # caller-identity extraction from the principal seam
 )
 
 
