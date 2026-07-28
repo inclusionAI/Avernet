@@ -1024,6 +1024,39 @@ async def test_restart_teclaw_not_live_target_retires_then_recreates():
 
 
 @pytest.mark.asyncio
+async def test_restart_first_release_target_releases_stale_binding_no_retire():
+    # A restart whose target is already RELEASED/DESTROYING (e.g. an external BaaS
+    # deletion) → FIRST_RELEASE → recreate. No bot to destroy, but the old ACTIVE
+    # binding must still be released (destroy_publish_id=None) so it does not
+    # linger pointing at the gone bot after ext.binding is rewritten.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock()  # must NOT be issued
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "RELEASED"}
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+    svc._release_binding = Mock()
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_not_called()  # bot already gone
+    build_service.upgrade_async.assert_not_awaited()
+    build_service.release_async.assert_awaited_once()  # recreate
+    # Old binding released with no destroy id (nothing was destroyed).
+    svc._release_binding.assert_called_once_with(1, destroy_publish_id=None)
+
+
+@pytest.mark.asyncio
 async def test_restart_baas_not_live_target_upgrades_in_place():
     # A baas/ARCA online bot in FAILED is rebuilt in place by the UPDATE, so the
     # restart upgrades (reuses the bot) — no recreate, no retire.
@@ -3457,6 +3490,7 @@ def test_sync_restart_progress_stable_success_activates_recreated_binding():
     svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
     svc._activate_binding = Mock()
     svc.refresh_publish_handle = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
 
     result = svc.sync_restart_progress(publish_id=1)
 
@@ -3470,6 +3504,9 @@ def test_sync_restart_progress_stable_success_activates_recreated_binding():
     # Activation replaces device_props (reuse_binding), so the teclaw status
     # handle publish_id is re-merged afterward, pointing at the restart workflow.
     svc.refresh_publish_handle.assert_called_once_with(88, 700)
+    # A recreated teclaw container needs the post-deploy MCP outbound rule that
+    # _handle_sync_success would apply; this stable branch runs it too.
+    svc._refresh_provider_mcp_after_success.assert_called_once()
 
 
 # ---- restart_bot() submit path ---------------------------------------------
