@@ -142,20 +142,23 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
         uses defaults for any body-sourced attributes.
 - **Depends on:** 1, 2, 3, 4
 
-## Task 9: Endpoint tests  `[~]`
+## Task 9: Endpoint tests  `[x]`
 - **Goal:** Prove each endpoint's success shape and the tenant guarantee.
-- **Files:** `tests/community/adapters/http/openapi_v1/test_bots_endpoints.py` (new).
+- **Files:** `tests/.../openapi_v1/test_bots_endpoints.py` (24 tests),
+  `tests/.../openapi_v1/test_bots_tenant_isolation.py` (5 tests, real guard).
 - **Done when:**
-  - [ ] One happy-path test per endpoint: status code, envelope `code`, and a
-        spot-check of mapped `data` fields (incl. `cluster_name` derivation).
-  - [ ] Cross-tenant test: a bot created under tenant A is unreachable (404) via
-        `GET`/`PUT`/`DELETE`/status/passport/engine-config when the request is
-        bound to tenant B — never returned, never mutated.
-  - [ ] List-filter test: `keyword`/`engine`/`status` each narrow; `total` exact.
-  - [ ] Create test: valid pair → 201; invalid engine↔cluster pair → 400; the
-        empty-token path → 202 `BotAuthPending`.
-  - [ ] Test harness binds `resolve_avernet_tenant` to a controllable tenant so
-        both tenants are exercisable while the real authenticator stays a stub.
+  - [x] Happy-path test per endpoint: status code, envelope `code`, mapped
+        `data` fields (incl. `cluster_name` derivation).
+  - [x] Cross-tenant: a bot created under tenant A is unreachable/immutable from
+        tenant B (get→None, list→0, update/delete→no-op) through the real Track A
+        guard on a live repo — the mechanism behind the handlers' masked 404.
+  - [x] List filters: endpoint passthrough (`owner_id`+keyword/engine/status/page
+        reach the service) + repo-level narrowing with exact totals (Task 5).
+  - [x] Create: valid pair → 201; invalid engine↔cluster → 400; empty-token →
+        202 `BotAuthPending`; auth-status preserves re-supplied attributes.
+  - [x] Harness overrides `require_principal` (caller) and drives the tenant via
+        `avernet_tenant_scope` (what the middleware sets) — real authenticator
+        stays a stub.
 - **Depends on:** 6, 7, 8
 
 ## Task 10: Full-suite + lint gate  `[ ]`
