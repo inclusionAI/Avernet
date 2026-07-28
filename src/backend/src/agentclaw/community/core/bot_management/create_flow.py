@@ -43,6 +43,15 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+
+class AuthStatusUnavailableError(RuntimeError):
+    """The passport service returned no authorization status at all.
+
+    Subclasses ``RuntimeError`` so the internal route's catch-all keeps mapping
+    it exactly as before, while the public surface can map it to a proper
+    envelope instead of letting it escape as an unhandled 500.
+    """
+
 # Passport application constants (unchanged from the internal router).
 _ACCESS_MODE = "RESTRICTED"
 _WORKSPACE_PATH = "/home/admin/.openclaw"
@@ -407,7 +416,7 @@ def complete_bot_authorization(
     """
     auth_status = passport_plugin.query_auth_status(bot_id=bot_id, owner_workno=user_id)
     if not auth_status:
-        raise RuntimeError("query auth status returned nothing")
+        raise AuthStatusUnavailableError("query auth status returned nothing")
 
     status = auth_status.get("status")
     if status != AuthStatus.ISSUED:

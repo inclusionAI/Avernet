@@ -31,6 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngineError
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
@@ -60,7 +61,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     validate_bot_name,
 )
 from agentclaw.community.core.services.engine_config import EngineConfigService
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
+from agentclaw.community.core.workspace.constants import (
+    DEFAULT_ENGINE_TYPE,
+    _get_engine_types,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
@@ -176,6 +180,12 @@ async def create_bot(
     values stop at the spec until that lands (flagged follow-up).
     """
     owner_id = caller_owner_id(principal)
+    # Validate the engine against the configured registry FIRST: the cluster rule
+    # below treats every non-teclaw value as ACRA, so an unknown engine would
+    # otherwise sail through, allocate an id, apply for a Passport, and only fail
+    # later at device provisioning — with those side effects already committed.
+    if body.engine not in _get_engine_types():
+        raise UnsupportedEngineError(body.engine)
     # The engine/cluster pair must obey the bijection (ANDC⟺teclaw, ACRA⟺else).
     validate_engine_cluster(body.engine, body.cluster_name)
 

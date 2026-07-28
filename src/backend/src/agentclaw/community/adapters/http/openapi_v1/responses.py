@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     ClusterMismatchError,
     MissingPrincipalError,
+    UnsupportedEngineError,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
@@ -45,6 +46,9 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotPermissionError,
     BotServiceError,
     DeviceLimitError,
+)
+from agentclaw.community.core.bot_management.create_flow import (
+    AuthStatusUnavailableError,
 )
 from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
@@ -107,10 +111,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     BotInvalidLifecycleStateError: (409, "Bot is not in a valid state for this operation"),
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
+    UnsupportedEngineError: (400, "Unsupported engine"),
     PassportError: (502, "Authorization service error"),
     # Engine-config failures. Neither is a BotServiceError, so the base mapping
     # below does not cover them and they would otherwise escape the envelope.
     DeviceNotBoundError: (409, "Bot has no active device"),
+    # The passport service answered with nothing at all — upstream problem, not
+    # a caller mistake, and not an unhandled crash.
+    AuthStatusUnavailableError: (502, "Authorization service error"),
     JSONDecodeError: (500, "Malformed engine configuration"),
     # Base class LAST: every mapping above is a subclass of BotServiceError, and
     # the lookup returns on the first isinstance match in insertion order, so the

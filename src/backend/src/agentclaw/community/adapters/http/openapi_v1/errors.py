@@ -23,3 +23,12 @@ class MissingPrincipalError(Exception):
     In the current pre-auth state ``require_principal`` is a stub returning
     ``None``, so every real request raises this until the gateway verifier lands.
     """
+
+
+class UnsupportedEngineError(Exception):
+    """Raised when a request names an engine the platform does not support (→ 400).
+
+    Checked up front so an unknown engine is rejected before a bot id is
+    allocated or a Passport is applied for — otherwise the request would create
+    side effects and only fail later at device provisioning.
+    """

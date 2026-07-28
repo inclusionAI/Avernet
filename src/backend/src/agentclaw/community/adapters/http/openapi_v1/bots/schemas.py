@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -44,7 +44,11 @@ class BotCreate(BaseModel):
     bot_desc: str
     engine: str
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
-    bot_type: str
+    # Only the two types this flow can actually complete. "desktop" bots are
+    # inserted and then deliberately skipped by create_bot's device allocation,
+    # so accepting one here would return 201 for a permanently PENDING bot;
+    # they have their own creation flow.
+    bot_type: Literal["personal", "service"]
     engine_options: dict[str, Any] = Field(
         default_factory=dict,
         description="Engine/vendor-specific inputs, kept nested rather than "

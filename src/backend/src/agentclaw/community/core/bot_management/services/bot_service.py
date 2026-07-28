@@ -3053,6 +3053,10 @@ class BotService:
             return True
         except BotNotFoundError:
             raise
+        except BotOperationNotAllowedError:
+            # 必须在 catch-all 之前放行：否则"不允许删除 default bot"这类客户端错误
+            # 会被重新包成通用 BotServiceError，调用方看到 500 并可能无谓重试。
+            raise
         except Exception as e:
             logger.error(f"[bot_service.delete_bot] Failed to delete bot {bot_id}: {e}")
             raise BotServiceError(f"Failed to delete bot: {e}")

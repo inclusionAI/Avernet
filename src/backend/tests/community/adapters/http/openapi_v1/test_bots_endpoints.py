@@ -238,9 +238,13 @@ def test_mutating_not_found_masked(client, svc):
 
 # ----- create + auth-status (Task 8) ---------------------------------------
 
+# openclaw is in the default SUPPORTED_ENGINE_TYPES registry; teclaw is NOT
+# (it is only available where ENGINE_TYPES is configured to include it), so the
+# create path's engine check would reject it here. Tests that specifically need
+# the teclaw/ANDC pairing patch the registry.
 _CREATE_BODY = {
-    "bot_name": "NewBot", "bot_desc": "d", "engine": "teclaw",
-    "cluster_name": "ANDC", "bot_type": "personal",
+    "bot_name": "NewBot", "bot_desc": "d", "engine": "openclaw",
+    "cluster_name": "ACRA", "bot_type": "personal",
 }
 
 
@@ -266,7 +270,7 @@ def test_create_bot_202_pending(client, passport):
 
 
 def test_create_bot_cluster_mismatch_400(client, svc):
-    bad = {**_CREATE_BODY, "cluster_name": "ACRA"}  # teclaw must be ANDC
+    bad = {**_CREATE_BODY, "cluster_name": "ANDC"}  # openclaw must be ACRA
     with patch.object(bots_router, "generate_bot_id", return_value="default"):
         resp = client.post("/openapi/v1/bots", json=bad)
     assert resp.status_code == 400, resp.json()
@@ -438,6 +442,53 @@ def test_deleting_default_bot_is_client_error(client, svc):
     resp = client.delete("/openapi/v1/bots/default")
     assert resp.status_code == 409
     assert resp.json()["code"] == 409000
+
+
+def test_unsupported_engine_rejected_before_side_effects(client, svc, passport, bot_repo):
+    """R3/F16: an unknown engine must not allocate an id or apply for a Passport."""
+    bad = {**_CREATE_BODY, "engine": "not-a-real-engine", "cluster_name": "ACRA"}
+    with patch.object(bots_router, "generate_bot_id", return_value="default") as gen:
+        resp = client.post("/openapi/v1/bots", json=bad)
+    assert resp.status_code == 400
+    assert resp.json()["code"] == 400000
+    # Rejected up front — no id allocated, no Passport applied, nothing created.
+    gen.assert_not_called()
+    passport.apply_first_agent_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
+def test_teclaw_andc_create_allowed_when_engine_configured(client, svc, passport):
+    """The ANDC cluster is reachable wherever teclaw is a configured engine.
+
+    teclaw is absent from the default registry, so the engine check rejects it
+    unless the deployment enables it via ENGINE_TYPES — this pins that the
+    teclaw/ANDC pairing itself is valid, not accidentally unreachable.
+    """
+    passport.apply_first_agent_passport.return_value = {"token": "tok", "agent_code": "ac"}
+    body = {**_CREATE_BODY, "engine": "teclaw", "cluster_name": "ANDC"}
+    with patch.object(
+        bots_router, "_get_engine_types", return_value=["openclaw", "teclaw"]
+    ), patch.object(bots_router, "generate_bot_id", return_value="default"):
+        resp = client.post("/openapi/v1/bots", json=body)
+    assert resp.status_code == 201, resp.json()
+    svc.create_bot.assert_called_once()
+
+
+def test_desktop_bot_type_rejected(client, svc):
+    """R3/F17: desktop bots have their own flow; 201-ing a PENDING shell is wrong."""
+    resp = client.post("/openapi/v1/bots", json={**_CREATE_BODY, "bot_type": "desktop"})
+    assert resp.status_code == 422
+    svc.create_bot.assert_not_called()
+
+
+def test_missing_auth_status_is_enveloped(client, passport):
+    """R3/F18: a null query_auth_status must not escape as a raw 500 detail."""
+    passport.query_auth_status.return_value = None
+    resp = client.get("/openapi/v1/bots/b1/auth-status")
+    assert resp.status_code == 502
+    body = resp.json()
+    assert body["code"] == 502000
+    assert body["data"] is None
 
 
 def test_rejected_authorization_is_not_reported_as_success(client, passport):
