@@ -2132,7 +2132,15 @@ class BotService:
             # Check if new bot_name already exists (and it's not the current bot)
             if bot_name.strip():
                 existing_bot = self._repository.get_by_bot_name(bot_name.strip())
-                if existing_bot and existing_bot.get("bot_id") != bot_id:
+                # Identify the current record by owner AND bot_id. bot_id is only
+                # unique per owner — every owner's first bot is "default" — so
+                # comparing bot_id alone made another owner's "default" bot look
+                # like this one, letting its name be taken even though create and
+                # check-name enforce the name tenant-wide.
+                if existing_bot and not (
+                    existing_bot.get("bot_id") == bot_id
+                    and existing_bot.get("owner_id") == bot.get("owner_id")
+                ):
                     raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
             update_data["bot_name"] = bot_name
         if bot_desc is not None:

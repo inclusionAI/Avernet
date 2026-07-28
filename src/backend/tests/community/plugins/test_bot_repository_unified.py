@@ -634,3 +634,32 @@ def test_search_bots_filter_provider_cross_env_binding_no_match(repo, db):
     total, items = repo.search_bots(provider="arca", page=1, page_size=10)
     assert total == 0
     assert items == []
+
+
+def test_list_by_conditions_treats_like_wildcards_literally(repo):
+    """R9/F39: a `%` in the keyword narrowed nothing — it matched everything.
+
+    The keyword goes into a LIKE pattern, so an unescaped `%` or `_` is a
+    wildcard rather than the character the caller typed: searching for a name
+    containing `%` returned every bot and an inflated total.
+    """
+    repo.insert(_data(bot_id="b1", bot_name="100% Bot"))
+    repo.insert(_data(bot_id="b2", bot_name="Plain Bot"))
+    repo.insert(_data(bot_id="b3", bot_name="a_b Bot"))
+    repo.insert(_data(bot_id="b4", bot_name="axb Bot"))
+
+    # `%` is the literal character, not "match anything".
+    total, rows = repo.list_by_conditions(bot_name="100%")
+    assert total == 1, [r["bot_name"] for r in rows]
+    assert rows[0]["bot_id"] == "b1"
+
+    # `_` is the literal character, not "match one".
+    total, rows = repo.list_by_conditions(bot_name="a_b")
+    assert total == 1, [r["bot_name"] for r in rows]
+    assert rows[0]["bot_id"] == "b3"
+
+    # A bare wildcard matches only names actually containing it.
+    assert repo.list_by_conditions(bot_name="%")[0] == 1
+
+    # Ordinary substring search is unchanged.
+    assert repo.list_by_conditions(bot_name="Bot")[0] == 4

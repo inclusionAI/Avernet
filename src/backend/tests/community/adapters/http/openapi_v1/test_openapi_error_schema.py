@@ -20,6 +20,14 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import ERROR_RESPONS
 
 _ERROR_REF = "#/components/schemas/ErrorEnvelope"
 
+# (path, status) pairs that deliberately document a data-bearing model instead
+# of the shared null-data envelope. Terminal authorization states are reported
+# as failures, but the state itself is what the caller acts on, so it stays in
+# ``data`` and the route declares that shape. Every other error stays uniform.
+_DOCUMENTED_DATA_BEARING_ERRORS = {
+    ("/openapi/v1/bots/{bot_id}/auth-status", 400),
+}
+
 
 def _schema() -> dict:
     app = FastAPI()
@@ -47,6 +55,8 @@ def test_every_public_operation_documents_the_error_envelope():
         for status in ERROR_RESPONSES:
             where = f"{method.upper()} {path} -> {status}"
             assert str(status) in operation["responses"], f"{where} undocumented"
+            if (path, status) in _DOCUMENTED_DATA_BEARING_ERRORS:
+                continue  # declares a richer model on purpose — see F38 below
             assert _json_ref(operation, str(status)) == _ERROR_REF, where
 
 
@@ -78,3 +88,30 @@ def test_error_envelope_pins_data_to_null():
     model = _schema()["components"]["schemas"]["ErrorEnvelope"]
     assert set(model["required"]) >= {"code", "message", "request_id"}
     assert model["properties"]["data"].get("type") == "null"
+
+
+# ----- R9/F38: the one documented exception to ErrorEnvelope ----------------
+
+
+def test_auth_status_400_documents_the_status_payload():
+    """The terminal-auth 400 returns data, so it must not be typed as null.
+
+    Every other 400 on this surface is an ``ErrorEnvelope`` with ``data: null``.
+    This route reports a terminal authorization state as a failure but keeps the
+    state in ``data`` — the actionable part — so a client generated against the
+    surface-wide declaration would deserialize it against the wrong model.
+    """
+    schema = _schema()
+    op = schema["paths"]["/openapi/v1/bots/{bot_id}/auth-status"]["get"]
+    ref = _json_ref(op, "400")
+    assert ref != _ERROR_REF, "still documented as the null-data error envelope"
+    assert "BotAuthStatus" in ref, ref
+
+
+def test_other_routes_keep_the_shared_error_envelope_for_400():
+    """The override is scoped to that one route, not leaked surface-wide."""
+    schema = _schema()
+    for path, method, op in _operations(schema):
+        if path.endswith("/auth-status"):
+            continue
+        assert _json_ref(op, "400") == _ERROR_REF, f"{method.upper()} {path}"

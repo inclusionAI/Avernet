@@ -417,7 +417,22 @@ async def restart_bot(
     return envelope(_to_bot(bot), request)
 
 
-@router.get("/{bot_id}/auth-status", response_model=Envelope[BotAuthStatus])
+@router.get(
+    "/{bot_id}/auth-status",
+    response_model=Envelope[BotAuthStatus],
+    responses={
+        # This route's 400 is the one documented exception to the surface-wide
+        # ErrorEnvelope (whose ``data`` is null): a terminal authorization state
+        # is reported as a failure, but the state itself is the actionable part,
+        # so it stays in ``data``. Declared here so generated clients
+        # deserialize it against the model it actually returns.
+        400: {
+            "model": Envelope[BotAuthStatus],
+            "description": "Authorization did not complete; `data.status` "
+            "carries the terminal state (e.g. REJECTED, EXPIRED)",
+        },
+    },
+)
 @envelope_errors
 async def get_bot_auth_status(
     bot_id: str,

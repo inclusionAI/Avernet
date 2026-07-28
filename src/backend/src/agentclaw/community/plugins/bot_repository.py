@@ -362,8 +362,12 @@ class BotRepository:
             if public:
                 query = query.filter(self.Model.public == public)
             if bot_name:
+                # autoescape=True escapes the caller's % and _ and emits the
+                # matching ESCAPE clause. Interpolating into LIKE directly makes
+                # those characters wildcards, so searching for a name containing
+                # a literal "%" matched everything and inflated the total.
                 query = query.filter(
-                    self.Model.bot_name.like(f"%{bot_name}%")
+                    self.Model.bot_name.contains(bot_name, autoescape=True)
                 )
             if owner_name:
                 query = query.filter(
