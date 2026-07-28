@@ -6,8 +6,8 @@ Session DTOs — those are covered by core/adapters/openclaw/tests/test_session.
 
 Coverage preserved from engines/openclaw/tests/test_session.py (legacy):
   - sessions_list: sessions.list + per-page chat.history + providers.available
-  - sessions_list: bcs:group filter with bcs_grp DM/bcs-cli exceptions,
-    "Bot 初始化配置" filter
+  - sessions_list: internal BCS and bcs:group filters with namespaced bcs_grp
+    DM/bcs-cli exceptions, "Bot 初始化配置" filter
   - sessions_list: pagination (offset/limit BEFORE history fetch)
   - sessions_list: model normalization via _normalized_model key
   - session_create: sessions.patch RPC method + params + raw return
@@ -173,15 +173,17 @@ class TestSessionsList:
         assert s["_message_count"] == 1
         assert s["_messages"] == messages
 
-    async def test_bcs_group_sessions_hide_group_chats_and_keep_dm_sessions(self):
-        """BCS group chats are hidden while bcs_grp DM sessions remain visible."""
+    async def test_bcs_sessions_hide_internal_and_group_chats_and_keep_dm_sessions(self):
+        """Internal/group chats are hidden while namespaced BCS DMs stay visible."""
         token = "bc7d52974947474da2f1cdea1c5642b6"
+        internal_group_key = f"agent:main:bcs_grp_{token}:e69117ce_1"
         channel_dm_key = f"agent:main:bcs:group:bcs_grp_dingtalk_dm_{token}"
         native_dm_key = f"agent:main:bcs:group:bcs_grp_dm_{token}"
         flexible_dm_key = "agent:main:bcs:group:bcs_grp_dingtalk_dm_not-a-token"
         sessions = [
             {"key": None, "label": "Null key"},
             {"label": "Missing key"},
+            {"key": internal_group_key, "label": "Internal BCS group"},
             {"key": "bcs:group:room-42", "label": "Group"},
             {
                 "key": f"agent:main:bcs:group:bcs_grp_dingtalk_{token}",
@@ -201,6 +203,7 @@ class TestSessionsList:
         })
         result = await impl.sessions_list(token="tok")
         keys = [s["key"] for s in result]
+        assert internal_group_key not in keys
         assert "bcs:group:room-42" not in keys
         assert f"agent:main:bcs:group:bcs_grp_dingtalk_{token}" not in keys
         assert "agent:main:bcs:group:legacy_dm_session" not in keys
