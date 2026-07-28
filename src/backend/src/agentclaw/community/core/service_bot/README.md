@@ -54,6 +54,10 @@ Publication path is the user-visible go-live for bots — bugs here block custom
 Service artifacts freeze the persisted Skills Pool layout state at build time;
 changes to the Skills Pool contract or repository therefore affect publication
 compatibility and must be reviewed together with this module.
+服务 Bot 的 BaaS 启动同样消费 `core.devices` 中定义的
+“BaaS bootstrap readiness contract”：只有镜像初始化 ready、DaaS checkout
+版本和内容复验通过后，才允许执行 engine install/start；bootstrap 非零必须
+终止发布链路。
 
 ## Publish operation ledger (#197)
 
