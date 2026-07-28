@@ -15,6 +15,7 @@ from agentclaw.community.utils import env_utils
 logger = get_logger()
 
 _LOCAL_TEMPLATE_UID = "local_default"
+_TEMPLATE_UID_ALIASES = (_LOCAL_TEMPLATE_UID, "aicoding")
 _SUPPORTED_ENGINES = ("openclaw", "moltis", "hermes", "aicoding", "claude_code")
 
 
@@ -39,12 +40,41 @@ class SingleboxBaasTemplateConfigLifecycle(LifecycleBase):
             config_key=BAAS_TEMPLATE_UID_ROUTING_CONFIG_KEY,
             env=env,
         )
-        if isinstance(existing, dict):
-            return
         if not self._template_uuid.startswith("TEMPLATE-"):
             raise RuntimeError(
                 "singlebox requires baas.template_uuid in TEMPLATE-* format"
             )
+        if isinstance(existing, dict):
+            templates = existing.get("templates")
+            if not isinstance(templates, dict):
+                templates = {}
+            missing_aliases = [
+                alias for alias in _TEMPLATE_UID_ALIASES if alias not in templates
+            ]
+            if not missing_aliases:
+                return
+            updated = dict(existing)
+            updated_templates = dict(templates)
+            for alias in missing_aliases:
+                updated_templates[alias] = {"template_uuid": self._template_uuid}
+            updated["templates"] = updated_templates
+            config_id = self._config_service.set_config(
+                category=BAAS_TEMPLATE_MAPPING_CATEGORY,
+                config_key=BAAS_TEMPLATE_UID_ROUTING_CONFIG_KEY,
+                config_value=updated,
+                env=env,
+                description="Generated from the local deployment configuration",
+                operator="local-bootstrap",
+            )
+            if not config_id:
+                raise RuntimeError("failed to migrate local BaaS template mapping")
+            logger.info(
+                "Migrated local BaaS template mapping aliases: env=%s aliases=%s template_uuid=%s",
+                env,
+                missing_aliases,
+                self._template_uuid,
+            )
+            return
 
         self._config_service.create_category(
             category=BAAS_TEMPLATE_MAPPING_CATEGORY,
@@ -63,9 +93,10 @@ class SingleboxBaasTemplateConfigLifecycle(LifecycleBase):
                     for engine in _SUPPORTED_ENGINES
                 ],
                 "templates": {
-                    _LOCAL_TEMPLATE_UID: {
+                    alias: {
                         "template_uuid": self._template_uuid,
                     }
+                    for alias in _TEMPLATE_UID_ALIASES
                 },
             },
             env=env,

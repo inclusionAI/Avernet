@@ -20,7 +20,7 @@ The repository is injected via constructor (DI), following the same pattern
 as BotService / BotRepository.
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from injector import inject
 
@@ -201,6 +201,25 @@ class TemplateService:
                 bot_id, e, exc_info=True,
             )
             return None
+
+    def list_templates_by_bot_ids(self, bot_ids: List[str]) -> List[Dict[str, Any]]:
+        """List template records by bot IDs.
+
+        This is used by bot list APIs to attach ac_templates.ext as
+        template_config in batch, avoiding N+1 calls to get_template().
+        Failures are treated as non-fatal so list APIs can still return bots.
+        """
+        if not bot_ids:
+            return []
+
+        try:
+            return self._repository.list_by_bot_ids(bot_ids)
+        except Exception as e:
+            logger.error(
+                "[template_service.list_templates_by_bot_ids] Failed to list templates for %d bots: %s",
+                len(bot_ids), e, exc_info=True,
+            )
+            return []
 
     def get_template_config(
         self,

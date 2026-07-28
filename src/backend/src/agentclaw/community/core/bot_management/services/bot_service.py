@@ -1778,6 +1778,47 @@ class BotService:
 
         return coding_bots
 
+    def _attach_template_configs_to_bots(self, items: List[Dict[str, Any]]) -> None:
+        """Attach ac_templates.ext as template_config for bot list items in batch.
+
+        create/get/update paths store template details in ac_templates.ext while
+        list repository methods read only ac_bots fields.  Keep list APIs
+        consistent with get_bot() by enriching template-backed bots here.
+        Best-effort: template lookup failure must not break bot lists.
+        """
+        if not items:
+            return
+
+        bot_ids = list(dict.fromkeys(
+            str(bot.get("bot_id"))
+            for bot in items
+            if bot.get("bot_id") and bot.get("template_type")
+        ))
+        if not bot_ids:
+            return
+
+        try:
+            templates = self._template_service.list_templates_by_bot_ids(bot_ids)
+            ext_by_bot_id = {
+                str(template.get("bot_id")): template.get("ext")
+                for template in templates
+                if template.get("bot_id") and template.get("ext") is not None
+            }
+            if not ext_by_bot_id:
+                return
+            for bot in items:
+                bot_id = bot.get("bot_id")
+                if bot_id is None:
+                    continue
+                ext = ext_by_bot_id.get(str(bot_id))
+                if ext is not None:
+                    bot["template_config"] = ext
+        except Exception as e:
+            logger.warning(
+                "[bot_service._attach_template_configs_to_bots] Failed to attach template configs: %s",
+                e, exc_info=True,
+            )
+
     def list_bots(
         self,
         entity_id: Optional[str] = None,
@@ -1807,6 +1848,7 @@ class BotService:
         # Note: Device binding info is stored in ac_entity_device_binding table
         # To avoid N+1 queries, we don't fetch binding info for list operations
         # Use get_bot() to get detailed info including device_binding
+        self._attach_template_configs_to_bots(items)
 
         return {
             "total": total,
@@ -1844,6 +1886,7 @@ class BotService:
             page=page,
             page_size=page_size,
         )
+        self._attach_template_configs_to_bots(items)
         return {
             "total": total,
             "items": items,
@@ -1869,6 +1912,7 @@ class BotService:
             Dictionary with 'total' and 'items' keys
         """
         total, items = self._repository.list_by_search(public=public, search=search, page=page, page_size=page_size)
+        self._attach_template_configs_to_bots(items)
         return {"total": total, "items": items}
 
     def list_domain_bots(
@@ -1975,6 +2019,8 @@ class BotService:
         except Exception as e:
             logger.warning(f"[bot_service.search_bots] Failed to add can_delete_bot/can_upgrade_publish: {e}")
 
+        self._attach_template_configs_to_bots(items)
+
         return {
             "total": total,
             "items": items,
@@ -2029,6 +2075,8 @@ class BotService:
         except Exception as e:
             logger.warning(f"[bot_service.list_bots_by_owner] Failed to add can_edit_bot: {e}")
 
+        self._attach_template_configs_to_bots(items)
+
         return {
             "total": total,
             "items": items,
@@ -2068,6 +2116,7 @@ class BotService:
 
         # List reads use the persisted status. Live desktop status is reconciled
         # outside this request path so a slow BaaS cannot delay first paint.
+        self._attach_template_configs_to_bots(items)
 
         return {
             "total": total,
