@@ -179,6 +179,8 @@ session_link_url = "http://localhost:8000/sessions/{session_id}"
 storage_backend = "local"
 multipart_threshold = 104857600
 max_file_size = 5368709120
+
+[session_files.backend]
 data_dir = "./data/session-files"
 
 [session_files.share]

@@ -48,10 +48,7 @@ fn default_invite_ttl_seconds() -> u64 {
 }
 
 /// Session file workspace configuration (Task 11 bootstrap wiring).
-///
-/// Mirrors `InviteConfig` in shape: an optional secret with a random
-/// fallback, an integer default TTL, and an optional public base URL.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFilesConfig {
     /// Storage backend tag. `"local"` selects `bcs_storage_local::LocalStoragePlugin`.
     /// Other backends are linked into the binary by future plugin registration.
@@ -67,15 +64,31 @@ pub struct SessionFilesConfig {
     #[serde(default = "default_session_files_max_file_size")]
     pub max_file_size: u64,
 
-    /// Directory used by `LocalStoragePlugin` for the local backend.
-    /// Defaults to `{bots_base_dir}/session-files` when unset.
-    #[serde(default)]
-    pub data_dir: Option<String>,
+    /// In-session + share download share-link TTL (baas expire_seconds), seconds.
+    #[serde(default = "default_session_files_share_link_ttl")]
+    pub share_link_ttl: u64,
 
     /// Share-token configuration — independent of `invite.token_secret`
     /// so rotating one does not invalidate the other's outstanding tokens.
     #[serde(default)]
     pub share: SessionFilesShareConfig,
+
+    /// Backend-specific config pass-through (local: data_dir; baas: endpoint/tenant/...).
+    #[serde(default)]
+    pub backend: toml::Table,
+}
+
+impl Default for SessionFilesConfig {
+    fn default() -> Self {
+        Self {
+            storage_backend: default_session_files_storage_backend(),
+            multipart_threshold: default_session_files_multipart_threshold(),
+            max_file_size: default_session_files_max_file_size(),
+            share_link_ttl: default_session_files_share_link_ttl(),
+            share: SessionFilesShareConfig::default(),
+            backend: toml::Table::new(),
+        }
+    }
 }
 
 fn default_session_files_storage_backend() -> String {
@@ -88,6 +101,10 @@ fn default_session_files_multipart_threshold() -> u64 {
 
 fn default_session_files_max_file_size() -> u64 {
     5_368_709_120
+}
+
+fn default_session_files_share_link_ttl() -> u64 {
+    3600
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1829,6 +1846,29 @@ port = 6379
         let config: BcsConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.database.database_type, DatabaseType::Sqlite);
         assert_eq!(config.database.sqlite.path, "custom-bcs.db");
+    }
+
+    #[test]
+    fn session_files_config_parses_share_link_ttl_and_backend() {
+        let toml_str = r#"
+storage_backend = "baas"
+multipart_threshold = 104857600
+max_file_size = 5368709120
+share_link_ttl = 3600
+
+[share]
+token_secret = "s3cret"
+default_ttl_seconds = 86400
+
+[backend]
+endpoint = "http://baas:8080"
+tenant = "teamclaw"
+"#;
+        let cfg: SessionFilesConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.storage_backend, "baas");
+        assert_eq!(cfg.share_link_ttl, 3600);
+        assert_eq!(cfg.backend["endpoint"], toml::Value::String("http://baas:8080".into()));
+        assert_eq!(cfg.backend["tenant"], toml::Value::String("teamclaw".into()));
     }
 
     #[test]
