@@ -76,6 +76,7 @@ from .schemas import (
     BotAuthStatus,
     BotCreate,
     BotStatus,
+    BotType,
     BotUpdate,
     Ceiling,
     Passport,
@@ -367,7 +368,7 @@ async def get_bot_auth_status(
     cluster_name: str | None = None,
     bot_name: str | None = None,
     bot_desc: str | None = None,
-    bot_type: str | None = None,
+    bot_type: BotType | None = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
@@ -380,10 +381,19 @@ async def get_bot_auth_status(
     would be created with defaults (e.g. engine ``openclaw``) that contradict the
     Passport applied for at ``POST`` time, so callers on the 202 flow should
     always echo back ``engine``/``cluster_name``/``bot_name``/… here.
+
+    Because this is where the record is actually inserted, every restriction
+    ``POST`` enforces is re-applied to the echoed-back values: the same engine
+    registry check, the same engine/cluster bijection, and the same
+    personal|service restriction on ``bot_type``. Otherwise the completion path
+    would be a way to create exactly the bots ``POST`` rejects.
     """
     owner_id = caller_owner_id(principal)
-    if engine is not None and cluster_name is not None:
-        validate_engine_cluster(engine, cluster_name)
+    if engine is not None:
+        if engine not in _get_engine_types():
+            raise UnsupportedEngineError(engine)
+        if cluster_name is not None:
+            validate_engine_cluster(engine, cluster_name)
     result = complete_bot_authorization(
         user_id=owner_id,
         nick_name=owner_id,

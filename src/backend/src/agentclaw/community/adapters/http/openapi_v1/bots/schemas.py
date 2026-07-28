@@ -15,6 +15,14 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
 # handler renders that as the standard Envelope.
 _STRICT = ConfigDict(extra="forbid")
 
+# The only two types this creation flow can carry to completion. "desktop" bots
+# are inserted and then deliberately skipped by create_bot's device allocation,
+# so accepting one would return 201/ISSUED for a permanently PENDING bot; they
+# have their own creation flow. Single-sourced here because the restriction has
+# to hold on *both* entry points that can insert a bot — the create body and the
+# authorization-completion query params — and those must not drift apart.
+BotType = Literal["personal", "service"]
+
 _CLUSTER_DESC = (
     "Deployment cluster, in strict 1:1 correspondence with the engine: "
     "'ANDC' for engine 'teclaw', 'ACRA' for every other engine. On create the "
@@ -44,11 +52,7 @@ class BotCreate(BaseModel):
     bot_desc: str
     engine: str
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
-    # Only the two types this flow can actually complete. "desktop" bots are
-    # inserted and then deliberately skipped by create_bot's device allocation,
-    # so accepting one here would return 201 for a permanently PENDING bot;
-    # they have their own creation flow.
-    bot_type: Literal["personal", "service"]
+    bot_type: BotType
     engine_options: dict[str, Any] = Field(
         default_factory=dict,
         description="Engine/vendor-specific inputs, kept nested rather than "

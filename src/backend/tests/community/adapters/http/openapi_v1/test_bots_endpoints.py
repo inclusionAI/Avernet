@@ -303,10 +303,13 @@ def test_auth_status_issued_preserves_create_attributes(client, svc, passport):
     """Re-supplied attributes reach completion so the bot isn't downgraded."""
     passport.query_auth_status.return_value = {"status": "ISSUED"}
     passport.query_agent_passport.return_value = {"agent_code": "ac"}
-    _ok(client.get(
-        "/openapi/v1/bots/b1/auth-status"
-        "?engine=teclaw&cluster_name=ANDC&bot_name=NewBot&bot_desc=d"
-    ))
+    with patch.object(
+        bots_router, "_get_engine_types", return_value=["openclaw", "teclaw"]
+    ):
+        _ok(client.get(
+            "/openapi/v1/bots/b1/auth-status"
+            "?engine=teclaw&cluster_name=ANDC&bot_name=NewBot&bot_desc=d"
+        ))
     kw = svc.create_bot.call_args.kwargs
     assert kw["engine_type"] == "teclaw"  # not defaulted to openclaw
     assert kw["bot_name"] == "NewBot"
@@ -314,9 +317,14 @@ def test_auth_status_issued_preserves_create_attributes(client, svc, passport):
 
 
 def test_auth_status_engine_cluster_mismatch_400(client, svc):
-    resp = client.get(
-        "/openapi/v1/bots/b1/auth-status?engine=teclaw&cluster_name=ACRA"
-    )
+    # teclaw is enabled here on purpose: the rejection must come from the
+    # engine/cluster bijection, not incidentally from the registry check.
+    with patch.object(
+        bots_router, "_get_engine_types", return_value=["openclaw", "teclaw"]
+    ):
+        resp = client.get(
+            "/openapi/v1/bots/b1/auth-status?engine=teclaw&cluster_name=ACRA"
+        )
     assert resp.status_code == 400
     svc.create_bot.assert_not_called()
 
@@ -499,3 +507,67 @@ def test_rejected_authorization_is_not_reported_as_success(client, passport):
     body = resp.json()
     assert body["code"] == 400000
     assert body["data"]["status"] == "REJECTED"  # caller can still see why
+
+
+# ----- round-4 review regressions ------------------------------------------
+
+
+def test_auth_status_rejects_unknown_engine(client, svc, passport):
+    """R4/F19: the completion path must apply POST's engine registry check.
+
+    The bot row is actually inserted here, so an engine ``POST`` rejects must
+    not become creatable by echoing it back on the poll.
+    """
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    resp = client.get(
+        "/openapi/v1/bots/b1/auth-status?engine=not-a-real-engine&cluster_name=ACRA"
+    )
+    assert resp.status_code == 400
+    assert resp.json()["code"] == 400000
+    svc.create_bot.assert_not_called()
+
+
+def test_auth_status_rejects_desktop_bot_type(client, svc, passport):
+    """R4/F19: ``bot_type`` is restricted on completion exactly as on create."""
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    resp = client.get("/openapi/v1/bots/b1/auth-status?bot_type=desktop")
+    assert resp.status_code == 422
+    svc.create_bot.assert_not_called()
+
+
+def test_auth_status_accepts_supported_bot_type(client, svc, passport):
+    """The restriction rejects only what create rejects — service still passes."""
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": "ac"}
+    _ok(client.get("/openapi/v1/bots/b1/auth-status?bot_type=service"))
+    assert svc.create_bot.call_args.kwargs["bot_type"] == "service"
+
+
+def test_engine_config_unknown_provider_is_enveloped(client, engine_config):
+    """R4/F21: a documented resolver failure must not escape the envelope.
+
+    ``UnknownProviderError`` is a sibling of ``DeviceNotBoundError``, not a
+    subclass, so mapping the latter does not cover it.
+    """
+    from agentclaw.community.core.devices.services.device_context import (
+        UnknownProviderError,
+    )
+
+    engine_config.read_bot_config.side_effect = UnknownProviderError("bad provider")
+    resp = client.get("/openapi/v1/bots/b1/engine-config")
+    assert resp.status_code == 500
+    assert resp.json()["code"] == 500000
+    assert resp.json()["data"] is None
+
+
+def test_engine_config_conn_info_failure_is_enveloped(client, engine_config):
+    """R4/F21: the underlying device-service call failing is a 502, enveloped."""
+    from agentclaw.community.core.devices.services.device_context import (
+        ConnInfoBuildError,
+    )
+
+    engine_config.read_bot_config.side_effect = ConnInfoBuildError("baas down")
+    resp = client.get("/openapi/v1/bots/b1/engine-config")
+    assert resp.status_code == 502
+    assert resp.json()["code"] == 502000
+    assert resp.json()["data"] is None

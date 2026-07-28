@@ -51,7 +51,9 @@ from agentclaw.community.core.bot_management.create_flow import (
     AuthStatusUnavailableError,
 )
 from agentclaw.community.core.devices.services.device_context import (
+    ConnInfoBuildError,
     DeviceNotBoundError,
+    UnknownProviderError,
 )
 from agentclaw.community.plugin_api.passport import PassportError
 
@@ -113,9 +115,19 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
     PassportError: (502, "Authorization service error"),
-    # Engine-config failures. Neither is a BotServiceError, so the base mapping
-    # below does not cover them and they would otherwise escape the envelope.
+    # Engine-config failures. None of these is a BotServiceError, so the base
+    # mapping below does not cover them and they would otherwise escape the
+    # envelope. They are also plain RuntimeError *siblings*, not a hierarchy, so
+    # each documented propagation path out of EngineConfigService needs its own
+    # entry — mapping one does not cover the others.
     DeviceNotBoundError: (409, "Bot has no active device"),
+    # The binding row names a device provider the resolver does not know: bad
+    # data on our side, never something the caller can correct.
+    UnknownProviderError: (500, "Device binding is misconfigured"),
+    # The connection-info build called the underlying device service and it
+    # failed — an upstream dependency problem, hence 502 like the other
+    # downstream-service mappings.
+    ConnInfoBuildError: (502, "Device service error"),
     # The passport service answered with nothing at all — upstream problem, not
     # a caller mistake, and not an unhandled crash.
     AuthStatusUnavailableError: (502, "Authorization service error"),
