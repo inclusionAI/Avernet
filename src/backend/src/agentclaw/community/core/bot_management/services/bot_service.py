@@ -118,6 +118,15 @@ class BotInvalidLifecycleStateError(BotServiceError):
         )
 
 
+class BotOperationNotAllowedError(BotServiceError):
+    """The operation is not supported for this bot and never will be.
+
+    Distinct from a transient failure: retrying cannot help, so delivery
+    surfaces should report it as a client error rather than a server fault.
+    """
+    pass
+
+
 class BotNotFoundError(BotServiceError):
     """Bot not found error."""
     pass
@@ -2976,8 +2985,12 @@ class BotService:
             # default bot 是用户的常驻默认 Bot,不允许删除(重启请走 restart_bot)。
             # 必须在 release_device / destroy_passport 之前拦截,否则会误销毁
             # agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
+            # 用 BotOperationNotAllowedError（BotServiceError 子类）表达"这是客户端
+            # 不支持的操作"，而不是服务端故障：重试永远不会成功。内部路由的 except 链没有
+            # 这一分支，仍落到 `except BotServiceError` → 500，行为不变；公共 API 则按
+            # 4xx 映射。
             if bot_id == "default":
-                raise BotServiceError("default bot 不允许删除")
+                raise BotOperationNotAllowedError("default bot 不允许删除")
 
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")

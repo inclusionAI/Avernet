@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
+
+# Request bodies reject unknown keys. Pydantic's default is to *ignore* them,
+# which on a public API means a typo'd or immutable field (``engine`` on update)
+# is silently dropped and the caller gets a 200 believing it was applied. With
+# ``forbid`` the request fails validation instead — and the public validation
+# handler renders that as the standard Envelope.
+_STRICT = ConfigDict(extra="forbid")
 
 _CLUSTER_DESC = (
     "Deployment cluster, in strict 1:1 correspondence with the engine: "
@@ -31,6 +38,8 @@ class Bot(BaseModel):
 class BotCreate(BaseModel):
     """Create-a-bot request body."""
 
+    model_config = _STRICT
+
     bot_name: str
     bot_desc: str
     engine: str
@@ -44,7 +53,14 @@ class BotCreate(BaseModel):
 
 
 class BotUpdate(BaseModel):
-    """Partial update; engine is fixed at creation and cannot change."""
+    """Partial update; engine is fixed at creation and cannot change.
+
+    ``engine`` is deliberately absent *and* rejected: with unknown keys forbidden
+    a caller that sends one gets a validation error rather than a 200 that
+    silently ignored their requested engine change.
+    """
+
+    model_config = _STRICT
 
     bot_name: str | None = None
     bot_desc: str | None = None
@@ -53,10 +69,16 @@ class BotUpdate(BaseModel):
 
 
 class BotAuthPending(BaseModel):
-    """Returned (202) when bot creation needs user authorization (Passport)."""
+    """Returned (202) when bot creation needs user authorization (Passport).
+
+    Passport may hand back either handle, so both are surfaced: a caller that
+    only receives ``redirect_url`` would otherwise have no way to complete
+    authorization. Each is empty when Passport did not supply it.
+    """
 
     bot_id: str
-    iframe_url: str
+    iframe_url: str = ""
+    redirect_url: str = ""
 
 
 class BotAuthStatus(BaseModel):

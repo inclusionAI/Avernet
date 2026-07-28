@@ -17,6 +17,7 @@ a builder on success and let the decorator handle the mapped failures.
 from __future__ import annotations
 
 from functools import wraps
+from json import JSONDecodeError
 from typing import Awaitable, Callable, TypeVar
 
 from fastapi import Request
@@ -40,9 +41,13 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNameExistsError,
     BotNameInvalidError,
     BotNotFoundError,
+    BotOperationNotAllowedError,
     BotPermissionError,
     BotServiceError,
     DeviceLimitError,
+)
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceNotBoundError,
 )
 from agentclaw.community.plugin_api.passport import PassportError
 
@@ -100,8 +105,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     BotLimitExceededError: (409, "Bot creation limit reached"),
     DeviceLimitError: (409, "Device limit reached"),
     BotInvalidLifecycleStateError: (409, "Bot is not in a valid state for this operation"),
+    BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     PassportError: (502, "Authorization service error"),
+    # Engine-config failures. Neither is a BotServiceError, so the base mapping
+    # below does not cover them and they would otherwise escape the envelope.
+    DeviceNotBoundError: (409, "Bot has no active device"),
+    JSONDecodeError: (500, "Malformed engine configuration"),
     # Base class LAST: every mapping above is a subclass of BotServiceError, and
     # the lookup returns on the first isinstance match in insertion order, so the
     # specific mappings still win. Services raise the bare base for device,

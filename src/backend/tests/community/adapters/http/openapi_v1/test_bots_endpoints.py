@@ -380,6 +380,66 @@ def test_update_without_identity_change_skips_passport(client, passport):
     passport.update_passport.assert_not_called()
 
 
+def test_update_rejects_unknown_and_immutable_fields(client, svc):
+    """R2/F9: sending `engine` must fail, not be silently ignored."""
+    resp = client.put("/openapi/v1/bots/b1", json={"engine": "teclaw"})
+    assert resp.status_code == 422
+    svc.update_bot.assert_not_called()
+
+
+def test_clearing_description_still_syncs_passport(client, passport):
+    """R2/F10: `bot_desc=""` is a real change and must reach the Passport."""
+    client.put("/openapi/v1/bots/b1", json={"bot_desc": ""})
+    kw = passport.update_passport.call_args.kwargs
+    assert kw["bot_desc"] == ""
+
+
+def test_engine_config_device_not_bound_is_enveloped(client, engine_config):
+    """R2/F11: engine-config failures must not escape as raw {"detail": ...}."""
+    from agentclaw.community.core.devices.services.device_context import (
+        DeviceNotBoundError,
+    )
+
+    engine_config.read_bot_config.side_effect = DeviceNotBoundError("no binding")
+    resp = client.get("/openapi/v1/bots/b1/engine-config")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == 409000
+
+
+def test_engine_config_malformed_json_is_enveloped(client, engine_config):
+    """R2/F11: a malformed stored config is enveloped, not a bare 500 detail."""
+    import json
+
+    engine_config.read_bot_config.side_effect = json.JSONDecodeError("bad", "{", 0)
+    resp = client.get("/openapi/v1/bots/b1/engine-config")
+    assert resp.status_code == 500
+    assert resp.json()["code"] == 500000
+    assert resp.json()["data"] is None
+
+
+def test_pending_auth_forwards_redirect_url(client, passport, svc):
+    """R2/F12: a redirect-only Passport response must not lose the handle."""
+    passport.apply_first_agent_passport.return_value = {
+        "token": None, "redirect_url": "http://redirect", "iframe_url": None,
+    }
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        resp = client.post("/openapi/v1/bots", json=_CREATE_BODY)
+    assert resp.status_code == 202
+    assert resp.json()["data"]["redirect_url"] == "http://redirect"
+
+
+def test_deleting_default_bot_is_client_error(client, svc):
+    """R2/F13: an unsupported operation is 4xx, not a retryable 500."""
+    from agentclaw.community.core.bot_management.services.bot_service import (
+        BotOperationNotAllowedError,
+    )
+
+    svc.delete_bot.side_effect = BotOperationNotAllowedError("default 不允许删除")
+    resp = client.delete("/openapi/v1/bots/default")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == 409000
+
+
 def test_rejected_authorization_is_not_reported_as_success(client, passport):
     """R1/F8: a terminal auth state must not come back as 200/200000 OK."""
     passport.query_auth_status.return_value = {"status": "REJECTED"}

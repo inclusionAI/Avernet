@@ -199,8 +199,14 @@ async def create_bot(
     )
 
     if isinstance(outcome, AuthPending):
+        # Forward BOTH handles — Passport may return either, and dropping one
+        # can leave the caller with no way to complete authorization.
         pending = accepted(
-            BotAuthPending(bot_id=outcome.bot_id, iframe_url=outcome.iframe_url or ""),
+            BotAuthPending(
+                bot_id=outcome.bot_id,
+                iframe_url=outcome.iframe_url or "",
+                redirect_url=outcome.redirect_url or "",
+            ),
             request,
         )
         return JSONResponse(status_code=202, content=pending.model_dump())
@@ -298,8 +304,10 @@ async def update_bot(
         bot_id, owner_id, bot_name=bot_name, bot_desc=body.bot_desc
     )
     # Identity metadata lives in the Passport too; leaving it stale would make
-    # Passport queries disagree with the bot API.
-    if bot_name or body.bot_desc:
+    # Passport queries disagree with the bot API. Presence, not truthiness —
+    # clearing a description with "" is a real metadata change that gets
+    # persisted, so it has to reach the Passport as well.
+    if bot_name is not None or body.bot_desc is not None:
         _sync_passport_identity(
             passport_plugin,
             bot_id=bot_id,
