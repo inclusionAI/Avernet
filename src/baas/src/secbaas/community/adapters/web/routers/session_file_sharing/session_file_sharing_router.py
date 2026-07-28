@@ -75,6 +75,7 @@ async def get_upload_url(
             file_size=request.file_size,
             part_size=request.part_size,
             operator=request.operator,
+            content_type=request.content_type,
         )
         return ApiResponse(data=result)
 

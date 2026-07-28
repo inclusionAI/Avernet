@@ -21,7 +21,7 @@ class NoopFileTransferBackend(FileTransferBackend):
     raises NotImplementedError.
     """
 
-    def generate_upload_url(self, staging_path: str, expire_seconds: int) -> str:
+    def generate_upload_url(self, staging_path: str, expire_seconds: int, content_type: str | None = None) -> str:
         raise NotImplementedError(
             "File transfer is not configured. "
             "Set config.plugins.file_transfer to 'real' to enable."

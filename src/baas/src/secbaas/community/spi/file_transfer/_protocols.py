@@ -71,7 +71,7 @@ class FileTransferBackend(Protocol):
     - AliyunOssFileTransferBackend: production OSS operations via oss2 SDK.
     """
 
-    def generate_upload_url(self, staging_path: str, expire_seconds: int) -> str:
+    def generate_upload_url(self, staging_path: str, expire_seconds: int, content_type: str | None = None) -> str:
         """Generate a presigned PUT URL for uploading a file to the staging path.
 
         The staging_path is a complete OSS object key constructed by the
@@ -80,6 +80,9 @@ class FileTransferBackend(Protocol):
         Args:
             staging_path: Complete OSS object key (constructed by Dispatcher).
             expire_seconds: URL validity duration in seconds.
+            content_type: Optional MIME type to include in the presigned
+                signature. When set, OSS enforces Content-Type matching on
+                the PUT request (mismatched requests receive 403).
 
         Returns:
             Presigned PUT URL string.

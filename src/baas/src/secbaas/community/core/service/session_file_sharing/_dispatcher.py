@@ -81,6 +81,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         file_size: int = 0,
         part_size: int | None = None,
         operator: str | None = None,
+        content_type: str | None = None,
     ) -> SessionGetUploadUrlResponse:
         """Orchestrate upload URL generation for a Session file.
 
@@ -122,6 +123,10 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         # Validate file_size
         if file_size < 0:
             raise ValueError(f"file_size must be non-negative, got {file_size}")
+
+        # Validate content_type — reject empty/whitespace-only strings (D-04)
+        if content_type is not None and not content_type.strip():
+            raise ValueError("content_type must not be empty or whitespace-only")
 
         transfer_id = uuid.uuid4().hex
 
@@ -217,6 +222,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 self._file_transfer_backend.generate_upload_url,
                 staging_path,
                 expire_seconds,
+                content_type,
             )
 
             logger.info(

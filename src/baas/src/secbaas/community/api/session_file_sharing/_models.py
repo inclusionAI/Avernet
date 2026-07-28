@@ -57,6 +57,16 @@ class SessionGetUploadUrlRequest(BaseModel):
         max_length=256,
         description="Identifier of the user or system initiating the upload",
     )
+    content_type: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional MIME type for the uploaded file. When set, the presigned "
+            "PUT URL's signature includes Content-Type, and OSS will reject PUT "
+            "requests with a mismatched Content-Type header (403). When None "
+            "(default), no Content-Type constraint is applied."
+        ),
+    )
 
     model_config = {"from_attributes": True}
 
