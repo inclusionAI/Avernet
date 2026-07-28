@@ -55,15 +55,9 @@ def _make_baas_device_service(
     vault: TokenVault | None = None,
     template_service: MagicMock | None = None,
 ) -> BaasDeviceService:
-    baas_service = MagicMock()
-    baas_service.exec_command_on_bot.return_value = {
-        "exit_code": 0,
-        "stdout": "",
-        "stderr": "",
-    }
     return BaasDeviceService(
         repository=repo,
-        baas_service=baas_service,
+        baas_service=MagicMock(),
         bot_query=bot_query or MagicMock(),
         bot_sync=MagicMock(),
         oss_record_repo=MagicMock(),
