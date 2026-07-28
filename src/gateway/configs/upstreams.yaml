@@ -53,4 +53,4 @@ servers:
   agentclaw:
     base_url: "${AGENTCLAW_URL}"
   secbaas:
-    base_url: "${SECBAAS_URL}"
+    base_url: "${BAAS_URL}"

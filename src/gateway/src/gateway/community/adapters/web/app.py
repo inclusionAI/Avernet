@@ -26,7 +26,7 @@ DOCS_TAGS = [
     {"name": "test", "description": "Test and debug endpoints."},
 ]
 
-_API_DESCRIPTION = "Avernet gateway — config-driven forwarding surface."
+_API_DESCRIPTION = "Avernet Gateway — A configuration-driven forwarding plane (under active development)."
 
 
 def create_app() -> FastAPI:
@@ -70,6 +70,7 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if enable_docs else None,
         openapi_tags=DOCS_TAGS,
         lifespan=lifespan,
+        swagger_ui_parameters={"supportedSubmitMethods": []},
     )
 
     # Install tracing middleware (must happen before the app starts serving).
@@ -77,13 +78,21 @@ def create_app() -> FastAPI:
     tracer.setup(config.app_name)
     tracer.install_middleware(app)
 
-    @app.get("/api/test", tags=["test"])
+    @app.get(
+        "/api/test",
+        tags=["test"],
+        description="Test endpoint to verify API connectivity",
+    )
     async def hello() -> dict[str, str]:
         """Return a hello message."""
         logger.info("Hello endpoint called")
         return {"status": "healthy", "message": "hello, i am gw"}
 
-    @app.get("/health", tags=["health"])
+    @app.get(
+        "/health",
+        tags=["health"],
+        description="Kubernetes liveness probe endpoint for container orchestration",
+    )
     async def health() -> dict[str, str]:
         """Liveness probe."""
         return {"status": "ok"}

@@ -10,7 +10,7 @@
 #
 # Required env vars (per upstream):
 #   BACKEND_URL   — backend service URL (for health check)
-#   SECBAAS_URL   — BaaS service URL (for health check)
+#   BAAS_URL   — BaaS service URL (for health check)
 #
 # The script runs from the gateway directory and assumes sibling src/ dirs.
 
