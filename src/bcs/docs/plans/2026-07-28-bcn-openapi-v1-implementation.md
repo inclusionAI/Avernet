@@ -26,7 +26,7 @@
   Provider, StateMachineRun, Service Invocation, CollaborationTemplate, or
   Internal API operations.
 - The architecture source is
-  `docs/plans/2026-07-28-bcn-openapi-v1-design.md`.
+  `src/bcs/docs/plans/2026-07-28-bcn-openapi-v1-design.md`.
 
 ## Production blockers to resolve before Task 15
 
@@ -1278,7 +1278,7 @@ git commit -m "ci: generate and compatibility-check BCN OpenAPI"
 - Create: `src/bcs/crates/bootstrap/bcs/tests/openapi_v1_gateway_e2e.rs`
 - Modify: `src/bcs/scripts/e2e-test/stories.sh`
 - Modify: `scripts/ci/singlebox_coverage_modules.yaml`
-- Modify: `docs/plans/2026-07-28-bcn-openapi-v1-design.md`
+- Modify: `src/bcs/docs/plans/2026-07-28-bcn-openapi-v1-design.md`
 
 **Step 1: Add failing E2E stories**
 
@@ -1337,7 +1337,7 @@ the required verification passes. Record:
 **Step 6: Commit**
 
 ```bash
-git add src/bcs/crates/bootstrap/bcs/tests src/bcs/scripts/e2e-test scripts/ci docs/plans/2026-07-28-bcn-openapi-v1-design.md
+git add src/bcs/crates/bootstrap/bcs/tests src/bcs/scripts/e2e-test scripts/ci src/bcs/docs/plans/2026-07-28-bcn-openapi-v1-design.md
 git commit -m "test: cover BCN OpenAPI v1 end to end"
 ```
 
