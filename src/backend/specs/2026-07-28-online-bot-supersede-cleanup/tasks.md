@@ -46,7 +46,7 @@
         green.
 - **Depends on:** —
 
-## Task 3: `[ ]` Provider-aware unified decision
+## Task 3: `[x]` Provider-aware unified decision
 
 - **Goal:** Replace `_should_upgrade_online` + `_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES`
   with one candidate resolver and one provider-aware decision matrix.
@@ -55,27 +55,27 @@
   `src/agentclaw/community/core/service_bot/types.py` (decision enum),
   `tests/community/core/service_bot/services/test_publish_flow_service.py`
 - **Done when:**
-  - [ ] `OnlineDeployDecision` enum `{UPGRADE, RETIRE_THEN_FIRST_RELEASE,
+  - [x] `OnlineDeployDecision` enum `{UPGRADE, RETIRE_THEN_FIRST_RELEASE,
         FIRST_RELEASE}` defined (types.py).
-  - [ ] `_resolve_online_reuse_target(publish_record) -> tuple[str | None, int |
+  - [x] `_resolve_online_reuse_target(publish_record) -> tuple[str | None, int |
         None]`: this record's own `ext.binding.online` → binding → `device_id`
         first; else `last_pub_id`'s online binding; else `(None, None)`.
-  - [ ] `_decide_online_deploy(publish_record, bot) -> OnlineDeployDecision`
+  - [x] `_decide_online_deploy(publish_record, bot) -> OnlineDeployDecision`
         implements the matrix: no candidate / `get_bot` failure / `RELEASED` /
         `DESTROYING` → `FIRST_RELEASE`; `ACTIVE` → `UPGRADE`;
         `FAILED`/`STOPPED`/`STOPPING` → `RETIRE_THEN_FIRST_RELEASE` iff
         `resolve_container_provider(bot) == TECLAW_DEVICE_PROVIDER` else
         `UPGRADE`; `PENDING`/unknown → `UPGRADE`.
-  - [ ] `_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES` and `_should_upgrade_online`
+  - [x] `_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES` and `_should_upgrade_online`
         removed; `grep -rn "_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES\|_should_upgrade_online"
         src/agentclaw` returns nothing (call sites migrated in Task 4).
-  - [ ] Unit (table-driven) over `(provider ∈ {teclaw, baas}) × (status ∈
+  - [x] Unit (table-driven) over `(provider ∈ {teclaw, baas}) × (status ∈
         {ACTIVE, FAILED, STOPPED, STOPPING, RELEASED, DESTROYING, PENDING, absent})`
         asserting the decision, incl. `get_bot`-raises → `FIRST_RELEASE`.
-  - [ ] `pytest tests/community/core/service_bot/services/` green.
+  - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** —
 
-## Task 4: `[ ]` Wire the decision into the online-release dispatch
+## Task 4: `[x]` Wire the decision into the online-release dispatch
 
 - **Goal:** The online release consumes the 3-way decision; the upgrade target is
   resolved own-binding-first (so the failed-first-release **retry** reuses).
@@ -83,20 +83,20 @@
   `src/agentclaw/community/core/service_bot/services/publish_flow_service.py`,
   `tests/community/core/service_bot/services/test_publish_flow_service.py`
 - **Done when:**
-  - [ ] `_execute_online_release` switches on `_decide_online_deploy(publish_record,
+  - [x] `_execute_online_release` switches on `_decide_online_deploy(publish_record,
         bot)`: `UPGRADE` → `_execute_upgrade_release`; `RETIRE_THEN_FIRST_RELEASE`
         → `self._build_service.retire_superseded_bot(candidate_bot_uuid)` then
         `_execute_first_release`; `FIRST_RELEASE` → `_execute_first_release`.
-  - [ ] `_execute_upgrade_release` resolves `bot_uuid`/`existing_binding_id` via
+  - [x] `_execute_upgrade_release` resolves `bot_uuid`/`existing_binding_id` via
         `_resolve_online_reuse_target` (own binding first, then `last_pub_id`) —
         not `last_pub_id` only.
-  - [ ] Retry of a failed online first-release: `baas`/ARCA candidate `FAILED` →
+  - [x] Retry of a failed online first-release: `baas`/ARCA candidate `FAILED` →
         upgrade against the **same** `bot_uuid` (no new bot); `teclaw` candidate
         `FAILED` → `destroy(old)` then first_release (one live bot).
-  - [ ] Unit: retry-ARCA reuse (same uuid, no destroy, no new bot); retry-teclaw
+  - [x] Unit: retry-ARCA reuse (same uuid, no destroy, no new bot); retry-teclaw
         (destroy once + first_release); re-publish prev `STOPPED` (baas upgrade /
         teclaw destroy+recreate).
-  - [ ] `pytest tests/community/core/service_bot/services/` green.
+  - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** Task 1, Task 3
 
 ## Task 5: `[ ]` Secondary net — retire on the upgrade-fallback error code
