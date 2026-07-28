@@ -405,8 +405,9 @@ def test_upgrade_device_count_does_not_apply_to_teclaw_path():
 @pytest.mark.unit
 def test_retire_superseded_bot_calls_destroy_idempotently():
     svc, baas = _svc("baas")
+    baas.destroy_bot.return_value = {"publish_id": 321}
 
-    svc.retire_superseded_bot("BOT-old", operator="op1")
+    assert svc.retire_superseded_bot("BOT-old", operator="op1") == 321
 
     baas.destroy_bot.assert_called_once()
     ck = baas.destroy_bot.call_args
@@ -418,6 +419,22 @@ def test_retire_superseded_bot_calls_destroy_idempotently():
     baas.destroy_bot.reset_mock()
     svc.retire_superseded_bot("BOT-old", operator="op1")
     assert baas.destroy_bot.call_args.kwargs["request_id"] == rid
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_no_publish_id_propagates():
+    from agentclaw.community.core.service_bot.services.bot_build_service import (
+        BotBuildServiceError,
+    )
+
+    svc, baas = _svc("baas")
+    # A successful-but-empty destroy envelope (no workflow id) does NOT confirm the
+    # DESTROY was initiated — it must propagate, not be treated as already-gone
+    # success (None is reserved for the explicit already-gone recheck path).
+    baas.destroy_bot.return_value = {}
+
+    with pytest.raises(BotBuildServiceError, match="no publish_id"):
+        svc.retire_superseded_bot("BOT-old")
 
 
 @pytest.mark.unit
