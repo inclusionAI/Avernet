@@ -52,23 +52,24 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
         cluster is engine-derived and engine is immutable on update.)
 - **Depends on:** —
 
-## Task 4: Extract the create / auth-status flow  `[ ]`
+## Task 4: Extract the create / auth-status flow  `[x]`
 - **Goal:** Move the create + auth-status orchestration out of the internal
   router into a reusable module both surfaces call, with **no behavior change**
   to the internal API.
 - **Files:** `core/bot_management/create_flow.py` (new),
   `adapters/http/bot_management/router.py` (internal handlers delegate).
 - **Done when:**
-  - [ ] `create_flow.py` exposes a create entry point returning a discriminated
-        result (created bot dict **or** an auth-pending `{bot_id, iframe_url}`),
-        and an auth-status entry point returning `{status, message?, bot?}`.
+  - [x] `create_flow.py` exposes `create_bot_with_authorization` (→ `Created` |
+        `AuthPending`) and `complete_bot_authorization` (→ `AuthStatusResult`).
         Both take the owner identity + injected services/plugins as arguments
-        (no FastAPI/`Request` coupling).
-  - [ ] The internal `create_bot` and `get_auth_status` handlers call these
-        entry points; the ~250 lines of inline orchestration are gone from the
-        router.
-  - [ ] The **unmodified** internal test suite for bot_management passes (this is
-        the behavior-preservation guard). No internal test edited.
+        (no FastAPI/`Request` coupling); typed against the concrete `BotService`
+        so no api-layer boundary is crossed.
+  - [x] The internal `create_bot` and `get_auth_status` handlers delegate; the
+        inline orchestration is gone from the router. `generate_bot_id` stays in
+        the router (patch point); `PassportError` re-mapped to 5400 there.
+  - [x] The **unmodified** internal suite passes: 142 in
+        `test_router.py` + `test_bot_passport.py`, plus module-boundary and
+        no-fastapi-in-core guards. No internal test edited.
 - **Depends on:** —
 
 ## Task 5: Additive list filters  `[ ]`
