@@ -137,6 +137,15 @@ class LocalBaas:
                  "token": "test-token", "target": "t", "expires_at": 0},
                 path,
             )
+        if len(parts) >= 2 and parts[-2] == "bots":
+            # GET /api/v1/bots/{bot_uuid} — the get_bot status read the online
+            # reuse decision uses. A bot still tracked here is live (ACTIVE);
+            # a destroyed/unknown bot is gone (404), which the decision treats
+            # as "create fresh".
+            bot_uuid = parts[-1]
+            if bot_uuid not in self.bots:
+                return _not_found(path)
+            return _ok({"bot_uuid": bot_uuid, "status": "ACTIVE"}, path)
         return _ok({}, path)
 
     def _post(self, path: str, **_kw) -> httpx.Response:
