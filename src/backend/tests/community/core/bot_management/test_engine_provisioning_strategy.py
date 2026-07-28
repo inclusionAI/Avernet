@@ -200,6 +200,11 @@ def test_template_factory_normal_cc_consumes_model_runtime_repos_and_token():
         owner_id="u1",
         bot_type="service",
         template_config={
+            "template_key": "normalCC",
+            "template_uid": "aicoding",
+            "bot_template_config": {
+                "engine_config": {"type": ["claude-code", "codefuse-antcc"]},
+            },
             "model": "  m-normal  ",
             "runtime": "  codefuse-antcc  ",
             "token": "tok-normal",
@@ -221,16 +226,103 @@ def test_template_factory_normal_cc_consumes_model_runtime_repos_and_token():
     assert strategy.extract_runtime_token(ctx) == "tok-normal"
 
 
-def test_template_factory_architect_routes_template_only_context_for_token_policy():
+def test_template_factory_architect_routes_by_template_config_not_template_type_enum():
     ctx, strategy = resolve_provisioning(
         bot_id="b1",
         owner_id="u1",
         bot_type="service",
-        active_engine=None,
+        active_engine="claude_code",
         template_type="architect",
-        template_config={"token": "tok-architect"},
+        template_config={
+            "template_key": "architect",
+            "template_uid": "aicoding",
+            "bot_template_config": {
+                "engine_config": {"type": ["claude-code"]},
+            },
+            "token": "tok-architect",
+        },
     )
 
-    assert strategy.engine_type == "aicoding"
+    assert strategy.engine_type == "claude_code"
     assert strategy.should_encrypt_template_token(ctx) is True
     assert strategy.extract_runtime_token(ctx) == "tok-architect"
+
+
+def test_user_created_template_factory_config_consumed_without_backend_template_type_enum():
+    """AC 用户自建模板不应要求后端为每个 template_type 发版加枚举。"""
+    strategy = AicodingProvisioningStrategy("claude_code")
+    ctx = BotProvisioningContext(
+        active_engine="claude_code",
+        template_type="userCustomTemplate",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={
+            "template_key": "userCustomTemplate",
+            "template_uid": "aicoding",
+            "bot_template_config": {
+                "engine_config": {"type": ["claude-code"]},
+            },
+            "model": "  custom-model  ",
+            "runtime": "  codefuse-antcc  ",
+            "token": "tok-custom",
+            "repos": ["https://code/custom-repo"],
+        },
+    )
+
+    envs = strategy.build_extra_envs(ctx)
+    assert envs is not None
+    assert envs["RELAY_DEFAULT_MODEL"] == "custom-model"
+    assert envs["RELAY_DEFAULT_RUNTIME"] == "codefuse-antcc"
+    assert json.loads(envs["GIT_ADDRESSES"]) == ["https://code/custom-repo"]
+    assert "BOT_TYPE" not in envs
+    assert strategy.should_encrypt_template_token(ctx) is True
+    assert strategy.extract_runtime_token(ctx) == "tok-custom"
+
+
+def test_non_coding_engine_does_not_consume_user_template_factory_config():
+    """非 coding 引擎即便带模板工厂形态配置，也不能误走 AICoding provisioning。"""
+    ctx = BotProvisioningContext(
+        active_engine="openclaw",
+        template_type="userCustomTemplate",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="service",
+        template_config={
+            "template_key": "userCustomTemplate",
+            "template_uid": "aicoding",
+            "bot_template_config": {
+                "engine_config": {"type": ["claude-code"]},
+            },
+            "model": "custom-model",
+            "runtime": "codefuse-antcc",
+            "token": "tok-custom",
+        },
+    )
+    strategy = get_engine_provisioning_registry().resolve_for_context(ctx)
+
+    assert strategy.build_extra_envs(ctx) is None
+    assert strategy.should_encrypt_template_token(ctx) is False
+    assert strategy.extract_runtime_token(ctx) is None
+
+
+def test_template_only_user_template_factory_config_without_active_engine_is_noop():
+    """用户自建模板不能靠后端遍历 engine_config.type 猜策略；创建链路应传 active_engine。"""
+    ctx, strategy = resolve_provisioning(
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        active_engine=None,
+        template_type="userCustomTemplate",
+        template_config={
+            "template_key": "userCustomTemplate",
+            "bot_template_config": {
+                "engine_config": {"type": ["claude-code"]},
+            },
+            "token": "tok-custom",
+        },
+    )
+
+    assert strategy.engine_type == "default"
+    assert strategy.should_encrypt_template_token(ctx) is False
+    assert strategy.extract_runtime_token(ctx) is None

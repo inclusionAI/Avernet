@@ -280,6 +280,7 @@ class TestTriggerMemoryInitYuquePayload:
 class TestTemplateFactoryKnowledgeAliases:
     def test_yuque_pairs_include_template_factory_wiki_aliases(self):
         config = {
+            "template_key": "normalCC",
             "wiki_knowledge_spaces": [
                 {"url": "https://yuque/wiki", "teamToken": "TK1"},
             ],
@@ -299,6 +300,7 @@ class TestTemplateFactoryKnowledgeAliases:
 
     def test_code_repo_urls_include_template_factory_aliases(self):
         config = {
+            "template_key": "normalCC",
             "repos": ["https://code/repos-string"],
             "init_repos": [{"url": "https://code/init"}],
             "application_repo_urls": [{"git_url": "git@example.com:a/b.git"}],
@@ -311,14 +313,15 @@ class TestTemplateFactoryKnowledgeAliases:
         ]
 
     def test_memory_sources_changed_detects_template_factory_aliases(self):
-        old = {"business_wiki_spaces": [{"url": "https://yuque/old"}]}
-        new = {"business_wiki_spaces": [{"url": "https://yuque/new"}]}
+        old = {"template_key": "normalCC", "business_wiki_spaces": [{"url": "https://yuque/old"}]}
+        new = {"template_key": "normalCC", "business_wiki_spaces": [{"url": "https://yuque/new"}]}
 
         assert memory_sources_changed(old, new) is True
 
     def test_trigger_memory_initialization_payload_uses_aliases(self):
         payload = self._run_with_aliases(
             {
+                "template_key": "normalCC",
                 "business_wiki_spaces": [
                     {"wiki_url": "https://yuque/business", "teamToken": "TK"},
                 ],

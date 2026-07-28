@@ -1,6 +1,7 @@
 from agentclaw.community.core.bot_management.capabilities import (
     can_join_bcn_as_provider,
     has_declared_capabilities,
+    is_template_factory_config,
 )
 
 
@@ -40,3 +41,8 @@ def test_flat_false_takes_over_legacy_shape():
 
     assert can_join_bcn_as_provider(template_config) is False
 
+
+def test_template_factory_config_marker_detection():
+    assert is_template_factory_config({"template_key": "normalCC"}) is True
+    assert is_template_factory_config({"template_uid": "aicoding"}) is True
+    assert is_template_factory_config({"capabilities": {}}) is False

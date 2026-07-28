@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Dict, List
 
 import requests
 
+from agentclaw.community.core.bot_management.capabilities import (
+    is_template_factory_config,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -161,17 +164,15 @@ def build_aix_extra_envs(
     return strategy.build_extra_envs(ctx)
 
 
-YUQUE_KNOWLEDGE_KEYS = (
-    "yuque_kb_repos",
+LEGACY_YUQUE_KNOWLEDGE_KEYS = ("yuque_kb_repos",)
+TEMPLATE_FACTORY_YUQUE_KNOWLEDGE_KEYS = (
     "wiki_knowledge_spaces",
     "business_wiki_spaces",
     "repo_wiki_spaces",
 )
 
-CODE_REPO_KEYS = (
-    "backend_repo",
-    "frontend_repo",
-    "lib_repo",
+LEGACY_CODE_REPO_KEYS = ("backend_repo", "frontend_repo", "lib_repo")
+TEMPLATE_FACTORY_CODE_REPO_KEYS = (
     "repos",
     "init_repos",
     "application_repo_urls",
@@ -344,17 +345,28 @@ def _extract_yuque_pairs(template_config: Dict[str, Any]) -> List[tuple]:
     if not isinstance(template_config, dict):
         return []
     pairs: List[tuple] = []
-    for item in _iter_template_list_items(template_config, YUQUE_KNOWLEDGE_KEYS):
-        # Preserve AppCoding compatibility: arbitrary non-dict list entries are
-        # ignored.  A direct string is only accepted if it is clearly a URL.
-        if isinstance(item, str) and not item.strip().startswith(("http://", "https://")):
+    keys = LEGACY_YUQUE_KNOWLEDGE_KEYS
+    if is_template_factory_config(template_config):
+        keys = keys + TEMPLATE_FACTORY_YUQUE_KNOWLEDGE_KEYS
+    for key in keys:
+        value = template_config.get(key)
+        if not isinstance(value, list):
             continue
-        url = _extract_item_url(
-            item,
-            url_keys=("url", "wiki_url", "repo_wiki_url", "space_url", "link"),
-        )
-        if url:
-            pairs.append((url, _extract_item_token(item)))
+        for item in value:
+            # Preserve AppCoding compatibility: legacy yuque_kb_repos only
+            # accepts object items.  Template-factory alias keys may use direct
+            # URL strings.
+            if isinstance(item, str):
+                if key in LEGACY_YUQUE_KNOWLEDGE_KEYS:
+                    continue
+                if not item.strip().startswith(("http://", "https://")):
+                    continue
+            url = _extract_item_url(
+                item,
+                url_keys=("url", "wiki_url", "repo_wiki_url", "space_url", "link"),
+            )
+            if url:
+                pairs.append((url, _extract_item_token(item)))
     return pairs
 
 
@@ -363,10 +375,23 @@ def _extract_code_repo_urls(template_config: Dict[str, Any]) -> List[str]:
     if not isinstance(template_config, dict):
         return []
     urls: List[str] = []
-    for item in _iter_template_list_items(template_config, CODE_REPO_KEYS):
-        url = _extract_item_url(item, url_keys=("repo_url", "url", "git_url", "ssh_url"))
-        if url:
-            urls.append(url)
+    keys = LEGACY_CODE_REPO_KEYS
+    if is_template_factory_config(template_config):
+        keys = keys + TEMPLATE_FACTORY_CODE_REPO_KEYS
+    for key in keys:
+        value = template_config.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            # Preserve AppCoding compatibility: legacy repo keys only accept
+            # object items.  Template-factory alias keys may use direct strings.
+            if isinstance(item, str) and key in LEGACY_CODE_REPO_KEYS:
+                continue
+            url = _extract_item_url(
+                item, url_keys=("repo_url", "url", "git_url", "ssh_url")
+            )
+            if url:
+                urls.append(url)
     return urls
 
 

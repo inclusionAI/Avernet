@@ -93,7 +93,10 @@ class TemplateService:
             raise TemplateValidationError("Template ext content cannot be empty")
 
     def _encrypt_token_field(
-        self, template_config: Dict[str, Any], template_type: Optional[str]
+        self,
+        template_config: Dict[str, Any],
+        template_type: Optional[str],
+        active_engine: Optional[str] = None,
     ) -> Dict[str, Any]:
         """按引擎策略决定是否加密 token 字段。幂等。
 
@@ -108,7 +111,7 @@ class TemplateService:
             bot_id="",
             owner_id="",
             bot_type="",
-            active_engine=None,
+            active_engine=active_engine,
             template_type=template_type,
             template_config=template_config,
         )
@@ -124,6 +127,7 @@ class TemplateService:
         bot_id: str,
         template_config: Dict[str, Any],
         template_type: Optional[str] = None,
+        active_engine: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a new template record for a bot.
 
@@ -136,6 +140,8 @@ class TemplateService:
             template_config: Template configuration dictionary (stored in ext field)
             template_type: Optional template type gate; when the engine provisioning
                 strategy supports runtime tokens, ``token`` is encrypted before persist.
+            active_engine: Optional engine gate used for user-created AC templates
+                whose template_type is not known by this backend.
 
         Returns:
             Created template record
@@ -149,7 +155,9 @@ class TemplateService:
         try:
             # Validate ext content (template_config is stored in the ext field)
             self._validate_ext_content(template_config)
-            template_config = self._encrypt_token_field(template_config, template_type)
+            template_config = self._encrypt_token_field(
+                template_config, template_type, active_engine
+            )
 
             template_data = {
                 "bot_id": bot_id,
@@ -295,6 +303,7 @@ class TemplateService:
         bot_id: str,
         template_config: Dict[str, Any],
         template_type: Optional[str] = None,
+        active_engine: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Update template configuration for a bot.
 
@@ -321,7 +330,9 @@ class TemplateService:
         try:
             # Validate ext content (template_config is stored in the ext field)
             self._validate_ext_content(template_config)
-            template_config = self._encrypt_token_field(template_config, template_type)
+            template_config = self._encrypt_token_field(
+                template_config, template_type, active_engine
+            )
 
             # Check if template exists
             if not self.exists_template(bot_id):
@@ -460,6 +471,7 @@ class TemplateService:
         bot_id: str,
         template_config: Dict[str, Any],
         template_type: Optional[str] = None,
+        active_engine: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create or update template configuration for a bot.
 
@@ -493,14 +505,18 @@ class TemplateService:
                     "[template_service.create_or_update_template] Template exists, updating for bot %s",
                     bot_id,
                 )
-                return self.update_template(bot_id, template_config, template_type)
+                return self.update_template(
+                    bot_id, template_config, template_type, active_engine
+                )
             else:
                 # Create new template
                 logger.debug(
                     "[template_service.create_or_update_template] Template not found, creating for bot %s",
                     bot_id,
                 )
-                return self.create_template(bot_id, template_config, template_type)
+                return self.create_template(
+                    bot_id, template_config, template_type, active_engine
+                )
         except TemplateValidationError:
             logger.warning(
                 "[template_service.create_or_update_template] Validation error for bot %s",

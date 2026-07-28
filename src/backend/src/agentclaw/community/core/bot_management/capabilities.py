@@ -7,6 +7,20 @@ nodes default to false and legacy template_type fallbacks must not be mixed in.
 from typing import Any, Dict, Optional
 
 
+TEMPLATE_FACTORY_MARKER_KEYS = frozenset({
+    "template_key",
+    "template_uid",
+    "template_version_id",
+    "template_version",
+})
+
+
+def is_template_factory_config(template_config: Optional[Dict[str, Any]]) -> bool:
+    return isinstance(template_config, dict) and any(
+        key in template_config for key in TEMPLATE_FACTORY_MARKER_KEYS
+    )
+
+
 def has_declared_capabilities(template_config: Optional[Dict[str, Any]]) -> bool:
     return isinstance(template_config, dict) and "capabilities" in template_config
 

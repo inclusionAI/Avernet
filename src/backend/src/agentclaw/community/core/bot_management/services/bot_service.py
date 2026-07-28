@@ -18,6 +18,7 @@ from typing import Callable, Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 from agentclaw.community.core.bot_management.capabilities import (
     can_join_bcn_as_provider,
     has_declared_capabilities,
+    is_template_factory_config,
 )
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
@@ -448,15 +449,23 @@ class BotService:
     ) -> bool:
         """Whether to reuse the AppCoding memory/Wiki initialization path.
 
-        New template-factory normalCC/architect bots consume business Wiki /
-        RepoWiki through the same AppCoding runtime pipeline, but the source of
-        truth is AC resolved ``template_config``.  Keep applicationCoding legacy
-        behavior on create, and let normalCC/architect trigger only when their
-        template snapshot actually declares repo/wiki sources.
+        Template-factory bots consume business Wiki / RepoWiki through the same
+        AppCoding runtime pipeline, but the source of truth is AC resolved
+        ``template_config``.  Keep applicationCoding legacy behavior on create,
+        and let template-factory bots trigger only when their template snapshot
+        actually declares repo/wiki sources.
         """
         if active_engine != "claude_code" or not isinstance(template_config, dict):
             return False
-        if template_type not in ("applicationCoding", "normalCC", "architect"):
+
+        # Legacy applicationCoding keeps the original always-init-on-create
+        # behavior.  Template-factory bots (normalCC / architect / user-created)
+        # are detected from the resolved template snapshot instead of a backend
+        # template_type whitelist, and only initialize memory when repo/wiki
+        # sources are declared.
+        is_legacy_application_coding = template_type == "applicationCoding"
+        is_template_factory_bot = is_template_factory_config(template_config)
+        if not is_legacy_application_coding and not is_template_factory_bot:
             return False
 
         try:
@@ -467,7 +476,7 @@ class BotService:
             empty_config: Dict[str, Any] = {}
             has_sources = memory_sources_changed(empty_config, template_config)
             if on_create:
-                return template_type == "applicationCoding" or has_sources
+                return is_legacy_application_coding or has_sources
             return memory_sources_changed(old_template_config or empty_config, template_config)
         except Exception as e:
             logger.warning(
@@ -1171,6 +1180,7 @@ class BotService:
                         bot_id=bot_id,
                         template_config=template_config,
                         template_type=template_type,
+                        active_engine=resolved_active_engine,
                     )
                     logger.info(f"[bot_service.create_bot] Template created for bot {bot_id}")
                 except Exception as e:
@@ -2251,6 +2261,7 @@ class BotService:
                         bot_id=bot_id,
                         template_config=template_config,
                         template_type=bot.get("template_type"),
+                        active_engine=bot.get("active_engine"),
                     )
                 else:
                     # Create new template (this should not normally happen in update)
@@ -2259,6 +2270,7 @@ class BotService:
                         bot_id=bot_id,
                         template_config=template_config,
                         template_type=bot.get("template_type"),
+                        active_engine=bot.get("active_engine"),
                     )
                 logger.info(f"[bot_service.update_bot] Template updated for bot {bot_id}")
 
@@ -2634,12 +2646,14 @@ class BotService:
                     bot_id=bot_id,
                     template_config=merged_config,
                     template_type=bot.get("template_type"),
+                    active_engine=bot.get("active_engine"),
                 )
             else:
                 self._template_service.create_template(
                     bot_id=bot_id,
                     template_config=merged_config,
                     template_type=bot.get("template_type"),
+                    active_engine=bot.get("active_engine"),
                 )
             logger.info("[bot_service.admin_update_bot] Template updated for bot %s by admin", bot_id)
 
@@ -2730,7 +2744,7 @@ class BotService:
         缺失能力节点按 False，不再混用 legacy template_type fallback。旧 Bot 没有
         capabilities 时继续保留历史逻辑。
         """
-        if has_declared_capabilities(template_config):
+        if is_template_factory_config(template_config) and has_declared_capabilities(template_config):
             return can_join_bcn_as_provider(template_config)
 
         is_coding_personal = (
