@@ -57,7 +57,7 @@ async def _upgrade_to_online_pub(app, world, baas) -> str:
     assert status_of(world, V2) == PublishStatus.DRAFT.value
 
     # v2: build + its own verify bot, then go-live issues the UPGRADE on the
-    # shared online bot (v1 SUCCESS ⇒ _should_upgrade_online).
+    # shared online bot (v1's online bot is ACTIVE ⇒ _decide_online_deploy → UPGRADE).
     await api(app, "POST", PROCESS, json={"publish_id": V2})
     await drain(world, until=lambda: status_of(world, V2) == PublishStatus.VALIDATE_PUB.value)
     baas.finish_all("SUCCESS")

@@ -251,35 +251,36 @@ class RestartMixin:
                     "message": f"Restart submitted, stage: {stage_enum.value}",
                     "stage": stage_enum.value, "restart_publish_id": recreate_wid}
 
-        # Provider-aware reuse-vs-recreate decision (online stage). Restart
-        # normally re-deploys the existing bot in place (the UPGRADE below), but a
-        # teclaw FAILED/STOPPED target can't be rebuilt by an UPDATE (it would just
-        # fail the publish and strand the record), and a gone target must recreate.
-        # In both non-UPGRADE cases retire the old bot first so the recreate never
-        # orphans it. ACTIVE / baas-rebuildable targets fall through to UPGRADE.
-        if stage_enum == PublishStage.ONLINE:
-            decision = self._decide_online_deploy(publish_record, bot)
-            if decision != OnlineDeployDecision.UPGRADE:
-                if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
-                    self._build_service.retire_superseded_bot(
-                        bot_uuid, operator=operator
-                    )
-                logger.info(
-                    "[PublishFlowService.execute_restart] decision=%s -> recreate: "
-                    "publish_id=%s bot_uuid=%s stage=%s",
-                    decision.value, publish_id, bot_uuid, stage_enum.value,
-                )
-                return await self._recreate_restart_target(
-                    publish_id=publish_id,
-                    stage_enum=stage_enum,
-                    publish_record=publish_record,
-                    bot=bot,
-                    migration_path=migration_path,
-                    version=version,
-                    delivery=delivery,
-                    skills_env=skills_env,
-                    operator=operator,
-                )
+        # Provider-aware reuse-vs-recreate decision (online stage). Only the
+        # teclaw not-live case needs a *proactive* short-circuit: its UPDATE
+        # cannot rebuild a gone container and would silently fail the publish
+        # (never raising BOT_NOT_FOUND), so we retire the old bot and recreate
+        # here instead of issuing a doomed upgrade. ACTIVE / baas-rebuildable
+        # targets fall through to the in-place UPGRADE below, and a genuinely
+        # gone bot (BOT_NOT_FOUND) is handled by that path's abandon→recreate
+        # leg — preserving the RESTART-op ledger record for that case.
+        if (
+            stage_enum == PublishStage.ONLINE
+            and self._decide_online_deploy(publish_record, bot)
+            == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE
+        ):
+            self._build_service.retire_superseded_bot(bot_uuid, operator=operator)
+            logger.info(
+                "[PublishFlowService.execute_restart] teclaw not-live target -> "
+                "retire + recreate: publish_id=%s bot_uuid=%s stage=%s",
+                publish_id, bot_uuid, stage_enum.value,
+            )
+            return await self._recreate_restart_target(
+                publish_id=publish_id,
+                stage_enum=stage_enum,
+                publish_record=publish_record,
+                bot=bot,
+                migration_path=migration_path,
+                version=version,
+                delivery=delivery,
+                skills_env=skills_env,
+                operator=operator,
+            )
 
         async def _issue():
             return await self._build_service.upgrade_async(
