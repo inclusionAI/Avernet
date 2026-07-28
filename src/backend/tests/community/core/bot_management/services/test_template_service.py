@@ -174,3 +174,30 @@ class TestTemplateService:
         }
         # Should not raise any exception
         template_service._validate_ext_content(ext_content)
+
+
+def _make_template_service_for_list_by_bot_ids():
+    repo = Mock()
+    return TemplateService(repository=repo, vault=TokenVault(master_key=""))
+
+
+def test_list_templates_by_bot_ids_empty_returns_empty():
+    template_service = _make_template_service_for_list_by_bot_ids()
+
+    assert template_service.list_templates_by_bot_ids([]) == []
+    template_service._repository.list_by_bot_ids.assert_not_called()
+
+
+def test_list_templates_by_bot_ids_delegates_to_repository():
+    template_service = _make_template_service_for_list_by_bot_ids()
+    template_service._repository.list_by_bot_ids.return_value = [{"bot_id": "b1", "ext": {}}]
+
+    assert template_service.list_templates_by_bot_ids(["b1"]) == [{"bot_id": "b1", "ext": {}}]
+    template_service._repository.list_by_bot_ids.assert_called_once_with(["b1"])
+
+
+def test_list_templates_by_bot_ids_repository_failure_returns_empty():
+    template_service = _make_template_service_for_list_by_bot_ids()
+    template_service._repository.list_by_bot_ids.side_effect = RuntimeError("boom")
+
+    assert template_service.list_templates_by_bot_ids(["b1"]) == []

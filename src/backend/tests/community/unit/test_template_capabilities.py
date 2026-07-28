@@ -46,3 +46,9 @@ def test_template_factory_config_marker_detection():
     assert is_template_factory_config({"template_key": "normalCC"}) is True
     assert is_template_factory_config({"template_uid": "aicoding"}) is True
     assert is_template_factory_config({"capabilities": {}}) is False
+
+
+def test_can_join_bcn_as_provider_reads_legacy_nested_bool():
+    template_config = {"capabilities": {"bcn": True}}
+
+    assert can_join_bcn_as_provider(template_config) is True

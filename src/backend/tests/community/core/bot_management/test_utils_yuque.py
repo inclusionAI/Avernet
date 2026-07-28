@@ -359,3 +359,26 @@ class TestTemplateFactoryKnowledgeAliases:
                 aixcore_base_url_pre="https://aixcore.example.com",
             )
         return captured.get("payload", {})
+
+
+def test_iter_template_list_items_ignores_non_dict_and_extends_lists():
+    from agentclaw.community.core.bot_management.utils import _iter_template_list_items
+
+    assert _iter_template_list_items(None, ("repos",)) == []  # type: ignore[arg-type]
+    assert _iter_template_list_items({"repos": ["a"], "init_repos": "bad"}, ("repos", "init_repos")) == ["a"]
+
+
+def test_template_factory_yuque_string_alias_skips_invalid_and_keeps_valid_urls():
+    config = {
+        "template_uid": "aicoding",
+        "business_wiki_spaces": [
+            "not-a-url",
+            " https://yuque.antfin.com/securitytec/wiki ",
+            {"space_url": "https://yuque.antfin.com/securitytec/space", "team_token": "TK"},
+        ],
+    }
+
+    assert _extract_yuque_pairs(config) == [
+        ("https://yuque.antfin.com/securitytec/wiki", ""),
+        ("https://yuque.antfin.com/securitytec/space", "TK"),
+    ]
