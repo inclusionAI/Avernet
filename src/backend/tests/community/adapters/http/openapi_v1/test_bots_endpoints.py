@@ -291,3 +291,25 @@ def test_auth_status_issued(client, svc, passport):
     assert data["status"] == "ISSUED"
     assert data["bot"]["bot_id"] == "b1"
     svc.create_bot.assert_called_once()
+
+
+def test_auth_status_issued_preserves_create_attributes(client, svc, passport):
+    """Re-supplied attributes reach completion so the bot isn't downgraded."""
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": "ac"}
+    _ok(client.get(
+        "/openapi/v1/bots/b1/auth-status"
+        "?engine=teclaw&cluster_name=ANDC&bot_name=NewBot&bot_desc=d"
+    ))
+    kw = svc.create_bot.call_args.kwargs
+    assert kw["engine_type"] == "teclaw"  # not defaulted to openclaw
+    assert kw["bot_name"] == "NewBot"
+    assert kw["bot_desc"] == "d"
+
+
+def test_auth_status_engine_cluster_mismatch_400(client, svc):
+    resp = client.get(
+        "/openapi/v1/bots/b1/auth-status?engine=teclaw&cluster_name=ACRA"
+    )
+    assert resp.status_code == 400
+    svc.create_bot.assert_not_called()

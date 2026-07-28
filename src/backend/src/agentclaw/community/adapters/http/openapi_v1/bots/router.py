@@ -272,22 +272,42 @@ async def get_bot_auth_status(
     bot_id: str,
     request: Request,
     principal: PrincipalDep,
+    engine: str | None = None,
+    cluster_name: str | None = None,
+    bot_name: str | None = None,
+    bot_desc: str | None = None,
+    bot_type: str | None = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
 ) -> Envelope[BotAuthStatus]:
-    """Poll Passport authorization; completes creation when ISSUED.
+    """Poll Passport authorization; complete creation when ISSUED.
 
-    A GET carries no body, so completion uses the identity/id only; any bot
-    attributes the internal completion would take from a body fall back to
-    defaults (the pending-create attributes are the passport's).
+    On the async-create flow the bot is only actually created here (on ISSUED),
+    so the caller must re-supply the attributes it created with — passed as
+    optional query params and forwarded to completion. Without them the bot
+    would be created with defaults (e.g. engine ``openclaw``) that contradict the
+    Passport applied for at ``POST`` time, so callers on the 202 flow should
+    always echo back ``engine``/``cluster_name``/``bot_name``/… here.
     """
     owner_id = caller_owner_id(principal)
+    if engine is not None and cluster_name is not None:
+        validate_engine_cluster(engine, cluster_name)
+    params = {
+        k: v
+        for k, v in {
+            "engine_type": engine,
+            "bot_name": bot_name,
+            "bot_desc": bot_desc,
+            "bot_type": bot_type,
+        }.items()
+        if v is not None
+    }
     result = complete_bot_authorization(
         user_id=owner_id,
         nick_name=owner_id,
         bot_id=bot_id,
-        params={},
+        params=params,
         cookie=request.headers.get("cookie", ""),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
