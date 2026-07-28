@@ -19,7 +19,7 @@ ownership of id allocation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.bot_management.services.bot_service import (
@@ -62,21 +62,25 @@ class Created:
     """The bot was created inline (Passport already issued a token)."""
 
     bot: dict[str, Any]
-    agent_code: str | None
+    # is_first_bot distinguishes first-agent onboarding from later creates; the
+    # internal ``/api/bots`` response echoes it in its ``passport`` payload.
     is_first_bot: bool
     passport_token: str
 
 
 @dataclass
 class AuthStatusResult:
-    """Outcome of polling authorization: ``PENDING``, ``ISSUED`` (+bot), or other."""
+    """Outcome of polling authorization: ``PENDING``, ``ISSUED`` (+bot), or other.
+
+    ``bot`` is populated only on ``ISSUED``; an empty dict on the other states.
+    """
 
     status: str
-    bot: dict[str, Any] | None = None
+    bot: dict[str, Any] = field(default_factory=dict)
 
 
 def get_bot_mcp_codes(
-    factory: "SkillSetServiceFactory",
+    factory: SkillSetServiceFactory,
     user_id: str,
     bot_id: str,
     entity_id: str,
@@ -108,7 +112,7 @@ def get_bot_mcp_codes(
 
 
 def _record_owner_relationship(
-    auth_rel_plugin: "AuthRelationshipPlugin",
+    auth_rel_plugin: AuthRelationshipPlugin,
     *,
     user_id: str,
     agent_code: str,
@@ -155,10 +159,10 @@ def create_bot_with_authorization(
     bot_id: str,
     params: dict[str, Any],
     cookie: str,
-    bot_service: "BotService",
-    passport_plugin: "PassportPlugin",
-    auth_rel_plugin: "AuthRelationshipPlugin",
-    skill_set_factory: "SkillSetServiceFactory",
+    bot_service: BotService,
+    passport_plugin: PassportPlugin,
+    auth_rel_plugin: AuthRelationshipPlugin,
+    skill_set_factory: SkillSetServiceFactory,
 ) -> Created | AuthPending:
     """Run the create + Passport-authorization flow for an already-allocated id.
 
@@ -258,7 +262,6 @@ def create_bot_with_authorization(
 
     return Created(
         bot=result,
-        agent_code=agent_code,
         is_first_bot=is_first_bot,
         passport_token=passport_token,
     )
@@ -271,9 +274,9 @@ def complete_bot_authorization(
     bot_id: str,
     params: dict[str, Any],
     cookie: str,
-    bot_service: "BotService",
-    passport_plugin: "PassportPlugin",
-    auth_rel_plugin: "AuthRelationshipPlugin",
+    bot_service: BotService,
+    passport_plugin: PassportPlugin,
+    auth_rel_plugin: AuthRelationshipPlugin,
 ) -> AuthStatusResult:
     """Poll Passport authorization for a pending bot; complete creation on ISSUED.
 

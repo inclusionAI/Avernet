@@ -26,12 +26,12 @@ TECLAW_CLUSTER: ClusterName = "ANDC"
 DEFAULT_CLUSTER: ClusterName = "ACRA"
 
 
-def cluster_for_engine(engine: str | None) -> ClusterName:
+def cluster_for_engine(engine: str) -> ClusterName:
     """Return the cluster an engine belongs to (``ANDC`` for teclaw, else ``ACRA``)."""
     return TECLAW_CLUSTER if engine == TECLAW_ENGINE else DEFAULT_CLUSTER
 
 
-def validate_engine_cluster(engine: str | None, cluster: str) -> None:
+def validate_engine_cluster(engine: str, cluster: str) -> None:
     """Raise :class:`ClusterMismatchError` if ``cluster`` isn't the engine's cluster."""
     expected = cluster_for_engine(engine)
     if cluster != expected:

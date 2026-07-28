@@ -77,12 +77,12 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 def _to_bot(d: dict[str, Any]) -> Bot:
     """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema."""
-    engine = d.get("active_engine")
+    engine = d.get("active_engine") or ""
     return Bot(
         bot_id=d["bot_id"],
         bot_name=d.get("bot_name") or "",
         bot_desc=d.get("bot_desc") or "",
-        engine=engine or "",
+        engine=engine,
         cluster_name=cluster_for_engine(engine),
         bot_type=d.get("bot_type") or "",
         status=d.get("status") or "",
