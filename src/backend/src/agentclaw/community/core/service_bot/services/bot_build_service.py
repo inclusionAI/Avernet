@@ -1145,6 +1145,40 @@ class BotBuildService:
             logger.error(f"[BotBuildService.upgrade] Upgrade failed: {e}")
             raise BotBuildServiceError(f"Bot upgrade failed: {e}")
 
+    def retire_superseded_bot(self, bot_uuid: str, operator: str = "system") -> None:
+        """Best-effort, idempotent teardown of a bot that a deploy is superseding.
+
+        Call this ONLY for a bot the caller has already decided is gone or not
+        reusable (e.g. a teclaw ``FAILED``/``STOPPED`` online bot whose container
+        an ``upgrade`` cannot rebuild, or a lingering record surfaced by a
+        ``DEVICE_NOT_FOUND`` fallback). It exists so that when a new online bot is
+        created instead of reusing the old one, the old one is not left behind as
+        an orphan (dirty data + wasted provider compute).
+
+        Best-effort by design: the BaaS ``destroy`` tolerates an already-gone bot,
+        and any failure here must never fail the surrounding deploy — a failed
+        retirement is logged and swallowed (the durable deploy still lands). The
+        ``request_id`` is derived deterministically from ``bot_uuid`` so a
+        redelivery retries the same idempotent destroy rather than opening a
+        second one.
+        """
+        request_id = hashlib.md5(f"retire_{bot_uuid}".encode()).hexdigest()
+        try:
+            self._baas_service.destroy_bot(
+                bot_uuid=bot_uuid,
+                operator=operator,
+                request_id=request_id,
+            )
+            logger.info(
+                f"[BotBuildService.retire_superseded_bot] retired superseded bot: "
+                f"bot_uuid={bot_uuid}, operator={operator}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[BotBuildService.retire_superseded_bot] best-effort retire failed "
+                f"(ignored): bot_uuid={bot_uuid}, error={e}"
+            )
+
     def refresh_teclaw_mcp_outbound_rule(
         self,
         *,
