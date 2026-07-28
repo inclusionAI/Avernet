@@ -42,6 +42,7 @@ class RolloutDecisionReason(StrEnum):
     CONFIG_ENV_MISMATCH = "config_env_mismatch"
     ENGINE_NOT_SUPPORTED = "engine_not_supported"
     ENGINE_NOT_PROMOTED = "engine_not_promoted"
+    BOT_NEGATIVE_CONTROL = "bot_negative_control"
     BOT_NOT_WHITELISTED = "bot_not_whitelisted"
     RUNTIME_NOT_EDITABLE = "runtime_not_editable"
 
@@ -131,10 +132,24 @@ class SkillsPoolRolloutGate:
         if engine_type not in promoted_engines:
             return self._reject(RolloutDecisionReason.ENGINE_NOT_PROMOTED)
 
+        negative_control = self._whitelist_service.find_bot_whitelist_entry(
+            value.get("negative_controls", []),
+            owner_id=owner_id,
+            bot_id=bot_id,
+        )
+        if negative_control is not None:
+            return self._reject(RolloutDecisionReason.BOT_NEGATIVE_CONTROL)
+
         batch_id = None
         decision_reason = "environment_full_rollout"
-        if value["enable_all"] is False and engine_type not in value.get(
-            "full_rollout_engines", []
+        owner_full_rollout = any(
+            str(entry["owner_id"]) == str(owner_id) and entry["engine"] == engine_type
+            for entry in value.get("full_rollout_owners", [])
+        )
+        if (
+            value["enable_all"] is False
+            and engine_type not in value.get("full_rollout_engines", [])
+            and not owner_full_rollout
         ):
             whitelist = value["whitelist"]
             entry = self._whitelist_service.find_bot_whitelist_entry(
@@ -146,6 +161,8 @@ class SkillsPoolRolloutGate:
                 return self._reject(RolloutDecisionReason.BOT_NOT_WHITELISTED)
             batch_id = entry.get("batch_id")
             decision_reason = "exact_bot_whitelist"
+        elif value["enable_all"] is False and owner_full_rollout:
+            decision_reason = "owner_full_rollout"
         elif value["enable_all"] is False:
             decision_reason = "engine_full_rollout"
         evidence = RolloutEvidence(

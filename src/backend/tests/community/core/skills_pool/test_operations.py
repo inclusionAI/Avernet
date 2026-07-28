@@ -10,6 +10,7 @@ from agentclaw.community.core.skills_pool.operations import (
     BatchPromotionEvidence,
     RolloutControlGroup,
     RolloutOperationError,
+    RolloutOwnerEntry,
     SkillsPoolRolloutOperations,
 )
 from agentclaw.community.core.skills_pool.types import (
@@ -48,7 +49,6 @@ class FakeCommonConfig:
             "gmt_modified": "2026-07-25T10:00:00+00:00",
         }
         return 42
-
 
 
 class FakeRolloutRepository:
@@ -132,7 +132,11 @@ class FakeLayouts:
         if (
             self.state.persisted
             and self.state.scope.env == env
-            and (engine is None or evidence is not None and evidence.engine_type == engine)
+            and (
+                engine is None
+                or evidence is not None
+                and evidence.engine_type == engine
+            )
             and (
                 batch_id is None
                 or evidence is not None
@@ -174,6 +178,7 @@ def rollout_config(
     enabled: bool = True,
     enable_all: bool = False,
     full_rollout_engines: list[str] | None = None,
+    full_rollout_owners: list[dict[str, object]] | None = None,
     promoted_engines: list[str] | None = None,
     whitelist: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
@@ -186,6 +191,7 @@ def rollout_config(
         "param_value": {
             "enable_all": enable_all,
             "full_rollout_engines": full_rollout_engines or [],
+            "full_rollout_owners": full_rollout_owners or [],
             "promoted_engines": promoted_engines or [],
             "whitelist": whitelist or [],
             "negative_controls": [],
@@ -211,6 +217,7 @@ def test_enabling_missing_rollout_creates_safe_exact_bot_configuration() -> None
     assert configs.upserts[0]["param_value"] == {
         "enable_all": False,
         "full_rollout_engines": [],
+        "full_rollout_owners": [],
         "promoted_engines": [],
         "whitelist": [],
         "negative_controls": [],
@@ -247,8 +254,9 @@ def test_engine_promotion_is_manual_ordered_and_idempotent() -> None:
     assert len(configs.upserts) == 1
 
 
-def test_full_rollout_requires_accepted_promoted_engine_then_admits_environment(
-) -> None:
+def test_full_rollout_requires_accepted_promoted_engine_then_admits_environment() -> (
+    None
+):
     operations, configs, _, _ = build_operations(
         config=rollout_config(promoted_engines=["openclaw"])
     )
@@ -319,6 +327,87 @@ def test_engine_full_rollout_does_not_admit_other_promoted_engine() -> None:
     assert snapshot.full_rollout_engines == ("openclaw",)
     assert configs.config["param_value"]["full_rollout_engines"] == ["openclaw"]
     assert snapshot.audit_log[-1].action == "full_rollout:openclaw:enable"
+
+
+def test_owner_full_rollout_requires_and_audits_latest_engine_acceptance() -> None:
+    operations, configs, _, _ = build_operations(
+        config=rollout_config(promoted_engines=["openclaw"])
+    )
+
+    with pytest.raises(RolloutOperationError, match="accepted openclaw batch"):
+        operations.set_owner_full_rollout(
+            env=ENV,
+            owner_id=OWNER,
+            engine="openclaw",
+            enabled=True,
+            acceptance_batch_id=None,
+            operator="freddie",
+            reason="too early",
+        )
+
+    operations.accept_batch(
+        env=ENV,
+        operator="freddie",
+        reason="canary passed",
+        acceptance=BatchPromotionEvidence(
+            engine="openclaw",
+            batch_id="openclaw-canary-1",
+            promotion_ready=True,
+            report={
+                "rollout_config_version": "2026-07-25T09:00:00+00:00",
+                "promotion_ready": True,
+            },
+        ),
+    )
+    snapshot = operations.set_owner_full_rollout(
+        env=ENV,
+        owner_id=OWNER,
+        engine="openclaw",
+        enabled=True,
+        acceptance_batch_id="openclaw-canary-1",
+        operator="freddie",
+        reason="expand to all owner bots",
+    )
+
+    assert snapshot.full_rollout_owners == (
+        RolloutOwnerEntry(owner_id=OWNER, engine="openclaw"),
+    )
+    assert configs.config is not None
+    assert configs.config["param_value"]["full_rollout_owners"] == [
+        {"owner_id": OWNER, "engine": "openclaw"}
+    ]
+    event = snapshot.audit_log[-1]
+    assert event.action == f"owner_full_rollout:{OWNER}:openclaw:enable"
+    assert event.batch_id == "openclaw-canary-1"
+
+
+def test_owner_full_rollout_is_engine_scoped_and_can_be_disabled() -> None:
+    operations, _, _, _ = build_operations(
+        config=rollout_config(
+            promoted_engines=["openclaw", "claude_code"],
+            full_rollout_owners=[
+                {"owner_id": OWNER, "engine": "openclaw"},
+                {"owner_id": "owner-2", "engine": "claude_code"},
+            ],
+        )
+    )
+
+    snapshot = operations.set_owner_full_rollout(
+        env=ENV,
+        owner_id=OWNER,
+        engine="openclaw",
+        enabled=False,
+        acceptance_batch_id=None,
+        operator="freddie",
+        reason="pause owner claims",
+    )
+
+    assert snapshot.full_rollout_owners == (
+        RolloutOwnerEntry(owner_id="owner-2", engine="claude_code"),
+    )
+    assert snapshot.audit_log[-1].action == (
+        f"owner_full_rollout:{OWNER}:openclaw:disable"
+    )
 
 
 def test_full_rollout_can_be_disabled_without_reverting_claimed_bots() -> None:
