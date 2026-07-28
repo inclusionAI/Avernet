@@ -1067,17 +1067,21 @@ async def test_restart_device_not_found_fallback_retires_then_recreates():
     baas_service = Mock()
     baas_service.get_bot.return_value = {"status": "ACTIVE"}
     baas_service.resolve_container_provider.return_value = "baas"
+    build_service.retire_superseded_bot.return_value = 424  # destroy publish id
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
     record = _make_publish_record(
         status=PublishStatus.SUCCESS.value,
         ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
     )
     _setup_restart(svc, record, bot_uuid="BOT-old")
+    svc._release_binding = Mock()
 
     result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
 
     assert result["success"] is True
     build_service.retire_superseded_bot.assert_called_once_with("BOT-old", operator="op")
+    # The lingering bot's stale binding (id 1) is released, stashing the destroy id.
+    svc._release_binding.assert_called_once_with(1, destroy_publish_id=424)
     build_service.release_async.assert_awaited_once()
 
 
