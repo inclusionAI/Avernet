@@ -871,6 +871,95 @@ async def test_restart_recreate_threads_config_artifact():
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
     # The recreate minted a fresh binding for the new bot.
     assert publish_service.create_device_binding.call_args.kwargs["device_id"] == "BOT-recreated"
+    # BOT_NOT_FOUND = the record is already gone → nothing to retire.
+    build_service.retire_superseded_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restart_teclaw_not_live_target_retires_then_recreates():
+    # A teclaw online bot in STOPPED/FAILED can't be rebuilt by an UPDATE, so the
+    # restart must retire it and recreate — never leaving it as an orphan.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock()  # must NOT be issued
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "STOPPED"}
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_called_once_with("BOT-old", operator="op")
+    build_service.upgrade_async.assert_not_awaited()
+    build_service.release_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_restart_baas_not_live_target_upgrades_in_place():
+    # A baas/ARCA online bot in FAILED is rebuilt in place by the UPDATE, so the
+    # restart upgrades (reuses the bot) — no recreate, no retire.
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"publish_id": 77, "bot_uuid": "BOT-old"}
+    )
+    build_service.release_async = AsyncMock()  # must NOT be called
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "FAILED"}
+    baas_service.resolve_container_provider.return_value = "baas"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "migration_path": "/m/1"},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.upgrade_async.assert_awaited_once()
+    build_service.release_async.assert_not_awaited()
+    build_service.retire_superseded_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restart_device_not_found_fallback_retires_then_recreates():
+    # Secondary net: proactive status said reusable (ACTIVE) but the UPDATE hit a
+    # gone device (DEVICE_NOT_FOUND) → retire the lingering record, then recreate.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "DEVICE_NOT_FOUND"}
+    )
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "ACTIVE"}
+    baas_service.resolve_container_provider.return_value = "baas"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_called_once_with("BOT-old", operator="op")
+    build_service.release_async.assert_awaited_once()
 
 
 @pytest.mark.asyncio
