@@ -41,7 +41,7 @@ Workbench、`bcs-cli` 和 E2E 脚本仍然使用这些接口。Legacy API 同时
 
 - 新增稳定、可版本化的 OpenAPI 和 Internal API 边界。
 - 保持全部 Legacy 生产接口继续工作。
-- 避免 TeamClaw 与 BCN 在 `/bots` 路径下发生资源所有权冲突。
+- 通过稳定的 Bot 协作子资源前缀区分 TeamClaw 与 BCN 的 `/bots` 路由所有权。
 - 把身份认证与资源授权分开。
 - 让 HTTP Adapter、Application Service 和领域实现保持正确依赖方向。
 - 从权威 Contract 自动生成文档并自动阻止不兼容修改。
@@ -66,7 +66,7 @@ Workbench、`bcs-cli` 和 E2E 脚本仍然使用这些接口。Legacy API 同时
 - 不提供 Group 级消息发送接口。
 - 不提供 `POST /openapi/v1/sessions/{session_id}/messages`。
 - 不设计 SSE；现有 WebSocket 和 callback 也不属于本次改造。
-- 不包含 Actor 目录、Bot Registration、Provider、Service Invocation、
+- 不包含 Bot Registration、Bot Profile、Provider、Service Invocation、
   CollaborationTemplate、StateMachineRun、Session File 和 collect。
 - 不引入 ServiceKey、ProviderPrincipal 或 Gateway 自身发起请求的
   InternalService Principal。
@@ -118,26 +118,32 @@ HTTP 路径统一采用 `/{api_type}/v1/**`。代码中的 OpenAPI 和 Internal 
 
 ### 5.2 Gateway 路由
 
-Gateway 按 `/openapi/v1` 后的首段资源域选择上游。第一阶段只需按资源域配置，
-不需要为每个 operation 配置 `contract_owner`：
+Gateway 按 `/openapi/v1` 后的最长稳定资源前缀选择上游。第一阶段只需按资源域
+或固定子资源前缀配置，不需要为每个 operation 配置 `contract_owner`：
 
-| 资源域 | 上游 |
+| 资源前缀 | 上游 |
 | --- | --- |
 | `groups` | BCN |
 | `sessions` | BCN |
-| `actors` | BCN |
+| `bots/collaboration` | BCN |
 | `invitations` | BCN |
 | `friend-requests` | BCN |
+| 其他 `bots/**` | TeamClaw |
 
-BCN 不占用 Gateway 的 `/openapi/v1/bots/**`。该路径由 TeamClaw Bot 资源所有者
-维护。BCN 对协作网络中的身份统一使用 `Actor`：
+BCN 不拥有通用 Bot 资源，也不引入 `Actor` 公共抽象。TeamClaw 继续维护
+`/openapi/v1/bots/**` 下的 Bot 注册、配置和生命周期；BCN 只拥有固定子资源
+前缀：
 
-- BotActor 的 `actor_id` 等于 BCN `bot_uuid`。
-- Friendship 第一阶段虽然只支持 BotActor，但路径仍使用 `actors`。
-- Gateway 解析到的 Bot UUID 必须能够稳定映射为同一个 BCN `bot_uuid`。
+```text
+/openapi/v1/bots/collaboration/{bot_uuid}/**
+```
 
-Gateway 首次接入 BCN 时需要增加上述资源域到同一个 BCN upstream 的映射；后续
-同一资源域下新增兼容 operation 不需要逐接口改 Gateway。
+Gateway 对该前缀使用最长前缀匹配路由到 BCN，其他 `/openapi/v1/bots/**`
+继续路由到 TeamClaw。这只需要一个前缀所有权配置，不需要逐 operation 配置。
+公共 Contract、Application Command 和 BCN 领域关系统一使用 `bot_uuid`。
+
+Gateway 首次接入 BCN 时需要增加上述资源前缀到同一个 BCN upstream 的映射；
+后续同一前缀下新增兼容 operation 不需要逐接口改 Gateway。
 
 ## 6. Principal 与信任边界
 
@@ -151,7 +157,7 @@ Gateway 当前实现了 `UserPrincipal`：
 - `subject: AuthenticatedUser`
 
 `AuthenticatedUser` 是认证插件返回的中立用户对象，当前包含稳定用户 ID、用户名
-以及可选展示名称、全名和租户信息。它不是 BCN 的领域 Actor。
+以及可选展示名称、全名和租户信息。它不是 BCN 的 Bot 资源。
 
 当前 Gateway 尚未实现 BotPrincipal。Gateway 的认证设计已经提出“签名的短期
 Principal Token”方向，但 Gateway 到 BCN 的签发、转发和验签尚未完成接入。
@@ -162,21 +168,21 @@ BCN 新 API 只接受投影后的领域 Principal：
 
 ```text
 Principal
-├── Human { actor_id, authenticated_user, tenant, scopes }
-└── Bot   { actor_id, tenant, scopes }
+├── Human { authenticated_user, tenant, scopes }
+└── Bot   { bot_uuid, tenant, scopes }
 ```
 
 约束如下：
 
-- Bot `actor_id == bot_uuid`。
-- Human 的 canonical `actor_id` 必须由 Gateway/身份映射契约明确提供；BCN
-  不应根据可变的 `username` 或展示字段自行猜测。
+- Gateway BotPrincipal 中的 Bot UUID 必须与 BCN `bot_uuid` 属于同一标识空间。
+- Human Principal 不分配 `actor_id` 或 `bot_uuid`。Human 管理目标 Bot 时，
+  请求中的 `bot_uuid` 必须由 BCN 根据权威 `created_by` 关系授权。
 - BCN 不接触外部原始 Cookie、Bearer Token 或 AgentPass。
 - ProviderPrincipal、ServiceKey 和 InternalService 不在第一阶段 union 中。
 
-当前 Gateway `UserPrincipal.subject.id` 与 Legacy BCN `human_{staff_no}` 的最终
-映射仍需 Gateway/身份负责人确认。这是上线前置项，不应在业务代码中用 fallback
-掩盖。
+Gateway `UserPrincipal.subject.id` 与 BCN Bot `created_by` 必须采用同一稳定身份
+空间，或由明确的身份映射契约转换。这是上线前置项，不应在业务代码中用
+`username` 或展示字段 fallback 掩盖。
 
 ### 6.3 Principal 如何进入 BCN
 
@@ -237,12 +243,12 @@ Action 是 Application 层概念，不暴露 HTTP 状态码。
   和 SessionParticipant 关系推导。
 - Participant 自身可以退出；manager/creator 可以管理普通 Participant；不能
   通过删除破坏 driver 等领域不变量。
-- Invitation 创建者必须有目标 Group/Session 的管理权限；接受邀请以当前
-  Human Principal 加入，不允许 body 指定加入者。
-- Friendship 仅存在于两个 BotActor 之间。Bot 可以管理自身关系；Human 可以
+- Invitation 创建者必须有目标 Group/Session 的管理权限；Bot 可以为自身接受
+  邀请，Human 只能为 `created_by` 关系确认的目标 `bot_uuid` 接受邀请。
+- Friendship 仅存在于两个 Bot 之间。Bot 可以管理自身关系；Human 可以
   基于 `created_by` 关系管理其创建 Bot 的 Friendship。
 - “Human 可以管理其创建的 Bot”不等于“Human 可以作为该 Bot 发言”。
-- 新接口中的 Actor 身份来自 Principal 或受授权的资源管理参数，不能通过
+- 新接口中的 Bot 身份来自 BotPrincipal 或受授权的 `bot_uuid` 资源管理参数，不能通过
   `sender`、`from` 等字段改变调用身份。
 - Provider 能否管理目标 Provider/Bot 等资源，留待 ProviderPrincipal 阶段处理。
 
@@ -261,13 +267,13 @@ Action 是 Application 层概念，不暴露 HTTP 状态码。
 
 | Method | Path | Operation |
 | --- | --- | --- |
-| GET | `/openapi/v1/actors/{actor_id}/groups` | 查询 Actor 参与的 Group |
+| GET | `/openapi/v1/bots/collaboration/{bot_uuid}/groups` | 查询 Bot 参与的 Group |
 | POST | `/openapi/v1/groups` | 创建 Group |
 | GET | `/openapi/v1/groups/{group_id}` | 获取 Group 详情 |
 | PATCH | `/openapi/v1/groups/{group_id}` | 修改 Group 可变属性 |
 | DELETE | `/openapi/v1/groups/{group_id}` | 删除 Group |
 
-`GET /actors/{actor_id}/groups` 使用
+`GET /bots/collaboration/{bot_uuid}/groups` 使用
 `membership=all|direct|session_only` 过滤，默认 `all`。`session_only` 是关系
 过滤条件，不单独设计成子资源。
 
@@ -276,8 +282,8 @@ Action 是 Application 层概念，不暴露 HTTP 状态码。
 | Method | Path | Operation |
 | --- | --- | --- |
 | POST | `/openapi/v1/groups/{group_id}/participants` | 添加 GroupParticipant |
-| PATCH | `/openapi/v1/groups/{group_id}/participants/{actor_id}` | 修改 Participant 可变属性 |
-| DELETE | `/openapi/v1/groups/{group_id}/participants/{actor_id}` | 移除 Participant 或自行退出 |
+| PATCH | `/openapi/v1/groups/{group_id}/participants/{bot_uuid}` | 修改 Participant 可变属性 |
+| DELETE | `/openapi/v1/groups/{group_id}/participants/{bot_uuid}` | 移除 Participant 或自行退出 |
 
 Group 详情包含 Participants，第一阶段不增加独立列表接口。
 
@@ -309,12 +315,12 @@ POST /openapi/v1/sessions/{session_id}/messages
 | Method | Path | Operation |
 | --- | --- | --- |
 | POST | `/openapi/v1/sessions/{session_id}/participants` | 添加 SessionParticipant |
-| PATCH | `/openapi/v1/sessions/{session_id}/participants/{actor_id}` | 修改 Participant mode |
-| DELETE | `/openapi/v1/sessions/{session_id}/participants/{actor_id}` | 移除 Participant 或自行退出 |
+| PATCH | `/openapi/v1/sessions/{session_id}/participants/{bot_uuid}` | 修改 Participant mode |
+| DELETE | `/openapi/v1/sessions/{session_id}/participants/{bot_uuid}` | 移除 Participant 或自行退出 |
 
 Session 详情包含 Participants，第一阶段不增加独立列表接口。新接口不继承
-Legacy Session Chat 的 Human 自动加入行为；未加入的 Human 必须先通过
-Participant 管理或 Invitation 加入。
+Legacy Session Chat 的 Human 自动加入行为；Human 不是 Participant，只能基于
+`created_by` 授权管理目标 Bot 的 Participant 或 Invitation 操作。
 
 ### 8.5 Invitation
 
@@ -331,10 +337,10 @@ Join 两套 endpoint。
 
 | Method | Path | Operation |
 | --- | --- | --- |
-| GET | `/openapi/v1/actors/{actor_id}/friendships` | 查询 Actor 的 Friendship |
-| DELETE | `/openapi/v1/actors/{actor_id}/friendships/{friend_actor_id}` | 解除 Friendship |
-| POST | `/openapi/v1/friend-requests` | 发起好友申请 |
-| GET | `/openapi/v1/actors/{actor_id}/friend-requests` | 查询发出或收到的申请 |
+| GET | `/openapi/v1/bots/collaboration/{bot_uuid}/friendships` | 查询 Bot 的 Friendship |
+| DELETE | `/openapi/v1/bots/collaboration/{bot_uuid}/friendships/{friend_bot_uuid}` | 解除 Friendship |
+| POST | `/openapi/v1/bots/collaboration/{bot_uuid}/friend-requests` | 以目标 Bot 发起好友申请 |
+| GET | `/openapi/v1/bots/collaboration/{bot_uuid}/friend-requests` | 查询 Bot 发出或收到的申请 |
 | POST | `/openapi/v1/friend-requests/{request_id}/accept` | 接受好友申请 |
 | POST | `/openapi/v1/friend-requests/{request_id}/reject` | 拒绝好友申请 |
 
@@ -394,7 +400,8 @@ Join 两套 endpoint。
 ### 10.3 身份字段
 
 - Request body 不允许携带用于覆盖 Principal 的 caller、sender 或 from。
-- 资源管理请求可以携带目标 `actor_id`，但必须由 BCN 授权层验证关系。
+- 资源管理请求可以携带目标 `bot_uuid`，但必须由 BCN 授权层验证 BotPrincipal
+  自身关系或 Human `created_by` 所有权。
 - `GET Session Messages` 不允许调用方通过查询参数切换到无权代表的 Bot 视角。
 
 ### 10.4 Gateway 鉴权声明
@@ -608,9 +615,9 @@ PR 中，以满足架构规则要求的“Contract 变更同时具有文档和 c
 以下问题不阻止定义 Application/Adapter 边界，但阻止生产开放：
 
 1. Gateway BotPrincipal 的正式 Schema、认证入口和实现。
-2. Human `AuthenticatedUser.subject.id` 到 BCN canonical `actor_id` 的映射。
+2. Human `AuthenticatedUser.subject.id` 与 BCN Bot `created_by` 的身份空间或映射契约。
 3. Gateway → BCN Principal 的签名、传递、验签、audience 和密钥轮换。
-4. BCN 资源域在 Gateway 配置中的最终注册名称。
+4. Gateway 对 `bots/collaboration` 使用最长前缀路由的配置能力。
 5. 权限 scope 词表；在其落地前，BCN 仍必须执行完整资源关系授权。
 
 第一阶段 Internal API 为空不是待定项。未来只有出现明确内部调用者和无法通过
@@ -624,8 +631,8 @@ OpenAPI 表达的受信任 Use Case 时，才新增 Internal API。
 | 公共路径 | `/openapi/v1/**`，不包含 `/bcn` |
 | Internal 路径 | `/internal/v1/**`，不包含 `/bcn` |
 | 第一阶段 Internal API | 空集 |
-| 资源命名 | BCN 使用 `actors`，不与 TeamClaw `/bots` 冲突 |
-| Bot ID | `actor_id == bot_uuid` |
+| 资源命名 | 使用 `bots`；BCN 只拥有 `/bots/collaboration/{bot_uuid}/**` |
+| Bot ID | 公共 Contract、Application 和领域关系统一使用 `bot_uuid` |
 | 身份职责 | Gateway 认证并形成 Principal；BCN 做资源授权 |
 | Human 管理 Bot | 可以管理已确认的资源关系，不能代表 Bot 发言 |
 | Session 消息 | 只开放 GET history，不开放 POST send |

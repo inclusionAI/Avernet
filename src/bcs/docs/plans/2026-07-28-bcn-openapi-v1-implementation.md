@@ -33,7 +33,7 @@
 Obtain explicit decisions from the Gateway/identity owners for:
 
 1. the BotPrincipal schema and authentication strategy;
-2. the canonical Human actor ID mapping;
+2. the Human `subject.id` to BCN Bot `created_by` identity mapping;
 3. the signed Principal token format, algorithm, issuer, audience, TTL, and key
    rotation contract.
 
@@ -65,14 +65,14 @@ path)` set with the 27 operations in the design:
 
 ```python
 EXPECTED = {
-    ("get", "/openapi/v1/actors/{actor_id}/groups"),
+    ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/groups"),
     ("post", "/openapi/v1/groups"),
     ("get", "/openapi/v1/groups/{group_id}"),
     ("patch", "/openapi/v1/groups/{group_id}"),
     ("delete", "/openapi/v1/groups/{group_id}"),
     ("post", "/openapi/v1/groups/{group_id}/participants"),
-    ("patch", "/openapi/v1/groups/{group_id}/participants/{actor_id}"),
-    ("delete", "/openapi/v1/groups/{group_id}/participants/{actor_id}"),
+    ("patch", "/openapi/v1/groups/{group_id}/participants/{bot_uuid}"),
+    ("delete", "/openapi/v1/groups/{group_id}/participants/{bot_uuid}"),
     ("post", "/openapi/v1/groups/{group_id}/sessions"),
     ("get", "/openapi/v1/groups/{group_id}/sessions"),
     ("get", "/openapi/v1/sessions/{session_id}"),
@@ -81,15 +81,15 @@ EXPECTED = {
     ("post", "/openapi/v1/sessions/{session_id}/completion"),
     ("get", "/openapi/v1/sessions/{session_id}/messages"),
     ("post", "/openapi/v1/sessions/{session_id}/participants"),
-    ("patch", "/openapi/v1/sessions/{session_id}/participants/{actor_id}"),
-    ("delete", "/openapi/v1/sessions/{session_id}/participants/{actor_id}"),
+    ("patch", "/openapi/v1/sessions/{session_id}/participants/{bot_uuid}"),
+    ("delete", "/openapi/v1/sessions/{session_id}/participants/{bot_uuid}"),
     ("post", "/openapi/v1/groups/{group_id}/invitations"),
     ("post", "/openapi/v1/sessions/{session_id}/invitations"),
     ("post", "/openapi/v1/invitations/{token}/accept"),
-    ("get", "/openapi/v1/actors/{actor_id}/friendships"),
-    ("delete", "/openapi/v1/actors/{actor_id}/friendships/{friend_actor_id}"),
-    ("post", "/openapi/v1/friend-requests"),
-    ("get", "/openapi/v1/actors/{actor_id}/friend-requests"),
+    ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/friendships"),
+    ("delete", "/openapi/v1/bots/collaboration/{bot_uuid}/friendships/{friend_bot_uuid}"),
+    ("post", "/openapi/v1/bots/collaboration/{bot_uuid}/friend-requests"),
+    ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/friend-requests"),
     ("post", "/openapi/v1/friend-requests/{request_id}/accept"),
     ("post", "/openapi/v1/friend-requests/{request_id}/reject"),
 }
@@ -100,6 +100,7 @@ Also assert:
 ```python
 assert ("post", "/openapi/v1/sessions/{session_id}/messages") not in actual
 assert not any(path.startswith("/openapi/v1/bcn/") for _, path in actual)
+assert not any(path.startswith("/openapi/v1/actors/") for _, path in actual)
 assert not internal_operations
 ```
 
@@ -196,15 +197,14 @@ Test the intended identity invariants:
 
 ```rust
 #[test]
-fn bot_actor_id_is_the_bcn_bot_uuid() {
+fn bot_principal_uses_the_bcn_bot_uuid() {
     let principal = Principal::bot("bot-123", "tenant-a", []);
-    assert_eq!(principal.actor_id(), "bot-123");
+    assert_eq!(principal.bot_uuid(), Some("bot-123"));
 }
 
 #[test]
-fn human_principal_requires_a_canonical_actor_id() {
+fn human_principal_does_not_claim_a_bot_identity() {
     let principal = Principal::human(
-        "human-actor-1",
         AuthenticatedUser {
             id: "user-1".into(),
             username: "alice".into(),
@@ -214,7 +214,8 @@ fn human_principal_requires_a_canonical_actor_id() {
         "tenant-a",
         [],
     );
-    assert_eq!(principal.actor_id(), "human-actor-1");
+    assert_eq!(principal.bot_uuid(), None);
+    assert_eq!(principal.authenticated_user().unwrap().id, "user-1");
 }
 ```
 
@@ -244,7 +245,6 @@ pub enum Principal {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HumanPrincipal {
-    pub actor_id: String,
     pub subject: AuthenticatedUser,
     pub tenant: String,
     pub scopes: BTreeSet<String>,
@@ -252,7 +252,7 @@ pub struct HumanPrincipal {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BotPrincipal {
-    pub actor_id: String,
+    pub bot_uuid: String,
     pub tenant: String,
     pub scopes: BTreeSet<String>,
 }
@@ -342,9 +342,9 @@ Use module versioning instead of type prefixes:
 ```rust
 #[async_trait]
 pub trait GroupService: Send + Sync {
-    async fn list_actor_groups(
+    async fn list_bot_groups(
         &self,
-        command: ListActorGroups,
+        command: ListBotGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError>;
     async fn create(&self, command: CreateGroup) -> Result<Group, ApplicationError>;
     async fn get(&self, query: GetGroup) -> Result<Group, ApplicationError>;
@@ -416,7 +416,7 @@ Cover:
 - Group manager may manage Group and Participants.
 - Direct Participant may read but not manage.
 - Session-only Participant may read only the relevant Session/parent projection.
-- Bot may act only as its own `actor_id`.
+- Bot may act only as its own `bot_uuid`.
 - Human owner may manage an owned Bot's Friendship/resource relation.
 - Human owner is not granted Bot message-sender identity.
 - Cross-tenant access is denied before existence details are disclosed.
@@ -552,10 +552,11 @@ Cover all nine Session/SessionParticipant operations:
 - read/update/delete Session;
 - completion only from Running and idempotent after Completed;
 - add/update/delete Participant;
-- no automatic Human enrollment;
+- Human is never enrolled as a Participant and may only manage an authorized
+  target Bot's membership;
 - completed Session rejects mutable operations;
 - Session belongs to the Group in the path;
-- a caller cannot supply another actor as Principal.
+- a caller cannot replace its Principal or manage an unauthorized `bot_uuid`.
 
 **Step 4: Implement `SessionServiceImpl`**
 
@@ -599,8 +600,9 @@ git commit -m "feat(bcs): implement v1 session use cases"
 Test Group/Session invitation creation and unified token acceptance:
 
 - token identifies target type and target ID;
-- current Human Principal is the joining actor;
-- request body cannot name a different joining actor;
+- a Bot Principal joins only its own `bot_uuid`;
+- a Human Principal may name only a target `bot_uuid` whose authoritative
+  `created_by` matches the Human subject;
 - expired token returns Gone;
 - duplicate acceptance is idempotent;
 - completed/non-joinable Session returns Conflict.
@@ -615,7 +617,7 @@ application layer.
 
 Cover all six operations and assert:
 
-- both actors are BotActor;
+- both relationship endpoints are identified by BCN `bot_uuid`;
 - Bot caller manages itself only;
 - Human caller may manage only a Bot whose authoritative `created_by` matches;
 - accept/reject only works for the receiver;
@@ -881,8 +883,8 @@ assert_route_absent(Method::POST, "/openapi/v1/sessions/s-1/messages");
 assert_route_absent(Method::POST, "/openapi/v1/sessions/s-1/chat");
 ```
 
-Also verify no request DTO contains `sender_actor_id`, `sender`, `from`, or
-`view_bot_id`.
+Also verify no request DTO contains `sender_bot_uuid`, `sender`, `from`, or
+`view_bot_uuid`.
 
 **Step 2: Run and verify failure**
 
@@ -932,9 +934,10 @@ git commit -m "feat(bcs): expose v1 session HTTP routes"
 
 Cover all nine operations and verify:
 
-- invitation acceptance derives the joining Human from Principal;
-- Friendship paths use `actors`, not `bots`;
-- `from_actor_id` cannot override a Bot Principal;
+- invitation acceptance uses the Bot Principal's own `bot_uuid`, or a
+  Human-authorized target `bot_uuid`;
+- Bot-scoped paths use `/bots/collaboration/{bot_uuid}` and never `/actors`;
+- `from_bot_uuid` cannot override a Bot Principal;
 - Human-owned-Bot management is passed to Application authorization;
 - no Legacy response shapes leak into V1.
 
@@ -1050,7 +1053,7 @@ Parametrize:
     [
         "/openapi/v1/groups/g1",
         "/openapi/v1/sessions/s1",
-        "/openapi/v1/actors/a1/groups",
+        "/openapi/v1/bots/collaboration/b1/groups",
         "/openapi/v1/invitations/t/accept",
         "/openapi/v1/friend-requests/r1/accept",
     ],
@@ -1059,7 +1062,9 @@ def test_bcn_domains_resolve_to_one_server(path: str) -> None:
     ...
 ```
 
-Also assert `/openapi/v1/bots` still resolves to AgentClaw/TeamClaw, not BCN.
+Also assert `/openapi/v1/bots/b1` still resolves to AgentClaw/TeamClaw, while
+`/openapi/v1/bots/collaboration/b1/groups` resolves to BCN by longest-prefix
+matching.
 
 **Step 2: Run and verify failure**
 
@@ -1074,9 +1079,10 @@ Expected: FAIL because BCN domains are not configured.
 
 **Step 3: Add one BCN server and resource-domain aliases**
 
-Add one `bcn` server and map `groups`, `sessions`, `actors`, `invitations`, and
-`friend-requests` to it. Each alias points to the same BCN schema artifact; do
-not duplicate schemas per operation.
+Add one `bcn` server and map `groups`, `sessions`, `bots/collaboration`,
+`invitations`, and `friend-requests` to it. Each alias points to the same BCN
+schema artifact; do not duplicate schemas per operation. Keep the general
+`bots/**` mapping owned by AgentClaw/TeamClaw.
 
 **Step 4: Add fail-closed route security**
 
@@ -1148,8 +1154,8 @@ Assert rejection of:
 - wrong issuer;
 - wrong audience;
 - unsupported Principal type;
-- Human without canonical actor ID;
-- Bot whose actor ID cannot map to a BCN bot UUID.
+- Human with a subject ID that cannot be evaluated against BCN `created_by`;
+- Bot without a valid BCN `bot_uuid`.
 
 **Step 4: Run tests and verify failure**
 
