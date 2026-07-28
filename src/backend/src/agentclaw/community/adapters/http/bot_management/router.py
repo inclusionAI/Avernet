@@ -59,6 +59,7 @@ from agentclaw.community.core.bot_management.utils import (
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
+    BotCreateSpec,
     complete_bot_authorization,
     create_bot_with_authorization,
 )
@@ -97,6 +98,27 @@ def _sanitize_baas_status_ext_for_response(
     ):
         return _clear_baas_publish_failure_ext(ext)
     return dict(ext)
+
+
+def _bot_create_spec(data: dict[str, Any]) -> BotCreateSpec:
+    """Map this surface's raw JSON body onto the shared create contract.
+
+    The one place the internal API's request keys are read; the shared flow then
+    works off typed fields, so a spec field added later must be filled in here
+    explicitly rather than silently going missing.
+    """
+    return BotCreateSpec(
+        entity_id=data.get("entity_id"),
+        entity_type=data.get("entity_type") or "staff",
+        engine_type=data.get("engine_type"),
+        bot_name=data.get("bot_name"),
+        bot_desc=data.get("bot_desc"),
+        bot_type=data.get("bot_type"),
+        avatar_url=data.get("avatar_url"),
+        share_policy=data.get("share_policy"),
+        template_type=data.get("template_type"),
+        template_config=data.get("template_config"),
+    )
 
 
 router = APIRouter(prefix="/api/bots", tags=["bots"])
@@ -897,7 +919,7 @@ async def create_bot(
             user_id=user_id,
             nick_name=nick_name,
             bot_id=bot_id,
-            params=data,
+            spec=_bot_create_spec(data),
             cookie=cookie,
             bot_service=bot_service,
             passport_plugin=passport_plugin,
@@ -1059,7 +1081,7 @@ async def get_auth_status(
             user_id=user_id,
             nick_name=nick_name,
             bot_id=bot_id,
-            params=data,
+            spec=_bot_create_spec(data),
             cookie=cookie,
             bot_service=bot_service,
             passport_plugin=passport_plugin,

@@ -44,6 +44,7 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
+    BotCreateSpec,
     complete_bot_authorization,
     create_bot_with_authorization,
 )
@@ -122,17 +123,16 @@ async def create_bot(
     validate_engine_cluster(body.engine, body.cluster_name)
 
     bot_id = generate_bot_id(owner_id, bot_repo)
-    params = {
-        "bot_name": body.bot_name,
-        "bot_desc": body.bot_desc,
-        "engine_type": body.engine,
-        "bot_type": body.bot_type,
-    }
     outcome = create_bot_with_authorization(
         user_id=owner_id,
         nick_name=owner_id,
         bot_id=bot_id,
-        params=params,
+        spec=BotCreateSpec(
+            bot_name=body.bot_name,
+            bot_desc=body.bot_desc,
+            engine_type=body.engine,
+            bot_type=body.bot_type,
+        ),
         cookie=request.headers.get("cookie", ""),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
@@ -293,21 +293,16 @@ async def get_bot_auth_status(
     owner_id = caller_owner_id(principal)
     if engine is not None and cluster_name is not None:
         validate_engine_cluster(engine, cluster_name)
-    params = {
-        k: v
-        for k, v in {
-            "engine_type": engine,
-            "bot_name": bot_name,
-            "bot_desc": bot_desc,
-            "bot_type": bot_type,
-        }.items()
-        if v is not None
-    }
     result = complete_bot_authorization(
         user_id=owner_id,
         nick_name=owner_id,
         bot_id=bot_id,
-        params=params,
+        spec=BotCreateSpec(
+            engine_type=engine,
+            bot_name=bot_name,
+            bot_desc=bot_desc,
+            bot_type=bot_type,
+        ),
         cookie=request.headers.get("cookie", ""),
         bot_service=bot_service,
         passport_plugin=passport_plugin,

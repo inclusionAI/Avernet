@@ -79,6 +79,46 @@ class AuthStatusResult:
     bot: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class BotCreateSpec:
+    """The bot attributes a create / authorization-completion runs with.
+
+    An explicit contract instead of an untyped payload dict: each API surface
+    maps its own request shape into this, so a field added or renamed here is a
+    type error at every call site rather than a key that silently goes missing
+    on one surface.
+
+    ``None`` is load-bearing on ``engine_type`` and ``bot_name`` — it means the
+    caller did not specify one and ``BotService.create_bot`` applies its own
+    default (platform default engine / default naming). Substituting a concrete
+    default here would change that behavior, so the unset state is modelled.
+    """
+
+    entity_id: str | None = None
+    entity_type: str = "staff"
+    engine_type: str | None = None
+    bot_name: str | None = None
+    bot_desc: str | None = None
+    bot_type: str | None = None
+    avatar_url: str | None = None
+    share_policy: dict[str, Any] | None = None
+    template_type: str | None = None
+    template_config: dict[str, Any] | None = None
+
+    @property
+    def passport_engine_type(self) -> str:
+        """Engine the Passport is applied for — always concrete.
+
+        Distinct from :attr:`engine_type`, which stays unset when the caller
+        did not choose one so ``create_bot`` can apply its own default.
+        """
+        return self.engine_type or DEFAULT_ENGINE_TYPE
+
+    def resolve_entity_id(self, user_id: str) -> str:
+        """Owning entity for the bot; the caller themself unless overridden."""
+        return self.entity_id or user_id
+
+
 def _get_bot_mcp_codes(
     factory: SkillSetServiceFactory,
     user_id: str,
@@ -109,6 +149,75 @@ def _get_bot_mcp_codes(
         entity_type=entity_type,
     )
     return filter_passport_mcp_codes(mcp_codes)
+
+
+def _apply_passport(
+    passport_plugin: PassportPlugin,
+    *,
+    bot_id: str,
+    user_id: str,
+    bot_name: str | None,
+    spec: BotCreateSpec,
+    mcp_codes: list[str],
+    cli_items: list[Any],
+    is_first_bot: bool,
+) -> dict[str, Any] | None:
+    """Apply for the bot's Passport, normalizing non-Passport failures.
+
+    ``PassportError`` propagates as-is (each surface maps it to its own code);
+    any other apply failure becomes a ``BotServiceError`` so it keeps the
+    "Passport apply failed" mapping rather than falling into a generic bucket.
+    """
+    apply = (
+        passport_plugin.apply_first_agent_passport
+        if is_first_bot
+        else passport_plugin.apply_agent_passport
+    )
+    try:
+        return apply(
+            bot_id=bot_id,
+            owner_workno=user_id,
+            mcp_codes=mcp_codes,
+            cli_items=cli_items,
+            bot_name=bot_name,
+            bot_desc=spec.bot_desc,
+            engine_type=spec.passport_engine_type,
+            access_mode=_ACCESS_MODE,
+            workspace_path=_WORKSPACE_PATH,
+        )
+    except PassportError:
+        raise
+    except Exception as e:  # noqa: BLE001 — normalized to the service-error bucket
+        raise BotServiceError(f"Passport申请失败: {e}")
+
+
+def _build_ext(
+    *, avatar_url: str | None, agent_code: str | None, issued: bool = False
+) -> dict[str, Any] | None:
+    """Assemble the bot's ``ext`` payload; ``None`` when there is nothing to store."""
+    ext: dict[str, Any] = {}
+    if avatar_url:
+        ext["avatar_url"] = avatar_url
+    if agent_code:
+        passport: dict[str, Any] = {"agent_code": agent_code}
+        if issued:
+            passport["status"] = "ISSUED"
+        ext["passport"] = passport
+    return ext or None
+
+
+def _query_agent_code(
+    passport_plugin: PassportPlugin, *, bot_id: str, user_id: str
+) -> str | None:
+    """Best-effort ``agent_code`` lookup — ``query_auth_status`` does not carry it."""
+    try:
+        info = passport_plugin.query_agent_passport(
+            bot_id=bot_id, owner_workno=user_id
+        )
+    except Exception as e:  # noqa: BLE001 — agent_code lookup is best-effort
+        logger.warning("[create_flow] query_agent_passport failed: %s", e)
+        return None
+    return info.get("agent_code") if info else None
 
 
 def _record_owner_relationship(
@@ -157,7 +266,7 @@ def create_bot_with_authorization(
     user_id: str,
     nick_name: str,
     bot_id: str,
-    params: dict[str, Any],
+    spec: BotCreateSpec,
     cookie: str,
     bot_service: BotService,
     passport_plugin: PassportPlugin,
@@ -171,86 +280,59 @@ def create_bot_with_authorization(
     :func:`complete_bot_authorization`), or :class:`Created` when the bot was
     created inline. Raises the bot/passport domain errors for the caller to map.
     """
-    # 0. Validate the name up front so an invalid name never reaches Passport or
-    #    create (mirrors the internal router's early check). None = default name.
-    raw_bot_name = params.get("bot_name")
-    bot_name = validate_bot_name(raw_bot_name) if raw_bot_name is not None else None
-
-    entity_id = params.get("entity_id") or user_id
-    entity_type = params.get("entity_type") or "staff"
+    # Validate the name up front so an invalid one never reaches Passport or
+    # create. An unset name stays unset — create_bot applies default naming.
+    bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
+    entity_id = spec.resolve_entity_id(user_id)
     is_first_bot = bot_id == "default"
-    passport_engine_type = params.get("engine_type") or DEFAULT_ENGINE_TYPE
-    bot_type = params.get("bot_type")
-    avatar_url = params.get("avatar_url")
 
-    # 1. Pre-flight before Passport, so a limit is reported before the user is
-    #    sent through authorization (raises BotLimitExceededError).
+    # Pre-flight before Passport, so a limit is reported before the user is sent
+    # through authorization (raises BotLimitExceededError).
     bot_service.check_create_bot_preflight(user_id=user_id)
 
-    # 2. Remote MCP codes for the Passport application.
-    mcp_codes = _get_bot_mcp_codes(
-        skill_set_factory, user_id, bot_id, entity_id, entity_type,
-        engine_type=passport_engine_type,
+    passport_result = _apply_passport(
+        passport_plugin,
+        bot_id=bot_id,
+        user_id=user_id,
+        bot_name=bot_name,
+        spec=spec,
+        mcp_codes=_get_bot_mcp_codes(
+            skill_set_factory, user_id, bot_id, entity_id, spec.entity_type,
+            engine_type=spec.passport_engine_type,
+        ),
+        cli_items=get_default_cli_items(
+            spec.passport_engine_type, spec.template_type
+        ),
+        is_first_bot=is_first_bot,
     )
-    default_cli_items = get_default_cli_items(
-        passport_engine_type, params.get("template_type")
-    )
-
-    # 3. Apply for the Passport. A PassportError propagates as-is (surface maps
-    #    it); any other apply failure becomes a BotServiceError so it keeps the
-    #    internal "Passport apply failed" 500 mapping rather than a generic 501.
-    apply = (
-        passport_plugin.apply_first_agent_passport
-        if is_first_bot
-        else passport_plugin.apply_agent_passport
-    )
-    try:
-        passport_result = apply(
-            bot_id=bot_id,
-            owner_workno=user_id,
-            mcp_codes=mcp_codes,
-            cli_items=default_cli_items,
-            bot_name=bot_name,
-            bot_desc=params.get("bot_desc"),
-            engine_type=passport_engine_type,
-            access_mode=_ACCESS_MODE,
-            workspace_path=_WORKSPACE_PATH,
-        )
-    except PassportError:
-        raise
-    except Exception as e:  # noqa: BLE001 — normalized to the 500 bucket
-        raise BotServiceError(f"Passport申请失败: {e}")
 
     passport_token = passport_result.get("token") if passport_result else None
     agent_code = passport_result.get("agent_code") if passport_result else None
-    iframe_url = passport_result.get("iframe_url") if passport_result else None
-    redirect_url = passport_result.get("redirect_url") if passport_result else None
 
-    # 4. No token yet → authorization pending.
+    # No token yet → authorization pending; nothing is created.
     if not passport_token:
-        return AuthPending(bot_id=bot_id, iframe_url=iframe_url, redirect_url=redirect_url)
+        return AuthPending(
+            bot_id=bot_id,
+            iframe_url=passport_result.get("iframe_url") if passport_result else None,
+            redirect_url=passport_result.get("redirect_url") if passport_result else None,
+        )
 
-    # 5. Token present → create the bot inline.
-    ext: dict[str, Any] = {}
-    if avatar_url:
-        ext["avatar_url"] = avatar_url
-    if agent_code:
-        ext["passport"] = {"agent_code": agent_code}
-
+    # Token present → create the bot inline. ``engine_type`` is passed through
+    # unset-if-unset so create_bot owns its own default.
     result = bot_service.create_bot(
         user_id=user_id,
         nick_name=nick_name,
         bot_name=bot_name,
-        bot_desc=params.get("bot_desc"),
+        bot_desc=spec.bot_desc,
         entity_id=entity_id,
-        entity_type=entity_type,
-        share_policy=params.get("share_policy"),
-        engine_type=params.get("engine_type"),
-        ext=ext if ext else None,
+        entity_type=spec.entity_type,
+        share_policy=spec.share_policy,
+        engine_type=spec.engine_type,
+        ext=_build_ext(avatar_url=spec.avatar_url, agent_code=agent_code),
         bot_id=bot_id,
-        bot_type=bot_type,
-        template_type=params.get("template_type"),
-        template_config=params.get("template_config"),
+        bot_type=spec.bot_type,
+        template_type=spec.template_type,
+        template_config=spec.template_config,
         cookie=cookie,
     )
 
@@ -272,7 +354,7 @@ def complete_bot_authorization(
     user_id: str,
     nick_name: str,
     bot_id: str,
-    params: dict[str, Any],
+    spec: BotCreateSpec,
     cookie: str,
     bot_service: BotService,
     passport_plugin: PassportPlugin,
@@ -291,48 +373,29 @@ def complete_bot_authorization(
         raise RuntimeError("query auth status returned nothing")
 
     status = auth_status.get("status")
-
-    if status == "PENDING":
-        return AuthStatusResult(status="PENDING")
-
     if status != "ISSUED":
+        # PENDING (still waiting) and any other status (e.g. REJECTED) are
+        # returned verbatim for the surface to map; nothing is created.
         return AuthStatusResult(status=status)
 
-    entity_id = params.get("entity_id") or user_id
-    entity_type = params.get("entity_type") or "staff"
-    avatar_url = params.get("avatar_url")
-
-    # query_auth_status does not carry agent_code — fetch it (best-effort).
-    agent_code = None
-    try:
-        passport_info = passport_plugin.query_agent_passport(
-            bot_id=bot_id, owner_workno=user_id
-        )
-        if passport_info:
-            agent_code = passport_info.get("agent_code")
-    except Exception as e:  # noqa: BLE001 — agent_code lookup is best-effort
-        logger.warning("[create_flow] query_agent_passport failed: %s", e)
-
-    ext: dict[str, Any] = {}
-    if avatar_url:
-        ext["avatar_url"] = avatar_url
-    if agent_code:
-        ext["passport"] = {"agent_code": agent_code, "status": "ISSUED"}
+    agent_code = _query_agent_code(passport_plugin, bot_id=bot_id, user_id=user_id)
 
     result = bot_service.create_bot(
         user_id=user_id,
         nick_name=nick_name,
         bot_id=bot_id,
-        bot_name=params.get("bot_name"),
-        bot_desc=params.get("bot_desc"),
-        entity_id=entity_id,
-        entity_type=entity_type,
-        share_policy=params.get("share_policy"),
-        engine_type=params.get("engine_type"),
-        ext=ext if ext else None,
-        bot_type=params.get("bot_type"),
-        template_type=params.get("template_type"),
-        template_config=params.get("template_config"),
+        bot_name=spec.bot_name,
+        bot_desc=spec.bot_desc,
+        entity_id=spec.resolve_entity_id(user_id),
+        entity_type=spec.entity_type,
+        share_policy=spec.share_policy,
+        engine_type=spec.engine_type,
+        ext=_build_ext(
+            avatar_url=spec.avatar_url, agent_code=agent_code, issued=True
+        ),
+        bot_type=spec.bot_type,
+        template_type=spec.template_type,
+        template_config=spec.template_config,
         cookie=cookie,
     )
 
