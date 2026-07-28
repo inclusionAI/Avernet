@@ -1215,6 +1215,17 @@ mod tests {
         let node_columns = column_names(&db, "bcs_state_machine_node_runs").await?;
         assert!(node_columns.iter().any(|column| column == "outcome"));
         assert!(node_columns.iter().any(|column| column == "responded_by"));
+        let request_columns = column_names(&db, "bcs_human_input_requests").await?;
+        assert!(
+            request_columns
+                .iter()
+                .any(|column| column == "active_slot_key")
+        );
+        assert!(
+            request_columns
+                .iter()
+                .any(|column| column == "provider_message_ref")
+        );
         assert_eq!(
             migration_rows(&db).await?,
             vec![
@@ -1236,6 +1247,11 @@ mod tests {
                     7,
                     "human_input_output_metadata".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    8,
+                    "human_input_im_requests".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1248,7 +1264,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 7);
+        assert_eq!(report.pending_versions.len(), 8);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1273,6 +1289,11 @@ mod tests {
         assert_eq!(
             report.pending_versions[6].name,
             "human_input_output_metadata"
+        );
+        assert_eq!(report.pending_versions[7].version, 8);
+        assert_eq!(
+            report.pending_versions[7].name,
+            "human_input_im_requests"
         );
         Ok(())
     }
@@ -1304,6 +1325,11 @@ mod tests {
                 (
                     7,
                     "human_input_output_metadata".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    8,
+                    "human_input_im_requests".to_string(),
                     "sqlite".to_string()
                 )
             ]
