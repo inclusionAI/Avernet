@@ -275,8 +275,14 @@ class RestartMixin:
                 )
             if decision != OnlineDeployDecision.UPGRADE:
                 if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
-                    self._build_service.retire_superseded_bot(
+                    destroy_publish_id = self._build_service.retire_superseded_bot(
                         bot_uuid, operator=operator
+                    )
+                    # Release the retired bot's now-stale binding so it does not
+                    # linger ACTIVE pointing at a destroyed bot; the recreate below
+                    # rewrites ext.binding.<stage> to a fresh binding.
+                    self._release_binding(
+                        binding_id, destroy_publish_id=destroy_publish_id
                     )
                 # Supersede any prior RESTART op with a fresh abandoned one, so
                 # restart-status reads the recreate's workflow (via ext.restart).

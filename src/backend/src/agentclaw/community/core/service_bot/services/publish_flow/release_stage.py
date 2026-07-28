@@ -76,6 +76,10 @@ class ReleaseRecordOps(Protocol):
 
     def refresh_publish_handle(self, binding_id, publish_id) -> None: ...
 
+    def release_binding(
+        self, binding_id: int, *, destroy_publish_id: int | None
+    ) -> None: ...
+
 
 @dataclass(frozen=True)
 class StageSpec:
@@ -305,7 +309,15 @@ class ReleaseStageRunner:
             # would orphan it. A BOT_NOT_FOUND means the record is already gone —
             # nothing to clean up.
             if e.error_code == "DEVICE_NOT_FOUND":
-                self._build_service.retire_superseded_bot(bot_uuid, operator=operator)
+                destroy_publish_id = self._build_service.retire_superseded_bot(
+                    bot_uuid, operator=operator
+                )
+                # Release the retired bot's now-stale binding so it does not linger
+                # ACTIVE pointing at a destroyed bot; the fallback first-release
+                # mints a fresh binding and rewrites ext.binding.<stage>.
+                self._ops.release_binding(
+                    existing_binding_id, destroy_publish_id=destroy_publish_id
+                )
             return await fallback(
                 publish_record=publish_record,
                 operator=operator,
