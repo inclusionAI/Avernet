@@ -23,6 +23,11 @@ from .resources import router as resources_router
 from .routines import router as routines_router
 from .skills import router as skills_router
 
+# Every public route lives under this prefix. Exported so app-level handlers can
+# tell a public request from an internal one (e.g. to envelope validation errors
+# only on this surface).
+PUBLIC_API_PREFIX = "/openapi/v1"
+
 # Order matters: literal sub-groups first, the `{bot_id}` wildcard group last.
 _SUBGROUPS = [
     channels_router,
@@ -43,4 +48,4 @@ def build_public_router() -> APIRouter:
     return public
 
 
-__all__ = ["build_public_router"]
+__all__ = ["build_public_router", "PUBLIC_API_PREFIX"]

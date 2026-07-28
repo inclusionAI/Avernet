@@ -282,6 +282,10 @@ if os.environ.get("SINGLEBOX_COVERAGE") == "1":
 # (tests/architecture/test_domain_error_status_map_complete.py) asserts
 # every concrete DomainError subclass has an entry here.
 from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from fastapi.exception_handlers import (  # noqa: E402
+    request_validation_exception_handler,
+)
 from agentclaw.community.core.aicoding.services.data_proxy_service import (  # noqa: E402
     DataProxyError,
     EngineUnreachable,
@@ -361,6 +365,29 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
         content={"detail": exc.detail},
         headers=_trace_headers(request),
     )
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(
+    request: Request, exc: RequestValidationError,
+) -> JSONResponse:
+    """Answer public-surface validation failures with the standard Envelope.
+
+    FastAPI raises this *before* the handler runs, so the public routers'
+    ``@envelope_errors`` decorator never sees it. Without this translation a
+    malformed public request (missing field, bad ``cluster_name`` enum,
+    out-of-range page size) would return FastAPI's ``{"detail": [...]}`` and
+    break the uniform-envelope contract that surface promises.
+
+    Scoped by path: internal ``/api`` routes keep FastAPI's default shape, so
+    existing clients are unaffected.
+    """
+    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+    from agentclaw.community.adapters.http.openapi_v1.responses import error_response
+
+    if request.url.path.startswith(PUBLIC_API_PREFIX):
+        return error_response(422, "Invalid request", request)
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.exception_handler(DataProxyError)

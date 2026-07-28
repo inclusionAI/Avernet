@@ -42,21 +42,27 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.api.skill_set_service_factory import (
+    SkillSetServiceFactoryProtocol,
+)
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
+    AuthStatus,
     BotCreateSpec,
     complete_bot_authorization,
     create_bot_with_authorization,
 )
+from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     generate_bot_id,
+    validate_bot_name,
 )
 from agentclaw.community.core.services.engine_config import EngineConfigService
-from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.di import Injected
+from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -70,6 +76,8 @@ from .schemas import (
     Ceiling,
     Passport,
 )
+
+logger = get_logger()
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
 
@@ -89,6 +97,51 @@ def _to_bot(d: dict[str, Any]) -> Bot:
         status=d.get("status") or "",
         owner_entity_id=d.get("owner_id") or "",
     )
+
+
+def _auth_status_error(status: str, request: Request) -> JSONResponse:
+    """400 envelope for a terminal (non-PENDING/ISSUED) authorization state.
+
+    The state itself is kept in ``data`` so the caller can tell *why* it failed,
+    while the 400 + ``400000`` code stop a rejected creation from reading as a
+    success to clients that key off the envelope code.
+    """
+    body = envelope(
+        BotAuthStatus(status=status, bot=None),
+        request,
+        code=400 * 1000,
+        message="Authorization did not complete",
+    )
+    return JSONResponse(status_code=400, content=body.model_dump())
+
+
+def _sync_passport_identity(
+    passport_plugin: PassportPlugin,
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_name: str | None,
+    bot_desc: str | None,
+    engine_type: str | None,
+) -> None:
+    """Push renamed identity metadata to the Passport (best-effort).
+
+    Mirrors the internal update route: metadata only, no MCP/CLI resource scope,
+    and a failure is logged rather than failing the update the caller already
+    succeeded in making.
+    """
+    try:
+        passport_plugin.update_passport(
+            bot_id=bot_id,
+            user_id=owner_id,
+            bot_name=bot_name,
+            bot_desc=bot_desc,
+            engine_type=engine_type or DEFAULT_ENGINE_TYPE,
+        )
+    except Exception as e:  # noqa: BLE001 — must not fail an applied update
+        logger.warning(
+            "[openapi_v1.update_bot] passport sync failed for bot %s: %s", bot_id, e
+        )
 
 
 @router.post(
@@ -111,7 +164,9 @@ async def create_bot(
     bot_repo: BotRepository = Injected(BotRepository),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
-    skill_set_factory: SkillSetServiceFactory = Injected(SkillSetServiceFactory),
+    skill_set_factory: SkillSetServiceFactoryProtocol = Injected(
+        SkillSetServiceFactoryProtocol
+    ),
 ):
     """Create a bot (201), or return 202 + a Passport iframe when authorization is needed.
 
@@ -227,6 +282,7 @@ async def update_bot(
     request: Request,
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    passport_plugin: PassportPlugin = Injected(PassportPlugin),
 ) -> Envelope[Bot]:
     """Update a bot's name/description (engine is fixed at creation).
 
@@ -235,9 +291,23 @@ async def update_bot(
     Both are accepted for schema symmetry but do not drive this update.
     """
     owner_id = caller_owner_id(principal)
+    # Same name rule as create and the internal update route — otherwise this
+    # surface could persist names the rest of the lifecycle rejects.
+    bot_name = validate_bot_name(body.bot_name) if body.bot_name is not None else None
     bot = bot_service.update_bot(
-        bot_id, owner_id, bot_name=body.bot_name, bot_desc=body.bot_desc
+        bot_id, owner_id, bot_name=bot_name, bot_desc=body.bot_desc
     )
+    # Identity metadata lives in the Passport too; leaving it stale would make
+    # Passport queries disagree with the bot API.
+    if bot_name or body.bot_desc:
+        _sync_passport_identity(
+            passport_plugin,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_name=bot_name,
+            bot_desc=body.bot_desc,
+            engine_type=bot.get("active_engine"),
+        )
     return envelope(_to_bot(bot), request)
 
 
@@ -311,6 +381,14 @@ async def get_bot_auth_status(
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,
     )
+    # PENDING (still waiting) and ISSUED (done) are successful outcomes of the
+    # poll. Any other state — REJECTED, EXPIRED, anything the passport service
+    # adds later — is a terminal failure: reporting it as 200/OK would let a
+    # client that keys off the envelope code treat a rejected creation as
+    # successful, which is how the internal surface treats it too (400).
+    if result.status not in (AuthStatus.PENDING, AuthStatus.ISSUED):
+        return _auth_status_error(result.status, request)
+
     bot = _to_bot(result.bot) if result.bot else None
     return envelope(BotAuthStatus(status=result.status, bot=bot), request)
 
@@ -327,11 +405,12 @@ async def get_bot_status(
     owner_id = caller_owner_id(principal)
     bot = bot_service.get_bot(bot_id, owner_id)
     binding = bot.get("device_binding") or {}
-    status = bot.get("status") or ""
     return envelope(
         BotStatus(
-            status=status,
-            is_ready=status == "ACTIVE",
+            status=bot.get("status") or "",
+            # Shared policy: an application bot is not ready until its repo
+            # checkout reports SUCCEEDED, so ACTIVE alone is not enough.
+            is_ready=is_bot_ready(bot),
             device_id=binding.get("device_id") or bot.get("device_id"),
         ),
         request,

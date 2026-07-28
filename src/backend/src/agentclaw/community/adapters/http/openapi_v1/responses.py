@@ -41,6 +41,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNameInvalidError,
     BotNotFoundError,
     BotPermissionError,
+    BotServiceError,
     DeviceLimitError,
 )
 from agentclaw.community.plugin_api.passport import PassportError
@@ -101,7 +102,23 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     BotInvalidLifecycleStateError: (409, "Bot is not in a valid state for this operation"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     PassportError: (502, "Authorization service error"),
+    # Base class LAST: every mapping above is a subclass of BotServiceError, and
+    # the lookup returns on the first isinstance match in insertion order, so the
+    # specific mappings still win. Services raise the bare base for device,
+    # persistence, and downstream failures — without this the decorator would
+    # re-raise and the app's catch-all would answer with {"detail": ...}, which
+    # is not an Envelope and breaks the public contract.
+    BotServiceError: (500, "Internal error"),
 }
+
+
+def error_response(http_status: int, message: str, request: Request) -> JSONResponse:
+    """Build an enveloped error response (``data`` null, 6-digit code).
+
+    Public so pre-handler failures — which never reach ``@envelope_errors`` —
+    can answer in the same shape as everything else on this surface.
+    """
+    return _error_response(http_status, message, request)
 
 
 def _error_response(http_status: int, message: str, request: Request) -> JSONResponse:

@@ -19,21 +19,23 @@ from injector import Injector, Module
 import importlib
 
 from agentclaw.community.adapters.http.openapi_v1.bots.router import router
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.api.skill_set_service_factory import (
+    SkillSetServiceFactoryProtocol,
+)
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin
 
 # The bots package re-exports ``router`` (the APIRouter), which shadows the
 # submodule attribute — so fetch the real module object to patch module globals.
 bots_router = importlib.import_module(
     "agentclaw.community.adapters.http.openapi_v1.bots.router"
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.api.policy_service import PolicyServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
-from agentclaw.community.core.services.engine_config import EngineConfigService
-from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
-from agentclaw.community.plugin_api.passport import PassportPlugin
 
 BOT = {
     "bot_id": "b1", "bot_name": "N", "bot_desc": "D", "active_engine": "teclaw",
@@ -105,7 +107,7 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
             binder.bind(PassportPlugin, to=passport)
             binder.bind(EngineConfigService, to=engine_config)
             binder.bind(BotRepository, to=bot_repo)
-            binder.bind(SkillSetServiceFactory, to=skill_set_factory)
+            binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
 
     app = FastAPI()
@@ -313,3 +315,76 @@ def test_auth_status_engine_cluster_mismatch_400(client, svc):
     )
     assert resp.status_code == 400
     svc.create_bot.assert_not_called()
+
+
+# ----- round-1 review regressions ------------------------------------------
+
+
+def test_application_bot_not_ready_until_repos_cloned(client, svc):
+    """R1/F1: ACTIVE alone must not report an application bot as ready."""
+    svc.get_bot.return_value = {
+        **BOT, "template_type": "applicationCoding", "active_engine": "aicoding",
+        "ext": {"start_status": "STARTING"},
+    }
+    assert _ok(client.get("/openapi/v1/bots/b1/status"))["is_ready"] is False
+
+    # ...and ready once the clone reports SUCCEEDED.
+    svc.get_bot.return_value = {
+        **BOT, "template_type": "applicationCoding", "active_engine": "aicoding",
+        "ext": {"start_status": "SUCCEEDED"},
+    }
+    assert _ok(client.get("/openapi/v1/bots/b1/status"))["is_ready"] is True
+
+
+def test_non_application_bot_ignores_start_status(client, svc):
+    """R1/F1 guard: the extra gate must not regress ordinary bots."""
+    svc.get_bot.return_value = {**BOT, "ext": {"start_status": "STARTING"}}
+    assert _ok(client.get("/openapi/v1/bots/b1/status"))["is_ready"] is True
+
+
+def test_base_service_error_is_enveloped(client, svc):
+    """R1/F2: a bare BotServiceError must not escape as {"detail": ...}."""
+    from agentclaw.community.core.bot_management.services.bot_service import (
+        BotServiceError,
+    )
+
+    svc.get_bot.side_effect = BotServiceError("device blew up")
+    resp = client.get("/openapi/v1/bots/b1")
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["code"] == 500000
+    assert body["data"] is None
+    assert "request_id" in body
+    assert body["message"] == "Internal error"  # no internal text leaked
+
+
+def test_update_rejects_invalid_bot_name(client, svc):
+    """R1/F4: the public update path enforces the same name rule as create."""
+    resp = client.put("/openapi/v1/bots/b1", json={"bot_name": "bad@name"})
+    assert resp.status_code == 400
+    svc.update_bot.assert_not_called()
+
+
+def test_update_syncs_passport_identity(client, passport):
+    """R1/F5: renaming must not leave the Passport carrying stale metadata."""
+    client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"})
+    kw = passport.update_passport.call_args.kwargs
+    assert kw["bot_id"] == "b1"
+    assert kw["user_id"] == "u1"
+    assert kw["bot_name"] == "Renamed"
+
+
+def test_update_without_identity_change_skips_passport(client, passport):
+    """No name/desc change → no passport call (mirrors the internal route)."""
+    client.put("/openapi/v1/bots/b1", json={})
+    passport.update_passport.assert_not_called()
+
+
+def test_rejected_authorization_is_not_reported_as_success(client, passport):
+    """R1/F8: a terminal auth state must not come back as 200/200000 OK."""
+    passport.query_auth_status.return_value = {"status": "REJECTED"}
+    resp = client.get("/openapi/v1/bots/b1/auth-status")
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["code"] == 400000
+    assert body["data"]["status"] == "REJECTED"  # caller can still see why

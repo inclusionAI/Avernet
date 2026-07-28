@@ -56,6 +56,10 @@ from agentclaw.community.core.bot_management.utils import (
     clear_baas_publish_failure_ext as _clear_baas_publish_failure_ext,
     is_baas_publish_failure_message as _utils_is_baas_publish_failure_message,
 )
+from agentclaw.community.core.bot_management.readiness import (
+    has_stale_baas_publish_failure,
+    is_bot_ready,
+)
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
@@ -2351,11 +2355,8 @@ async def get_bot_status(
         binding_info = bot.get("device_binding", {})
         ext = bot.get("ext") or {}
         binding_status = binding_info.get("status", "UNKNOWN") if binding_info else "UNKNOWN"
-        is_active_baas_binding = (
-            bot_status == "ACTIVE"
-            and binding_status == "ACTIVE"
-            and (binding_info.get("device_provider") if binding_info else None) == "baas"
-        )
+        # 与 is_ready 共用同一份判定（core/bot_management/readiness.py）。
+        stale_baas_failure = has_stale_baas_publish_failure(bot)
 
         # 失败信息来源（按优先级）：
         # 1. binding.error_message — 设备层直接上报（DaaS 等）
@@ -2365,11 +2366,6 @@ async def get_bot_status(
         #    → starting_watchdog 上报 status=FAILED + tail 1 行 log
         # binding 层没有 error_message 字段时（如 DeviceBindingRecord）退到 ext
         error_message = binding_info.get("error_message") if binding_info else None
-        stale_baas_failure = (
-            is_active_baas_binding
-            and ext.get("start_status") == "FAILED"
-            and _is_baas_publish_failure_message(ext.get("start_message"))
-        )
         if not error_message and ext.get("start_status") == "FAILED" and not stale_baas_failure:
             error_message = ext.get("start_message")
         response_ext = _sanitize_baas_status_ext_for_response(
@@ -2382,22 +2378,7 @@ async def get_bot_status(
         )
 
         # aicoding 应用 bot：等 .repos/ 仓库克隆完成才算 ready。
-        # finalize.sh Step 5.4 会同步阻塞等 .repos/_meta.json 出现，
-        # marker 写 SUCCEEDED 后 starting_watchdog 才发 start_status=SUCCEEDED，
-        # 因此把 start_status==SUCCEEDED 纳入 is_ready 即可表达"代码已 clone 完"。
-        # 创建链路里 claude_code+applicationCoding 会被路由成 aicoding 引擎，
-        # 但 ac_bots.active_engine 写库时保留的是用户传入值，所以两种取值都要覆盖。
-        active_engine = bot.get("active_engine")
-        template_type = bot.get("template_type")
-        needs_repos = (
-            template_type == "applicationCoding"
-            and active_engine in ("aicoding", "claude_code")
-        )
-        start_status = ext.get("start_status")
-        # 非应用 bot：start_status 不参与判定，保持旧行为；
-        # 应用 bot：必须 start_status==SUCCEEDED。
-        repos_ready = (not needs_repos) or start_status == "SUCCEEDED" or stale_baas_failure
-
+        # 判定策略见 core/bot_management/readiness.py —— 内部与公共 API 共用同一实现。
         result = {
             "bot_id": bot_id,
             "bot_status": bot_status,
@@ -2405,7 +2386,7 @@ async def get_bot_status(
             "device_id": binding_info.get("device_id") if binding_info else None,
             "device_provider": binding_info.get("device_provider") if binding_info else None,
             "error_message": error_message,
-            "is_ready": bot_status == "ACTIVE" and repos_ready,
+            "is_ready": is_bot_ready(bot),
             "ext": response_ext,  # 添加扩展字段
         }
 
