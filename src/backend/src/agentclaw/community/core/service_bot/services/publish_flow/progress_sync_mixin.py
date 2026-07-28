@@ -15,9 +15,13 @@ from typing import Dict, Literal
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishOperationKind,
+    PublishOperationState,
     PublishStatus,
 )
-from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+from agentclaw.community.core.service_bot.schemas.publish_schemas import (
+    InFlightOperation,
+    PublishFlowResult,
+)
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
@@ -64,6 +68,43 @@ class ProgressSyncMixin:
     (``_activate_binding``), and the BaaS progress query via
     ``BaasPublishOpsMixin`` (``get_baas_publish_progress``).
     """
+
+    def in_flight_operation(self, publish_id: int) -> InFlightOperation | None:
+        """Return the record's currently-running BaaS operation, or ``None``.
+
+        The ledger persists an operation's intent BEFORE the BaaS call and only
+        leaves ``pending``/``id_recorded`` at a terminal state, so a non-terminal
+        row is the durable answer to "is something running against this record
+        right now?" — the question the publish record's own ``status`` cannot
+        answer, because a restart on a stable (``validating``/``success``) record
+        deliberately skips the status advance (see ``sync_restart_progress``).
+
+        Callers need this at page-load time: the console's in-progress flag lives
+        in page memory, so a refresh mid-restart re-enables 重启/升级/下线 against
+        a container that is still being rebuilt.
+
+        ``None`` is an intentional contract state — nothing is running, so the
+        record's operations are safe to offer.
+        """
+        terminal = {s.value for s in PublishOperationState.terminal()}
+        running = [
+            op
+            for op in self._publish_operation_repo.list_by_publish_id(publish_id)
+            if op.state not in terminal
+        ]
+        if not running:
+            return None
+
+        # Highest id = most recently opened. A reissue after ``abandon`` opens a
+        # fresh attempt row, so the newest non-terminal row is the live one.
+        latest = max(running, key=lambda op: op.id or 0)
+        return InFlightOperation(
+            kind=latest.operation_kind,
+            stage=latest.stage,
+            state=latest.state,
+            started_at=latest.gmt_create.isoformat(),
+            baas_publish_id=latest.baas_publish_id,
+        )
 
     def _handle_sync_success(
         self,

@@ -225,10 +225,16 @@ async def get_publish_record(
     publish_id: int,
     user: AuthenticatedUser = Depends(get_current_user),
     publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
+    flow_service: PublishFlowServiceProtocol = Injected(PublishFlowServiceProtocol),
 ) -> ApiResponse:
     """查询发布记录详情.
 
     GET /api/service-bot/publish/{publish_id}
+
+    ``data.in_flight`` 给出该发布单当前是否有 BaaS 操作在跑（重启/升级/…）。
+    发布单自身的 ``status`` 回答不了这个问题：对 validating/success 这类稳定态
+    记录，重启刻意不推进状态。前端必须用它在**页面加载**时恢复禁用态——否则
+    重启途中刷新页面，按钮会重新可点，请求打到一个正在重建的容器上。
     """
     try:
         user_id = user.staffId
@@ -248,9 +254,13 @@ async def get_publish_record(
                 data=None,
             )
 
+        in_flight = flow_service.in_flight_operation(publish_id)
+        data = record.to_dict()
+        data["in_flight"] = in_flight.model_dump() if in_flight else None
+
         return ApiResponse(
             success=True,
-            data=record.to_dict(),
+            data=data,
             message="查询成功",
         )
 

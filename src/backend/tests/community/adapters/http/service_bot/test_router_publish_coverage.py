@@ -19,6 +19,9 @@ from agentclaw.community.adapters.http.service_bot.schemas_publish import (
 )
 from agentclaw.community.core.bot_collaborator.interceptor import InterceptorContext
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.service_bot.schemas.publish_schemas import (
+    InFlightOperation,
+)
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotAlreadyServiceTypeError,
     BotNotFoundError,
@@ -168,20 +171,57 @@ async def test_get_bot_stage_binding_info_paths():
 async def test_get_publish_record_paths():
     service = MagicMock()
     service.get_publish_by_id.return_value = Record()
-    resp = await router_publish.get_publish_record(1, user=_USER, publish_service=service)
+    flow = MagicMock()
+    flow.in_flight_operation.return_value = None
+    resp = await router_publish.get_publish_record(
+        1, user=_USER, publish_service=service, flow_service=flow,
+    )
     assert resp.success is True
     assert resp.message == "查询成功"
+    # Idle: the console may enable the record's operation buttons.
+    assert resp.data["in_flight"] is None
 
     service.get_publish_by_id.return_value = None
-    resp = await router_publish.get_publish_record(2, user=_USER, publish_service=service)
+    resp = await router_publish.get_publish_record(
+        2, user=_USER, publish_service=service, flow_service=flow,
+    )
     assert_error(resp, 404, "发布记录不存在")
 
-    resp = await router_publish.get_publish_record(2, user=_ANON, publish_service=service)
+    resp = await router_publish.get_publish_record(
+        2, user=_ANON, publish_service=service, flow_service=flow,
+    )
     assert_error(resp, 400, "无法获取用户信息")
 
     service.get_publish_by_id.side_effect = RuntimeError("db down")
-    resp = await router_publish.get_publish_record(3, user=_USER, publish_service=service)
+    resp = await router_publish.get_publish_record(
+        3, user=_USER, publish_service=service, flow_service=flow,
+    )
     assert_error(resp, 500, "查询失败")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_publish_record_exposes_in_flight_operation():
+    """A page load mid-restart must be able to tell an operation is running —
+    the console's own in-progress flag dies on refresh."""
+    service = MagicMock()
+    service.get_publish_by_id.return_value = Record()
+    flow = MagicMock()
+    flow.in_flight_operation.return_value = InFlightOperation(
+        kind="restart",
+        stage="verify",
+        state="id_recorded",
+        started_at="2026-07-28T23:41:32",
+        baas_publish_id=27502,
+    )
+    resp = await router_publish.get_publish_record(
+        1, user=_USER, publish_service=service, flow_service=flow,
+    )
+    assert resp.success is True
+    assert resp.data["in_flight"]["kind"] == "restart"
+    assert resp.data["in_flight"]["stage"] == "verify"
+    assert resp.data["in_flight"]["baas_publish_id"] == 27502
+    flow.in_flight_operation.assert_called_once_with(1)
 
 
 @pytest.mark.unit

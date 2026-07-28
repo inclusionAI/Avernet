@@ -4,7 +4,12 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+    PublishOperationKind,
+    PublishOperationState,
+    PublishStatus,
+)
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService, BotBuildServiceError
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
@@ -3377,6 +3382,131 @@ def test_describe_publish_failed_reports_error_message():
     result = svc.describe_publish(publish_id=1)
     assert result.status == PublishStatus.FAILED
     assert "boom" in result.message
+
+
+# ---- in_flight_operation() -------------------------------------------------
+
+# The console disables 重启/升级/下线 while an operation runs, but that flag lives
+# in page memory: a refresh mid-restart re-enabled every button and let the user
+# fire requests at a container being rebuilt. The record's own status cannot
+# answer "is something running" — a restart on a stable (validating/success)
+# record deliberately skips the status advance — so the durable ledger does.
+
+
+def _open_ledger_op(svc, publish_id, *, kind, stage, state, baas_publish_id=None):
+    """Insert one ledger row directly, bypassing the runner's CAS flow."""
+    return svc._publish_operation_repo.insert({
+        "publish_id": publish_id,
+        "operation_kind": kind,
+        "stage": stage,
+        "state": state,
+        "request_id": f"req-{publish_id}-{kind}-{stage}-{state}",
+        "operator": "op",
+        "baas_publish_id": baas_publish_id,
+    })
+
+
+def test_in_flight_operation_none_when_ledger_empty():
+    svc, _ = _svc_with_record(_make_publish_record(status=PublishStatus.SUCCESS.value))
+    assert svc.in_flight_operation(publish_id=1) is None
+
+
+@pytest.mark.parametrize(
+    "state",
+    [PublishOperationState.PENDING.value, PublishOperationState.ID_RECORDED.value],
+)
+def test_in_flight_operation_reports_non_terminal_op(state):
+    svc, _ = _svc_with_record(_make_publish_record(status=PublishStatus.SUCCESS.value))
+    _open_ledger_op(
+        svc, 1, kind=PublishOperationKind.RESTART.value, stage="verify",
+        state=state, baas_publish_id=27502,
+    )
+    in_flight = svc.in_flight_operation(publish_id=1)
+    assert in_flight is not None
+    assert in_flight.kind == PublishOperationKind.RESTART.value
+    assert in_flight.stage == "verify"
+    assert in_flight.state == state
+    assert in_flight.baas_publish_id == 27502
+    assert in_flight.started_at  # ISO timestamp, so the UI can show elapsed time
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        PublishOperationState.COMPLETED.value,
+        PublishOperationState.FAILED.value,
+        PublishOperationState.ABANDONED.value,
+    ],
+)
+def test_in_flight_operation_ignores_terminal_ops(state):
+    """A finished restart must not leave the buttons disabled forever — the bug
+    ``ext.restart`` has, since #197 stopped clearing that marker."""
+    svc, _ = _svc_with_record(_make_publish_record(status=PublishStatus.SUCCESS.value))
+    _open_ledger_op(
+        svc, 1, kind=PublishOperationKind.RESTART.value, stage="verify", state=state,
+    )
+    assert svc.in_flight_operation(publish_id=1) is None
+
+
+def test_in_flight_operation_prefers_newest_when_reissued():
+    """``abandon`` + reissue opens a fresh attempt row; the live one is newest."""
+    svc, _ = _svc_with_record(_make_publish_record(status=PublishStatus.SUCCESS.value))
+    _open_ledger_op(
+        svc, 1, kind=PublishOperationKind.RESTART.value, stage="verify",
+        state=PublishOperationState.ABANDONED.value,
+    )
+    _open_ledger_op(
+        svc, 1, kind=PublishOperationKind.UPGRADE.value, stage="online",
+        state=PublishOperationState.PENDING.value,
+    )
+    in_flight = svc.in_flight_operation(publish_id=1)
+    assert in_flight is not None
+    assert in_flight.kind == PublishOperationKind.UPGRADE.value
+    assert in_flight.stage == "online"
+
+
+def test_in_flight_operation_scoped_to_its_publish_record():
+    svc, _ = _svc_with_record(_make_publish_record(status=PublishStatus.SUCCESS.value))
+    _open_ledger_op(
+        svc, 2, kind=PublishOperationKind.RESTART.value, stage="verify",
+        state=PublishOperationState.PENDING.value,
+    )
+    assert svc.in_flight_operation(publish_id=1) is None
+
+
+def test_describe_publish_carries_in_flight_for_stable_record():
+    """The regression case: status says success, a restart is running anyway."""
+    record = _make_publish_record(status=PublishStatus.SUCCESS.value)
+    svc, _ = _svc_with_record(record)
+    _open_ledger_op(
+        svc, 1, kind=PublishOperationKind.RESTART.value, stage="online",
+        state=PublishOperationState.ID_RECORDED.value, baas_publish_id=27469,
+    )
+    result = svc.describe_publish(publish_id=1)
+    assert result.status == PublishStatus.SUCCESS
+    assert result.in_flight is not None
+    assert result.in_flight.kind == PublishOperationKind.RESTART.value
+
+
+def test_describe_publish_in_flight_none_when_idle():
+    record = _make_publish_record(status=PublishStatus.SUCCESS.value)
+    svc, _ = _svc_with_record(record)
+    assert svc.describe_publish(publish_id=1).in_flight is None
+
+
+def test_describe_publish_failed_still_carries_in_flight():
+    """A FAILED record with a retry running must stay disabled too."""
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value, ext={"error_message": "boom"}
+    )
+    svc, _ = _svc_with_record(record)
+    _open_ledger_op(
+        svc, 1, kind=PublishOperationKind.RESTART.value, stage="verify",
+        state=PublishOperationState.PENDING.value,
+    )
+    result = svc.describe_publish(publish_id=1)
+    assert result.status == PublishStatus.FAILED
+    assert result.in_flight is not None
 
 
 def test_advance_publish_progress_not_found_raises():

@@ -32,12 +32,34 @@ class ReleaseResult(BaseModel):
     message: Optional[str] = Field(default=None, description="消息")
 
 
+class InFlightOperation(BaseModel):
+    """正在执行中的 BaaS 操作（重启/升级/扩缩容等）快照。
+
+    来源是 ``ac_publish_operation`` 台账：意图在调用 BaaS **之前**落库，只有到达
+    终态（completed/failed/abandoned）才离开 ``pending``/``id_recorded``。因此一条
+    非终态记录就是"这张发布单当前是否有操作在跑"的持久答案。
+
+    前端需要它来在**页面加载时**恢复禁用态：重启期间容器被销毁重建，此时
+    重启/升级/下线都不该可点，但前端自己的"进行中"标记只存在于页面内存里，
+    刷新即丢失，导致按钮重新可点、请求打到一个正在重建的 Bot 上。
+    """
+    kind: str = Field(..., description="PublishOperationKind 值，如 restart/upgrade")
+    stage: str = Field(..., description="发布阶段: verify / online / eval / 空")
+    state: str = Field(..., description="PublishOperationState 值: pending / id_recorded")
+    started_at: str = Field(..., description="操作开始时间(ISO8601)，即台账行创建时间")
+    baas_publish_id: Optional[int] = Field(default=None, description="BaaS 工作流 ID；到达 id_recorded 后才有")
+
+
 class PublishFlowResult(BaseModel):
     """发布流程结果."""
     publish_id: int = Field(..., description="发布单 ID")
     status: str = Field(..., description="当前状态")
     message: str = Field(..., description="状态消息")
     action: Optional[str] = Field(default=None, description="当前执行的操作类型，如 process/restart/rollback")
+    in_flight: Optional[InFlightOperation] = Field(
+        default=None,
+        description="当前正在执行的 BaaS 操作；None 表示没有操作在跑（此时操作按钮可用）"
+    )
     bot_uuid: Optional[str] = Field(default=None, description="BaaS 层 Bot UUID")
     baas_publish_id: Optional[str] = Field(default=None, description="BaaS 层发布 ID")
     device_binding_id: Optional[int] = Field(default=None, description="设备绑定记录 ID")

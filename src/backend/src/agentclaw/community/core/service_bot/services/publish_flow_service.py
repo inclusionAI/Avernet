@@ -423,11 +423,15 @@ class PublishFlowService(
         durable task pipeline owns all status advancement (the poll task drives
         ``advance_publish_progress``), an external status query must not mutate —
         it just reads the record and describes it, covering every status.
+
+        Carries ``in_flight`` so a caller that loads this endpoint (rather than
+        having watched the operation start) still learns an operation is running.
         """
         publish_record = self.get_publish_record(publish_id)
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
+        in_flight = self.in_flight_operation(publish_id)
         current_status = PublishStatus(publish_record.status)
         if current_status == PublishStatus.FAILED:
             error_message = (publish_record.ext or {}).get("error_message")
@@ -436,6 +440,7 @@ class PublishFlowService(
                 status=current_status,
                 message=f"Publish failed: {error_message or 'Unknown error'}",
                 action="sync",
+                in_flight=in_flight,
             )
 
         message = _DESCRIBE_STATUS_MESSAGES.get(
@@ -448,6 +453,7 @@ class PublishFlowService(
             status=current_status,
             message=message,
             action="sync",
+            in_flight=in_flight,
         )
 
     @staticmethod
