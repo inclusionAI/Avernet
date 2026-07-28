@@ -89,7 +89,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         if aix_devflow_info:
             envs["AIX_DEVFLOW_INFO"] = aix_devflow_info
 
-        legacy_repo_keys = {"backend_repo", "frontend_repo", "lib_repo"}
+        legacy_repo_keys = ("backend_repo", "frontend_repo", "lib_repo")
         repo_keys = list(legacy_repo_keys)
         if is_template_factory_config(template_config):
             repo_keys.extend(["repos", "init_repos", "application_repo_urls"])

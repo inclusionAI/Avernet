@@ -47,7 +47,10 @@ class SingleboxBaasTemplateConfigLifecycle(LifecycleBase):
         if isinstance(existing, dict):
             templates = existing.get("templates")
             if not isinstance(templates, dict):
-                templates = {}
+                return
+            local_template = templates.get(_LOCAL_TEMPLATE_UID)
+            if not isinstance(local_template, dict):
+                return
             missing_aliases = [
                 alias for alias in _TEMPLATE_UID_ALIASES if alias not in templates
             ]
@@ -56,7 +59,7 @@ class SingleboxBaasTemplateConfigLifecycle(LifecycleBase):
             updated = dict(existing)
             updated_templates = dict(templates)
             for alias in missing_aliases:
-                updated_templates[alias] = {"template_uuid": self._template_uuid}
+                updated_templates[alias] = dict(local_template)
             updated["templates"] = updated_templates
             config_id = self._config_service.set_config(
                 category=BAAS_TEMPLATE_MAPPING_CATEGORY,
