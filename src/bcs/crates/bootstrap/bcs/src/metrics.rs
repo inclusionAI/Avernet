@@ -817,6 +817,16 @@ impl MessageFlowService for InstrumentedMessageFlowService {
         result
     }
 
+    async fn rebind_channel_source_message(
+        &self,
+        source_run_id: &str,
+        accepted_run_id: &str,
+    ) -> ServiceResult<bool> {
+        self.inner
+            .rebind_channel_source_message(source_run_id, accepted_run_id)
+            .await
+    }
+
     async fn register_task_run_alias(
         &self,
         task_id: &str,

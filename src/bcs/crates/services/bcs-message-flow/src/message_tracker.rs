@@ -169,6 +169,26 @@ impl MessageTracker {
             .insert(run_id.to_string(), message_id.to_string());
     }
 
+    pub async fn rebind_channel_source_message_id(
+        &self,
+        source_run_id: &str,
+        accepted_run_id: &str,
+    ) -> bool {
+        if source_run_id == accepted_run_id {
+            return self
+                .channel_source_message_ids
+                .lock()
+                .await
+                .contains_key(source_run_id);
+        }
+        let mut message_ids = self.channel_source_message_ids.lock().await;
+        let Some(message_id) = message_ids.remove(source_run_id) else {
+            return false;
+        };
+        message_ids.insert(accepted_run_id.to_string(), message_id);
+        true
+    }
+
     pub async fn remove_channel_source_message_id(&self, run_id: &str) {
         self.channel_source_message_ids.lock().await.remove(run_id);
     }
@@ -244,6 +264,41 @@ mod tests {
         assert_eq!(
             tracker.channel_source_message_id("run-2").await.as_deref(),
             Some("message-2")
+        );
+    }
+
+    #[tokio::test]
+    async fn channel_source_message_id_follows_accepted_run_id() {
+        let tracker = MessageTracker::new();
+        tracker
+            .cache_channel_source_message_id("source-run", "message-1")
+            .await;
+
+        assert!(
+            tracker
+                .rebind_channel_source_message_id("source-run", "accepted-run")
+                .await
+        );
+        assert!(
+            tracker
+                .channel_source_message_id("source-run")
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            tracker
+                .channel_source_message_id("accepted-run")
+                .await
+                .as_deref(),
+            Some("message-1")
+        );
+
+        tracker.cleanup_run("accepted-run").await;
+        assert!(
+            tracker
+                .channel_source_message_id("accepted-run")
+                .await
+                .is_none()
         );
     }
 }
