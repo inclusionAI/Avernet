@@ -100,17 +100,19 @@ def _sanitize_baas_status_ext_for_response(
     return dict(ext)
 
 
-def _bot_create_spec(data: dict[str, Any]) -> BotCreateSpec:
+def _bot_create_spec(data: dict[str, Any], user_id: str) -> BotCreateSpec:
     """Map this surface's raw JSON body onto the shared create contract.
 
     The one place the internal API's request keys are read; the shared flow then
     works off typed fields, so a spec field added later must be filled in here
-    explicitly rather than silently going missing.
+    explicitly rather than silently going missing. ``entity_id`` and
+    ``engine_type`` are resolved to concrete values here — the same defaults
+    ``create_bot`` would otherwise apply.
     """
     return BotCreateSpec(
-        entity_id=data.get("entity_id"),
+        entity_id=data.get("entity_id") or user_id,
         entity_type=data.get("entity_type") or "staff",
-        engine_type=data.get("engine_type"),
+        engine_type=data.get("engine_type") or DEFAULT_ENGINE_TYPE,
         bot_name=data.get("bot_name"),
         bot_desc=data.get("bot_desc"),
         bot_type=data.get("bot_type"),
@@ -919,7 +921,7 @@ async def create_bot(
             user_id=user_id,
             nick_name=nick_name,
             bot_id=bot_id,
-            spec=_bot_create_spec(data),
+            spec=_bot_create_spec(data, user_id),
             cookie=cookie,
             bot_service=bot_service,
             passport_plugin=passport_plugin,
@@ -1081,7 +1083,7 @@ async def get_auth_status(
             user_id=user_id,
             nick_name=nick_name,
             bot_id=bot_id,
-            spec=_bot_create_spec(data),
+            spec=_bot_create_spec(data, user_id),
             cookie=cookie,
             bot_service=bot_service,
             passport_plugin=passport_plugin,

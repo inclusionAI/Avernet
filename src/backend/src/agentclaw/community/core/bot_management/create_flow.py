@@ -30,7 +30,6 @@ from agentclaw.community.core.mcp.services._defaults import get_default_cli_item
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
 )
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
 from agentclaw.community.plugin_api.passport import PassportError
@@ -88,15 +87,20 @@ class BotCreateSpec:
     type error at every call site rather than a key that silently goes missing
     on one surface.
 
-    ``None`` is load-bearing on ``engine_type`` and ``bot_name`` — it means the
-    caller did not specify one and ``BotService.create_bot`` applies its own
-    default (platform default engine / default naming). Substituting a concrete
-    default here would change that behavior, so the unset state is modelled.
+    ``entity_id`` and ``engine_type`` are **required and concrete** — each
+    surface resolves its own default while building the spec (the caller's id;
+    ``DEFAULT_ENGINE_TYPE``). ``BotService.create_bot`` only ever applies
+    ``x or <default>`` to them, so a concrete value is equivalent to leaving
+    them unset, and the flow never has to reason about an absent engine.
+
+    ``bot_name`` keeps its unset state: ``None`` means "no name given" and
+    ``create_bot`` derives the default name from the owner, which is not
+    something a caller can pre-compute.
     """
 
-    entity_id: str | None = None
+    entity_id: str
+    engine_type: str
     entity_type: str = "staff"
-    engine_type: str | None = None
     bot_name: str | None = None
     bot_desc: str | None = None
     bot_type: str | None = None
@@ -104,19 +108,6 @@ class BotCreateSpec:
     share_policy: dict[str, Any] | None = None
     template_type: str | None = None
     template_config: dict[str, Any] | None = None
-
-    @property
-    def passport_engine_type(self) -> str:
-        """Engine the Passport is applied for — always concrete.
-
-        Distinct from :attr:`engine_type`, which stays unset when the caller
-        did not choose one so ``create_bot`` can apply its own default.
-        """
-        return self.engine_type or DEFAULT_ENGINE_TYPE
-
-    def resolve_entity_id(self, user_id: str) -> str:
-        """Owning entity for the bot; the caller themself unless overridden."""
-        return self.entity_id or user_id
 
 
 def _get_bot_mcp_codes(
@@ -181,7 +172,7 @@ def _apply_passport(
             cli_items=cli_items,
             bot_name=bot_name,
             bot_desc=spec.bot_desc,
-            engine_type=spec.passport_engine_type,
+            engine_type=spec.engine_type,
             access_mode=_ACCESS_MODE,
             workspace_path=_WORKSPACE_PATH,
         )
@@ -283,7 +274,6 @@ def create_bot_with_authorization(
     # Validate the name up front so an invalid one never reaches Passport or
     # create. An unset name stays unset — create_bot applies default naming.
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
-    entity_id = spec.resolve_entity_id(user_id)
     is_first_bot = bot_id == "default"
 
     # Pre-flight before Passport, so a limit is reported before the user is sent
@@ -297,11 +287,11 @@ def create_bot_with_authorization(
         bot_name=bot_name,
         spec=spec,
         mcp_codes=_get_bot_mcp_codes(
-            skill_set_factory, user_id, bot_id, entity_id, spec.entity_type,
-            engine_type=spec.passport_engine_type,
+            skill_set_factory, user_id, bot_id, spec.entity_id, spec.entity_type,
+            engine_type=spec.engine_type,
         ),
         cli_items=get_default_cli_items(
-            spec.passport_engine_type, spec.template_type
+            spec.engine_type, spec.template_type
         ),
         is_first_bot=is_first_bot,
     )
@@ -317,14 +307,13 @@ def create_bot_with_authorization(
             redirect_url=passport_result.get("redirect_url") if passport_result else None,
         )
 
-    # Token present → create the bot inline. ``engine_type`` is passed through
-    # unset-if-unset so create_bot owns its own default.
+    # Token present → create the bot inline.
     result = bot_service.create_bot(
         user_id=user_id,
         nick_name=nick_name,
         bot_name=bot_name,
         bot_desc=spec.bot_desc,
-        entity_id=entity_id,
+        entity_id=spec.entity_id,
         entity_type=spec.entity_type,
         share_policy=spec.share_policy,
         engine_type=spec.engine_type,
@@ -386,7 +375,7 @@ def complete_bot_authorization(
         bot_id=bot_id,
         bot_name=spec.bot_name,
         bot_desc=spec.bot_desc,
-        entity_id=spec.resolve_entity_id(user_id),
+        entity_id=spec.entity_id,
         entity_type=spec.entity_type,
         share_policy=spec.share_policy,
         engine_type=spec.engine_type,
