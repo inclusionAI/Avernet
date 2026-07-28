@@ -1,4 +1,4 @@
-"""Open API Run 依赖注入"""
+"""Open API dependency injection"""
 
 from dependency_injector.wiring import Provide, inject
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -15,43 +15,43 @@ from secbaas.community.bootstrap import ApplicationContainer
 
 
 def get_api_key_from_header(authorization: str | None = Header(None)) -> str:
-    """从 Authorization Header 解析 Bearer Token
+    """Parse Bearer Token from the Authorization Header
 
     Args:
-        authorization: Authorization Header 值，格式为 "Bearer {api_key}"
+        authorization: Authorization Header value, formatted as "Bearer {api_key}"
 
     Returns:
-        api_key: 解析出的 API Key
+        api_key: Parsed API Key
 
     Raises:
-        HTTPException: 401 如果 Header 缺失或格式错误
+        HTTPException: 401 if the Header is missing or malformed
     """
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": 40101, "message": "Token 缺失"},
+            detail={"code": 40101, "message": "Token missing"},
         )
 
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": 40002, "message": "参数缺失"},
+            detail={"code": 40002, "message": "Parameter missing"},
         )
 
     return parts[1]
 
 
 def get_iam_token_from_cookie(request: Request) -> str | None:
-    """从 Cookie 解析 IAM Token（忽略大小写）
+    """Parse IAM Token from Cookie (case-insensitive)
 
     Args:
-        request: FastAPI Request 对象
+        request: FastAPI Request object
 
     Returns:
-        iam_token: 解析出的 IAM Token，不存在时返回 None
+        iam_token: Parsed IAM Token; returns None if not present
     """
-    # 忽略大小写查找 cookie
+    # Case-insensitive cookie lookup
     for key, value in request.cookies.items():
         if key.upper() == "IAM_TOKEN":
             return value if value else None
@@ -66,23 +66,23 @@ async def validate_api_key(
         Provide[ApplicationContainer.services.api_key_validator]
     ),
 ) -> APIKeyRecord:
-    """验证 API Key 并返回关联的 API Key 记录
+    """Validate the API Key and return the associated API Key record
 
     Args:
         api_key: API Key
-        validator: APIKeyValidator 实例
+        validator: APIKeyValidator instance
 
     Returns:
-        APIKeyRecord: 验证通过的 API Key 记录，包含 bot_id (app_id)、api_key_prefix 等
+        APIKeyRecord: Validated API Key record, containing bot_id (app_id), api_key_prefix, etc.
 
     Raises:
-        HTTPException: 401 如果 API Key 无效
+        HTTPException: 401 if the API Key is invalid
     """
     record = await validator.verify(api_key)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": 40103, "message": "Token 无效"},
+            detail={"code": 40103, "message": "Token invalid"},
         )
     return record
 
@@ -91,14 +91,14 @@ def get_bot_chat_context(
     api_key_record: APIKeyRecord = Depends(validate_api_key),
     iam_token: str | None = Depends(get_iam_token_from_cookie),
 ) -> BotChatContext:
-    """从 API Key 记录和 Cookie 构建 BotChatContext
+    """Build BotChatContext from API Key record and Cookie
 
     Args:
-        api_key_record: API Key 验证记录
-        iam_token: 从 Cookie 中提取的 IAM Token
+        api_key_record: API Key validation record
+        iam_token: IAM Token extracted from Cookie
 
     Returns:
-        BotChatContext: 请求上下文
+        BotChatContext: Request context
     """
     return BotChatContext.from_api_key(
         api_key_prefix=api_key_record.api_key_prefix,
@@ -110,7 +110,7 @@ def get_bot_chat_context(
 
 
 def _normalize_bot_id(bot_id: str) -> str:
-    """兼容处理 bot id 中工号带 0 的情况。bot_id 格式 ``<real_bot_id>:<entity_id>``，去除 entity_id 前导零。"""
+    """Compatibility handling for bot IDs whose employee number is zero-padded. bot_id format is ``<real_bot_id>:<entity_id>``; strips leading zeros from entity_id."""
     if ":" in bot_id:
         real_bot_id, entity_id = bot_id.rsplit(":", 1)
         entity_id = entity_id.lstrip("0") or "0"
@@ -119,22 +119,22 @@ def _normalize_bot_id(bot_id: str) -> str:
 
 
 def resolve_bot_id_from_api_key(api_key_record: APIKeyRecord) -> str:
-    """从 API Key 记录解析 bot_id，兼容工号前导零
+    """Resolve bot_id from the API Key record, handling zero-padded employee numbers
 
     Args:
-        api_key_record: API Key 验证记录
+        api_key_record: API Key validation record
 
     Returns:
-        str: 解析并归一化后的 bot_id
+        str: Parsed and normalized bot_id
     """
     return _normalize_bot_id(api_key_record.app_id)
 
 
 def parse_bot_id(bot_id: str) -> tuple[str, str]:
-    """解析 bot_id 为 real_bot_id 和 entity_id
+    """Parse bot_id into real_bot_id and entity_id
 
     Args:
-        bot_id: bot ID，格式为 <real_bot_id>:<entity_id>
+        bot_id: bot ID, formatted as <real_bot_id>:<entity_id>
 
     Returns:
         tuple[str, str]: (real_bot_id, entity_id)
@@ -146,14 +146,14 @@ def parse_bot_id(bot_id: str) -> tuple[str, str]:
 
 
 def match_allowed_bots(target_bot_id: str, allowed_bots: list[str]) -> str | None:
-    """校验 target_bot_id 是否在 allowed_bots 列表中
+    """Validate whether target_bot_id is in the allowed_bots list
 
     Args:
-        target_bot_id: 目标 bot ID，格式为 <real_bot_id>:<entity_id>
-        allowed_bots: 允许访问的 bot ID 列表
+        target_bot_id: Target bot ID, formatted as <real_bot_id>:<entity_id>
+        allowed_bots: List of bot IDs allowed for access
 
     Returns:
-        str | None: 匹配到的 allowed_bots 中的 bot_id（权威格式），未匹配返回 None
+        str | None: The matched bot_id from allowed_bots (authoritative format); returns None if no match
     """
     if not allowed_bots:
         return None
@@ -164,11 +164,11 @@ def match_allowed_bots(target_bot_id: str, allowed_bots: list[str]) -> str | Non
         allowed_real_bot_id, allowed_entity_id = parse_bot_id(allowed)
 
         if target_real_bot_id != "default":
-            # 非 default 模式：只需要 real_bot_id 匹配即可
+            # Non-default mode: only real_bot_id needs to match
             if target_real_bot_id == allowed_real_bot_id:
                 return allowed
         else:
-            # default 模式：需要完整匹配（real_bot_id:entity_id）
+            # Default mode: requires full match (real_bot_id:entity_id)
             if (
                 target_real_bot_id == allowed_real_bot_id
                 and target_entity_id == allowed_entity_id
@@ -182,39 +182,39 @@ def validate_policy(
     api_key_record: APIKeyRecord,
     target_bot_id: str,
 ) -> str:
-    """根据 API Key 的 policy 校验对目标 bot 的访问权限
+    """Validate access permission to the target bot based on the API Key's policy
 
-    policy 语义（parse_policy 归一化后）：
-    - allowed_bots 含 "*"：允许访问所有 bot（显式配置）。
-    - allowed_bots 为空（含历史 ["NONE"] 哨兵 / 未配置 policy / 缺少 allowed_bots key）：拒绝所有 bot（fail-closed）。
-    - 否则：白名单匹配，仅命中的 bot 放行。
+    Policy semantics (after parse_policy normalization):
+    - allowed_bots contains "*": allows access to all bots (explicit configuration).
+    - allowed_bots is empty (including legacy ["NONE"] sentinel / unconfigured policy / missing allowed_bots key): denies all bots (fail-closed).
+    - Otherwise: whitelist match; only matched bots are permitted.
 
     Args:
-        api_key_record: API Key 记录
-        target_bot_id: 目标 bot ID，格式为 <real_bot_id>:<entity_id>
+        api_key_record: API Key record
+        target_bot_id: Target bot ID, formatted as <real_bot_id>:<entity_id>
 
     Returns:
-        str: 校验通过后应使用的 bot_id。
-             当为显式 allow-all 时返回原始 target_bot_id；
-             当为白名单匹配时返回匹配到的 allowed_bots 中的权威格式。
+        str: The bot_id to use after successful validation.
+              Returns the original target_bot_id when explicit allow-all;
+              Returns the matched authoritative format from allowed_bots when whitelist-matched.
 
     Raises:
-        HTTPException: 403 如果无权限
+        HTTPException: 403 if no permission
     """
     policy = parse_policy(api_key_record.policy)
 
     if APIKeyPolicy.ALL in policy.allowed_bots:
-        # 显式 allow-all
+        # Explicit allow-all
         return target_bot_id
 
     matched = match_allowed_bots(target_bot_id, policy.allowed_bots)
     if matched is None:
-        # 白名单未命中 / 空（含 NONE）即拒绝所有 bot（fail-closed）
+        # Whitelist miss / empty (including NONE) denies all bots (fail-closed)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": OpenAPICode.FORBIDDEN,
-                "message": f"API Key 无权访问 bot: {target_bot_id}",
+                "message": f"API Key does not have permission to access bot: {target_bot_id}",
             },
         )
     return matched

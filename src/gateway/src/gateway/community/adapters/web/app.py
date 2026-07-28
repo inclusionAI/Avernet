@@ -26,7 +26,7 @@ DOCS_TAGS = [
     {"name": "test", "description": "Test and debug endpoints."},
 ]
 
-_API_DESCRIPTION = "Avernet Gateway — A configuration-driven forwarding plane (under active development)."
+_API_DESCRIPTION = "Avernet Gateway — A configuration-driven forwarding plane (UNDER ACTIVE DEVELOPMENT)."
 
 
 def create_app() -> FastAPI:
