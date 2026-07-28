@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.responses import Response
 
 from gateway.community.spi.auth import AuthError
-from gateway.community.spi.authn import CredentialBundle
+from gateway.community.spi.authn import CredentialBundle, Principal, PrincipalType
 from gateway.community.spi.forwarder import ForwardRequest
 from gateway.community.tracer import get_tracer_plugin
 
@@ -64,6 +64,19 @@ def _target_url(base_url: str, request: Request) -> str:
     return f"{base}{request.url.path}" + (f"?{query}" if query else "")
 
 
+def _attach_identities(
+    forward: ForwardRequest, identities: dict[PrincipalType, Principal]
+) -> ForwardRequest:
+    """Forwarder seam for the resolved identities.
+
+    Per auth design §7.1, components must NEVER trust a bare Principal header;
+    the signing workstream swaps this no-op for a signed-token injection.
+    Until then, the resolved identities are available here but NOT forwarded.
+    """
+    _ = identities  # referenced so the value is provably available at the seam
+    return forward
+
+
 async def forward_request(request: Request) -> Response:
     """Resolve domain → authenticate → forward verbatim, streaming the response."""
     path = request.url.path
@@ -72,19 +85,22 @@ async def forward_request(request: Request) -> Response:
         return _error(404, 1, "no route for path")
 
     try:
-        await request.app.state.authenticator.authenticate(
+        identities = await request.app.state.authenticator.authenticate(
             request.method, path, _bundle(request)
         )
     except AuthError as exc:
         return _error(401, 1, str(exc))
 
     body = await request.body()
-    forward = ForwardRequest(
-        method=request.method,
-        url=_target_url(server.base_url, request),
-        # Drop Host so httpx sets it from the upstream URL, not the gateway's.
-        headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
-        content=body,
+    forward = _attach_identities(
+        ForwardRequest(
+            method=request.method,
+            url=_target_url(server.base_url, request),
+            # Drop Host so httpx sets it from the upstream URL, not the gateway's.
+            headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
+            content=body,
+        ),
+        identities,
     )
 
     cm = request.app.state.forwarder.forward(forward)

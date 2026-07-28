@@ -48,9 +48,14 @@ def create_app() -> FastAPI:
     # Wire the composition root. Imported lazily inside the factory so the adapters
     # layer keeps no *static* dependency on bootstrap — function-body imports are
     # exempt from the layer-boundary check by design (composition at call time).
-    from gateway.community.bootstrap import build_authenticator, build_forwarding
+    from gateway.community.bootstrap import (
+        build_authenticator,
+        build_database,
+        build_forwarding,
+    )
 
-    authenticator = build_authenticator()
+    db = build_database()
+    authenticator = build_authenticator(db)
     forwarding = build_forwarding()
 
     @asynccontextmanager
@@ -60,6 +65,7 @@ def create_app() -> FastAPI:
             yield
         finally:
             await forwarding.stop_refresh()
+            await db.close()
 
     app = FastAPI(
         title=config.app_name,

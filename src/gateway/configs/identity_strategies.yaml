@@ -1,0 +1,9 @@
+# Per-identity strategy chain (system-level config).
+# Each identity type runs its strategies in order; the first to recognise the
+# credential wins (design §5). Flavor-specific verification backends are wired
+# by PluginAccessor in the composition root.
+identity_strategies:
+  user: [google]
+  bot: [bot_token]
+  app: [app_token]
+  access_key: [access_key_token]

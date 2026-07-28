@@ -6,7 +6,6 @@ async SQLAlchemy sessions.
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from typing import Any, Protocol
 
@@ -57,7 +56,7 @@ class DataSourcePlugin(Protocol):
         """
         ...
 
-    def orm_session(self) -> Generator[Session, None, None]:
+    def orm_session(self) -> AbstractContextManager[Session]:
         """Get a sync SQLAlchemy ORM session context.
 
         Yields an ORM Session with commit/rollback/close lifecycle
