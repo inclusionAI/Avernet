@@ -196,6 +196,9 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
     let timer = LocalTime::new(format_description!(
         "[year]-[month]-[day] [hour]:[minute]:[second]"
     ));
+    let millisecond_timer = LocalTime::new(format_description!(
+        "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"
+    ));
 
     let file_layers: Vec<Box<dyn Layer<_> + Send + Sync>> = config
         .outputs
@@ -214,11 +217,16 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
             let writer = RotatingFileWriter::new(&dir, &output.file);
 
             let filter = build_output_targets_filter(output);
+            let output_timer = if output.name == "common-error" {
+                millisecond_timer.clone()
+            } else {
+                timer.clone()
+            };
             match output.format {
                 LogOutputFormat::Text => Some(
                     tracing_subscriber::fmt::layer()
                         .with_writer(writer)
-                        .with_timer(timer.clone())
+                        .with_timer(output_timer)
                         .with_ansi(false)
                         .with_filter(filter)
                         .boxed(),
@@ -230,7 +238,7 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
                         .with_current_span(false)
                         .with_span_list(false)
                         .with_writer(writer)
-                        .with_timer(timer.clone())
+                        .with_timer(output_timer)
                         .with_ansi(false)
                         .with_filter(filter)
                         .boxed(),
@@ -430,6 +438,9 @@ mod tests {
                         dir.path(),
                         &common_error_output.file,
                     ))
+                    .with_timer(LocalTime::new(format_description!(
+                        "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"
+                    )))
                     .with_ansi(false)
                     .with_filter(build_output_targets_filter(&common_error_output)),
             );
@@ -448,6 +459,17 @@ mod tests {
         assert!(main.contains("error is duplicated"));
         assert!(!common_error.contains("warning stays in main only"));
         assert!(common_error.contains("error is duplicated"));
+        let common_error_line = common_error
+            .lines()
+            .find(|line| line.contains("error is duplicated"))
+            .expect("common error log line should exist");
+        let timestamp = common_error_line
+            .get(..23)
+            .expect("common error timestamp should include milliseconds");
+        assert!(
+            chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S%.3f").is_ok(),
+            "common error timestamp should use YYYY-MM-DD HH:mm:ss.SSS: {timestamp}"
+        );
     }
 
     #[test]
