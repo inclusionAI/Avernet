@@ -254,22 +254,46 @@ class RestartMixin:
                     "message": f"Restart submitted, stage: {stage_enum.value}",
                     "stage": stage_enum.value, "restart_publish_id": recreate_wid}
 
-        # Provider-aware reuse-vs-recreate decision (online stage). Only the
-        # teclaw not-live case needs a *proactive* short-circuit: its UPDATE
-        # cannot rebuild a gone container and would silently fail the publish
-        # (never raising BOT_NOT_FOUND), so we retire the old bot and recreate
-        # here instead of issuing a doomed upgrade. ACTIVE / baas-rebuildable
-        # targets fall through to the in-place UPGRADE below, and a genuinely
-        # gone bot (BOT_NOT_FOUND) is handled by that path's abandon→recreate
-        # leg — preserving the RESTART-op ledger record for that case.
+        # Provider-aware reuse-vs-recreate decision (online stage). Any non-UPGRADE
+        # decision recreates *directly* rather than issuing the in-place UPGRADE:
+        # a teclaw not-live target's UPDATE cannot rebuild a gone container (it
+        # would silently fail the publish), and a DESTROYING/gone target's UPDATE
+        # is rejected with an error the atom does not classify as BOT_NOT_FOUND —
+        # both would strand the restart. Before recreating we open+abandon a fresh
+        # RESTART op so ``sync_restart_progress`` (which prefers the latest RESTART
+        # op's workflow id) does not read a stale earlier restart, and instead
+        # falls back to the ``ext.restart`` handle the recreate writes.
         if stage_enum == PublishStage.ONLINE:
             decision = self._decide_online_deploy(publish_record, bot)
-            if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
-                self._build_service.retire_superseded_bot(bot_uuid, operator=operator)
+            if decision not in (
+                OnlineDeployDecision.UPGRADE,
+                OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE,
+                OnlineDeployDecision.FIRST_RELEASE,
+            ):
+                raise PublishFlowServiceError(
+                    f"Unhandled online deploy decision: {decision}"
+                )
+            if decision != OnlineDeployDecision.UPGRADE:
+                if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                    self._build_service.retire_superseded_bot(
+                        bot_uuid, operator=operator
+                    )
+                # Supersede any prior RESTART op with a fresh abandoned one, so
+                # restart-status reads the recreate's workflow (via ext.restart).
+                superseding_op = self._operation_runner.open_operation(
+                    publish_id=publish_id,
+                    kind=PublishOperationKind.RESTART,
+                    stage=stage_enum,
+                    bot_uuid=bot_uuid,
+                    operator=operator,
+                )
+                self._operation_runner.abandon_operation(
+                    superseding_op, f"{decision.value} -> recreate"
+                )
                 logger.info(
-                    "[PublishFlowService.execute_restart] teclaw not-live target -> "
-                    "retire + recreate: publish_id=%s bot_uuid=%s stage=%s",
-                    publish_id, bot_uuid, stage_enum.value,
+                    "[PublishFlowService.execute_restart] decision=%s -> recreate: "
+                    "publish_id=%s bot_uuid=%s stage=%s",
+                    decision.value, publish_id, bot_uuid, stage_enum.value,
                 )
                 return await self._recreate_restart_target(
                     publish_id=publish_id,
@@ -281,18 +305,6 @@ class RestartMixin:
                     delivery=delivery,
                     skills_env=skills_env,
                     operator=operator,
-                )
-            # UPGRADE and FIRST_RELEASE both fall through to the in-place UPGRADE
-            # path below: UPGRADE reuses the live/rebuildable bot; a genuinely gone
-            # bot surfaces BOT_NOT_FOUND there and takes the abandon→recreate leg
-            # (which keeps the RESTART-op ledger record). Any other/new decision
-            # must fail loudly rather than silently pick a path.
-            if decision not in (
-                OnlineDeployDecision.UPGRADE,
-                OnlineDeployDecision.FIRST_RELEASE,
-            ):
-                raise PublishFlowServiceError(
-                    f"Unhandled online deploy decision: {decision}"
                 )
 
         async def _issue():
