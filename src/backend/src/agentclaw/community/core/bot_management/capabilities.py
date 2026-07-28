@@ -18,7 +18,30 @@ def _capabilities(template_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return capabilities if isinstance(capabilities, dict) else {}
 
 
+def _bool_capability(
+    capabilities: Dict[str, Any],
+    flat_key: str,
+    nested_key: str,
+    nested_value_key: str,
+) -> bool:
+    flat_value = capabilities.get(flat_key)
+    if isinstance(flat_value, bool):
+        return flat_value
+
+    nested_value = capabilities.get(nested_key)
+    if isinstance(nested_value, bool):
+        return nested_value
+    if isinstance(nested_value, dict):
+        return bool(nested_value.get(nested_value_key))
+
+    return False
+
+
 def can_join_bcn_as_provider(template_config: Optional[Dict[str, Any]]) -> bool:
     capabilities = _capabilities(template_config)
-    bcn = capabilities.get("bcn")
-    return isinstance(bcn, dict) and bool(bcn.get("join_as_provider"))
+    return _bool_capability(
+        capabilities,
+        "enable_bcn_network",
+        "bcn",
+        "join_as_provider",
+    )

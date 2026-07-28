@@ -22,3 +22,21 @@ def test_missing_or_invalid_capabilities_default_false():
     assert can_join_bcn_as_provider(None) is False
     assert can_join_bcn_as_provider({"capabilities": None}) is False
     assert can_join_bcn_as_provider({"capabilities": {"bcn": None}}) is False
+
+
+def test_can_join_bcn_as_provider_reads_flat_available_tc_flag():
+    template_config = {"capabilities": {"enable_bcn_network": True}}
+
+    assert can_join_bcn_as_provider(template_config) is True
+
+
+def test_flat_false_takes_over_legacy_shape():
+    template_config = {
+        "capabilities": {
+            "enable_bcn_network": False,
+            "bcn": {"join_as_provider": True},
+        }
+    }
+
+    assert can_join_bcn_as_provider(template_config) is False
+
