@@ -315,6 +315,76 @@ class TestDispatchGetUploadUrl:
         call_kwargs = ticket_repo.create_ticket.call_args.kwargs
         assert call_kwargs["operator"] == "alice"
 
+    @pytest.mark.asyncio
+    async def test_single_upload_with_content_type(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """content_type='image/png' → passed to generate_upload_url as 3rd arg."""
+        file_backend.generate_upload_url.return_value = (
+            "https://oss.example.com/put?token=abc"
+        )
+        file_backend.build_session_staging_path.return_value = (
+            "file-transfers/test/t1/sess-001/tf-ct/data.png"
+        )
+
+        await dispatcher.dispatch_get_upload_url(
+            tenant="test-tenant",
+            session_id="sess-001",
+            filename="data.png",
+            content_type="image/png",
+        )
+
+        call_args = file_backend.generate_upload_url.call_args
+        assert call_args[0][2] == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_single_upload_without_content_type(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """content_type not passed → generate_upload_url called with content_type=None."""
+        file_backend.generate_upload_url.return_value = (
+            "https://oss.example.com/put?token=abc"
+        )
+        file_backend.build_session_staging_path.return_value = (
+            "file-transfers/test/t1/sess-001/tf-noct/data.csv"
+        )
+
+        await dispatcher.dispatch_get_upload_url(
+            tenant="test-tenant",
+            session_id="sess-001",
+            filename="data.csv",
+        )
+
+        call_args = file_backend.generate_upload_url.call_args
+        assert len(call_args[0]) == 3  # staging_path, expire_seconds, content_type=None
+        assert call_args[0][2] is None
+
+    @pytest.mark.asyncio
+    async def test_content_type_empty_string_raises(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """content_type='' raises ValueError (D-04)."""
+        with pytest.raises(ValueError):
+            await dispatcher.dispatch_get_upload_url(
+                tenant="test-tenant",
+                session_id="sess-001",
+                filename="data.csv",
+                content_type="",
+            )
+
+    @pytest.mark.asyncio
+    async def test_content_type_whitespace_raises(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """content_type='   ' raises ValueError (D-04)."""
+        with pytest.raises(ValueError):
+            await dispatcher.dispatch_get_upload_url(
+                tenant="test-tenant",
+                session_id="sess-001",
+                filename="data.csv",
+                content_type="   ",
+            )
+
 
 # ============================================================================
 # TestDispatchCompleteUploadFull — tests 4-11 extending existing 3
@@ -614,8 +684,8 @@ class TestGetShareLink:
         assert response_params_arg == {"response-content-disposition": "attachment"}
 
     @pytest.mark.asyncio
-    async def test_share_link_show_true(self, dispatcher, file_backend, ticket_repo):
-        """show=True → generate_download_url called with response_params=None (inline preview)."""
+    async def test_share_link_show_true_inline(self, dispatcher, file_backend, ticket_repo):
+        """show=True → generate_download_url called with response_params={'response-content-disposition': 'inline'}."""
         ticket = _make_ticket(status="DONE")
         ticket_repo.get_by_transfer_id.return_value = ticket
         file_backend.generate_download_url.return_value = (
@@ -629,7 +699,30 @@ class TestGetShareLink:
             show=True,
         )
 
-        # response_params is passed as positional arg (3rd position), should be None for show=True
+        # show=True → response_params should be {"response-content-disposition": "inline"}
+        call_args = file_backend.generate_download_url.call_args
+        response_params_arg = call_args[0][2] if len(call_args[0]) > 2 else None
+        assert response_params_arg == {"response-content-disposition": "inline"}
+
+    @pytest.mark.asyncio
+    async def test_share_link_show_none_no_intervention(
+        self, dispatcher, file_backend, ticket_repo
+    ):
+        """show=None → generate_download_url called with response_params=None."""
+        ticket = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+        file_backend.generate_download_url.return_value = (
+            "https://oss.example.com/dl?token=abc"
+        )
+
+        await dispatcher.dispatch_get_share_link(
+            transfer_id="tf-001",
+            tenant="test-tenant",
+            session_id="sess-001",
+            show=None,
+        )
+
+        # show=None → response_params should be None (no OSS intervention)
         call_args = file_backend.generate_download_url.call_args
         response_params_arg = call_args[0][2] if len(call_args[0]) > 2 else None
         assert response_params_arg is None
