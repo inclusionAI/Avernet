@@ -371,7 +371,10 @@ def test_decide_online_deploy_no_candidate_is_first_release():
     baas_service.get_bot.assert_not_called()
 
 
-def test_decide_online_deploy_get_bot_error_is_first_release():
+def test_decide_online_deploy_get_bot_error_propagates():
+    # get_bot normalizes a real 404 to RELEASED; a raised error is transient/
+    # non-404, so it must propagate (durable task retries the status read) rather
+    # than be treated as "gone" and create a replacement for a possibly-live bot.
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -381,10 +384,8 @@ def test_decide_online_deploy_get_bot_error_is_first_release():
     publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
     baas_service.get_bot.side_effect = RuntimeError("baas unreachable")
 
-    assert (
+    with pytest.raises(RuntimeError, match="baas unreachable"):
         svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
-        is OnlineDeployDecision.FIRST_RELEASE
-    )
 
 
 # (#197 all-auto) approve_baas_publish was removed — every BaaS mutation is
@@ -454,9 +455,11 @@ async def test_execute_release_phase_offlined_online_bot_stopped_no_orphan(provi
         status=PublishStatus.RELEASED.value,
         ext={'binding': {'online': 88}},
     )
-    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-stopped')
-    baas_service.get_bot.return_value = {'status': 'STOPPED'}
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id='BOT-stopped'
+    )
     baas_service.resolve_container_provider.return_value = provider
+    baas_service.get_bot.return_value = {'status': 'STOPPED'}
 
     bot_service = Mock()
     bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
@@ -496,7 +499,9 @@ async def test_online_retire_then_first_release_is_crash_safe_on_redelivery():
         source_bot_id='bot-source',
         ext={'binding': {'online': 99}, 'migration_path': '/m'},
     )
-    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-old')
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id='BOT-old'
+    )
     baas_service.resolve_container_provider.return_value = 'teclaw'
     bot_service = Mock()
     bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
