@@ -421,10 +421,13 @@ def test_retire_superseded_bot_calls_destroy_idempotently():
 
 
 @pytest.mark.unit
-def test_retire_superseded_bot_swallows_destroy_failure():
+def test_retire_superseded_bot_propagates_destroy_failure():
     svc, baas = _svc("baas")
     baas.destroy_bot.side_effect = RuntimeError("baas down")
 
-    # Best-effort: must not raise into the deploy path.
-    assert svc.retire_superseded_bot("BOT-old") is None
+    # Failures must propagate (never swallow a failed lifecycle write and report
+    # success) so the caller does not create a replacement while the old bot is
+    # still live; the durable deploy retries.
+    with pytest.raises(RuntimeError, match="baas down"):
+        svc.retire_superseded_bot("BOT-old")
     baas.destroy_bot.assert_called_once()
