@@ -274,16 +274,21 @@ class RestartMixin:
                     f"Unhandled online deploy decision: {decision}"
                 )
             if decision != OnlineDeployDecision.UPGRADE:
+                # Release the record's now-stale online binding before recreating
+                # (the recreate below mints a fresh one and rewrites
+                # ext.binding.<stage>), so the old binding does not linger ACTIVE
+                # pointing at a gone/retired bot. For RETIRE_THEN_FIRST_RELEASE we
+                # destroy the still-registered bot first and stash its destroy id;
+                # for FIRST_RELEASE the target is already gone (RELEASED/DESTROYING,
+                # e.g. an external BaaS deletion) so no destroy is issued.
+                destroy_publish_id = None
                 if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
                     destroy_publish_id = self._build_service.retire_superseded_bot(
                         bot_uuid, operator=operator
                     )
-                    # Release the retired bot's now-stale binding so it does not
-                    # linger ACTIVE pointing at a destroyed bot; the recreate below
-                    # rewrites ext.binding.<stage> to a fresh binding.
-                    self._release_binding(
-                        binding_id, destroy_publish_id=destroy_publish_id
-                    )
+                self._release_binding(
+                    binding_id, destroy_publish_id=destroy_publish_id
+                )
                 # Supersede any prior RESTART op with a fresh abandoned one, so
                 # restart-status reads the recreate's workflow (via ext.restart).
                 superseding_op = self._operation_runner.open_operation(
