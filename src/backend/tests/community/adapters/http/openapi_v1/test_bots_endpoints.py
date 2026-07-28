@@ -8,7 +8,7 @@ is overridden per test to supply (or withhold) a caller.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -16,12 +16,23 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+import importlib
+
 from agentclaw.community.adapters.http.openapi_v1.bots.router import router
+
+# The bots package re-exports ``router`` (the APIRouter), which shadows the
+# submodule attribute — so fetch the real module object to patch module globals.
+bots_router = importlib.import_module(
+    "agentclaw.community.adapters.http.openapi_v1.bots.router"
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 BOT = {
@@ -41,7 +52,26 @@ def svc():
     m.update_bot.return_value = {**BOT, "bot_name": "Renamed"}
     m.restart_bot.return_value = {**BOT, "status": "PENDING"}
     m.delete_bot.return_value = True
+    m.check_create_bot_preflight.return_value = None
+    m.create_bot.return_value = BOT
     return m
+
+
+@pytest.fixture
+def bot_repo():
+    return MagicMock()
+
+
+@pytest.fixture
+def skill_set_factory():
+    m = MagicMock()
+    m.create.return_value.get_bot_mcp_codes.return_value = []
+    return m
+
+
+@pytest.fixture
+def auth_rel():
+    return MagicMock()
 
 
 @pytest.fixture
@@ -67,13 +97,16 @@ def passport():
 
 
 @pytest.fixture
-def client(svc, policy, passport, engine_config):
+def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, auth_rel):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
             binder.bind(PolicyServiceProtocol, to=policy)
             binder.bind(PassportPlugin, to=passport)
             binder.bind(EngineConfigService, to=engine_config)
+            binder.bind(BotRepository, to=bot_repo)
+            binder.bind(SkillSetServiceFactory, to=skill_set_factory)
+            binder.bind(AuthRelationshipPlugin, to=auth_rel)
 
     app = FastAPI()
     app.include_router(router)
@@ -199,3 +232,62 @@ def test_mutating_not_found_masked(client, svc):
     assert client.get("/openapi/v1/bots/b1/engine-config").status_code == 404
     svc.update_bot.side_effect = BotNotFoundError("x")
     assert client.put("/openapi/v1/bots/b1", json={"bot_name": "y"}).status_code == 404
+
+
+# ----- create + auth-status (Task 8) ---------------------------------------
+
+_CREATE_BODY = {
+    "bot_name": "NewBot", "bot_desc": "d", "engine": "teclaw",
+    "cluster_name": "ANDC", "bot_type": "personal",
+}
+
+
+def test_create_bot_201(client, svc, passport):
+    passport.apply_first_agent_passport.return_value = {"token": "tok", "agent_code": "ac"}
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        resp = client.post("/openapi/v1/bots", json=_CREATE_BODY)
+    assert resp.status_code == 201, resp.json()
+    body = resp.json()
+    assert body["code"] == 201000
+    assert body["data"]["bot_id"] == "b1"
+    svc.create_bot.assert_called_once()
+
+
+def test_create_bot_202_pending(client, passport):
+    passport.apply_first_agent_passport.return_value = {"token": None, "iframe_url": "http://auth"}
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        resp = client.post("/openapi/v1/bots", json=_CREATE_BODY)
+    assert resp.status_code == 202, resp.json()
+    body = resp.json()
+    assert body["code"] == 202000
+    assert body["data"]["iframe_url"] == "http://auth"
+
+
+def test_create_bot_cluster_mismatch_400(client, svc):
+    bad = {**_CREATE_BODY, "cluster_name": "ACRA"}  # teclaw must be ANDC
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        resp = client.post("/openapi/v1/bots", json=bad)
+    assert resp.status_code == 400, resp.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_bot_missing_principal_401(client):
+    client.app.dependency_overrides[require_principal] = lambda: None
+    resp = client.post("/openapi/v1/bots", json=_CREATE_BODY)
+    assert resp.status_code == 401
+
+
+def test_auth_status_pending(client, passport):
+    passport.query_auth_status.return_value = {"status": "PENDING"}
+    data = _ok(client.get("/openapi/v1/bots/b1/auth-status"))
+    assert data["status"] == "PENDING"
+    assert data["bot"] is None
+
+
+def test_auth_status_issued(client, svc, passport):
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": "ac"}
+    data = _ok(client.get("/openapi/v1/bots/b1/auth-status"))
+    assert data["status"] == "ISSUED"
+    assert data["bot"]["bot_id"] == "b1"
+    svc.create_bot.assert_called_once()

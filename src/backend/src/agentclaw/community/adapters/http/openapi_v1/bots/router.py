@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
@@ -22,13 +23,18 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.clusters import cluster_for_engine
+from agentclaw.community.adapters.http.openapi_v1.clusters import (
+    cluster_for_engine,
+    validate_engine_cluster,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
+    accepted,
+    created,
     deleted as deleted_envelope,
     envelope,
     envelope_errors,
@@ -36,10 +42,21 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
-from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.bot_management.create_flow import (
+    AuthPending,
+    complete_bot_authorization,
+    create_bot_with_authorization,
+)
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError,
+    generate_bot_id,
+)
 from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.di import Injected
+from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 from .schemas import (
@@ -84,9 +101,53 @@ def _to_bot(d: dict[str, Any]) -> Bot:
         }
     },
 )
-async def create_bot(body: BotCreate, request: Request, principal: PrincipalDep):
-    """Create a bot (201), or return 202 + a Passport iframe when authorization is needed."""
-    raise NotImplementedError
+@envelope_errors
+async def create_bot(
+    body: BotCreate,
+    request: Request,
+    principal: PrincipalDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+    passport_plugin: PassportPlugin = Injected(PassportPlugin),
+    auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
+    skill_set_factory: SkillSetServiceFactory = Injected(SkillSetServiceFactory),
+):
+    """Create a bot (201), or return 202 + a Passport iframe when authorization is needed.
+
+    ``engine_options`` is accepted but not yet wired — the internal create path
+    has no engine-options input; flagged for follow-up.
+    """
+    owner_id = caller_owner_id(principal)
+    # The engine/cluster pair must obey the bijection (ANDC⟺teclaw, ACRA⟺else).
+    validate_engine_cluster(body.engine, body.cluster_name)
+
+    bot_id = generate_bot_id(owner_id, bot_repo)
+    params = {
+        "bot_name": body.bot_name,
+        "bot_desc": body.bot_desc,
+        "engine_type": body.engine,
+        "bot_type": body.bot_type,
+    }
+    outcome = create_bot_with_authorization(
+        user_id=owner_id,
+        nick_name=owner_id,
+        bot_id=bot_id,
+        params=params,
+        cookie=request.headers.get("cookie", ""),
+        bot_service=bot_service,
+        passport_plugin=passport_plugin,
+        auth_rel_plugin=auth_rel_plugin,
+        skill_set_factory=skill_set_factory,
+    )
+
+    if isinstance(outcome, AuthPending):
+        pending = accepted(
+            BotAuthPending(bot_id=outcome.bot_id, iframe_url=outcome.iframe_url or ""),
+            request,
+        )
+        return JSONResponse(status_code=202, content=pending.model_dump())
+
+    return created(_to_bot(outcome.bot), request)
 
 
 @router.get("", response_model=Envelope[Page[Bot]])
@@ -206,9 +267,34 @@ async def restart_bot(
 
 
 @router.get("/{bot_id}/auth-status", response_model=Envelope[BotAuthStatus])
-async def get_bot_auth_status(bot_id: str, request: Request, principal: PrincipalDep):
-    """Poll Passport authorization; completes creation when ISSUED."""
-    raise NotImplementedError
+@envelope_errors
+async def get_bot_auth_status(
+    bot_id: str,
+    request: Request,
+    principal: PrincipalDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    passport_plugin: PassportPlugin = Injected(PassportPlugin),
+    auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
+) -> Envelope[BotAuthStatus]:
+    """Poll Passport authorization; completes creation when ISSUED.
+
+    A GET carries no body, so completion uses the identity/id only; any bot
+    attributes the internal completion would take from a body fall back to
+    defaults (the pending-create attributes are the passport's).
+    """
+    owner_id = caller_owner_id(principal)
+    result = complete_bot_authorization(
+        user_id=owner_id,
+        nick_name=owner_id,
+        bot_id=bot_id,
+        params={},
+        cookie=request.headers.get("cookie", ""),
+        bot_service=bot_service,
+        passport_plugin=passport_plugin,
+        auth_rel_plugin=auth_rel_plugin,
+    )
+    bot = _to_bot(result.bot) if result.bot else None
+    return envelope(BotAuthStatus(status=result.status, bot=bot), request)
 
 
 @router.get("/{bot_id}/status", response_model=Envelope[BotStatus])

@@ -127,16 +127,19 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
   - [x] All wrapped by `@envelope_errors`. 16 endpoint tests pass.
 - **Depends on:** 1, 2
 
-## Task 8: Create + auth-status endpoints  `[ ]`
+## Task 8: Create + auth-status endpoints  `[x]`
 - **Goal:** Wire the two Passport-entangled handlers to the shared flow.
-- **Files:** `adapters/http/openapi_v1/bots/router.py`.
+- **Files:** `adapters/http/openapi_v1/bots/router.py`, `test_bots_endpoints.py`.
 - **Done when:**
-  - [ ] `POST /bots` validates the engine↔cluster pair, calls the create entry
-        point, and returns `201 Envelope[Bot]` or `202 Envelope[BotAuthPending]`
-        by result variant.
-  - [ ] `GET /bots/{id}/auth-status` calls the auth-status entry point →
+  - [x] `POST /bots` validates the engine↔cluster pair, allocates the id, calls
+        `create_bot_with_authorization`, and returns `201 Envelope[Bot]` or
+        `202 Envelope[BotAuthPending]` by result variant.
+  - [x] `GET /bots/{id}/auth-status` calls `complete_bot_authorization` →
         `BotAuthStatus` (maps the bot dict when `ISSUED`).
-  - [ ] Both wrapped by `@envelope_errors`.
+  - [x] Both wrapped by `@envelope_errors`. 22 endpoint tests pass.
+  - **Known gaps (flagged):** `engine_options` accepted but not wired (internal
+        create has no such input); GET auth-status carries no body, so completion
+        uses defaults for any body-sourced attributes.
 - **Depends on:** 1, 2, 3, 4
 
 ## Task 9: Endpoint tests  `[ ]`
