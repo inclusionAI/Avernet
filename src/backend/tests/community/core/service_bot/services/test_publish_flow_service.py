@@ -275,7 +275,7 @@ async def test_service_release_uses_frozen_engine_layout_not_live_draft_drift():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error_code,expect_retire", [
-    ("BOT_NOT_FOUND", False),     # record already gone → nothing to clean up
+    ("BOT_NOT_FOUND", False),     # bot fully gone → no destroy, but still release binding
     ("DEVICE_NOT_FOUND", True),   # record lingers → retire before first release
 ])
 async def test_execute_upgrade_release_fallback_retires_only_on_device_not_found(
@@ -297,8 +297,10 @@ async def test_execute_upgrade_release_fallback_retires_only_on_device_not_found
         'error_code': error_code,
         'message': 'gone',
     })
+    build_service.retire_superseded_bot.return_value = 909  # destroy publish id
     expected = Mock()
     svc._execute_first_release = AsyncMock(return_value=expected)
+    svc.release_binding = Mock()
 
     result = await svc._execute_upgrade_release(
         publish_record=publish_record,
@@ -314,12 +316,17 @@ async def test_execute_upgrade_release_fallback_retires_only_on_device_not_found
         migration_path='/tmp/migration',
         bot={'bot_id': 'b1'},
     )
+    # The stale binding (id 88) is released either way so it does not linger
+    # ACTIVE; only DEVICE_NOT_FOUND retires the still-registered bot first (and
+    # stashes its destroy id), while BOT_NOT_FOUND is already gone (None).
     if expect_retire:
         build_service.retire_superseded_bot.assert_called_once_with(
             'BOT-old', operator='u1'
         )
+        svc.release_binding.assert_called_once_with(88, destroy_publish_id=909)
     else:
         build_service.retire_superseded_bot.assert_not_called()
+        svc.release_binding.assert_called_once_with(88, destroy_publish_id=None)
 
 
 @pytest.mark.parametrize("provider,status,expected", [
