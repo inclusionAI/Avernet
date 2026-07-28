@@ -304,20 +304,21 @@ class ReleaseStageRunner:
                 spec.stage.value, e.error_code, publish_id, bot_uuid,
             )
             # Secondary cleanup net (the primary decision is provider-aware and
-            # proactive): a DEVICE_NOT_FOUND means the record still lingers with a
-            # gone container, so retire it before recreating or the fresh bot
-            # would orphan it. A BOT_NOT_FOUND means the record is already gone —
-            # nothing to clean up.
+            # proactive). Either way the fallback first-release mints a fresh
+            # binding and rewrites ext.binding.<stage>, so the record's current
+            # binding must be released or it lingers ACTIVE pointing at the gone
+            # bot. A DEVICE_NOT_FOUND means the record still lingers with a gone
+            # container, so retire it first (and stash the destroy id); a
+            # BOT_NOT_FOUND means the bot is already fully gone (no destroy needed
+            # → destroy_publish_id=None).
+            destroy_publish_id = None
             if e.error_code == "DEVICE_NOT_FOUND":
                 destroy_publish_id = self._build_service.retire_superseded_bot(
                     bot_uuid, operator=operator
                 )
-                # Release the retired bot's now-stale binding so it does not linger
-                # ACTIVE pointing at a destroyed bot; the fallback first-release
-                # mints a fresh binding and rewrites ext.binding.<stage>.
-                self._ops.release_binding(
-                    existing_binding_id, destroy_publish_id=destroy_publish_id
-                )
+            self._ops.release_binding(
+                existing_binding_id, destroy_publish_id=destroy_publish_id
+            )
             return await fallback(
                 publish_record=publish_record,
                 operator=operator,
