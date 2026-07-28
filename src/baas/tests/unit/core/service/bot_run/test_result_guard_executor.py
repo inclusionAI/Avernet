@@ -54,6 +54,11 @@ class _RaisingInner:
         raise RuntimeError("boom")
 
 
+class _TimeoutInner:
+    async def execute(self, record: BotRunQueueRecord) -> None:
+        raise TimeoutError("inner timeout")
+
+
 class _RequeueInner:
     async def execute(self, record: BotRunQueueRecord) -> None:
         raise RequeuedToPendingError(record.run_id, "sess-1")
@@ -131,3 +136,14 @@ async def test_pre_execute_timeout_marks_failed_without_running_inner(
 
     assert inner.executed == []
     assert repo.get_by_run_id(run_id).status == "FAILED"
+
+
+async def test_timeout_error_inner_marks_failed(repo: OrmBotRunRepository):
+    run_id = _insert_run(repo)
+    ex = ResultGuardExecutor(_TimeoutInner(), repo)
+
+    await ex.execute(_record(run_id))
+
+    rec = repo.get_by_run_id(run_id)
+    assert rec.status == "FAILED"
+    assert "Task execution timeout" in (rec.error or "")
