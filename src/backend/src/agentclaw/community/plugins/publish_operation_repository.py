@@ -194,6 +194,18 @@ class OrmPublishOperationRepository(PublishOperationRepository):
             allowed_sources=[PublishOperationState.ID_RECORDED.value],
         )
 
+    def complete_without_workflow(
+        self, op_id: int
+    ) -> Optional[PublishOperationRecord]:
+        return self._cas_update(
+            op_id,
+            {
+                self.Model.state: PublishOperationState.COMPLETED.value,
+                self.Model.gmt_modified: func.now(),
+            },
+            allowed_sources=[PublishOperationState.PENDING.value],
+        )
+
     def fail(self, op_id: int, error: str) -> Optional[PublishOperationRecord]:
         return self._cas_update(
             op_id,

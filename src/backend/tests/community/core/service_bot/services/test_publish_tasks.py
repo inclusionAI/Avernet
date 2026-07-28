@@ -1,13 +1,18 @@
 """Unit tests for the durable publish task handlers (Task 11)."""
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
-from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    DraftRestoreRetryableError,
+)
+from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule, Retry
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+    DRAFT_RESTORE_TASK,
     PROGRESS_POLL_TASK,
+    PublishDraftRestoreHandler,
     PublishOnlineReleaseHandler,
     PublishProgressPollHandler,
     PublishVerifyFlowHandler,
@@ -287,3 +292,83 @@ def test_handler_invalid_payload_raises():
     verify, _online, _poll, _tq = _handlers(flow)
     with pytest.raises(ValueError):
         verify.handle({"operator": "op"})  # missing publish_id
+
+
+# ── draft_restore ───────────────────────────────────────────────────────────
+
+def _draft_restore_handler(result=None, error=None):
+    flow = Mock()
+    if error is not None:
+        flow.execute_restore_draft = AsyncMock(side_effect=error)
+    else:
+        flow.execute_restore_draft = AsyncMock(return_value=result)
+    return PublishDraftRestoreHandler(
+        flow=flow, task_queue_service=Mock(), poll_delay_seconds=2.0
+    ), flow
+
+
+def test_draft_restore_reschedules_while_teclaw_workflow_is_active():
+    handler, flow = _draft_restore_handler({"status": "restoring"})
+
+    outcome = handler.handle(
+        {"draft_publish_id": 2, "operation_id": 7, "operator": "u1"}
+    )
+
+    assert isinstance(outcome, Reschedule)
+    assert outcome.delay_seconds == 2.0
+    flow.execute_restore_draft.assert_awaited_once_with(
+        draft_publish_id=2, operation_id=7, operator="u1"
+    )
+    assert handler.task_type == DRAFT_RESTORE_TASK
+
+
+def test_draft_restore_completes_when_restore_succeeds():
+    handler, _flow = _draft_restore_handler({"status": "success"})
+
+    outcome = handler.handle(
+        {"draft_publish_id": 2, "operation_id": 7, "operator": "u1"}
+    )
+
+    assert isinstance(outcome, Complete)
+
+
+def test_draft_restore_fails_when_flow_raises():
+    handler, _flow = _draft_restore_handler(error=RuntimeError("BaaS failed"))
+
+    outcome = handler.handle(
+        {"draft_publish_id": 2, "operation_id": 7, "operator": "u1"}
+    )
+
+    assert isinstance(outcome, Fail)
+    assert "draft restore failed" in outcome.error
+    assert "BaaS failed" in outcome.error
+
+
+def test_draft_restore_retries_in_doubt_workflow_error():
+    handler, _flow = _draft_restore_handler(
+        error=DraftRestoreRetryableError("response lost after submit")
+    )
+
+    outcome = handler.handle(
+        {"draft_publish_id": 2, "operation_id": 7, "operator": "u1"}
+    )
+
+    assert isinstance(outcome, Retry)
+    assert "retrying the same operation" in outcome.error
+    assert "response lost after submit" in outcome.error
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"operation_id": 7, "operator": "u1"},
+        {"draft_publish_id": 2, "operator": "u1"},
+        {"draft_publish_id": 2, "operation_id": 7},
+        {"draft_publish_id": True, "operation_id": 7, "operator": "u1"},
+    ],
+)
+def test_draft_restore_invalid_payload_raises(payload):
+    handler, _flow = _draft_restore_handler({"status": "success"})
+
+    with pytest.raises(ValueError):
+        handler.handle(payload)

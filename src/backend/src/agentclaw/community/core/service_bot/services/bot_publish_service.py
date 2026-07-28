@@ -4,6 +4,9 @@ from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
+from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
+    PublishOperationRepository,
+)
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
@@ -20,6 +23,7 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
+from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -46,6 +50,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         device_binding_repo: DeviceBindingRepository,
         bcn_service: "BcnService",
         quality_task_service: "QualityTaskService",
+        publish_operation_repo: PublishOperationRepository,
+        task_queue_service: TaskQueueService,
     ):
         self._repo = bot_publish_repo
         self._bot_repo = bot_repo
@@ -55,6 +61,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         self._device_binding_repo = device_binding_repo
         self._bcn_service = bcn_service
         self._quality_task_service = quality_task_service
+        self._publish_operation_repo = publish_operation_repo
+        self._task_queue_service = task_queue_service
         self._env = get_current_env()
 
     def create_device_binding(

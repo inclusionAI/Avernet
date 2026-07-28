@@ -89,3 +89,184 @@ def test_run_local_command_reports_timeout(monkeypatch):
             error_message="restore draft workspace failed",
             timeout_seconds=1800,
         )
+
+
+@pytest.mark.asyncio
+async def test_restore_teclaw_draft_submits_then_checks_progress_one_step_at_a_time(
+    monkeypatch,
+):
+    baas = MagicMock()
+    baas.update_teclaw_bot.return_value = {
+        "bot_uuid": "BOT-current",
+        "publish_id": 901,
+    }
+    baas.get_publish_progress.side_effect = [
+        {"status": "ACTIVE"},
+        {"status": "SUCCESS"},
+    ]
+    svc = BotBuildService(
+        device_service=MagicMock(),
+        baas_service=baas,
+        path_factory=MagicMock(),
+        passport_plugin=MagicMock(),
+        device_binding_repo=MagicMock(),
+        sandbox_registry=MagicMock(),
+        channel_service=MagicMock(),
+        bot_repository=MagicMock(),
+        common_whitelist_service=MagicMock(),
+        baas_template_resolver=MagicMock(),
+        teclaw_template_uuid="teclaw-template",
+    )
+    monkeypatch.setattr(
+        module.uuid, "uuid4", lambda: type("Uuid", (), {"hex": "nonce"})()
+    )
+    svc.generate_request_id = MagicMock(return_value="request-id")
+    historical = {
+        "schema_version": 4,
+        "engine_type": "teclaw",
+        "engine_ext": {"stage": "release", "opaque": True},
+        "engine_overrides": {
+            "channels": {"dingding": {"enabled": True}},
+            "other": "keep",
+        },
+        "resources": [{"name": "old.txt", "store": "bot-data", "path": "old"}],
+    }
+    submitted = await svc.restore_teclaw_draft_async(
+        bot_uuid="BOT-current",
+        bot={"bot_id": "b1", "entity_id": "u1", "active_engine": "teclaw"},
+        owner_id="u1",
+        source_version=3,
+        artifact_ext={"config_artifact": historical},
+    )
+
+    assert submitted == {
+        "restore_type": "config_artifact",
+        "publish_id": 901,
+        "bot_uuid": "BOT-current",
+        "baas_status": "SUBMITTED",
+        "status": "restoring",
+    }
+    svc.generate_request_id.assert_called_once_with(
+        bot={"bot_id": "b1", "entity_id": "u1", "active_engine": "teclaw"},
+        publish_stage="draft_restore_3_nonce",
+    )
+    kwargs = baas.update_teclaw_bot.call_args.kwargs
+    delivered = kwargs["config_artifact"]
+    assert kwargs["bot_uuid"] == "BOT-current"
+    assert kwargs["owner_id"] == "u1"
+    assert kwargs["template_uuid"] == "teclaw-template"
+    assert delivered["engine_ext"]["stage"] == "draft"
+    assert delivered["engine_ext"]["opaque"] is True
+    assert delivered["engine_overrides"] == {"other": "keep"}
+    assert historical["engine_ext"]["stage"] == "release"
+    assert "channels" in historical["engine_overrides"]
+    active = await svc.restore_teclaw_draft_async(
+        bot_uuid="BOT-current",
+        bot={"bot_id": "b1", "entity_id": "u1", "active_engine": "teclaw"},
+        owner_id="u1",
+        source_version=3,
+        artifact_ext={"config_artifact": historical},
+        baas_publish_id=901,
+    )
+    assert active["status"] == "restoring"
+    assert active["baas_status"] == "ACTIVE"
+
+    completed = await svc.restore_teclaw_draft_async(
+        bot_uuid="BOT-current",
+        bot={"bot_id": "b1", "entity_id": "u1", "active_engine": "teclaw"},
+        owner_id="u1",
+        source_version=3,
+        artifact_ext={"config_artifact": historical},
+        baas_publish_id=901,
+    )
+    assert completed == {
+        "restore_type": "config_artifact",
+        "baas_publish_id": 901,
+        "baas_status": "SUCCESS",
+        "status": "success",
+    }
+    assert baas.update_teclaw_bot.call_count == 1
+    assert baas.get_publish_progress.call_args_list == [((901, True),), ((901, True),)]
+
+
+@pytest.mark.asyncio
+async def test_restore_teclaw_draft_reports_terminal_baas_failure():
+    baas = MagicMock()
+    baas.update_teclaw_bot.return_value = {"publish_id": 902}
+    baas.get_publish_progress.return_value = {"status": "FAILED"}
+    svc = BotBuildService(
+        device_service=MagicMock(),
+        baas_service=baas,
+        path_factory=MagicMock(),
+        passport_plugin=MagicMock(),
+        device_binding_repo=MagicMock(),
+        sandbox_registry=MagicMock(),
+        channel_service=MagicMock(),
+        bot_repository=MagicMock(),
+        common_whitelist_service=MagicMock(),
+        baas_template_resolver=MagicMock(),
+        teclaw_template_uuid="teclaw-template",
+    )
+
+    result = await svc.restore_teclaw_draft_async(
+        bot_uuid="BOT-current",
+        bot={"bot_id": "b1", "entity_id": "u1", "active_engine": "teclaw"},
+        owner_id="u1",
+        source_version=3,
+        artifact_ext={
+            "config_artifact": {
+                "schema_version": 4,
+                "engine_type": "teclaw",
+                "engine_ext": {"stage": "release"},
+            }
+        },
+        baas_publish_id=902,
+    )
+
+    assert result == {
+        "restore_type": "config_artifact",
+        "baas_publish_id": 902,
+        "baas_status": "FAILED",
+        "status": "failed",
+        "error": "teclaw 草稿热更新失败: publish_id=902, status=FAILED",
+    }
+    baas.update_teclaw_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restore_teclaw_draft_retries_after_progress_query_error():
+    baas = MagicMock()
+    baas.get_publish_progress.side_effect = RuntimeError("temporary gateway error")
+    svc = BotBuildService(
+        device_service=MagicMock(),
+        baas_service=baas,
+        path_factory=MagicMock(),
+        passport_plugin=MagicMock(),
+        device_binding_repo=MagicMock(),
+        sandbox_registry=MagicMock(),
+        channel_service=MagicMock(),
+        bot_repository=MagicMock(),
+        common_whitelist_service=MagicMock(),
+        baas_template_resolver=MagicMock(),
+        teclaw_template_uuid="teclaw-template",
+    )
+
+    result = await svc.restore_teclaw_draft_async(
+        bot_uuid="BOT-current",
+        bot={"bot_id": "b1", "entity_id": "u1", "active_engine": "teclaw"},
+        owner_id="u1",
+        source_version=3,
+        artifact_ext={
+            "config_artifact": {
+                "schema_version": 4,
+                "engine_type": "teclaw",
+                "engine_ext": {"stage": "release"},
+            }
+        },
+        baas_publish_id=902,
+    )
+
+    assert result["status"] == "restoring"
+    assert result["baas_status"] == "QUERY_ERROR"
+    assert result["progress_error"] == "temporary gateway error"
+    baas.update_teclaw_bot.assert_not_called()

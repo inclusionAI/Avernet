@@ -12,10 +12,12 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -1269,6 +1271,119 @@ class BotBuildService:
     ) -> Dict[str, Any]:
         """Run :meth:`restore_draft` outside the event loop."""
         return await asyncio.to_thread(self.restore_draft, **kwargs)
+
+    async def restore_teclaw_draft_async(
+        self,
+        *,
+        bot_uuid: str,
+        bot: Dict[str, Any],
+        owner_id: str,
+        source_version: int,
+        artifact_ext: Dict[str, Any],
+        baas_publish_id: int | None = None,
+        request_id: str | None = None,
+    ) -> Dict[str, Any]:
+        """Advance one Teclaw draft-restore workflow step.
+
+        The historical artifact is copied and composed for ``DRAFT`` before it
+        crosses the BaaS boundary. Draft delivery intentionally clears historical
+        stage channel overrides; DB-backed draft config remains resolved by the
+        teclaw draft runtime, while the artifact's workspace/identity refs restore
+        the historical file snapshot. The existing ``bot_uuid`` is updated in
+        place, so sessions/container identity are preserved.
+        """
+        config_artifact = copy.deepcopy(artifact_ext.get("config_artifact"))
+        if not isinstance(config_artifact, dict):
+            raise BotBuildServiceError("历史版本缺少 config_artifact")
+        if config_artifact.get("engine_type") != TECLAW_DEVICE_PROVIDER:
+            raise BotBuildServiceError(
+                "历史 config_artifact engine_type 不是 teclaw: "
+                f"{config_artifact.get('engine_type')!r}"
+            )
+
+        delivery = DeliveryArtifact.compose(
+            config_artifact,
+            PublishStage.DRAFT,
+            {},
+        )
+        if not delivery.config_artifact:
+            raise BotBuildServiceError("无法构造 teclaw 草稿恢复 artifact")
+
+        if baas_publish_id is None:
+            effective_request_id = request_id or self.generate_request_id(
+                bot=bot,
+                publish_stage=f"draft_restore_{source_version}_{uuid.uuid4().hex}",
+            )
+            update_result = await asyncio.to_thread(
+                self._baas_service.update_teclaw_bot,
+                bot_uuid=bot_uuid,
+                bot=bot,
+                owner_id=owner_id,
+                request_id=effective_request_id,
+                config_artifact=delivery.config_artifact,
+                template_uuid=self._teclaw_template_uuid,
+                device_count=1,
+            )
+            issued_publish_id = update_result.get("publish_id")
+            if not issued_publish_id:
+                raise BotBuildServiceError("teclaw 草稿热更新未返回 publish_id")
+            return {
+                "restore_type": "config_artifact",
+                "publish_id": int(issued_publish_id),
+                "bot_uuid": bot_uuid,
+                "baas_status": "SUBMITTED",
+                "status": "restoring",
+            }
+
+        try:
+            progress = await asyncio.to_thread(
+                self._baas_service.get_publish_progress,
+                baas_publish_id,
+                True,
+            )
+        except Exception as exc:
+            # The durable task will poll again. Do not turn a temporary query
+            # outage into a terminal restore failure after BaaS already accepted
+            # the hot update and its workflow id is safely recorded.
+            logger.warning(
+                "[BotBuildService.restore_teclaw_draft_async] progress query "
+                "failed, will retry: publish_id=%s error=%s",
+                baas_publish_id,
+                exc,
+            )
+            return {
+                "restore_type": "config_artifact",
+                "baas_publish_id": baas_publish_id,
+                "baas_status": "QUERY_ERROR",
+                "progress_error": str(exc),
+                "status": "restoring",
+            }
+        status = str(progress.get("status") or "").upper()
+        if status == "SUCCESS":
+            return {
+                "restore_type": "config_artifact",
+                "baas_publish_id": baas_publish_id,
+                "baas_status": status,
+                "status": "success",
+            }
+        if status in {"FAILED", "REJECTED", "REVOKED"}:
+            error = (
+                "teclaw 草稿热更新失败: "
+                f"publish_id={baas_publish_id}, status={status}"
+            )
+            return {
+                "restore_type": "config_artifact",
+                "baas_publish_id": baas_publish_id,
+                "baas_status": status,
+                "status": "failed",
+                "error": error,
+            }
+        return {
+            "restore_type": "config_artifact",
+            "baas_publish_id": baas_publish_id,
+            "baas_status": status or "UNKNOWN",
+            "status": "restoring",
+        }
 
     def refresh_teclaw_mcp_outbound_rule(
         self,

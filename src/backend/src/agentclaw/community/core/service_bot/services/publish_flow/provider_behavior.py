@@ -17,6 +17,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
+from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
+    TECLAW_DEVICE_PROVIDER,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -75,6 +78,34 @@ class ProviderBehavior(ABC):
         reproduces them); a no-op for providers that carry no such snapshot."""
         ...
 
+    @abstractmethod
+    def validate_draft_restore_artifact(self, artifact_ext: dict) -> str | None:
+        """Return ``None`` when the historical artifact can restore a draft,
+        otherwise a user-facing reason explaining the missing provider artifact."""
+        ...
+
+    @abstractmethod
+    async def restore_draft(
+        self,
+        *,
+        build_service: "BotBuildService",
+        bot: dict,
+        bot_uuid: str,
+        owner_id: str,
+        source_version: int,
+        artifact_ext: dict,
+        baas_publish_id: int | None = None,
+        request_id: str | None = None,
+    ) -> dict:
+        """Advance one restore step for the provider's historical artifact."""
+        ...
+
+    @property
+    @abstractmethod
+    def draft_restore_uses_workflow(self) -> bool:
+        """Whether restore is backed by a trackable BaaS workflow."""
+        ...
+
     @property
     @abstractmethod
     def supports_scale(self) -> bool:
@@ -110,6 +141,36 @@ class DefaultProviderBehavior(ProviderBehavior):
         # ARCA/baas keep no frozen artifact snapshot and route per-stage channels
         # out of band → nothing to persist here.
         return None
+
+    def validate_draft_restore_artifact(self, artifact_ext: dict) -> str | None:
+        if artifact_ext.get("migration_path"):
+            return None
+        return "上一版本没有可用的 migration_path 构造物"
+
+    async def restore_draft(
+        self,
+        *,
+        build_service: "BotBuildService",
+        bot: dict,
+        bot_uuid: str,
+        owner_id: str,
+        source_version: int,
+        artifact_ext: dict,
+        baas_publish_id: int | None = None,
+        request_id: str | None = None,
+    ) -> dict:
+        del bot_uuid, owner_id, request_id
+        if baas_publish_id is not None:
+            raise PublishFlowServiceError("本地草稿恢复不应携带 BaaS publish_id")
+        return await build_service.restore_draft_async(
+            bot=bot,
+            source_version=source_version,
+            artifact_ext=artifact_ext,
+        )
+
+    @property
+    def draft_restore_uses_workflow(self) -> bool:
+        return False
 
     @property
     def supports_scale(self) -> bool:
@@ -186,6 +247,40 @@ class TeclawProviderBehavior(ProviderBehavior):
         # respective key is absent.
         PublishExtState.stamp_stage_on_stored_artifact(ext, stage)
         PublishExtState.store_stage_overrides(ext, stage, engine_overrides)
+
+    def validate_draft_restore_artifact(self, artifact_ext: dict) -> str | None:
+        config_artifact = artifact_ext.get("config_artifact")
+        if not isinstance(config_artifact, dict):
+            return "上一版本没有可用的 config_artifact 构造物"
+        if config_artifact.get("engine_type") != TECLAW_DEVICE_PROVIDER:
+            return "上一版本的 config_artifact 不是 teclaw 构造物"
+        return None
+
+    async def restore_draft(
+        self,
+        *,
+        build_service: "BotBuildService",
+        bot: dict,
+        bot_uuid: str,
+        owner_id: str,
+        source_version: int,
+        artifact_ext: dict,
+        baas_publish_id: int | None = None,
+        request_id: str | None = None,
+    ) -> dict:
+        return await build_service.restore_teclaw_draft_async(
+            bot_uuid=bot_uuid,
+            bot=bot,
+            owner_id=owner_id,
+            source_version=source_version,
+            artifact_ext=artifact_ext,
+            baas_publish_id=baas_publish_id,
+            request_id=request_id,
+        )
+
+    @property
+    def draft_restore_uses_workflow(self) -> bool:
+        return True
 
     @property
     def supports_scale(self) -> bool:

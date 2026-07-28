@@ -2,7 +2,8 @@
 
 单元测试 - 不依赖网络、文件系统、数据库，使用 mock。
 """
-import asyncio
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, Mock, call
@@ -18,6 +19,9 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 )
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
+    PublishOperationKind,
+    PublishOperationRecord,
+    PublishOperationState,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
@@ -32,6 +36,8 @@ def _make_service(
     device_binding_repo=None,
     bcn_service=None,
     quality_task_service=None,
+    publish_operation_repo=None,
+    task_queue_service=None,
 ) -> BotPublishService:
     """Build a ``BotPublishService`` with MagicMock fallbacks for unused deps.
 
@@ -39,6 +45,11 @@ def _make_service(
     paths touching ``bot_publish_repo`` use this helper to keep call
     sites terse.
     """
+    operation_repo = publish_operation_repo or MagicMock()
+    if publish_operation_repo is None:
+        operation_repo.get_latest_by_kind.return_value = None
+        operation_repo.max_attempt.return_value = 0
+
     return BotPublishService(
         bot_publish_repo=bot_publish_repo,
         bot_repo=bot_repo or MagicMock(),
@@ -47,6 +58,8 @@ def _make_service(
         device_binding_repo=device_binding_repo or MagicMock(),
         bcn_service=bcn_service or MagicMock(),
         quality_task_service=quality_task_service or MagicMock(),
+        publish_operation_repo=operation_repo,
+        task_queue_service=task_queue_service or MagicMock(),
     )
 
 
@@ -2660,6 +2673,86 @@ class TestDraftRestore:
         repo.update_status_with_ext.side_effect = update_status_with_ext
         return repo
 
+    @staticmethod
+    def _stateful_operation_repo() -> Mock:
+        repo = Mock()
+        operations: dict[int, PublishOperationRecord] = {}
+
+        def get_latest(publish_id, operation_kind, stage):
+            matches = [
+                op
+                for op in operations.values()
+                if op.publish_id == publish_id
+                and op.operation_kind == operation_kind
+                and op.stage == stage
+            ]
+            return max(matches, key=lambda op: op.attempt, default=None)
+
+        def insert(data):
+            op_id = len(operations) + 1
+            op = PublishOperationRecord(
+                id=op_id,
+                publish_id=data["publish_id"],
+                operation_kind=data["operation_kind"],
+                stage=data["stage"],
+                attempt=data["attempt"],
+                state=PublishOperationState.PENDING.value,
+                request_id=data["request_id"],
+                bot_uuid=data.get("bot_uuid"),
+                params=data.get("params"),
+                operator=data["operator"],
+                env=data["env"],
+                gmt_create=datetime.now(),
+                gmt_modified=datetime.now(),
+            )
+            operations[op_id] = op
+            return op
+
+        def update_result(op_id, result):
+            op = operations.get(op_id)
+            if op:
+                op.result = result
+            return op
+
+        def fail(op_id, error):
+            op = operations.get(op_id)
+            if not op or op.state in {
+                state.value for state in PublishOperationState.terminal()
+            }:
+                return None
+            op.state = PublishOperationState.FAILED.value
+            op.last_error = error
+            return op
+
+        def complete_without_workflow(op_id):
+            op = operations.get(op_id)
+            if not op or op.state != PublishOperationState.PENDING.value:
+                return None
+            op.state = PublishOperationState.COMPLETED.value
+            return op
+
+        def complete(op_id):
+            op = operations.get(op_id)
+            if not op or op.state != PublishOperationState.ID_RECORDED.value:
+                return None
+            op.state = PublishOperationState.COMPLETED.value
+            return op
+
+        repo.get_latest_by_kind.side_effect = get_latest
+        repo.max_attempt.side_effect = lambda publish_id, kind, stage: (
+            get_latest(publish_id, kind, stage).attempt
+            if get_latest(publish_id, kind, stage)
+            else 0
+        )
+        repo.insert.side_effect = insert
+        repo.get_by_id.side_effect = operations.get
+        repo.update_result.side_effect = update_result
+        repo.fail.side_effect = fail
+        repo.complete_without_workflow.side_effect = complete_without_workflow
+        repo.complete.side_effect = complete
+        repo._operations = operations
+        return repo
+
     def test_first_draft_has_no_restore_action(self):
         repo = Mock()
         repo.get_by_id.return_value = _create_mock_record(
@@ -2727,25 +2820,6 @@ class TestDraftRestore:
         assert expected_reason in reason
         assert restore_source is None
 
-    def test_restore_state_update_skips_changed_or_stale_draft(self):
-        repo = Mock()
-        service = _make_service(repo)
-
-        repo.get_by_id.return_value = None
-        assert service._update_draft_restore_state(
-            2, "task-new", {"status": "success"}, require_existing_task=True
-        ) is False
-
-        repo.get_by_id.return_value = _create_mock_record(
-            record_id=2,
-            status=PublishStatus.DRAFT,
-            ext={"draft_restore": {"task_id": "task-current"}},
-        )
-        assert service._update_draft_restore_state(
-            2, "task-stale", {"status": "failed"}, require_existing_task=True
-        ) is False
-        repo.update_status_with_ext.assert_not_called()
-
     def test_draft_uses_immediately_previous_artifact(self):
         repo = Mock()
         draft = _create_mock_record(
@@ -2765,6 +2839,98 @@ class TestDraftRestore:
         assert can_restore is True
         assert reason == "可以恢复草稿"
         assert restore_source == {"source_publish_id": 1, "source_version": 1}
+
+    def test_teclaw_draft_uses_config_artifact_without_migration_path(self):
+        repo = Mock()
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={
+                "config_artifact": {
+                    "schema_version": 4,
+                    "engine_type": "teclaw",
+                }
+            },
+        )
+        repo.get_by_id.side_effect = [draft, source]
+        bot_service = MagicMock()
+        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        service = _make_service(repo, bot_service=bot_service)
+
+        can_restore, reason, restore_source = service.can_restore_draft(2)
+
+        assert can_restore is True
+        assert reason == "可以恢复草稿"
+        assert restore_source == {"source_publish_id": 1, "source_version": 1}
+
+    def test_teclaw_provider_detection_is_case_insensitive(self):
+        repo = Mock()
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"config_artifact": {"engine_type": "teclaw"}},
+        )
+        repo.get_by_id.side_effect = [draft, source]
+        bot_service = MagicMock()
+        bot_service.get_bot.return_value = {"active_engine": "TeClaw"}
+        service = _make_service(repo, bot_service=bot_service)
+
+        can_restore, reason, _ = service.can_restore_draft(2)
+
+        assert can_restore is True
+        assert reason == "可以恢复草稿"
+
+    def test_teclaw_draft_rejects_non_teclaw_config_artifact(self):
+        repo = Mock()
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"config_artifact": {"engine_type": "openclaw"}},
+        )
+        repo.get_by_id.side_effect = [draft, source]
+        bot_service = MagicMock()
+        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        service = _make_service(repo, bot_service=bot_service)
+
+        can_restore, reason, restore_source = service.can_restore_draft(2)
+
+        assert can_restore is False
+        assert reason == "上一版本的 config_artifact 不是 teclaw 构造物"
+        assert restore_source is None
+
+    def test_teclaw_draft_rejects_missing_config_artifact(self):
+        repo = Mock()
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"migration_path": "/arca-only"},
+        )
+        repo.get_by_id.side_effect = [draft, source]
+        bot_service = MagicMock()
+        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        service = _make_service(repo, bot_service=bot_service)
+
+        can_restore, reason, restore_source = service.can_restore_draft(2)
+
+        assert can_restore is False
+        assert reason == "上一版本没有可用的 config_artifact 构造物"
+        assert restore_source is None
 
     def test_artifact_without_migration_path_is_not_restoreable(self):
         repo = Mock()
@@ -2786,8 +2952,205 @@ class TestDraftRestore:
         assert reason == "上一版本没有可用的 migration_path 构造物"
         assert restore_source is None
 
+    @pytest.mark.parametrize(
+        ("operation_state", "expected_status", "expected_error"),
+        [
+            (PublishOperationState.PENDING.value, "restoring", None),
+            (PublishOperationState.ID_RECORDED.value, "restoring", None),
+            (PublishOperationState.COMPLETED.value, "success", None),
+            (PublishOperationState.FAILED.value, "failed", "restore failed"),
+            (PublishOperationState.ABANDONED.value, "failed", "superseded"),
+        ],
+    )
+    def test_get_draft_restore_status_maps_ledger_state(
+        self, operation_state, expected_status, expected_error
+    ):
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"migration_path": "/artifact/v1/openclaw"},
+        )
+        repo = self._stateful_repo(draft, source)
+        operation_repo = self._stateful_operation_repo()
+        operation = operation_repo.insert(
+            {
+                "publish_id": 2,
+                "operation_kind": PublishOperationKind.DRAFT_RESTORE.value,
+                "stage": PublishStage.DRAFT.value,
+                "attempt": 1,
+                "request_id": "pub_2_draft_restore_draft_a1",
+                "operator": "u1",
+                "params": {
+                    "source_publish_id": 1,
+                    "source_version": 1,
+                },
+                "env": "dev",
+            }
+        )
+        operation.state = operation_state
+        operation.baas_publish_id = 8801
+        operation.result = {
+            "baas_status": "SUCCESS",
+            "restore_type": "config_artifact",
+            "draft_binding_id": 802,
+        }
+        operation.last_error = expected_error
+        service = _make_service(
+            repo, publish_operation_repo=operation_repo
+        )
+
+        result = service.get_draft_restore_status(2, operation.id)
+
+        assert result["draft_publish_id"] == 2
+        assert result["operation_id"] == operation.id
+        assert result["task_id"] == "pub_2_draft_restore_draft_a1"
+        assert result["status"] == expected_status
+        assert result["operation_state"] == operation_state
+        assert result["source_publish_id"] == 1
+        assert result["source_version"] == 1
+        assert result["baas_publish_id"] == 8801
+        assert result["baas_status"] == "SUCCESS"
+        assert result["error"] == expected_error
+        assert (result["completed_at"] is not None) == (
+            operation_state in {
+                state.value for state in PublishOperationState.terminal()
+            }
+        )
+
+    def test_get_draft_restore_status_hides_mismatched_operation(self):
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1, status=PublishStatus.UPGRADED, version=1
+        )
+        repo = self._stateful_repo(draft, source)
+        operation_repo = self._stateful_operation_repo()
+        operation = operation_repo.insert(
+            {
+                "publish_id": 999,
+                "operation_kind": PublishOperationKind.DRAFT_RESTORE.value,
+                "stage": PublishStage.DRAFT.value,
+                "attempt": 1,
+                "request_id": "other-operation",
+                "operator": "u2",
+                "env": "dev",
+            }
+        )
+        service = _make_service(
+            repo, publish_operation_repo=operation_repo
+        )
+
+        with pytest.raises(PublishNotFoundError, match="草稿恢复操作不存在"):
+            service.get_draft_restore_status(2, operation.id)
+
+    @pytest.mark.parametrize(
+        "operation_state",
+        [
+            PublishOperationState.PENDING.value,
+            PublishOperationState.ID_RECORDED.value,
+        ],
+    )
+    def test_get_draft_restore_status_converges_expired_operation(
+        self, operation_state
+    ):
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"migration_path": "/artifact/v1/openclaw"},
+        )
+        repo = self._stateful_repo(draft, source)
+        operation_repo = self._stateful_operation_repo()
+        operation = operation_repo.insert(
+            {
+                "publish_id": 2,
+                "operation_kind": PublishOperationKind.DRAFT_RESTORE.value,
+                "stage": PublishStage.DRAFT.value,
+                "attempt": 1,
+                "request_id": "pub_2_draft_restore_draft_a1",
+                "operator": "u1",
+                "params": {
+                    "source_publish_id": 1,
+                    "source_version": 1,
+                    "deadline_at": (
+                        datetime.now() - timedelta(minutes=1)
+                    ).isoformat(),
+                },
+                "env": "dev",
+            }
+        )
+        operation.state = operation_state
+        if operation_state == PublishOperationState.ID_RECORDED.value:
+            operation.baas_publish_id = 8801
+        service = _make_service(repo, publish_operation_repo=operation_repo)
+
+        result = service.get_draft_restore_status(2, operation.id)
+
+        assert result["status"] == "failed"
+        assert result["operation_state"] == PublishOperationState.FAILED.value
+        assert result["error"] == "恢复草稿超时（默认限制 30 分钟）"
+        assert result["completed_at"] is not None
+        assert operation_repo.get_by_id(operation.id).state == (
+            PublishOperationState.FAILED.value
+        )
+
+    def test_can_restore_draft_expires_stale_operation_and_unblocks_retry(self):
+        draft = _create_mock_record(
+            record_id=2, status=PublishStatus.DRAFT, version=2, last_pub_id=1
+        )
+        source = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.UPGRADED,
+            version=1,
+            ext={"migration_path": "/artifact/v1/openclaw"},
+        )
+        repo = self._stateful_repo(draft, source)
+        operation_repo = self._stateful_operation_repo()
+        operation = operation_repo.insert(
+            {
+                "publish_id": 2,
+                "operation_kind": PublishOperationKind.DRAFT_RESTORE.value,
+                "stage": PublishStage.DRAFT.value,
+                "attempt": 1,
+                "request_id": "pub_2_draft_restore_draft_a1",
+                "operator": "u1",
+                "params": {
+                    "source_publish_id": 1,
+                    "source_version": 1,
+                    "deadline_at": (
+                        datetime.now() - timedelta(minutes=1)
+                    ).isoformat(),
+                },
+                "env": "dev",
+            }
+        )
+        bot_service = MagicMock()
+        bot_service.get_bot.return_value = {"active_engine": "openclaw"}
+        service = _make_service(
+            repo,
+            bot_service=bot_service,
+            publish_operation_repo=operation_repo,
+        )
+
+        can_restore, reason, source_info = service.can_restore_draft(2)
+
+        assert can_restore is True
+        assert reason == "可以恢复草稿"
+        assert source_info == {"source_publish_id": 1, "source_version": 1}
+        expired = operation_repo.get_by_id(operation.id)
+        assert expired.state == PublishOperationState.FAILED.value
+        assert expired.last_error == "恢复草稿超时（默认限制 30 分钟）"
+
     @pytest.mark.asyncio
-    async def test_restore_draft_returns_immediately_then_records_success(self):
+    async def test_restore_draft_returns_immediately_and_enqueues_durable_task(self):
         draft = _create_mock_record(
             record_id=2,
             status=PublishStatus.DRAFT,
@@ -2802,48 +3165,47 @@ class TestDraftRestore:
             ext={"migration_path": "/artifact/v1/openclaw"},
         )
         repo = self._stateful_repo(draft, source)
-        release_flow = asyncio.Event()
-        flow = MagicMock()
-
-        async def execute_restore(**_kwargs):
-            await release_flow.wait()
-            return {
-                "status": "success",
-                "restore_type": "migration_path",
-                "draft_binding_id": 802,
-            }
-
-        flow.execute_restore_draft = AsyncMock(side_effect=execute_restore)
-        service = _make_service(repo, publish_flow_service_provider=lambda: flow)
+        operation_repo = self._stateful_operation_repo()
+        task_queue = Mock()
+        bot_service = Mock()
+        bot_service.get_bot.return_value = {"binding_id": 802}
+        binding_repo = Mock()
+        binding_repo.get_by_id.return_value = SimpleNamespace(
+            id=802, device_id="BOT-current-draft"
+        )
+        service = _make_service(
+            repo,
+            bot_service=bot_service,
+            device_binding_repo=binding_repo,
+            publish_operation_repo=operation_repo,
+            task_queue_service=task_queue,
+        )
 
         result = await service.restore_draft(2, operator="u1")
 
         assert result["status"] == "restoring"
-        assert result["task_id"].startswith("draft_restore_")
+        assert result["operation_id"] == 1
+        assert result["task_id"].startswith("pub_2_draft_restore_draft_a1")
         assert draft.status == PublishStatus.DRAFT
-        assert draft.ext["existing"] is True
-        assert draft.ext["draft_restore"]["status"] == "restoring"
-        assert draft.ext["draft_restore"]["source_publish_id"] == 1
-
-        await asyncio.sleep(0)
-        flow.execute_restore_draft.assert_awaited_once_with(
-            draft_publish_id=2, source_publish_id=1, operator="u1"
+        assert draft.ext == {"existing": True}
+        op = operation_repo.get_by_id(1)
+        assert op.state == PublishOperationState.PENDING.value
+        assert op.bot_uuid == "BOT-current-draft"
+        assert op.params["source_publish_id"] == 1
+        assert op.params["source_version"] == 1
+        assert datetime.fromisoformat(op.params["deadline_at"]) > datetime.now()
+        task_queue.enqueue.assert_called_once_with(
+            "service_bot.publish.draft_restore",
+            {
+                "draft_publish_id": 2,
+                "operation_id": 1,
+                "operator": "u1",
+            },
+            deadline_seconds=1860,
         )
-        assert draft.ext["draft_restore"]["status"] == "restoring"
-
-        release_flow.set()
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-
-        assert draft.status == PublishStatus.DRAFT
-        assert draft.ext["draft_restore"]["status"] == "success"
-        assert draft.ext["draft_restore"]["restore_type"] == "migration_path"
-        assert draft.ext["draft_restore"]["draft_binding_id"] == 802
-        assert "migration_path" not in draft.ext
-        assert "binding" not in draft.ext
 
     @pytest.mark.asyncio
-    async def test_restore_draft_records_failure_and_can_retry(self):
+    async def test_restore_draft_enqueue_failure_marks_operation_failed_and_can_retry(self):
         draft = _create_mock_record(
             record_id=2,
             status=PublishStatus.DRAFT,
@@ -2857,18 +3219,30 @@ class TestDraftRestore:
             ext={"migration_path": "/artifact/v1/openclaw"},
         )
         repo = self._stateful_repo(draft, source)
-        flow = MagicMock()
-        flow.execute_restore_draft = AsyncMock(side_effect=RuntimeError("rsync failed"))
-        service = _make_service(repo, publish_flow_service_provider=lambda: flow)
+        operation_repo = self._stateful_operation_repo()
+        task_queue = Mock()
+        task_queue.enqueue.side_effect = RuntimeError("queue unavailable")
+        bot_service = Mock()
+        bot_service.get_bot.return_value = {"binding_id": 802}
+        binding_repo = Mock()
+        binding_repo.get_by_id.return_value = SimpleNamespace(
+            id=802, device_id="BOT-current-draft"
+        )
+        service = _make_service(
+            repo,
+            bot_service=bot_service,
+            device_binding_repo=binding_repo,
+            publish_operation_repo=operation_repo,
+            task_queue_service=task_queue,
+        )
 
-        result = await service.restore_draft(2, operator="u1")
-        assert result["status"] == "restoring"
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        with pytest.raises(BotPublishServiceError, match="恢复任务入队失败"):
+            await service.restore_draft(2, operator="u1")
 
         assert draft.status == PublishStatus.DRAFT
-        assert draft.ext["draft_restore"]["status"] == "failed"
-        assert draft.ext["draft_restore"]["error"] == "rsync failed"
+        first_op = operation_repo.get_by_id(1)
+        assert first_op.state == PublishOperationState.FAILED.value
+        assert first_op.last_error == "持久化恢复任务入队失败: queue unavailable"
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
         assert can_restore is True
@@ -2882,18 +3256,24 @@ class TestDraftRestore:
             status=PublishStatus.DRAFT,
             version=2,
             last_pub_id=1,
-            ext={
-                "draft_restore": {
-                    "status": "restoring",
-                    "task_id": "draft_restore_existing",
-                }
-            },
         )
         repo = Mock()
         repo.get_by_id.return_value = draft
-        service = _make_service(repo)
+        operation_repo = self._stateful_operation_repo()
+        operation_repo.insert(
+            {
+                "publish_id": 2,
+                "operation_kind": "draft_restore",
+                "stage": "draft",
+                "attempt": 1,
+                "request_id": "draft_restore_existing",
+                "operator": "u1",
+                "env": "dev",
+            }
+        )
+        service = _make_service(repo, publish_operation_repo=operation_repo)
 
         with pytest.raises(BotPublishServiceError, match="正在恢复中"):
             await service.restore_draft(2, operator="u1")
 
-        repo.update_status_with_ext.assert_not_called()
+        assert len(operation_repo._operations) == 1

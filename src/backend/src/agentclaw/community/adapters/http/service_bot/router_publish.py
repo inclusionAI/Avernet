@@ -1483,6 +1483,54 @@ async def can_restore_draft(
         return ApiResponse(success=False, message=f"查询失败: {e}", error_code=500, data=None)
 
 
+@router.get(
+    "/{publish_id}/draft-restore-operations/{operation_id}",
+    response_model=ApiResponse,
+    summary="查询草稿恢复操作状态",
+)
+@with_interceptors(CollaboratorPermissionInterceptor(
+    params_extractor=extract_from_publish_id,
+    extractor_params={"publish_id": "$publish_id"},
+    persist_audit_log=False,
+))
+async def get_draft_restore_status(
+    publish_id: int,
+    operation_id: int,
+    user: AuthenticatedUser = Depends(get_current_user),
+    publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
+) -> ApiResponse:
+    """Read one durable draft-restore attempt for frontend polling."""
+    try:
+        if not user.staffId or user.staffId == "anonymous":
+            return ApiResponse(
+                success=False,
+                message="无法获取用户信息",
+                error_code=400,
+                data=None,
+            )
+        result = publish_service.get_draft_restore_status(
+            publish_id=publish_id,
+            operation_id=operation_id,
+        )
+        return ApiResponse(
+            success=True,
+            data=result,
+            message="查询草稿恢复状态成功",
+        )
+    except PublishNotFoundError as e:
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
+    except BotPublishServiceError as e:
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+    except Exception as e:
+        logger.error(f"[get_draft_restore_status] Unexpected error: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"查询草稿恢复状态失败: {e}",
+            error_code=500,
+            data=None,
+        )
+
+
 @router.post(
     "/{publish_id}/restore-draft",
     response_model=ApiResponse,
@@ -1498,7 +1546,12 @@ async def restore_draft(
     user: AuthenticatedUser = Depends(get_current_user),
     publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
 ) -> ApiResponse:
-    """Overwrite draft files only; publish states and online containers are unchanged."""
+    """Restore the current draft container from the previous version artifact.
+
+    ARCA restores the versioned workspace snapshot; Teclaw hot-updates the
+    historical draft artifact into the existing draft bot. Publish state and
+    verify/online containers are unchanged.
+    """
     try:
         if not user.staffId or user.staffId == "anonymous":
             return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)

@@ -1021,6 +1021,51 @@ async def test_draft_restore_query_and_execute_endpoints():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_get_draft_restore_status_endpoint_paths():
+    publish_service = MagicMock()
+    publish_service.get_draft_restore_status.return_value = {
+        "draft_publish_id": 2,
+        "operation_id": 7,
+        "task_id": "pub_2_draft_restore_draft_a1",
+        "status": "restoring",
+        "operation_state": "id_recorded",
+        "source_publish_id": 1,
+        "source_version": 1,
+        "error": None,
+    }
+
+    response = await router_publish.get_draft_restore_status(
+        2, 7, user=_USER, publish_service=publish_service
+    )
+    assert response.success is True
+    assert response.data["operation_id"] == 7
+    assert response.data["status"] == "restoring"
+    publish_service.get_draft_restore_status.assert_called_once_with(
+        publish_id=2, operation_id=7
+    )
+
+    response = await router_publish.get_draft_restore_status(
+        2, 7, user=_ANON, publish_service=publish_service
+    )
+    assert_error(response, 400, "无法获取用户信息")
+
+    publish_service.get_draft_restore_status.side_effect = PublishNotFoundError(
+        "草稿恢复操作不存在"
+    )
+    response = await router_publish.get_draft_restore_status(
+        2, 999, user=_USER, publish_service=publish_service
+    )
+    assert_error(response, 404, "草稿恢复操作不存在")
+
+    publish_service.get_draft_restore_status.side_effect = RuntimeError("boom")
+    response = await router_publish.get_draft_restore_status(
+        2, 7, user=_USER, publish_service=publish_service
+    )
+    assert_error(response, 500, "查询草稿恢复状态失败: boom")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_draft_restore_endpoint_error_paths():
     publish_service = MagicMock()
 
