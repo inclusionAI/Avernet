@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from agentclaw.community.adapters.http.openapi_v1.responses import ClusterMismatchError
+from agentclaw.community.adapters.http.openapi_v1.errors import ClusterMismatchError
 
 # Public cluster names. ``ANDC`` is the teclaw cluster; ``ACRA`` is everything
 # else. These are external aliases for the internal ``teclaw`` / ARCA providers.

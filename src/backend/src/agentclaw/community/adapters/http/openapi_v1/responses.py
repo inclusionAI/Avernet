@@ -30,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
     Page,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors import ClusterMismatchError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotLimitExceededError,
@@ -42,16 +43,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.plugin_api.passport import PassportError
 
 T = TypeVar("T")
-
-
-class ClusterMismatchError(Exception):
-    """Raised when a request's ``engine`` and ``cluster_name`` violate the rule.
-
-    The public cluster enum is in strict bijection with the engine (``ANDC`` for
-    ``teclaw``, ``ACRA`` for everything else); a pair that breaks it is a client
-    error. Defined here so it participates in the same envelope mapping as the
-    domain errors; the rule itself lives in ``clusters.py``.
-    """
 
 
 def _trace_id(request: Request) -> str:

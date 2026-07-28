@@ -6,6 +6,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
+
+_CLUSTER_DESC = (
+    "Deployment cluster, in strict 1:1 correspondence with the engine: "
+    "'ANDC' for engine 'teclaw', 'ACRA' for every other engine. On create the "
+    "engine/cluster pair is validated against this rule (400 on mismatch)."
+)
+
 
 class Bot(BaseModel):
     """An agent (bot) record."""
@@ -14,7 +22,7 @@ class Bot(BaseModel):
     bot_name: str
     bot_desc: str
     engine: str
-    cluster_name: str
+    cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
     bot_type: str
     status: str = Field(description="Lifecycle status: PENDING | ACTIVE | FAILED.")
     owner_entity_id: str
@@ -26,7 +34,7 @@ class BotCreate(BaseModel):
     bot_name: str
     bot_desc: str
     engine: str
-    cluster_name: str
+    cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
     bot_type: str
     engine_options: dict[str, Any] = Field(
         default_factory=dict,

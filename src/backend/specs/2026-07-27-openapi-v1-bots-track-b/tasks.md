@@ -37,15 +37,19 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
         cluster names come only from the enum. 9 passed.
 - **Depends on:** —
 
-## Task 3: Schema updates  `[ ]`
+## Task 3: Schema updates  `[x]`
 - **Goal:** Public `Bot`/`BotCreate` express `cluster_name` as the validated enum
   and advertise the combination rule in the contract.
-- **Files:** `adapters/http/openapi_v1/bots/schemas.py`.
+- **Files:** `adapters/http/openapi_v1/bots/schemas.py`,
+  `adapters/http/openapi_v1/errors.py` (new — breaks an import cycle: the
+  lightweight schema/cluster layer must not transitively import `bot_service`).
 - **Done when:**
-  - [ ] `Bot.cluster_name` and `BotCreate.cluster_name` are
+  - [x] `Bot.cluster_name` and `BotCreate.cluster_name` are the `ClusterName`
         `Literal["ACRA", "ANDC"]`; field descriptions state the engine↔cluster
-        rule so it shows in the generated OpenAPI.
-  - [ ] No other schema field changes; existing fields untouched.
+        rule so it shows in the generated OpenAPI. Bad enum values rejected.
+  - [x] No other schema field changes; existing fields untouched.
+        (`BotUpdate.cluster_name` left as-is per scope — flagged for review since
+        cluster is engine-derived and engine is immutable on update.)
 - **Depends on:** —
 
 ## Task 4: Extract the create / auth-status flow  `[ ]`
