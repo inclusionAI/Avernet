@@ -21,6 +21,9 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    PublishFlowServiceError,
+)
 from agentclaw.community.core.service_bot.types import (
     OnlineDeployDecision,
     PublishStage,
@@ -182,6 +185,10 @@ class UpgradeResolutionMixin:
         so a raised error here means a transient/non-404 BaaS failure — NOT that
         the candidate is gone. We let it propagate so the durable task retries the
         status read rather than creating a replacement for a possibly-live bot.
+        An empty/absent status on a *successful* envelope is likewise ambiguous
+        (``get_bot`` returns the response ``data`` which defaults to ``{}``), so
+        we refuse to treat it as gone and raise so the task retries — only an
+        explicit terminal status recreates.
         """
         bot_uuid, _ = self._resolve_online_reuse_target(publish_record)
         if not bot_uuid:
@@ -192,7 +199,17 @@ class UpgradeResolutionMixin:
         baas_bot = self._baas_service.get_bot(bot_uuid=bot_uuid)
         status = (baas_bot or {}).get("status")
 
-        if not status or status in _ONLINE_GONE_BAAS_STATUSES:
+        if not status:
+            # A genuine 404 is already normalized to RELEASED; an empty/absent
+            # status from a 200 envelope is ambiguous — NOT proof the candidate is
+            # gone. Refuse to recreate on it; raise so the durable task retries the
+            # status read rather than replacing a possibly-live bot.
+            raise PublishFlowServiceError(
+                f"BaaS get_bot returned no status for candidate "
+                f"bot_uuid={bot_uuid}; refusing to treat as gone"
+            )
+
+        if status in _ONLINE_GONE_BAAS_STATUSES:
             return OnlineDeployDecision.FIRST_RELEASE
 
         if status in _ONLINE_NOT_LIVE_BAAS_STATUSES:
