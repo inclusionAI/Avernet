@@ -6,6 +6,12 @@ from dataclasses import replace
 
 import pytest
 
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    LAYOUT_CONTRACT_VERSION,
+    MAPPING_CONTRACT_VERSION,
+    RuntimeLayoutProbeResult,
+    RuntimeLayoutProbeStatus,
+)
 from agentclaw.community.core.skills_pool.recovery_service import (
     ManualRepairResolution,
     SkillsPoolRollbackOutcome,
@@ -233,6 +239,7 @@ class _RollbackLayouts:
             self.state,
             phase=SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED,
             data_plane_cutover_committed=False,
+            last_probe_evidence={"rollback": dict(kwargs["evidence"])},
         )
         return True
 
@@ -320,28 +327,74 @@ class _Skills:
         return self.active
 
 
+class _HistoricalSkills(_Skills):
+    local = [
+        *_Skills.local,
+        RegisteredSkillAsset(
+            skill_id=12,
+            name="local-a",
+            git_path=(
+                "local:///home/admin/.openclaw/workspace/"
+                "skills-pool/older-version/local-a"
+            ),
+        ),
+    ]
+    active = _Skills.active
+
+
 class _RollbackRuntime:
     def __init__(self) -> None:
         self.events: list[str] = []
         self.publish_results = [True, False]
         self.mapping_layouts: list[SkillMappingSourceLayout] = []
+        self.expected_registered_local_names = ["local-a"]
+        self.probe_result = RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus.READY,
+            engine="openclaw",
+            layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            preparation_id="preparation-1",
+            evidence={"mapping_contract_version": MAPPING_CONTRACT_VERSION},
+        )
+
+    async def probe(self, **kwargs: object) -> RuntimeLayoutProbeResult:
+        self.events.append("probe")
+        return self.probe_result
 
     async def rollback_to_legacy(self, **kwargs: object) -> PoolCutoverResult:
         self.events.append("rollback")
-        assert kwargs["registered_local_names"] == ["local-a"]
+        assert (
+            kwargs["registered_local_names"]
+            == self.expected_registered_local_names
+        )
         return PoolCutoverResult(
             committed=True,
             status=PoolCutoverStatus.COMMITTED,
-            evidence={"source": "current_pool"},
+            evidence={
+                "source": "current_pool",
+                "local_locators": {
+                    "local-a": (
+                        "local:///home/admin/.openclaw/workspace/"
+                        "skills/skills-local/local-a"
+                    ),
+                },
+            },
         )
 
     async def publish_mappings(self, **kwargs: object) -> bool:
         self.events.append("mapping")
         self.mapping_layouts.append(kwargs["source_layout"])
         mappings = kwargs["mappings"]
-        assert [item.source for item in mappings] == [
-            "/home/admin/.openclaw/workspace/skills/skills-local/local-a",
-            "/home/admin/.openclaw/workspace/skills/skills-repo/business/repo-a",
+        assert [item.to_dict() for item in mappings] == [
+            {
+                "corpus": "local",
+                "relative_path": "local-a",
+                "link_name": "local-a",
+            },
+            {
+                "corpus": "repo",
+                "relative_path": "business/repo-a",
+                "link_name": "repo-a",
+            },
         ]
         return self.publish_results.pop(0)
 
@@ -383,6 +436,7 @@ async def test_explicit_rollback_only_moves_forward_and_preserves_pool_writes() 
     assert layouts.state.phase is SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED
     assert layouts.events == ["begin", "cutover", "failure"]
     assert runtime.events == [
+        "probe",
         "mapping",
         "verify",
         "rollback",
@@ -407,7 +461,7 @@ async def test_explicit_rollback_only_moves_forward_and_preserves_pool_writes() 
     )
 
     assert second.outcome is SkillsPoolRollbackOutcome.LEGACY_ACTIVE
-    assert runtime.events == ["mapping", "verify"]
+    assert runtime.events == ["probe", "mapping", "verify"]
     assert layouts.events == ["database"]
     assert layouts.locators == {
         11: (
@@ -415,6 +469,36 @@ async def test_explicit_rollback_only_moves_forward_and_preserves_pool_writes() 
             "skills/skills-local/local-a"
         )
     }
+
+
+@pytest.mark.asyncio
+async def test_rollback_updates_all_historical_local_versions() -> None:
+    layouts = _RollbackLayouts()
+    runtime = _RollbackRuntime()
+    runtime.publish_results = [True, True]
+    runtime.expected_registered_local_names = ["local-a", "local-a"]
+    service = SkillsPoolRollbackService(
+        bot_repository=_Bots(),
+        layout_repository=layouts,
+        skill_repository=_HistoricalSkills(),
+        runtime=runtime,
+        edit_guard=_EditGuard(),
+    )
+
+    result = await service.rollback(
+        scope=SCOPE,
+        rollback_generation="rollback-1",
+        lease_owner="operator-task-1",
+        operator="oncall-1",
+        note="rollback all versions",
+    )
+
+    locator = (
+        "local:///home/admin/.openclaw/workspace/"
+        "skills/skills-local/local-a"
+    )
+    assert result.outcome is SkillsPoolRollbackOutcome.LEGACY_ACTIVE
+    assert layouts.locators == {11: locator, 12: locator}
 
 
 @pytest.mark.asyncio
@@ -437,3 +521,40 @@ async def test_rollback_bot_validation_failure_is_persisted() -> None:
     assert result.outcome is SkillsPoolRollbackOutcome.BOT_CHANGED
     assert layouts.events == ["begin", "failure"]
     assert layouts.state.last_failure_stage == "rollback_bot_validation"
+
+
+@pytest.mark.asyncio
+async def test_rollback_old_runtime_is_fenced_before_v2_mapping_request() -> None:
+    layouts = _RollbackLayouts()
+    runtime = _RollbackRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
+        preparation_id=None,
+        evidence={"reason": "logical_mapping_contract_not_supported"},
+    )
+    service = SkillsPoolRollbackService(
+        bot_repository=_Bots(),
+        layout_repository=layouts,
+        skill_repository=_Skills(),
+        runtime=runtime,
+        edit_guard=_EditGuard(),
+    )
+
+    result = await service.rollback(
+        scope=SCOPE,
+        rollback_generation="rollback-1",
+        lease_owner="operator-task-1",
+        operator="oncall-1",
+        note="old runtime must not receive mapping v2",
+    )
+
+    assert result.outcome is SkillsPoolRollbackOutcome.ROLLBACK_FAILED
+    assert result.retryable is True
+    assert result.evidence == {
+        "reason": "logical_mapping_contract_not_supported"
+    }
+    assert runtime.events == ["probe"]
+    assert layouts.events == ["begin", "failure"]
+    assert layouts.state.phase is SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING
+    assert layouts.state.last_failure_stage == "runtime_probe"

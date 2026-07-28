@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from engine.community.core.skills.layout_planner import (
+    MAPPING_CONTRACT_VERSION,
+)
 from engine.community.plugins.hermes.layout_pool import (
     PoolActivationStatus,
     RuntimeLayoutInspectionStatus,
@@ -73,12 +76,26 @@ def test_probe_requires_verified_hermes_legacy_bridge(tmp_path: Path) -> None:
 
     result = inspect_hermes_runtime_layout(
         home=home,
+        mapping_contract_version=MAPPING_CONTRACT_VERSION,
         repo_is_mounted=lambda path: path == pool_repo,
     )
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
     assert result.engine == "hermes"
     assert result.evidence["checks"]["legacy_local_bridge_valid"] is True
+    assert (
+        result.evidence["mapping_contract_version"]
+        == MAPPING_CONTRACT_VERSION
+    )
+    assert result.evidence["resolved_layout"]["active_root"] == str(
+        home / ".hermes/skills"
+    )
+
+    legacy_consumer = inspect_hermes_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert "mapping_contract_version" not in legacy_consumer.evidence
 
     marker_path = pool_root / ".pool-ready"
     marker = json.loads(marker_path.read_text())

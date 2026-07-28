@@ -13,6 +13,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from engine.community.core.skills.layout_planner import (
+    LayoutIdentity,
+    RuntimeLayoutContext,
+    SkillLayoutResolutionError,
+    resolve_filesystem_skill_layout,
+    resolve_local_skill_locators,
+    resolved_filesystem_layout_evidence,
+)
+from engine.community.core.skills.layout_planner import (
     ResolvedFilesystemLayoutPlan as _Layout,
 )
 from engine.community.plugins.skills_pool.layout_atomic import (
@@ -203,6 +211,55 @@ class _PostCutoverFinalization:
     post_sync: dict[str, object]
     cleanup_pending: bool
     failure: PoolActivationResult | None = None
+
+
+def _with_resolution_evidence(
+    result_factory: Callable[[], PoolActivationResult],
+    *,
+    engine: str,
+    source_layout: MappingSourceLayout,
+    registered_local_names: list[str],
+    home: str | Path,
+) -> PoolActivationResult:
+    try:
+        plan = resolve_filesystem_skill_layout(
+            LayoutIdentity(
+                engine_type=engine,
+                layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            ),
+            RuntimeLayoutContext(home=Path(home)),
+        )
+        local_root = (
+            plan.pool_local
+            if source_layout is MappingSourceLayout.POOL
+            else plan.legacy_local
+        )
+        repo_root = (
+            plan.pool_repo
+            if source_layout is MappingSourceLayout.POOL
+            else plan.legacy_repo
+        )
+        local_locators = resolve_local_skill_locators(
+            local_root,
+            registered_local_names,
+        )
+    except SkillLayoutResolutionError as error:
+        return _invalid("registered_local_name_invalid", error=str(error))
+    result = result_factory()
+    if not result.committed:
+        return result
+    return PoolActivationResult(
+        result.status,
+        {
+            **result.evidence,
+            "resolved_layout": resolved_filesystem_layout_evidence(
+                plan,
+                local_root=local_root,
+                repo_root=repo_root,
+            ),
+            "local_locators": local_locators,
+        },
+    )
 
 
 def _read_active_marker(path: Path) -> dict[str, object] | None:
@@ -991,6 +1048,18 @@ def _activate_pool(
     layout = _Layout.for_engine(engine, home_path)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", migration_generation):
         return _invalid("migration_generation_invalid")
+    try:
+        normalized_names = list(
+            resolve_local_skill_locators(
+                layout.pool_local,
+                registered_local_names,
+            )
+        )
+    except SkillLayoutResolutionError as error:
+        return _invalid(
+            "registered_local_name_invalid",
+            error=str(error),
+        )
 
     inspection = inspect_runtime_layout(
         engine=engine,
@@ -1074,18 +1143,6 @@ def _activate_pool(
             },
         )
 
-    normalized_names: list[str] = []
-    for name in registered_local_names:
-        path = Path(name)
-        if (
-            not name
-            or path.is_absolute()
-            or len(path.parts) != 1
-            or name in {".", ".."}
-        ):
-            return _invalid("registered_local_name_invalid", name=name)
-        if name not in normalized_names:
-            normalized_names.append(name)
     try:
         if layout.legacy_local.is_symlink():
             if _lexical_target(layout.legacy_local) != Path(
@@ -1387,17 +1444,23 @@ def activate_openclaw_pool(
     # Deprecated compatibility seam for existing in-process callers. Forward
     # activation no longer depends on atomic exchange.
     del exchange_paths
-    return _activate_pool(
+    return _with_resolution_evidence(
+        lambda: _activate_pool(
+            engine="openclaw",
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            registered_local_names=registered_local_names,
+            mappings=mappings,
+            home=home,
+            repo_is_mounted=repo_is_mounted,
+            retire_path=retire_path,
+            before_legacy_retire=before_legacy_retire,
+            before_post_sync=before_post_sync,
+        ),
         engine="openclaw",
-        migration_generation=migration_generation,
-        preparation_id=preparation_id,
+        source_layout=MappingSourceLayout.POOL,
         registered_local_names=registered_local_names,
-        mappings=mappings,
         home=home,
-        repo_is_mounted=repo_is_mounted,
-        retire_path=retire_path,
-        before_legacy_retire=before_legacy_retire,
-        before_post_sync=before_post_sync,
     )
 
 
@@ -1415,17 +1478,23 @@ def activate_claude_code_pool(
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
     del exchange_paths
-    return _activate_pool(
+    return _with_resolution_evidence(
+        lambda: _activate_pool(
+            engine="claude_code",
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            registered_local_names=registered_local_names,
+            mappings=mappings,
+            home=home,
+            repo_is_mounted=repo_is_mounted,
+            retire_path=retire_path,
+            before_legacy_retire=before_legacy_retire,
+            before_post_sync=before_post_sync,
+        ),
         engine="claude_code",
-        migration_generation=migration_generation,
-        preparation_id=preparation_id,
+        source_layout=MappingSourceLayout.POOL,
         registered_local_names=registered_local_names,
-        mappings=mappings,
         home=home,
-        repo_is_mounted=repo_is_mounted,
-        retire_path=retire_path,
-        before_legacy_retire=before_legacy_retire,
-        before_post_sync=before_post_sync,
     )
 
 
@@ -1443,17 +1512,23 @@ def activate_aicoding_pool(
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
     del exchange_paths
-    return _activate_pool(
+    return _with_resolution_evidence(
+        lambda: _activate_pool(
+            engine="aicoding",
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            registered_local_names=registered_local_names,
+            mappings=mappings,
+            home=home,
+            repo_is_mounted=repo_is_mounted,
+            retire_path=retire_path,
+            before_legacy_retire=before_legacy_retire,
+            before_post_sync=before_post_sync,
+        ),
         engine="aicoding",
-        migration_generation=migration_generation,
-        preparation_id=preparation_id,
+        source_layout=MappingSourceLayout.POOL,
         registered_local_names=registered_local_names,
-        mappings=mappings,
         home=home,
-        repo_is_mounted=repo_is_mounted,
-        retire_path=retire_path,
-        before_legacy_retire=before_legacy_retire,
-        before_post_sync=before_post_sync,
     )
 
 
@@ -1471,17 +1546,23 @@ def activate_hermes_pool(
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
     del exchange_paths
-    return _activate_pool(
+    return _with_resolution_evidence(
+        lambda: _activate_pool(
+            engine="hermes",
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            registered_local_names=registered_local_names,
+            mappings=mappings,
+            home=home,
+            repo_is_mounted=repo_is_mounted,
+            retire_path=retire_path,
+            before_legacy_retire=before_legacy_retire,
+            before_post_sync=before_post_sync,
+        ),
         engine="hermes",
-        migration_generation=migration_generation,
-        preparation_id=preparation_id,
+        source_layout=MappingSourceLayout.POOL,
         registered_local_names=registered_local_names,
-        mappings=mappings,
         home=home,
-        repo_is_mounted=repo_is_mounted,
-        retire_path=retire_path,
-        before_legacy_retire=before_legacy_retire,
-        before_post_sync=before_post_sync,
     )
 
 
@@ -1498,18 +1579,18 @@ def _rollback_pool(
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", rollback_generation):
         return _invalid("rollback_generation_invalid")
     layout = _Layout.for_engine(engine, Path(home))
-    normalized_names: list[str] = []
-    for name in registered_local_names:
-        path = Path(name)
-        if (
-            not name
-            or path.is_absolute()
-            or len(path.parts) != 1
-            or name in {".", ".."}
-        ):
-            return _invalid("registered_local_name_invalid", name=name)
-        if name not in normalized_names:
-            normalized_names.append(name)
+    try:
+        normalized_names = list(
+            resolve_local_skill_locators(
+                layout.legacy_local,
+                registered_local_names,
+            )
+        )
+    except SkillLayoutResolutionError as error:
+        return _invalid(
+            "registered_local_name_invalid",
+            error=str(error),
+        )
 
     rebuild = layout.legacy_local.parent / (
         f".skills-local.pool-rollback-{rollback_generation}"
@@ -1632,12 +1713,18 @@ def rollback_openclaw_pool(
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
 ) -> PoolActivationResult:
-    return _rollback_pool(
+    return _with_resolution_evidence(
+        lambda: _rollback_pool(
+            engine="openclaw",
+            rollback_generation=rollback_generation,
+            registered_local_names=registered_local_names,
+            home=home,
+            exchange_paths=exchange_paths,
+        ),
         engine="openclaw",
-        rollback_generation=rollback_generation,
+        source_layout=MappingSourceLayout.LEGACY,
         registered_local_names=registered_local_names,
         home=home,
-        exchange_paths=exchange_paths,
     )
 
 
@@ -1648,12 +1735,18 @@ def rollback_claude_code_pool(
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
 ) -> PoolActivationResult:
-    return _rollback_pool(
+    return _with_resolution_evidence(
+        lambda: _rollback_pool(
+            engine="claude_code",
+            rollback_generation=rollback_generation,
+            registered_local_names=registered_local_names,
+            home=home,
+            exchange_paths=exchange_paths,
+        ),
         engine="claude_code",
-        rollback_generation=rollback_generation,
+        source_layout=MappingSourceLayout.LEGACY,
         registered_local_names=registered_local_names,
         home=home,
-        exchange_paths=exchange_paths,
     )
 
 
@@ -1664,12 +1757,18 @@ def rollback_aicoding_pool(
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
 ) -> PoolActivationResult:
-    return _rollback_pool(
+    return _with_resolution_evidence(
+        lambda: _rollback_pool(
+            engine="aicoding",
+            rollback_generation=rollback_generation,
+            registered_local_names=registered_local_names,
+            home=home,
+            exchange_paths=exchange_paths,
+        ),
         engine="aicoding",
-        rollback_generation=rollback_generation,
+        source_layout=MappingSourceLayout.LEGACY,
         registered_local_names=registered_local_names,
         home=home,
-        exchange_paths=exchange_paths,
     )
 
 
@@ -1680,12 +1779,18 @@ def rollback_hermes_pool(
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
 ) -> PoolActivationResult:
-    return _rollback_pool(
+    return _with_resolution_evidence(
+        lambda: _rollback_pool(
+            engine="hermes",
+            rollback_generation=rollback_generation,
+            registered_local_names=registered_local_names,
+            home=home,
+            exchange_paths=exchange_paths,
+        ),
         engine="hermes",
-        rollback_generation=rollback_generation,
+        source_layout=MappingSourceLayout.LEGACY,
         registered_local_names=registered_local_names,
         home=home,
-        exchange_paths=exchange_paths,
     )
 
 

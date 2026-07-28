@@ -4,8 +4,7 @@ Skills Pool 控制面的 Bot 级布局状态、首次迁移认领和激活编排
 容器目录准备由镜像负责；本模块通过当前 runtime adapter 完成 probe、
 受支持文件型引擎的原子数据面切换与 Pool mapping，并在最后事务性提交
 locator 和 `POOL_ACTIVE`。当前已接入 OpenClaw、Claude Code、AICoding 与
-Hermes；完整多引擎
-Engine Layout Descriptor 仍不在本期范围内。
+Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
 
 ## 核心语义
 
@@ -39,7 +38,17 @@ Engine Layout Descriptor 仍不在本期范围内。
   无效结构持久化失败证据并阻断；重复任务通过 generation/lease 收敛。
 - 激活只处理当前仍可编辑、已经认领、引擎已显式接入且由当前 worker 持有
   lease 的 Bot；每次执行都重新读取 Bot 和当前 provider binding，并重新
-  probe 对应引擎 marker。未知引擎不回退到 OpenClaw。
+  probe 对应引擎 marker。只有 probe evidence 明确声明
+  `skills-pool-mapping-v2` 后才发送 logical mapping；旧或缺失 capability
+  作为 `NOT_CAPABLE` 释放认领并保持 Legacy。OpenClaw、Claude Code 内置
+  consumer 直接广告 v2；AICoding、Hermes 只有在具体 composition root
+  已接入同一 resolver 后才显式广告，旧 consumer 继续保持
+  `NOT_CAPABLE`/Legacy。未知引擎不回退到 OpenClaw。
+- Backend 发送的 v2 mapping 只包含
+  `(corpus, relative_path, link_name)`；Engine 使用本地 runtime context 和
+  descriptor 投影 source/active target，并返回 locator evidence。Backend
+  只校验并持久化 evidence，不按引擎重建 activation/publish/verify/reconcile
+  的物理路径。
 - 容器内先把 Legacy local 以 generation-scoped rename 移入隔离区，再执行
   best-effort 后置合并；随后发布并验证直接指向 canonical Pool 的 active
   mapping。持久化 `.pool-active` 的 `finalizing → active` 后，active root
@@ -67,7 +76,9 @@ Engine Layout Descriptor 仍不在本期范围内。
   lease 过期后的新 worker 接管并继续提交 Legacy mapping 和 locator。
 - Backend 上传、删除和显式回滚共用 Bot 级互斥锁；回滚阶段内的新 local
   编辑 fail closed。mapping 请求同时声明 `source_layout`：激活缺省为
-  `pool`，显式回滚前后使用 `legacy`。
+  `pool`，显式回滚前后使用 `legacy`。显式回滚也必须在第一次 logical
+  mapping 请求前重新 probe 当前 binding；若运行时已降级或缺少 v2
+  capability，则不发送 v2、不执行文件系统切换，并记录可重试失败。
 - 显式回滚不会读取迁移隔离副本，Pool 激活后产生的 local 新增和修改会被
   带入新的 Legacy；Pool 本身保留用于证据和后续恢复。
 - local 后置合并采用 best-effort、无覆盖的文件级收敛：一般的切换前修改、
@@ -131,6 +142,7 @@ provides:
   - "RuntimeQuarantineCleanupResult"
   - "PoolCutoverStatus"
   - "PoolCutoverResult"
+  - "PoolSkillMapping logical intent"
   - "BotSkillLayoutState and migration enums"
 consumes:
   - "BotRepository"
@@ -139,6 +151,7 @@ consumes:
   - "DatabasePlugin (through Skills Pool layout, operational and rollout repositories)"
   - "SkillsPoolRuntimeProtocol"
   - "SkillsPoolSkillRepositoryProtocol"
+  - "skills-pool-mapping-v2 capability and Engine locator evidence"
   - "DeviceBindingRepository"
   - "TaskQueueService and HandlerRegistry"
 internal_dependencies:
@@ -160,4 +173,4 @@ internal_dependencies:
 
 状态机或激活顺序变化会同时影响迁移 Worker、Bot locator 事务和运行时
 mapping/bridge 实现；端口变化还必须同步 Backend runtime、skill
-repository 实现及相应测试。
+repository 实现、Engine `SkillsService` consumers 及相应 contract tests。

@@ -10,14 +10,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
+MAPPING_CONTRACT_VERSION = "skills-pool-mapping-v2"
 
 
 class SkillLayoutCapability(StrEnum):
     FILESYSTEM = "filesystem"
     ARTIFACT = "artifact"
+
+
+class SkillCorpus(StrEnum):
+    """Logical source collection named by the Backend wire contract."""
+
+    LOCAL = "local"
+    REPO = "repo"
 
 
 class SkillLayoutResolutionError(ValueError):
@@ -41,6 +49,27 @@ class LayoutIdentity:
 @dataclass(frozen=True, slots=True)
 class RuntimeLayoutContext:
     home: Path = Path("/home/admin")
+
+
+@dataclass(frozen=True, slots=True)
+class LogicalSkillMapping:
+    """Engine-independent declaration of one active Skill."""
+
+    corpus: SkillCorpus
+    relative_path: str
+    link_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSkillMapping:
+    """Engine-local projection and locator evidence for one active Skill."""
+
+    corpus: SkillCorpus
+    relative_path: str
+    link_name: str
+    source: Path
+    target: Path
+    resolved_locator: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +196,115 @@ class ResolvedFilesystemLayoutPlan:
 ResolvedSkillLayoutPlan = ResolvedFilesystemLayoutPlan | ResolvedArtifactLayoutPlan
 
 
+def _normalize_relative_path(raw: str, *, field: str) -> str:
+    value = raw.strip()
+    path = PurePosixPath(value)
+    if (
+        not value
+        or raw != value
+        or "\x00" in raw
+        or path.is_absolute()
+        or not path.parts
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or path.as_posix() != value
+    ):
+        raise SkillLayoutResolutionError(
+            f"{field} must be a normalized relative POSIX path: {raw!r}"
+        )
+    return path.as_posix()
+
+
+def _normalize_link_name(raw: str) -> str:
+    value = _normalize_relative_path(raw, field="link_name")
+    if len(PurePosixPath(value).parts) != 1:
+        raise SkillLayoutResolutionError(
+            f"link_name must contain exactly one path segment: {raw!r}"
+        )
+    return value
+
+
+def resolve_skill_mappings(
+    *,
+    active_root: Path,
+    local_root: Path,
+    repo_root: Path,
+    mappings: list[LogicalSkillMapping],
+) -> list[ResolvedSkillMapping]:
+    """Resolve mappings from roots selected by the operation's protocol."""
+
+    resolved: list[ResolvedSkillMapping] = []
+    seen_targets: set[Path] = set()
+    for mapping in mappings:
+        relative_path = _normalize_relative_path(
+            mapping.relative_path,
+            field="relative_path",
+        )
+        link_name = _normalize_link_name(mapping.link_name)
+        if mapping.corpus is SkillCorpus.LOCAL:
+            source_root = local_root
+            locator_scheme = "local"
+        elif mapping.corpus is SkillCorpus.REPO:
+            source_root = repo_root
+            locator_scheme = "git"
+        else:
+            raise SkillLayoutResolutionError(
+                f"unknown Skill corpus: {mapping.corpus!r}"
+            )
+
+        source = source_root / relative_path
+        target = active_root / link_name
+        if target in seen_targets:
+            raise SkillLayoutResolutionError(
+                f"duplicate active Skill target: {link_name}"
+            )
+        seen_targets.add(target)
+        locator_value = (
+            str(source)
+            if mapping.corpus is SkillCorpus.LOCAL
+            else relative_path
+        )
+        resolved.append(
+            ResolvedSkillMapping(
+                corpus=mapping.corpus,
+                relative_path=relative_path,
+                link_name=link_name,
+                source=source,
+                target=target,
+                resolved_locator=f"{locator_scheme}://{locator_value}",
+            )
+        )
+    return resolved
+
+
+def resolved_filesystem_layout_evidence(
+    plan: ResolvedFilesystemLayoutPlan,
+    *,
+    local_root: Path,
+    repo_root: Path,
+) -> dict[str, str]:
+    """Return the roots selected by the caller as Backend evidence."""
+
+    return {
+        "active_root": str(plan.active_root),
+        "local_root": str(local_root),
+        "repo_root": str(repo_root),
+    }
+
+
+def resolve_local_skill_locators(
+    local_root: Path,
+    names: list[str],
+) -> dict[str, str]:
+    """Resolve registered local Skill names into persistence locators."""
+
+    resolved: dict[str, str] = {}
+    for raw_name in names:
+        name = _normalize_link_name(raw_name)
+        if name not in resolved:
+            resolved[name] = f"local://{local_root / name}"
+    return resolved
+
+
 def _filesystem_template(
     *,
     engine_home: str,
@@ -274,16 +412,23 @@ def resolve_filesystem_skill_layout(
 __all__ = [
     "DESCRIPTORS",
     "LAYOUT_CONTRACT_VERSION",
+    "MAPPING_CONTRACT_VERSION",
     "EngineSkillLayoutDescriptor",
     "LayoutIdentity",
+    "LogicalSkillMapping",
     "ResolvedArtifactLayoutPlan",
     "ResolvedFilesystemLayoutPlan",
     "ResolvedSkillLayoutPlan",
+    "ResolvedSkillMapping",
     "RuntimeLayoutContext",
+    "SkillCorpus",
     "SkillLayoutCapability",
     "SkillLayoutResolutionError",
     "UnsupportedLayoutContractError",
     "UnsupportedRuntimeLayoutError",
     "resolve_filesystem_skill_layout",
+    "resolve_local_skill_locators",
     "resolve_skill_layout",
+    "resolve_skill_mappings",
+    "resolved_filesystem_layout_evidence",
 ]

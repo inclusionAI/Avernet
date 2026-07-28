@@ -10,6 +10,9 @@ import os
 from pathlib import Path
 from typing import Any
 
+from engine.community.core.skills.layout_planner import (
+    MAPPING_CONTRACT_VERSION,
+)
 from engine.community.plugin_api.openclaw.skills import (
     PoolLayoutActivationPortResult,
 )
@@ -17,16 +20,19 @@ from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.plugins.openclaw._file import _convert_path
 from engine.community.plugins.openclaw.layout_activation import (
     MappingSourceLayout,
-    SkillMapping,
     activate_openclaw_pool,
     publish_pool_mappings,
     rollback_openclaw_pool,
     verify_skill_mappings,
 )
+from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layout
 from engine.community.plugins.skills_pool.layout_quarantine import (
     cleanup_quarantine,
 )
-from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layout
+from engine.community.plugins.skills_pool.mapping_contract import (
+    ResolvedMappingPayload,
+    resolve_mapping_payload,
+)
 
 log = logging.getLogger("openclaw-port")
 
@@ -53,11 +59,17 @@ class _SkillsPortMixin:
     )
 
     @staticmethod
-    def _pool_mappings(params: dict[str, Any]) -> list[SkillMapping]:
-        return [
-            SkillMapping(source=item["source"], target=item["target"])
-            for item in params.get("mappings", [])
-        ]
+    def _pool_mappings(
+        params: dict[str, Any],
+        *,
+        source_layout: MappingSourceLayout,
+    ) -> ResolvedMappingPayload:
+        return resolve_mapping_payload(
+            engine="openclaw",
+            source_layout=source_layout,
+            payload=params.get("mappings", []),
+            mapping_contract_version=params.get("mapping_contract_version"),
+        )
 
     async def activate_pool_layout(
         self, params: dict[str, Any]
@@ -69,7 +81,12 @@ class _SkillsPortMixin:
             registered_local_names=list(
                 params.get("registered_local_names", [])
             ),
-            mappings=self._pool_mappings(params),
+            mappings=list(
+                self._pool_mappings(
+                    params,
+                    source_layout=MappingSourceLayout.POOL,
+                ).mappings
+            ),
         )
         return PoolLayoutActivationPortResult(**result.to_data())
 
@@ -103,32 +120,61 @@ class _SkillsPortMixin:
             inspect_runtime_layout,
             engine=params["engine"],
             expected_contract_version=params["layout_contract_version"],
+            mapping_contract_version=MAPPING_CONTRACT_VERSION,
         )
         return result.to_data()
 
     async def publish_pool_mappings(
         self, params: dict[str, Any]
     ) -> dict[str, Any]:
+        resolved = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get(
+                    "source_layout",
+                    MappingSourceLayout.POOL.value,
+                )
+            ),
+        )
         result = await asyncio.to_thread(
             publish_pool_mappings,
-            mappings=self._pool_mappings(params),
+            mappings=list(resolved.mappings),
             source_layout=MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
         )
-        return result.to_data()
+        data = result.to_data()
+        if result.published and resolved.resolved_locators:
+            data["evidence"]["resolved_mappings"] = list(
+                resolved.resolved_locators
+            )
+        return data
 
     async def verify_pool_mappings(
         self, params: dict[str, Any]
     ) -> dict[str, Any]:
+        resolved = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get(
+                    "source_layout",
+                    MappingSourceLayout.POOL.value,
+                )
+            ),
+        )
         result = await asyncio.to_thread(
             verify_skill_mappings,
-            mappings=self._pool_mappings(params),
+            mappings=list(resolved.mappings),
             source_layout=MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
         )
-        return result.to_data()
+        data = result.to_data()
+        if result.valid and resolved.resolved_locators:
+            data["evidence"]["resolved_mappings"] = list(
+                resolved.resolved_locators
+            )
+        return data
 
     def _skills_resolve_base_dir(self) -> Path:
         """Resolve SKILLS_LINK_BASE_DIR from env, or default.
@@ -145,11 +191,11 @@ class _SkillsPortMixin:
 
     # Per-key asyncio locks (in-process; single-process deployment, isolated per bot).
     @classmethod
-    def _get_ensure_lock(cls, key: str) -> "Any":
-        import asyncio as _asyncio  # noqa: PLC0415
-        from collections import defaultdict  # noqa: PLC0415
+    def _get_ensure_lock(cls, key: str) -> Any:
+        import asyncio as _asyncio
+        from collections import defaultdict
         if not hasattr(cls, "_skills_ensure_locks_store"):
-            cls._skills_ensure_locks_store: "dict[str, Any]" = defaultdict(
+            cls._skills_ensure_locks_store: dict[str, Any] = defaultdict(
                 _asyncio.Lock
             )
         return cls._skills_ensure_locks_store[key]
@@ -212,13 +258,14 @@ class _SkillsPortMixin:
         Relocated intact from
         ``engines/openclaw/skills.py:OpenClawSkillsService._rsync_dir``.
         """
-        import subprocess as _sp  # noqa: PLC0415
+        import subprocess as _sp
 
         result = _sp.run(
             ["rsync", "-rltD", "--delete", f"{src}/", f"{dst}/"],
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
         if result.returncode != 0:
             raise _SkillsEnsureError(
@@ -254,7 +301,7 @@ class _SkillsPortMixin:
         operating on plain dicts.  Raises ``RuntimeError`` on NAS-source-
         missing or rsync failure.
         """
-        import asyncio as _asyncio  # noqa: PLC0415
+        import asyncio as _asyncio
 
         skill_uuid = item["skill_uuid"]
         version_dir_name = str(item["version"])
