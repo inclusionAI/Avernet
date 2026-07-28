@@ -110,11 +110,11 @@ flowchart LR
 | API 类型 | 路径 | 说明 |
 | --- | --- | --- |
 | OpenAPI | `/openapi/v1/**` | 面向产品、Bot 和外部集成；路径不包含 `bcn` |
-| Internal API | `/api/v1/bcn/**` | 面向受信任内部服务和运维工具；保留 `bcn` 服务命名空间 |
+| Internal API | `/internal/v1/**` | 面向受信任内部服务和运维工具；路径同样不包含 `bcn` |
 | Legacy API | 现有路径 | 不改名、不迁移、不改变语义 |
 
-版本位于 API 类型之前的共同层级。代码目录因此采用 `v1/openapi` 和
-`v1/internal`，而不是分别采用 `openapi/v1` 和 `internal/v1`。
+HTTP 路径统一采用 `/{api_type}/v1/**`。代码中的 OpenAPI 和 Internal API
+共享同一版本生命周期，因此模块目录采用 `v1/openapi` 和 `v1/internal`。
 
 ### 5.2 Gateway 路由
 
@@ -340,7 +340,7 @@ Join 两套 endpoint。
 
 ## 9. 第一阶段 Internal API
 
-第一阶段 Internal API 是空集，即不新增 `/api/v1/bcn/**` 业务 operation。
+第一阶段 Internal API 是空集，即不新增 `/internal/v1/**` 业务 operation。
 
 原因：
 
@@ -353,12 +353,12 @@ Join 两套 endpoint。
 
 | Deferred endpoint | 原因 |
 | --- | --- |
-| `POST /api/v1/bcn/providers` | Provider/ProviderPrincipal 延后 |
-| `POST /api/v1/bcn/groups/{group_id}/state-machine-runs` | StateMachineRun 延后 |
-| `GET /api/v1/bcn/state-machine-runs/{run_id}` | StateMachineRun 延后 |
-| `GET /api/v1/bcn/state-machine-runs/{run_id}/graph` | StateMachineRun 延后 |
-| `GET /api/v1/bcn/state-machine-runs/{run_id}/nodes/{node_id}` | StateMachineRun 延后 |
-| `POST /api/v1/bcn/state-machine-runs/{run_id}/cancel` | StateMachineRun 延后 |
+| `POST /internal/v1/providers` | Provider/ProviderPrincipal 延后 |
+| `POST /internal/v1/groups/{group_id}/state-machine-runs` | StateMachineRun 延后 |
+| `GET /internal/v1/state-machine-runs/{run_id}` | StateMachineRun 延后 |
+| `GET /internal/v1/state-machine-runs/{run_id}/graph` | StateMachineRun 延后 |
+| `GET /internal/v1/state-machine-runs/{run_id}/nodes/{node_id}` | StateMachineRun 延后 |
+| `POST /internal/v1/state-machine-runs/{run_id}/cancel` | StateMachineRun 延后 |
 
 保留 `v1/internal` 目录边界，但不创建无业务意义的占位 Route。
 
@@ -537,7 +537,7 @@ flowchart LR
 CI 至少检查：
 
 - OpenAPI 3.1 语法和 `$ref` 完整性。
-- `/openapi/v1/**` 与 `/api/v1/bcn/**` 命名空间不混用。
+- `/openapi/v1/**` 与 `/internal/v1/**` 命名空间不混用。
 - `operationId` 全局唯一。
 - 每个 operation 有明确 Principal 要求和错误码。
 - Router 注册的 Method/Path 与 Contract 一致。
@@ -622,7 +622,7 @@ OpenAPI 表达的受信任 Use Case 时，才新增 Internal API。
 | --- | --- |
 | Legacy 兼容 | Legacy Router 保持功能和语义，不在本阶段下线 |
 | 公共路径 | `/openapi/v1/**`，不包含 `/bcn` |
-| Internal 路径 | `/api/v1/bcn/**` |
+| Internal 路径 | `/internal/v1/**`，不包含 `/bcn` |
 | 第一阶段 Internal API | 空集 |
 | 资源命名 | BCN 使用 `actors`，不与 TeamClaw `/bots` 冲突 |
 | Bot ID | `actor_id == bot_uuid` |
