@@ -93,11 +93,15 @@ class BotCreateSpec:
     ``x or <default>`` to them, so a concrete value is equivalent to leaving
     them unset, and the flow never has to reason about an absent engine.
 
-    ``bot_name`` is the one field that keeps an unset state, and it is
-    load-bearing: ``None`` means "no name given" so ``_resolve_bot_name``
-    derives one (the owner's nick name for a first bot, else the bot id). No
-    string can stand in — ``validate_bot_name("")`` rejects the request — and
-    the default needs a first-bot lookup the caller cannot pre-compute.
+    Two fields keep an unset state on purpose:
+
+    * ``bot_name`` — ``None`` means "no name given" so ``_resolve_bot_name``
+      derives one (the owner's nick name for a first bot, else the bot id). No
+      string can stand in: ``validate_bot_name("")`` rejects the request, and
+      the default needs a first-bot lookup the caller cannot pre-compute.
+    * ``bot_desc`` — stored straight through to a nullable column and echoed
+      back in responses, so ``None`` ("no description") and ``""`` are
+      genuinely different persisted values, not interchangeable defaults.
     """
 
     entity_id: str
