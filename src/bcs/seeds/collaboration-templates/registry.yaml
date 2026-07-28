@@ -15,6 +15,10 @@ templates:
     tags: [parallel]
     priority: 20
 
+  bot-human-bot-review:
+    tags: [judge, serial]
+    priority: 25
+
   world-cup-preview-content-production:
     tags: [parallel]
     priority: 30
