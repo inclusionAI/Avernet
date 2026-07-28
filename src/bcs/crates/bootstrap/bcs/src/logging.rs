@@ -189,12 +189,27 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
 
 // ─── Init ───────────────────────────────────────────────────────────────────
 
+fn timer_for_output<F: Clone>(
+    output_name: &str,
+    timer: &LocalTime<F>,
+    millisecond_timer: &LocalTime<F>,
+) -> LocalTime<F> {
+    if output_name == "common-error" {
+        millisecond_timer.clone()
+    } else {
+        timer.clone()
+    }
+}
+
 /// Initialize the tracing subscriber based on `LoggingConfig`.
 ///
 /// Console, file, and BCN OpenTelemetry output use independent layer filters.
 pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
     let timer = LocalTime::new(format_description!(
         "[year]-[month]-[day] [hour]:[minute]:[second]"
+    ));
+    let millisecond_timer = LocalTime::new(format_description!(
+        "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"
     ));
 
     let file_layers: Vec<Box<dyn Layer<_> + Send + Sync>> = config
@@ -214,11 +229,12 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
             let writer = RotatingFileWriter::new(&dir, &output.file);
 
             let filter = build_output_targets_filter(output);
+            let output_timer = timer_for_output(&output.name, &timer, &millisecond_timer);
             match output.format {
                 LogOutputFormat::Text => Some(
                     tracing_subscriber::fmt::layer()
                         .with_writer(writer)
-                        .with_timer(timer.clone())
+                        .with_timer(output_timer)
                         .with_ansi(false)
                         .with_filter(filter)
                         .boxed(),
@@ -230,7 +246,7 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
                         .with_current_span(false)
                         .with_span_list(false)
                         .with_writer(writer)
-                        .with_timer(timer.clone())
+                        .with_timer(output_timer)
                         .with_ansi(false)
                         .with_filter(filter)
                         .boxed(),
@@ -417,10 +433,21 @@ mod tests {
             max_keep_days: 7,
         };
 
+        let timer = LocalTime::new(format_description!(
+            "[year]-[month]-[day] [hour]:[minute]:[second]"
+        ));
+        let millisecond_timer = LocalTime::new(format_description!(
+            "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"
+        ));
         let subscriber = tracing_subscriber::registry()
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_writer(RotatingFileWriter::new(dir.path(), &main_output.file))
+                    .with_timer(timer_for_output(
+                        &main_output.name,
+                        &timer,
+                        &millisecond_timer,
+                    ))
                     .with_ansi(false)
                     .with_filter(build_output_targets_filter(&main_output)),
             )
@@ -429,6 +456,11 @@ mod tests {
                     .with_writer(RotatingFileWriter::new(
                         dir.path(),
                         &common_error_output.file,
+                    ))
+                    .with_timer(timer_for_output(
+                        &common_error_output.name,
+                        &timer,
+                        &millisecond_timer,
                     ))
                     .with_ansi(false)
                     .with_filter(build_output_targets_filter(&common_error_output)),
@@ -446,8 +478,35 @@ mod tests {
 
         assert!(main.contains("warning stays in main only"));
         assert!(main.contains("error is duplicated"));
+        let main_error_line = main
+            .lines()
+            .find(|line| line.contains("error is duplicated"))
+            .expect("main error log line should exist");
+        let main_timestamp = main_error_line
+            .get(..19)
+            .expect("main timestamp should include seconds");
+        assert!(
+            chrono::NaiveDateTime::parse_from_str(main_timestamp, "%Y-%m-%d %H:%M:%S").is_ok(),
+            "main timestamp should use YYYY-MM-DD HH:mm:ss: {main_timestamp}"
+        );
+        assert_eq!(
+            main_error_line.as_bytes().get(19),
+            Some(&b' '),
+            "main timestamp should not include fractional seconds"
+        );
         assert!(!common_error.contains("warning stays in main only"));
         assert!(common_error.contains("error is duplicated"));
+        let common_error_line = common_error
+            .lines()
+            .find(|line| line.contains("error is duplicated"))
+            .expect("common error log line should exist");
+        let timestamp = common_error_line
+            .get(..23)
+            .expect("common error timestamp should include milliseconds");
+        assert!(
+            chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S%.3f").is_ok(),
+            "common error timestamp should use YYYY-MM-DD HH:mm:ss.SSS: {timestamp}"
+        );
     }
 
     #[test]
