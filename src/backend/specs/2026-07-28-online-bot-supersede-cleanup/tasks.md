@@ -26,7 +26,7 @@
   - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** —
 
-## Task 2: `[ ]` Carry the gone-bot error code through `TargetBotGoneError`
+## Task 2: `[x]` Carry the gone-bot error code through `TargetBotGoneError`
 
 - **Goal:** Preserve the specific gone code (`BOT_NOT_FOUND` vs
   `DEVICE_NOT_FOUND`) out of the deploy atom so the secondary fallback can branch.
@@ -34,15 +34,15 @@
   `src/agentclaw/community/core/service_bot/services/publish_flow/operation_runner.py`,
   `tests/community/core/service_bot/services/test_operation_runner.py`
 - **Done when:**
-  - [ ] `TargetBotGoneError.__init__(self, error_code: str = "BOT_NOT_FOUND")`
+  - [x] `TargetBotGoneError.__init__(self, error_code: str = "BOT_NOT_FOUND")`
         stores `self.error_code`; docstring updated.
-  - [ ] `acquire_deploy_workflow` raises `TargetBotGoneError(result.get(
+  - [x] `acquire_deploy_workflow` raises `TargetBotGoneError(result.get(
         "error_code"))` when `result["error_code"] in BOT_GONE_ERROR_CODES`.
         `BOT_GONE_ERROR_CODES` unchanged (`{BOT_NOT_FOUND, DEVICE_NOT_FOUND}`).
-  - [ ] Unit: a `BOT_NOT_FOUND` result raises `TargetBotGoneError` with
+  - [x] Unit: a `BOT_NOT_FOUND` result raises `TargetBotGoneError` with
         `error_code == "BOT_NOT_FOUND"`; a `DEVICE_NOT_FOUND` result → `error_code
         == "DEVICE_NOT_FOUND"`.
-  - [ ] `pytest tests/community/core/service_bot/services/test_operation_runner.py`
+  - [x] `pytest tests/community/core/service_bot/services/test_operation_runner.py`
         green.
 - **Depends on:** —
 
