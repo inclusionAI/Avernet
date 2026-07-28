@@ -142,7 +142,7 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
         uses defaults for any body-sourced attributes.
 - **Depends on:** 1, 2, 3, 4
 
-## Task 9: Endpoint tests  `[ ]`
+## Task 9: Endpoint tests  `[~]`
 - **Goal:** Prove each endpoint's success shape and the tenant guarantee.
 - **Files:** `tests/community/adapters/http/openapi_v1/test_bots_endpoints.py` (new).
 - **Done when:**
