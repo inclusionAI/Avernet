@@ -480,13 +480,26 @@ crates/service-api/bcs-service-api/src/application/
 不创建实现全部 Application API 的“god crate”。实现继续按领域分布：
 
 ```text
-bcs-group/src/application/v1.rs       -> Group、GroupParticipant、Invitation
-bcs-session/src/application/v1.rs     -> Session、SessionParticipant、completion
-bcs-friend/src/application/v1.rs      -> Friendship、FriendRequest
-bcs-message/src/application/v1.rs     -> Session message history query
+bcs-group/src/application/v1/         -> Group、GroupParticipant、Invitation
+bcs-session/src/application/v1/       -> Session、SessionParticipant、completion
+bcs-friend/src/application/v1/        -> Friendship、FriendRequest
+bcs-message/src/application/v1/       -> Session message history query
 ```
 
-具体文件可按现有 crate 结构拆分，但依赖方向保持：
+每个 `v1/` 都是版本化 Application facade 的目录，不是单个实现文件：
+
+```text
+application/v1/
+├── mod.rs          # 只声明子模块并导出实现
+├── <use_case>.rs   # 一个领域 Use Case 或一组紧密相关操作
+└── ...
+```
+
+`mod.rs` 不承载全部业务实现，不在一个文件混合 V1/V2。版本化范围只包括
+Application 编排、Command/Result 和授权语义；Core Service、领域实体、Repo
+Port 和 Store 保持无版本并由 Legacy/V1/V2 复用。
+
+依赖方向保持：
 
 ```text
 bcs-api-http

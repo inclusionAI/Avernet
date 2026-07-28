@@ -530,7 +530,10 @@ git commit -m "feat(bcs): implement v1 group use cases"
 
 - Create: `src/bcs/crates/services/bcs-session/src/application/mod.rs`
 - Create: `src/bcs/crates/services/bcs-session/src/application/legacy.rs`
-- Create: `src/bcs/crates/services/bcs-session/src/application/v1.rs`
+- Create: `src/bcs/crates/services/bcs-session/src/application/v1/mod.rs`
+- Create: `src/bcs/crates/services/bcs-session/src/application/v1/session.rs`
+- Create: `src/bcs/crates/services/bcs-session/src/application/v1/participant.rs`
+- Create: `src/bcs/crates/services/bcs-session/src/application/v1/completion.rs`
 - Modify: `src/bcs/crates/services/bcs-session/src/lib.rs`
 - Create: `src/bcs/crates/services/bcs-session/tests/v1_session_service.rs`
 
@@ -594,10 +597,14 @@ git commit -m "feat(bcs): implement v1 session use cases"
 - Create: `src/bcs/crates/services/bcs-group/src/application/v1/invitation.rs`
 - Modify: `src/bcs/crates/services/bcs-group/src/application/v1/mod.rs`
 - Create: `src/bcs/crates/services/bcs-group/tests/v1_invitation_service.rs`
-- Create: `src/bcs/crates/services/bcs-friend/src/application/v1.rs`
+- Create: `src/bcs/crates/services/bcs-friend/src/application/v1/mod.rs`
+- Create: `src/bcs/crates/services/bcs-friend/src/application/v1/friendship.rs`
+- Create: `src/bcs/crates/services/bcs-friend/src/application/v1/friend_request.rs`
 - Modify: `src/bcs/crates/services/bcs-friend/src/application/mod.rs`
 - Create: `src/bcs/crates/services/bcs-friend/tests/v1_friendship_service.rs`
-- Create: `src/bcs/crates/services/bcs-message/src/v1.rs`
+- Create: `src/bcs/crates/services/bcs-message/src/application/mod.rs`
+- Create: `src/bcs/crates/services/bcs-message/src/application/v1/mod.rs`
+- Create: `src/bcs/crates/services/bcs-message/src/application/v1/session_history.rs`
 - Modify: `src/bcs/crates/services/bcs-message/src/lib.rs`
 - Create: `src/bcs/crates/services/bcs-message/tests/v1_session_message_service.rs`
 
