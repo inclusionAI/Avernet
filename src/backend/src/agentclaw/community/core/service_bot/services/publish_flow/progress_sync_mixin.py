@@ -644,6 +644,14 @@ class ProgressSyncMixin:
                 if binding_id:
                     self.refresh_publish_handle(binding_id, restart_publish_id)
 
+                # A restart that RECREATED a teclaw target minted a fresh container
+                # that needs the post-deploy MCP outbound/auth rule normal
+                # first-release success establishes (via _handle_sync_success). This
+                # stable-record branch bypasses that path, so apply it here. No-op
+                # for ARCA/baas; idempotent (a re-push) for teclaw, so it is safe on
+                # the in-place upgrade path too.
+                self._refresh_provider_mcp_after_success(publish_record, ext, stage)
+
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=current_status,
