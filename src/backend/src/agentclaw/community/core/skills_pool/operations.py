@@ -57,6 +57,15 @@ class RolloutBotEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class RolloutOwnerEntry:
+    owner_id: str
+    engine: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"owner_id": self.owner_id, "engine": self.engine}
+
+
+@dataclass(frozen=True, slots=True)
 class RolloutAuditEvent:
     env: str
     action: str
@@ -105,6 +114,7 @@ class RolloutConfigSnapshot:
     teclaw_controls: tuple[RolloutBotEntry, ...]
     audit_log: tuple[RolloutAuditEvent, ...]
     full_rollout_engines: tuple[str, ...] = ()
+    full_rollout_owners: tuple[RolloutOwnerEntry, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,9 +198,7 @@ class SkillsPoolRolloutOperations:
                 raise RolloutOperationError(
                     "rollout feature must be enabled before full rollout"
                 )
-            target_engines = (
-                current.promoted_engines if engine is None else (engine,)
-            )
+            target_engines = current.promoted_engines if engine is None else (engine,)
             if not target_engines:
                 raise RolloutOperationError(
                     "at least one engine must be promoted before full rollout"
@@ -234,6 +242,70 @@ class SkillsPoolRolloutOperations:
             batch_id=None,
             action=(
                 f"full_rollout:{engine or 'environment'}:"
+                f"{'enable' if enabled else 'disable'}"
+            ),
+        )
+
+    def set_owner_full_rollout(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        engine: str,
+        enabled: bool,
+        acceptance_batch_id: str | None,
+        operator: str,
+        reason: str,
+    ) -> RolloutConfigSnapshot:
+        """Enable future claims for every Bot owned by one person and engine."""
+
+        self._validate_change(operator=operator, reason=reason)
+        entry = self._owner_entry(owner_id=owner_id, engine=engine)
+        current = self.get_snapshot(env=env)
+        present = entry in current.full_rollout_owners
+        if present is enabled:
+            return current
+
+        acceptance = None
+        if enabled:
+            if not current.enabled:
+                raise RolloutOperationError(
+                    "rollout feature must be enabled before owner full rollout"
+                )
+            if engine not in current.promoted_engines:
+                raise RolloutOperationError(
+                    f"{engine} must be promoted before owner full rollout"
+                )
+            acceptance = self._latest_accepted_batch(current, engine=engine)
+            if acceptance is None:
+                raise RolloutOperationError(
+                    f"an accepted {engine} batch is required for owner full rollout"
+                )
+            if acceptance_batch_id != acceptance.batch_id:
+                raise RolloutOperationError(
+                    "owner full rollout must reference the latest accepted batch"
+                )
+            if self._open_batches(current, env=env, engine=engine):
+                raise RolloutOperationError(f"{engine} still has an unaccepted batch")
+
+        owners = tuple(item for item in current.full_rollout_owners if item != entry)
+        if enabled:
+            owners = (*owners, entry)
+        return self._write(
+            snapshot=RolloutConfigSnapshot(
+                **{
+                    **self._snapshot_values(current),
+                    "full_rollout_owners": owners,
+                }
+            ),
+            expected_snapshot=current,
+            enabled=current.enabled,
+            operator=operator,
+            reason=reason,
+            batch_id=acceptance.batch_id if acceptance else None,
+            evidence=acceptance.report if acceptance else None,
+            action=(
+                f"owner_full_rollout:{entry.owner_id}:{entry.engine}:"
                 f"{'enable' if enabled else 'disable'}"
             ),
         )
@@ -746,6 +818,7 @@ class SkillsPoolRolloutOperations:
                 enabled=False,
                 enable_all=False,
                 full_rollout_engines=(),
+                full_rollout_owners=(),
                 promoted_engines=(),
                 whitelist=(),
                 negative_controls=(),
@@ -783,6 +856,9 @@ class SkillsPoolRolloutOperations:
             enabled=config.get("enable") == "1",
             enable_all=bool(value["enable_all"]),
             full_rollout_engines=tuple(value.get("full_rollout_engines", [])),
+            full_rollout_owners=cls._owner_entries(
+                value.get("full_rollout_owners", [])
+            ),
             promoted_engines=promoted_engines,
             whitelist=cls._entries(whitelist),
             negative_controls=cls._entries(value.get(CONTROL_KEYS[0], [])),
@@ -845,6 +921,9 @@ class SkillsPoolRolloutOperations:
         return {
             "enable_all": snapshot.enable_all,
             "full_rollout_engines": list(snapshot.full_rollout_engines),
+            "full_rollout_owners": [
+                item.to_dict() for item in snapshot.full_rollout_owners
+            ],
             "promoted_engines": list(snapshot.promoted_engines),
             "whitelist": [item.to_dict() for item in snapshot.whitelist],
             "negative_controls": [
@@ -869,6 +948,34 @@ class SkillsPoolRolloutOperations:
                 )
             )
         return tuple(entries)
+
+    @classmethod
+    def _owner_entries(cls, raw: object) -> tuple[RolloutOwnerEntry, ...]:
+        if not isinstance(raw, list):
+            raise RolloutOperationError("rollout owner entries are invalid")
+        entries: list[RolloutOwnerEntry] = []
+        for value in raw:
+            if not isinstance(value, dict):
+                raise RolloutOperationError("rollout owner entry is invalid")
+            entries.append(
+                cls._owner_entry(
+                    owner_id=value.get("owner_id"),
+                    engine=value.get("engine"),
+                )
+            )
+        return tuple(entries)
+
+    @staticmethod
+    def _owner_entry(*, owner_id: object, engine: object) -> RolloutOwnerEntry:
+        if (
+            isinstance(owner_id, bool)
+            or not isinstance(owner_id, (str, int))
+            or str(owner_id).strip() in {"", "*"}
+        ):
+            raise RolloutOperationError("rollout owner identity is invalid")
+        if not isinstance(engine, str) or engine not in ENGINE_PROMOTION_ORDER:
+            raise RolloutOperationError("rollout owner engine is invalid")
+        return RolloutOwnerEntry(owner_id=str(owner_id), engine=engine)
 
     @staticmethod
     def _entry(
@@ -924,6 +1031,7 @@ class SkillsPoolRolloutOperations:
             "enabled": snapshot.enabled,
             "enable_all": snapshot.enable_all,
             "full_rollout_engines": snapshot.full_rollout_engines,
+            "full_rollout_owners": snapshot.full_rollout_owners,
             "promoted_engines": snapshot.promoted_engines,
             "whitelist": snapshot.whitelist,
             "negative_controls": snapshot.negative_controls,
