@@ -5,24 +5,24 @@
 Each task lands with the internal suite green and (from Task 3 on) its own new
 tests. Ordered so shared plumbing exists before the handlers that use it.
 
-## Task 1: Response + envelope helper  `[ ]`
+## Task 1: Response + envelope helper  `[x]`
 - **Goal:** One place that turns a payload + request into the standard
   `Envelope`/`Page`, and maps domain errors to enveloped error responses.
 - **Files:** `adapters/http/openapi_v1/responses.py` (new),
   `tests/community/adapters/http/openapi_v1/test_responses.py` (new).
 - **Done when:**
-  - [ ] `envelope(data, request, *, code=CODE_OK, message="OK")`,
+  - [x] `envelope(data, request, *, code=CODE_OK, message="OK")`,
         `page(total, items, request)`, `created(...)`, `accepted(...)`,
         `deleted(request)` implemented; `request_id` read from
         `request.state.trace_id` (falls back to `""` when unset).
-  - [ ] `@envelope_errors` decorator maps the domain errors named in the plan
+  - [x] `@envelope_errors` decorator maps the domain errors named in the plan
         (`BotNotFoundError`→404, `BotNameExistsError`→409, `BotNameInvalidError`
         →400, `BotLimitExceededError`/`DeviceLimitError`→409,
         `BotPermissionError`→404, `BotInvalidLifecycleStateError`→409,
         `PassportError`→502, `ClusterMismatchError`→400) to an `Envelope`
         (`data=None`, mapped 6-digit code); unmapped exceptions propagate.
-  - [ ] Tests: each builder's code/message/request_id; trace-id fallback; the
-        decorator's mapping for one mapped error and one pass-through.
+  - [x] Tests: each builder's code/message/request_id; trace-id fallback; the
+        decorator's mapping for one mapped error and one pass-through. 8 passed.
 - **Depends on:** —
 
 ## Task 2: Cluster ↔ engine rule  `[ ]`
