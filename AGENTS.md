@@ -258,3 +258,19 @@ Do not commit:
 
 Open-source defaults must be reproducible from public dependencies or clearly
 marked as TODO.
+
+## Skills Architecture
+
+Before changing Skills management, publication, mounting, or runtime
+activation, read
+`src/backend/src/agentclaw/community/adapters/http/skill_center/CLAUDE.md`.
+
+- `skills-repo` and `skills-local` are complete content stores. An active
+  Skills directory must expose only the Skills explicitly activated for the
+  current Bot; do not add bridges from the active directory to a full content
+  store.
+- Do not add new engine-specific filesystem paths to Backend code. Physical
+  layout ownership belongs to Engine Runtime and its versioned layout contract.
+- Treat a `center://` source as a governed, versioned content source. A source
+  prefix alone is not evidence that publication, distribution, and activation
+  have completed.
