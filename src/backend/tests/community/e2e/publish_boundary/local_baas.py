@@ -60,10 +60,19 @@ class LocalBaas:
         self.bots: dict[str, list[int]] = {}      # bot_uuid -> [workflow ids]
         self.workflows: dict[int, dict] = {}      # wid -> workflow row
         self.journal: list[tuple[str, str]] = []  # (kind, target) of mutations
+        self._bot_status: dict[str, str] = {}     # bot_uuid -> get_bot status override
 
     # ── test controls ────────────────────────────────────────────────────
     def finish_workflow(self, wid: int, status: str = "SUCCESS") -> None:
         self.workflows[wid]["status"] = status
+
+    def set_bot_status(self, bot_uuid: str, status: str) -> None:
+        """Override what ``GET /bots/{uuid}`` reports for this bot (default is
+        ``ACTIVE``). Lets a test drive a bot to a not-live state (``FAILED`` /
+        ``STOPPED``) so the online reuse decision reaches the provider-aware
+        ``RETIRE_THEN_FIRST_RELEASE`` / ``FIRST_RELEASE`` cleanup path instead of
+        always ``UPGRADE``."""
+        self._bot_status[bot_uuid] = status
 
     def finish_all(self, status: str = "SUCCESS") -> None:
         """Flip every non-terminal workflow to ``status``."""
@@ -145,7 +154,8 @@ class LocalBaas:
             bot_uuid = parts[-1]
             if bot_uuid not in self.bots:
                 return _not_found(path)
-            return _ok({"bot_uuid": bot_uuid, "status": "ACTIVE"}, path)
+            status = self._bot_status.get(bot_uuid, "ACTIVE")
+            return _ok({"bot_uuid": bot_uuid, "status": status}, path)
         return _ok({}, path)
 
     def _post(self, path: str, **_kw) -> httpx.Response:
@@ -173,9 +183,15 @@ class LocalBaas:
             return _ok({"status": "APPROVED"}, path)
         if path.endswith("/destroy") or path.endswith("/stop"):
             bot_uuid = parts[-2]
+            # The real server creates a DESTROY publish and returns its workflow
+            # id; retire_superseded_bot requires that id to confirm the destroy
+            # was initiated. Mint one (not polled by any test) and remove the bot.
+            self._next_wid += 1
+            wid = self._next_wid
             self.journal.append(("destroy", bot_uuid))
             self.bots.pop(bot_uuid, None)
-            return _ok({}, path)
+            self._bot_status.pop(bot_uuid, None)
+            return _ok({"bot_uuid": bot_uuid, "publish_id": wid}, path)
         return _ok({}, path)
 
     def install(self, world) -> "LocalBaas":
