@@ -162,6 +162,13 @@ class ResourceModel(Base):
         }
 
 
+
+# ── Avernet tenant guard ────────────────────────────────────────────
+# Same model-agnostic mechanism as BotModel above (utils/avernet_tenant_guard):
+# import ResourceModel, get the guard. PR #543 extended isolation to ac_resource.
+register_avernet_tenant_guard(ResourceModel)
+
+
 class ChannelConfig(Base):
     """SQLAlchemy ORM model for ac_channel_config table.
 
