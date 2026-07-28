@@ -70,8 +70,8 @@ class TestGetStartCmdOrdering:
             version="1",
         )
         bootstrap_idx = cmd.index("bootstrap_minimal.sh")
-        install_idx = cmd.index("install_engine.sh")
-        start_idx = cmd.index("start_service.sh")
+        install_idx = cmd.rindex("install_engine.sh")
+        start_idx = cmd.rindex("start_service.sh")
         assert bootstrap_idx < install_idx < start_idx
 
     def test_steps_chained_with_and(self):
@@ -92,8 +92,75 @@ class TestGetStartCmdOrdering:
         assert "install_engine.sh" in cmd
         # The substring between install_engine and start_service must
         # contain a chained `&&` (not `;` or a backgrounded `&`).
-        between = cmd[cmd.index("install_engine.sh") : cmd.index("start_service.sh")]
+        between = cmd[cmd.rindex("install_engine.sh") : cmd.rindex("start_service.sh")]
         assert "&&" in between
+
+
+class TestBootstrapReadinessGuard:
+    def test_waits_for_container_init_before_bootstrap_decision(self):
+        cmd = _make_service()._get_start_cmd(
+            bot_id="bot-1",
+            owner_id="owner-1",
+            entity_id="entity-1",
+            entity_type="user",
+            migration_pat="",
+            bot_type="personal",
+            engine="claude_code",
+            stage="online",
+            version="1",
+        )
+
+        marker_idx = cmd.index("/var/run/agentclaw/.install_dependency_file")
+        lock_idx = cmd.index(
+            "_agentclaw_lock_dir=/var/run/agentclaw/.baas-bootstrap.lock"
+        )
+        repo_validation_idx = cmd.rindex("if _agentclaw_checkout_valid")
+        bootstrap_idx = cmd.rindex("bootstrap_minimal.sh")
+        install_idx = cmd.rindex("install_engine.sh")
+
+        assert marker_idx < lock_idx < repo_validation_idx < bootstrap_idx < install_idx
+
+    def test_reuses_complete_release_checkout_instead_of_unconditionally_bootstrapping(
+        self,
+    ):
+        cmd = _make_service()._get_bootstrap_cmp()
+
+        assert "git -C" in cmd
+        assert "describe --tags --exact-match" in cmd
+        assert "_agentclaw_release_tag_valid" in cmd
+        assert "*_dev" in cmd
+        assert "*_pre" in cmd
+        assert "openClawEnterprise.properties" in cmd
+        assert "cmp -s" in cmd
+        assert "/home/admin/bin/install_engine.sh" in cmd
+        assert "/home/admin/bin/start_service.sh" in cmd
+        assert "reusing completed bootstrap checkout" in cmd
+        assert "else su admin -c 'bash /home/admin/bin/bootstrap_minimal.sh'" in cmd
+
+    def test_release_tag_validation_rejects_unknown_runtime_environment(self):
+        cmd = _make_service()._get_bootstrap_cmp()
+
+        assert (
+            'prod) case "$_agentclaw_release_tag" in *_dev|*_pre) '
+            "return 1;; *) return 0;; esac;;" in cmd
+        )
+        assert "*) return 1;; esac;" in cmd
+
+    def test_serializes_checkout_validation_and_compensation(self):
+        cmd = _make_service()._get_bootstrap_cmp()
+
+        assert 'mkdir "$_agentclaw_lock_dir"' in cmd
+        assert 'kill -0 "$_agentclaw_lock_pid"' in cmd
+        assert "_agentclaw_cleanup_lock" in cmd
+        assert "bootstrap lock timed out" in cmd
+
+    def test_fails_closed_when_container_init_does_not_finish(self):
+        cmd = _make_service()._get_bootstrap_cmp()
+
+        assert "/proc/1/comm" in cmd
+        assert "seq 1 120" in cmd
+        assert "container initialization timed out" in cmd
+        assert "exit 1" in cmd
 
 
 class TestGetStartSandboxServiceCmdNasFlag:
