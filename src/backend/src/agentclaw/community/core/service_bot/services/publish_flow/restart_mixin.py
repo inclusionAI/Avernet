@@ -353,9 +353,16 @@ class RestartMixin:
             )
             # Secondary net (mirrors upgrade_release): a lingering record
             # (DEVICE_NOT_FOUND) must be retired before recreating, or the fresh
-            # bot orphans it. BOT_NOT_FOUND is already gone — nothing to clean.
+            # bot orphans it — and its now-stale binding released so it does not
+            # linger ACTIVE pointing at the destroyed bot. BOT_NOT_FOUND is
+            # already gone — nothing to clean.
             if e.error_code == "DEVICE_NOT_FOUND":
-                self._build_service.retire_superseded_bot(bot_uuid, operator=operator)
+                destroy_publish_id = self._build_service.retire_superseded_bot(
+                    bot_uuid, operator=operator
+                )
+                self._release_binding(
+                    binding_id, destroy_publish_id=destroy_publish_id
+                )
             return await self._recreate_restart_target(
                 publish_id=publish_id,
                 stage_enum=stage_enum,
