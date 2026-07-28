@@ -8,7 +8,7 @@ is overridden per test to supply (or withhold) a caller.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -21,11 +21,13 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.services.engine_config import EngineConfigService
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 BOT = {
     "bot_id": "b1", "bot_name": "N", "bot_desc": "D", "active_engine": "teclaw",
     "bot_type": "personal", "status": "ACTIVE", "owner_id": "u1",
+    "entity_id": "u1", "entity_type": "staff",
     "device_binding": {"device_id": "dev-9"},
 }
 
@@ -36,6 +38,17 @@ def svc():
     m.get_bot.return_value = BOT
     m.list_bots_by_conditions.return_value = {"total": 1, "items": [BOT]}
     m.check_bot_name_exists.return_value = True
+    m.update_bot.return_value = {**BOT, "bot_name": "Renamed"}
+    m.restart_bot.return_value = {**BOT, "status": "PENDING"}
+    m.delete_bot.return_value = True
+    return m
+
+
+@pytest.fixture
+def engine_config():
+    m = AsyncMock()
+    m.read_bot_config.return_value = {"k": "v"}
+    m.write_bot_config.return_value = None
     return m
 
 
@@ -54,12 +67,13 @@ def passport():
 
 
 @pytest.fixture
-def client(svc, policy, passport):
+def client(svc, policy, passport, engine_config):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
             binder.bind(PolicyServiceProtocol, to=policy)
             binder.bind(PassportPlugin, to=passport)
+            binder.bind(EngineConfigService, to=engine_config)
 
     app = FastAPI()
     app.include_router(router)
@@ -140,3 +154,48 @@ def test_not_found_is_masked_404(client, svc):
     assert resp.status_code == 404
     # Fixed message — never the raw internal text.
     assert resp.json()["message"] == "Not found"
+
+
+# ----- mutating endpoints (Task 7) -----------------------------------------
+
+
+def test_update_bot(client, svc):
+    data = _ok(client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"}))
+    assert data["bot_name"] == "Renamed"
+    kw = svc.update_bot.call_args
+    assert kw.args == ("b1", "u1")
+    assert kw.kwargs["bot_name"] == "Renamed"
+
+
+def test_delete_bot(client, svc):
+    data = _ok(client.delete("/openapi/v1/bots/b1"))
+    assert data == {"deleted": True}
+    svc.delete_bot.assert_called_once_with("b1", "u1")
+
+
+def test_restart_bot(client):
+    data = _ok(client.post("/openapi/v1/bots/b1/restart"))
+    assert data["status"] == "PENDING"
+
+
+def test_get_engine_config(client, engine_config):
+    data = _ok(client.get("/openapi/v1/bots/b1/engine-config"))
+    assert data == {"k": "v"}
+    kw = engine_config.read_bot_config.call_args.kwargs
+    assert kw["bot_id"] == "b1" and kw["owner_id"] == "u1"
+    assert kw["engine_type"] == "teclaw"  # from bot active_engine
+
+
+def test_update_engine_config(client, engine_config):
+    data = _ok(client.put("/openapi/v1/bots/b1/engine-config", json={"a": 1}))
+    assert data == {"a": 1}  # echoes the written config
+    kw = engine_config.write_bot_config.call_args.kwargs
+    assert kw["config"] == {"a": 1} and kw["owner_id"] == "u1"
+
+
+def test_mutating_not_found_masked(client, svc):
+    svc.get_bot.side_effect = BotNotFoundError("x")
+    # engine-config guards via get_bot → masked 404
+    assert client.get("/openapi/v1/bots/b1/engine-config").status_code == 404
+    svc.update_bot.side_effect = BotNotFoundError("x")
+    assert client.put("/openapi/v1/bots/b1", json={"bot_name": "y"}).status_code == 404

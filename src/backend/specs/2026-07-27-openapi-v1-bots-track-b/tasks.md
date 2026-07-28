@@ -112,18 +112,19 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
         tenant bound by middleware. 10 endpoint tests pass (incl. 401/404-mask).
 - **Depends on:** 1, 2, 5
 
-## Task 7: Mutating endpoints — update, delete, restart, engine-config r/w  `[ ]`
+## Task 7: Mutating endpoints — update, delete, restart, engine-config r/w  `[x]`
 - **Goal:** Wire the five straightforward mutating handlers.
-- **Files:** `adapters/http/openapi_v1/bots/router.py`.
+- **Files:** `adapters/http/openapi_v1/bots/router.py`, `test_bots_endpoints.py`.
 - **Done when:**
-  - [ ] `PUT /bots/{id}` → `update_bot(...)`; `engine` not accepted; returns
-        updated `Bot`.
-  - [ ] `DELETE /bots/{id}` → `delete_bot(...)` → `Deleted`.
-  - [ ] `POST /bots/{id}/restart` → `restart_bot(...)` → `Bot`.
-  - [ ] `GET`/`PUT /bots/{id}/engine-config` → `get_bot` prelude +
+  - [x] `PUT /bots/{id}` → `update_bot(bot_name, bot_desc)`; `engine` not
+        accepted; `cluster_name`/`engine_options` accepted for schema symmetry
+        but not update drivers (engine immutable; config via engine-config).
+  - [x] `DELETE /bots/{id}` → `delete_bot(...)` → `Deleted`.
+  - [x] `POST /bots/{id}/restart` → `restart_bot(...)` → `Bot`.
+  - [x] `GET`/`PUT /bots/{id}/engine-config` → `get_bot` prelude +
         `EngineConfigService.read_bot_config` / `write_bot_config` (async) →
-        free-form `dict` pass-through.
-  - [ ] All wrapped by `@envelope_errors`.
+        free-form `dict` pass-through (missing entity → masked 404).
+  - [x] All wrapped by `@envelope_errors`. 16 endpoint tests pass.
 - **Depends on:** 1, 2
 
 ## Task 8: Create + auth-status endpoints  `[ ]`

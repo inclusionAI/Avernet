@@ -29,6 +29,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
+    deleted as deleted_envelope,
     envelope,
     envelope_errors,
     page,
@@ -36,6 +37,8 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -153,23 +156,53 @@ async def get_bot(
 
 
 @router.put("/{bot_id}", response_model=Envelope[Bot])
+@envelope_errors
 async def update_bot(
-    bot_id: str, body: BotUpdate, request: Request, principal: PrincipalDep
-):
-    """Update a bot (engine is immutable)."""
-    raise NotImplementedError
+    bot_id: str,
+    body: BotUpdate,
+    request: Request,
+    principal: PrincipalDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+) -> Envelope[Bot]:
+    """Update a bot's name/description (engine is fixed at creation).
+
+    ``cluster_name`` is engine-derived and the engine is immutable, so it is not
+    updatable here; ``engine_options`` is managed via the engine-config endpoints.
+    Both are accepted for schema symmetry but do not drive this update.
+    """
+    owner_id = caller_owner_id(principal)
+    bot = bot_service.update_bot(
+        bot_id, owner_id, bot_name=body.bot_name, bot_desc=body.bot_desc
+    )
+    return envelope(_to_bot(bot), request)
 
 
 @router.delete("/{bot_id}", response_model=Envelope[Deleted])
-async def delete_bot(bot_id: str, request: Request, principal: PrincipalDep):
+@envelope_errors
+async def delete_bot(
+    bot_id: str,
+    request: Request,
+    principal: PrincipalDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+) -> Envelope[Deleted]:
     """Delete a bot."""
-    raise NotImplementedError
+    owner_id = caller_owner_id(principal)
+    bot_service.delete_bot(bot_id, owner_id)
+    return deleted_envelope(request)
 
 
 @router.post("/{bot_id}/restart", response_model=Envelope[Bot])
-async def restart_bot(bot_id: str, request: Request, principal: PrincipalDep):
+@envelope_errors
+async def restart_bot(
+    bot_id: str,
+    request: Request,
+    principal: PrincipalDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+) -> Envelope[Bot]:
     """Restart a bot (re-provision its device)."""
-    raise NotImplementedError
+    owner_id = caller_owner_id(principal)
+    bot = bot_service.restart_bot(bot_id, owner_id)
+    return envelope(_to_bot(bot), request)
 
 
 @router.get("/{bot_id}/auth-status", response_model=Envelope[BotAuthStatus])
@@ -221,23 +254,58 @@ async def get_bot_passport(
     return envelope(Passport(bot_id=bot_id, passport_id=passport_id), request)
 
 
+def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:
+    """Resolve (entity_id, entity_type, engine) for an engine-config call."""
+    entity_id = bot.get("entity_id")
+    if not entity_id:
+        raise BotNotFoundError("bot has no associated entity")
+    entity_type = bot.get("entity_type") or "staff"
+    engine = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
+    return entity_id, entity_type, engine
+
+
 @router.get(
     "/{bot_id}/engine-config",
     response_model=Envelope[dict[str, Any]],
 )
+@envelope_errors
 async def get_bot_engine_config(
-    bot_id: str, request: Request, principal: PrincipalDep
-):
+    bot_id: str,
+    request: Request,
+    principal: PrincipalDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+) -> Envelope[dict[str, Any]]:
     """Read a bot's engine configuration (free-form JSON)."""
-    raise NotImplementedError
+    owner_id = caller_owner_id(principal)
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    entity_id, entity_type, engine = _engine_config_target(bot)
+    data = await engine_config_service.read_bot_config(
+        bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
+        entity_type=entity_type, engine_type=engine,
+    )
+    return envelope(data, request)
 
 
 @router.put(
     "/{bot_id}/engine-config",
     response_model=Envelope[dict[str, Any]],
 )
+@envelope_errors
 async def update_bot_engine_config(
-    bot_id: str, body: dict[str, Any], request: Request, principal: PrincipalDep
-):
+    bot_id: str,
+    body: dict[str, Any],
+    request: Request,
+    principal: PrincipalDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+) -> Envelope[dict[str, Any]]:
     """Write a bot's engine configuration (free-form JSON)."""
-    raise NotImplementedError
+    owner_id = caller_owner_id(principal)
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    entity_id, entity_type, engine = _engine_config_target(bot)
+    await engine_config_service.write_bot_config(
+        bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
+        entity_type=entity_type, engine_type=engine, config=body,
+    )
+    return envelope(body, request)
