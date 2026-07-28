@@ -559,6 +559,76 @@ class TestOnAgentAdditional:
         assert state.last_stream_is_assistant is False
 
 
+# ==================== _on_agent final state ====================
+
+
+class TestOnAgentFinal:
+    @pytest.mark.asyncio
+    async def test_on_agent_final_sets_complete_events(self, mock_bot_ws):
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_agent(
+            {
+                "sessionKey": "sk1",
+                "state": "final",
+                "message": {
+                    "content": [{"type": "text", "text": "agent done"}],
+                },
+            }
+        )
+        assert state.state == "final"
+        assert state.agent_complete.is_set()
+        assert state.chat_complete.is_set()
+        assert state.content == "agent done"
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "final"
+        assert chunk.content == "agent done"
+
+    @pytest.mark.asyncio
+    async def test_on_agent_final_empty_content(self, mock_bot_ws):
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_agent(
+            {
+                "sessionKey": "sk1",
+                "state": "final",
+                "message": {},
+            }
+        )
+        assert state.state == "final"
+        assert state.agent_complete.is_set()
+        assert state.chat_complete.is_set()
+        assert state.content == ""
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "final"
+        assert chunk.content == ""
+
+    @pytest.mark.asyncio
+    async def test_on_agent_final_verbose(self, mock_bot_ws):
+        client = AsyncChatClient(uri="ws://host/ws", verbose=True)
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_agent(
+            {
+                "sessionKey": "sk1",
+                "state": "final",
+                "stream": "lifecycle",
+                "message": {
+                    "content": [{"type": "text", "text": "final text"}],
+                },
+            }
+        )
+        assert state.state == "final"
+        assert state.agent_complete.is_set()
+        assert state.chat_complete.is_set()
+        assert state.content == "final text"
+
+
 # ==================== _on_error ====================
 
 

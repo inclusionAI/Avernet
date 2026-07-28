@@ -742,6 +742,25 @@ class AsyncChatClient:
             )
             return
 
+        if agent_state and agent_state == "final":
+            # agent final 事件视为整个会话的结束标志：
+            # 设置 agent_complete + chat_complete 唤醒等待方，并 emit final chunk
+            # 让流式迭代器终止。
+            state.state = "final"
+            state.agent_complete.set()
+            state.chat_complete.set()
+            content = payload.get("message", {}).get("content", [])
+            text = content[0].get("text", "") if content else ""
+            state.content = text
+            self._emit_stream_chunk(
+                state, StreamChunk(type="final", content=text)
+            )
+            if self.verbose:
+                logger.info(
+                    "[agent] final: sessionKey=%s, stream=%s", session_key, stream
+                )
+            return
+
         if self.verbose:
             logger.info(
                 "[agent] sessionKey=%s, stream=%s, has_state=%s",
