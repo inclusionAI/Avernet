@@ -44,9 +44,10 @@ binding first, then `last_pub_id`'s), read its **BaaS status**, and pick:
 | `RELEASED` / absent / `DESTROYING` | `FIRST_RELEASE` | `FIRST_RELEASE` |
 | no candidate at all | `FIRST_RELEASE` | `FIRST_RELEASE` |
 
-- **`RETIRE_THEN_FIRST_RELEASE`** = `destroy(old_bot_uuid)` (idempotent,
-  best-effort), then create a fresh bot. This is the teclaw cleanup the pipeline
-  is missing today.
+- **`RETIRE_THEN_FIRST_RELEASE`** = `destroy(old_bot_uuid)` (idempotent;
+  failures propagate so we never create the replacement while the old bot may
+  still be live), then create a fresh bot. This is the teclaw cleanup the
+  pipeline is missing today.
 - The **reactive `DEVICE_NOT_FOUND` fallback stays as a secondary net** for the
   rare non-teclaw race (status read said reusable, but the `upgrade` still hit a
   gone device): `BOT_NOT_FOUND` → first_release; `DEVICE_NOT_FOUND` → retire +
@@ -62,8 +63,8 @@ binding first, then `last_pub_id`'s), read its **BaaS status**, and pick:
   specific gone-bot error code out of the atom (for the secondary fallback).
 - **Upgrade fallback** (`release_stage.py`) — retire-by-code before falling back.
 - **Restart recreate** (`restart_mixin.py`) — apply the same decision + retire.
-- **Cleanup primitive** (`bot_build_service.py`) — one best-effort, idempotent
-  "retire superseded bot" method.
+- **Cleanup primitive** (`bot_build_service.py`) — one idempotent "retire
+  superseded bot" method whose failures propagate.
 
 ## Data Model Changes
 None. No schema, DDL, or migration.
@@ -73,8 +74,9 @@ None. No schema, DDL, or migration.
   `acquire_deploy_workflow` raises `TargetBotGoneError(result["error_code"])`.
   Internal only.
 - New `BotBuildService.retire_superseded_bot(bot_uuid: str) -> None` —
-  best-effort, idempotent `destroy_bot`; logs + swallows; never raises into the
-  deploy path; never called for an `ACTIVE`/reused bot.
+  idempotent `destroy_bot` (deterministic `request_id`); failures **propagate**
+  (never report a failed lifecycle write as success — the durable deploy retries
+  before creating the replacement); never called for an `ACTIVE`/reused bot.
 - `_should_upgrade_online(bool)` is replaced by `_decide_online_deploy(...)`
   returning a 3-way decision (provider-aware). The old boolean and the static
   `_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES` set are removed — the status/provider
@@ -89,8 +91,10 @@ None. No schema, DDL, or migration.
   `(None, None)`.
 - `_decide_online_deploy(publish_record, bot) -> OnlineDeployDecision`:
   1. candidate = `_resolve_online_reuse_target(...)`; `None` → `FIRST_RELEASE`.
-  2. `status = self._baas_service.get_bot(bot_uuid).get("status")` (best-effort;
-     lookup failure / missing → treat as gone → `FIRST_RELEASE`).
+  2. `status = self._baas_service.get_bot(bot_uuid).get("status")` (a genuine 404
+     is already normalized to `RELEASED`; a raised error is transient/non-404 and
+     **propagates** so the durable task retries — it is NOT treated as gone.
+     Missing/empty status → `FIRST_RELEASE`).
   3. `RELEASED`/`DESTROYING` → `FIRST_RELEASE`.
   4. `ACTIVE` → `UPGRADE`.
   5. `FAILED`/`STOPPED`/`STOPPING`:
@@ -120,14 +124,23 @@ None. No schema, DDL, or migration.
   `e.error_code == "DEVICE_NOT_FOUND"` (record lingers); skip for `BOT_NOT_FOUND`.
 
 ### 5. Restart (`restart_mixin.py`)
-- `execute_restart` applies `_decide_online_deploy` on the restart target the same
-  way (upgrade / retire+recreate / recreate), and its `except TargetBotGoneError`
-  uses the same code-gated `retire_superseded_bot` before `_recreate_restart_target`.
+- `execute_restart` applies `_decide_online_deploy` on the restart target:
+  `UPGRADE` reuses the in-place upgrade path; every non-`UPGRADE` decision
+  recreates *directly* (`RETIRE_THEN_FIRST_RELEASE` retires first), opening+
+  abandoning a fresh `RESTART` op before `_recreate_restart_target` so
+  `sync_restart_progress` reads the recreate's workflow via `ext.restart` rather
+  than a stale earlier `RESTART` op. A `FIRST_RELEASE`/`DESTROYING` target is not
+  routed through `upgrade_async` (its UPDATE fails with a non-`BOT_NOT_FOUND`
+  error the atom would not fall back on). The `except TargetBotGoneError` on the
+  `UPGRADE` path still applies the code-gated `retire_superseded_bot`
+  (`DEVICE_NOT_FOUND` only) before recreating.
 
 ### 6. Cleanup primitive (`bot_build_service.py`)
-- `retire_superseded_bot(self, bot_uuid)`: `try: self._baas_service.destroy_bot(
-  bot_uuid)` (idempotent — destroy tolerates already-gone); `except Exception:
-  log.warning`; never raises.
+- `retire_superseded_bot(self, bot_uuid)`: `self._baas_service.destroy_bot(
+  bot_uuid, request_id=md5("retire_"+bot_uuid))` (idempotent — the deterministic
+  `request_id` makes a redelivery reuse the same destroy); failures **propagate**
+  (never report a failed lifecycle write as success — the caller must not create
+  the replacement while the old bot may still be live).
 
 ### 7. Tests
 - Table-driven on `(provider ∈ {teclaw, baas}, prior_status, get_bot result)`:
@@ -142,7 +155,8 @@ None. No schema, DDL, or migration.
   - restart target `teclaw`+`STOPPED` → destroy + recreate; `baas`+`FAILED` →
     upgrade.
   - secondary fallback: `DEVICE_NOT_FOUND` → destroy; `BOT_NOT_FOUND` → no destroy.
-  - `retire_superseded_bot` raising → swallowed, deploy proceeds.
+  - `retire_superseded_bot` raising → **propagates** (deploy does not proceed to
+    create a replacement; the durable task retries).
 - Crash-safety: redelivery after `destroy(old)` but before first_release →
   candidate now `RELEASED` → `FIRST_RELEASE`, no double-destroy, single live bot.
 - Regression: adapt `dcce9a6`'s tests — teclaw offline→re-publish still yields a
