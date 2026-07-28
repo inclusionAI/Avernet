@@ -765,7 +765,7 @@ class BotService:
             BotLimitExceededError: 已达到该用户允许的最大 Bot 数量
         """
         # 1. 尝试从 policy 表读取用户专属上限
-        max_bots = self._get_bots_ceiling_for_owner(owner_id)
+        max_bots = self.get_bots_ceiling_for_owner(owner_id)
 
         if max_bots <= 0:
             return
@@ -790,8 +790,15 @@ class BotService:
                 f"已达到 Bot 数量上限 ({max_bots})，当前 {current} 个。请删除部分 Bot 后再创建新的。"
             )
 
-    def _get_bots_ceiling_for_owner(self, owner_id: str) -> int:
+    def get_bots_ceiling_for_owner(self, owner_id: str) -> int:
         """获取用户的 BOT 数量上限，优先从 policy 表读取。
+
+        Public because it is the single definition of the ceiling: creation
+        enforces it here, and a surface that *reports* the quota must resolve it
+        the same way. Reading ``PolicyService.get_bots_ceiling`` directly instead
+        picks up that method's own hardcoded default (5) rather than the
+        configured allocation limit, so the advertised and enforced ceilings can
+        disagree whenever ``max_devices_per_entity`` is not 5.
 
         Priority:
         1. PolicyService.get_bots_ceiling (per-user, from DB)
@@ -813,7 +820,7 @@ class BotService:
             )
         except Exception as e:
             logger.warning(
-                "[bot_service._get_bots_ceiling_for_owner] "
+                "[bot_service.get_bots_ceiling_for_owner] "
                 "policy_service.get_bots_ceiling failed for %s: %s",
                 owner_id, e,
             )
@@ -839,7 +846,7 @@ class BotService:
         Counts devices that are actively bound to user's bots (ACTIVE/PENDING/FAILED),
         regardless of whether the bot is ACTIVE, PENDING, or FAILED.
 
-        上限来源为 per-user ceiling（``_get_bots_ceiling_for_owner``，优先读
+        上限来源为 per-user ceiling（``get_bots_ceiling_for_owner``，优先读
         ``ac_access_control_policy.policy.bots_ceiling``，fallback 到
         ``device_allocation.max_devices_per_entity``），与 ``_check_bot_count_limit``
         同源，确保动态上限对绑定了 device 的 bot 同样生效。
@@ -854,7 +861,7 @@ class BotService:
         """
         try:
             mode_str = self._allocation_config.mode
-            max_devices = self._get_bots_ceiling_for_owner(owner_id)
+            max_devices = self.get_bots_ceiling_for_owner(owner_id)
 
             # ceiling 无效（<=0）时放行，与 _check_bot_count_limit 语义一致，
             # 避免 active_device_count >= 0 恒真导致第一个 bot 就被拦。

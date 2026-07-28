@@ -191,26 +191,26 @@ class TestCreateBotValidation:
 
 
 # ---------------------------------------------------------------------------
-# _get_bots_ceiling_for_owner: policy 优先于 config
+# get_bots_ceiling_for_owner: policy 优先于 config
 # ---------------------------------------------------------------------------
 
 
 class TestGetBotsCeilingForOwner:
     def test_no_policy_service_falls_back_to_config(self):
         svc = _make_service(max_bots=3, policy_service=None)
-        assert svc._get_bots_ceiling_for_owner("u1") == 3
+        assert svc.get_bots_ceiling_for_owner("u1") == 3
 
     def test_policy_service_returns_ceiling(self):
         ps = MagicMock()
         ps.get_bots_ceiling.return_value = 10
         svc = _make_service(max_bots=5, policy_service=ps)
-        assert svc._get_bots_ceiling_for_owner("u1") == 10
+        assert svc.get_bots_ceiling_for_owner("u1") == 10
 
     def test_policy_service_exception_falls_back_to_config(self):
         ps = MagicMock()
         ps.get_bots_ceiling.side_effect = Exception("db error")
         svc = _make_service(max_bots=5, policy_service=ps)
-        assert svc._get_bots_ceiling_for_owner("u1") == 5
+        assert svc.get_bots_ceiling_for_owner("u1") == 5
 
 
 class TestCheckBotCountLimitWithPolicy:

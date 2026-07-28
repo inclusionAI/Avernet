@@ -56,6 +56,7 @@ def svc():
     m.delete_bot.return_value = True
     m.check_create_bot_preflight.return_value = None
     m.create_bot.return_value = BOT
+    m.get_bots_ceiling_for_owner.return_value = 7
     return m
 
 
@@ -732,3 +733,47 @@ def test_update_without_authorization_forwards_nothing(client, svc):
     """No credential in, no credential out — not a header with an empty value."""
     client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"})
     assert svc.update_bot.call_args.kwargs["request_headers"] == {}
+
+
+# ----- round-10 review regressions -----------------------------------------
+
+
+def test_update_rejects_explicit_null(client, svc):
+    """R10/F41: `{"bot_desc": null}` was a 200 that changed nothing.
+
+    ``update_bot`` reads ``None`` as "field omitted", so an explicit null was
+    indistinguishable from not sending the field — the caller asked to clear the
+    description and got a success back with it untouched.
+    """
+    for field in ["bot_name", "bot_desc"]:
+        resp = client.put("/openapi/v1/bots/b1", json={field: None})
+        assert resp.status_code == 422, f"{field}: null accepted as a no-op"
+    svc.update_bot.assert_not_called()
+
+
+def test_update_schema_does_not_advertise_nullable_fields(client):
+    """A client must not be able to compile the request we reject."""
+    props = client.app.openapi()["components"]["schemas"]["BotUpdate"]["properties"]
+    for field in ["bot_name", "bot_desc"]:
+        assert props[field].get("type") == "string", props[field]
+        assert "anyOf" not in props[field], props[field]
+
+
+def test_update_omitting_a_field_still_leaves_it_unchanged(client, svc):
+    """Omission keeps its meaning — only explicit null is refused."""
+    _ok(client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"}))
+    kw = svc.update_bot.call_args.kwargs
+    assert kw["bot_name"] == "Renamed"
+    assert kw["bot_desc"] is None  # untouched
+
+
+def test_ceiling_uses_the_limit_creation_enforces(client, svc):
+    """R10/F42: reporting must not resolve the quota differently from create.
+
+    ``PolicyService.get_bots_ceiling`` defaults to a hardcoded 5; creation falls
+    back to the configured ``max_devices_per_entity``. Reading the policy service
+    directly advertised 5 to a deployment that allows something else.
+    """
+    svc.get_bots_ceiling_for_owner.return_value = 12
+    assert _ok(client.get("/openapi/v1/bots/ceiling"))["ceiling"] == 12
+    svc.get_bots_ceiling_for_owner.assert_called_once_with("u1")

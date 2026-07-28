@@ -42,7 +42,6 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
@@ -320,11 +319,18 @@ async def check_bot_name(
 async def get_bots_ceiling(
     request: Request,
     principal: PrincipalDep,
-    policy_service: PolicyServiceProtocol = Injected(PolicyServiceProtocol),
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Ceiling]:
-    """Get the caller's bot-creation quota ceiling."""
+    """Get the caller's bot-creation quota ceiling.
+
+    Resolved through the same method creation enforces, not
+    ``PolicyService.get_bots_ceiling`` directly: that one falls back to its own
+    hardcoded default of 5, while creation falls back to the configured
+    ``max_devices_per_entity``. Reading it directly would advertise 5 to a caller
+    whose deployment allows (or rejects at) a different number.
+    """
     owner_id = caller_owner_id(principal)
-    ceiling = policy_service.get_bots_ceiling(entity_id=owner_id)
+    ceiling = bot_service.get_bots_ceiling_for_owner(owner_id)
     return envelope(Ceiling(ceiling=ceiling), request)
 
 

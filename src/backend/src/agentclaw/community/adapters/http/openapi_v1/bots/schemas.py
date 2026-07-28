@@ -76,8 +76,20 @@ class BotUpdate(BaseModel):
 
     model_config = _STRICT
 
-    bot_name: str | None = None
-    bot_desc: str | None = None
+    # Declared ``str`` with a ``None`` default on purpose. Omitting a field means
+    # "leave it alone" — that is what the default encodes, and defaults are not
+    # validated — while sending an explicit ``null`` is rejected instead of
+    # silently doing nothing: ``BotService.update_bot`` reads ``None`` as
+    # "field omitted", so a schema-valid ``{"bot_desc": null}`` would answer 200
+    # having changed nothing. The generated schema types both as non-nullable
+    # strings, so a client cannot compile the request that gets rejected.
+    #
+    # This means the surface has no way to *clear* a description back to null.
+    # Neither does the internal route — ``update_bot`` has no representation for
+    # it — so that is a product gap to close deliberately, not something to fake
+    # here by treating "" as null.
+    bot_name: str = Field(default=None, description="New name; omit to keep.")
+    bot_desc: str = Field(default=None, description="New description; omit to keep.")
 
 
 class BotAuthPending(BaseModel):
