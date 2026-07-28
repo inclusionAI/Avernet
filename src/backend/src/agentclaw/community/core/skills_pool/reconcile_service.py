@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import PurePosixPath
-
 from injector import inject
 
 from agentclaw.community.core.bot_management.repository.protocol import (
@@ -19,11 +17,13 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skills_pool.models import (
-    PoolPaths,
+    FILESYSTEM_POOL_ENGINES,
     PoolCutoverStatus,
-    PoolSkillMapping,
-    RegisteredSkillAsset,
-    pool_paths_for_engine,
+)
+from agentclaw.community.core.skills_pool.mapping_intent import (
+    build_logical_skill_mappings,
+    local_locators_from_evidence,
+    local_skill_name,
 )
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
@@ -116,9 +116,7 @@ class SkillsPoolReconcileService:
         engine = bot.get("active_engine")
         if bot.get("env") != scope.env or not isinstance(engine, str):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
-        try:
-            paths = pool_paths_for_engine(engine)
-        except ValueError:
+        if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
 
         owner_id = bot.get("owner_id")
@@ -210,8 +208,8 @@ class SkillsPoolReconcileService:
             engine=engine,
         )
         try:
-            local_names = [self._local_name(asset) for asset in local_assets]
-            mappings = self._build_pool_mappings(active_assets, paths=paths)
+            local_names = [local_skill_name(asset) for asset in local_assets]
+            mappings = build_logical_skill_mappings(active_assets)
         except ValueError as error:
             evidence = {"reason": str(error)}
             recorded = self._record_failure_for_boundary(
@@ -236,6 +234,7 @@ class SkillsPoolReconcileService:
 
         cutover_finalizing = state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
         repair_evidence_refresh = state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+        locator_evidence = self._persisted_cutover_evidence(state)
         if (
             not state.data_plane_cutover_committed
             or cutover_finalizing
@@ -392,6 +391,7 @@ class SkillsPoolReconcileService:
                         SkillsPoolReconcileOutcome.STATE_RACE_LOST,
                         preparation_id=probe.preparation_id,
                     )
+            locator_evidence = cutover.evidence
 
         if not self._layouts.holds_lease(
             scope=scope,
@@ -433,10 +433,23 @@ class SkillsPoolReconcileService:
                 evidence={"mapping_count": len(mappings)},
             )
 
-        local_locators = {
-            asset.skill_id: f"local://{paths.pool_local}/{name}"
-            for asset, name in zip(local_assets, local_names, strict=True)
-        }
+        try:
+            local_locators = local_locators_from_evidence(
+                local_assets,
+                local_names,
+                locator_evidence,
+            )
+        except ValueError as error:
+            return self._record_post_cutover_failure(
+                scope=scope,
+                generation=generation,
+                lease_owner=lease_owner,
+                preparation_id=probe.preparation_id,
+                outcome=SkillsPoolReconcileOutcome.DATABASE_COMMIT_FAILED,
+                failure_code="LOCATOR_EVIDENCE_INVALID",
+                failure_stage="control_plane_commit",
+                evidence={"reason": str(error)},
+            )
         if not self._layouts.commit_pool_active(
             scope=scope,
             migration_generation=generation,
@@ -533,9 +546,7 @@ class SkillsPoolReconcileService:
         engine = bot.get("active_engine")
         if bot.get("env") != scope.env or not isinstance(engine, str):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
-        try:
-            pool_paths_for_engine(engine)
-        except ValueError:
+        if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         owner_id = bot.get("owner_id")
         if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
@@ -645,43 +656,17 @@ class SkillsPoolReconcileService:
         )
 
     @staticmethod
-    def _source_tail(git_path: str, prefix: str) -> PurePosixPath:
-        raw = git_path[len(prefix) :]
-        path = PurePosixPath(raw)
-        if not raw or path.name in {"", ".", ".."}:
-            raise ValueError(f"invalid skill locator: {git_path}")
-        return path
-
-    def _local_name(self, asset: RegisteredSkillAsset) -> str:
-        if not asset.git_path.startswith("local://"):
-            raise ValueError(f"skill {asset.skill_id} is not local")
-        return self._source_tail(asset.git_path, "local://").name
-
-    def _build_pool_mappings(
-        self,
-        assets: list[RegisteredSkillAsset],
-        *,
-        paths: PoolPaths,
-    ) -> list[PoolSkillMapping]:
-        mappings: list[PoolSkillMapping] = []
-        targets: dict[str, str] = {}
-        for asset in assets:
-            if asset.git_path.startswith("local://"):
-                relative = PurePosixPath(self._local_name(asset))
-                source = PurePosixPath(paths.pool_local) / relative
-            elif asset.git_path.startswith("git://"):
-                relative = self._source_tail(asset.git_path, "git://")
-                source = PurePosixPath(paths.pool_repo) / relative
-            else:
-                continue
-            target = str(PurePosixPath(paths.active) / relative.name)
-            if targets.get(target) == str(source):
-                continue
-            if target in targets:
-                raise ValueError(f"duplicate managed target: {target}")
-            targets[target] = str(source)
-            mappings.append(PoolSkillMapping(source=str(source), target=target))
-        return mappings
+    def _persisted_cutover_evidence(
+        state: BotSkillLayoutState,
+    ) -> dict[str, object] | None:
+        probe_evidence = state.last_probe_evidence
+        if not isinstance(probe_evidence, dict):
+            return None
+        cutover = probe_evidence.get("cutover")
+        if not isinstance(cutover, dict):
+            return None
+        evidence = cutover.get("evidence")
+        return evidence if isinstance(evidence, dict) else None
 
 
 __all__ = [

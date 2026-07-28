@@ -21,12 +21,18 @@ from engine.community.api.skills.schemas import (
     PoolLayoutActivateRequest,
     PoolLayoutActivateResponse,
     PoolLayoutRollbackRequest,
-    PoolQuarantineCleanupRequest,
     PoolMappingVerifyRequest,
+    PoolQuarantineCleanupRequest,
     RuntimeLayoutProbeApiResponse,
     RuntimeLayoutProbeRequest,
     RuntimeLayoutProbeResponse,
     SyncSymlinkRequest,
+)
+from engine.community.api.skills.schemas import (
+    PoolPhysicalMapping as PoolPhysicalMappingSchema,
+)
+from engine.community.api.skills.schemas import (
+    PoolSkillMappingIntent as PoolSkillMappingIntentSchema,
 )
 from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
@@ -34,14 +40,23 @@ from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
     CleanSymlinksRequest,
-    PoolLayoutActivateRequest as PoolLayoutActivateCommand,
-    PoolLayoutRollbackRequest as PoolLayoutRollbackCommand,
-    PoolLayoutProbeRequest as PoolLayoutProbeCommand,
     PoolMappingSourceLayout,
-    PoolQuarantineCleanupRequest as PoolQuarantineCleanupCommand,
+    PoolSkillMappingIntent,
     SymlinkItem,
     SyncBindPathsRequest,
     SyncSymlinksRequest,
+)
+from engine.community.core.skills.models import (
+    PoolLayoutActivateRequest as PoolLayoutActivateCommand,
+)
+from engine.community.core.skills.models import (
+    PoolLayoutProbeRequest as PoolLayoutProbeCommand,
+)
+from engine.community.core.skills.models import (
+    PoolLayoutRollbackRequest as PoolLayoutRollbackCommand,
+)
+from engine.community.core.skills.models import (
+    PoolQuarantineCleanupRequest as PoolQuarantineCleanupCommand,
 )
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
@@ -51,6 +66,21 @@ log = logging.getLogger("api-skills")
 def _skills_plugin():
     from engine.community.manager import EngineManager
     return EngineManager.get_instance().skills
+
+
+def _mapping_command(
+    item: PoolSkillMappingIntentSchema | PoolPhysicalMappingSchema,
+) -> PoolSkillMappingIntent | SymlinkItem:
+    if isinstance(item, PoolSkillMappingIntentSchema):
+        return PoolSkillMappingIntent(
+            corpus=item.corpus,
+            relative_path=item.relative_path,
+            link_name=item.link_name,
+        )
+    return SymlinkItem(
+        source=item.source,
+        target=item.target,
+    )
 
 
 @router.post("/layout/probe", response_model=RuntimeLayoutProbeApiResponse)
@@ -91,10 +121,8 @@ async def activate_runtime_skills_layout(
                 migration_generation=body.migration_generation,
                 preparation_id=body.preparation_id,
                 registered_local_names=body.registered_local_names,
-                mappings=[
-                    SymlinkItem(source=item.source, target=item.target)
-                    for item in body.mappings
-                ],
+                mappings=[_mapping_command(item) for item in body.mappings],
+                mapping_contract_version=body.mapping_contract_version,
             )
         )
     except CapabilityNotSupportedError as error:
@@ -173,12 +201,13 @@ async def verify_runtime_skill_mappings(
         if body.source_layout == PoolMappingSourceLayout.LEGACY.value
         else {}
     )
+    if body.mapping_contract_version is not None:
+        layout_kwargs["mapping_contract_version"] = (
+            body.mapping_contract_version
+        )
     try:
         result = await plugin.verify_pool_mappings(
-            [
-                SymlinkItem(source=item.source, target=item.target)
-                for item in body.mappings
-            ],
+            [_mapping_command(item) for item in body.mappings],
             **layout_kwargs,
         )
     except CapabilityNotSupportedError as error:
@@ -202,12 +231,13 @@ async def publish_runtime_skill_mappings(
         if body.source_layout == PoolMappingSourceLayout.LEGACY.value
         else {}
     )
+    if body.mapping_contract_version is not None:
+        layout_kwargs["mapping_contract_version"] = (
+            body.mapping_contract_version
+        )
     try:
         result = await plugin.publish_pool_mappings(
-            [
-                SymlinkItem(source=item.source, target=item.target)
-                for item in body.mappings
-            ],
+            [_mapping_command(item) for item in body.mappings],
             **layout_kwargs,
         )
     except CapabilityNotSupportedError as error:

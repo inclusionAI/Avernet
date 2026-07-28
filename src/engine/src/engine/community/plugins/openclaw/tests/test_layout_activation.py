@@ -6,11 +6,16 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
+from engine.community.core.skills.layout_planner import (
+    MAPPING_CONTRACT_VERSION,
+    SkillLayoutResolutionError,
+)
 from engine.community.core.skills.models import (
     PoolLayoutActivateRequest,
     PoolLayoutProbeRequest,
@@ -41,6 +46,9 @@ from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 from engine.community.plugins.skills_pool import layout_atomic
 from engine.community.plugins.skills_pool.layout_activation import (
     mapping_sources_use_pool,
+)
+from engine.community.plugins.skills_pool.mapping_contract import (
+    resolve_mapping_payload,
 )
 
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
@@ -196,6 +204,14 @@ def test_registered_local_cutover_syncs_latest_content_and_retires_bridges(
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
+    assert result.evidence["resolved_layout"] == {
+        "active_root": str(home / ".openclaw/workspace/skills"),
+        "local_root": str(pool_local),
+        "repo_root": str(pool_repo),
+    }
+    assert result.evidence["local_locators"] == {
+        "handmade": f"local://{pool_local / 'handmade'}"
+    }
     assert not legacy_local.exists()
     assert not legacy_local.is_symlink()
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
@@ -236,6 +252,59 @@ def test_registered_local_cutover_syncs_latest_content_and_retires_bridges(
         repo_is_mounted=lambda path: path == pool_repo,
     )
     assert repeated.status is PoolActivationStatus.ALREADY_COMMITTED
+
+
+def test_invalid_registered_name_is_rejected_before_cutover(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    invalid_name = " handmade"
+    (legacy_local / "handmade").rename(legacy_local / invalid_name)
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=[invalid_name],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.INVALID
+    assert result.evidence["reason"] == "registered_local_name_invalid"
+    assert (legacy_local / invalid_name / "SKILL.md").read_text() == "latest"
+    assert not legacy_local.is_symlink()
+    assert (legacy_local.parent / "skills-repo").is_symlink()
+    assert not (pool_local.parent / ".pool-active").exists()
+
+
+def test_invalid_registered_name_is_rejected_before_rollback(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    activated = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+    invalid_name = " handmade"
+    (pool_local / "handmade").rename(pool_local / invalid_name)
+
+    result = rollback_openclaw_pool(
+        rollback_generation="rollback-1",
+        registered_local_names=[invalid_name],
+        home=home,
+    )
+
+    assert result.status is PoolActivationStatus.INVALID
+    assert result.evidence["reason"] == "registered_local_name_invalid"
+    assert (pool_local / invalid_name / "SKILL.md").read_text() == "latest"
+    assert not legacy_local.exists()
+    assert (pool_local.parent / ".pool-active").exists()
 
 
 def test_explicit_rollback_rebuilds_legacy_from_current_pool_content(
@@ -1289,7 +1358,7 @@ def test_atomic_exchange_treats_einval_as_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeRenameAt2:
-        argtypes: list[object] = []
+        argtypes: ClassVar[list[object]] = []
         restype: object | None = None
 
         def __call__(self, *_args: object) -> int:
@@ -1786,3 +1855,124 @@ async def test_openclaw_port_runs_pool_filesystem_operations_off_loop(
     )["status"] == "READY"
     assert (await port.publish_pool_mappings(params))["published"] is True
     assert (await port.verify_pool_mappings(params))["valid"] is True
+
+
+@pytest.mark.asyncio
+async def test_openclaw_port_resolves_logical_mapping_and_returns_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import _skills
+
+    received: dict[str, object] = {}
+
+    def publish(**kwargs):
+        received.update(kwargs)
+        return MappingPublishResult(True, {"total": 1})
+
+    monkeypatch.setattr(_skills, "publish_pool_mappings", publish)
+    result = await OpenClawPluginImpl().publish_pool_mappings(
+        {
+            "mapping_contract_version": MAPPING_CONTRACT_VERSION,
+            "mappings": [
+                {
+                    "corpus": "repo",
+                    "relative_path": "business/reviewer",
+                    "link_name": "reviewer",
+                }
+            ],
+            "source_layout": "pool",
+        }
+    )
+
+    assert received["mappings"] == [
+        SkillMapping(
+            source=(
+                "/home/admin/.openclaw/workspace/skills-pool/"
+                "skills-repo/business/reviewer"
+            ),
+            target="/home/admin/.openclaw/workspace/skills/reviewer",
+        ),
+    ]
+    assert result["evidence"]["resolved_mappings"] == [
+        {
+            "corpus": "repo",
+            "relative_path": "business/reviewer",
+            "link_name": "reviewer",
+            "resolved_locator": "git://business/reviewer",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mappings",
+    [
+        [
+            {
+                "corpus": "local",
+                "relative_path": "writer\x00draft",
+                "link_name": "writer",
+            }
+        ],
+        [
+            {
+                "corpus": "local",
+                "relative_path": "writer",
+                "link_name": "writer",
+            },
+            {
+                "corpus": "repo",
+                "relative_path": "reviewer",
+                "link_name": "reviewer\x00draft",
+            },
+        ],
+    ],
+)
+async def test_openclaw_port_rejects_nul_before_publish(
+    monkeypatch: pytest.MonkeyPatch,
+    mappings: list[dict[str, str]],
+) -> None:
+    from engine.community.plugins.openclaw import _skills
+
+    publish = MagicMock()
+    monkeypatch.setattr(_skills, "publish_pool_mappings", publish)
+
+    with pytest.raises(SkillLayoutResolutionError):
+        await OpenClawPluginImpl().publish_pool_mappings(
+            {
+                "mapping_contract_version": MAPPING_CONTRACT_VERSION,
+                "mappings": mappings,
+                "source_layout": "pool",
+            }
+        )
+
+    publish.assert_not_called()
+
+
+def test_logical_dot_mapping_is_rejected_before_active_tree_mutation(
+    tmp_path: Path,
+) -> None:
+    home, legacy_local, _pool_local, _pool_repo = _prepared_home(tmp_path)
+    active_target = legacy_local.parent / "all-skills"
+
+    with pytest.raises(SkillLayoutResolutionError):
+        resolved = resolve_mapping_payload(
+            engine="openclaw",
+            source_layout=MappingSourceLayout.POOL,
+            payload=[
+                {
+                    "corpus": "local",
+                    "relative_path": ".",
+                    "link_name": "all-skills",
+                }
+            ],
+            mapping_contract_version=MAPPING_CONTRACT_VERSION,
+            home=home,
+        )
+        publish_pool_mappings(
+            mappings=list(resolved.mappings),
+            home=home,
+        )
+
+    assert not active_target.exists()
+    assert not active_target.is_symlink()

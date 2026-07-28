@@ -15,9 +15,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from engine.community.core.skills.layout_planner import (
+    MAPPING_CONTRACT_VERSION,
+)
 from engine.community.plugins.claude_code.layout_pool import (
     MappingSourceLayout,
-    SkillMapping,
     activate_claude_code_pool,
     inspect_claude_code_runtime_layout,
     publish_claude_code_pool_mappings,
@@ -25,6 +27,10 @@ from engine.community.plugins.claude_code.layout_pool import (
     verify_claude_code_pool_mappings,
 )
 from engine.community.plugins.skills_pool.layout_quarantine import cleanup_quarantine
+from engine.community.plugins.skills_pool.mapping_contract import (
+    ResolvedMappingPayload,
+    resolve_mapping_payload,
+)
 
 log = logging.getLogger("claude-code-community-port")
 
@@ -48,11 +54,17 @@ class _SkillsPortMixin:
     ensure_center}."""
 
     @staticmethod
-    def _pool_mappings(params: dict[str, Any]) -> list[SkillMapping]:
-        return [
-            SkillMapping(source=item["source"], target=item["target"])
-            for item in params.get("mappings", [])
-        ]
+    def _pool_mappings(
+        params: dict[str, Any],
+        *,
+        source_layout: MappingSourceLayout,
+    ) -> ResolvedMappingPayload:
+        return resolve_mapping_payload(
+            engine="claude_code",
+            source_layout=source_layout,
+            payload=params.get("mappings", []),
+            mapping_contract_version=params.get("mapping_contract_version"),
+        )
 
     async def activate_pool_layout(
         self,
@@ -63,7 +75,12 @@ class _SkillsPortMixin:
             migration_generation=params["migration_generation"],
             preparation_id=params["preparation_id"],
             registered_local_names=list(params.get("registered_local_names", [])),
-            mappings=self._pool_mappings(params),
+            mappings=list(
+                self._pool_mappings(
+                    params,
+                    source_layout=MappingSourceLayout.POOL,
+                ).mappings
+            ),
         )
         return result.to_data()
 
@@ -99,6 +116,7 @@ class _SkillsPortMixin:
         result = await asyncio.to_thread(
             inspect_claude_code_runtime_layout,
             expected_contract_version=params["layout_contract_version"],
+            mapping_contract_version=MAPPING_CONTRACT_VERSION,
         )
         return result.to_data()
 
@@ -106,27 +124,55 @@ class _SkillsPortMixin:
         self,
         params: dict[str, Any],
     ) -> dict[str, Any]:
+        resolved = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get(
+                    "source_layout",
+                    MappingSourceLayout.POOL.value,
+                )
+            ),
+        )
         result = await asyncio.to_thread(
             publish_claude_code_pool_mappings,
-            mappings=self._pool_mappings(params),
+            mappings=list(resolved.mappings),
             source_layout=MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
         )
-        return result.to_data()
+        data = result.to_data()
+        if result.published and resolved.resolved_locators:
+            data["evidence"]["resolved_mappings"] = list(
+                resolved.resolved_locators
+            )
+        return data
 
     async def verify_pool_mappings(
         self,
         params: dict[str, Any],
     ) -> dict[str, Any]:
+        resolved = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get(
+                    "source_layout",
+                    MappingSourceLayout.POOL.value,
+                )
+            ),
+        )
         result = await asyncio.to_thread(
             verify_claude_code_pool_mappings,
-            mappings=self._pool_mappings(params),
+            mappings=list(resolved.mappings),
             source_layout=MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
         )
-        return result.to_data()
+        data = result.to_data()
+        if result.valid and resolved.resolved_locators:
+            data["evidence"]["resolved_mappings"] = list(
+                resolved.resolved_locators
+            )
+        return data
 
     async def skills_list(self, token: str | None = None) -> list[dict]:
         resp = await (await self._relay()).send_request("skills.list", {})

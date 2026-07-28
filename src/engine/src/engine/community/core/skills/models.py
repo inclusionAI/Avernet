@@ -95,6 +95,15 @@ class SymlinkItem:
     target: str
 
 
+@dataclass(frozen=True, slots=True)
+class PoolSkillMappingIntent:
+    """Path-agnostic mapping resolved by the active Engine implementation."""
+
+    corpus: str
+    relative_path: str
+    link_name: str
+
+
 @dataclass
 class SyncSymlinksRequest:
     """Bulk-sync request for relative-path symlinks under a base dir."""
@@ -185,7 +194,10 @@ class PoolLayoutActivateRequest:
     migration_generation: str
     preparation_id: str
     registered_local_names: list[str] = field(default_factory=list)
-    mappings: list[SymlinkItem] = field(default_factory=list)
+    mappings: list[PoolSkillMappingIntent | SymlinkItem] = field(
+        default_factory=list
+    )
+    mapping_contract_version: str | None = None
 
 
 @dataclass
@@ -250,7 +262,7 @@ class PoolLayoutActivationResult:
     """Pool 数据面切换结果。"""
 
     committed: bool
-    status: "PoolLayoutActivationStatus"
+    status: PoolLayoutActivationStatus
     evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_data(self) -> dict[str, Any]:
@@ -312,8 +324,6 @@ __all__ = [
     "CleanSymlinksRequest",
     "CleanSymlinksResult",
     "PoolLayoutActivateRequest",
-    "PoolQuarantineCleanupRequest",
-    "PoolQuarantineCleanupResult",
     "PoolLayoutActivationResult",
     "PoolLayoutActivationStatus",
     "PoolLayoutProbeRequest",
@@ -323,6 +333,9 @@ __all__ = [
     "PoolMappingPublishResult",
     "PoolMappingSourceLayout",
     "PoolMappingVerificationResult",
+    "PoolQuarantineCleanupRequest",
+    "PoolQuarantineCleanupResult",
+    "PoolSkillMappingIntent",
     "Skill",
     "SkillConfig",
     "SkillExecutionRequest",
