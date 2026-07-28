@@ -32,6 +32,7 @@ from secbaas.community.core.service.bot_run import (
     ClawBotService,
     FixedMachineCountProvider,
     QueueTaskMessageDispatcher,
+    ResultGuardExecutor,
     SerializingExecutor,
     TaskConcurrencyPool,
     TaskMessageDispatcher,
@@ -658,7 +659,12 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         SerializingExecutor,
         inner=bot_run_request_executor,
         lock_service=distributed_lock_service,
-        queue_repository=bot_run_queue_repository,
+    )
+
+    result_guard_executor = providers.Singleton(
+        ResultGuardExecutor,
+        inner=serializing_executor,
+        run_repository=bot_run_repository,
     )
 
     bot_request_worker_config = providers.Singleton(
@@ -681,9 +687,8 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     bot_request_worker = providers.Singleton(
         BotRequestWorker,
         queue_repository=bot_run_queue_repository,
-        run_repository=bot_run_repository,
         qpm_manager=bot_qpm_manager,
-        executor=serializing_executor,
+        executor=result_guard_executor,
         post_run_callback_factories=providers.Dict(
             {
                 "bcn_uplink": bcn_uplink_callback,

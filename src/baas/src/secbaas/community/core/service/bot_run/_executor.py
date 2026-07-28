@@ -3,11 +3,14 @@
 执行器链处理 ``baas_bot_run_queue`` 的工作项（``BotRunQueueRecord``），结果正文
 落 ``baas_bot_run``（``BotRunRepository``）。链的层次（由外到内）：
 
+- ``ResultGuardExecutor``（兜底）：执行前处理队列级 timeout；除
+  ``RequeuedToPendingError`` 外，把逃逸异常落成 ``baas_bot_run.FAILED``。
+
 - ``SerializingExecutor``（增量 4）：用 ``DistributedLockService`` 给内层执行器
   加 **session 维度串行**。同一 session 同一时刻只有一台机器能持锁执行，不同
   session 并行。串行用现成的 DB 分布式锁（``ac_lock_table`` + ``FOR UPDATE`` +
-  后台自动续约），不依赖 ZCache，也不需要把请求路由到固定机器。串行放回 PENDING
-  在队列表上完成（``release_to_pending``）。
+  后台自动续约），不依赖 ZCache，也不需要把请求路由到固定机器。抢不到锁时
+  抛出 ``RequeuedToPendingError``，由持有 Worker 按 owner fencing 放回 PENDING。
 
 - ``BotRunRequestExecutor``（增量 5）：按 ``record.run_id`` 读 ``baas_bot_run``
   取消息/上下文，解析 binding、建会话、发/注入消息，写结果回 ``baas_bot_run``。
@@ -48,7 +51,6 @@ from ._internal_protocols import (
 )
 
 if TYPE_CHECKING:
-    from secbaas.community.core.repository.bot_run_queue import BotRunQueueRepository
     from secbaas.community.core.repository.bot_run_queue_chunk import (
         BotRunQueueChunkRepository,
     )
@@ -62,7 +64,7 @@ DEFAULT_LOCK_EXPIRE_SECONDS = 300
 
 
 class RequeuedToPendingError(Exception):
-    """Executor 已将工作项放回 PENDING（session 锁被占用），Worker 应跳过
+    """session 锁被占用，Worker 应把工作项放回 PENDING 并跳过
     post_run_callback 和 mark_done，仅释放并发槽位。"""
 
     def __init__(self, run_id: str, session_id: str) -> None:
@@ -71,12 +73,68 @@ class RequeuedToPendingError(Exception):
         super().__init__(f"run_id={run_id} requeued, session={session_id} busy")
 
 
+def _is_queue_record_timed_out(record: BotRunQueueRecord) -> bool:
+    timeout: int | float | None = record.meta.get("timeout")
+    if timeout is None or record.gmt_create is None:
+        return False
+    deadline = record.gmt_create.timestamp() + float(timeout)
+    return time.time() > deadline
+
+
+class ResultGuardExecutor:
+    """RequestExecutor 兜底包装器，统一负责 ``baas_bot_run`` 失败终态。
+
+    Worker 只关心队列生命周期；业务结果表的 FAILED 兜底留在 executor 链内。
+    ``RequeuedToPendingError`` 是调度信号，必须透传给 Worker 做 RUNNING→PENDING。
+    """
+
+    def __init__(
+        self, inner: RequestExecutor, run_repository: BotRunRepository
+    ) -> None:
+        self._inner = inner
+        self._run = run_repository
+
+    async def execute(self, record: BotRunQueueRecord) -> None:
+        if _is_queue_record_timed_out(record):
+            logger.warning(
+                "[ResultGuardExecutor] time out before execute run_id=%s",
+                record.run_id,
+            )
+            self._mark_failed(record.run_id, "time out")
+            return
+
+        try:
+            await self._inner.execute(record)
+        except RequeuedToPendingError:
+            raise
+        except TimeoutError:
+            logger.warning(
+                "[ResultGuardExecutor] executor timeout run_id=%s",
+                record.run_id,
+            )
+            self._mark_failed(record.run_id, "Task execution timeout")
+        except Exception as e:
+            logger.error(
+                "[ResultGuardExecutor] executor raised for run_id=%s: %s",
+                record.run_id,
+                e,
+                exc_info=True,
+            )
+            self._mark_failed(record.run_id, str(e))
+
+    def _mark_failed(self, run_id: str, error: str) -> None:
+        current = self._run.get_by_run_id(run_id)
+        if current is not None and current.status in ("PENDING", "RUNNING"):
+            self._run.update_error(run_id, f"executor safety-net: {error}")
+
+
 class SerializingExecutor:
     """给内层 ``RequestExecutor`` 加 session 串行的装饰器。
 
     - ``record.session_id`` 存在：先抢 ``{prefix}{session_id}`` 的分布式锁，
-      抢到才执行内层；抢不到说明同 session 有请求在执行 → 把队列工作项放回
-      PENDING，下个 tick 等前序完成后再认领（保证串行且不丢请求）。
+      抢到才执行内层；抢不到说明同 session 有请求在执行 → 抛出
+      RequeuedToPendingError，由 Worker 放回 PENDING，下个 tick 等前序完成后再认领
+      （保证串行且不丢请求）。
     - ``record.session_id`` 为空（一次新会话的首条消息，session 尚未创建）：
       此时无 key 可锁，直接交给内层执行（内层会建会话）。同一新会话"首条消息"
       被并发提交的边界见设计文档 §11，阶段一不在此处兜。
@@ -86,14 +144,12 @@ class SerializingExecutor:
         self,
         inner: RequestExecutor,
         lock_service: SessionLockService,
-        queue_repository: BotRunQueueRepository,
         *,
         lock_prefix: str = DEFAULT_SESSION_LOCK_PREFIX,
         lock_expire_seconds: int = DEFAULT_LOCK_EXPIRE_SECONDS,
     ) -> None:
         self._inner = inner
         self._lock_service = lock_service
-        self._queue = queue_repository
         self._lock_prefix = lock_prefix
         self._lock_expire_seconds = lock_expire_seconds
 
@@ -122,7 +178,6 @@ class SerializingExecutor:
                     lock_name,
                     record.bot_id,
                 )
-                self._queue.release_to_pending(record.run_id)
                 raise RequeuedToPendingError(record.run_id, session_id)
             await self._inner.execute(record)
 

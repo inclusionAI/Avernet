@@ -185,33 +185,55 @@ def test_touch_heartbeat_refreshes(repo: OrmBotRunQueueRepository, db: DatabaseM
     run_id = _insert(repo, "bot-1")
     repo.claim_pending_by_bot("bot-1", "w")
     _force_heartbeat(db, run_id, datetime.now() - timedelta(seconds=600))
-    repo.touch_heartbeat(run_id)
+    repo.touch_heartbeat(run_id, "w")
     assert repo.reset_stale_running(stale_seconds=150) == 0
 
 
 def test_release_to_pending(repo: OrmBotRunQueueRepository):
     run_id = _insert(repo, "bot-1")
     repo.claim_pending_by_bot("bot-1", "w")
-    assert repo.release_to_pending(run_id) == 1
+    assert repo.release_to_pending(run_id, "w") == 1
     rec = repo.get_by_run_id(run_id)
     assert rec.status == "PENDING"
     assert rec.assigned_worker is None
-    assert repo.release_to_pending(run_id) == 0
+    assert repo.release_to_pending(run_id, "w") == 0
 
 
 def test_mark_done(repo: OrmBotRunQueueRepository):
     run_id = _insert(repo, "bot-1")
     repo.claim_pending_by_bot("bot-1", "w")
-    assert repo.mark_done(run_id) == 1
+    assert repo.mark_done(run_id, "w") == 1
     assert repo.get_by_run_id(run_id).status == "DONE"
     # 已 DONE 再次 mark 无效果
-    assert repo.mark_done(run_id) == 0
+    assert repo.mark_done(run_id, "w") == 0
+
+
+def test_owner_fencing_prevents_old_worker_from_marking_reclaimed_row_done(
+    repo: OrmBotRunQueueRepository,
+):
+    run_id = _insert(repo, "bot-1")
+    first = repo.claim_pending_by_bot("bot-1", "worker-A")
+    assert first is not None
+
+    assert repo.release_to_pending(run_id, "worker-A") == 1
+    second = repo.claim_pending_by_bot("bot-1", "worker-B")
+    assert second is not None
+    assert second.assigned_worker == "worker-B"
+
+    # worker-A 的 finally/延迟清理不能误把 worker-B 新认领的 RUNNING 行置 DONE。
+    assert repo.mark_done(run_id, "worker-A") == 0
+    rec = repo.get_by_run_id(run_id)
+    assert rec.status == "RUNNING"
+    assert rec.assigned_worker == "worker-B"
+
+    assert repo.mark_done(run_id, "worker-B") == 1
+    assert repo.get_by_run_id(run_id).status == "DONE"
 
 
 def test_mark_done_not_discoverable(repo: OrmBotRunQueueRepository):
     run_id = _insert(repo, "bot-1")
     repo.claim_pending_by_bot("bot-1", "w")
-    repo.mark_done(run_id)
+    repo.mark_done(run_id, "w")
     # DONE 行不被发现 / 不被认领
     assert repo.discover_active_bots() == []
     assert repo.claim_pending_by_bot("bot-1", "w") is None
