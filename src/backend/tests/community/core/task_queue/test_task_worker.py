@@ -285,6 +285,7 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
     baas.get_publish_progress.return_value = {"status": "SUCCESS"}
     binding_repo = MagicMock()
     binding_repo.get_by_id.return_value = SimpleNamespace(
+        id=77,
         status="PENDING",
         device_provider="teclaw",
         device_props={"publish_id": 9},
