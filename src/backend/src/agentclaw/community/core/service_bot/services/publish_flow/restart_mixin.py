@@ -9,6 +9,9 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     service_skills_env_from_ext,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    PublishFlowServiceError,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     TargetBotGoneError,
     acquire_deploy_workflow,
@@ -259,28 +262,38 @@ class RestartMixin:
         # targets fall through to the in-place UPGRADE below, and a genuinely
         # gone bot (BOT_NOT_FOUND) is handled by that path's abandon→recreate
         # leg — preserving the RESTART-op ledger record for that case.
-        if (
-            stage_enum == PublishStage.ONLINE
-            and self._decide_online_deploy(publish_record, bot)
-            == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE
-        ):
-            self._build_service.retire_superseded_bot(bot_uuid, operator=operator)
-            logger.info(
-                "[PublishFlowService.execute_restart] teclaw not-live target -> "
-                "retire + recreate: publish_id=%s bot_uuid=%s stage=%s",
-                publish_id, bot_uuid, stage_enum.value,
-            )
-            return await self._recreate_restart_target(
-                publish_id=publish_id,
-                stage_enum=stage_enum,
-                publish_record=publish_record,
-                bot=bot,
-                migration_path=migration_path,
-                version=version,
-                delivery=delivery,
-                skills_env=skills_env,
-                operator=operator,
-            )
+        if stage_enum == PublishStage.ONLINE:
+            decision = self._decide_online_deploy(publish_record, bot)
+            if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                self._build_service.retire_superseded_bot(bot_uuid, operator=operator)
+                logger.info(
+                    "[PublishFlowService.execute_restart] teclaw not-live target -> "
+                    "retire + recreate: publish_id=%s bot_uuid=%s stage=%s",
+                    publish_id, bot_uuid, stage_enum.value,
+                )
+                return await self._recreate_restart_target(
+                    publish_id=publish_id,
+                    stage_enum=stage_enum,
+                    publish_record=publish_record,
+                    bot=bot,
+                    migration_path=migration_path,
+                    version=version,
+                    delivery=delivery,
+                    skills_env=skills_env,
+                    operator=operator,
+                )
+            # UPGRADE and FIRST_RELEASE both fall through to the in-place UPGRADE
+            # path below: UPGRADE reuses the live/rebuildable bot; a genuinely gone
+            # bot surfaces BOT_NOT_FOUND there and takes the abandon→recreate leg
+            # (which keeps the RESTART-op ledger record). Any other/new decision
+            # must fail loudly rather than silently pick a path.
+            if decision not in (
+                OnlineDeployDecision.UPGRADE,
+                OnlineDeployDecision.FIRST_RELEASE,
+            ):
+                raise PublishFlowServiceError(
+                    f"Unhandled online deploy decision: {decision}"
+                )
 
         async def _issue():
             return await self._build_service.upgrade_async(
