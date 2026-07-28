@@ -6,23 +6,25 @@
 
 ## Task 1: `[x]` Cleanup primitive — `retire_superseded_bot`
 
-- **Goal:** One best-effort, idempotent "destroy a superseded bot" method that
-  every seam can call. Never raises into the deploy path; never touches a live
-  bot (callers gate on the decision/error-code).
+- **Goal:** One idempotent "destroy a superseded bot" method that every seam can
+  call. Failures **propagate** (never report a failed lifecycle write as
+  success); never touches a live bot (callers gate on the decision/error-code).
 - **Files:**
   `src/agentclaw/community/core/service_bot/services/bot_build_service.py`,
   `tests/community/core/service_bot/services/test_bot_build_service_teclaw_routing.py`
   (or a new `test_bot_build_service_retire.py`)
 - **Done when:**
   - [x] `BotBuildService.retire_superseded_bot(self, bot_uuid: str) -> None`
-        added: calls `self._baas_service.destroy_bot(bot_uuid)`; wraps in
-        `try/except Exception` → `logger.warning(...)` and swallow; returns
-        `None` always.
-  - [x] Docstring states it is best-effort, idempotent (BaaS `destroy` tolerates
-        already-gone), and must only be called for a bot the caller has decided
-        is superseded/gone.
+        added: calls `self._baas_service.destroy_bot(bot_uuid)` with a
+        `bot_uuid`-derived deterministic `request_id`; a `destroy_bot` failure
+        **propagates** (AGENTS.md: never swallow a failed lifecycle write and
+        report success) so the caller does not create a replacement while the old
+        bot may still be live — the durable deploy retries and re-evaluates.
+  - [x] Docstring states it is idempotent (BaaS `destroy` tolerates already-gone
+        via the deterministic `request_id`), propagates failures, and must only
+        be called for a bot the caller has decided is superseded/gone.
   - [x] Unit: `destroy_bot` called once with the uuid on the happy path.
-  - [x] Unit: `destroy_bot` raising is swallowed (method returns, no exception).
+  - [x] Unit: `destroy_bot` raising **propagates** (method re-raises).
   - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** —
 
@@ -61,17 +63,20 @@
         None]`: this record's own `ext.binding.online` → binding → `device_id`
         first; else `last_pub_id`'s online binding; else `(None, None)`.
   - [x] `_decide_online_deploy(publish_record, bot) -> OnlineDeployDecision`
-        implements the matrix: no candidate / `get_bot` failure / `RELEASED` /
-        `DESTROYING` → `FIRST_RELEASE`; `ACTIVE` → `UPGRADE`;
+        implements the matrix: no candidate / `RELEASED` / `DESTROYING` /
+        status-absent → `FIRST_RELEASE`; `ACTIVE` → `UPGRADE`;
         `FAILED`/`STOPPED`/`STOPPING` → `RETIRE_THEN_FIRST_RELEASE` iff
         `resolve_container_provider(bot) == TECLAW_DEVICE_PROVIDER` else
-        `UPGRADE`; `PENDING`/unknown → `UPGRADE`.
+        `UPGRADE`; `PENDING`/unknown → `UPGRADE`. A `get_bot` failure
+        **propagates** (a genuine 404 is already normalized to `RELEASED`, so a
+        raised error is transient/non-404 — NOT proof the candidate is gone; the
+        durable task retries the status read rather than replacing a live bot).
   - [x] `_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES` and `_should_upgrade_online`
         removed; `grep -rn "_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES\|_should_upgrade_online"
         src/agentclaw` returns nothing (call sites migrated in Task 4).
   - [x] Unit (table-driven) over `(provider ∈ {teclaw, baas}) × (status ∈
         {ACTIVE, FAILED, STOPPED, STOPPING, RELEASED, DESTROYING, PENDING, absent})`
-        asserting the decision, incl. `get_bot`-raises → `FIRST_RELEASE`.
+        asserting the decision, incl. `get_bot`-raises → **propagates**.
   - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** —
 
@@ -128,9 +133,15 @@
   touched)
 - **Done when:**
   - [x] `execute_restart` decides via `_decide_online_deploy` on the restart
-        target: `UPGRADE` → existing upgrade path; `RETIRE_THEN_FIRST_RELEASE` →
-        `retire_superseded_bot(bot_uuid)` then `_recreate_restart_target`;
-        `FIRST_RELEASE` → `_recreate_restart_target`.
+        target: `UPGRADE` → existing upgrade path; every **non-`UPGRADE`** decision
+        recreates *directly* (`RETIRE_THEN_FIRST_RELEASE` calls
+        `retire_superseded_bot(bot_uuid)` first; both it and `FIRST_RELEASE` then
+        open+abandon a fresh `RESTART` op — so `sync_restart_progress` does not
+        read a stale earlier restart and instead falls back to the `ext.restart`
+        handle the recreate writes — before `_recreate_restart_target`). A
+        `FIRST_RELEASE`/`DESTROYING` target is NOT sent through `upgrade_async`
+        (its UPDATE is rejected with an error the atom does not classify as
+        `BOT_NOT_FOUND`, which would strand the restart).
   - [x] `except TargetBotGoneError as e:` applies the same code-gated
         `retire_superseded_bot` (DEVICE_NOT_FOUND only) before
         `_recreate_restart_target`.
