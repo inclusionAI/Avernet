@@ -41,7 +41,12 @@ _ONLINE_GONE_BAAS_STATUSES = frozenset({"RELEASED", "DESTROYING"})
 # destroys+recreates the device in place (recovers), while a teclaw UPDATE only
 # re-delivers to the existing container and cannot rebuild a gone one — so for
 # teclaw these must be retired and recreated instead of upgraded.
-_ONLINE_NOT_LIVE_BAAS_STATUSES = frozenset({"FAILED", "STOPPED", "STOPPING"})
+#
+# ``STOPPING`` is deliberately NOT here: it has an active STOP publish in flight,
+# and BaaS ``create_publish`` rejects any new publish of a different type (an
+# UPGRADE's UPDATE *or* a retire's DESTROY) while that runs. It is a transient
+# wait state — settle to ``STOPPED`` first — handled separately below.
+_ONLINE_NOT_LIVE_BAAS_STATUSES = frozenset({"FAILED", "STOPPED"})
 
 
 class UpgradeResolutionMixin:
@@ -174,8 +179,12 @@ class UpgradeResolutionMixin:
         - no candidate / ``RELEASED`` / ``DESTROYING`` → ``FIRST_RELEASE``
           (nothing live to reuse or orphan).
         - ``ACTIVE`` → ``UPGRADE`` (re-deliver in place; works for both providers).
-        - ``FAILED`` / ``STOPPED`` / ``STOPPING`` → ``UPGRADE`` for ``baas``/ARCA
-          (the UPDATE destroys+recreates the device in place and recovers it), but
+        - ``STOPPING`` → raise (wait): a STOP publish is still in flight, and BaaS
+          rejects any new publish of a different type while it runs, so neither an
+          UPGRADE nor a retire could land — the durable task retries until it
+          settles to ``STOPPED``.
+        - ``FAILED`` / ``STOPPED`` → ``UPGRADE`` for ``baas``/ARCA (the UPDATE
+          destroys+recreates the device in place and recovers it), but
           ``RETIRE_THEN_FIRST_RELEASE`` for teclaw (its UPDATE cannot rebuild a
           gone container — it would just fail the publish and strand the record).
         - anything else (``PENDING``/unknown) → ``UPGRADE`` (optimistic; the deploy
@@ -211,6 +220,16 @@ class UpgradeResolutionMixin:
 
         if status in _ONLINE_GONE_BAAS_STATUSES:
             return OnlineDeployDecision.FIRST_RELEASE
+
+        if status == "STOPPING":
+            # A STOP publish is still in flight; BaaS create_publish rejects any
+            # new publish of a different type (UPGRADE's UPDATE or a retire's
+            # DESTROY) while it runs. Wait for it to settle to STOPPED — raise so
+            # the durable task retries rather than issuing a doomed publish.
+            raise PublishFlowServiceError(
+                f"candidate bot_uuid={bot_uuid} is STOPPING (teardown publish in "
+                f"flight); retry once it settles"
+            )
 
         if status in _ONLINE_NOT_LIVE_BAAS_STATUSES:
             is_teclaw = (
