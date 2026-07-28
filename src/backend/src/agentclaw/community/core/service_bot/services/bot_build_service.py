@@ -30,6 +30,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE,
     ENGINE_DIR_MOUNT_WHITELIST_PARAM_CODE,
     BaasService,
+    BaasServiceError,
 )
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     DeliveryArtifact,
@@ -1145,7 +1146,9 @@ class BotBuildService:
             logger.error(f"[BotBuildService.upgrade] Upgrade failed: {e}")
             raise BotBuildServiceError(f"Bot upgrade failed: {e}")
 
-    def retire_superseded_bot(self, bot_uuid: str, operator: str = "system") -> None:
+    def retire_superseded_bot(
+        self, bot_uuid: str, operator: str = "system"
+    ) -> int | None:
         """Idempotent teardown of a bot that a deploy is superseding.
 
         Call this ONLY for a bot the caller has already decided is gone or not
@@ -1155,25 +1158,54 @@ class BotBuildService:
         created instead of reusing the old one, the old one is not left behind as
         an orphan (dirty data + wasted provider compute).
 
+        Returns the BaaS DESTROY workflow id when one was issued, or ``None`` when
+        the bot was already gone (nothing to destroy) — the caller stashes it on
+        the released binding.
+
         Failures **propagate** (AGENTS.md: never swallow a failed lifecycle write
         and report success): if the destroy cannot be confirmed, the caller must
         NOT proceed to create the replacement, or the superseded bot stays live
         and the at-most-one-live-bot guarantee is broken. The durable deploy then
-        retries — and on retry the decision is re-evaluated (once the bot is
-        confirmed gone the caller simply first-releases). The ``request_id`` is
-        derived deterministically from ``bot_uuid`` so a redelivery reuses the
-        same idempotent destroy rather than opening a second one.
+        retries — and on retry the decision is re-evaluated. The one exception is
+        an **already-gone** bot: if the candidate was deleted between the
+        decision's status read and this call, BaaS rejects the DESTROY (404, which
+        ``get_bot`` normalizes to ``RELEASED``; or ``DESTROYING`` when a prior
+        destroy is already in flight). That already satisfies the retirement goal,
+        so we re-check and treat an explicitly-gone bot as success — while any
+        other destroy failure (timeout, conflict, 5xx, still-live bot) propagates.
+        The ``request_id`` is derived deterministically from ``bot_uuid`` so a
+        redelivery reuses the same idempotent destroy rather than opening a second
+        one.
         """
         request_id = hashlib.md5(f"retire_{bot_uuid}".encode()).hexdigest()
-        self._baas_service.destroy_bot(
-            bot_uuid=bot_uuid,
-            operator=operator,
-            request_id=request_id,
-        )
+        try:
+            result = self._baas_service.destroy_bot(
+                bot_uuid=bot_uuid,
+                operator=operator,
+                request_id=request_id,
+            )
+        except BaasServiceError:
+            # The destroy may have been rejected because the bot is ALREADY gone
+            # (deleted after the decision's status read, or a destroy already in
+            # flight). Re-check: only an explicit gone status satisfies the goal;
+            # anything else (still live, or an ambiguous empty response) means the
+            # destroy genuinely failed and must propagate.
+            baas_bot = self._baas_service.get_bot(bot_uuid=bot_uuid)
+            status = (baas_bot or {}).get("status")
+            if status not in ("RELEASED", "DESTROYING"):
+                raise
+            logger.info(
+                f"[BotBuildService.retire_superseded_bot] destroy rejected but bot "
+                f"already gone (status={status}); retirement satisfied: "
+                f"bot_uuid={bot_uuid}"
+            )
+            return None
+        publish_id = result.get("publish_id") if isinstance(result, dict) else None
         logger.info(
             f"[BotBuildService.retire_superseded_bot] retired superseded bot: "
-            f"bot_uuid={bot_uuid}, operator={operator}"
+            f"bot_uuid={bot_uuid}, operator={operator}, destroy_publish_id={publish_id}"
         )
+        return publish_id
 
     def refresh_teclaw_mcp_outbound_rule(
         self,
