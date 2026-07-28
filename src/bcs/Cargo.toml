@@ -61,6 +61,7 @@ members = [
     # plugins
     "crates/plugins/bcs-cache-local",
     "crates/plugins/bcs-cache-redis",
+    "crates/plugins/bcs-storage-baas",
     "crates/plugins/bcs-storage-local",
     "crates/plugins/bcs-db-local",
     "crates/plugins/bcs-db-mysql",

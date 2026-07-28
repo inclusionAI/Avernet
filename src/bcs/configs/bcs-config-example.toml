@@ -232,10 +232,19 @@ group_link_url = "https://botchat.example.com/groups/{group_id}"
 session_link_url = "https://botchat.example.com/sessions/{session_id}"
 
 [session_files]
-storage_backend = "local"
+storage_backend = "local"      # or "baas"
 multipart_threshold = 104857600
 max_file_size = 5368709120
+
+[session_files.backend]
+# local:
 data_dir = "/var/bcs/session-files"
+# baas (when storage_backend = "baas"):
+# endpoint = "http://baas.xxx.xxx:8080"
+# tenant = "teamclaw"
+# health_probe_path = ""
+# [session_files.backend.headers]
+# X-Baas-Token = "..."
 
 [session_files.share]
 token_secret = "replace-with-share-token-secret"
