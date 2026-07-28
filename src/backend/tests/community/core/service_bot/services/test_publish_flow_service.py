@@ -1126,6 +1126,40 @@ async def test_restart_device_not_found_fallback_retires_then_recreates():
 
 
 @pytest.mark.asyncio
+async def test_restart_bot_not_found_fallback_releases_binding_no_retire():
+    # Secondary net: proactive status said reusable (ACTIVE) but the UPDATE raced
+    # with deletion and returned BOT_NOT_FOUND (bot fully gone). No retire, but the
+    # record's stale binding (id 1) must still be released (destroy_publish_id=None)
+    # so it does not linger ACTIVE after the recreate rewrites ext.binding.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "ACTIVE"}
+    baas_service.resolve_container_provider.return_value = "baas"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+    svc._release_binding = Mock()
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_not_called()  # bot already gone
+    svc._release_binding.assert_called_once_with(1, destroy_publish_id=None)
+    build_service.release_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_restart_and_recreate_preserve_frozen_pool_layout():
     publish_service = Mock()
     publish_service.create_device_binding.return_value = 55
