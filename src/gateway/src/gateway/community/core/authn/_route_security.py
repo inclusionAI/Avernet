@@ -1,30 +1,30 @@
-"""Route → auth-requirement table (auth design §8).
+"""Route → identity-requirement table (auth design §8, reshaped).
 
-Loads the ``route_security`` table (a ``"[METHOD ]<path-glob>" -> OR-list``
-mapping) and resolves an incoming ``(method, path)`` to the **most specific**
-matching rule's requirement. Fail-closed: an unmatched route resolves to
-``None`` and the caller must deny.
+The value under each ``"[METHOD ]<path-glob>"`` key is a mapping of
+``{identity: required|optional}`` (identity = a ``PrincipalType`` value).
+Resolves an incoming ``(method, path)`` to the **most specific** matching rule's
+requirement. Fail-closed: an unmatched route resolves to ``None`` and the caller
+must deny.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
-from gateway.community.spi.authn import Delegation, StrategyParams
+from gateway.community.spi.authn import Presence, PrincipalType
 
-# A requirement is an OR-list of alternatives; each alternative is an AND-map of
-# strategy name -> params (one strategy per alternative in practice today).
-Requirement = list[dict[str, StrategyParams]]
+# A requirement maps each identity the route cares about to its Presence.
+Requirement = dict[PrincipalType, Presence]
 
 
 @dataclass(frozen=True)
 class _Rule:
     method: str | None  # None = applies to every method
-    segments: tuple[str, ...]  # path split on "/", e.g. ("openapi", "v1", "bots", "**")
+    segments: tuple[str, ...]
     requirement: Requirement
 
 
@@ -72,23 +72,14 @@ def _segments(path: str) -> tuple[str, ...]:
 
 
 def _parse_req(value: Any) -> Requirement:
-    requirement: Requirement = []
-    for item in value or []:
-        if isinstance(item, str):
-            requirement.append({item: StrategyParams()})
-        elif isinstance(item, dict):
-            requirement.append(
-                {name: _parse_params(params) for name, params in item.items()}
-            )
-    return requirement
-
-
-def _parse_params(params: Any) -> StrategyParams:
-    params = params or {}
-    return StrategyParams(
-        scopes=frozenset(params.get("scopes", [])),
-        delegation=Delegation(params.get("delegation", Delegation.OPTIONAL.value)),
-    )
+    """Each value is ``{<identity-type-value>: required|optional}``."""
+    req: Requirement = {}
+    items = cast(dict[str, str], value or {})
+    for identity_value, presence_value in items.items():
+        identity = PrincipalType(identity_value)
+        presence = Presence(presence_value)
+        req[identity] = presence
+    return req
 
 
 # ── matching (§8.3) ──────────────────────────────────────────────────────────
@@ -108,7 +99,7 @@ def _match_segments(pattern: tuple[str, ...], segs: tuple[str, ...]) -> bool:
     if not pattern:
         return not segs
     head, rest = pattern[0], pattern[1:]
-    if head == "**":  # matches any remaining segments, including none
+    if head == "**":
         return True
     if not segs:
         return False

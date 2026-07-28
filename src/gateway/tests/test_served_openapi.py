@@ -17,7 +17,7 @@ from gateway.community.core.forwarding import build_served_openapi
 
 _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "bots.openapi.json"
 _METHODS = {"get", "post", "put", "delete", "patch"}
-_RULES = RouteSecurity.from_table({"/**": ["first_party_user"]})
+_RULES = RouteSecurity.from_table({"/**": {"user": "required"}})
 
 
 def _served() -> dict[str, Any]:
@@ -46,7 +46,7 @@ def test_every_served_operation_carries_security() -> None:
     for path, item in _served()["paths"].items():
         for method, operation in item.items():
             if method in _METHODS:
-                assert operation["x-avernet-security"] == [{"first_party_user": {}}], (
+                assert operation["x-avernet-security"] == {"user": "required"}, (
                     f"{method} {path}"
                 )
 
