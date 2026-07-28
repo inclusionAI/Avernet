@@ -29,15 +29,12 @@ if TYPE_CHECKING:
 TECLAW_CREATE_PUBLISH_POLL_TASK = "teclaw.create.publish_poll"
 TECLAW_PUBLISH_TASK_DEADLINE_SECONDS = 86400
 _PUBLISH_POLL_TIMEOUT_SECONDS = 600.0
-# How long the delivery keeps waiting for BaaS to expose a ready device after the
-# publish reported SUCCESS. Measured from the same create timestamp as the poll
-# window, so a bot that never gets a device fails loudly instead of rescheduling
-# to the task deadline.
+# How long a "device not ready" wait stays the *expected* path after the publish
+# reported SUCCESS. Measured from the same create timestamp as the poll window.
+# Past it the delivery keeps retrying (up to the task deadline) but records the
+# reason on the task instead of rescheduling quietly.
 _DELIVERY_READY_TIMEOUT_SECONDS = 2 * _PUBLISH_POLL_TIMEOUT_SECONDS
 _PUBLISH_PROGRESS_TRANSIENT_ERROR = "get_publish_progress transient error"
-# device_props key stamping which publish's outbound rule was delivered — the
-# durable record that separates "status persisted" from "token delivered".
-_OUTBOUND_RULE_DELIVERED_KEY = "outbound_rule_publish_id"
 
 logger = get_logger()
 
@@ -142,7 +139,7 @@ class TeclawPublishTaskHandler:
             # may have died before (or while) delivering the token — the status
             # write and the delivery are two separate writes. Completing here on
             # the status alone would strand the container without a token for
-            # good, so replay the delivery unless it recorded success.
+            # good, so replay the delivery — the push is idempotent.
             return self._deliver_outbound_rule(
                 bot_id=bot_id,
                 binding=binding,
@@ -231,11 +228,12 @@ class TeclawPublishTaskHandler:
         why provision cannot push the rule inline.
 
         The delivery is a *second* write after the terminal status write, so it
-        carries its own durability: a transient failure returns ``Retry`` (the
-        queue re-drives it, bounded by the task deadline) and success is stamped
-        onto the binding, which is what lets a task reclaimed after a crash tell
-        "status persisted, token delivered" from "status persisted, token lost".
-        The push itself is idempotent (a rule REPLACE), so replaying it is safe.
+        carries its own durability: nothing but a completed push may complete the
+        task. A transient failure returns ``Retry`` (the queue re-drives it with
+        backoff, bounded by the task deadline), and a task reclaimed after a
+        crash between the two writes re-enters here from the ACTIVE binding and
+        simply pushes again — the push is a rule REPLACE, so replaying it is
+        idempotent and needs no delivery bookkeeping of its own.
 
         The updater's three states drive the outcome: ``None`` (this provider
         writes no outbound rules) completes, ``[]`` (BaaS has no ready device
@@ -243,9 +241,6 @@ class TeclawPublishTaskHandler:
         visible to the next read) reschedules, and a non-empty list is a
         delivery to every device of the bot.
         """
-        if self._delivery_recorded(binding, publish_id):
-            return Complete()
-
         bot_uuid = binding.device_id
         owner_id = binding.entity_id
         if not bot_uuid or not owner_id:
@@ -298,13 +293,23 @@ class TeclawPublishTaskHandler:
             return Complete()
 
         if not updated:
-            # Devices aren't ready yet. Keep waiting on the same durable task
-            # rather than blocking in-handler; give up loudly once the window
-            # closes instead of silently completing an undelivered token.
+            # Devices aren't ready yet. Wait on the same durable task rather than
+            # blocking in-handler. Inside the readiness window this is the normal
+            # path (Reschedule, no error noise); past it the wait is abnormal, so
+            # it switches to Retry — same recoverability up to the task deadline,
+            # but the reason is recorded on the task and the backoff widens. The
+            # bot is already ACTIVE, so completing here would strand it silently.
             if (
                 self._clock() - started_at_epoch_s
             ) >= _DELIVERY_READY_TIMEOUT_SECONDS:
-                return Fail(
+                logger.warning(
+                    "[TeclawPublishTaskHandler] Still no ready device past the "
+                    "readiness window: bot_id=%s bot_uuid=%s publish_id=%s",
+                    bot_id,
+                    bot_uuid,
+                    publish_id,
+                )
+                return Retry(
                     "Teclaw outbound rule has no ready device after publish "
                     f"SUCCESS: bot_id={bot_id} bot_uuid={bot_uuid} "
                     f"publish_id={publish_id}"
@@ -318,16 +323,6 @@ class TeclawPublishTaskHandler:
             )
             return Reschedule(self._poll_delay_seconds)
 
-        try:
-            self._device_binding_repo.update_device_props(
-                binding_id=binding.id,
-                props={_OUTBOUND_RULE_DELIVERED_KEY: publish_id},
-            )
-        except Exception as exc:
-            # The rule is already written; only the marker is missing, so a
-            # replay re-pushes it (idempotent) rather than losing the delivery.
-            return Retry(f"record Teclaw outbound rule delivery failed: {exc}")
-
         logger.info(
             "[TeclawPublishTaskHandler] Teclaw outbound rule updated: "
             "bot_id=%s bot_uuid=%s publish_id=%s updated_count=%s",
@@ -338,11 +333,6 @@ class TeclawPublishTaskHandler:
         )
         return Complete()
 
-    @staticmethod
-    def _delivery_recorded(binding: DeviceBindingRecord, publish_id: int) -> bool:
-        """Whether this publish's outbound rule was already delivered."""
-        delivered = (binding.device_props or {}).get(_OUTBOUND_RULE_DELIVERED_KEY)
-        return delivered is not None and str(delivered) == str(publish_id)
 
 
 class TeclawPublishTaskLifecycle(LifecycleBase):
