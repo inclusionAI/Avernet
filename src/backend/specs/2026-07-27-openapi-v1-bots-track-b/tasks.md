@@ -25,16 +25,16 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
         decorator's mapping for one mapped error and one pass-through. 8 passed.
 - **Depends on:** —
 
-## Task 2: Cluster ↔ engine rule  `[ ]`
+## Task 2: Cluster ↔ engine rule  `[x]`
 - **Goal:** The `ACRA`/`ANDC` ↔ engine bijection in one place, both directions.
-- **Files:** `adapters/http/openapi_v1/responses.py` (or `clusters.py`) + its test.
+- **Files:** `adapters/http/openapi_v1/clusters.py` (new) + its test.
 - **Done when:**
-  - [ ] `cluster_for_engine(engine) -> "ANDC" | "ACRA"` returns `ANDC` iff
+  - [x] `cluster_for_engine(engine) -> "ANDC" | "ACRA"` returns `ANDC` iff
         `engine == "teclaw"`, else `ACRA`.
-  - [ ] `validate_engine_cluster(engine, cluster) -> None` raises
+  - [x] `validate_engine_cluster(engine, cluster) -> None` raises
         `ClusterMismatchError` when the pair breaks the bijection.
-  - [ ] Tests: `teclaw`/`ANDC` ok; non-teclaw/`ACRA` ok; both mismatches raise;
-        cluster names come only from the enum.
+  - [x] Tests: `teclaw`/`ANDC` ok; non-teclaw/`ACRA` ok; both mismatches raise;
+        cluster names come only from the enum. 9 passed.
 - **Depends on:** —
 
 ## Task 3: Schema updates  `[ ]`
