@@ -288,11 +288,14 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
         status="PENDING",
         device_provider="teclaw",
         device_props={"publish_id": 9},
+        device_id="BOT-x",
+        entity_id="staff-1",
     )
     w.registry.register(
         TeclawPublishTaskHandler(
             baas_service=baas,
             device_binding_repo=binding_repo,
+            passport_plugin=MagicMock(),
         )
     )
     record = w.enqueue(
