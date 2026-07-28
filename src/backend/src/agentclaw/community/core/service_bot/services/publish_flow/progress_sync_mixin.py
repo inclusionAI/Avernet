@@ -635,6 +635,14 @@ class ProgressSyncMixin:
                     baas_publish_id=restart_publish_id,
                     bot_id=publish_record.source_bot_id,
                 )
+                # _activate_binding writes device_props via reuse_binding, which
+                # REPLACES (not merges) the dict — dropping the teclaw status-read
+                # handle publish_id that execute_restart / _recreate_restart_target
+                # stored. Re-merge it (refresh_publish_handle merges) so teclaw
+                # consumers keep pointing at the current restart workflow.
+                binding_id = (ext.get("binding") or {}).get(stage.value)
+                if binding_id:
+                    self.refresh_publish_handle(binding_id, restart_publish_id)
 
             return PublishFlowResult(
                 publish_id=publish_id,
