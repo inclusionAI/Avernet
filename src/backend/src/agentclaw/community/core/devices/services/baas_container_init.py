@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 
 from agentclaw.community.core.devices.models import AllocatedDevice, SynlinkMappingInfo
+from agentclaw.community.core.devices.services.baas_bootstrap_guard import (
+    build_baas_bootstrap_guard_command,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -64,11 +67,17 @@ class BaasContainerInitializer:
         write_codefuse_token_baas(self._baas_service, bot_uuid, codefuse_token)
 
     def _run_baas_bootstrap(self, bot_uuid: str) -> None:
-        self._baas_service.exec_command_on_bot(
+        result = self._baas_service.exec_command_on_bot(
             bot_uuid=bot_uuid,
-            cmd="bash /home/admin/bin/bootstrap_minimal.sh",
-            timeout_seconds=60,
+            # BaaS exec runs as root, while root_init creates and owns the
+            # checkout as admin. Keep the lock/root lifecycle outside, but
+            # inspect or repair the checkout as its owning user.
+            cmd=build_baas_bootstrap_guard_command(as_admin=True),
+            timeout_seconds=300,
         )
+        exit_code = result.get("exit_code") if isinstance(result, dict) else None
+        if exit_code != 0:
+            raise RuntimeError(f"BaaS bootstrap guard failed: exit_code={exit_code}")
         logger.info("[_run_baas_bootstrap] done: bot_uuid=%s", bot_uuid)
 
     def _run_baas_install_engine(self, bot_uuid: str) -> None:
