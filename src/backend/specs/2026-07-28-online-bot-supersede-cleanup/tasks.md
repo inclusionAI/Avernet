@@ -117,7 +117,7 @@
   - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** Task 1, Task 2
 
-## Task 6: `[ ]` Apply the decision + cleanup to restart
+## Task 6: `[x]` Apply the decision + cleanup to restart
 
 - **Goal:** Restart uses the same provider-aware decision and cleanup, so a
   restart against a `FAILED`/`STOPPED`/gone target never orphans a bot.
@@ -127,18 +127,18 @@
   (+ `tests/community/e2e/publish_boundary/test_chain_and_restart_flows.py` if
   touched)
 - **Done when:**
-  - [ ] `execute_restart` decides via `_decide_online_deploy` on the restart
+  - [x] `execute_restart` decides via `_decide_online_deploy` on the restart
         target: `UPGRADE` → existing upgrade path; `RETIRE_THEN_FIRST_RELEASE` →
         `retire_superseded_bot(bot_uuid)` then `_recreate_restart_target`;
         `FIRST_RELEASE` → `_recreate_restart_target`.
-  - [ ] `except TargetBotGoneError as e:` applies the same code-gated
+  - [x] `except TargetBotGoneError as e:` applies the same code-gated
         `retire_superseded_bot` (DEVICE_NOT_FOUND only) before
         `_recreate_restart_target`.
-  - [ ] Unit: restart `teclaw`+`STOPPED` → destroy + recreate; restart
+  - [x] Unit: restart `teclaw`+`STOPPED` → destroy + recreate; restart
         `baas`+`FAILED` → upgrade (same uuid); restart `DEVICE_NOT_FOUND`
         fallback → destroy + recreate; `BOT_NOT_FOUND` fallback → recreate, no
         destroy.
-  - [ ] `pytest tests/community/core/service_bot/services/` green.
+  - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** Task 1, Task 2, Task 3
 
 ## Task 7: `[ ]` Regression, crash-safety, and E2E guard
