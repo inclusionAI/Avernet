@@ -150,3 +150,21 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
         `## Context Boundary`; `tests/community/architecture/` green.
   - [ ] Remote CI green on the PR (push `--no-verify`, rely on remote gates).
 - **Depends on:** 9
+
+## Groups
+
+Execution units for SDD Phase 4. Review after each group with code changes;
+check in with the user only where noted.
+
+- **Group A — Shared primitives:** Tasks 1, 2, 3. New code in the `openapi_v1`
+  package only (response/envelope helper, cluster↔engine rule, schema enum). No
+  existing behavior touched. Review; no check-in.
+- **Group B — Internal seams:** Tasks 4, 5. The two behavior-preserving edits to
+  `bot_management` internals (create-flow extraction, additive list filters),
+  guarded by the unmodified internal suite. Review **and check in** — highest
+  blast radius.
+- **Group C — Handlers:** Tasks 6, 7, 8. Wire all 13 routes to the Group A/B
+  pieces. Review.
+- **Group D — Tests & gate:** Tasks 9, 10. Endpoint + cross-tenant + filter
+  tests, then the full-suite/architecture gate and the acceptance-criteria walk.
+  Review; final verification.
