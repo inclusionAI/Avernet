@@ -1158,14 +1158,19 @@ class TestStartServiceInitSteps:
         if not cmds[0]:
             cmds = [c[1]["cmd"] for c in calls]
 
+        assert "/var/run/agentclaw/.install_dependency_file" in cmds[0]
+        assert "describe --tags --exact-match" in cmds[0]
+        assert "openClawEnterprise.properties" in cmds[0]
+        assert "reusing completed bootstrap checkout" in cmds[0]
         assert "bootstrap_minimal.sh" in cmds[0]
+        assert calls[0].kwargs["timeout_seconds"] == 300
         assert "install_engine.sh" in cmds[1]
         assert "setup_supervisor_sync_service.sh" in cmds[2]
         assert "setup_engine_dirs.sh" in cmds[3]
         assert "start_service.sh" in cmds[-2]
         assert "starting_watchdog.sh" in cmds[-1]
 
-    def test_no_su_admin_in_commands(self):
+    def test_only_bootstrap_checkout_operations_drop_to_admin(self):
         svc, baas = self._make_success_svc()
 
         with patch(
@@ -1174,9 +1179,21 @@ class TestStartServiceInitSteps:
         ):
             svc._start_service(device=_device_with_publish())
 
-        for call in baas.exec_command_on_bot.call_args_list:
+        calls = baas.exec_command_on_bot.call_args_list
+        bootstrap_cmd = calls[0].kwargs["cmd"]
+        assert (
+            "su admin -c 'git -C /home/admin/agentclaw-daas-scripts "
+            "describe --tags --exact-match'" in bootstrap_cmd
+        )
+        assert (
+            "su admin -c 'bash /home/admin/bin/bootstrap_minimal.sh'"
+            in bootstrap_cmd
+        )
+
+        # install_engine.sh itself requires root and drops privileges internally.
+        for call in calls[1:]:
             cmd = call.kwargs.get("cmd", "")
-            assert "su admin" not in cmd, f"BaaS container should not use su admin: {cmd}"
+            assert "su admin" not in cmd, f"root lifecycle command used su admin: {cmd}"
 
     def test_init_uses_correct_bot_uuid(self):
         svc, baas = self._make_success_svc()
@@ -1210,6 +1227,25 @@ class TestStartServiceInitSteps:
         assert "init failed" in msg.lower() or "bootstrap" in msg.lower()
         svc.report_device_alive.assert_not_called()
 
+    def test_bootstrap_nonzero_exit_stops_remaining_init_steps(self):
+        svc, baas = self._make_success_svc()
+        baas.exec_command_on_bot.return_value = {
+            "exit_code": 1,
+            "stdout": "",
+            "stderr": "bootstrap guard failed",
+        }
+
+        with patch(
+            "agentclaw.community.core.devices.services.baas_device_service.time.sleep",
+            return_value=None,
+        ):
+            ok, msg = svc._start_service(device=_device_with_publish())
+
+        assert ok is False
+        assert "bootstrap guard failed" in msg
+        assert baas.exec_command_on_bot.call_count == 1
+        svc.report_device_alive.assert_not_called()
+
     def test_start_service_passes_bot_type(self):
         svc, baas = self._make_success_svc()
 
@@ -1225,7 +1261,7 @@ class TestStartServiceInitSteps:
 
         start_cmd_calls = [
             c for c in baas.exec_command_on_bot.call_args_list
-            if "start_service.sh" in c.kwargs.get("cmd", "")
+            if "start_service.sh --token" in c.kwargs.get("cmd", "")
         ]
         assert len(start_cmd_calls) == 1
         assert "--bot_type personalCoding" in start_cmd_calls[0].kwargs["cmd"]
