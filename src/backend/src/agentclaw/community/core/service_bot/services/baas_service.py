@@ -2754,13 +2754,27 @@ class BaasService:  # pragma: no cover
         bot_uuid: str,
         *,
         agent_pass_token: str = "",
-    ) -> list[dict[str, Any]]:
-        """创建/发布后按 BaaS bot_uuid 更新 Teclaw PaaS 设备出站规则。"""
+    ) -> list[dict[str, Any]] | None:
+        """创建/发布后按 BaaS bot_uuid 更新 Teclaw PaaS 设备出站规则。
+
+        三态返回值 —— 调用方需要区分"无需下发"和"设备还没准备好",
+        否则会把一次没写成的下发当成成功(#527 回归的形态之一):
+
+        - ``None``: 当前 provider 不做出站改写(community/local 的空规则),
+          没有任何东西要写,调用方应视为完成。
+        - ``[]``: 有规则要写,但设备还没就绪 —— BaaS 尚未返回设备,或设备的
+          ``provider_device_id`` 还没落库(``start_device`` 才写入)。调用方应
+          稍后重试,不能当成成功。
+        - 非空列表: 该 Bot 名下每台设备都写入成功。
+
+        为避免"部分成功"这种既不能重试也不算完成的中间态,先确认所有设备都有
+        ``provider_device_id``,再逐台下发。
+        """
         outbound_rule = self._build_teclaw_outbound_operation_rule(
             agent_pass_token=agent_pass_token,
         )
         if outbound_rule is None:
-            return []
+            return None
 
         devices = self.list_devices_by_bot_uuid(bot_uuid)
         if not devices:
@@ -2770,18 +2784,24 @@ class BaasService:  # pragma: no cover
             )
             return []
 
+        pending = [
+            device.get("device_uuid", "")
+            for device in devices
+            if not device.get("provider_device_id")
+        ]
+        if pending:
+            logger.warning(
+                "[BaasService.update_teclaw_outbound_rule_by_bot_uuid] Devices not ready "
+                "(missing provider_device_id): bot_uuid=%s, device_uuids=%s",
+                bot_uuid,
+                pending,
+            )
+            return []
+
         updated_devices: list[dict[str, Any]] = []
         for device in devices:
-            paas_device_id = device.get("provider_device_id")
+            paas_device_id = device["provider_device_id"]
             device_uuid = device.get("device_uuid", "")
-            if not paas_device_id:
-                logger.warning(
-                    "[BaasService.update_teclaw_outbound_rule_by_bot_uuid] Missing provider_device_id: "
-                    "bot_uuid=%s, device_uuid=%s",
-                    bot_uuid,
-                    device_uuid,
-                )
-                continue
             self.update_device_outbound_rule(paas_device_id, outbound_rule)
             updated_devices.append({
                 "device_uuid": device_uuid,
