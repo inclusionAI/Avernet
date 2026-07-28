@@ -24,6 +24,7 @@ from agentclaw.community.core.bot_collaborator.repository.protocol import (
 )
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.notify.protocol import NotifyTarget
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -44,7 +45,7 @@ class RepositoryNotifyBotLister:
         # 仅 owner 列表，保持兼容（不阻断 notify 接口）。
         self._collaborator_repo = collaborator_repo
 
-    def list_bot_mappings(self, user_id: str) -> list[tuple[str, str, str]]:
+    def list_bot_mappings(self, user_id: str) -> list[NotifyTarget]:
         env = get_current_env()
         _total, bindings = self._binding_repo.list_bindings(
             entity_id=user_id,
@@ -58,7 +59,7 @@ class RepositoryNotifyBotLister:
             f"[notify_bot_lister] user={user_id} env={env} "
             f"active bindings count={len(bindings)}"
         )
-        result: list[tuple[str, str, str]] = []
+        result: list[NotifyTarget] = []
         seen_bot_ids: set[str] = set()
         for b in bindings:
             props = b.device_props or {}
@@ -67,7 +68,10 @@ class RepositoryNotifyBotLister:
                 continue
             bot_id = str(props.get("bolt_id") or b.device_id)
             bot_name = self._resolve_bot_name(bot_id, user_id)
-            result.append((bot_id, bot_name, sandbox_id))
+            result.append(NotifyTarget(
+                bot_id=bot_id, bot_name=bot_name,
+                owner_id=user_id, sandbox_id=str(sandbox_id),
+            ))
             seen_bot_ids.add(bot_id)
         logger.info(
             f"[notify_bot_lister] user={user_id} owner mappings={len(result)}"
@@ -111,7 +115,7 @@ class RepositoryNotifyBotLister:
         user_id: str,
         env: str,
         seen_bot_ids: set[str],
-    ) -> list[tuple[str, str, str]]:
+    ) -> list[NotifyTarget]:
         """当前用户以「协作者」身份参与的 Bot 的 (bot_id, bot_name, sandbox_id)。
 
         协作者记录里的 ``owner_id`` 是 Bot 拥有者工号——设备绑定挂在 owner
@@ -121,7 +125,7 @@ class RepositoryNotifyBotLister:
         if self._collaborator_repo is None:
             return []
 
-        mappings: list[tuple[str, str, str]] = []
+        mappings: list[NotifyTarget] = []
         try:
             collaborators = self._collaborator_repo.list_by_user(user_id, env)
         except Exception as e:
@@ -164,6 +168,9 @@ class RepositoryNotifyBotLister:
             if not sandbox_id:
                 continue
             bot_name = self._resolve_bot_name(bot_id, owner_id)
-            mappings.append((bot_id, bot_name, str(sandbox_id)))
+            mappings.append(NotifyTarget(
+                bot_id=bot_id, bot_name=bot_name,
+                owner_id=owner_id, sandbox_id=str(sandbox_id),
+            ))
             seen_bot_ids.add(bot_id)
         return mappings
