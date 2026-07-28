@@ -104,11 +104,7 @@ def test_provision_produces_creates_approves_and_binds() -> None:
         "agentclaw.community.core.bot_management.services.teclaw_provision_service.time.time",
         return_value=123.0,
     ):
-        result = svc.provision(
-            bot=_BOT,
-            owner_id="u1",
-            agent_pass_token="passport-token",
-        )
+        result = svc.provision(bot=_BOT, owner_id="u1")
 
     # 1. deploy artifact produced via the teclaw producer (draft -> version None);
     #    owner_id spliced into the bot row for the producer's compose request.
@@ -117,8 +113,8 @@ def test_provision_produces_creates_approves_and_binds() -> None:
     assert pa.args[0]["bot_id"] == "b1" and pa.args[0]["owner_id"] == "u1"
     assert pa.kwargs["version"] is None
 
-    # 2. created with the produced artifact + teclaw template; token 通过创建后
-    #    outbound-rule update 写入，不混入 create payload。
+    # 2. created with the produced artifact + teclaw template; token 由创建发布单
+    #    轮询任务在容器启动后写入 outbound rule，不混入 create payload。
     ck = baas.create_teclaw_bot.call_args
     assert ck.kwargs["config_artifact"] == {"schema_version": 2, "skills": []}
     assert ck.kwargs["template_uuid"] == "teclaw-tpl"
@@ -166,28 +162,16 @@ def test_provision_produces_creates_approves_and_binds() -> None:
 
 
 @pytest.mark.unit
-def test_provision_updates_agent_pass_rule_after_create() -> None:
+def test_provision_does_not_push_agent_pass_rule_before_container_starts() -> None:
+    # BaaS only mints the container's PaaS device while it executes the create
+    # publish, so a push here would write to nothing. The create publish poll
+    # task owns the push (see test_teclaw_publish_task_handler).
     svc, baas, *_ = _make_service()
 
-    svc.provision(bot=_BOT, owner_id="u1", agent_pass_token="passport-token")
+    svc.provision(bot=_BOT, owner_id="u1")
 
     assert "agent_pass_token" not in baas.create_teclaw_bot.call_args.kwargs
-    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
-        "BOT-x",
-        agent_pass_token="passport-token",
-    )
-
-
-@pytest.mark.unit
-def test_provision_continues_when_agent_pass_rule_update_fails() -> None:
-    svc, baas, _, binding_repo, task_queue_service, _ = _make_service()
-    baas.update_teclaw_outbound_rule_by_bot_uuid.side_effect = RuntimeError("rule down")
-
-    result = svc.provision(bot=_BOT, owner_id="u1", agent_pass_token="passport-token")
-
-    assert result.binding_id == 77
-    binding_repo.insert_binding.assert_called_once()
-    task_queue_service.enqueue.assert_called_once()
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_not_called()
 
 
 @pytest.mark.unit
@@ -195,11 +179,7 @@ def test_enqueue_failure_marks_bot_and_binding_failed_without_destroying_remote(
     svc, baas, _, binding_repo, task_queue_service, bot_repo = _make_service()
     task_queue_service.enqueue.side_effect = RuntimeError("queue down")
 
-    result = svc.provision(
-        bot=_BOT,
-        owner_id="u1",
-        agent_pass_token="passport-token",
-    )
+    result = svc.provision(bot=_BOT, owner_id="u1")
 
     assert result.status == "FAILED"
     bot_repo.update_by_owner.assert_called_once_with("b1", "u1", {"status": "FAILED"})
@@ -254,7 +234,7 @@ def test_provision_raises_and_rolls_back_when_no_publish_id() -> None:
         create_result={"bot_uuid": "BOT-x"}
     )
     with pytest.raises(BaasServiceError, match="publish_id"):
-        svc.provision(bot=_BOT, owner_id="u1", agent_pass_token="passport-token")
+        svc.provision(bot=_BOT, owner_id="u1")
     baas.approve_publish.assert_not_called()
     baas.destroy_bot.assert_called_once()
     assert baas.destroy_bot.call_args.kwargs["bot_uuid"] == "BOT-x"
@@ -269,7 +249,7 @@ def test_provision_raises_when_no_bot_uuid() -> None:
 
     svc, baas, _, binding_repo, _, _ = _make_service(create_result={"publish_id": 9})
     with pytest.raises(BaasServiceError):
-        svc.provision(bot=_BOT, owner_id="u1", agent_pass_token="passport-token")
+        svc.provision(bot=_BOT, owner_id="u1")
     # Nothing was minted (no bot_uuid) — no compensating destroy, no binding.
     baas.destroy_bot.assert_not_called()
     binding_repo.insert_binding.assert_not_called()
@@ -278,7 +258,7 @@ def test_provision_raises_when_no_bot_uuid() -> None:
 @pytest.mark.unit
 def test_request_id_is_deterministic_32_hex() -> None:
     svc, baas, _, _, _, _ = _make_service()
-    svc.provision(bot=_BOT, owner_id="u1", agent_pass_token="passport-token")
+    svc.provision(bot=_BOT, owner_id="u1")
     rid = baas.create_teclaw_bot.call_args.kwargs["request_id"]
     assert len(rid) == 32 and all(c in "0123456789abcdef" for c in rid)
 
@@ -293,7 +273,7 @@ def test_approve_failure_compensating_destroys_and_reraises() -> None:
     baas.approve_publish.side_effect = BaasServiceError("approve boom")
 
     with pytest.raises(BaasServiceError, match="approve boom"):
-        svc.provision(bot=_BOT, owner_id="u1", agent_pass_token="passport-token")
+        svc.provision(bot=_BOT, owner_id="u1")
 
     # Orphaned BaaS bot is destroyed; no binding recorded.
     baas.destroy_bot.assert_called_once()
@@ -307,7 +287,7 @@ def test_binding_failure_compensating_destroys_and_reraises() -> None:
     binding_repo.insert_binding.side_effect = RuntimeError("db down")
 
     with pytest.raises(RuntimeError, match="db down"):
-        svc.provision(bot=_BOT, owner_id="u1", agent_pass_token="passport-token")
+        svc.provision(bot=_BOT, owner_id="u1")
 
     baas.destroy_bot.assert_called_once()
     assert baas.destroy_bot.call_args.kwargs["bot_uuid"] == "BOT-x"
@@ -327,7 +307,7 @@ def test_compensating_destroy_failure_does_not_mask_original_error() -> None:
 
     # The original (approve) error wins; the destroy failure is swallowed.
     with pytest.raises(BaasServiceError, match="approve boom"):
-        svc.provision(bot=_BOT, owner_id="u1", agent_pass_token="passport-token")
+        svc.provision(bot=_BOT, owner_id="u1")
 
 
 @pytest.mark.unit
@@ -335,7 +315,7 @@ def test_compensating_destroy_uses_distinct_request_id() -> None:
     svc, baas, _, _, _, _ = _make_service()
     baas.approve_publish.side_effect = RuntimeError("x")
     try:
-        svc.provision(bot=_BOT, owner_id="u1", agent_pass_token="passport-token")
+        svc.provision(bot=_BOT, owner_id="u1")
     except RuntimeError:
         pass
     create_rid = baas.create_teclaw_bot.call_args.kwargs["request_id"]
