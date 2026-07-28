@@ -704,6 +704,107 @@ class ResourceService:
 
         return self._repo.delete(resource_id)
 
+    async def download_resource(
+        self,
+        resource_id: str,
+        *,
+        device_fs: "DeviceFileSystem",
+    ) -> tuple[bytes, str] | None:
+        """Read a FILE resource's raw bytes for download.
+
+        Returns ``(content_bytes, content_type)`` for a downloadable FILE
+        resource, or ``None`` when the record is missing, is not a file,
+        is a directory, has no path, or the device_fs read fails (the
+        caller maps ``None`` to a 404). Errors from ``device_fs.read_file``
+        (arca HTTP 404, teclaw, etc.) are swallowed and surfaced as
+        ``None`` rather than propagated — the openapi adapter must not
+        leak provider errors. Resource-level preconditions (not-file /
+        is-directory) mirror the legacy download handler.
+        """
+        item = self._repo.get_by_id(resource_id)
+        if not item:
+            return None
+        resource = Resource(**item)
+        if not resource.is_file:
+            return None
+        if resource.is_directory:
+            return None
+        if not resource.path:
+            return None
+        try:
+            content_bytes = await device_fs.read_file(resource.path)
+        except Exception:
+            # arca 404 / teclaw read errors → signal "not downloadable",
+            # not propagate; the adapter renders a 404.
+            return None
+        content_type = resource.mime_type or "application/octet-stream"
+        return (content_bytes, content_type)
+
+    async def preview_resource(
+        self,
+        resource_id: str,
+        *,
+        device_fs: "DeviceFileSystem",
+        max_size: int = 1_048_576,  # 1 MB preview cap (legacy parity)
+    ) -> dict | None:
+        """Preview a FILE resource's content.
+
+        Returns ``{"content": str, "content_type": str, "size": int}`` for a
+        previewable non-directory FILE, or ``None`` when the record is
+        missing, the record is not a file, is a directory, has no path, or
+        the device_fs read fails or returns empty bytes (the caller maps
+        ``None`` to a 404). Errors from ``device_fs.read_file`` (arca HTTP
+        404, teclaw read errors) are swallowed and surfaced as ``None``
+        rather than propagated — the openapi adapter must not leak provider
+        errors (parity with ``download_resource``).
+
+        Raises ``ValueError`` when the content exceeds ``max_size`` — the
+        caller maps that to HTTP 413 (legacy parity: "File too large for
+        preview"). The 1 MB default mirrors the legacy preview cap; it is
+        not derived from ``device_fs.read_file``'s own cap because not every
+        impl enforces one (see ``FileTooLargeError``).
+
+        ``device_fs`` is non-Optional — the handler always resolves it via
+        ``DeviceFilesystemDispatcher`` before calling this method. Mirrors
+        ``download_resource``; ``delete_resource`` is the lone Optional
+        variant (legacy sync contract).
+        """
+        item = self._repo.get_by_id(resource_id)
+        if not item:
+            return None
+        resource = Resource(**item)
+        if not resource.is_file or resource.is_directory:
+            return None
+        if not resource.path:
+            return None
+        try:
+            content_bytes = await device_fs.read_file(resource.path)
+        except Exception:
+            # arca 404 / teclaw read errors → signal "not previewable",
+            # not propagate; the adapter renders a 404 (parity with
+            # download_resource).
+            return None
+        if not content_bytes:
+            # legacy parity: empty content → 404, not an empty preview body.
+            return None
+        if len(content_bytes) > max_size:
+            raise ValueError(
+                f"File too large for preview (max {max_size} bytes)"
+            )
+        content_type = resource.mime_type or "application/octet-stream"
+        # preview content is text-ifiable; decode utf-8 best-effort, fall
+        # back to latin-1 so binary blobs don't crash the handler (the
+        # content is opaque to the caller; latin-1 round-trips any byte).
+        try:
+            content_str = content_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            content_str = content_bytes.decode("latin-1")
+        return {
+            "content": content_str,
+            "content_type": content_type,
+            "size": len(content_bytes),
+        }
+
     # ==================== Helper Methods ====================
 
     @staticmethod

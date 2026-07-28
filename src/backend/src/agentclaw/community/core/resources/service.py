@@ -7,11 +7,12 @@ are migrated.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from agentclaw.community.core.resources.models import (
     Resource,
     ResourceType,
+    create_file_resource,
     create_link_resource,
     create_node_resource,
     create_url_resource,
@@ -266,6 +267,193 @@ class ResourceService:
         stored = self._repo.create(resource.to_dict())
         resource.id = stored.get("id")
         return resource
+
+    # -- File / generic resource ops ---------------------------------------
+    #
+    # device_fs is an opaque duck-typed boundary the adapter resolves
+    # (DeviceFilesystemDispatcher) and forwards in. The slim service never
+    # holds a dispatcher — it only calls .write_file / .read_file /
+    # .delete_file on whatever the adapter passes. This keeps the pure-core
+    # service free of device-layer imports. ``device_fs`` defaults to None so
+    # the non-file / no-fs paths degrade gracefully (legacy parity: missing
+    # → None → handler maps to 404).
+
+    def get_resource(self, resource_id: str) -> Optional[Resource]:
+        """Get any resource by ID, or None if missing.
+
+        Cross-bot access collapses to ``None`` (404) — same semantics as
+        ``update_link_resource`` raising on a bolt mismatch, applied to the
+        read path so a foreign-bot resource_id never leaks through the
+        public ``GET /{resource_id}``.
+        """
+        item = self._repo.get_by_id(resource_id)
+        if not item:
+            return None
+        if item.get("bolt_id", "default") != self._bot_id:
+            return None
+        return _dict_to_resource(item)
+
+    async def delete_resource(
+        self,
+        resource_id: str,
+        *,
+        device_fs: Any = None,
+    ) -> bool:
+        """Delete a resource (file → device FS, else DB soft-delete).
+
+        Returns False if the record is missing. Cross-bot access also
+        collapses to ``False`` (404 — same ownership invariant as
+        ``get_resource``; a foreign-bot resource_id never deletes).
+        device_fs delete failures are logged and swallowed — the DB record
+        is still soft-deleted so the resource disappears from listings
+        (legacy parity: device-side cleanup is best-effort, DB is the
+        source of truth for "gone").
+        """
+        item = self._repo.get_by_id(resource_id)
+        if not item:
+            return False
+        if item.get("bolt_id", "default") != self._bot_id:
+            return False
+        resource = _dict_to_resource(item)
+        if resource.is_file and resource.path and device_fs is not None:
+            try:
+                await device_fs.delete_file(resource.path)
+            except Exception as e:
+                logger.warning(
+                    "[delete_resource] device_fs delete failed: %s", e
+                )
+        return self._repo.delete(resource_id)
+
+    async def upload_file(
+        self,
+        *,
+        data: bytes,
+        filename: str,
+        parent_path: str = "",
+        user_id: Optional[str] = None,
+        device_fs: Any = None,
+    ) -> Resource:
+        """Upload a file: device_fs write (if provided) + repo.create.
+
+        Raises DuplicateResourceError on name clash. device_fs write
+        failures bubble — the handler maps them to 502 Bad Gateway and
+        NO record is created (a half-written file with no DB row would
+        leak storage; failing fast keeps DB and device_fs consistent).
+        ``write_file`` runs BEFORE ``repo.create`` so the record exists
+        only when the bytes are durably on the device.
+        """
+        if await self.check_name_exists(
+            name=filename,
+            resource_type=ResourceType.FILE,
+            parent_path=parent_path or None,
+            user_id=user_id,
+        ):
+            raise DuplicateResourceError(f"Resource '{filename}' already exists")
+        # Simplified: device_fs write at root filename. parent_path joining
+        # lives at the device_fs boundary; the service records the path key.
+        file_path = filename
+        if device_fs is not None:
+            # NOT swallowed: a write failure must surface to the handler as
+            # an HTTP 502 (storage backend unavailable) and the repo.create
+            # below MUST NOT run (otherwise we'd return 201 with a phantom
+            # record pointing at a path that has no bytes).
+            await device_fs.write_file(file_path, data)
+        record = create_file_resource(
+            name=filename,
+            path=file_path,
+            parent_path=parent_path,
+            size=len(data),
+            user_id=user_id,
+            source="upload",
+            bolt_id=self._bot_id,
+        )
+        stored = self._repo.create(record.to_dict())
+        record.id = stored.get("id")
+        return record
+
+    async def download_resource(
+        self,
+        resource_id: str,
+        *,
+        device_fs: Any = None,
+    ) -> Optional[tuple[bytes, str]]:
+        """Read a FILE resource's bytes.
+
+        Returns ``(bytes, content_type)`` for a downloadable FILE, or None
+        when the record is missing, owned by a different bot, not a file,
+        is a directory, has no path, no device_fs was supplied, the read
+        fails, or the content is empty (the caller maps None → 404).
+        Cross-bot access collapses to ``None`` (404) — see ``get_resource``.
+        """
+        item = self._repo.get_by_id(resource_id)
+        if not item:
+            return None
+        if item.get("bolt_id", "default") != self._bot_id:
+            return None
+        resource = _dict_to_resource(item)
+        if not resource.is_file or resource.is_directory or not resource.path:
+            return None
+        if device_fs is None:
+            return None
+        try:
+            content = await device_fs.read_file(resource.path)
+        except Exception:
+            return None
+        if not content:
+            return None
+        return (content, resource.mime_type or "application/octet-stream")
+
+    async def preview_resource(
+        self,
+        resource_id: str,
+        *,
+        device_fs: Any = None,
+        max_size: int = 1_048_576,  # 1 MB preview cap (legacy parity)
+    ) -> Optional[Dict[str, Any]]:
+        """Preview a FILE resource's content as text.
+
+        Returns ``{"content": str, "content_type": str, "size": int}`` for
+        a previewable non-directory FILE, or None when the record is
+        missing, owned by a different bot, not a file, is a directory,
+        has no path, no device_fs was supplied, the read fails, or the
+        content is empty (the caller maps None → 404). Cross-bot access
+        collapses to ``None`` (404) — see ``get_resource``. Raises
+        ``ValueError`` when the content exceeds ``max_size`` — the caller
+        maps that to HTTP 413 (legacy parity: "File too large for preview").
+        """
+        item = self._repo.get_by_id(resource_id)
+        if not item:
+            return None
+        if item.get("bolt_id", "default") != self._bot_id:
+            return None
+        resource = _dict_to_resource(item)
+        if not resource.is_file or resource.is_directory or not resource.path:
+            return None
+        if device_fs is None:
+            return None
+        try:
+            content = await device_fs.read_file(resource.path)
+        except Exception:
+            return None
+        if not content:
+            return None
+        if len(content) > max_size:
+            raise ValueError(
+                f"File too large for preview (max {max_size} bytes)"
+            )
+        content_type = resource.mime_type or "application/octet-stream"
+        # preview content is text-ified; decode utf-8 best-effort, fall back
+        # to latin-1 so binary blobs don't crash the handler (latin-1
+        # round-trips any byte).
+        try:
+            content_str = content.decode("utf-8")
+        except UnicodeDecodeError:
+            content_str = content.decode("latin-1")
+        return {
+            "content": content_str,
+            "content_type": content_type,
+            "size": len(content),
+        }
 
 
 def _dict_to_resource(data: dict) -> Resource:

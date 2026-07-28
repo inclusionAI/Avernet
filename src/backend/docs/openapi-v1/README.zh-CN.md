@@ -96,7 +96,7 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 | 阶段 | 范围（数据） | 负责人 | 优先级 | 状态 | 完成判据 |
 |---|---|---|---|---|---|
 | 1 | 机器人记录（`ac_bots` / `BotModel`） | totalfrank | P1 | ✅ **DONE —— PR #456 已于 2026-07-27 合并** | —— |
-| 2 | 资源（`ac_resource`） | lucas-xzp | P1 | ⬜ TODO | 列 + 守卫 + 测试通过；内部 API 不变 |
+| 2 | 资源（`ac_resource`） | lucas-xzp | P1 | ✅ DONE —— Phase 0（分支 `rongzhi_0727`） | 列 + 守卫 + 测试通过；内部 API 不变 — 已验：to_dict 不含 tenant、guard 直接表达式非 lambda、Changelog 见下 |
 | 3 | 渠道（`ac_channel_config`） | totalfrank | 🅳 **已降级** | ⏸️ 已搁置 —— 范围保持不变，并非取消 | 同上（若重新启动） |
 | 4 | 技能（skill 相关表） | totalfrank + lucas-xzp | P3 | ⬜ TODO | 同上 |
 | 5 | MCP 配置（`ac_user_mcp_config` + `ac_bot_mcp_call_config`） | totalfrank | P1 | ✅ DONE —— **PR #564** | PR #564 合并后 |
@@ -111,7 +111,7 @@ _按优先级分层排序。_
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE —— PR #494 已于 2026-07-29 合并**（13/13 端点） | ~~Track A 阶段 1~~ ✅ |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(桩)* | ⬜ TODO —— **已解除阻塞** | ~~Track A 阶段 5~~ ✅（PR #564） |
-| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` *(桩)* | ⬜ TODO | Track A resources（lucas-xzp） |
+| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 9 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 9 端点接通 stub→service；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(桩)* | ⬜ TODO | Track A routines（lucas-xzp） |
 | channels | totalfrank | 🅳 **已降级** | `openapi_v1/channels/router.py` *(桩)* | ⏸️ 已搁置 —— 范围保持不变，并非取消 | Track A 阶段 3（同样搁置） |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(桩)* | ⬜ TODO | bots 隔离（Stage 1 ✅） |
@@ -420,7 +420,7 @@ _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #
 | GET | `/openapi/v1/bots/resources/{resource_id}/download` | 下载字节（**原始，不走信封**） | `application/octet-stream` |
 | GET | `/openapi/v1/bots/resources/{resource_id}/preview` | 预览 | `Envelope[Preview]` |
 
-_注：桩里的上传是原始 `octet-stream`；PR #363 描述的是 `multipart`。接线时二选一。_
+_注：upload 已定稿为原始 `application/octet-stream` body（非 multipart）。与 PR #363 总览的 multipart 描述不一致——实现以路由为准，若后续需改 multipart 是契约 PR。_
 
 ### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（7 个端点：桩里 5 个 + 提议新增 2 个 ★）· `openapi_v1/skills/router.py`
 目录在 `/openapi/v1/bots/skills`；某个 Agent 已安装的技能是 bot 的子资源。
@@ -563,6 +563,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 - **2026-07-27** —— **Track A Stage 1 已合并（PR #456）。** bots 带上了
   `avernet_tenant`；可复用机制（租户载体、守卫、中间件、`resolve_avernet_tenant` 接缝）
   已在 `dev` 上。bots 的共同闸口就此解除。
+- **2026-07-28** —— **Track A 阶段 2（ac_resource）DONE**（lucas-xzp，分支 `rongzhi_0727`，pending rebase/push）。把 PR #456 的 BotModel guard 工厂化到 `(BotModel, ResourceModel)`：单 Session read listener 链式 `with_loader_criteria`（直接表达式非 lambda）+ per-mapper `before_insert`。红→绿：resource tenant isolation/guard 以及 routines/identity 间接隔离测试。`to_dict()` 不暴露 tenant。**DDL（ac_resource ADD COLUMN）已由 lucas-xzp 在平台提交工单，部署前须先落地；`ac_bot_publish` 经核实本期 openapi_v1 handler 不读，留待 service_bot owner 或后续 verify/online 阶段。** 阶段 6（例程）保持 ⬜ TODO——无表，靠 ac_bots 间接隔离已由 Session 0 覆盖，真 DONE 留给 Track B routines handler 接通时。
 - **2026-07-29** —— **Track B bots 已合并（PR #494）—— 第一个落地的公共类别。**
   13 个 `/openapi/v1/bots` 端点全部接到内部服务，通过 `caller_owner_id` 做 owner 限定，
   并由 Track A 守卫做租户限定（别的租户的 `{bot_id}` → 被掩盖的 404，且是针对真实守卫
