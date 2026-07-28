@@ -174,6 +174,7 @@ user_config:
   # File transfer OSS storage backend configuration (enterprise/prod deployments only)
   file_transfer_oss:
     endpoint: ""
+    external_endpoint: ""
     bucket_name: ""
     staging_root_path: "baas-file-transfer"
     secret_name: ""
