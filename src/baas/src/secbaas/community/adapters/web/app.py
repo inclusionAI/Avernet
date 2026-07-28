@@ -162,6 +162,7 @@ def create_app() -> FastAPI:
         description="SecBaaS API",
         version="1.0.0",
         lifespan=lifespan,
+        swagger_ui_parameters={"supportedSubmitMethods": []},
     )
 
     # ── tracer plugin selection ────────────────────────────────────────────────
