@@ -356,18 +356,21 @@ class RestartMixin:
                 "recreating via first release: publish_id=%s bot_uuid=%s stage=%s",
                 e.error_code, publish_id, bot_uuid, stage_enum.value,
             )
-            # Secondary net (mirrors upgrade_release): a lingering record
-            # (DEVICE_NOT_FOUND) must be retired before recreating, or the fresh
-            # bot orphans it — and its now-stale binding released so it does not
-            # linger ACTIVE pointing at the destroyed bot. BOT_NOT_FOUND is
-            # already gone — nothing to clean.
+            # Secondary net (mirrors upgrade_release). Either way the recreate
+            # below mints a fresh binding and rewrites ext.binding.<stage>, so the
+            # record's current binding must be released or it lingers ACTIVE
+            # pointing at the gone bot. A DEVICE_NOT_FOUND means the record still
+            # lingers with a gone container, so retire it first (and stash the
+            # destroy id); a BOT_NOT_FOUND means the bot is already fully gone (no
+            # destroy needed → destroy_publish_id=None).
+            destroy_publish_id = None
             if e.error_code == "DEVICE_NOT_FOUND":
                 destroy_publish_id = self._build_service.retire_superseded_bot(
                     bot_uuid, operator=operator
                 )
-                self._release_binding(
-                    binding_id, destroy_publish_id=destroy_publish_id
-                )
+            self._release_binding(
+                binding_id, destroy_publish_id=destroy_publish_id
+            )
             return await self._recreate_restart_target(
                 publish_id=publish_id,
                 stage_enum=stage_enum,
