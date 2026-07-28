@@ -123,7 +123,10 @@ Do not add a company-only package source.
 
 For every operation, define:
 
-- globally unique `operationId`;
+- globally unique, `snake_case` `operationId` owned by the BCN contract;
+- a semantic `operationId` that omits routing-only names such as
+  `collaboration`, `bcn`, `openapi`, and `v1` (for example,
+  `list_bot_groups`, not `list_bot_collaboration_groups`);
 - request and response schemas;
 - `x-avernet-security`;
 - the common `{code, message, data, request_id}` envelope;
@@ -152,7 +155,10 @@ Do not define raw BCN `humanCookie`, `botRuntimeBearer`, or
 The validator must fail on:
 
 - unresolved `$ref`;
+- a missing `operationId`;
 - duplicate `operationId`;
+- an `operationId` containing routing-only `collaboration`, `bcn`, `openapi`,
+  or a version suffix/prefix;
 - a path outside `/openapi/v1/**`;
 - any Internal API operation in V1 phase one;
 - a missing `x-avernet-security`;

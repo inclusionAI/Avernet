@@ -562,7 +562,25 @@ CI 至少检查：
 只增加 optional 字段、新 operation 或新错误细分通常属于兼容修改，但仍需契约
 测试。
 
-### 12.3 Contract 与代码 PR 流程
+### 12.3 operationId 规则
+
+`operationId` 是来源服务 OpenAPI Contract 中的标准操作标识。BCN 在自己的 YAML
+中定义，Gateway 聚合时原样保留，不根据 URL 重新生成。它应描述业务 Use Case，
+不能复制只为 Gateway 路由分流而增加的路径段：
+
+- 采用与当前 Gateway artifact 一致的 `snake_case` 风格。
+- 不包含 `collaboration`、`bcn`、`openapi` 或 `v1` 等路由、服务和版本中缀。
+- 例如使用 `list_bot_groups`、`list_bot_friendships`、
+  `delete_bot_friendship`、`create_bot_friend_request`。
+- 在 BCN Contract 内必须唯一；Gateway 聚合后的整份文档也必须全局唯一。
+- 发布后不得仅因路径组织调整而重命名；修改既有 `operationId` 按 breaking
+  change 处理。
+
+因此，`collaboration` 只存在于
+`/openapi/v1/bots/collaboration/{bot_uuid}/**` 路径中，不进入
+`operationId`。
+
+### 12.4 Contract 与代码 PR 流程
 
 Contract 和实现应逻辑分离评审，但不能让“已发布 Contract”和线上实现长期
 不一致：
