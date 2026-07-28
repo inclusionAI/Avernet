@@ -1222,6 +1222,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-rule-bot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bcs-protocol",
+ "clap",
+ "futures",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.26.2",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "bcs-secret"
 version = "0.1.0"
 dependencies = [
