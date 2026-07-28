@@ -3456,6 +3456,7 @@ def test_sync_restart_progress_stable_success_activates_recreated_binding():
     svc, _ = _svc_with_record(record)
     svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
     svc._activate_binding = Mock()
+    svc.refresh_publish_handle = Mock()
 
     result = svc.sync_restart_progress(publish_id=1)
 
@@ -3466,6 +3467,9 @@ def test_sync_restart_progress_stable_success_activates_recreated_binding():
     assert kwargs["stage"] == PublishStage.ONLINE
     assert kwargs["baas_publish_id"] == 700
     assert kwargs["bot_id"] == "bot-src"
+    # Activation replaces device_props (reuse_binding), so the teclaw status
+    # handle publish_id is re-merged afterward, pointing at the restart workflow.
+    svc.refresh_publish_handle.assert_called_once_with(88, 700)
 
 
 # ---- restart_bot() submit path ---------------------------------------------
