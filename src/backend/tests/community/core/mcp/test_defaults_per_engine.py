@@ -49,7 +49,6 @@ def test_claude_code_merges_aicoding_research_mcps():
         "mcp.ant.zlatan.yuntumcpserver",
         "mcp.ant.alipaybase-antlogsmcp.mcp-server",
         "mcp.ant.arkai.assistantmcpserver",
-        "mcp.ant.agentix.112858.aixAicoding",
         "mcp.ant.faas.aixjiter.AixCodingMemoryMCP",
         "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
     )
@@ -57,8 +56,8 @@ def test_claude_code_merges_aicoding_research_mcps():
         assert code in codes, f"missing aicoding-only MCP in claude_code: {code}"
     # 无重复。
     assert len(codes) == len(set(codes))
-    # 12 原有 + 6 研发 MCP + 1 应用信息 MCP + 1 clawmind = 20。
-    assert len(codes) == 20
+    # 12 原有 + 5 研发 MCP + 1 应用信息 MCP + 1 clawmind = 19。
+    assert len(codes) == 19
 
 
 def test_aicoding_has_its_own_list():
