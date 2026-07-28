@@ -375,6 +375,21 @@ def _payload(
     )
 
 
+def test_ineligible_unclaimed_bot_never_probes_or_reconciles_runtime() -> None:
+    legacy = BotSkillLayoutState.legacy_default(SCOPE)
+    handler, claims, _, reconcile = _handler(
+        claim_results=[
+            MigrationClaimResult(MigrationClaimOutcome.INELIGIBLE, legacy)
+        ],
+        reconcile_results=[],
+        state=legacy,
+    )
+
+    assert handler.handle(_payload()) == Complete()
+    assert len(claims.calls) == 1
+    assert reconcile.calls == []
+
+
 def test_unclaimed_task_claims_then_reconciles_same_generation() -> None:
     state = _claimed_state()
     handler, claims, _, reconcile = _handler(

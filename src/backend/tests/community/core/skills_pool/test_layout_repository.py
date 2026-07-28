@@ -1062,14 +1062,8 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
         lease_owner="worker-1",
         preparation_id="preparation-1",
         local_locators={
-            1: (
-                "local:///home/admin/.openclaw/workspace/"
-                "skills-pool/skills-local/local-a"
-            ),
-            2: (
-                "local:///home/admin/.openclaw/workspace/"
-                "skills-pool/skills-local/local-b"
-            ),
+            1: "local:///runtime/vendor-x/pool/local-a",
+            2: "local:///runtime/vendor-x/pool/local-b",
         },
     )
 
@@ -1185,8 +1179,8 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
             for row in session.query(Skill).order_by(Skill.id).all()
         }
     assert paths == {
-        1: ("local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-a"),
-        2: ("local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"),
+        1: "local:///runtime/vendor-x/pool/local-a",
+        2: "local:///runtime/vendor-x/pool/local-b",
         3: "git://business/repo",
         4: "local:///legacy/other-bot",
         5: "local:///legacy/other-env",

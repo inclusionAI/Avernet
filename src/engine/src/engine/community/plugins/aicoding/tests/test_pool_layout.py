@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from engine.community.core.skills.layout_planner import (
+    MAPPING_CONTRACT_VERSION,
+)
 from engine.community.plugins.aicoding.layout_pool import (
     PoolActivationStatus,
     RuntimeLayoutInspectionStatus,
@@ -89,6 +92,7 @@ def test_aicoding_probe_uses_own_pool_and_stable_bridges(tmp_path: Path) -> None
 
     ready = inspect_aicoding_runtime_layout(
         home=home,
+        mapping_contract_version=MAPPING_CONTRACT_VERSION,
         repo_is_mounted=lambda path: path == pool_repo,
     )
 
@@ -97,6 +101,19 @@ def test_aicoding_probe_uses_own_pool_and_stable_bridges(tmp_path: Path) -> None
     assert ready.preparation_id == PREPARATION_ID
     assert ready.evidence["checks"]["stable_local_bridge_valid"] is True
     assert ready.evidence["checks"]["stable_repo_bridge_valid"] is True
+    assert (
+        ready.evidence["mapping_contract_version"]
+        == MAPPING_CONTRACT_VERSION
+    )
+    assert ready.evidence["resolved_layout"]["active_root"] == str(
+        home / ".claude/skills"
+    )
+
+    legacy_consumer = inspect_aicoding_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert "mapping_contract_version" not in legacy_consumer.evidence
 
     repo_bridge.unlink()
     repo_bridge.symlink_to(home / "wrong", target_is_directory=True)

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from engine.community.core.skills.layout_planner import MAPPING_CONTRACT_VERSION
 from engine.community.plugins.claude_code.layout_pool import (
     LAYOUT_CONTRACT_VERSION,
     MappingPublishResult,
@@ -294,6 +295,7 @@ async def test_claude_code_port_runs_pool_filesystem_operations_off_loop(
     }
     assert received[1] == {
         "expected_contract_version": LAYOUT_CONTRACT_VERSION,
+        "mapping_contract_version": MAPPING_CONTRACT_VERSION,
     }
     assert received[2] == received[3] == {
         "mappings": [

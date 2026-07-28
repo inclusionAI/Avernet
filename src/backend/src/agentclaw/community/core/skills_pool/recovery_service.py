@@ -4,20 +4,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import PurePosixPath
-
 from injector import inject
 
 from agentclaw.community.core.bot_management.repository.protocol import (
     BotRepository,
 )
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    RuntimeLayoutProbeStatus,
+)
 from agentclaw.community.core.skills_pool.models import (
+    FILESYSTEM_POOL_ENGINES,
     PoolCutoverStatus,
-    PoolPaths,
     PoolSkillMapping,
-    RegisteredSkillAsset,
     SkillMappingSourceLayout,
-    pool_paths_for_engine,
+)
+from agentclaw.community.core.skills_pool.mapping_intent import (
+    build_logical_skill_mappings,
+    local_locators_from_evidence,
+    local_skill_name,
 )
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.ports import (
@@ -312,9 +316,7 @@ class SkillsPoolRollbackService:
                 retryable=False,
                 evidence={"reason": "bot_engine_or_owner_invalid"},
             )
-        try:
-            paths = pool_paths_for_engine(engine)
-        except ValueError as error:
+        if engine not in FILESYSTEM_POOL_ENGINES:
             return self._failure(
                 scope=scope,
                 rollback_generation=rollback_generation,
@@ -323,9 +325,32 @@ class SkillsPoolRollbackService:
                 code="ROLLBACK_ENGINE_UNSUPPORTED",
                 stage="rollback_bot_validation",
                 retryable=False,
-                evidence={"reason": str(error)},
+                evidence={
+                    "reason": f"engine Pool layout not implemented: {engine}"
+                },
             )
         user_id = str(owner_id)
+
+        probe = await self._runtime.probe(
+            bot_id=scope.bot_id,
+            user_id=user_id,
+            engine=engine,
+        )
+        if probe.status is not RuntimeLayoutProbeStatus.READY:
+            return self._failure(
+                scope=scope,
+                rollback_generation=rollback_generation,
+                lease_owner=lease_owner,
+                outcome=SkillsPoolRollbackOutcome.ROLLBACK_FAILED,
+                code=f"ROLLBACK_RUNTIME_{probe.status.value}",
+                stage="runtime_probe",
+                retryable=probe.status
+                in {
+                    RuntimeLayoutProbeStatus.NOT_CAPABLE,
+                    RuntimeLayoutProbeStatus.TRANSIENT_ERROR,
+                },
+                evidence=probe.evidence,
+            )
 
         local_assets = self._skills.list_bot_local_assets(
             env=scope.env,
@@ -338,8 +363,8 @@ class SkillsPoolRollbackService:
             engine=engine,
         )
         try:
-            local_names = [self._local_name(asset) for asset in local_assets]
-            mappings = self._build_legacy_mappings(active_assets, paths=paths)
+            local_names = [local_skill_name(asset) for asset in local_assets]
+            mappings = build_logical_skill_mappings(active_assets)
         except ValueError as error:
             return self._failure(
                 scope=scope,
@@ -352,6 +377,9 @@ class SkillsPoolRollbackService:
                 evidence={"reason": str(error)},
             )
 
+        locator_evidence = self._persisted_rollback_evidence(
+            state.last_probe_evidence
+        )
         if state.phase is SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING:
             pre_cutover_mapping = await self._publish_and_verify_mappings(
                 scope=scope,
@@ -395,6 +423,7 @@ class SkillsPoolRollbackService:
                 return SkillsPoolRollbackResult(
                     SkillsPoolRollbackOutcome.STATE_RACE_LOST
                 )
+            locator_evidence = cutover.evidence
 
         # Re-publish after the atomic exchange as an idempotent confirmation.
         # A process that resumes from LEGACY_ROLLBACK_COMMITTED starts here.
@@ -408,10 +437,23 @@ class SkillsPoolRollbackService:
         if post_cutover_mapping is not None:
             return post_cutover_mapping
 
-        local_locators = {
-            asset.skill_id: f"local://{paths.legacy_local}/{name}"
-            for asset, name in zip(local_assets, local_names, strict=True)
-        }
+        try:
+            local_locators = local_locators_from_evidence(
+                local_assets,
+                local_names,
+                locator_evidence,
+            )
+        except ValueError as error:
+            return self._failure(
+                scope=scope,
+                rollback_generation=rollback_generation,
+                lease_owner=lease_owner,
+                outcome=SkillsPoolRollbackOutcome.DATABASE_COMMIT_FAILED,
+                code="ROLLBACK_LOCATOR_EVIDENCE_INVALID",
+                stage="control_plane_commit",
+                retryable=True,
+                evidence={"reason": str(error)},
+            )
         if not self._layouts.commit_legacy_active(
             scope=scope,
             rollback_generation=rollback_generation,
@@ -506,45 +548,16 @@ class SkillsPoolRollbackService:
         )
 
     @staticmethod
-    def _source_tail(git_path: str, prefix: str) -> PurePosixPath:
-        raw = git_path[len(prefix) :]
-        path = PurePosixPath(raw)
-        if not raw or path.name in {"", ".", ".."}:
-            raise ValueError(f"invalid skill locator: {git_path}")
-        return path
-
-    @classmethod
-    def _local_name(cls, asset: RegisteredSkillAsset) -> str:
-        if not asset.git_path.startswith("local://"):
-            raise ValueError(f"skill {asset.skill_id} is not local")
-        return cls._source_tail(asset.git_path, "local://").name
-
-    @classmethod
-    def _build_legacy_mappings(
-        cls,
-        assets: list[RegisteredSkillAsset],
-        *,
-        paths: PoolPaths,
-    ) -> list[PoolSkillMapping]:
-        mappings: list[PoolSkillMapping] = []
-        targets: dict[str, str] = {}
-        for asset in assets:
-            if asset.git_path.startswith("local://"):
-                relative = PurePosixPath(cls._local_name(asset))
-                source = PurePosixPath(paths.legacy_local) / relative
-            elif asset.git_path.startswith("git://"):
-                relative = cls._source_tail(asset.git_path, "git://")
-                source = PurePosixPath(paths.legacy_repo) / relative
-            else:
-                continue
-            target = str(PurePosixPath(paths.active) / relative.name)
-            if targets.get(target) == str(source):
-                continue
-            if target in targets:
-                raise ValueError(f"duplicate managed target: {target}")
-            targets[target] = str(source)
-            mappings.append(PoolSkillMapping(source=str(source), target=target))
-        return mappings
+    def _persisted_rollback_evidence(
+        stored: dict[str, object] | None,
+    ) -> dict[str, object] | None:
+        if not isinstance(stored, dict):
+            return None
+        rollback = stored.get("rollback")
+        if not isinstance(rollback, dict):
+            return None
+        evidence = rollback.get("evidence")
+        return evidence if isinstance(evidence, dict) else None
 
 
 __all__ = [

@@ -15,6 +15,11 @@ from uuid import UUID
 
 from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
+    MAPPING_CONTRACT_VERSION,
+    LayoutIdentity,
+    RuntimeLayoutContext,
+    resolve_filesystem_skill_layout,
+    resolved_filesystem_layout_evidence,
 )
 from engine.community.core.skills.layout_planner import (
     ResolvedFilesystemLayoutPlan as _FilesystemPoolLayout,
@@ -44,6 +49,40 @@ class RuntimeLayoutInspection:
             "preparation_id": self.preparation_id,
             "evidence": self.evidence,
         }
+
+
+def _ready_evidence(
+    *,
+    layout: _FilesystemPoolLayout,
+    marker: dict[str, Any],
+    checks: dict[str, bool],
+    mapping_contract_version: str | None,
+    activation_state: str | None = None,
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "marker": str(layout.marker),
+        "prepared_at": marker["prepared_at"],
+        "checks": checks,
+    }
+    if activation_state is not None:
+        evidence.update(
+            {
+                "active_marker": str(layout.active_marker),
+                "activation_state": activation_state,
+            }
+        )
+    if mapping_contract_version is not None:
+        evidence.update(
+            {
+                "mapping_contract_version": mapping_contract_version,
+                "resolved_layout": resolved_filesystem_layout_evidence(
+                    layout,
+                    local_root=layout.pool_local,
+                    repo_root=layout.pool_repo,
+                ),
+            }
+        )
+    return evidence
 
 
 def _not_capable(
@@ -341,6 +380,7 @@ def inspect_runtime_layout(
     *,
     engine: str,
     expected_contract_version: str = LAYOUT_CONTRACT_VERSION,
+    mapping_contract_version: str | None = MAPPING_CONTRACT_VERSION,
     home: Path = Path("/home/admin"),
     repo_is_mounted: Callable[[Path], bool] = os.path.ismount,
 ) -> RuntimeLayoutInspection:
@@ -358,7 +398,13 @@ def inspect_runtime_layout(
             "engine_pool_probe_not_implemented",
         )
 
-    layout = _FilesystemPoolLayout.for_engine(engine, home)
+    layout = resolve_filesystem_skill_layout(
+        LayoutIdentity(
+            engine_type=engine,
+            layout_contract_version=expected_contract_version,
+        ),
+        RuntimeLayoutContext(home=home),
+    )
     try:
         marker_stat = layout.marker.stat()
     except (FileNotFoundError, NotADirectoryError):
@@ -647,12 +693,12 @@ def inspect_runtime_layout(
             engine=engine,
             layout_contract_version=expected_contract_version,
             preparation_id=preparation_id,
-            evidence={
-                "marker": str(layout.marker),
-                "active_marker": str(layout.active_marker),
-                "prepared_at": marker["prepared_at"],
-                "activation_state": active_marker["activation_state"],
-                "checks": {
+            evidence=_ready_evidence(
+                layout=layout,
+                marker=marker,
+                activation_state=active_marker["activation_state"],
+                mapping_contract_version=mapping_contract_version,
+                checks={
                     "marker_valid": True,
                     "active_marker_valid": True,
                     "pool_local_valid": True,
@@ -664,7 +710,7 @@ def inspect_runtime_layout(
                     ),
                     "stable_repo_bridge_valid": (engine in {"aicoding", "hermes"}),
                 },
-            },
+            ),
         )
     required_bridges = [("legacy_repo", layout.repo_bridge, layout.pool_repo)]
     if engine != "openclaw":
@@ -752,11 +798,12 @@ def inspect_runtime_layout(
         engine=engine,
         layout_contract_version=expected_contract_version,
         preparation_id=preparation_id,
-        evidence={
-            "marker": str(layout.marker),
-            "prepared_at": marker["prepared_at"],
-            "checks": checks,
-        },
+        evidence=_ready_evidence(
+            layout=layout,
+            marker=marker,
+            mapping_contract_version=mapping_contract_version,
+            checks=checks,
+        ),
     )
 
 

@@ -30,6 +30,7 @@ from engine.community.core.skills.models import (
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     PoolQuarantineCleanupResult,
+    PoolSkillMappingIntent,
     SymlinkItem,
     SyncSymlinksResult,
 )
@@ -344,6 +345,75 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
             SymlinkItem(source="/pool/a", target="/skills/a"),
         ],
         source_layout=PoolMappingSourceLayout.LEGACY,
+    )
+
+
+def test_pool_mapping_routes_propagate_logical_v2_contract(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.activate_pool_layout = AsyncMock(
+        return_value=PoolLayoutActivationResult(
+            committed=True,
+            status=PoolLayoutActivationStatus.COMMITTED,
+            evidence={},
+        ),
+    )
+    plugin.publish_pool_mappings = AsyncMock(
+        return_value=PoolMappingPublishResult(published=True, evidence={}),
+    )
+    plugin.verify_pool_mappings = AsyncMock(
+        return_value=PoolMappingVerificationResult(valid=True, evidence={}),
+    )
+    rich_manager._active_engine._skills = plugin
+    mapping = {
+        "corpus": "repo",
+        "relative_path": "business/reviewer",
+        "link_name": "reviewer",
+    }
+    version = "skills-pool-mapping-v2"
+
+    activation = client.post(
+        "/api/skills/layout/activate",
+        json={
+            "migration_generation": "generation-1",
+            "preparation_id": "preparation-1",
+            "registered_local_names": [],
+            "mapping_contract_version": version,
+            "mappings": [mapping],
+        },
+    )
+    published = client.post(
+        "/api/skills/layout/mappings/publish",
+        json={
+            "mapping_contract_version": version,
+            "mappings": [mapping],
+        },
+    )
+    verified = client.post(
+        "/api/skills/layout/mappings/verify",
+        json={
+            "mapping_contract_version": version,
+            "mappings": [mapping],
+        },
+    )
+
+    assert activation.status_code == published.status_code == verified.status_code == 200
+    intent = PoolSkillMappingIntent(
+        corpus="repo",
+        relative_path="business/reviewer",
+        link_name="reviewer",
+    )
+    request = plugin.activate_pool_layout.await_args.args[0]
+    assert request.mapping_contract_version == version
+    assert request.mappings == [intent]
+    plugin.publish_pool_mappings.assert_awaited_once_with(
+        [intent],
+        mapping_contract_version=version,
+    )
+    plugin.verify_pool_mappings.assert_awaited_once_with(
+        [intent],
+        mapping_contract_version=version,
     )
 
 
