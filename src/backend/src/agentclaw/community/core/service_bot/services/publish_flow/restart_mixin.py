@@ -13,7 +13,10 @@ from agentclaw.community.core.service_bot.services.publish_flow.operation_runner
     TargetBotGoneError,
     acquire_deploy_workflow,
 )
-from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.service_bot.types import (
+    OnlineDeployDecision,
+    PublishStage,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -248,6 +251,36 @@ class RestartMixin:
                     "message": f"Restart submitted, stage: {stage_enum.value}",
                     "stage": stage_enum.value, "restart_publish_id": recreate_wid}
 
+        # Provider-aware reuse-vs-recreate decision (online stage). Restart
+        # normally re-deploys the existing bot in place (the UPGRADE below), but a
+        # teclaw FAILED/STOPPED target can't be rebuilt by an UPDATE (it would just
+        # fail the publish and strand the record), and a gone target must recreate.
+        # In both non-UPGRADE cases retire the old bot first so the recreate never
+        # orphans it. ACTIVE / baas-rebuildable targets fall through to UPGRADE.
+        if stage_enum == PublishStage.ONLINE:
+            decision = self._decide_online_deploy(publish_record, bot)
+            if decision != OnlineDeployDecision.UPGRADE:
+                if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                    self._build_service.retire_superseded_bot(
+                        bot_uuid, operator=operator
+                    )
+                logger.info(
+                    "[PublishFlowService.execute_restart] decision=%s -> recreate: "
+                    "publish_id=%s bot_uuid=%s stage=%s",
+                    decision.value, publish_id, bot_uuid, stage_enum.value,
+                )
+                return await self._recreate_restart_target(
+                    publish_id=publish_id,
+                    stage_enum=stage_enum,
+                    publish_record=publish_record,
+                    bot=bot,
+                    migration_path=migration_path,
+                    version=version,
+                    delivery=delivery,
+                    skills_env=skills_env,
+                    operator=operator,
+                )
+
         async def _issue():
             return await self._build_service.upgrade_async(
                 bot_uuid=bot_uuid,
@@ -280,12 +313,17 @@ class RestartMixin:
                 bot_uuid=bot_uuid,
                 bot_gone_reason="BOT_NOT_FOUND -> recreate",
             )
-        except TargetBotGoneError:
+        except TargetBotGoneError as e:
             logger.warning(
-                "[PublishFlowService.execute_restart] target bot not found, "
+                "[PublishFlowService.execute_restart] target bot gone (%s), "
                 "recreating via first release: publish_id=%s bot_uuid=%s stage=%s",
-                publish_id, bot_uuid, stage_enum.value,
+                e.error_code, publish_id, bot_uuid, stage_enum.value,
             )
+            # Secondary net (mirrors upgrade_release): a lingering record
+            # (DEVICE_NOT_FOUND) must be retired before recreating, or the fresh
+            # bot orphans it. BOT_NOT_FOUND is already gone — nothing to clean.
+            if e.error_code == "DEVICE_NOT_FOUND":
+                self._build_service.retire_superseded_bot(bot_uuid, operator=operator)
             return await self._recreate_restart_target(
                 publish_id=publish_id,
                 stage_enum=stage_enum,
