@@ -344,6 +344,87 @@ Join 两套 endpoint。
 | POST | `/openapi/v1/friend-requests/{request_id}/accept` | 接受好友申请 |
 | POST | `/openapi/v1/friend-requests/{request_id}/reject` | 拒绝好友申请 |
 
+### 8.7 与 Legacy 接口的逐项映射
+
+以下映射描述业务能力来源，不表示 V1 Route 调用 Legacy HTTP handler。V1 只能
+通过 `bcs-service-api::application::v1` 复用或编排已有 Core、Port 和 Store
+能力，并重新执行 V1 授权。
+
+#### Group 与 GroupParticipant
+
+| V1 OpenAPI | Legacy 接口/能力 | 映射与功能差异 | V1 资源授权 |
+| --- | --- | --- | --- |
+| `GET /bots/collaboration/{bot_uuid}/groups` | `GET /bots/{id}/groups` | 同类查询；V1 使用统一分页和 `membership` 过滤。Legacy 路由不要求认证，V1 不允许匿名枚举 | Bot 仅查自身；Human 仅查 `created_by` 关系确认的 Bot |
+| `POST /groups` | `POST /groups` | 复用创建能力；不复用 Legacy DTO、可选 caller 或 Human Actor 行为 | 必须有 Principal；Bot 为自身创建，Human 只能以已授权的目标 Bot 管理身份创建 |
+| `GET /groups/{group_id}` | `GET /groups/{id}` | 复用详情查询；Legacy 当前公开读取，V1 改为关系授权读取 | Group manager、直接 Participant，或符合 Session 可见性规则的调用者 |
+| `PATCH /groups/{group_id}` | `PUT /groups/{id}/label`、`PUT /visibility`、`PATCH /settings` 等字段型路由 | V1 聚合明确允许修改的基础字段；CollaborationDefinition、workspace、routing-policy 和状态转换不因该 PATCH 自动进入 V1 | creator/manager；YAML 必须锁定字段 allowlist |
+| `DELETE /groups/{group_id}` | `DELETE /groups/{id}?bot_id=...` | 复用删除能力；V1 删除 request-supplied caller，不再信任 `bot_id` 查询参数 | creator/manager；Bot 或 Human-owned-Bot 关系从 Principal 推导 |
+| `POST /groups/{group_id}/participants` | `POST /groups/{id}/members` | `members` 统一命名为 `participants`；复用角色和领域不变量 | creator/manager；Human 只能管理其有权管理的目标 Bot |
+| `PATCH /groups/{group_id}/participants/{bot_uuid}` | `PUT /groups/{gid}/participants/{aid}/mode` | HTTP method、标识名和响应 Envelope 统一；第一阶段只开放明确的 Participant 可变字段 | manager，或领域规则允许时由目标 Bot 修改自身状态 |
+| `DELETE /groups/{group_id}/participants/{bot_uuid}` | `DELETE /groups/{id}/members/{bot_uuid}` | 路径术语统一；保留不能破坏 driver/coordinator 不变量的规则 | manager 或目标 Bot 自行退出；Human 需有目标 Bot 管理权 |
+
+#### Session 与 SessionParticipant
+
+| V1 OpenAPI | Legacy 接口/能力 | 映射与功能差异 | V1 资源授权 |
+| --- | --- | --- | --- |
+| `POST /groups/{group_id}/sessions` | `POST /groups/{id}/sessions` | 复用创建和角色校验；V1 不把 Human 自动加入为 Participant，Human 只管理目标 Bot | Group 可见且调用者有创建权限；目标 Bot 必须是 BotPrincipal 自身或 Human-owned Bot |
+| `GET /groups/{group_id}/sessions` | `GET /groups/{id}/sessions` | 复用查询、状态和分页能力；Legacy 对未认证调用者仍可能返回过滤后结果，V1 不提供匿名读取 | Group member/manager；Session-only Bot 只能读取与自身相关的 Session |
+| `GET /sessions/{session_id}` | `GET /sessions/{sid}` | 复用详情查询；Legacy 当前无身份检查，V1 增加关系授权 | Session Participant、Group manager 或符合领域可见性规则的调用者 |
+| `PATCH /sessions/{session_id}` | `PATCH /sessions/{sid}` | 第一阶段复用 title 等明确可变字段；Legacy 当前无身份检查 | Session creator/manager；字段 allowlist 由 Contract 固定 |
+| `DELETE /sessions/{session_id}` | `DELETE /sessions/{sid}?bot_id=...` | 复用删除和文件清理；不再接受查询参数声明 caller | creator、driver 或对应的 Human-owned-Bot 管理者 |
+| `POST /sessions/{session_id}/completion` | `POST /sessions/{sid}/complete` | 用 `completion` 表达生命周期动作；定义状态校验、幂等和统一错误 | driver/creator/manager；ServiceInvocation Session 仍不走该接口 |
+| `GET /sessions/{session_id}/messages` | `GET /sessions/{sid}/messages` | 复用 history 聚合；Legacy 未传 `view_bot_id` 时按 Public caller 处理，V1 始终鉴权且不能切换 Bot 视角 | Session Participant 或有管理权的 Human；目标视角由授权关系确定 |
+| `POST /sessions/{session_id}/participants` | `POST /sessions/{sid}/members` | 术语统一；Legacy 主要检查“已认证”，V1 增加 Session 资源授权 | Session/Group manager；Human 只管理有权管理的 Bot |
+| `PATCH /sessions/{session_id}/participants/{bot_uuid}` | `PATCH /sessions/{sid}/members/{bot_uuid}` | 复用 mode 更新；Legacy 主要检查“已认证”，V1 约束可管理关系 | manager，或领域允许时目标 Bot 修改自身 mode |
+| `DELETE /sessions/{session_id}/participants/{bot_uuid}` | `DELETE /sessions/{sid}/members/{bot_uuid}` | 复用 self/owner/creator/coordinator 规则，集中到 V1 Application authorizer | manager、目标 Bot 自行退出，或 Human 管理其 owned Bot；driver 不变量仍保留 |
+
+#### Invitation
+
+| V1 OpenAPI | Legacy 接口/能力 | 映射与功能差异 | V1 资源授权 |
+| --- | --- | --- | --- |
+| `POST /groups/{group_id}/invitations` | `POST /groups/{id}/invite-link` | 从“生成链接”提升为 Invitation 资源，仍可返回可分享 token/link | Group creator/manager |
+| `POST /sessions/{session_id}/invitations` | `POST /sessions/{sid}/invite-link` | 同上，目标类型写入 token/Invitation | Session/Group manager |
+| `POST /invitations/{token}/accept` | `POST /groups/join/{token}`、`POST /sessions/join/{token}` | 两个 Join 路由合并；V1 从 token 识别目标。Legacy 加入 Human Actor，V1 只加入 Bot：Bot 为自身接受，Human 为 owned Bot 接受 | token 有效且目标可加入；Human 必须证明目标 Bot 的 `created_by` 关系 |
+
+#### Friendship 与 FriendRequest
+
+| V1 OpenAPI | Legacy 接口/能力 | 映射与功能差异 | V1 资源授权 |
+| --- | --- | --- | --- |
+| `GET /bots/collaboration/{bot_uuid}/friendships` | `GET /bots/{id}/friends` | 路径进入 BCN collaboration 子资源；响应、分页和错误统一 | Bot 自身，或 Human 管理其 owned Bot |
+| `DELETE /bots/collaboration/{bot_uuid}/friendships/{friend_bot_uuid}` | 无单对单 Legacy HTTP 接口 | 第一阶段新增能力；需要补充单对单持久化/Core API，不能误用 `remove_all_friendships` | 关系任一 Bot 自身，或其 Human owner；操作幂等 |
+| `POST /bots/collaboration/{bot_uuid}/friend-requests` | `POST /friends/request`，body 可带 `from_bot` | 发起方移到 path，body 不能覆盖 caller/目标管理身份 | Bot path 必须是 BotPrincipal 自身，或 Human-owned Bot |
+| `GET /bots/collaboration/{bot_uuid}/friend-requests` | `GET /friends/requests?bot_uuid=...` | 目标 Bot 从 query 移到 path；保留 direction/status 和分页过滤 | Bot 自身，或 Human-owned Bot |
+| `POST /friend-requests/{request_id}/accept` | `POST /friends/requests/{id}/accept` | 复用决策和建 Friendship 能力；统一 Envelope、幂等和错误码 | 只有接收方 Bot 或其 Human owner |
+| `POST /friend-requests/{request_id}/reject` | `POST /friends/requests/{id}/reject` | 同上 | 只有接收方 Bot 或其 Human owner |
+
+### 8.8 Legacy 与 V1 鉴权模式对比
+
+| 维度 | Legacy API | V1 OpenAPI |
+| --- | --- | --- |
+| 调用入口 | 客户端可直接调用 `bcs-http` | 客户端必须先经过 Gateway |
+| 原始凭证认证 | BCN Route 解析 Bot token、Human cookie/mock identity 等 | Gateway 认证原始凭证；BCN 不解析上游用户 Cookie/Token |
+| Gateway → BCN 信任 | 不适用或依赖现有直连方式 | BCN 必须验证请求来自合法 Gateway；签名/验签方案仍是上线阻塞项 |
+| Principal | 多种 Route 自行构造 `CallerContext`/actor string，行为不完全统一 | Gateway 形成规范化 `HumanPrincipal` 或 `BotPrincipal`，BCN V1 Adapter 只读取已验证 Principal |
+| 匿名读取 | 部分 GET 允许 Public/无认证，例如 Group、Session 详情及部分 message history | 第一阶段没有 Public Principal，27 个 operation 全部要求已认证 Principal |
+| caller 参数 | 个别接口使用 query/body 中的 `bot_id`、`from_bot`、`bot_uuid` 辅助决定调用身份 | path/body 中的 `bot_uuid` 只是目标资源；不能覆盖 Principal |
+| Human 与 Bot | 部分 Legacy 流程把 Human 建成 Actor 或自动加入 Session | Human 不是 Participant，不能作为 Bot 发言；只能基于权威 `created_by` 管理 Bot 资源关系 |
+| 资源授权位置 | 分散在 HTTP handler、caller resolver 和现有 service 中，强度因接口而异 | 集中在 `application::v1` 的资源授权层，HTTP Adapter 不拥有业务权限规则 |
+| 未设置 `created_by` 的旧 Bot | 部分 Legacy ownership 逻辑存在兼容放行 | V1 不静默认领或放行，必须有明确迁移/权威关系 |
+| 响应与错误 | 多种裸 JSON、`success/error` 结构和状态码映射 | 统一 `{code, message, data, request_id}` Envelope 和稳定错误码 |
+| 对 Legacy 的影响 | 保持现状，继续服务生产链路 | V1 不修改 Legacy 行为；Legacy 收紧或下线必须另立迁移方案 |
+
+### 8.9 第一阶段范围汇总
+
+| 领域 | V1 operation 数 | 直接/同类 Legacy 能力 | 聚合或语义重设 | V1 新增 |
+| --- | ---: | ---: | ---: | ---: |
+| Group | 5 | 4 | 1 | 0 |
+| GroupParticipant | 3 | 3 | 0 | 0 |
+| Session | 7 | 7 | 0 | 0 |
+| SessionParticipant | 3 | 3 | 0 | 0 |
+| Invitation | 3 | 2 | 1 | 0 |
+| Friendship/FriendRequest | 6 | 5 | 0 | 1 |
+| **合计** | **27** | **24** | **2** | **1** |
+
 ## 9. 第一阶段 Internal API
 
 第一阶段 Internal API 是空集，即不新增 `/internal/v1/**` 业务 operation。
