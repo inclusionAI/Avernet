@@ -59,6 +59,7 @@ from agentclaw.community.core.bot_management.utils import (
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.bot_management.create_flow import (
     AuthPending,
+    AuthStatus,
     BotCreateSpec,
     complete_bot_authorization,
     create_bot_with_authorization,
@@ -1090,12 +1091,12 @@ async def get_auth_status(
             auth_rel_plugin=auth_rel_plugin,
         )
 
-        if result.status == "PENDING":
+        if result.status == AuthStatus.PENDING:
             return ApiResponse(
                 success=True,
                 data={"status": "PENDING", "message": "授权处理中"},
             )
-        if result.status == "ISSUED":
+        if result.status == AuthStatus.ISSUED:
             return ApiResponse(
                 success=True,
                 data={"status": "ISSUED", "bot": result.bot},

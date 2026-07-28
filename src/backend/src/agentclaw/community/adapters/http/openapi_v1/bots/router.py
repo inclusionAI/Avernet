@@ -115,8 +115,10 @@ async def create_bot(
 ):
     """Create a bot (201), or return 202 + a Passport iframe when authorization is needed.
 
-    ``engine_options`` is accepted but not yet wired — the internal create path
-    has no engine-options input; flagged for follow-up.
+    ``engine_options`` maps onto the spec's ``extra_properties`` bag — the
+    designated home for engine-specific inputs. Note it is carried but not yet
+    persisted: ``BotService.create_bot`` has no corresponding input, so the
+    values stop at the spec until that lands (flagged follow-up).
     """
     owner_id = caller_owner_id(principal)
     # The engine/cluster pair must obey the bijection (ANDC⟺teclaw, ACRA⟺else).
@@ -133,6 +135,7 @@ async def create_bot(
             bot_type=body.bot_type,
             bot_name=body.bot_name,
             bot_desc=body.bot_desc,
+            extra_properties=body.engine_options,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,

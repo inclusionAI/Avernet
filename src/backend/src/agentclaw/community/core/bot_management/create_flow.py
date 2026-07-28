@@ -20,6 +20,7 @@ ownership of id allocation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.bot_management.services.bot_service import (
@@ -67,11 +68,32 @@ class Created:
     passport_token: str
 
 
+class AuthStatus(StrEnum):
+    """Passport authorization states this flow branches on.
+
+    Use these members instead of bare literals when comparing or emitting a
+    status. The set is **not** closed: the value originates in the external
+    passport service, so an unlisted state is possible and must survive the
+    round trip (see :class:`AuthStatusResult`).
+    """
+
+    PENDING = "PENDING"
+    ISSUED = "ISSUED"
+    REJECTED = "REJECTED"
+
+
 @dataclass
 class AuthStatusResult:
     """Outcome of polling authorization: ``PENDING``, ``ISSUED`` (+bot), or other.
 
     ``bot`` is populated only on ``ISSUED``; an empty dict on the other states.
+
+    ``status`` is deliberately a plain ``str`` rather than :class:`AuthStatus`:
+    it holds whatever the external passport service reported, and the surfaces
+    echo an unrecognized state back to the caller verbatim ("授权状态异常: X").
+    Coercing to the enum would raise on a state the service adds later, turning
+    a reportable condition into a 500 — so the enum names the known states while
+    the carrier stays permissive.
     """
 
     status: str
@@ -114,6 +136,11 @@ class BotCreateSpec:
     share_policy: dict[str, Any] | None = None
     template_type: str | None = None
     template_config: dict[str, Any] | None = None
+    # Engine/vendor-specific inputs belong here, NOT as new named fields. The
+    # spec is the contract shared by every surface, so it stays engine-agnostic
+    # rather than growing an attribute per engine; anything meaningful to only
+    # one engine goes in this bag.
+    extra_properties: dict[str, Any] = field(default_factory=dict)
 
 
 def _get_bot_mcp_codes(
@@ -198,7 +225,7 @@ def _build_ext(
     if agent_code:
         passport: dict[str, Any] = {"agent_code": agent_code}
         if issued:
-            passport["status"] = "ISSUED"
+            passport["status"] = AuthStatus.ISSUED
         ext["passport"] = passport
     return ext or None
 
@@ -383,7 +410,7 @@ def complete_bot_authorization(
         raise RuntimeError("query auth status returned nothing")
 
     status = auth_status.get("status")
-    if status != "ISSUED":
+    if status != AuthStatus.ISSUED:
         # PENDING (still waiting) and any other status (e.g. REJECTED) are
         # returned verbatim for the surface to map; nothing is created.
         return AuthStatusResult(status=status)
@@ -415,4 +442,4 @@ def complete_bot_authorization(
             nick_name=nick_name, bot_id=bot_id,
         )
 
-    return AuthStatusResult(status="ISSUED", bot=result)
+    return AuthStatusResult(status=AuthStatus.ISSUED, bot=result)
