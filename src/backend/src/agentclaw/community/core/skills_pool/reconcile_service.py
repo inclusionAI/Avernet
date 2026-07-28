@@ -344,17 +344,20 @@ class SkillsPoolReconcileService:
                     preparation_id=probe.preparation_id,
                     evidence=cutover.to_dict(),
                 )
-            if not self._layouts.record_cutover_committed(
-                scope=scope,
-                migration_generation=generation,
-                lease_owner=lease_owner,
-                preparation_id=probe.preparation_id,
-                evidence=cutover.to_dict(),
+            if not (
+                state.data_plane_cutover_committed and repair_evidence_refresh
             ):
-                return SkillsPoolReconcileResult(
-                    SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                if not self._layouts.record_cutover_committed(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
                     preparation_id=probe.preparation_id,
-                )
+                    evidence=cutover.to_dict(),
+                ):
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                        preparation_id=probe.preparation_id,
+                    )
 
         if not self._layouts.holds_lease(
             scope=scope,

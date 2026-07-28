@@ -564,6 +564,34 @@ async def test_unknown_cutover_enters_manual_repair_and_stops_automation() -> No
 
 
 @pytest.mark.asyncio
+async def test_resolved_pool_committed_repair_skips_duplicate_cutover_ledger_cas() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            last_failure_code="MANUAL_REPAIR_RESOLVED",
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"active_marker": "same-generation"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.events == ["database"]
+    assert layouts.state.active_layout is SkillLayout.POOL
+
+
+@pytest.mark.asyncio
 async def test_post_cutover_sync_pending_retries_finalization_before_mappings() -> None:
     layouts = FakeLayoutRepository()
     runtime = FakeRuntime()
