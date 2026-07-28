@@ -75,6 +75,7 @@ def _seed_happy_services(world) -> None:
             for method in (
                 "set_feature_enabled",
                 "set_full_rollout",
+                "set_owner_full_rollout",
                 "promote_engine",
                 "add_bot",
                 "remove_bot",
@@ -143,6 +144,20 @@ _HAPPY_CASES = (
         CaseInput(
             headers=_HEADERS,
             json_body={"enabled": True, "reason": "promote environment"},
+        ),
+    ),
+    (
+        "POST",
+        "/api/ops/skills-pool/rollout/owners",
+        CaseInput(
+            headers=_HEADERS,
+            json_body={
+                "owner_id": "owner-1",
+                "engine": "openclaw",
+                "enabled": True,
+                "acceptance_batch_id": "batch-1",
+                "reason": "promote owner bots",
+            },
         ),
     ),
     (
