@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .aicoding.strategy import AicodingProvisioningStrategy, CODING_TEMPLATE_TYPES
+from .aicoding.strategy import (
+    AicodingProvisioningStrategy,
+    TEMPLATE_CONFIG_CONSUMING_TYPES,
+)
 from .default import DefaultProvisioningStrategy
 from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
 
@@ -41,13 +44,15 @@ class EngineProvisioningRegistry:
         Prefer ``active_engine``.  If older call sites only pass
         ``template_type``, route known coding templates to the coding strategy
         so historical TemplateService signatures keep working while keeping the
-        rule in one place.  An explicit (non-empty) engine always wins over a
-        coding ``template_type``, so dirty data such as ``openclaw`` +
+        rule in one place.  Template-factory normalCC/architect templates also
+        route here so TemplateService can apply the same token policy when it
+        only receives template_type.  An explicit (non-empty) engine always wins
+        over a coding ``template_type``, so dirty data such as ``openclaw`` +
         ``personalCoding`` does not accidentally get AICoding provisioning.
         """
         if ctx.active_engine:
             return self.resolve(ctx.active_engine)
-        if ctx.template_type in CODING_TEMPLATE_TYPES:
+        if ctx.template_type in TEMPLATE_CONFIG_CONSUMING_TYPES:
             return self.resolve("aicoding")
         return self._default
 

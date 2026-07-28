@@ -15,6 +15,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 
+from agentclaw.community.core.bot_management.capabilities import (
+    can_join_bcn_as_provider,
+    has_declared_capabilities,
+)
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
@@ -432,6 +436,48 @@ class BotService:
                 e,
             )
             return None
+
+    @staticmethod
+    def _should_trigger_memory_initialization(
+        *,
+        active_engine: "str | None",
+        template_type: "str | None",
+        template_config: "Optional[Dict[str, Any]]",
+        old_template_config: "Optional[Dict[str, Any]]" = None,
+        on_create: bool = False,
+    ) -> bool:
+        """Whether to reuse the AppCoding memory/Wiki initialization path.
+
+        New template-factory normalCC/architect bots consume business Wiki /
+        RepoWiki through the same AppCoding runtime pipeline, but the source of
+        truth is AC resolved ``template_config``.  Keep applicationCoding legacy
+        behavior on create, and let normalCC/architect trigger only when their
+        template snapshot actually declares repo/wiki sources.
+        """
+        if active_engine != "claude_code" or not isinstance(template_config, dict):
+            return False
+        if template_type not in ("applicationCoding", "normalCC", "architect"):
+            return False
+
+        try:
+            from agentclaw.community.core.bot_management.utils import (
+                memory_sources_changed,
+            )
+
+            empty_config: Dict[str, Any] = {}
+            has_sources = memory_sources_changed(empty_config, template_config)
+            if on_create:
+                return template_type == "applicationCoding" or has_sources
+            return memory_sources_changed(old_template_config or empty_config, template_config)
+        except Exception as e:
+            logger.warning(
+                "[bot_service.memory_init] source detection failed: "
+                "template_type=%s active_engine=%s error=%s",
+                template_type,
+                active_engine,
+                e,
+            )
+            return template_type == "applicationCoding" and on_create
 
     def _attach_template_uid_context(
         self,
@@ -1271,6 +1317,7 @@ class BotService:
                     active_engine=resolved_active_engine,
                     bot_type=resolved_bot_type,
                     template_type=template_type,
+                    template_config=template_config,
                 )
                 if should_register_bcn:
                     logger.info(
@@ -1341,11 +1388,18 @@ class BotService:
                 if template_config and template_type:
                     bot_record["template_config"] = template_config
 
-                # 对于 applicationCoding 类型且使用 claude_code 引擎的 bot，触发 memory 初始化
-                if template_type == "applicationCoding" and resolved_active_engine == "claude_code":
+                # applicationCoding 保留原 memory 初始化；新通用 CC / 架构师 Bot
+                # 的业务知识库、Wiki、RepoWiki 复用同一链路，但从
+                # template_config resolved 快照检测配置来源。
+                if self._should_trigger_memory_initialization(
+                    active_engine=resolved_active_engine,
+                    template_type=template_type,
+                    template_config=template_config,
+                    on_create=True,
+                ):
                     logger.info(
                         f"[bot_service.create_bot] Triggering memory initialization for "
-                        f"applicationCoding bot {bot_id}"
+                        f"template-backed bot {bot_id}, template_type={template_type}"
                     )
                     from agentclaw.community.core.bot_management.utils import trigger_memory_initialization
 
@@ -2193,13 +2247,13 @@ class BotService:
                 bot_active_engine = bot.get("active_engine")
                 from agentclaw.community.core.bot_management.utils import (
                     trigger_memory_initialization,
-                    memory_sources_changed,
                 )
 
-                if (
-                    bot_template_type == "applicationCoding"
-                    and bot_active_engine == "claude_code"
-                    and memory_sources_changed(old_template_config, template_config)
+                if self._should_trigger_memory_initialization(
+                    active_engine=bot_active_engine,
+                    template_type=bot_template_type,
+                    template_config=template_config,
+                    old_template_config=old_template_config,
                 ):
                     logger.info(
                         f"[bot_service.update_bot] memory sources changed for bot {bot_id}, "
@@ -2619,8 +2673,17 @@ class BotService:
         active_engine: Optional[str],
         bot_type: Optional[str],
         template_type: Optional[str],
+        template_config: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """统一 create / start 注册 BCN Provider 的触发条件."""
+        """统一 create / start 注册 BCN Provider 的触发条件.
+
+        如果 AC 模板工厂快照显式声明 capabilities，则 capabilities 是唯一事实源；
+        缺失能力节点按 False，不再混用 legacy template_type fallback。旧 Bot 没有
+        capabilities 时继续保留历史逻辑。
+        """
+        if has_declared_capabilities(template_config):
+            return can_join_bcn_as_provider(template_config)
+
         is_coding_personal = (
             active_engine in ("claude_code", "aicoding")
             and template_type == "personalCoding"
@@ -3354,6 +3417,14 @@ class BotService:
         resolved_nick_name = nick_name or user_id
         bot_owner_id = bot.get("owner_id") or user_id
 
+        try:
+            resolved_template_config = self._template_service.get_template_config(bot_id)
+        except Exception as e:
+            logger.warning(
+                f"[bot_service.start_bot] Failed to get template config for bot {bot_id}: {e}"
+            )
+            resolved_template_config = None
+
         # 启动前先在 BCN 注册为 Provider bot (下行链路).
         # 触发条件:
         #   - active_engine == "claude_code" 且 template_type == "normalCC"
@@ -3367,6 +3438,7 @@ class BotService:
             active_engine=active_engine,
             bot_type=bot_type,
             template_type=template_type,
+            template_config=resolved_template_config,
         )
         if should_register_bcn:
             logger.info(
@@ -3698,12 +3770,23 @@ class BotService:
         bot_type = bot.get("bot_type") or "personal"
         bot_template_type = (bot.get("template_type") or "").strip()
 
+        # 先读取模板快照：BCN 能力门控与后续 BaaS restart 均使用同一份 resolved config。
+        try:
+            resolved_template_config = self._template_service.get_template_config(bot_id)
+        except Exception as e:
+            logger.warning(
+                "[bot_service._restart_bot_baas] Failed to get template for bot %s: %s",
+                bot_id, e,
+            )
+            resolved_template_config = None
+
         # BaaS 原地重启不会经过 start_bot，这里补齐启动链路的 BCN Provider 注册。
         # 注册接口幂等：已注册时直接返回，也能重试创建阶段失败的注册。
         if self._should_register_bcn_provider(
             active_engine=active_engine,
             bot_type=bot_type,
             template_type=bot_template_type,
+            template_config=resolved_template_config,
         ):
             logger.info(
                 "[bot_service._restart_bot_baas] register bot to BCN as provider: "
@@ -3730,17 +3813,7 @@ class BotService:
             else None
         )
 
-        # 仅用于解析 template_uuid（避免 BaasService 走默认模板覆盖当前引擎模板）。
-        # 解析失败仅记 warning：template_uuid 退化为 None，upgrade 走 BaaS 默认模板。
-        try:
-            resolved_template_config = self._template_service.get_template_config(bot_id)
-        except Exception as e:
-            logger.warning(
-                "[bot_service._restart_bot_baas] Failed to get template for bot %s: %s",
-                bot_id, e,
-            )
-            resolved_template_config = None
-
+        # resolved_template_config 已在 BCN 能力门控前读取，后续 BaaS restart 复用同一快照。
         # 与 _allocate_device_async（create / arca-restart 路径）同口径构造 extra_envs
         # 与 template_config，让 BaaS 原地重启也消费 BOT_TYPE / RELAY_DEFAULT_MODEL /
         # RELAY_DEFAULT_RUNTIME / AIX_DEVFLOW_INFO / GIT_ADDRESSES 及 sandbox overrides。

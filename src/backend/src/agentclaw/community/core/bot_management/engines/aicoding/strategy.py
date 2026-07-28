@@ -13,6 +13,7 @@ from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
 
 
 CODING_TEMPLATE_TYPES = frozenset({"applicationCoding", "personalCoding"})
+TEMPLATE_CONFIG_CONSUMING_TYPES = CODING_TEMPLATE_TYPES | frozenset({"normalCC", "architect"})
 BOT_TYPE_ENV_MAP = {
     "personalCoding": "personal",
     "applicationCoding": "application",
@@ -33,9 +34,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     def is_coding_template(template_type: str | None) -> bool:
         return template_type in CODING_TEMPLATE_TYPES
 
+    @staticmethod
+    def consumes_template_config(template_type: str | None) -> bool:
+        return template_type in TEMPLATE_CONFIG_CONSUMING_TYPES
+
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         template_type = ctx.template_type
-        if not self.is_coding_template(template_type):
+        if not self.consumes_template_config(template_type):
             return None
 
         template_config = ctx.template_config or {}
@@ -56,20 +61,32 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             envs["AIX_DEVFLOW_INFO"] = aix_devflow_info
 
         repo_list: list[str] = []
-        for repo_key in ("backend_repo", "frontend_repo", "lib_repo"):
+        for repo_key in (
+            "backend_repo",
+            "frontend_repo",
+            "lib_repo",
+            "repos",
+            "init_repos",
+            "application_repo_urls",
+        ):
             repos = template_config.get(repo_key)
             if not isinstance(repos, list):
                 continue
             for repo in repos:
-                if isinstance(repo, dict):
-                    repo_url = repo.get("repo_url")
-                    if repo_url:
-                        repo_list.append(repo_url)
+                if isinstance(repo, str) and repo.strip():
+                    repo_list.append(repo.strip())
+                elif isinstance(repo, dict):
+                    for url_key in ("repo_url", "url", "git_url", "ssh_url"):
+                        repo_url = repo.get(url_key)
+                        if isinstance(repo_url, str) and repo_url.strip():
+                            repo_list.append(repo_url.strip())
+                            break
         if repo_list:
             envs["GIT_ADDRESSES"] = json.dumps(repo_list, ensure_ascii=False)
 
         # Bug-fix semantics: both applicationCoding and personalCoding may set
-        # relay default model/runtime.  Non-coding templates are rejected above.
+        # relay default model/runtime.  Template-factory normalCC/architect bots
+        # reuse the same runtime configuration consumption via template_config.
         model = template_config.get("model")
         if isinstance(model, str) and model.strip():
             envs["RELAY_DEFAULT_MODEL"] = model.strip()
@@ -80,10 +97,10 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         return envs or None
 
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
-        return self.is_coding_template(ctx.template_type)
+        return self.consumes_template_config(ctx.template_type)
 
     def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
-        if not self.is_coding_template(ctx.template_type):
+        if not self.consumes_template_config(ctx.template_type):
             return None
         token = (ctx.template_config or {}).get("token")
         return token if isinstance(token, str) and token else None

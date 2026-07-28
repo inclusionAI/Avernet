@@ -275,3 +275,84 @@ class TestTriggerMemoryInitYuquePayload:
             )
 
         assert called["post"] is False
+
+
+class TestTemplateFactoryKnowledgeAliases:
+    def test_yuque_pairs_include_template_factory_wiki_aliases(self):
+        config = {
+            "wiki_knowledge_spaces": [
+                {"url": "https://yuque/wiki", "teamToken": "TK1"},
+            ],
+            "business_wiki_spaces": [
+                {"wiki_url": "https://yuque/business", "team_token": "TK2"},
+            ],
+            "repo_wiki_spaces": [
+                {"repo_wiki_url": "https://yuque/repo"},
+            ],
+        }
+
+        assert _extract_yuque_pairs(config) == [
+            ("https://yuque/wiki", "TK1"),
+            ("https://yuque/business", "TK2"),
+            ("https://yuque/repo", ""),
+        ]
+
+    def test_code_repo_urls_include_template_factory_aliases(self):
+        config = {
+            "repos": ["https://code/repos-string"],
+            "init_repos": [{"url": "https://code/init"}],
+            "application_repo_urls": [{"git_url": "git@example.com:a/b.git"}],
+        }
+
+        assert _extract_code_repo_urls(config) == [
+            "https://code/repos-string",
+            "https://code/init",
+            "git@example.com:a/b.git",
+        ]
+
+    def test_memory_sources_changed_detects_template_factory_aliases(self):
+        old = {"business_wiki_spaces": [{"url": "https://yuque/old"}]}
+        new = {"business_wiki_spaces": [{"url": "https://yuque/new"}]}
+
+        assert memory_sources_changed(old, new) is True
+
+    def test_trigger_memory_initialization_payload_uses_aliases(self):
+        payload = self._run_with_aliases(
+            {
+                "business_wiki_spaces": [
+                    {"wiki_url": "https://yuque/business", "teamToken": "TK"},
+                ],
+                "init_repos": [{"repo_url": "https://code/init"}],
+            }
+        )
+
+        assert payload["yuqueUrls"] == [
+            {"url": "https://yuque/business", "teamToken": "TK"},
+        ]
+        assert payload["codeRepoUrls"] == ["https://code/init"]
+
+    def _run_with_aliases(self, template_config):
+        captured = {}
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured["payload"] = json
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
+
+        with patch(
+            "agentclaw.community.core.bot_management.utils.get_current_env",
+            return_value="pre",
+        ), patch(
+            "agentclaw.community.core.bot_management.utils.requests.post",
+            side_effect=fake_post,
+        ):
+            trigger_memory_initialization(
+                bot_id="b1",
+                bot_name="n",
+                user_id="u",
+                template_config=template_config,
+                cookie="c=1",
+                aixcore_base_url_pre="https://aixcore.example.com",
+            )
+        return captured.get("payload", {})

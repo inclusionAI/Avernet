@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from agentclaw.community.core.bot_management.engines import (
     BotProvisioningContext,
     resolve_provisioning,
@@ -187,3 +189,48 @@ def test_resolve_provisioning_routes_legacy_template_only_context():
     )
     assert strategy.engine_type == "aicoding"
     assert strategy.should_encrypt_template_token(ctx) is True
+
+
+def test_template_factory_normal_cc_consumes_model_runtime_repos_and_token():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    ctx = BotProvisioningContext(
+        active_engine="claude_code",
+        template_type="normalCC",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="service",
+        template_config={
+            "model": "  m-normal  ",
+            "runtime": "  codefuse-antcc  ",
+            "token": "tok-normal",
+            "repos": ["https://code/repo1"],
+            "init_repos": [{"url": "https://code/repo2"}],
+        },
+    )
+
+    envs = strategy.build_extra_envs(ctx)
+    assert envs is not None
+    assert envs["RELAY_DEFAULT_MODEL"] == "m-normal"
+    assert envs["RELAY_DEFAULT_RUNTIME"] == "codefuse-antcc"
+    assert json.loads(envs["GIT_ADDRESSES"]) == [
+        "https://code/repo1",
+        "https://code/repo2",
+    ]
+    assert "BOT_TYPE" not in envs
+    assert strategy.should_encrypt_template_token(ctx) is True
+    assert strategy.extract_runtime_token(ctx) == "tok-normal"
+
+
+def test_template_factory_architect_routes_template_only_context_for_token_policy():
+    ctx, strategy = resolve_provisioning(
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="service",
+        active_engine=None,
+        template_type="architect",
+        template_config={"token": "tok-architect"},
+    )
+
+    assert strategy.engine_type == "aicoding"
+    assert strategy.should_encrypt_template_token(ctx) is True
+    assert strategy.extract_runtime_token(ctx) == "tok-architect"
