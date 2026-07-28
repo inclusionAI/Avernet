@@ -14,12 +14,14 @@ from agentclaw.community.adapters.http.skills_pool.router import (
     rollback_bot,
     router,
     set_full_rollout,
+    set_owner_full_rollout,
     set_rollout_feature,
 )
 from agentclaw.community.adapters.http.skills_pool.schemas import (
     ControlBotRequest,
     FeatureToggleRequest,
     FullRolloutRequest,
+    OwnerFullRolloutRequest,
     RollbackRequest,
 )
 from agentclaw.community.api.skills_pool_rollout_service import (
@@ -49,6 +51,7 @@ def test_all_skills_pool_operations_are_operator_only() -> None:
         "/api/ops/skills-pool/rollout",
         "/api/ops/skills-pool/rollout/feature",
         "/api/ops/skills-pool/rollout/full",
+        "/api/ops/skills-pool/rollout/owners",
         "/api/ops/skills-pool/rollout/promote",
         "/api/ops/skills-pool/rollout/whitelist",
         "/api/ops/skills-pool/rollout/whitelist/remove",
@@ -119,11 +122,13 @@ async def test_feature_post_normalizes_legacy_config_and_audits_once(
     assert response.data["enabled"] is True
     assert response.data["enable_all"] is False
     assert response.data["full_rollout_engines"] == ()
+    assert response.data["full_rollout_owners"] == ()
     stored = configs.get_by_id(config_id=config_id)
     assert stored is not None
     assert json.loads(stored.param_value or "{}") == {
         "enable_all": False,
         "full_rollout_engines": [],
+        "full_rollout_owners": [],
         "promoted_engines": ["openclaw"],
         "whitelist": [],
         "negative_controls": [],
@@ -181,6 +186,44 @@ async def test_full_rollout_route_forwards_optional_engine() -> None:
 
 
 @pytest.mark.asyncio
+async def test_owner_full_rollout_route_forwards_owner_engine_and_acceptance() -> None:
+    @dataclass(frozen=True)
+    class Result:
+        enabled: bool = True
+
+    class RolloutService:
+        call: dict[str, object] | None = None
+
+        def set_owner_full_rollout(self, **kwargs: object):
+            self.call = kwargs
+            return Result()
+
+    service = RolloutService()
+
+    await set_owner_full_rollout(
+        request=OwnerFullRolloutRequest(
+            owner_id="168944",
+            engine="openclaw",
+            enabled=True,
+            acceptance_batch_id="openclaw-canary-1",
+            reason="enable all owner bots in pre",
+        ),
+        user=SimpleNamespace(staffId="freddie"),
+        service=service,
+    )
+
+    assert service.call == {
+        "env": "dev",
+        "owner_id": "168944",
+        "engine": "openclaw",
+        "enabled": True,
+        "acceptance_batch_id": "openclaw-canary-1",
+        "operator": "freddie",
+        "reason": "enable all owner bots in pre",
+    }
+
+
+@pytest.mark.asyncio
 async def test_rollback_route_supplies_a_unique_lease_owner() -> None:
     scope = BotSkillLayoutScope("pre", "entity-1", "bot-1")
 
@@ -193,9 +236,7 @@ async def test_rollback_route_supplies_a_unique_lease_owner() -> None:
 
         async def rollback(self, **kwargs: object) -> SkillsPoolRollbackResult:
             self.call = kwargs
-            return SkillsPoolRollbackResult(
-                SkillsPoolRollbackOutcome.LEGACY_ACTIVE
-            )
+            return SkillsPoolRollbackResult(SkillsPoolRollbackOutcome.LEGACY_ACTIVE)
 
     service = RollbackService()
 

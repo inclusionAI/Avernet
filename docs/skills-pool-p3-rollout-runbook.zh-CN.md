@@ -127,6 +127,28 @@ SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1;
    `POST /rollout/batches/accept` 冻结该批次的验收报告。扩大批次时，新
    `batch_id` 必须引用当前引擎最近的 `acceptance_batch_id`；晋级下一引擎
    也必须引用上一引擎已验收批次。Backend 不会自动验收、扩大或晋级。
+9. 如需在当前环境内按员工覆盖其存量重启和未来新建 Bot，调用
+   `POST /rollout/owners`，传入精确 `owner_id`、`engine`、`enabled` 和该
+   引擎最近一次已验收的 `acceptance_batch_id`。规则按
+   `(owner_id, engine)` 隔离，不会越过引擎晋级顺序，也不会影响其他员工。
+   精确负对照优先于 owner 全量并保持 Legacy；关闭规则只阻止尚未认领的
+   Bot，已认领 Bot 继续前滚。
+
+示例：预发 OpenClaw 验收完成后，为员工 `168944` 开启 owner 全量：
+
+```json
+{
+  "owner_id": "168944",
+  "engine": "openclaw",
+  "enabled": true,
+  "acceptance_batch_id": "openclaw-pre-canary-1",
+  "reason": "OpenClaw canary accepted; enable all owner bots in pre"
+}
+```
+
+该请求只写当前 Backend 所属环境的 `full_rollout_owners`。它不会立即扫描并
+重启员工名下所有 Bot；后续创建、重启、ARCA alive、BaaS publish-completed
+或人工 wake 事件会触发首次认领。
 
 移出白名单会返回 `claimed_before` 和 `claimed_after`。未认领 Bot 将不再开始
 迁移；已经认领或已经 Pool-active 的 Bot 保持同一
@@ -173,6 +195,7 @@ SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1;
 | 新 Backend + 旧镜像无 marker，保持 Legacy | `test_reconcile_service.py::test_non_ready_runtime_keeps_legacy_without_data_plane_changes` |
 | 新镜像已有 marker、未命中白名单，不认领 | `test_claim_service.py::test_ineligible_bot_does_not_persist_layout_state` |
 | 精确命中后认领，移出白名单仍前滚 | `test_claim_service.py::test_claim_is_sticky_after_whitelist_removal` |
+| owner + engine 全量覆盖未来新建与后续重启，且不影响其他 owner/engine | `test_rollout_gate.py::test_owner_full_rollout_admits_future_and_restarted_bots_for_that_engine` 与 `test_operations.py::test_owner_full_rollout_requires_and_audits_latest_engine_acceptance` |
 | ONLINE Legacy 服务不原地迁移 | `test_claim_service.py::test_published_service_and_teclaw_do_not_claim` |
 | 四个文件型引擎使用各自 Pool 路径和结构桥 | `test_reconcile_service.py::test_ready_claimed_bot_completes_pool_activation`、`::test_claude_code_uses_its_own_pool_paths_for_full_activation`、`::test_aicoding_uses_its_own_pool_paths_for_full_activation`、`::test_hermes_h0_ready_uses_its_own_pool_paths_for_full_activation` |
 | 新旧镜像对应的不同 Bot 独立收敛：新镜像可激活，旧镜像保持 Legacy | `test_reconcile_service.py::test_mixed_image_bots_reconcile_independently_in_one_environment` |

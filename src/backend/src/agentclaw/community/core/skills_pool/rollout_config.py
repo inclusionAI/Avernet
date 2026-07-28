@@ -7,8 +7,11 @@ from typing import Any
 ENGINE_PROMOTION_ORDER = ("openclaw", "claude_code", "aicoding", "hermes")
 CONTROL_KEYS = ("negative_controls", "teclaw_controls")
 _REQUIRED_KEYS = frozenset({"enable_all", "promoted_engines", "whitelist"})
-_ALLOWED_KEYS = _REQUIRED_KEYS | frozenset((*CONTROL_KEYS, "full_rollout_engines"))
+_ALLOWED_KEYS = _REQUIRED_KEYS | frozenset(
+    (*CONTROL_KEYS, "full_rollout_engines", "full_rollout_owners")
+)
 _ENTRY_KEYS = frozenset({"owner_id", "bot_id", "batch_id"})
+_OWNER_ENTRY_KEYS = frozenset({"owner_id", "engine"})
 
 
 def _valid_identity(value: Any) -> bool:
@@ -35,6 +38,25 @@ def _valid_entries(value: Any) -> bool:
     return True
 
 
+def _valid_owner_entries(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    identities: set[tuple[str, str]] = set()
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != _OWNER_ENTRY_KEYS:
+            return False
+        if not _valid_identity(entry.get("owner_id")):
+            return False
+        engine = entry.get("engine")
+        if not isinstance(engine, str) or engine not in ENGINE_PROMOTION_ORDER:
+            return False
+        identity = (str(entry["owner_id"]), engine)
+        if identity in identities:
+            return False
+        identities.add(identity)
+    return True
+
+
 def is_valid_rollout_config_value(value: Any) -> bool:
     """Accept only the exact, fail-closed rollout configuration schema."""
 
@@ -58,6 +80,13 @@ def is_valid_rollout_config_value(value: Any) -> bool:
         or any(not isinstance(engine, str) for engine in full_rollout_engines)
         or len(set(full_rollout_engines)) != len(full_rollout_engines)
         or any(engine not in promoted_engines for engine in full_rollout_engines)
+    ):
+        return False
+    if not _valid_owner_entries(value.get("full_rollout_owners", [])):
+        return False
+    if any(
+        entry["engine"] not in promoted_engines
+        for entry in value.get("full_rollout_owners", [])
     ):
         return False
 
@@ -92,9 +121,18 @@ def normalize_rollout_config_value(value: Any) -> dict[str, object] | None:
             normalized.append(entry)
         return normalized
 
+    owner_entries = [
+        {
+            "owner_id": str(raw["owner_id"]),
+            "engine": str(raw["engine"]),
+        }
+        for raw in value.get("full_rollout_owners", [])
+    ]
+
     return {
         "enable_all": value["enable_all"],
         "full_rollout_engines": list(value.get("full_rollout_engines", [])),
+        "full_rollout_owners": owner_entries,
         "promoted_engines": list(value["promoted_engines"]),
         "whitelist": entries("whitelist"),
         "negative_controls": entries(CONTROL_KEYS[0]),
