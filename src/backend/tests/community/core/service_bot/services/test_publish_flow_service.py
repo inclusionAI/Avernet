@@ -3442,6 +3442,32 @@ def test_sync_restart_progress_stable_status_still_fails_on_baas_failed():
     svc._handle_sync_failure.assert_called_once()
 
 
+def test_sync_restart_progress_stable_success_activates_recreated_binding():
+    # A restart that RECREATED the target minted a NEW binding as PENDING and
+    # pointed ext.binding.online at it. The record stays SUCCESS (no forward
+    # advance), but on BaaS SUCCESS the recreated binding must be activated here
+    # or it stays PENDING forever. (The in-place upgrade path is unaffected —
+    # _activate_binding is idempotent for an already-ACTIVE binding.)
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        source_bot_id="bot-src",
+        ext={"restart": {"online": 700}, "binding": {"online": 88}},
+    )
+    svc, _ = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    svc._activate_binding = Mock()
+
+    result = svc.sync_restart_progress(publish_id=1)
+
+    # No status advance (still SUCCESS), but the recreated binding is activated.
+    assert result.status == PublishStatus.SUCCESS
+    svc._activate_binding.assert_called_once()
+    kwargs = svc._activate_binding.call_args.kwargs
+    assert kwargs["stage"] == PublishStage.ONLINE
+    assert kwargs["baas_publish_id"] == 700
+    assert kwargs["bot_id"] == "bot-src"
+
+
 # ---- restart_bot() submit path ---------------------------------------------
 
 def test_restart_bot_not_found_returns_failure():
