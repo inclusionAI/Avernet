@@ -467,7 +467,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         tenant: str,
         session_id: str,
         expire_seconds: int = 3600,
-        show: bool = False,
+        show: bool | None = False,
         operator: str | None = None,
     ) -> SessionShareLinkResponse:
         """Generate a shareable download link for a completed Session upload.
@@ -476,8 +476,12 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         ownership before generating the pre-signed GET URL.  Synchronous
         — no ticket is created (unlike Bot's async download flow).
 
-        ``show=False`` adds ``Content-Disposition: attachment`` to force
-        download; ``show=True`` produces an inline/preview URL.
+        ``show`` controls the ``Content-Disposition`` behavior of the
+        generated share link (three-state):
+        - ``False`` (default) → ``Content-Disposition: attachment`` force download
+        - ``True`` → ``Content-Disposition: inline`` browser inline preview
+        - ``None`` → no ``Content-Disposition`` intervention (OSS original headers,
+          backward-compatible with old ``show=True`` behavior)
         """
         logger.info(
             "dispatch_get_share_link: transfer_id=%s, tenant=%s, "
@@ -514,11 +518,14 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 current_status=ticket.status,
             )
 
-        # Build response_params based on show flag
-        # show=False → attachment (download); show=True → inline (preview)
-        response_params = None
-        if not show:
+        # Build response_params based on show flag (three-state)
+        # False → attachment (download); True → inline (preview); None → no intervention
+        if show is True:
+            response_params = {"response-content-disposition": "inline"}
+        elif show is False:
             response_params = {"response-content-disposition": "attachment"}
+        else:  # show is None — preserve backward-compatible "don't intervene" behavior
+            response_params = None
 
         share_url = await asyncio.to_thread(
             self._file_transfer_backend.generate_download_url,

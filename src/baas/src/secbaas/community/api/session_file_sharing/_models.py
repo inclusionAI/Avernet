@@ -153,9 +153,15 @@ class SessionShareLinkRequest(BaseModel):
         le=604800,
         description="Share link validity in seconds (60–604800, default 3600 for Session)",
     )
-    show: bool = Field(
+    show: bool | None = Field(
         default=False,
-        description="False → Content-Disposition: attachment (download); True → inline (preview)",
+        description=(
+            "Controls browser Content-Disposition for the share link. "
+            "False (default) → Content-Disposition: attachment (force download). "
+            "True → Content-Disposition: inline (browser inline preview). "
+            "None → no Content-Disposition intervention — OSS returns object's "
+            "original headers (backward-compatible with old show=True behavior)."
+        ),
     )
     operator: str = Field(
         default="unknown",
