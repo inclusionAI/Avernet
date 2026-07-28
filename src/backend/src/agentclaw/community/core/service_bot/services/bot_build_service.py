@@ -1201,6 +1201,16 @@ class BotBuildService:
             )
             return None
         publish_id = result.get("publish_id") if isinstance(result, dict) else None
+        if publish_id is None:
+            # destroy_bot returned a successful-but-empty envelope (no workflow id):
+            # the DESTROY was NOT confirmed initiated. Do NOT report success (that
+            # would let the caller create a replacement while the old bot may still
+            # be live) — propagate so the durable deploy retries. ``None`` is
+            # reserved for the explicit already-gone recheck path above.
+            raise BotBuildServiceError(
+                f"destroy_bot returned no publish_id for bot_uuid={bot_uuid}; "
+                f"destroy not confirmed"
+            )
         logger.info(
             f"[BotBuildService.retire_superseded_bot] retired superseded bot: "
             f"bot_uuid={bot_uuid}, operator={operator}, destroy_publish_id={publish_id}"
