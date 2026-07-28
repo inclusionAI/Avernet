@@ -400,3 +400,31 @@ def test_upgrade_device_count_does_not_apply_to_teclaw_path():
     )
 
     assert baas.update_teclaw_bot.call_args.kwargs["device_count"] == 1
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_calls_destroy_idempotently():
+    svc, baas = _svc("baas")
+
+    svc.retire_superseded_bot("BOT-old", operator="op1")
+
+    baas.destroy_bot.assert_called_once()
+    ck = baas.destroy_bot.call_args
+    assert ck.kwargs["bot_uuid"] == "BOT-old"
+    assert ck.kwargs["operator"] == "op1"
+    # request_id is deterministic per bot_uuid (idempotent redelivery)
+    rid = ck.kwargs["request_id"]
+    assert isinstance(rid, str) and 32 <= len(rid) <= 64
+    baas.destroy_bot.reset_mock()
+    svc.retire_superseded_bot("BOT-old", operator="op1")
+    assert baas.destroy_bot.call_args.kwargs["request_id"] == rid
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_swallows_destroy_failure():
+    svc, baas = _svc("baas")
+    baas.destroy_bot.side_effect = RuntimeError("baas down")
+
+    # Best-effort: must not raise into the deploy path.
+    assert svc.retire_superseded_bot("BOT-old") is None
+    baas.destroy_bot.assert_called_once()
