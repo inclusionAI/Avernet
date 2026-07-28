@@ -641,3 +641,41 @@ def test_non_desktop_lifecycle_operations_still_work(client, svc):
     svc.delete_bot.assert_called_once_with("b1", "u1")
     _ok(client.post("/openapi/v1/bots/b1/restart"))
     svc.restart_bot.assert_called_once()
+
+
+# ----- round-6 review regressions ------------------------------------------
+
+
+def test_update_rejects_fields_it_cannot_apply(client, svc):
+    """R6/F29: 200 for a request that changed nothing is a lie.
+
+    ``cluster_name`` is engine-derived and the engine is immutable;
+    ``engine_options`` belongs to the engine-config endpoints. Neither can be
+    applied here, so neither is accepted — same treatment as ``engine`` (F9).
+    """
+    for field, value in [("cluster_name", "ACRA"), ("engine_options", {"model": "x"})]:
+        resp = client.put("/openapi/v1/bots/b1", json={field: value})
+        assert resp.status_code == 422, f"{field} was accepted: {resp.json()}"
+    svc.update_bot.assert_not_called()
+
+
+def test_passport_accepts_the_local_plugin_identifier(client, passport):
+    """R6/F32: the local plugin issues ``agent_id`` and leaves ``agent_code`` null."""
+    passport.query_agent_passport.return_value = {
+        "agent_id": "b1", "agent_code": None, "mcps": [],
+    }
+    data = _ok(client.get("/openapi/v1/bots/b1/passport"))
+    assert data == {"bot_id": "b1", "passport_id": "b1"}
+
+
+def test_passport_prefers_agent_code_when_both_present(client, passport):
+    """``agent_code`` stays the primary identifier where the provider issues one."""
+    passport.query_agent_passport.return_value = {"agent_id": "b1", "agent_code": "ac-1"}
+    data = _ok(client.get("/openapi/v1/bots/b1/passport"))
+    assert data["passport_id"] == "ac-1"
+
+
+def test_passport_absent_is_still_404(client, passport):
+    """Neither identifier present still means no passport."""
+    passport.query_agent_passport.return_value = {"agent_id": None, "agent_code": None}
+    assert client.get("/openapi/v1/bots/b1/passport").status_code == 404

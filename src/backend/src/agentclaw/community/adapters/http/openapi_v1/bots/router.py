@@ -337,8 +337,8 @@ async def update_bot(
     """Update a bot's name/description (engine is fixed at creation).
 
     ``cluster_name`` is engine-derived and the engine is immutable, so it is not
-    updatable here; ``engine_options`` is managed via the engine-config endpoints.
-    Both are accepted for schema symmetry but do not drive this update.
+    updatable here; ``engine_options`` is managed via the engine-config
+    endpoints. Neither is accepted — see :class:`BotUpdate`.
     """
     owner_id = caller_owner_id(principal)
     # Same name rule as create and the internal update route — otherwise this
@@ -498,7 +498,12 @@ async def get_bot_passport(
     owner_id = caller_owner_id(principal)
     bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard (raises 404)
     info = passport_plugin.query_agent_passport(bot_id=bot_id, owner_workno=owner_id)
-    passport_id = (info or {}).get("agent_code")
+    # Either identifier means "a passport exists". Which one is populated is a
+    # provider detail: the local plugin issues an ``agent_id`` and leaves
+    # ``agent_code`` null, so keying on ``agent_code`` alone made every locally
+    # created bot 404 here despite the plugin returning its passport.
+    info = info or {}
+    passport_id = info.get("agent_code") or info.get("agent_id")
     if not passport_id:
         # No passport issued for this bot yet — a missing sub-resource is a 404.
         raise BotNotFoundError(f"passport not found: {bot_id}")

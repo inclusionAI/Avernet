@@ -61,19 +61,21 @@ class BotCreate(BaseModel):
 
 
 class BotUpdate(BaseModel):
-    """Partial update; engine is fixed at creation and cannot change.
+    """Partial update — only the fields this operation can actually apply.
 
-    ``engine`` is deliberately absent *and* rejected: with unknown keys forbidden
-    a caller that sends one gets a validation error rather than a 200 that
-    silently ignored their requested engine change.
+    ``engine``, ``cluster_name`` and ``engine_options`` are all deliberately
+    absent *and* rejected by ``extra="forbid"``. Declaring them for symmetry
+    would mean answering 200 to a request that changed nothing: the engine is
+    fixed at creation, ``cluster_name`` is derived from it, and engine options
+    are managed through the engine-config endpoints. A caller that sends one now
+    gets a validation error naming the field instead of a success they have to
+    verify by re-reading the bot.
     """
 
     model_config = _STRICT
 
     bot_name: str | None = None
     bot_desc: str | None = None
-    cluster_name: str | None = None
-    engine_options: dict[str, Any] | None = None
 
 
 class BotAuthPending(BaseModel):

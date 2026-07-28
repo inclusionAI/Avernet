@@ -115,3 +115,63 @@ def test_unmapped_internal_exception_keeps_detail_shape():
     resp = _backstop_app().get("/api/bots/boom")
     assert resp.status_code == 500
     assert resp.json() == {"detail": "Internal Server Error"}
+
+
+# ----- R6/F30: routing errors are enveloped too -----------------------------
+#
+# Starlette raises these before any router is reached — an unknown public path
+# (404) or a wrong method on a known one (405) — so neither @envelope_errors nor
+# the generic catch-all sees them. They are the first failures a new integrator
+# hits, so they cannot be the ones that break the contract.
+
+
+def _routing_app() -> TestClient:
+    from fastapi.exception_handlers import http_exception_handler
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        is_public_api,
+        unmapped_error_response,
+    )
+
+    app = FastAPI()
+
+    # Same registration the real app performs (adapters/http/app.py).
+    @app.exception_handler(StarletteHTTPException)
+    async def _handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        if is_public_api(request):
+            return unmapped_error_response(exc.status_code, request)
+        return await http_exception_handler(request, exc)
+
+    @app.get(f"{PUBLIC_API_PREFIX}/bots/known")
+    async def _public():  # pragma: no cover - only its absence/method is tested
+        return {}
+
+    @app.get("/api/bots/known")
+    async def _internal():  # pragma: no cover
+        return {}
+
+    return TestClient(app)
+
+
+def _assert_envelope(resp, status: int):
+    assert resp.status_code == status
+    body = resp.json()
+    assert set(body) == {"code", "message", "data", "request_id"}
+    assert body["code"] == status * 1000
+    assert body["data"] is None
+
+
+def test_public_unknown_path_is_enveloped():
+    _assert_envelope(_routing_app().get(f"{PUBLIC_API_PREFIX}/bots/nope"), 404)
+
+
+def test_public_wrong_method_is_enveloped():
+    _assert_envelope(_routing_app().post(f"{PUBLIC_API_PREFIX}/bots/known"), 405)
+
+
+def test_internal_routing_errors_keep_detail_shape():
+    """Scoping guard: existing internal clients must be unaffected."""
+    resp = _routing_app().post("/api/bots/known")
+    assert resp.status_code == 405
+    assert "detail" in resp.json()

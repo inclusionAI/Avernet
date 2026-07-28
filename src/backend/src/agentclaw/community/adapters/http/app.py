@@ -284,8 +284,10 @@ if os.environ.get("SINGLEBOX_COVERAGE") == "1":
 from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.exception_handlers import (  # noqa: E402
+    http_exception_handler,
     request_validation_exception_handler,
 )
+from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 from agentclaw.community.core.aicoding.services.data_proxy_service import (  # noqa: E402
     DataProxyError,
     EngineUnreachable,
@@ -383,6 +385,28 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
         content={"detail": exc.detail},
         headers=_trace_headers(request),
     )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(
+    request: Request, exc: StarletteHTTPException,
+) -> JSONResponse:
+    """Envelope routing-level HTTP errors on the public surface.
+
+    Starlette raises these *before* any router is reached — an unknown
+    ``/openapi/v1/...`` path (404) or a wrong method on a known one (405) — and
+    its built-in handler answers them, so neither ``@envelope_errors`` nor the
+    generic catch-all ever sees them. They are among the most common failures a
+    new integrator hits, so leaving them as ``{"detail": ...}`` breaks the
+    contract exactly where it is first tested.
+
+    Scoped by path like the other public translations; internal ``/api`` routes
+    keep FastAPI's default shape, including any ``HTTPException`` they raise
+    themselves.
+    """
+    if _is_public_api(request):
+        return _public_error_envelope(exc.status_code, request)
+    return await http_exception_handler(request, exc)
 
 
 @app.exception_handler(RequestValidationError)
