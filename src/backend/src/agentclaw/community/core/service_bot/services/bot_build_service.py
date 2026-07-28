@@ -1192,10 +1192,21 @@ class BotBuildService:
             return False
 
         try:
-            self._baas_service.update_teclaw_outbound_rule_by_bot_uuid(
+            updated = self._baas_service.update_teclaw_outbound_rule_by_bot_uuid(
                 bot_uuid,
                 agent_pass_token=agent_pass_token,
             )
+            if updated is not None and not updated:
+                # Devices aren't ready (no device / no provider_device_id yet) —
+                # nothing was written, so don't report a delivery that didn't
+                # happen. The caller's next publish-progress SUCCESS re-runs this.
+                logger.warning(
+                    "[BotBuildService.refresh_teclaw_mcp_outbound_rule] no ready "
+                    "device to deliver to: bot_id=%s, bot_uuid=%s",
+                    bot_id,
+                    bot_uuid,
+                )
+                return False
             return True
         except Exception as update_err:
             logger.warning(
