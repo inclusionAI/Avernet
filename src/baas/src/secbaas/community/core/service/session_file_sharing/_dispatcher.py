@@ -491,6 +491,14 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
 
         # Verify session_id ownership (per D-05 — don't reveal existence)
         if ticket.session_id != session_id:
+            logger.warning(
+                "dispatch_get_share_link: session_id mismatch — ticket belongs to "
+                "session_id=%s but request had session_id=%s (transfer_id=%s, tenant=%s)",
+                ticket.session_id,
+                session_id,
+                transfer_id,
+                tenant,
+            )
             raise SourceTransferNotFoundError(transfer_id=transfer_id)
 
         # Only DONE tickets are shareable
@@ -564,6 +572,14 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
 
         # Ownership validation — don't reveal existence (per D-05)
         if session_id is not None and record.session_id != session_id:
+            logger.warning(
+                "dispatch_get_transfer_status: session_id mismatch — ticket belongs to "
+                "session_id=%s but request had session_id=%s (transfer_id=%s, tenant=%s)",
+                record.session_id,
+                session_id,
+                transfer_id,
+                tenant,
+            )
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Conditional fields per status
