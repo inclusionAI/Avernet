@@ -29,7 +29,15 @@ if TYPE_CHECKING:
 TECLAW_CREATE_PUBLISH_POLL_TASK = "teclaw.create.publish_poll"
 TECLAW_PUBLISH_TASK_DEADLINE_SECONDS = 86400
 _PUBLISH_POLL_TIMEOUT_SECONDS = 600.0
+# How long the delivery keeps waiting for BaaS to expose a ready device after the
+# publish reported SUCCESS. Measured from the same create timestamp as the poll
+# window, so a bot that never gets a device fails loudly instead of rescheduling
+# to the task deadline.
+_DELIVERY_READY_TIMEOUT_SECONDS = 2 * _PUBLISH_POLL_TIMEOUT_SECONDS
 _PUBLISH_PROGRESS_TRANSIENT_ERROR = "get_publish_progress transient error"
+# device_props key stamping which publish's outbound rule was delivered — the
+# durable record that separates "status persisted" from "token delivered".
+_OUTBOUND_RULE_DELIVERED_KEY = "outbound_rule_publish_id"
 
 logger = get_logger()
 
@@ -122,16 +130,26 @@ class TeclawPublishTaskHandler:
         except Exception as exc:
             return Retry(f"load Teclaw binding failed: {exc}")
 
-        if binding is None or binding.status in {
-            DeviceBindingStatus.ACTIVE.value,
-            DeviceBindingStatus.FAILED.value,
-            DeviceBindingStatus.RELEASED.value,
-        }:
+        if binding is None:
             return Complete()
         if binding.device_provider != TECLAW_DEVICE_PROVIDER:
             return Complete()
         current_publish_id = (binding.device_props or {}).get("publish_id")
         if current_publish_id is None or str(current_publish_id) != str(publish_id):
+            return Complete()
+        if binding.status == DeviceBindingStatus.ACTIVE.value:
+            # Crash resume: an earlier attempt committed the terminal status but
+            # may have died before (or while) delivering the token — the status
+            # write and the delivery are two separate writes. Completing here on
+            # the status alone would strand the container without a token for
+            # good, so replay the delivery unless it recorded success.
+            return self._deliver_outbound_rule(
+                bot_id=bot_id,
+                binding=binding,
+                publish_id=publish_id,
+                started_at_epoch_s=started_at_epoch_s,
+            )
+        if binding.status != DeviceBindingStatus.PENDING.value:
             return Complete()
 
         try:
@@ -157,6 +175,7 @@ class TeclawPublishTaskHandler:
                 publish_id=publish_id,
                 status=status,
                 binding=binding,
+                started_at_epoch_s=started_at_epoch_s,
             )
         if (self._clock() - started_at_epoch_s) >= _PUBLISH_POLL_TIMEOUT_SECONDS:
             return Complete()
@@ -171,6 +190,7 @@ class TeclawPublishTaskHandler:
         publish_id: int,
         status: str,
         binding: DeviceBindingRecord,
+        started_at_epoch_s: int | float,
     ) -> TaskOutcome:
         try:
             applied = self._device_binding_repo.transition_teclaw_publish_terminal(
@@ -184,13 +204,23 @@ class TeclawPublishTaskHandler:
             return Retry(f"persist Teclaw terminal status failed: {exc}")
 
         if applied and status == DeviceBindingStatus.ACTIVE.value:
-            self._push_outbound_rule(bot_id=bot_id, binding=binding)
+            return self._deliver_outbound_rule(
+                bot_id=bot_id,
+                binding=binding,
+                publish_id=publish_id,
+                started_at_epoch_s=started_at_epoch_s,
+            )
 
         return Complete()
 
-    def _push_outbound_rule(
-        self, *, bot_id: str, binding: DeviceBindingRecord
-    ) -> None:
+    def _deliver_outbound_rule(
+        self,
+        *,
+        bot_id: str,
+        binding: DeviceBindingRecord,
+        publish_id: int,
+        started_at_epoch_s: int | float,
+    ) -> TaskOutcome:
         """Deliver the bot's passport token to the just-started teclaw container.
 
         The container's PaaS device only exists once BaaS has executed the create
@@ -200,21 +230,30 @@ class TeclawPublishTaskHandler:
         the (now-ignored) client approve both return before that happens, which is
         why provision cannot push the rule inline.
 
-        Best-effort, mirroring the publish path's poll-success refresh
-        (``BotBuildService.refresh_teclaw_mcp_outbound_rule``): a failure is logged
-        and never fails the task — the binding status is already persisted.
+        The delivery is a *second* write after the terminal status write, so it
+        carries its own durability: a transient failure returns ``Retry`` (the
+        queue re-drives it, bounded by the task deadline) and success is stamped
+        onto the binding, which is what lets a task reclaimed after a crash tell
+        "status persisted, token delivered" from "status persisted, token lost".
+        The push itself is idempotent (a rule REPLACE), so replaying it is safe.
+
+        The updater's three states drive the outcome: ``None`` (this provider
+        writes no outbound rules) completes, ``[]`` (BaaS has no ready device
+        yet — publish SUCCESS does not guarantee ``provider_device_id`` is
+        visible to the next read) reschedules, and a non-empty list is a
+        delivery to every device of the bot.
         """
+        if self._delivery_recorded(binding, publish_id):
+            return Complete()
+
         bot_uuid = binding.device_id
         owner_id = binding.entity_id
         if not bot_uuid or not owner_id:
-            logger.warning(
-                "[TeclawPublishTaskHandler] outbound rule skipped, missing context: "
-                "bot_id=%s bot_uuid=%s owner_id=%s",
-                bot_id,
-                bot_uuid,
-                owner_id,
+            # A teclaw binding without these is malformed — no retry can fix it.
+            return Fail(
+                "Teclaw outbound rule delivery has no target: "
+                f"bot_id={bot_id} bot_uuid={bot_uuid!r} owner_id={owner_id!r}"
             )
-            return
 
         try:
             agent_pass_token = self._passport_plugin.query_token(bot_id, owner_id) or ""
@@ -226,27 +265,22 @@ class TeclawPublishTaskHandler:
                 owner_id,
                 exc,
             )
-            return
+            return Retry(f"query passport token failed: {exc}")
 
         if not agent_pass_token:
+            # The passport may still be provisioning; retrying is bounded by the
+            # task deadline, and giving up here would strand the container.
             logger.warning(
                 "[TeclawPublishTaskHandler] queryToken empty: bot_id=%s owner_id=%s",
                 bot_id,
                 owner_id,
             )
-            return
+            return Retry("passport token not available yet")
 
         try:
             updated = self._baas.update_teclaw_outbound_rule_by_bot_uuid(
                 bot_uuid,
                 agent_pass_token=agent_pass_token,
-            )
-            logger.info(
-                "[TeclawPublishTaskHandler] Teclaw outbound rule updated: "
-                "bot_id=%s bot_uuid=%s updated_count=%s",
-                bot_id,
-                bot_uuid,
-                len(updated or []),
             )
         except Exception as exc:
             logger.warning(
@@ -256,6 +290,59 @@ class TeclawPublishTaskHandler:
                 bot_uuid,
                 exc,
             )
+            return Retry(f"update Teclaw outbound rule failed: {exc}")
+
+        if updated is None:
+            # This provider applies no egress mutation — nothing to deliver, and
+            # nothing to come back for.
+            return Complete()
+
+        if not updated:
+            # Devices aren't ready yet. Keep waiting on the same durable task
+            # rather than blocking in-handler; give up loudly once the window
+            # closes instead of silently completing an undelivered token.
+            if (
+                self._clock() - started_at_epoch_s
+            ) >= _DELIVERY_READY_TIMEOUT_SECONDS:
+                return Fail(
+                    "Teclaw outbound rule has no ready device after publish "
+                    f"SUCCESS: bot_id={bot_id} bot_uuid={bot_uuid} "
+                    f"publish_id={publish_id}"
+                )
+            logger.info(
+                "[TeclawPublishTaskHandler] No ready device for outbound rule yet, "
+                "waiting: bot_id=%s bot_uuid=%s publish_id=%s",
+                bot_id,
+                bot_uuid,
+                publish_id,
+            )
+            return Reschedule(self._poll_delay_seconds)
+
+        try:
+            self._device_binding_repo.update_device_props(
+                binding_id=binding.id,
+                props={_OUTBOUND_RULE_DELIVERED_KEY: publish_id},
+            )
+        except Exception as exc:
+            # The rule is already written; only the marker is missing, so a
+            # replay re-pushes it (idempotent) rather than losing the delivery.
+            return Retry(f"record Teclaw outbound rule delivery failed: {exc}")
+
+        logger.info(
+            "[TeclawPublishTaskHandler] Teclaw outbound rule updated: "
+            "bot_id=%s bot_uuid=%s publish_id=%s updated_count=%s",
+            bot_id,
+            bot_uuid,
+            publish_id,
+            len(updated),
+        )
+        return Complete()
+
+    @staticmethod
+    def _delivery_recorded(binding: DeviceBindingRecord, publish_id: int) -> bool:
+        """Whether this publish's outbound rule was already delivered."""
+        delivered = (binding.device_props or {}).get(_OUTBOUND_RULE_DELIVERED_KEY)
+        return delivered is not None and str(delivered) == str(publish_id)
 
 
 class TeclawPublishTaskLifecycle(LifecycleBase):
