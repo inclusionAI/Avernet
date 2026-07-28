@@ -16,6 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from .bots import router as bots_router
+from .contracts import ERROR_RESPONSES
 from .channels import router as channels_router
 from .identity import router as identity_router
 from .mcp import router as mcp_router
@@ -40,11 +41,16 @@ _SUBGROUPS = [
 
 
 def build_public_router() -> APIRouter:
-    """Assemble the ``/openapi/v1/bots`` public router."""
+    """Assemble the ``/openapi/v1/bots`` public router.
+
+    ``ERROR_RESPONSES`` is attached here rather than on each handler so the
+    published schema documents the envelope this surface actually returns on
+    failure — every group, every route, one declaration.
+    """
     public = APIRouter()
     for router in _SUBGROUPS:
-        public.include_router(router)
-    public.include_router(bots_router)
+        public.include_router(router, responses=ERROR_RESPONSES)
+    public.include_router(bots_router, responses=ERROR_RESPONSES)
     return public
 
 
