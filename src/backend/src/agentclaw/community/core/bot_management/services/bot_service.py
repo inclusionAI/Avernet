@@ -1156,16 +1156,12 @@ class BotService:
                         f"[bot_service.create_bot] Bot {bot_id} is teclaw, provisioning "
                         f"container via BaaS (skipping DeviceService.apply_device)"
                     )
-                    agent_pass_token = ""
-                    owner_id = bot_record["entity_id"]
-                    try:
-                        agent_pass_token = self._passport_plugin.query_token(bot_id, owner_id) or ""
-                    except Exception as e:
-                        logger.warning(f"[bot_service.create_bot] Teclaw passport token query failed: bot_id={bot_id}, owner_id={owner_id}, error={e}")
+                    # The passport token is fetched and pushed by the create
+                    # publish poll task once BaaS reports the container started —
+                    # the PaaS device it is written onto does not exist yet here.
                     provision = teclaw_provision.provision(
                         bot=bot_record,
                         owner_id=user_id,
-                        agent_pass_token=agent_pass_token,
                     )
                     binding_id = provision.binding_id
                     device_id = provision.device_id
