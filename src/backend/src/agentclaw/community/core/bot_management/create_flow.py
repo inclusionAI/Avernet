@@ -264,7 +264,7 @@ def create_bot_with_authorization(
     nick_name: str,
     bot_id: str,
     spec: BotCreateSpec,
-    cookie: str,
+    cookie: str | None = None,  # see the note on cookies below
     bot_service: BotService,
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
@@ -276,6 +276,16 @@ def create_bot_with_authorization(
     caller guides the user through the iframe, then polls
     :func:`complete_bot_authorization`), or :class:`Created` when the bot was
     created inline. Raises the bot/passport domain errors for the caller to map.
+
+    ``cookie`` forwards the browser session down to the service layer, which is
+    **bad practice** — a transport credential has no business below the adapter
+    boundary. It is threaded through only for backward compatibility with the
+    internal ``/api/bots`` path, whose downstream memoryos call still relies on
+    it. The public ``/openapi/v1`` surface deliberately does not pass it (its
+    callers are registered tenants, not browser sessions), so it is optional and
+    should stay unset for any new caller; ``create_bot`` treats ``None`` as "no
+    cookie". Remove the parameter entirely once the internal path stops needing
+    it.
     """
     # Validate the name up front so an invalid one never reaches Passport or
     # create. An unset name stays unset — create_bot applies default naming.
@@ -350,7 +360,7 @@ def complete_bot_authorization(
     nick_name: str,
     bot_id: str,
     spec: BotCreateSpec,
-    cookie: str,
+    cookie: str | None = None,  # see the note on cookies below
     bot_service: BotService,
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
@@ -362,6 +372,11 @@ def complete_bot_authorization(
     the caller to map. Raises ``PassportError`` (query failure) and the create
     domain errors for the caller to map; a query that returns nothing raises
     ``RuntimeError`` (mapped to the internal 500).
+
+    ``cookie`` carries the browser session into the service layer, which is
+    **bad practice** — see :func:`create_bot_with_authorization` for the full
+    note. Kept only for the internal ``/api/bots`` path; the public
+    ``/openapi/v1`` surface does not pass it.
     """
     auth_status = passport_plugin.query_auth_status(bot_id=bot_id, owner_workno=user_id)
     if not auth_status:
