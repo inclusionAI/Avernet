@@ -2103,6 +2103,7 @@ mod tests {
         ParticipantMode, ParticipantRole, RegisteredBot, Session, SessionKind, SessionScope,
         SessionStatus, Skill, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
         StateMachineRunStatus, SystemMessageEvent, Visibility, HumanInputNotificationMode,
+        HumanInputRequestStatus,
     };
     use bcs_service_api::application::channel::{
         ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
@@ -2137,8 +2138,8 @@ mod tests {
         ChannelOutboundEventKind, ChannelRenderHint,
     };
     use bcs_service_api::port::repo::{
-        ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort,
-        NewSessionParams, SessionRepoPort,
+        ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputRequestRepoPort,
+        ImParticipantRepoPort, NewSessionParams, SessionRepoPort,
     };
     use bcs_service_api::{
         HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
@@ -2404,6 +2405,7 @@ mod tests {
         binding_repo: Arc<MemoryChannelBindingRepo>,
         conversation_repo: Arc<MemoryConversationSessionRepo>,
         participant_repo: Arc<MemoryImParticipantRepo>,
+        human_input_requests: Arc<MemoryHumanInputRequestRepo>,
         session_repo: Arc<RecordingSessionRepo>,
         registry: Arc<RecordingRegistry>,
         message_flow: Arc<RecordingMessageFlow>,
@@ -2452,7 +2454,7 @@ mod tests {
                 binding_repo.clone(),
                 conversation_repo.clone(),
                 participant_repo.clone(),
-                human_input_requests,
+                human_input_requests.clone(),
                 session_repo.clone(),
                 message_flow.clone(),
                 system_message.clone(),
@@ -2470,6 +2472,7 @@ mod tests {
                 binding_repo,
                 conversation_repo,
                 participant_repo,
+                human_input_requests,
                 session_repo,
                 registry,
                 message_flow,
@@ -2502,7 +2505,7 @@ mod tests {
                 Arc::new(PanicOnListBindingRepo::new(binding_repo.clone())),
                 conversation_repo.clone(),
                 participant_repo.clone(),
-                human_input_requests,
+                human_input_requests.clone(),
                 session_repo.clone(),
                 message_flow.clone(),
                 system_message.clone(),
@@ -2520,6 +2523,7 @@ mod tests {
                 binding_repo,
                 conversation_repo,
                 participant_repo,
+                human_input_requests,
                 session_repo,
                 registry,
                 message_flow,
@@ -4438,6 +4442,157 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn direct_human_input_resolves_assignee_and_queues_same_scope() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+
+        let missing_mapping = SessionChannelOutboundPort::publish_human_input_ready(
+            &harness.service,
+            human_input_ready_event(
+                "direct-missing",
+                HumanInputNotificationMode::DirectAssignee,
+            ),
+        )
+        .await;
+        assert!(matches!(
+            missing_mapping,
+            Err(ServiceError::InvalidOperation { .. })
+        ));
+
+        harness
+            .participant_repo
+            .upsert(bcs_domain::ImParticipantMap {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                im_user_id: "u1".to_string(),
+                actor_id: "human_u1".to_string(),
+                display_name: Some("张三".to_string()),
+            })
+            .await?;
+
+        for event_id in ["direct-first", "direct-second"] {
+            assert_eq!(
+                SessionChannelOutboundPort::publish_human_input_ready(
+                    &harness.service,
+                    human_input_ready_event(
+                        event_id,
+                        HumanInputNotificationMode::DirectAssignee,
+                    ),
+                )
+                .await?,
+                SessionChannelDeliveryOutcome::Delivered
+            );
+        }
+
+        let first = harness
+            .human_input_requests
+            .get("direct-first")
+            .await?
+            .expect("first direct request");
+        assert_eq!(first.status, HumanInputRequestStatus::Active);
+        assert_eq!(first.im_conversation_id, "u1");
+        assert_eq!(first.im_conversation_type, "1");
+        assert_eq!(first.im_user_id.as_deref(), Some("u1"));
+
+        let second = harness
+            .human_input_requests
+            .get("direct-second")
+            .await?
+            .expect("queued direct request");
+        assert_eq!(second.status, HumanInputRequestStatus::Queued);
+        assert_eq!(
+            harness
+                .human_input_requests
+                .count_queued(&second.reply_scope_key)
+                .await?,
+            1
+        );
+
+        let events = harness.delivery.events.lock().await;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].purpose, ChannelOutboundPurpose::HumanInputRequest);
+        assert_eq!(
+            events[1].purpose,
+            ChannelOutboundPurpose::HumanInputQueueSummary
+        );
+        assert!(
+            events[0]
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("上游结果") && text.contains("请直接回复本会话"))
+        );
+        assert!(
+            events[1]
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("另有 1 项排队"))
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn human_input_delivery_failure_is_persisted() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        *harness.delivery.fail_error.lock().await = Some("provider unavailable".to_string());
+
+        let result = SessionChannelOutboundPort::publish_human_input_ready(
+            &harness.service,
+            human_input_ready_event(
+                "delivery-failed",
+                HumanInputNotificationMode::FixedGroup,
+            ),
+        )
+        .await;
+        assert!(matches!(result, Err(ServiceError::InternalError(_))));
+
+        let request = harness
+            .human_input_requests
+            .get("delivery-failed")
+            .await?
+            .expect("failed request");
+        assert_eq!(request.status, HumanInputRequestStatus::DeliveryFailed);
+        assert_eq!(request.delivery_attempts, 1);
+        assert!(
+            request
+                .last_delivery_error
+                .as_deref()
+                .is_some_and(|error| error.contains("provider unavailable"))
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn channel_meta_uses_inbound_channel_type_as_source() {
         let msg = InboundMessage {
@@ -4928,6 +5083,32 @@ mod tests {
             judge_outcomes: Vec::new(),
             timeout_deadline_ms: None,
             upstream_artifacts: Vec::new(),
+        }
+    }
+
+    fn human_input_ready_event(
+        event_id: &str,
+        notification_mode: HumanInputNotificationMode,
+    ) -> HumanInputReadyEvent {
+        HumanInputReadyEvent {
+            event_id: event_id.to_string(),
+            group_id: "group_sm".to_string(),
+            session_id: format!("session-{event_id}"),
+            run_id: format!("run-{event_id}"),
+            node_id: "human_review".to_string(),
+            display_name: "Human review".to_string(),
+            instruction: "请审核上游结果".to_string(),
+            assignee_actor_id: "human_u1".to_string(),
+            channel_type: channel_type(),
+            notification_mode,
+            fixed_group_conversation_id: Some("conv_sm".to_string()),
+            response_ref: format!("run-{event_id}:human_review"),
+            upstream_artifacts: vec![bcs_service_api::JudgeArtifact {
+                node_id: "draft".to_string(),
+                text: "draft content".to_string(),
+            }],
+            judge_outcomes: vec!["approve".to_string(), "reject".to_string()],
+            timeout_deadline_ms: Some(1_000),
         }
     }
 

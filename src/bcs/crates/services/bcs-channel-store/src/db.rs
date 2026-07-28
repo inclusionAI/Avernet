@@ -1334,7 +1334,10 @@ mod tests {
 
     use bcs_db_api::{DbError, DbStatement};
     use bcs_db_local::LocalSqliteDbPlugin;
-    use bcs_domain::{BindingStatus, BindingTarget, GroupChatScope, Visibility};
+    use bcs_domain::{
+        BindingStatus, BindingTarget, GroupChatScope, HumanInputNotificationMode,
+        HumanInputRequest, HumanInputRequestStatus, Visibility,
+    };
 
     fn test_db_error(operation: &'static str, err: DbError) -> ServiceError {
         ServiceError::InternalError(format!("test db {}: {}", operation, err))
@@ -1401,6 +1404,44 @@ mod tests {
                 display_name TEXT,
                 PRIMARY KEY (channel_type, account_ref, im_user_id)
             )",
+        )
+        .await?;
+        execute_schema(
+            &db,
+            "CREATE TABLE bcs_human_input_requests (
+                request_id TEXT PRIMARY KEY,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                session_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                binding_id TEXT NOT NULL,
+                channel_type TEXT NOT NULL,
+                account_ref TEXT NOT NULL,
+                notification_mode TEXT NOT NULL,
+                reply_scope_key TEXT NOT NULL,
+                active_slot_key TEXT,
+                assignee_actor_id TEXT NOT NULL,
+                im_conversation_id TEXT NOT NULL,
+                im_conversation_type TEXT NOT NULL,
+                im_user_id TEXT,
+                node_display_name TEXT NOT NULL,
+                notification_text TEXT NOT NULL,
+                deadline_ms INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                provider_message_ref TEXT,
+                delivery_attempts INTEGER NOT NULL DEFAULT 0,
+                last_delivery_error TEXT,
+                created_at INTEGER NOT NULL,
+                activated_at INTEGER,
+                responded_at INTEGER
+            )",
+        )
+        .await?;
+        execute_schema(
+            &db,
+            "CREATE UNIQUE INDEX uk_human_input_active_slot
+             ON bcs_human_input_requests(active_slot_key)",
         )
         .await?;
 
@@ -1471,6 +1512,42 @@ mod tests {
             im_user_id: "staff_1".to_string(),
             actor_id: actor_id.to_string(),
             display_name: Some(display_name.to_string()),
+        }
+    }
+
+    fn human_input_request(
+        request_id: &str,
+        reply_scope_key: &str,
+        run_id: &str,
+        node_id: &str,
+        deadline_ms: u64,
+        created_at: u64,
+    ) -> HumanInputRequest {
+        HumanInputRequest {
+            request_id: request_id.to_string(),
+            session_id: "session_1".to_string(),
+            run_id: run_id.to_string(),
+            node_id: node_id.to_string(),
+            binding_id: "binding_1".to_string(),
+            channel_type: "dingtalk".to_string(),
+            account_ref: "robot_1".to_string(),
+            notification_mode: HumanInputNotificationMode::FixedGroup,
+            reply_scope_key: reply_scope_key.to_string(),
+            active_slot_key: None,
+            assignee_actor_id: "human_1".to_string(),
+            im_conversation_id: "conversation_1".to_string(),
+            im_conversation_type: "group".to_string(),
+            im_user_id: None,
+            node_display_name: "Review".to_string(),
+            notification_text: "Please review".to_string(),
+            deadline_ms,
+            status: HumanInputRequestStatus::Queued,
+            provider_message_ref: None,
+            delivery_attempts: 0,
+            last_delivery_error: None,
+            created_at,
+            activated_at: None,
+            responded_at: None,
         }
     }
 
@@ -1893,6 +1970,168 @@ mod tests {
             }
             None => panic!("expected participant mapping"),
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_human_input_requests_queue_activate_and_respond() -> ServiceResult<()> {
+        let db = sqlite_db().await?;
+        let repo = DbHumanInputRequestStore::sqlite(db);
+        let first =
+            human_input_request("request_1", "scope_1", "run_queue", "review_1", 1_000, 10);
+        let mut second =
+            human_input_request("request_2", "scope_1", "run_queue", "review_2", 2_000, 20);
+        second.notification_mode = HumanInputNotificationMode::DirectAssignee;
+        second.im_user_id = Some("staff_1".to_string());
+
+        assert_eq!(
+            repo.enqueue(first.clone()).await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert_eq!(
+            repo.enqueue(first).await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert!(repo.mark_active("request_1", Some("message_1"), 100).await?);
+        assert!(!repo.mark_active("request_1", None, 101).await?);
+
+        let active = repo
+            .find_active_by_scope("scope_1")
+            .await?
+            .expect("active request");
+        assert_eq!(active.request_id, "request_1");
+        assert_eq!(active.status, HumanInputRequestStatus::Active);
+        assert_eq!(active.provider_message_ref.as_deref(), Some("message_1"));
+        assert_eq!(active.delivery_attempts, 1);
+        assert_eq!(active.activated_at, Some(100));
+
+        assert_eq!(
+            repo.enqueue(second.clone()).await?,
+            HumanInputEnqueueDisposition::Queued
+        );
+        assert_eq!(
+            repo.enqueue(second).await?,
+            HumanInputEnqueueDisposition::Queued
+        );
+        assert_eq!(repo.count_queued("scope_1").await?, 1);
+        assert!(repo.promote_next("scope_1", 200).await?.is_none());
+
+        let by_run = repo.list_by_run("run_queue").await?;
+        assert_eq!(by_run.len(), 2);
+        assert_eq!(
+            by_run[1].notification_mode,
+            HumanInputNotificationMode::DirectAssignee
+        );
+        assert_eq!(by_run[1].im_user_id.as_deref(), Some("staff_1"));
+
+        assert!(repo.mark_responded("request_1", 300).await?);
+        assert!(!repo.mark_responded("request_1", 301).await?);
+        let responded = repo.get("request_1").await?.expect("responded request");
+        assert_eq!(responded.status, HumanInputRequestStatus::Responded);
+        assert_eq!(responded.responded_at, Some(300));
+
+        let promoted = repo
+            .promote_next("scope_1", 400)
+            .await?
+            .expect("queued request promoted");
+        assert_eq!(promoted.request_id, "request_2");
+        assert_eq!(promoted.status, HumanInputRequestStatus::Notifying);
+        assert_eq!(promoted.active_slot_key.as_deref(), Some("scope_1"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_human_input_requests_fail_expire_promote_and_close() -> ServiceResult<()> {
+        let db = sqlite_db().await?;
+        let repo = DbHumanInputRequestStore::sqlite(db);
+
+        assert_eq!(
+            repo.enqueue(human_input_request(
+                "failed",
+                "scope_failed",
+                "run_failed",
+                "review",
+                1_000,
+                10,
+            ))
+            .await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert!(
+            repo.mark_delivery_failed("failed", "provider unavailable")
+                .await?
+        );
+        assert!(
+            !repo
+                .mark_delivery_failed("failed", "provider unavailable")
+                .await?
+        );
+        let failed = repo.get("failed").await?.expect("failed request");
+        assert_eq!(failed.status, HumanInputRequestStatus::DeliveryFailed);
+        assert_eq!(failed.delivery_attempts, 1);
+        assert_eq!(
+            failed.last_delivery_error.as_deref(),
+            Some("provider unavailable")
+        );
+
+        let holder =
+            human_input_request("holder", "scope_fifo", "run_holder", "review", 1_000, 10);
+        let expired =
+            human_input_request("expired", "scope_fifo", "run_expired", "review", 20, 20);
+        let live = human_input_request("live", "scope_fifo", "run_live", "review", 200, 30);
+        assert_eq!(
+            repo.enqueue(holder).await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert_eq!(
+            repo.enqueue(expired).await?,
+            HumanInputEnqueueDisposition::Queued
+        );
+        assert_eq!(
+            repo.enqueue(live).await?,
+            HumanInputEnqueueDisposition::Queued
+        );
+        assert_eq!(repo.count_queued("scope_fifo").await?, 2);
+
+        assert_eq!(
+            repo.close_for_run_node(
+                "run_holder",
+                "review",
+                HumanInputRequestStatus::Cancelled,
+            )
+            .await?,
+            1
+        );
+        assert_eq!(
+            repo.get("holder").await?.expect("cancelled holder").status,
+            HumanInputRequestStatus::Cancelled
+        );
+
+        let promoted = repo
+            .promote_next("scope_fifo", 50)
+            .await?
+            .expect("live request promoted");
+        assert_eq!(promoted.request_id, "live");
+        assert_eq!(
+            repo.get("expired").await?.expect("expired request").status,
+            HumanInputRequestStatus::Expired
+        );
+        assert_eq!(repo.count_queued("scope_fifo").await?, 0);
+
+        assert_eq!(
+            repo.close_for_run_node("run_live", "review", HumanInputRequestStatus::Expired)
+                .await?,
+            1
+        );
+        assert!(repo.promote_next("scope_fifo", 300).await?.is_none());
+
+        let error = repo
+            .close_for_run_node("run_live", "review", HumanInputRequestStatus::Responded)
+            .await
+            .expect_err("responded is not a valid close status");
+        assert!(matches!(error, ServiceError::InvalidOperation { .. }));
 
         Ok(())
     }
