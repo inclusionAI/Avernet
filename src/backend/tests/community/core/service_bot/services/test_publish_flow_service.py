@@ -516,6 +516,38 @@ async def test_online_retire_then_first_release_is_crash_safe_on_redelivery():
 
 
 @pytest.mark.asyncio
+async def test_execute_release_phase_unhandled_decision_fails_loudly():
+    """The dispatch is exhaustive: a new/unknown OnlineDeployDecision must fail
+    the publish loudly, never silently fall through to first-release."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source', ext={'migration_path': '/m'}
+    )
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    svc._bot_service = bot_service
+    svc._decide_online_deploy = Mock(return_value="BOGUS_DECISION")
+    svc._execute_first_release = AsyncMock()
+    svc._execute_upgrade_release = AsyncMock()
+    # Stub the failure-handling plumbing so the guard's raise surfaces as a
+    # FAILED publish result (the process fails), not a silent first-release.
+    svc._get_latest_ext = Mock(return_value={})
+    svc._clear_retry_flag = Mock()
+    svc._update_publish_status = Mock()
+
+    result = await svc.execute_release_phase(publish_record, operator='op')
+
+    assert result.status == PublishStatus.FAILED
+    assert "Unhandled online deploy decision" in result.message
+    svc._execute_first_release.assert_not_awaited()
+    svc._execute_upgrade_release.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_retry_clears_retry_flag_when_restart_submit_fails():
     publish_service = Mock()
     build_service = Mock()

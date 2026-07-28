@@ -714,17 +714,30 @@ class PublishFlowService(
                     bot=bot,
                 )
             if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                # Retire the superseded bot first (else the fresh create orphans
+                # it), then fall into the first-release below.
                 candidate_bot_uuid, _ = self._resolve_online_reuse_target(publish_record)
                 if candidate_bot_uuid:
                     self._build_service.retire_superseded_bot(
                         candidate_bot_uuid, operator=operator
                     )
-            # FIRST_RELEASE (and the post-retire path): create a new Bot.
-            return await self._execute_first_release(
-                publish_record=publish_record,
-                operator=operator,
-                migration_path=migration_path,
-                bot=bot,
+                return await self._execute_first_release(
+                    publish_record=publish_record,
+                    operator=operator,
+                    migration_path=migration_path,
+                    bot=bot,
+                )
+            if decision == OnlineDeployDecision.FIRST_RELEASE:
+                return await self._execute_first_release(
+                    publish_record=publish_record,
+                    operator=operator,
+                    migration_path=migration_path,
+                    bot=bot,
+                )
+            # Exhaustive: every decision is handled explicitly above. A new enum
+            # value must fail loudly here rather than silently first-release.
+            raise PublishFlowServiceError(
+                f"Unhandled online deploy decision: {decision}"
             )
 
         except Exception as e:
