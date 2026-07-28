@@ -136,6 +136,12 @@ class ResourceModel(Base):
     source = Column(String(50))
     bolt_id = Column(String(100), default='default')
     env = Column(String(20), default=get_current_env, nullable=False)
+    # Data-isolation tenant (see utils/avernet_tenant + the guards in this
+    # module). server_default (not Python default=) so create_all emits the
+    # same DEFAULT 'teamclaw' prod's out-of-band DDL applies, backfilling
+    # existing rows and covering any non-ORM insert. Deliberately absent from
+    # to_dict().
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
