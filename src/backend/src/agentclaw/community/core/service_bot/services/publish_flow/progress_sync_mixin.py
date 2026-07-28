@@ -619,6 +619,23 @@ class ProgressSyncMixin:
                     error_message=f"Restart publish status: {baas_status}",
                 )
 
+            # A restart that RECREATED the target minted a NEW binding as PENDING
+            # (the normal in-place upgrade reuses the already-ACTIVE one, and
+            # ext.binding.<stage> now points at the new binding). The stable
+            # SUCCESS/VALIDATING record skips the status advance, but the recreated
+            # binding must still be activated on deploy success or it stays PENDING
+            # forever and binding consumers reject it. _activate_binding is
+            # idempotent — a no-op refresh for the in-place upgrade path.
+            if baas_status == "SUCCESS":
+                self._activate_binding(
+                    ext=ext,
+                    stage=stage,
+                    progress=progress,
+                    baas_status=baas_status,
+                    baas_publish_id=restart_publish_id,
+                    bot_id=publish_record.source_bot_id,
+                )
+
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=current_status,
