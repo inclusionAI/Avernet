@@ -388,6 +388,26 @@ def test_decide_online_deploy_get_bot_error_propagates():
         svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
 
 
+def test_decide_online_deploy_missing_status_propagates():
+    # A *successful* envelope with no status (get_bot returns `data`, which
+    # defaults to {}) is ambiguous — NOT proof the candidate is gone. It must
+    # raise (durable task retries) rather than map to FIRST_RELEASE and create a
+    # replacement for a possibly-live bot. Only a real 404 (already normalized to
+    # RELEASED) or an explicit terminal status recreates.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.return_value = {}  # 200 envelope, empty data → no status
+
+    with pytest.raises(PublishFlowServiceError, match="no status"):
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+    build_service.retire_superseded_bot.assert_not_called()
+
+
 # (#197 all-auto) approve_baas_publish was removed — every BaaS mutation is
 # auto-approved server-side, so there is no client approve method to test.
 
