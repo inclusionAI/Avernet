@@ -14,17 +14,25 @@
   `tests/community/core/service_bot/services/test_bot_build_service_teclaw_routing.py`
   (or a new `test_bot_build_service_retire.py`)
 - **Done when:**
-  - [x] `BotBuildService.retire_superseded_bot(self, bot_uuid: str) -> None`
+  - [x] `BotBuildService.retire_superseded_bot(self, bot_uuid: str) -> int | None`
         added: calls `self._baas_service.destroy_bot(bot_uuid)` with a
-        `bot_uuid`-derived deterministic `request_id`; a `destroy_bot` failure
+        `bot_uuid`-derived deterministic `request_id` and returns the DESTROY
+        workflow id (or `None` when already gone). A `destroy_bot` failure
         **propagates** (AGENTS.md: never swallow a failed lifecycle write and
         report success) so the caller does not create a replacement while the old
         bot may still be live — the durable deploy retries and re-evaluates.
-  - [x] Docstring states it is idempotent (BaaS `destroy` tolerates already-gone
-        via the deterministic `request_id`), propagates failures, and must only
-        be called for a bot the caller has decided is superseded/gone.
+  - [x] **Already-gone is success:** if the destroy is rejected because the bot no
+        longer exists (deleted between the decision's status read and the call, or
+        a destroy already in flight), re-check via `get_bot`; an explicit
+        `RELEASED`/`DESTROYING` means the retirement goal is met → return `None`
+        (no raise). Any other failure (timeout/conflict/5xx, or a still-live bot)
+        still propagates.
+  - [x] Docstring states it is idempotent (deterministic `request_id`), returns
+        the destroy workflow id, normalizes already-gone to success, propagates
+        other failures, and must only be called for a superseded/gone bot.
   - [x] Unit: `destroy_bot` called once with the uuid on the happy path.
-  - [x] Unit: `destroy_bot` raising **propagates** (method re-raises).
+  - [x] Unit: `destroy_bot` raising a non-gone failure **propagates**; an
+        already-gone (`get_bot` → `RELEASED`) destroy rejection returns `None`.
   - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** —
 
@@ -63,20 +71,26 @@
         None]`: this record's own `ext.binding.online` → binding → `device_id`
         first; else `last_pub_id`'s online binding; else `(None, None)`.
   - [x] `_decide_online_deploy(publish_record, bot) -> OnlineDeployDecision`
-        implements the matrix: no candidate / `RELEASED` / `DESTROYING` /
-        status-absent → `FIRST_RELEASE`; `ACTIVE` → `UPGRADE`;
-        `FAILED`/`STOPPED`/`STOPPING` → `RETIRE_THEN_FIRST_RELEASE` iff
-        `resolve_container_provider(bot) == TECLAW_DEVICE_PROVIDER` else
-        `UPGRADE`; `PENDING`/unknown → `UPGRADE`. A `get_bot` failure
-        **propagates** (a genuine 404 is already normalized to `RELEASED`, so a
-        raised error is transient/non-404 — NOT proof the candidate is gone; the
-        durable task retries the status read rather than replacing a live bot).
+        implements the matrix: no candidate / `RELEASED` / `DESTROYING` →
+        `FIRST_RELEASE`; `ACTIVE` → `UPGRADE`; `FAILED`/`STOPPED` →
+        `RETIRE_THEN_FIRST_RELEASE` iff `resolve_container_provider(bot) ==
+        TECLAW_DEVICE_PROVIDER` else `UPGRADE`; `PENDING`/unknown → `UPGRADE`.
+        Two statuses **do not return a decision — they raise so the durable task
+        retries**: `STOPPING` (a STOP publish is in flight; BaaS `create_publish`
+        rejects any new publish of a different type — UPDATE or DESTROY — while it
+        runs, so wait for it to settle to `STOPPED`), and an **empty/absent
+        status** on a successful envelope (`get_bot` returns `data` which defaults
+        to `{}`; a real 404 is already normalized to `RELEASED`, so an empty
+        status is ambiguous, NOT proof the candidate is gone). A `get_bot`
+        exception likewise **propagates** (transient/non-404 — the durable task
+        retries the status read rather than replacing a possibly-live bot).
   - [x] `_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES` and `_should_upgrade_online`
         removed; `grep -rn "_ONLINE_UPGRADE_BLOCKING_BAAS_STATUSES\|_should_upgrade_online"
         src/agentclaw` returns nothing (call sites migrated in Task 4).
   - [x] Unit (table-driven) over `(provider ∈ {teclaw, baas}) × (status ∈
-        {ACTIVE, FAILED, STOPPED, STOPPING, RELEASED, DESTROYING, PENDING, absent})`
-        asserting the decision, incl. `get_bot`-raises → **propagates**.
+        {ACTIVE, FAILED, STOPPED, RELEASED, DESTROYING, PENDING})` asserting the
+        decision, plus `STOPPING → raises`, empty-status → raises, and
+        `get_bot`-raises → **propagates**.
   - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** —
 

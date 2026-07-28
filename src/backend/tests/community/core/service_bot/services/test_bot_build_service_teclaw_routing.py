@@ -431,3 +431,38 @@ def test_retire_superseded_bot_propagates_destroy_failure():
     with pytest.raises(RuntimeError, match="baas down"):
         svc.retire_superseded_bot("BOT-old")
     baas.destroy_bot.assert_called_once()
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_already_gone_is_success():
+    from agentclaw.community.core.service_bot.services.bot_build_service import (
+        BaasServiceError,
+    )
+
+    svc, baas = _svc("baas")
+    # The bot was deleted between the decision's status read and this destroy, so
+    # BaaS rejects the DESTROY. get_bot confirms it is gone (a real 404 is
+    # normalized to RELEASED) → the retirement goal is already satisfied, so this
+    # returns success (None) rather than aborting the replacement.
+    baas.destroy_bot.side_effect = BaasServiceError("BaaS API error: 404 - gone")
+    baas.get_bot.return_value = {"status": "RELEASED"}
+
+    assert svc.retire_superseded_bot("BOT-old") is None
+    baas.get_bot.assert_called_once()
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_propagates_when_bot_still_live():
+    from agentclaw.community.core.service_bot.services.bot_build_service import (
+        BaasServiceError,
+    )
+
+    svc, baas = _svc("baas")
+    # A destroy failure where the bot is still present (e.g. a timeout/5xx, or a
+    # conflict) is NOT an already-gone case — it must propagate so the caller does
+    # not create a replacement while the old bot may still be live.
+    baas.destroy_bot.side_effect = BaasServiceError("BaaS API error: 503 - busy")
+    baas.get_bot.return_value = {"status": "ACTIVE"}
+
+    with pytest.raises(BaasServiceError, match="503"):
+        svc.retire_superseded_bot("BOT-old")

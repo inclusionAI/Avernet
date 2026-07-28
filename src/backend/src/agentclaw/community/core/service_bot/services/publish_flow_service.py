@@ -305,6 +305,13 @@ class PublishFlowService(
                 e,
             )
 
+    def release_binding(
+        self, binding_id: int, *, destroy_publish_id: int | None
+    ) -> None:
+        """Public ``ReleaseRecordOps`` seam: mark a superseded binding RELEASED
+        after its bot was retired. Delegates to ``DeviceBindingMixin``."""
+        self._release_binding(binding_id, destroy_publish_id=destroy_publish_id)
+
     async def process(
         self,
         publish_id: int,
@@ -715,12 +722,20 @@ class PublishFlowService(
                 )
             if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
                 # Retire the superseded bot first (else the fresh create orphans
-                # it), then fall into the first-release below.
-                candidate_bot_uuid, _ = self._resolve_online_reuse_target(publish_record)
+                # it), then release its now-stale binding so it does not linger
+                # ACTIVE pointing at a destroyed bot, then fall into first-release.
+                candidate_bot_uuid, candidate_binding_id = (
+                    self._resolve_online_reuse_target(publish_record)
+                )
                 if candidate_bot_uuid:
-                    self._build_service.retire_superseded_bot(
+                    destroy_publish_id = self._build_service.retire_superseded_bot(
                         candidate_bot_uuid, operator=operator
                     )
+                    if candidate_binding_id:
+                        self._release_binding(
+                            candidate_binding_id,
+                            destroy_publish_id=destroy_publish_id,
+                        )
                 return await self._execute_first_release(
                     publish_record=publish_record,
                     operator=operator,

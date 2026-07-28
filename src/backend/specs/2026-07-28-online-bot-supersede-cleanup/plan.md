@@ -40,9 +40,19 @@ binding first, then `last_pub_id`'s), read its **BaaS status**, and pick:
 | Candidate status | `baas`/ARCA (rebuild-in-place update) | teclaw (native in-place update) |
 |---|---|---|
 | `ACTIVE` | `UPGRADE` | `UPGRADE` (live container) |
-| `FAILED` / `STOPPED` / `STOPPING` | `UPGRADE` (rebuilds in place) | `RETIRE_THEN_FIRST_RELEASE` |
-| `RELEASED` / absent / `DESTROYING` | `FIRST_RELEASE` | `FIRST_RELEASE` |
+| `FAILED` / `STOPPED` | `UPGRADE` (rebuilds in place) | `RETIRE_THEN_FIRST_RELEASE` |
+| `STOPPING` | **wait (raise → retry)** | **wait (raise → retry)** |
+| `RELEASED` / `DESTROYING` | `FIRST_RELEASE` | `FIRST_RELEASE` |
 | no candidate at all | `FIRST_RELEASE` | `FIRST_RELEASE` |
+| empty/absent status (200) | **wait (raise → retry)** | **wait (raise → retry)** |
+
+- **`STOPPING`** has a STOP publish in flight; BaaS `create_publish` rejects any
+  new publish of a different type (an UPGRADE's UPDATE *or* a retire's DESTROY)
+  while it runs, so neither branch can land — raise and let the durable task retry
+  until it settles to `STOPPED`.
+- **empty/absent status** on a *successful* envelope is ambiguous (a real 404 is
+  already normalized to `RELEASED`), so it is NOT treated as gone — raise and
+  retry rather than create a replacement for a possibly-live bot.
 
 - **`RETIRE_THEN_FIRST_RELEASE`** = `destroy(old_bot_uuid)` (idempotent;
   failures propagate so we never create the replacement while the old bot may
@@ -93,23 +103,29 @@ None. No schema, DDL, or migration.
   1. candidate = `_resolve_online_reuse_target(...)`; `None` → `FIRST_RELEASE`.
   2. `status = self._baas_service.get_bot(bot_uuid).get("status")` (a genuine 404
      is already normalized to `RELEASED`; a raised error is transient/non-404 and
-     **propagates** so the durable task retries — it is NOT treated as gone.
-     Missing/empty status → `FIRST_RELEASE`).
+     **propagates** so the durable task retries — it is NOT treated as gone. An
+     empty/absent status on a *successful* envelope is likewise ambiguous → raise
+     so the task retries, NOT `FIRST_RELEASE`).
   3. `RELEASED`/`DESTROYING` → `FIRST_RELEASE`.
   4. `ACTIVE` → `UPGRADE`.
-  5. `FAILED`/`STOPPED`/`STOPPING`:
+  5. `STOPPING` → **raise (wait)**: a STOP publish is in flight and BaaS
+     `create_publish` rejects any new publish of a different type (UPDATE or
+     DESTROY) while it runs; the durable task retries until it settles.
+  6. `FAILED`/`STOPPED`:
      - `resolve_container_provider(bot) == TECLAW_DEVICE_PROVIDER` →
        `RETIRE_THEN_FIRST_RELEASE`.
      - else → `UPGRADE`.
-  6. `PENDING`/unknown → `UPGRADE` (optimistic; the deploy atom / progress poll
+  7. `PENDING`/unknown → `UPGRADE` (optimistic; the deploy atom / progress poll
      settles a still-provisioning bot). See Open Questions.
 
 ### 2. Online release dispatch (`publish_flow_service.py`)
 - `_execute_online_release` switches on `_decide_online_deploy(...)`:
   - `UPGRADE` → `_execute_upgrade_release(...)` (target = the resolved candidate,
     own-binding-first — this is what makes the **retry** seam reuse).
-  - `RETIRE_THEN_FIRST_RELEASE` → `retire_superseded_bot(candidate)` then
-    `_execute_first_release(...)`.
+  - `RETIRE_THEN_FIRST_RELEASE` → `retire_superseded_bot(candidate)`, then
+    `_release_binding(candidate_binding_id, destroy_publish_id=...)` so the
+    superseded backend binding does not linger `ACTIVE` pointing at a destroyed
+    bot, then `_execute_first_release(...)`.
   - `FIRST_RELEASE` → `_execute_first_release(...)`.
 - `_execute_first_release` unchanged (still the `fallback` for `upgrade_release`).
 
@@ -122,11 +138,15 @@ None. No schema, DDL, or migration.
 - In `upgrade_release`'s `except TargetBotGoneError as e:`, before `fallback(...)`,
   `self._build_service.retire_superseded_bot(bot_uuid)` **only when**
   `e.error_code == "DEVICE_NOT_FOUND"` (record lingers); skip for `BOT_NOT_FOUND`.
+  On retire, also `self._ops.release_binding(existing_binding_id,
+  destroy_publish_id=...)` (new narrow-protocol seam) so the superseded binding is
+  marked `RELEASED`, mirroring the primary dispatch path.
 
 ### 5. Restart (`restart_mixin.py`)
 - `execute_restart` applies `_decide_online_deploy` on the restart target:
   `UPGRADE` reuses the in-place upgrade path; every non-`UPGRADE` decision
-  recreates *directly* (`RETIRE_THEN_FIRST_RELEASE` retires first), opening+
+  recreates *directly* (`RETIRE_THEN_FIRST_RELEASE` retires first, then
+  `_release_binding` on the record's now-stale online binding), opening+
   abandoning a fresh `RESTART` op before `_recreate_restart_target` so
   `sync_restart_progress` reads the recreate's workflow via `ext.restart` rather
   than a stale earlier `RESTART` op. A `FIRST_RELEASE`/`DESTROYING` target is not
@@ -136,11 +156,14 @@ None. No schema, DDL, or migration.
   (`DEVICE_NOT_FOUND` only) before recreating.
 
 ### 6. Cleanup primitive (`bot_build_service.py`)
-- `retire_superseded_bot(self, bot_uuid)`: `self._baas_service.destroy_bot(
-  bot_uuid, request_id=md5("retire_"+bot_uuid))` (idempotent — the deterministic
-  `request_id` makes a redelivery reuse the same destroy); failures **propagate**
-  (never report a failed lifecycle write as success — the caller must not create
-  the replacement while the old bot may still be live).
+- `retire_superseded_bot(self, bot_uuid) -> int | None`: `self._baas_service.
+  destroy_bot(bot_uuid, request_id=md5("retire_"+bot_uuid))` (idempotent — the
+  deterministic `request_id` makes a redelivery reuse the same destroy), returns
+  the DESTROY workflow id. Failures **propagate** (never report a failed lifecycle
+  write as success — the caller must not create the replacement while the old bot
+  may still be live), **except already-gone**: if the destroy is rejected and a
+  `get_bot` re-check shows `RELEASED`/`DESTROYING`, the goal is met → return
+  `None`.
 
 ### 7. Tests
 - Table-driven on `(provider ∈ {teclaw, baas}, prior_status, get_bot result)`:

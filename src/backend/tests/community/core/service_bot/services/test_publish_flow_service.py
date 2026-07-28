@@ -338,8 +338,8 @@ async def test_execute_upgrade_release_fallback_retires_only_on_device_not_found
     ("teclaw", "FAILED", OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE),
     ("baas", "STOPPED", OnlineDeployDecision.UPGRADE),
     ("teclaw", "STOPPED", OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE),
-    ("baas", "STOPPING", OnlineDeployDecision.UPGRADE),
-    ("teclaw", "STOPPING", OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE),
+    # STOPPING is a wait state (see test_decide_online_deploy_stopping_waits) —
+    # not in this matrix because it raises rather than returning a decision.
 ])
 def test_decide_online_deploy_matrix(provider, status, expected):
     publish_service = Mock()
@@ -386,6 +386,27 @@ def test_decide_online_deploy_get_bot_error_propagates():
 
     with pytest.raises(RuntimeError, match="baas unreachable"):
         svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+
+
+@pytest.mark.parametrize("provider", ["teclaw", "baas"])
+def test_decide_online_deploy_stopping_waits(provider):
+    # STOPPING has an active STOP publish in flight; BaaS create_publish rejects
+    # any new publish of a different type (UPGRADE's UPDATE or a retire's DESTROY)
+    # while it runs. The decision must WAIT (raise so the durable task retries)
+    # rather than issue a doomed publish — for BOTH providers, no retire.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.return_value = {'status': 'STOPPING'}
+    baas_service.resolve_container_provider.return_value = provider
+
+    with pytest.raises(PublishFlowServiceError, match="STOPPING"):
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+    build_service.retire_superseded_bot.assert_not_called()
 
 
 def test_decide_online_deploy_missing_status_propagates():
@@ -480,12 +501,14 @@ async def test_execute_release_phase_offlined_online_bot_stopped_no_orphan(provi
     )
     baas_service.resolve_container_provider.return_value = provider
     baas_service.get_bot.return_value = {'status': 'STOPPED'}
+    build_service.retire_superseded_bot.return_value = 777  # destroy publish id
 
     bot_service = Mock()
     bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
     svc._bot_service = bot_service
     svc._execute_first_release = AsyncMock(return_value='FIRST')
     svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
+    svc._release_binding = Mock()
 
     result = await svc.execute_release_phase(publish_record, operator='u1')
 
@@ -494,11 +517,15 @@ async def test_execute_release_phase_offlined_online_bot_stopped_no_orphan(provi
         build_service.retire_superseded_bot.assert_called_once_with(
             'BOT-stopped', operator='u1'
         )
+        # The retired bot's stale binding (id 88) is released, stashing the
+        # destroy workflow id — no lingering ACTIVE binding to a destroyed bot.
+        svc._release_binding.assert_called_once_with(88, destroy_publish_id=777)
         svc._execute_first_release.assert_awaited_once()
         svc._execute_upgrade_release.assert_not_awaited()
     else:
         assert result == 'UPGRADE'
         build_service.retire_superseded_bot.assert_not_called()
+        svc._release_binding.assert_not_called()
         svc._execute_upgrade_release.assert_awaited_once()
         svc._execute_first_release.assert_not_awaited()
 
