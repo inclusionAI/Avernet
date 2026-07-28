@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.notify.local_bot_lister import LocalNotifyBotLister
+from agentclaw.community.core.notify.protocol import NotifyTarget
 
 
 def test_list_bot_mappings_uses_active_personal_bots_from_repository():
@@ -13,8 +14,8 @@ def test_list_bot_mappings_uses_active_personal_bots_from_repository():
     lister = LocalNotifyBotLister(bot_repository=bot_repo)
 
     assert lister.list_bot_mappings("u001") == [
-        ("bot1", "Alpha", "101"),
-        ("bot3", "bot3", "103"),
+        NotifyTarget("bot1", "Alpha", "u001", "101"),
+        NotifyTarget("bot3", "bot3", "u001", "103"),
     ]
     bot_repo.list_active_bots_by_entity.assert_called_once_with(
         entity_id="u001",
@@ -31,4 +32,4 @@ def test_list_bot_mappings_skips_empty_bot_id():
         {"bot_id": "real", "bot_name": "OK", "binding_id": 201},
     ]
     lister = LocalNotifyBotLister(bot_repository=bot_repo)
-    assert lister.list_bot_mappings("u002") == [("real", "OK", "201")]
+    assert lister.list_bot_mappings("u002") == [NotifyTarget("real", "OK", "u002", "201")]
