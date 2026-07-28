@@ -218,6 +218,7 @@ class FileTransferOssConfigSchema(ConfigSchema):
 
     config_section = "file_transfer_oss"
     endpoint: str = Field(default="")
+    external_endpoint: str = Field(default="")
     bucket_name: str = Field(default="")
     staging_root_path: str = Field(default="baas-file-transfer")
     secret_name: str = Field(default="")
