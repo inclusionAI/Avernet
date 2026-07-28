@@ -70,24 +70,36 @@ async def test_envelope_errors_maps_domain_error():
     resp = await handler(request=_request())
     assert isinstance(resp, JSONResponse)
     assert resp.status_code == 404
-    # Body carries the enveloped error: null data, 6-digit code, trace id.
+    # Body carries the enveloped error: null data, 6-digit code, trace id, and a
+    # FIXED message (never the raw exception text — no internal leak).
     import json
 
     body = json.loads(bytes(resp.body))
     assert body["code"] == 404000
     assert body["data"] is None
-    assert body["message"] == "no such bot"
+    assert body["message"] == "Not found"
     assert body["request_id"] == "trace-123"
 
 
 @pytest.mark.asyncio
-async def test_envelope_errors_maps_permission_to_404():
-    @envelope_errors
-    async def handler(request: Request):
-        raise BotPermissionError("not yours")
+async def test_not_found_and_permission_errors_are_indistinguishable():
+    """The 404-masking guarantee: differing internal text must not leak."""
+    import json
 
-    resp = await handler(request=_request())
-    assert resp.status_code == 404
+    @envelope_errors
+    async def not_found(request: Request):
+        raise BotNotFoundError("Bot not found: b-123")
+
+    @envelope_errors
+    async def permission(request: Request):
+        raise BotPermissionError("架构师 Bot 不存在或非本人所有: b-123")
+
+    nf = await not_found(request=_request())
+    perm = await permission(request=_request())
+    assert nf.status_code == perm.status_code == 404
+    # Byte-for-byte identical bodies — a caller cannot tell the two cases apart.
+    assert json.loads(bytes(nf.body)) == json.loads(bytes(perm.body))
+    assert "b-123" not in json.loads(bytes(perm.body))["message"]
 
 
 @pytest.mark.asyncio

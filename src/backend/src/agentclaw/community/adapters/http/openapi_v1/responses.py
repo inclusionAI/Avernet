@@ -81,27 +81,29 @@ def deleted(request: Request) -> Envelope[Deleted]:
     return envelope(Deleted(), request)
 
 
-# Domain error → (HTTP status, business subcode-less 6-digit code). Only the
-# specific leaf errors are listed; anything unmapped propagates to the app's
-# existing 500 handler. ``BotPermissionError`` maps to 404 so a caller can never
-# distinguish "exists but not yours/other tenant" from "does not exist".
-ENVELOPE_ERRORS: dict[type[Exception], int] = {
-    BotNotFoundError: 404,
-    BotPermissionError: 404,
-    BotNameExistsError: 409,
-    BotNameInvalidError: 400,
-    BotLimitExceededError: 409,
-    DeviceLimitError: 409,
-    BotInvalidLifecycleStateError: 409,
-    ClusterMismatchError: 400,
-    PassportError: 502,
+# Domain error → (HTTP status, fixed public message). Only the specific leaf
+# errors are listed; anything unmapped propagates to the app's existing 500
+# handler. Messages are fixed (never ``str(exc)``) so that (a) internal
+# identifiers and internal-language text never leak to external callers, and
+# (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
+# tell "exists but not yours/other tenant" from "does not exist".
+ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    BotNotFoundError: (404, "Not found"),
+    BotPermissionError: (404, "Not found"),
+    BotNameExistsError: (409, "Bot name already exists"),
+    BotNameInvalidError: (400, "Invalid bot name"),
+    BotLimitExceededError: (409, "Bot creation limit reached"),
+    DeviceLimitError: (409, "Device limit reached"),
+    BotInvalidLifecycleStateError: (409, "Bot is not in a valid state for this operation"),
+    ClusterMismatchError: (400, "engine and cluster_name do not match"),
+    PassportError: (502, "Authorization service error"),
 }
 
 
-def _error_response(exc: Exception, http_status: int, request: Request) -> JSONResponse:
+def _error_response(http_status: int, message: str, request: Request) -> JSONResponse:
     body = Envelope(
         code=http_status * 1000,
-        message=str(exc) or exc.__class__.__name__,
+        message=message,
         data=None,
         request_id=_trace_id(request),
     )
@@ -133,12 +135,12 @@ def envelope_errors(
         try:
             return await fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 — re-raised unless mapped
-            for error_type, http_status in ENVELOPE_ERRORS.items():
+            for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
                 if isinstance(exc, error_type):
                     request = _find_request(args, kwargs)
                     if request is None:
                         raise
-                    return _error_response(exc, http_status, request)
+                    return _error_response(http_status, message, request)
             raise
 
     return wrapper
