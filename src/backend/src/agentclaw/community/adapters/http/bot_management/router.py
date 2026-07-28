@@ -64,7 +64,7 @@ from agentclaw.community.core.bot_management.create_flow import (
 )
 # Re-exported so ``test_bot_passport`` can keep importing it from this module.
 from agentclaw.community.core.bot_management.create_flow import (  # noqa: F401
-    get_bot_mcp_codes as _get_bot_mcp_codes,
+    _get_bot_mcp_codes,
 )
 from agentclaw.community.core.services.engine_config import EngineConfigService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory

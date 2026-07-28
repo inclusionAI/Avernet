@@ -79,21 +79,21 @@ class AuthStatusResult:
     bot: dict[str, Any] = field(default_factory=dict)
 
 
-def get_bot_mcp_codes(
+def _get_bot_mcp_codes(
     factory: SkillSetServiceFactory,
     user_id: str,
     bot_id: str,
     entity_id: str,
     entity_type: str,
-    engine_type: str | None = None,
+    engine_type: str,
 ) -> list[str]:
     """Resolve the passport-service MCP codes for a bot using the injected factory.
 
-    Pure helper — the factory is passed in by the caller (obtained via
-    ``Injected(SkillSetServiceFactory)``), so this contains no service-locator
-    calls. ``engine_type`` scopes the skill-set query to the bot's active
-    engine; when omitted the factory falls back to ``DEFAULT_ENGINE_TYPE``.
-    LOCAL/stdio MCPs are filtered because the passport service does not own them.
+    Internal helper of the create flow — the factory is passed in by the caller
+    (obtained via ``Injected(SkillSetServiceFactory)``), so this contains no
+    service-locator calls. ``engine_type`` scopes the skill-set query to the
+    bot's active engine. LOCAL/stdio MCPs are filtered because the passport
+    service does not own them.
     """
     skill_set_service = factory.create(
         user_id=user_id,
@@ -188,7 +188,7 @@ def create_bot_with_authorization(
     bot_service.check_create_bot_preflight(user_id=user_id)
 
     # 2. Remote MCP codes for the Passport application.
-    mcp_codes = get_bot_mcp_codes(
+    mcp_codes = _get_bot_mcp_codes(
         skill_set_factory, user_id, bot_id, entity_id, entity_type,
         engine_type=passport_engine_type,
     )

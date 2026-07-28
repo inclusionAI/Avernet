@@ -242,6 +242,7 @@ class TestGetBotMcpCodes:
             bot_id="default",
             entity_id="staff_123456",
             entity_type="staff",
+            engine_type="openclaw",
         )
 
         assert result == ["mcp_1", "mcp_2", "mcp_3"]
@@ -250,7 +251,7 @@ class TestGetBotMcpCodes:
             entity_id="staff_123456",
             bot_id="default",
             entity_type="staff",
-            engine_type=None,
+            engine_type="openclaw",
         )
         mock_skill_set_service.get_bot_mcp_codes.assert_called_once_with(
             entity_id="staff_123456",
