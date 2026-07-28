@@ -281,7 +281,10 @@ class TestCreateBotEngineRouting:
         # Personal bots have no publish row — nothing to record onto.
         svc._bot_publish_provider().record_draft_artifact.assert_not_called()
 
-    def test_personal_teclaw_bot_continues_when_token_query_fails(self):
+    def test_personal_teclaw_bot_provisions_without_a_passport_token(self):
+        # The AgentPass token is fetched and pushed by the create publish poll
+        # task once the container is up — create never needs it, so a passport
+        # outage cannot affect provisioning.
         svc = _make_service()
         device_service = _attach_device_service(svc)
         svc._passport_plugin.query_token.side_effect = RuntimeError("boom")
@@ -303,7 +306,7 @@ class TestCreateBotEngineRouting:
         )
 
         teclaw.provision.assert_called_once()
-        assert teclaw.provision.call_args.kwargs["agent_pass_token"] == ""
+        assert "agent_pass_token" not in teclaw.provision.call_args.kwargs
         assert not device_service.apply_device.called
 
     def test_service_teclaw_bot_provisions_eagerly_and_creates_publish(self):
