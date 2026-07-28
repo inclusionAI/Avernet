@@ -301,6 +301,13 @@ pub trait MessageFlowService: Send + Sync {
         cmd: GroupCallbackCommand,
     ) -> ServiceResult<GroupCallbackOutcome>;
     async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome>;
+    async fn rebind_channel_source_message(
+        &self,
+        _source_run_id: &str,
+        _accepted_run_id: &str,
+    ) -> ServiceResult<bool> {
+        Ok(false)
+    }
     async fn register_task_run_alias(
         &self,
         task_id: &str,

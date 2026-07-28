@@ -14,6 +14,7 @@ import {
   handleBcsRouteTool,
   initAgentEventsSubscription,
   rememberTaskToolSession,
+  resolveChatRunId,
   resolveGroupIdFromSessionKey,
 } from '../src/inbound-handler.js';
 import type { RequestFrame, ResolvedBcsAccount } from '../src/types.js';
@@ -36,6 +37,15 @@ function listSourceFiles(dir: string): string[] {
 }
 
 describe('openclaw-channel-bcn', () => {
+  it('preserves the upstream BCS run id with backward-compatible fallbacks', () => {
+    assert.equal(resolveChatRunId('request-run', ' upstream-run '), 'upstream-run');
+    assert.equal(resolveChatRunId(' request-run ', undefined), 'request-run');
+    assert.match(
+      resolveChatRunId(undefined, '  '),
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
   it('resolves default and named BCS accounts', () => {
     const cfg = {
       channels: {
@@ -561,6 +571,7 @@ describe('openclaw-channel-bcn', () => {
       id: 'chat-1',
       method: 'chat.send',
       params: {
+        idempotency_key: 'upstream-run-1',
         bcs_group_id: 'group-1',
         channel: { source: 'api', user_id: 'user-1' },
         session_context: {},
@@ -584,7 +595,7 @@ describe('openclaw-channel-bcn', () => {
       assert.equal(responses.length, 1);
       assert.equal(responses[0].ok, true);
       const runId = responses[0].payload?.run_id;
-      assert.equal(typeof runId, 'string');
+      assert.equal(runId, 'upstream-run-1');
       assert.equal(capturedReplyOptions?.disableBlockStreaming, false);
       assert.equal(capturedReplyOptions?.sourceReplyDeliveryMode, 'automatic');
       assert.equal(capturedInboundContext?.Body, '[Image: diagram.png]');
