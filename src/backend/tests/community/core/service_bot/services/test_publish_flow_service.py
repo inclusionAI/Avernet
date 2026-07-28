@@ -274,7 +274,13 @@ async def test_service_release_uses_frozen_engine_layout_not_live_draft_drift():
 
 
 @pytest.mark.asyncio
-async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_found():
+@pytest.mark.parametrize("error_code,expect_retire", [
+    ("BOT_NOT_FOUND", False),     # record already gone → nothing to clean up
+    ("DEVICE_NOT_FOUND", True),   # record lingers → retire before first release
+])
+async def test_execute_upgrade_release_fallback_retires_only_on_device_not_found(
+    error_code, expect_retire
+):
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -288,8 +294,8 @@ async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_fo
     publish_service.get_device_binding_by_id.return_value = binding
     build_service.upgrade_async = AsyncMock(return_value={
         'success': False,
-        'error_code': 'BOT_NOT_FOUND',
-        'message': 'Bot not found or already destroyed',
+        'error_code': error_code,
+        'message': 'gone',
     })
     expected = Mock()
     svc._execute_first_release = AsyncMock(return_value=expected)
@@ -308,6 +314,12 @@ async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_fo
         migration_path='/tmp/migration',
         bot={'bot_id': 'b1'},
     )
+    if expect_retire:
+        build_service.retire_superseded_bot.assert_called_once_with(
+            'BOT-old', operator='u1'
+        )
+    else:
+        build_service.retire_superseded_bot.assert_not_called()
 
 
 @pytest.mark.parametrize("provider,status,expected", [

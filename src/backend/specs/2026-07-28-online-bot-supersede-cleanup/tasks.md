@@ -99,7 +99,7 @@
   - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** Task 1, Task 3
 
-## Task 5: `[ ]` Secondary net — retire on the upgrade-fallback error code
+## Task 5: `[x]` Secondary net — retire on the upgrade-fallback error code
 
 - **Goal:** Keep the reactive path for the rare non-teclaw race: when an
   attempted `upgrade` reports a gone bot, clean up before first-release only when
@@ -108,13 +108,13 @@
   `src/agentclaw/community/core/service_bot/services/publish_flow/release_stage.py`,
   `tests/community/core/service_bot/services/test_publish_flow_service.py`
 - **Done when:**
-  - [ ] `upgrade_release`'s `except TargetBotGoneError as e:` calls
+  - [x] `upgrade_release`'s `except TargetBotGoneError as e:` calls
         `self._build_service.retire_superseded_bot(bot_uuid)` **iff**
         `e.error_code == "DEVICE_NOT_FOUND"`, then `fallback(...)`; no destroy for
         `BOT_NOT_FOUND`.
-  - [ ] Unit: `DEVICE_NOT_FOUND` fallback → `destroy` called once then first
+  - [x] Unit: `DEVICE_NOT_FOUND` fallback → `destroy` called once then first
         release; `BOT_NOT_FOUND` fallback → no destroy, first release.
-  - [ ] `pytest tests/community/core/service_bot/services/` green.
+  - [x] `pytest tests/community/core/service_bot/services/` green.
 - **Depends on:** Task 1, Task 2
 
 ## Task 6: `[ ]` Apply the decision + cleanup to restart

@@ -293,12 +293,19 @@ class ReleaseStageRunner:
                 bot_uuid=bot_uuid,
                 bot_gone_reason="BOT_NOT_FOUND -> first release",
             )
-        except TargetBotGoneError:
+        except TargetBotGoneError as e:
             logger.warning(
-                "[ReleaseStageRunner.upgrade_release] %s upgrade target bot not "
-                "found, fallback to first release: publish_id=%s, bot_uuid=%s",
-                spec.stage.value, publish_id, bot_uuid,
+                "[ReleaseStageRunner.upgrade_release] %s upgrade target bot gone "
+                "(%s), fallback to first release: publish_id=%s, bot_uuid=%s",
+                spec.stage.value, e.error_code, publish_id, bot_uuid,
             )
+            # Secondary cleanup net (the primary decision is provider-aware and
+            # proactive): a DEVICE_NOT_FOUND means the record still lingers with a
+            # gone container, so retire it before recreating or the fresh bot
+            # would orphan it. A BOT_NOT_FOUND means the record is already gone —
+            # nothing to clean up.
+            if e.error_code == "DEVICE_NOT_FOUND":
+                self._build_service.retire_superseded_bot(bot_uuid, operator=operator)
             return await fallback(
                 publish_record=publish_record,
                 operator=operator,
