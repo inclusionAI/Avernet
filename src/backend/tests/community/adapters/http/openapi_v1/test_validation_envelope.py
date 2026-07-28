@@ -140,7 +140,9 @@ def _routing_app() -> TestClient:
     @app.exception_handler(StarletteHTTPException)
     async def _handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         if is_public_api(request):
-            return unmapped_error_response(exc.status_code, request)
+            return unmapped_error_response(
+                exc.status_code, request, headers=exc.headers
+            )
         return await http_exception_handler(request, exc)
 
     @app.get(f"{PUBLIC_API_PREFIX}/bots/known")
@@ -175,3 +177,60 @@ def test_internal_routing_errors_keep_detail_shape():
     resp = _routing_app().post("/api/bots/known")
     assert resp.status_code == 405
     assert "detail" in resp.json()
+
+
+# ----- R7/F33: protocol headers survive the envelope ------------------------
+
+
+def test_wrong_method_keeps_the_allow_header():
+    """A 405 without ``Allow`` says "wrong" without saying what would be right.
+
+    Starlette attaches the permitted methods to the exception; rebuilding the
+    response from the status code alone silently dropped them.
+    """
+    resp = _routing_app().post(f"{PUBLIC_API_PREFIX}/bots/known")
+    assert resp.status_code == 405
+    assert "GET" in resp.headers.get("allow", "")
+    # …and it is still an envelope, not the default detail body.
+    assert resp.json()["code"] == 405000
+
+
+def test_error_envelope_carries_the_trace_header():
+    """``X-Trace-ID`` mirrors ``request_id`` on failures too, not just success."""
+    from unittest.mock import patch
+
+    with patch(
+        "agentclaw.community.adapters.http.openapi_v1.responses._trace_id",
+        return_value="trace-123",
+    ):
+        resp = _routing_app().get(f"{PUBLIC_API_PREFIX}/bots/nope")
+    assert resp.headers["x-trace-id"] == "trace-123"
+    assert resp.json()["request_id"] == "trace-123"
+
+
+def test_body_describing_headers_are_not_forwarded():
+    """A stale Content-Length would describe the body we discarded."""
+    from fastapi import HTTPException
+
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        unmapped_error_response,
+    )
+
+    app = FastAPI()
+
+    @app.exception_handler(HTTPException)
+    async def _handler(request: Request, exc: HTTPException) -> JSONResponse:
+        return unmapped_error_response(exc.status_code, request, headers=exc.headers)
+
+    @app.get(f"{PUBLIC_API_PREFIX}/bots/boom")
+    async def _public():
+        raise HTTPException(
+            status_code=409,
+            headers={"Content-Length": "99999", "X-Keep-Me": "yes"},
+        )
+
+    resp = TestClient(app).get(f"{PUBLIC_API_PREFIX}/bots/boom")
+    assert resp.status_code == 409
+    assert resp.headers["x-keep-me"] == "yes"          # protocol header kept
+    assert resp.headers["content-length"] != "99999"   # body header recomputed
+    assert resp.json()["code"] == 409000               # body actually parses

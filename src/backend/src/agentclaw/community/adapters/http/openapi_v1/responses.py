@@ -19,7 +19,7 @@ from __future__ import annotations
 from functools import wraps
 from http import HTTPStatus
 from json import JSONDecodeError
-from typing import Awaitable, Callable, TypeVar
+from typing import Awaitable, Callable, Mapping, TypeVar
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -159,19 +159,29 @@ def is_public_api(request: Request) -> bool:
     return request.url.path.startswith(PUBLIC_API_PREFIX)
 
 
-def unmapped_error_response(http_status: int, request: Request) -> JSONResponse:
+def unmapped_error_response(
+    http_status: int,
+    request: Request,
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
     """Envelope for a public failure that reached an app-level handler.
 
     The message is the standard HTTP reason phrase, never the exception's own
     text: anything landing here was *not* mapped by :data:`ENVELOPE_ERRORS`, so
     its message is internal-facing and may carry identifiers or internal-language
     text that must not reach an external caller.
+
+    ``headers`` carries protocol headers the raised exception attached — the
+    ``Allow`` list on a 405, a ``WWW-Authenticate`` challenge on a 401. Those are
+    part of the answer, not decoration: a 405 without ``Allow`` tells the caller
+    they got it wrong but not what would be right.
     """
     try:
         message = HTTPStatus(http_status).phrase
     except ValueError:  # non-standard status — say nothing specific
         message = "Error"
-    return _error_response(http_status, message, request)
+    return _error_response(http_status, message, request, headers=headers)
 
 
 def error_response(http_status: int, message: str, request: Request) -> JSONResponse:
@@ -183,14 +193,53 @@ def error_response(http_status: int, message: str, request: Request) -> JSONResp
     return _error_response(http_status, message, request)
 
 
-def _error_response(http_status: int, message: str, request: Request) -> JSONResponse:
+# Headers that describe *this* response's body. JSONResponse computes them from
+# the envelope it is about to serialize, so forwarding an exception's copies
+# would describe the body we discarded — a wrong Content-Length is a broken
+# response, not a cosmetic issue.
+_BODY_HEADERS: frozenset[str] = frozenset({
+    "content-length",
+    "content-type",
+    "transfer-encoding",
+})
+
+
+def _error_headers(
+    request: Request, extra: Mapping[str, str] | None
+) -> dict[str, str]:
+    """Protocol headers to echo, plus the trace id.
+
+    The trace header is set on success by the tracer middleware; it is repeated
+    here so an error response carries it regardless of middleware ordering —
+    matching ``request_id`` in the body.
+    """
+    headers = {
+        k: v for k, v in (extra or {}).items() if k.lower() not in _BODY_HEADERS
+    }
+    trace_id = _trace_id(request)
+    if trace_id:
+        headers.setdefault("X-Trace-ID", trace_id)
+    return headers
+
+
+def _error_response(
+    http_status: int,
+    message: str,
+    request: Request,
+    *,
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
     body = Envelope(
         code=http_status * 1000,
         message=message,
         data=None,
         request_id=_trace_id(request),
     )
-    return JSONResponse(status_code=http_status, content=body.model_dump())
+    return JSONResponse(
+        status_code=http_status,
+        content=body.model_dump(),
+        headers=_error_headers(request, headers),
+    )
 
 
 def _find_request(args: tuple, kwargs: dict) -> Request | None:

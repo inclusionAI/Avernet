@@ -358,13 +358,15 @@ def _is_public_api(request: Request) -> bool:
     return is_public_api(request)
 
 
-def _public_error_envelope(status: int, request: Request) -> JSONResponse:
+def _public_error_envelope(
+    status: int, request: Request, headers: dict[str, str] | None = None,
+) -> JSONResponse:
     """Envelope a public-surface failure that reached an app-level handler."""
     from agentclaw.community.adapters.http.openapi_v1.responses import (
         unmapped_error_response,
     )
 
-    return unmapped_error_response(status, request)
+    return unmapped_error_response(status, request, headers=headers)
 
 
 @app.exception_handler(DomainError)
@@ -403,9 +405,13 @@ async def _http_exception_handler(
     Scoped by path like the other public translations; internal ``/api`` routes
     keep FastAPI's default shape, including any ``HTTPException`` they raise
     themselves.
+
+    ``exc.headers`` is forwarded because the protocol headers on these responses
+    carry the actionable part: a 405 without its ``Allow`` list tells the caller
+    they got it wrong but not what would be right.
     """
     if _is_public_api(request):
-        return _public_error_envelope(exc.status_code, request)
+        return _public_error_envelope(exc.status_code, request, exc.headers)
     return await http_exception_handler(request, exc)
 
 
