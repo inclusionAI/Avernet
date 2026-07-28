@@ -62,6 +62,16 @@ class RestartMixin:
         if error is not None:
             return error
 
+        # Guard: refuse restart when an online instance already exists for this publish
+        if stage == PublishStage.ONLINE:
+            guard_result = self._check_online_instance_guard(
+                publish_id=publish_id,
+                stage=stage,
+                log_prefix="restart_bot",
+            )
+            if guard_result is not None:
+                return guard_result
+
         # (#197) Enqueue the DURABLE restart task instead of a fire-and-forget
         # asyncio task. The handler re-resolves and runs the re-deploy through the
         # operation runner (crash-safe, idempotent).
@@ -88,6 +98,39 @@ class RestartMixin:
             "stage": stage.value,
             "bot_uuid": bot_uuid,
         }
+
+    def _check_online_instance_guard(
+        self,
+        publish_id: int,
+        stage: PublishStage,
+        log_prefix: str,
+    ):
+        """Check for an existing occupied online instance; return error dict
+        or None. Shared by ``restart_bot`` and ``execute_restart`` to avoid
+        duplicating the guard logic at both insertion points."""
+        from agentclaw.community.core.service_bot.services.publish_flow.online_instance_guard import (
+            check_existing_online_instance,
+            DuplicateOnlineInstanceError,
+        )
+        try:
+            check_existing_online_instance(
+                publish_service=self._publish_service,
+                publish_id=publish_id,
+                stage=stage,
+            )
+        except DuplicateOnlineInstanceError as exc:
+            logger.warning(
+                "[PublishFlowService.%s] rejecting: "
+                "existing online instance: publish_id=%s stage=%s detail=%s",
+                log_prefix, publish_id, stage.value, exc,
+            )
+            return {
+                "success": False,
+                "message": str(exc),
+                "error_code": "duplicate_online_instance",
+                "stage": stage.value,
+            }
+        return None
 
     def _resolve_restart_request(self, publish_id: int):
         """Validate + resolve a restart request from ``publish_id``.
@@ -281,6 +324,15 @@ class RestartMixin:
                 bot_gone_reason="BOT_NOT_FOUND -> recreate",
             )
         except TargetBotGoneError:
+            # Guard: before recreating, check for existing online instance
+            if stage_enum == PublishStage.ONLINE:
+                guard_result = self._check_online_instance_guard(
+                    publish_id=publish_id,
+                    stage=stage_enum,
+                    log_prefix="execute_restart",
+                )
+                if guard_result is not None:
+                    return guard_result
             logger.warning(
                 "[PublishFlowService.execute_restart] target bot not found, "
                 "recreating via first release: publish_id=%s bot_uuid=%s stage=%s",

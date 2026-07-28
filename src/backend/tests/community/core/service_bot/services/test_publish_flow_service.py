@@ -18,6 +18,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    TargetBotGoneError,
     operation_request_id,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
@@ -3462,3 +3463,102 @@ async def test_retry_from_built_source_enqueues_verify_flow():
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
     assert result.action == "process"
+
+
+# ── Online instance guard integration tests ─────────────────────────────────
+
+
+def test_restart_bot_rejects_when_online_instance_exists():
+    """restart_bot returns error dict when guard detects existing online instance."""
+    from agentclaw.community.core.devices.models import DeviceBindingStatus
+    from agentclaw.community.core.service_bot.services.publish_flow.online_instance_guard import (
+        DuplicateOnlineInstanceError,
+    )
+
+    publish_service = Mock()
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 42}, "migration_path": "/m"},
+    )
+    publish_service.get_publish_by_id.return_value = record
+    binding = Mock(device_id="BOT-x", status=DeviceBindingStatus.ACTIVE)
+    publish_service.get_device_binding_by_id.return_value = binding
+    svc = _pf(publish_service, Mock(), Mock(), Mock(), _arca_router())
+    svc._bot_service.get_bot = Mock(return_value={"bot_id": "bot-source"})
+
+    # Patch the guard to raise, simulating an occupied online slot.
+    import agentclaw.community.core.service_bot.services.publish_flow.online_instance_guard as guard_mod
+    original_check = guard_mod.check_existing_online_instance
+
+    def _raising_check(publish_service, publish_id, stage):
+        raise DuplicateOnlineInstanceError(
+            f"An online instance already exists for publish {publish_id} "
+            f"at stage {stage.value}. Please clean up the existing instance "
+            f"before restarting."
+        )
+
+    guard_mod.check_existing_online_instance = _raising_check
+    try:
+        result = svc.restart_bot(publish_id=1, operator="op")
+    finally:
+        guard_mod.check_existing_online_instance = original_check
+
+    assert result["success"] is False
+    assert result["error_code"] == "duplicate_online_instance"
+    assert result["stage"] == PublishStage.ONLINE.value
+    assert "online instance already exists" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_execute_restart_blocks_recreate_when_online_instance_exists():
+    """The recreate path in execute_restart is blocked by the online instance guard."""
+    from agentclaw.community.core.devices.models import DeviceBindingStatus
+    from agentclaw.community.core.service_bot.services.publish_flow.online_instance_guard import (
+        DuplicateOnlineInstanceError,
+    )
+
+    publish_service = Mock()
+    build_service = Mock()
+    # upgrade_async triggers BOT_NOT_FOUND -> recreate path
+    build_service.upgrade_async = AsyncMock(
+        side_effect=TargetBotGoneError("BOT_NOT_FOUND -> recreate"),
+    )
+    build_service.release_async = AsyncMock()
+    svc = _pf(
+        publish_service, build_service, Mock(), Mock(), _arca_router(build_service)
+    )
+
+    artifact = {"schema_version": 2, "skills": []}
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": artifact},
+    )
+    # Binding has ACTIVE status, meaning the slot is occupied
+    binding = Mock(device_id="BOT-x", status=DeviceBindingStatus.ACTIVE)
+    _setup_restart(svc, record, bot_uuid="BOT-x")
+    # Override the binding mock set by _setup_restart to carry ACTIVE status
+    svc._publish_service.get_device_binding_by_id.return_value = binding
+
+    # Patch the guard to raise
+    import agentclaw.community.core.service_bot.services.publish_flow.online_instance_guard as guard_mod
+    original_check = guard_mod.check_existing_online_instance
+
+    def _raising_check(publish_service, publish_id, stage):
+        raise DuplicateOnlineInstanceError(
+            f"An online instance already exists for publish {publish_id} "
+            f"at stage {stage.value}. Please clean up the existing instance "
+            f"before restarting."
+        )
+
+    guard_mod.check_existing_online_instance = _raising_check
+    try:
+        result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    finally:
+        guard_mod.check_existing_online_instance = original_check
+
+    assert result["success"] is False
+    assert result["error_code"] == "duplicate_online_instance"
+    assert result["stage"] == "online"
+    assert "online instance already exists" in result["message"]
+    # The recreate must NOT have been called
+    build_service.release_async.assert_not_awaited()
