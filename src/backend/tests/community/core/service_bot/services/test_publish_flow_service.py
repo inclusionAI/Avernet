@@ -481,6 +481,41 @@ async def test_execute_release_phase_offlined_online_bot_stopped_no_orphan(provi
 
 
 @pytest.mark.asyncio
+async def test_online_retire_then_first_release_is_crash_safe_on_redelivery():
+    """Crash-safety: a teclaw not-live candidate retires + first-releases. If the
+    durable task is redelivered after destroy(old) but before first-release
+    lands, the candidate now reads gone → the decision is FIRST_RELEASE (no
+    second destroy) and first-release runs again (adopting the in-doubt new bot
+    via the deploy atom). Retire happens exactly once; no double-destroy."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source',
+        ext={'binding': {'online': 99}, 'migration_path': '/m'},
+    )
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-old')
+    baas_service.resolve_container_provider.return_value = 'teclaw'
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    svc._bot_service = bot_service
+    svc._execute_first_release = AsyncMock(return_value='FIRST')
+
+    # Delivery 1: candidate STOPPED (teclaw) → retire old + first release.
+    baas_service.get_bot.return_value = {'status': 'STOPPED'}
+    assert await svc.execute_release_phase(publish_record, operator='op') == 'FIRST'
+
+    # Redelivery: the retired bot now reads gone → first release, NO second destroy.
+    baas_service.get_bot.return_value = {'status': 'RELEASED'}
+    assert await svc.execute_release_phase(publish_record, operator='op') == 'FIRST'
+
+    build_service.retire_superseded_bot.assert_called_once_with('BOT-old', operator='op')
+    assert svc._execute_first_release.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_retry_clears_retry_flag_when_restart_submit_fails():
     publish_service = Mock()
     build_service = Mock()
