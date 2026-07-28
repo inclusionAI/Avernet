@@ -60,6 +60,7 @@ pub struct GroupManagement {
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     outbound_url_guard: OutboundUrlGuard,
+    v1_openapi_create_policy: bool,
 }
 
 fn validate_service_spec_callback_urls(
@@ -104,6 +105,7 @@ impl GroupManagement {
             channel_binding_cleanup: Arc::new(NoopChannelBindingCleanupPort),
             bot_runtime: None,
             outbound_url_guard: OutboundUrlGuard::strict(),
+            v1_openapi_create_policy: false,
         }
     }
 
@@ -125,6 +127,16 @@ impl GroupManagement {
 
     pub fn with_outbound_url_guard(mut self, outbound_url_guard: OutboundUrlGuard) -> Self {
         self.outbound_url_guard = outbound_url_guard;
+        self
+    }
+
+    /// Select the OpenAPI v1 group-creation reachability policy.
+    ///
+    /// Legacy instances retain their original caller/originator checks. A
+    /// dedicated V1 instance validates collaboration from the selected driver,
+    /// after the V1 facade has verified Principal-to-driver eligibility.
+    pub fn for_v1_openapi(mut self) -> Self {
+        self.v1_openapi_create_policy = true;
         self
     }
 
@@ -751,7 +763,14 @@ impl GroupManagementService for GroupManagement {
                 .await
                 .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
             if bot.actor_kind == ActorKind::Bot {
-                if bot_id != originator {
+                if self.v1_openapi_create_policy {
+                    if bot_id != cmd.driver_bot_id {
+                        self.ensure_reachable(&cmd.driver_bot_id, &bot_id).await?;
+                    }
+                    if bot_id != cmd.driver_bot_id && bot.capabilities.visibility == "public" {
+                        subscription_targets.push(bot.clone());
+                    }
+                } else if bot_id != originator {
                     if is_human_originator {
                         let staff_no = originator.trim_start_matches("human_");
                         if bot.capabilities.visibility != "public"

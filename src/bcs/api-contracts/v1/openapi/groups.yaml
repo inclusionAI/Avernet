@@ -1,0 +1,434 @@
+ListBotGroupsPath:
+  get:
+    operationId: list_bot_groups
+    summary: List groups visible from a Bot collaboration identity.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/BotUuidPath
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: q
+        in: query
+        schema:
+          type: string
+      - name: membership
+        in: query
+        schema:
+          type: string
+          enum:
+            - all
+            - direct
+            - session_only
+          default: all
+      - name: kind
+        in: query
+        schema:
+          type: string
+          enum:
+            - normal
+            - dm
+            - all
+          default: normal
+      - name: strategy
+        in: query
+        schema:
+          type: string
+          enum:
+            - chat
+            - manager_worker
+            - state_machine
+    responses:
+      "200":
+        description: Matching groups after relation filtering and pagination.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/GroupPageEnvelope
+      "400":
+        description: Invalid filter combination.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the target Bot identity.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Target Bot is missing.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+CreateGroupPath:
+  post:
+    operationId: create_group
+    summary: Create a collaboration group or direct-message group.
+    x-avernet-security:
+      principal: required
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/CreateCollaborationGroup"
+              - $ref: "#/CreateDirectMessageGroup"
+            discriminator:
+              propertyName: group_kind
+    responses:
+      "201":
+        description: Created group detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/CreatedGroupDetailEnvelope
+      "400":
+        description: Invalid group definition.
+        x-error-codes:
+          - invalid_request
+          - invalid_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: A selected Bot is not collaboration-eligible.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: A referenced Bot Actor is missing.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Group conflicts with an existing resource.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+GroupPath:
+  get:
+    operationId: get_group
+    summary: Get target-independent group detail.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+    responses:
+      "200":
+        description: Group detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/GroupDetailEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot read the group.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group is missing or intentionally hidden.
+        x-error-codes:
+          - group_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  patch:
+    operationId: update_group
+    summary: Update the explicitly mutable group properties.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/UpdateGroup"
+    responses:
+      "200":
+        description: Updated group detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/GroupDetailEnvelope
+      "400":
+        description: Invalid patch.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the group.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group is missing or intentionally hidden.
+        x-error-codes:
+          - group_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Patch conflicts with current group state.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: delete_group
+    summary: Delete a group using the authenticated Principal as caller.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+    responses:
+      "200":
+        description: Idempotent delete result.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/DeleteResultEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot delete the group.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: The group kind or state cannot be deleted.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+CreateParticipant:
+  type: object
+  additionalProperties: false
+  required:
+    - actor_id
+    - role
+  properties:
+    actor_id:
+      type: string
+    role:
+      type: string
+      enum:
+        - driver
+        - consultant
+        - manager
+        - worker
+        - observer
+
+CreateDeliveryPolicy:
+  $ref: ../domain-models.yaml#/DeliveryPolicy
+
+CreateChatConfiguration:
+  type: object
+  additionalProperties: false
+  required:
+    - strategy
+    - delivery_policy
+  properties:
+    strategy:
+      const: chat
+    delivery_policy:
+      $ref: "#/CreateDeliveryPolicy"
+
+CreateManagerWorkerConfiguration:
+  type: object
+  additionalProperties: false
+  required:
+    - strategy
+  properties:
+    strategy:
+      const: manager_worker
+
+CreateStateMachineConfiguration:
+  type: object
+  additionalProperties: false
+  required:
+    - strategy
+    - definition
+    - participant_bindings
+  properties:
+    strategy:
+      const: state_machine
+    definition:
+      $ref: ../domain-models.yaml#/StateMachineDefinitionReference
+    participant_bindings:
+      type: array
+      items:
+        $ref: ../domain-models.yaml#/StateMachineParticipantBinding
+
+CreateCollaborationConfiguration:
+  oneOf:
+    - $ref: "#/CreateChatConfiguration"
+    - $ref: "#/CreateManagerWorkerConfiguration"
+    - $ref: "#/CreateStateMachineConfiguration"
+  discriminator:
+    propertyName: strategy
+
+CreateCollaborationGroup:
+  type: object
+  additionalProperties: false
+  required:
+    - group_kind
+    - driver_bot_uuid
+    - participants
+    - collaboration
+  properties:
+    group_kind:
+      const: normal
+    name:
+      type: string
+    context:
+      type: string
+    visibility:
+      type: string
+      enum:
+        - private
+        - public
+      default: private
+    driver_bot_uuid:
+      type: string
+    participants:
+      type: array
+      items:
+        $ref: "#/CreateParticipant"
+    collaboration:
+      $ref: "#/CreateCollaborationConfiguration"
+
+CreateDirectMessageGroup:
+  type: object
+  additionalProperties: false
+  required:
+    - group_kind
+    - target_actor_id
+  properties:
+    group_kind:
+      const: dm
+    target_actor_id:
+      type: string
+      description: First-phase target must resolve to a Bot Actor.
+    name:
+      type: string
+    context:
+      type: string
+
+UpdateGroup:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    name:
+      type: string
+    context:
+      type: string
+    visibility:
+      type: string
+      enum:
+        - private
+        - public
+    delivery_policy:
+      $ref: ../domain-models.yaml#/DeliveryPolicy

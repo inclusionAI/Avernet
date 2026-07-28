@@ -1,0 +1,20 @@
+openapi: 3.1.0
+info:
+  title: BCN OpenAPI
+  version: 1.0.0
+  description: Versioned public contract for Bot Collaboration Network resources.
+paths:
+  /openapi/v1/bots/collaboration/{bot_uuid}/groups:
+    $ref: ./openapi/groups.yaml#/ListBotGroupsPath
+  /openapi/v1/groups:
+    $ref: ./openapi/groups.yaml#/CreateGroupPath
+  /openapi/v1/groups/{group_id}:
+    $ref: ./openapi/groups.yaml#/GroupPath
+components:
+  schemas:
+    GroupSummary:
+      $ref: ./domain-models.yaml#/GroupSummary
+    GroupDetail:
+      $ref: ./domain-models.yaml#/GroupDetail
+    ErrorEnvelope:
+      $ref: ./shared.yaml#/ErrorEnvelope

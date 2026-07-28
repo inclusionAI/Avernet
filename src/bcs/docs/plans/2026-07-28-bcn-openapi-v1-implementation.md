@@ -8,6 +8,23 @@
 
 **Tech Stack:** Rust 1.91, Axum 0.8, Tokio, Serde, `async-trait`, Python 3.13/PyYAML for contract tooling, FastAPI/Pydantic in Gateway, Cargo tests, Pytest.
 
+## Current implementation increment
+
+The first executable increment intentionally contains only the five Group
+resource operations:
+
+- `GET /openapi/v1/bots/collaboration/{bot_uuid}/groups`
+- `POST /openapi/v1/groups`
+- `GET /openapi/v1/groups/{group_id}`
+- `PATCH /openapi/v1/groups/{group_id}`
+- `DELETE /openapi/v1/groups/{group_id}`
+
+The checked-in contract, versioned Application API, Group-domain facade, and
+`bcs-api-http` routes implement this slice. The remaining operations in this
+plan are later additive increments. The HTTP adapter accepts only a Principal
+returned by an injected verifier; production bootstrap mounting remains
+blocked until Gateway and BCN agree on the signed Principal transport.
+
 ---
 
 ## Execution constraints
@@ -71,8 +88,8 @@ EXPECTED = {
     ("patch", "/openapi/v1/groups/{group_id}"),
     ("delete", "/openapi/v1/groups/{group_id}"),
     ("post", "/openapi/v1/groups/{group_id}/participants"),
-    ("patch", "/openapi/v1/groups/{group_id}/participants/{bot_uuid}"),
-    ("delete", "/openapi/v1/groups/{group_id}/participants/{bot_uuid}"),
+    ("patch", "/openapi/v1/groups/{group_id}/participants/{actor_id}"),
+    ("delete", "/openapi/v1/groups/{group_id}/participants/{actor_id}"),
     ("post", "/openapi/v1/groups/{group_id}/sessions"),
     ("get", "/openapi/v1/groups/{group_id}/sessions"),
     ("get", "/openapi/v1/sessions/{session_id}"),
@@ -134,6 +151,65 @@ For every operation, define:
 - stable ordering and `offset`/`limit` for list operations;
 - `additionalProperties: false` for request objects unless extension data is an
   explicit field.
+
+The V1 Group schemas must also enforce these compatibility decisions:
+
+- DM creation keeps the existing `target_actor_id` wire name and does not
+  introduce `target_bot_uuid`;
+- `target_actor_id` is present only on the `group_kind=dm` request variant;
+- the first-phase target must resolve to a Bot Actor;
+- V1 exposes `delivery_policy.bot_final_delivery` with only
+  `send_to_driver` and `inject_observers`;
+- V1 request and response schemas contain neither `routing_policy.mode` nor
+  `routing_policy.sender_routes`;
+- no untyped `serde_json::Value` routing policy is admitted through the
+  Contract.
+
+Define the Group list query parameters exactly as:
+
+```text
+offset
+limit
+q
+membership = all | direct | session_only
+kind       = normal | dm | all
+strategy   = chat | manager_worker | state_machine
+```
+
+`membership` defaults to `all`, `kind` defaults to `normal`, and an omitted
+`strategy` means no strategy filter. Reject `kind=dm` combined with strategy.
+For `kind=all&strategy=...`, exclude DM and return matching normal Groups.
+Apply relation filtering, strategy/kind filtering, deduplication, ordering,
+and only then pagination.
+
+Model list and detail responses separately:
+
+```text
+GroupSummary
+├── NormalGroupSummary          discriminator kind=normal
+└── DirectMessageGroupSummary   discriminator kind=dm
+
+GroupDetail
+├── CollaborationGroupDetail   discriminator kind=normal
+│   └── CollaborationConfiguration
+│       ├── ChatConfiguration          discriminator strategy=chat
+│       ├── ManagerWorkerConfiguration discriminator strategy=manager_worker
+│       └── StateMachineConfiguration  discriminator strategy=state_machine
+└── DirectMessageGroupDetail   discriminator kind=dm
+```
+
+Every list item includes the target Bot's `membership=direct|session_only`.
+Direct wins when both relationships exist. A DM summary may expose a
+target-relative `peer_actor`; a DM detail must instead return the two
+participants symmetrically because `GET /groups/{group_id}` has no target-Bot
+view. DM schemas must not expose `strategy`, `driver_bot_uuid`,
+`delivery_policy`, or the internal `dm_pair_key`.
+
+The normal Group detail returns complete Participants and a typed
+`collaboration` object. Chat exposes only
+`delivery_policy.bot_final_delivery`; ManagerWorker role assignment is read
+from Participants; StateMachine exposes a definition reference and participant
+bindings, but not inline source YAML, runs, node runs, or message history.
 
 Use this root shape:
 
@@ -211,6 +287,7 @@ fn bot_principal_uses_the_bcn_bot_uuid() {
 #[test]
 fn human_principal_does_not_claim_a_bot_identity() {
     let principal = Principal::human(
+        "human-actor-1",
         AuthenticatedUser {
             id: "user-1".into(),
             username: "alice".into(),
@@ -221,6 +298,7 @@ fn human_principal_does_not_claim_a_bot_identity() {
         [],
     );
     assert_eq!(principal.bot_uuid(), None);
+    assert_eq!(principal.actor_id(), "human-actor-1");
     assert_eq!(principal.authenticated_user().unwrap().id, "user-1");
 }
 ```
@@ -251,6 +329,7 @@ pub enum Principal {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HumanPrincipal {
+    pub actor_id: String,
     pub subject: AuthenticatedUser,
     pub tenant: String,
     pub scopes: BTreeSet<String>,
@@ -263,6 +342,11 @@ pub struct BotPrincipal {
     pub scopes: BTreeSet<String>,
 }
 ```
+
+`Principal::actor_id()` returns `HumanPrincipal.actor_id` for Human and
+`BotPrincipal.bot_uuid` for Bot. The Gateway identity contract owns Human
+`actor_id` normalization; BCN routes must not construct it from username or
+other display fields.
 
 Do not add Provider, ServiceKey, Admin, Integration, Public, or
 InternalService variants to this V1 enum.
@@ -352,9 +436,9 @@ pub trait GroupService: Send + Sync {
         &self,
         command: ListBotGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError>;
-    async fn create(&self, command: CreateGroup) -> Result<Group, ApplicationError>;
-    async fn get(&self, query: GetGroup) -> Result<Group, ApplicationError>;
-    async fn update(&self, command: UpdateGroup) -> Result<Group, ApplicationError>;
+    async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError>;
+    async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError>;
+    async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError>;
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError>;
     async fn add_participant(
         &self,
@@ -374,6 +458,52 @@ pub trait GroupService: Send + Sync {
 Define the remaining traits with one method per Contract operation. Reuse pure
 `bcs-domain` entities where their semantics match; introduce application
 result types when a response needs idempotency or pagination metadata.
+
+Define distinct V1 application projections for `GroupSummary` and
+`GroupDetail`; do not return the current flat `bcs_domain::Group` directly.
+Use closed enums for both discriminator levels so invalid combinations cannot
+be constructed:
+
+```rust
+pub enum GroupSummary {
+    Normal(NormalGroupSummary),
+    DirectMessage(DirectMessageGroupSummary),
+}
+
+pub enum GroupDetail {
+    Collaboration(CollaborationGroupDetail),
+    DirectMessage(DirectMessageGroupDetail),
+}
+
+pub enum CollaborationConfiguration {
+    Chat(ChatConfiguration),
+    ManagerWorker(ManagerWorkerConfiguration),
+    StateMachine(StateMachineConfiguration),
+}
+```
+
+The Group list projection is target-Bot-aware and carries membership. The
+Group detail projection is target-independent and never carries membership or
+a relative DM peer.
+
+Do not reuse the full Legacy `RoutingPolicy` as the V1 Application contract.
+Define a narrow V1 type:
+
+```rust
+pub struct GroupDeliveryPolicy {
+    pub bot_final_delivery: BotFinalDelivery,
+}
+
+pub enum BotFinalDelivery {
+    SendToDriver,
+    InjectObservers,
+}
+```
+
+The DM create command keeps `target_actor_id`. It must not expose a duplicate
+`target_bot_uuid` alias. Document that the persistence boundary stores the
+caller and target as two participants and derives the canonical
+`dm_pair_key`; there is no `target_actor_id` database column.
 
 **Step 4: Keep HTTP DTOs out**
 
@@ -419,7 +549,12 @@ git commit -m "feat(bcs): add OpenAPI v1 application service contracts"
 
 Cover:
 
-- Group manager may manage Group and Participants.
+- Human and Bot actors receive identical Group management permissions when
+  they hold the same originator/driver/management role.
+- A Human creator that is not in canonical Group Participants has audit-only
+  `created_by_principal` and does not receive originator or Group management
+  permission.
+- Owning the driver Bot does not let a Human act as that driver.
 - Direct Participant may read but not manage.
 - Session-only Participant may read only the relevant Session/parent projection.
 - Bot may act only as its own `bot_uuid`.
@@ -482,11 +617,57 @@ git commit -m "feat(bcs): implement v1 resource authorization"
 Test all eight Group/GroupParticipant operations, including:
 
 - `membership=all|direct|session_only`;
+- `kind=normal|dm|all`;
+- `strategy=chat|manager_worker|state_machine`;
+- direct membership wins when a Bot has both direct and session-only
+  relationships, and the Group is emitted once;
+- all filters and deduplication execute before pagination and produce the
+  correct `total`;
+- `kind=dm&strategy=...` returns invalid input, while
+  `kind=all&strategy=...` excludes DM;
+- list results serialize `NormalGroupSummary` and
+  `DirectMessageGroupSummary` through the `kind` discriminator;
+- normal summaries include strategy; DM summaries omit strategy and may
+  include a target-relative peer;
+- Group detail serializes `CollaborationGroupDetail` or
+  `DirectMessageGroupDetail` through the `kind` discriminator;
+- normal detail serializes Chat, ManagerWorker, and StateMachine
+  collaboration configurations through the nested `strategy` discriminator;
+- DM detail returns exactly two symmetric Participants and omits peer,
+  strategy, driver, delivery policy, and `dm_pair_key`;
 - creation derives caller identity from Principal rather than request fields;
-- update uses an explicit allow-list of mutable fields;
+- DM creation accepts `target_actor_id`, rejects a non-Bot target in phase one,
+  and creates or reuses the same Group for the same unordered Actor pair;
+- DM persistence writes both Actors as participants and derives
+  `dm_pair_key=min(a,b) + "|" + max(a,b)` without requiring a
+  `target_actor_id` column;
+- Human and Bot Principals may select any collaboration-eligible
+  `driver_bot_uuid`; ownership and `driver == principal` are not required;
+- creation rejects a request-supplied originator and derives
+  `originator_actor_id` only after canonical Participant validation:
+
+  ```text
+  principal.actor_id in canonical_participants
+      ? principal.actor_id
+      : driver_bot_uuid
+  ```
+
+- Human and Bot originators exercise the same Group management permissions;
+- a Human creator omitted from Participants cannot manage the Group, even when
+  the Human owns the driver Bot;
+- creation maps `delivery_policy.bot_final_delivery` into the existing
+  `RoutingPolicy.default_bot_final_delivery`, with internal `mode=Hybrid` and
+  an empty `sender_routes`;
+- Group projections expose only `delivery_policy.bot_final_delivery`, never
+  Legacy `mode` or `sender_routes`;
+- update uses an explicit allow-list of mutable fields and changing
+  `bot_final_delivery` preserves any stored Legacy `mode` and `sender_routes`;
 - delete is idempotent;
 - Participant duplicate/add/remove conflicts;
-- role changes preserve driver/manager invariants;
+- GroupParticipant paths and commands use `actor_id` and support Human/Bot
+  Actors;
+- role changes and removals preserve originator/driver/manager invariants
+  without branching on Actor kind; ordinary roles remain removable;
 - unauthorized access returns `ApplicationError::Forbidden`;
 - invisible resources return the Contract-approved not-found response.
 
@@ -506,6 +687,12 @@ The facade calls the V1 authorizer, then delegates to existing
 `GroupManagementService`, `GroupQueryService`, and
 `SessionManagementService`. Do not call Legacy handlers and do not copy their
 HTTP error mapping.
+
+Add an explicit compatibility mapper between V1 `GroupDeliveryPolicy` and the
+existing full `RoutingPolicy`. For a new V1 Group, initialize hidden Legacy
+fields to `mode=Hybrid` and `sender_routes={}`. For a V1 update, load the full
+stored policy and mutate only `default_bot_final_delivery`; do not replace the
+whole policy with a V1 projection.
 
 **Step 4: Run tests**
 
@@ -561,8 +748,8 @@ Cover all nine Session/SessionParticipant operations:
 - read/update/delete Session;
 - completion only from Running and idempotent after Completed;
 - add/update/delete Participant;
-- Human is never enrolled as a Participant and may only manage an authorized
-  target Bot's membership;
+- Human is never automatically enrolled as a SessionParticipant and may only
+  manage an authorized target Bot's Session membership;
 - completed Session rejects mutable operations;
 - Session belongs to the Group in the path;
 - a caller cannot replace its Principal or manage an unauthorized `bot_uuid`.
@@ -1303,15 +1490,17 @@ git commit -m "ci: generate and compatibility-check BCN OpenAPI"
 
 Cover at least:
 
-1. Human creates Group, manages Participant, creates Session, reads history,
-   completes Session.
-2. Bot friendship request lifecycle using BotPrincipal.
-3. Human manages an owned Bot's Friendship without being treated as that Bot.
-4. Invitation create/accept for Group and Session.
-5. Cross-tenant and cross-resource attempts are rejected.
-6. Missing/tampered Gateway Principal is rejected.
-7. `POST /openapi/v1/sessions/{id}/messages` remains absent.
-8. Representative Legacy chat/message/CLI stories still pass.
+1. Human creates Group while joining as a Participant, becomes originator,
+   manages Participants, creates Session, reads history, and completes Session.
+2. Human creates Group without joining; originator falls back to driver and
+   the Human cannot manage the Group even when the Human owns that driver Bot.
+3. Bot friendship request lifecycle using BotPrincipal.
+4. Human manages an owned Bot's Friendship without being treated as that Bot.
+5. Invitation create/accept for Group and Session.
+6. Cross-tenant and cross-resource attempts are rejected.
+7. Missing/tampered Gateway Principal is rejected.
+8. `POST /openapi/v1/sessions/{id}/messages` remains absent.
+9. Representative Legacy chat/message/CLI stories still pass.
 
 **Step 2: Run the focused E2E and verify failure**
 

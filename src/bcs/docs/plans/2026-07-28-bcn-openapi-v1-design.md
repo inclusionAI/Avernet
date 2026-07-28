@@ -168,21 +168,25 @@ BCN 新 API 只接受投影后的领域 Principal：
 
 ```text
 Principal
-├── Human { authenticated_user, tenant, scopes }
-└── Bot   { bot_uuid, tenant, scopes }
+├── Human { actor_id, authenticated_user, tenant, scopes }
+└── Bot   { actor_id = bot_uuid, bot_uuid, tenant, scopes }
 ```
 
 约束如下：
 
 - Gateway BotPrincipal 中的 Bot UUID 必须与 BCN `bot_uuid` 属于同一标识空间。
-- Human Principal 不分配 `actor_id` 或 `bot_uuid`。Human 管理目标 Bot 时，
-  请求中的 `bot_uuid` 必须由 BCN 根据权威 `created_by` 关系授权。
+- 每个 Principal 都提供规范化的 `actor_id`，供 BCN 统一执行 Participant
+  和 Group role 授权。Human `actor_id` 不能当作 `bot_uuid` 使用，也不代表
+  Human 可以作为其管理的 Bot 发言。
+- Human Principal 参与 Bot 资源关系管理时，请求中的 `bot_uuid` 必须由 BCN
+  根据权威 `created_by` 关系授权；该关系不改变 Human 的 `actor_id`。
 - BCN 不接触外部原始 Cookie、Bearer Token 或 AgentPass。
 - ProviderPrincipal、ServiceKey 和 InternalService 不在第一阶段 union 中。
 
 Gateway `UserPrincipal.subject.id` 与 BCN Bot `created_by` 必须采用同一稳定身份
 空间，或由明确的身份映射契约转换。这是上线前置项，不应在业务代码中用
-`username` 或展示字段 fallback 掩盖。
+`username` 或展示字段 fallback 掩盖。Human `actor_id` 的规范化规则也必须由
+同一身份契约定义，不能由各个 Route 自行拼接。
 
 ### 6.3 Principal 如何进入 BCN
 
@@ -239,10 +243,34 @@ Action 是 Application 层概念，不暴露 HTTP 状态码。
 
 ### 7.2 关键授权原则
 
-- Group 和 Session 的读取、管理权限从 creator、manager、直接 Participant
-  和 SessionParticipant 关系推导。
-- Participant 自身可以退出；manager/creator 可以管理普通 Participant；不能
-  通过删除破坏 driver 等领域不变量。
+- Group 和 Session 的读取、管理权限从 originator、driver、领域管理角色、
+  直接 Participant 和 SessionParticipant 关系推导。授权比较规范化
+  `actor_id`，不因 Actor 是 Human 或 Bot 而采用不同的 Group 管理规则。
+- Group 创建请求可以选择任意对当前 Principal“可协作”的
+  `driver_bot_uuid`。Bot 所有权只是可协作关系的一种来源，不要求 Human
+  必须管理 driver，也不要求 BotPrincipal 自身必须成为 driver。
+- V1 不接受 request-supplied `originator`。Application 在完成 Participant
+  校验、补齐 driver 并形成 canonical Participants 后按以下规则推导：
+
+  ```text
+  if principal.actor_id in canonical_participants:
+      originator_actor_id = principal.actor_id
+  else:
+      originator_actor_id = driver_bot_uuid
+  ```
+
+- `originator_actor_id` 可以是 Human 或 Bot。originator 与 driver 都拥有
+  Group 管理权限；增删成员等管理授权只比较 Actor 和角色，不允许 Human
+  冒充其管理的 Bot。
+- `created_by_principal` 独立记录创建审计信息，不自动授予 Group 管理权限。
+  Human 创建 Group 但未加入 canonical Participants 时，Human 不具备
+  originator 权限，只有 fallback 后的 driver 具备对应权限。
+- Participant 自身可以退出；originator、driver、ManagerWorker manager 等
+  持有必需角色或 Group 级管理职责的 Actor 在转移职责前不能被移除。该不变量
+  同样不区分 Human 与 Bot；consultant、observer、worker 等普通角色仍可移除。
+- Bot 消息的默认响应和 coordinator 路由使用 driver/lead role，不使用
+  originator。V1 不依赖 `selector.type=originator`；Legacy WS 协议的兼容和
+  废弃另行处理。
 - Invitation 创建者必须有目标 Group/Session 的管理权限；Bot 可以为自身接受
   邀请，Human 只能为 `created_by` 关系确认的目标 `bot_uuid` 接受邀请。
 - Friendship 仅存在于两个 Bot 之间。Bot 可以管理自身关系；Human 可以
@@ -274,18 +302,158 @@ Action 是 Application 层概念，不暴露 HTTP 状态码。
 | DELETE | `/openapi/v1/groups/{group_id}` | 删除 Group |
 
 `GET /bots/collaboration/{bot_uuid}/groups` 使用
-`membership=all|direct|session_only` 过滤，默认 `all`。`session_only` 是关系
-过滤条件，不单独设计成子资源。
+以下查询参数：
+
+```text
+offset
+limit
+q
+membership = all | direct | session_only
+kind       = normal | dm | all
+strategy   = chat | manager_worker | state_machine
+```
+
+`membership` 默认 `all`，`kind` 默认 `normal`，`strategy` 省略时不过滤。
+`session_only` 是关系过滤条件，不单独设计成子资源。同一个 Bot 同时具有直接
+GroupParticipant 和 SessionParticipant 关系时按 `direct` 返回；过滤、去重必须
+发生在分页之前。`kind=dm` 与任意 `strategy` 组合非法并返回 400；
+`kind=all` 与 `strategy` 组合时只返回匹配 strategy 的 normal Group，DM 被排除。
+
+创建 Group 时，`driver_bot_uuid` 是请求选择的协作驱动 Bot，只要求对当前
+Principal 可协作，不要求所有权。请求不包含 `originator_actor_id`；
+Application 根据规范化 Principal 和 canonical Participants 推导并返回该字段。
+originator 可以是 Human 或 Bot，但 Bot 消息的默认响应者始终由
+`driver_bot_uuid`/lead role 决定。
+
+DM 创建继续使用 Legacy 已有的 `target_actor_id`，不改名为
+`target_bot_uuid`。该字段只属于 `group_kind=dm` 的创建请求；第一阶段要求它
+解析到 Bot Actor，但 Actor 命名保留未来扩展空间。`target_actor_id` 不作为独立
+列落库：Application 将 caller 和 target 写成两个 GroupParticipant，并将双方
+规范化 `actor_id` 按字典序组成 `dm_pair_key=min(a,b) + "|" + max(a,b)`。
+`bcs_groups` 保存 `group_kind=dm`、`dm_pair_key`、`driver_bot` 和 `originator`，
+`bcs_group_participants` 保存双方 `actor_id`（沿用历史列名 `bot_uuid`）及
+`actor_kind`。`(env, dm_pair_key)` 唯一约束保证同一对 Actor 复用同一个 DM
+Group，因此数据库不保存有方向的“target”关系。
+
+V1 不暴露 Legacy `RoutingPolicy` 的 `mode` 和 `sender_routes`。新 Contract
+使用收窄后的投递模型：
+
+```yaml
+delivery_policy:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_final_delivery
+  properties:
+    bot_final_delivery:
+      type: string
+      enum:
+        - send_to_driver
+        - inject_observers
+```
+
+`delivery_policy` 只表达 Bot 最终输出如何投递，不再称为完整的
+`routing_policy`。V1 创建 Group 时，Application 将
+`delivery_policy.bot_final_delivery` 映射到 Legacy
+`RoutingPolicy.default_bot_final_delivery`，内部 `mode` 固定为 `hybrid`，
+`sender_routes` 固定为空。V1 查询只投影 `bot_final_delivery`；V1 PATCH
+只修改 `default_bot_final_delivery`，必须保留存量 Group 的 `mode` 和
+`sender_routes`，不能因 V1 未暴露而清空。Legacy API、共享领域对象、消息路由
+和数据库继续保留完整 `RoutingPolicy`，其下线或数据清理不属于第一阶段。
+
+#### 8.1.1 列表投影：GroupSummary
+
+列表接口返回轻量 `GroupSummary`，不返回完整 `GroupDetail`。`GroupSummary`
+以 `kind` 为 discriminator：
+
+```text
+GroupSummary
+├── NormalGroupSummary          kind=normal
+└── DirectMessageGroupSummary   kind=dm
+```
+
+公共字段为：
+
+```text
+group_id
+version
+name
+kind
+status
+visibility
+membership = direct | session_only
+originator_actor_id
+participant_count
+created_at
+updated_at
+```
+
+`membership` 是路径中 `bot_uuid` 与 Group 的关系，不是 Group 聚合的固有属性。
+NormalGroupSummary 额外返回 `driver_bot_uuid` 和
+`strategy=chat|manager_worker|state_machine`。DirectMessageGroupSummary
+不返回 strategy、driver 或 delivery policy，而是返回相对于路径
+`bot_uuid` 的 `peer_actor`。列表不内嵌完整 Participants、StateMachine
+definition/bindings、delivery policy 或运行状态。
+
+#### 8.1.2 详情投影：GroupDetail
+
+`GET /openapi/v1/groups/{group_id}` 返回完整 `GroupDetail`，不复用
+`GroupSummary`。详情采用两层 discriminated union：
+
+```text
+GroupDetail
+├── CollaborationGroupDetail   kind=normal
+│   └── collaboration
+│       ├── ChatConfiguration          strategy=chat
+│       ├── ManagerWorkerConfiguration strategy=manager_worker
+│       └── StateMachineConfiguration  strategy=state_machine
+└── DirectMessageGroupDetail   kind=dm
+```
+
+两种 Group 的公共详情字段为：
+
+```text
+group_id
+version
+name
+kind
+status
+visibility
+context
+originator_actor_id
+participants
+created_at
+updated_at
+```
+
+详情不返回列表专用的 `membership`。CollaborationGroupDetail 额外返回
+`driver_bot_uuid` 和 strategy 专属的 `collaboration` 子对象：
+
+- ChatConfiguration 返回 `strategy=chat` 和
+  `delivery_policy.bot_final_delivery`；
+- ManagerWorkerConfiguration 返回 `strategy=manager_worker`，Manager 和
+  Worker 从完整 Participants 的 role 识别；
+- StateMachineConfiguration 返回 `strategy=state_machine`、definition ref
+  和 participant bindings，不内嵌完整 YAML、StateMachineRun、NodeRun 或
+  Session 消息历史。
+
+DirectMessageGroupDetail 对称返回恰好两个完整 Participants，不返回相对调用者
+的 `peer_actor`，因为详情路径没有 `bot_uuid` 视角，Human 也可能通过资源关系
+查询该 Group。DM 详情不返回 collaboration、strategy、delivery policy 或内部
+`dm_pair_key`。数据库为兼容保留的 driver、默认 strategy 和 pair key 不能直接
+投影成 DM 的 OpenAPI 业务能力。
 
 ### 8.2 GroupParticipant
 
 | Method | Path | Operation |
 | --- | --- | --- |
 | POST | `/openapi/v1/groups/{group_id}/participants` | 添加 GroupParticipant |
-| PATCH | `/openapi/v1/groups/{group_id}/participants/{bot_uuid}` | 修改 Participant 可变属性 |
-| DELETE | `/openapi/v1/groups/{group_id}/participants/{bot_uuid}` | 移除 Participant 或自行退出 |
+| PATCH | `/openapi/v1/groups/{group_id}/participants/{actor_id}` | 修改 Participant 可变属性 |
+| DELETE | `/openapi/v1/groups/{group_id}/participants/{actor_id}` | 移除 Participant 或自行退出 |
 
-Group 详情包含 Participants，第一阶段不增加独立列表接口。
+Group 详情包含 Participants，第一阶段不增加独立列表接口。GroupParticipant
+可以是 Human 或 Bot，因此路径使用 `actor_id`。管理和必需角色保护规则只依据
+规范化 Actor 身份和 Group role，不依据 Actor 类型。
 
 ### 8.3 Session
 
@@ -355,13 +523,13 @@ Join 两套 endpoint。
 | V1 OpenAPI | Legacy 接口/能力 | 映射与功能差异 | V1 资源授权 |
 | --- | --- | --- | --- |
 | `GET /bots/collaboration/{bot_uuid}/groups` | `GET /bots/{id}/groups` | 同类查询；V1 使用统一分页和 `membership` 过滤。Legacy 路由不要求认证，V1 不允许匿名枚举 | Bot 仅查自身；Human 仅查 `created_by` 关系确认的 Bot |
-| `POST /groups` | `POST /groups` | 复用创建能力；不复用 Legacy DTO、可选 caller 或 Human Actor 行为 | 必须有 Principal；Bot 为自身创建，Human 只能以已授权的目标 Bot 管理身份创建 |
-| `GET /groups/{group_id}` | `GET /groups/{id}` | 复用详情查询；Legacy 当前公开读取，V1 改为关系授权读取 | Group manager、直接 Participant，或符合 Session 可见性规则的调用者 |
-| `PATCH /groups/{group_id}` | `PUT /groups/{id}/label`、`PUT /visibility`、`PATCH /settings` 等字段型路由 | V1 聚合明确允许修改的基础字段；CollaborationDefinition、workspace、routing-policy 和状态转换不因该 PATCH 自动进入 V1 | creator/manager；YAML 必须锁定字段 allowlist |
-| `DELETE /groups/{group_id}` | `DELETE /groups/{id}?bot_id=...` | 复用删除能力；V1 删除 request-supplied caller，不再信任 `bot_id` 查询参数 | creator/manager；Bot 或 Human-owned-Bot 关系从 Principal 推导 |
-| `POST /groups/{group_id}/participants` | `POST /groups/{id}/members` | `members` 统一命名为 `participants`；复用角色和领域不变量 | creator/manager；Human 只能管理其有权管理的目标 Bot |
-| `PATCH /groups/{group_id}/participants/{bot_uuid}` | `PUT /groups/{gid}/participants/{aid}/mode` | HTTP method、标识名和响应 Envelope 统一；第一阶段只开放明确的 Participant 可变字段 | manager，或领域规则允许时由目标 Bot 修改自身状态 |
-| `DELETE /groups/{group_id}/participants/{bot_uuid}` | `DELETE /groups/{id}/members/{bot_uuid}` | 路径术语统一；保留不能破坏 driver/coordinator 不变量的规则 | manager 或目标 Bot 自行退出；Human 需有目标 Bot 管理权 |
+| `POST /groups` | `POST /groups` | 复用创建能力；driver 只要求对 Principal 可协作；请求不能覆盖 caller/originator，Application 从 canonical Participants 推导 originator。DM 继续使用 `target_actor_id`；V1 将投递配置收窄为 `delivery_policy.bot_final_delivery` | 必须有 Principal；请求者在 canonical Participants 中时成为 originator，否则 originator fallback 为 driver |
+| `GET /groups/{group_id}` | `GET /groups/{id}` | 复用详情查询；Legacy 当前公开读取，V1 改为关系授权读取 | originator、driver、直接 Participant，或符合 Session 可见性规则的调用者 |
+| `PATCH /groups/{group_id}` | `PUT /groups/{id}/label`、`PUT /visibility`、`PATCH /settings` 等字段型路由 | V1 聚合明确允许修改的基础字段和 `delivery_policy.bot_final_delivery`；修改投递方式时保留存量 `mode`、`sender_routes`。CollaborationDefinition、workspace 和状态转换不因该 PATCH 自动进入 V1 | originator、driver 或领域管理角色；YAML 必须锁定字段 allowlist |
+| `DELETE /groups/{group_id}` | `DELETE /groups/{id}?bot_id=...` | 复用删除能力；V1 删除 request-supplied caller，不再信任 `bot_id` 查询参数 | originator、driver 或领域管理角色；Human/Bot 使用相同 Actor-role 规则 |
+| `POST /groups/{group_id}/participants` | `POST /groups/{id}/members` | `members` 统一命名为 `participants`；支持 Human/Bot Actor，复用角色和领域不变量 | originator、driver 或领域管理角色，不按 Actor 类型分支 |
+| `PATCH /groups/{group_id}/participants/{actor_id}` | `PUT /groups/{gid}/participants/{aid}/mode` | HTTP method、Actor 标识名和响应 Envelope 统一；第一阶段只开放明确的 Participant 可变字段 | Group manager，或领域规则允许时由目标 Actor 修改自身状态 |
+| `DELETE /groups/{group_id}/participants/{actor_id}` | `DELETE /groups/{id}/members/{bot_uuid}` | 路径术语和 Actor 标识统一；必需角色转移前不能移除，普通角色可以退出或被管理者移除 | originator、driver、领域管理角色或目标 Actor 自行退出；不区分 Human/Bot |
 
 #### Session 与 SessionParticipant
 
@@ -407,7 +575,7 @@ Join 两套 endpoint。
 | Principal | 多种 Route 自行构造 `CallerContext`/actor string，行为不完全统一 | Gateway 形成规范化 `HumanPrincipal` 或 `BotPrincipal`，BCN V1 Adapter 只读取已验证 Principal |
 | 匿名读取 | 部分 GET 允许 Public/无认证，例如 Group、Session 详情及部分 message history | 第一阶段没有 Public Principal，27 个 operation 全部要求已认证 Principal |
 | caller 参数 | 个别接口使用 query/body 中的 `bot_id`、`from_bot`、`bot_uuid` 辅助决定调用身份 | path/body 中的 `bot_uuid` 只是目标资源；不能覆盖 Principal |
-| Human 与 Bot | 部分 Legacy 流程把 Human 建成 Actor 或自动加入 Session | Human 不是 Participant，不能作为 Bot 发言；只能基于权威 `created_by` 管理 Bot 资源关系 |
+| Human 与 Bot | 部分 Legacy 流程把 Human 建成 Actor 或自动加入 Session | GroupParticipant 可以是 Human 或 Bot，Group 管理按 Actor-role 统一授权；Human 仍不能作为 Bot 发言。Session 第一阶段不继承 Legacy 的 Human 自动加入行为 |
 | 资源授权位置 | 分散在 HTTP handler、caller resolver 和现有 service 中，强度因接口而异 | 集中在 `application::v1` 的资源授权层，HTTP Adapter 不拥有业务权限规则 |
 | 未设置 `created_by` 的旧 Bot | 部分 Legacy ownership 逻辑存在兼容放行 | V1 不静默认领或放行，必须有明确迁移/权威关系 |
 | 响应与错误 | 多种裸 JSON、`success/error` 结构和状态码映射 | 统一 `{code, message, data, request_id}` Envelope 和稳定错误码 |
@@ -707,6 +875,10 @@ PR 中，以满足架构规则要求的“Contract 变更同时具有文档和 c
 
 - Human/Bot 合法访问。
 - 未认证和无权限访问。
+- Human/Bot 作为相同 Group role 时获得相同管理权限。
+- Human 创建 Group 但未加入 canonical Participants 时不获得 originator 权限。
+- driver 只要求对 Principal 可协作，不要求由 Human 管理或等于 BotPrincipal。
+- originator、driver 等必需职责在转移前不能被移除，普通角色仍可移除。
 - Human 管理自己的 Bot 资源关系。
 - Human 不能把资源管理权解释成 Bot 发言权。
 - 跨 Group、跨 Session 和跨租户访问。
@@ -727,7 +899,8 @@ PR 中，以满足架构规则要求的“Contract 变更同时具有文档和 c
 以下问题不阻止定义 Application/Adapter 边界，但阻止生产开放：
 
 1. Gateway BotPrincipal 的正式 Schema、认证入口和实现。
-2. Human `AuthenticatedUser.subject.id` 与 BCN Bot `created_by` 的身份空间或映射契约。
+2. Human `actor_id` 的规范化规则，以及 `AuthenticatedUser.subject.id`
+   与 BCN Bot `created_by` 的身份空间或映射契约。
 3. Gateway → BCN Principal 的签名、传递、验签、audience 和密钥轮换。
 4. Gateway 对 `bots/collaboration` 使用最长前缀路由的配置能力。
 5. 权限 scope 词表；在其落地前，BCN 仍必须执行完整资源关系授权。
@@ -745,8 +918,19 @@ OpenAPI 表达的受信任 Use Case 时，才新增 Internal API。
 | 第一阶段 Internal API | 空集 |
 | 资源命名 | 使用 `bots`；BCN 只拥有 `/bots/collaboration/{bot_uuid}/**` |
 | Bot ID | 公共 Contract、Application 和领域关系统一使用 `bot_uuid` |
+| GroupParticipant ID | Human/Bot 统一使用规范化 `actor_id` |
 | 身份职责 | Gateway 认证并形成 Principal；BCN 做资源授权 |
-| Human 管理 Bot | 可以管理已确认的资源关系，不能代表 Bot 发言 |
+| driver 选择 | Human/Bot 都可选择任意可协作 Bot，不要求所有权或自身身份 |
+| originator 推导 | 请求者属于 canonical Participants 时取请求者，否则 fallback 到 driver |
+| Group 管理 | originator、driver 和领域管理角色按 Actor-role 统一授权，不区分 Human/Bot |
+| 创建者未入群 | `created_by_principal` 仅用于审计；Human 不获得 originator/driver 权限 |
+| 关键角色保护 | originator、driver、manager 等必需职责转移前不可移除，普通角色可移除 |
+| DM target | V1 保留 `target_actor_id`；不新增同义的 `target_bot_uuid` |
+| DM 持久化 | target 不单独落库；双方写入 Participants，并通过唯一 `dm_pair_key` 标识无方向 Actor 对 |
+| V1 投递策略 | 只暴露 `delivery_policy.bot_final_delivery`，不暴露 `mode`、`sender_routes` |
+| Legacy 路由兼容 | 完整 `RoutingPolicy` 继续保留；V1 更新不能清空存量隐藏字段 |
+| Human 管理 Bot | 可按 `created_by` 管理明确的 Bot 资源关系，但不能代表 Bot 发言或继承其 Group role |
+| Bot 路由 | 默认响应和 coordinator 路由使用 driver/lead，不使用 originator |
 | Session 消息 | 只开放 GET history，不开放 POST send |
 | Group 消息 | 不进入新 API；Legacy 暂不下线 |
 | V1 HTTP Adapter | 新增独立 `bcs-api-http` crate |

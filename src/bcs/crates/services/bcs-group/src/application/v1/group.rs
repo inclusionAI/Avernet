@@ -1,0 +1,957 @@
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use async_trait::async_trait;
+use bcs_service_api::application::v1::{
+    Actor, ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
+    CollaborationGroupDetail, CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup,
+    CreateGroupSpec, DeleteGroup, DeleteResult, DirectMessageGroupDetail,
+    DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter, GroupService, GroupStatus,
+    GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, ListBotGroups,
+    ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
+    Participant as V1Participant, Principal, StateMachineConfiguration,
+    StateMachineDefinitionReference, StateMachineParticipantBinding, UpdateGroup,
+};
+use bcs_service_api::{
+    ActorKind, ActorStatus, BotRegistryCoreService, CollaborationDefinitionRef,
+    CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
+    DefaultDelivery, DmCreateCommand, FriendCoreService, Group as DomainGroup, GroupCoreService,
+    GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand, GroupKind,
+    GroupManagementService, GroupStrategy, GroupUseCaseError, RelationCoreService, RoutingMode,
+    RoutingPolicy, RuntimeParticipantBinding, ServiceError, SessionManagementService,
+};
+
+#[derive(Debug, Clone)]
+pub struct GroupServiceConfig {
+    pub relation_env: String,
+}
+
+impl Default for GroupServiceConfig {
+    fn default() -> Self {
+        Self {
+            relation_env: "dev".to_string(),
+        }
+    }
+}
+
+/// OpenAPI v1 Group facade.
+///
+/// It owns Principal-based resource authorization and V1 projections while
+/// delegating existing group creation/deletion side effects to the legacy-
+/// compatible application service. No HTTP type crosses this boundary.
+pub struct GroupServiceImpl {
+    groups: Arc<dyn GroupCoreService>,
+    registry: Arc<dyn BotRegistryCoreService>,
+    friends: Arc<dyn FriendCoreService>,
+    relation: Arc<dyn RelationCoreService>,
+    sessions: Arc<dyn SessionManagementService>,
+    management: Arc<dyn GroupManagementService>,
+    collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
+    config: GroupServiceConfig,
+}
+
+impl GroupServiceImpl {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        groups: Arc<dyn GroupCoreService>,
+        registry: Arc<dyn BotRegistryCoreService>,
+        friends: Arc<dyn FriendCoreService>,
+        relation: Arc<dyn RelationCoreService>,
+        sessions: Arc<dyn SessionManagementService>,
+        management: Arc<dyn GroupManagementService>,
+        config: GroupServiceConfig,
+    ) -> Self {
+        Self {
+            groups,
+            registry,
+            friends,
+            relation,
+            sessions,
+            management,
+            collaboration_runtime: None,
+            config,
+        }
+    }
+
+    pub fn with_collaboration_runtime(
+        mut self,
+        collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+    ) -> Self {
+        self.collaboration_runtime = Some(collaboration_runtime);
+        self
+    }
+
+    async fn authorize_bot_resource(
+        &self,
+        principal: &Principal,
+        bot_uuid: &str,
+    ) -> Result<(), ApplicationError> {
+        match principal {
+            Principal::Bot(bot) if bot.bot_uuid == bot_uuid => {
+                self.registry.get(bot_uuid).await.ok_or_else(|| {
+                    ApplicationError::not_found(
+                        "bot_not_found",
+                        format!("Bot '{bot_uuid}' was not found"),
+                    )
+                })?;
+                Ok(())
+            }
+            Principal::Bot(_) => Err(ApplicationError::forbidden(
+                "Bot Principal may query only its own bot_uuid",
+            )),
+            Principal::Human(human) => {
+                let bot = self.registry.get(bot_uuid).await.ok_or_else(|| {
+                    ApplicationError::not_found(
+                        "bot_not_found",
+                        format!("Bot '{bot_uuid}' was not found"),
+                    )
+                })?;
+                if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
+                    return Ok(());
+                }
+                let creator_edge = self
+                    .relation
+                    .get_edge(&human.actor_id, bot_uuid, &self.config.relation_env)
+                    .await
+                    .map_err(map_service_error)?;
+                if creator_edge.is_some_and(|edge| edge.is_creator) {
+                    return Ok(());
+                }
+                Err(ApplicationError::forbidden(format!(
+                    "Human Principal cannot manage Bot '{bot_uuid}'"
+                )))
+            }
+        }
+    }
+
+    async fn ensure_collaboration_eligible(
+        &self,
+        principal: &Principal,
+        bot_uuid: &str,
+    ) -> Result<(), ApplicationError> {
+        let bot = self.registry.get(bot_uuid).await.ok_or_else(|| {
+            ApplicationError::not_found("bot_not_found", format!("Bot '{bot_uuid}' was not found"))
+        })?;
+        if bot.actor_kind != ActorKind::Bot {
+            return Err(ApplicationError::invalid(
+                "invalid_driver",
+                "driver_bot_uuid must identify a Bot Actor",
+            ));
+        }
+        if bot.status == ActorStatus::Hidden {
+            return Err(ApplicationError::forbidden(format!(
+                "Bot '{bot_uuid}' is hidden and cannot collaborate"
+            )));
+        }
+        if principal.actor_id() == bot_uuid || bot.capabilities.visibility == "public" {
+            return Ok(());
+        }
+
+        if let Principal::Human(human) = principal {
+            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
+                return Ok(());
+            }
+            let creator_edge = self
+                .relation
+                .get_edge(&human.actor_id, bot_uuid, &self.config.relation_env)
+                .await
+                .map_err(map_service_error)?;
+            if creator_edge.is_some_and(|edge| edge.is_creator) {
+                return Ok(());
+            }
+        }
+
+        if self
+            .friends
+            .are_friends(principal.actor_id(), bot_uuid)
+            .await
+        {
+            return Ok(());
+        }
+
+        Err(ApplicationError::forbidden(format!(
+            "Bot '{bot_uuid}' is not collaboration-eligible for this Principal"
+        )))
+    }
+
+    async fn can_read_group(
+        &self,
+        principal: &Principal,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
+        if group
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == principal.actor_id())
+        {
+            return Ok(true);
+        }
+        let session_group_ids = self
+            .sessions
+            .list_group_ids_by_session_participant(principal.actor_id())
+            .await
+            .map_err(|error| ApplicationError::internal(error.to_string()))?;
+        Ok(session_group_ids.iter().any(|id| id == &group.id))
+    }
+
+    fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
+        principal.actor_id() == group.driver_bot || principal.actor_id() == group.originator()
+    }
+
+    async fn load_readable_group(
+        &self,
+        principal: &Principal,
+        group_id: &str,
+    ) -> Result<DomainGroup, ApplicationError> {
+        let group = self.groups.get(group_id).await.ok_or_else(|| {
+            ApplicationError::not_found(
+                "group_not_found",
+                format!("Group '{group_id}' was not found"),
+            )
+        })?;
+        if !self.can_read_group(principal, &group).await? {
+            return Err(ApplicationError::forbidden(
+                "Principal has no readable relation to this Group",
+            ));
+        }
+        Ok(group)
+    }
+
+    async fn load_manageable_group(
+        &self,
+        principal: &Principal,
+        group_id: &str,
+    ) -> Result<DomainGroup, ApplicationError> {
+        let group = self.groups.get(group_id).await.ok_or_else(|| {
+            ApplicationError::not_found(
+                "group_not_found",
+                format!("Group '{group_id}' was not found"),
+            )
+        })?;
+        if !Self::can_manage_group(principal, &group) {
+            return Err(ApplicationError::forbidden(
+                "Only the Group originator or driver may manage this Group",
+            ));
+        }
+        Ok(group)
+    }
+
+    async fn project_detail(
+        &self,
+        mut group: DomainGroup,
+    ) -> Result<GroupDetail, ApplicationError> {
+        bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
+        let participants = group
+            .participants
+            .iter()
+            .map(project_participant)
+            .collect::<Vec<_>>();
+        let common = DetailCommon {
+            group_id: group.id.clone(),
+            version: group.version,
+            name: group.label.clone(),
+            status: project_status(group.status),
+            visibility: project_visibility(&group.visibility)?,
+            context: group.context.clone(),
+            originator_actor_id: group.originator().to_string(),
+            participants,
+            created_at: group.created_at,
+            updated_at: group.updated_at,
+        };
+
+        if group.group_kind == GroupKind::Dm {
+            if common.participants.len() != 2 {
+                return Err(ApplicationError::internal(format!(
+                    "DM Group '{}' does not contain exactly two participants",
+                    group.id
+                )));
+            }
+            return Ok(GroupDetail::DirectMessage(DirectMessageGroupDetail {
+                group_id: common.group_id,
+                version: common.version,
+                name: common.name,
+                status: common.status,
+                visibility: common.visibility,
+                context: common.context,
+                originator_actor_id: common.originator_actor_id,
+                participants: common.participants,
+                created_at: common.created_at,
+                updated_at: common.updated_at,
+            }));
+        }
+
+        let collaboration = match group.group_strategy {
+            GroupStrategy::Chat => CollaborationConfiguration::Chat(ChatConfiguration {
+                delivery_policy: bcs_service_api::application::v1::GroupDeliveryPolicy {
+                    bot_final_delivery: project_delivery(
+                        group
+                            .routing_policy
+                            .as_ref()
+                            .map(|policy| policy.default_bot_final_delivery)
+                            .unwrap_or_default(),
+                    ),
+                },
+            }),
+            GroupStrategy::ManagerWorker => {
+                CollaborationConfiguration::ManagerWorker(ManagerWorkerConfiguration::default())
+            }
+            GroupStrategy::StateMachine => {
+                let runtime = self.collaboration_runtime.as_ref().ok_or_else(|| {
+                    ApplicationError::internal(
+                        "StateMachine Group projection requires CollaborationRuntimeService",
+                    )
+                })?;
+                let view = runtime
+                    .get_group_collaboration_definition(&group.id)
+                    .await
+                    .map_err(map_runtime_error)?;
+                let definition = view.default_definition.ok_or_else(|| {
+                    ApplicationError::conflict(
+                        "state_machine_definition_missing",
+                        "StateMachine Group has no default definition",
+                    )
+                })?;
+                let participant_bindings = view
+                    .participant_bindings
+                    .into_iter()
+                    .map(|(binding, value)| StateMachineParticipantBinding {
+                        binding,
+                        actor_ids: value.bot_ids,
+                    })
+                    .collect();
+                CollaborationConfiguration::StateMachine(StateMachineConfiguration {
+                    definition: StateMachineDefinitionReference {
+                        definition_id: definition.id,
+                        version: definition.version,
+                    },
+                    participant_bindings,
+                })
+            }
+        };
+
+        Ok(GroupDetail::Collaboration(CollaborationGroupDetail {
+            group_id: common.group_id,
+            version: common.version,
+            name: common.name,
+            status: common.status,
+            visibility: common.visibility,
+            context: common.context,
+            originator_actor_id: common.originator_actor_id,
+            participants: common.participants,
+            driver_bot_uuid: group.driver_bot,
+            collaboration,
+            created_at: common.created_at,
+            updated_at: common.updated_at,
+        }))
+    }
+
+    async fn project_summary(
+        &self,
+        mut group: DomainGroup,
+        target_bot_uuid: &str,
+        membership: Membership,
+    ) -> Result<GroupSummary, ApplicationError> {
+        bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
+        let status = project_status(group.status);
+        let visibility = project_visibility(&group.visibility)?;
+        let originator_actor_id = group.originator().to_string();
+        if group.group_kind == GroupKind::Dm {
+            let peer_actor = group
+                .participants
+                .iter()
+                .find(|participant| participant.bot_uuid != target_bot_uuid)
+                .map(|participant| Actor {
+                    actor_id: participant.bot_uuid.clone(),
+                    actor_kind: participant.actor_kind,
+                    name: participant.bot_name.clone(),
+                });
+            return Ok(GroupSummary::DirectMessage(DirectMessageGroupSummary {
+                group_id: group.id,
+                version: group.version,
+                name: group.label,
+                status,
+                visibility,
+                membership,
+                originator_actor_id,
+                participant_count: group.participants.len(),
+                peer_actor,
+                created_at: group.created_at,
+                updated_at: group.updated_at,
+            }));
+        }
+
+        Ok(GroupSummary::Normal(NormalGroupSummary {
+            group_id: group.id,
+            version: group.version,
+            name: group.label,
+            status,
+            visibility,
+            membership,
+            originator_actor_id,
+            participant_count: group.participants.len(),
+            driver_bot_uuid: group.driver_bot,
+            strategy: project_strategy(group.group_strategy),
+            created_at: group.created_at,
+            updated_at: group.updated_at,
+        }))
+    }
+
+    async fn create_collaboration(
+        &self,
+        principal: Principal,
+        request: CreateCollaborationGroup,
+    ) -> Result<GroupDetail, ApplicationError> {
+        self.ensure_collaboration_eligible(&principal, &request.driver_bot_uuid)
+            .await?;
+        if request
+            .participants
+            .iter()
+            .any(|participant| participant.actor_id.is_empty())
+        {
+            return Err(ApplicationError::invalid(
+                "invalid_participant",
+                "participant actor_id cannot be empty",
+            ));
+        }
+
+        let principal_is_participant = request
+            .participants
+            .iter()
+            .any(|participant| participant.actor_id == principal.actor_id())
+            || request.driver_bot_uuid == principal.actor_id();
+        let originator = if principal_is_participant {
+            principal.actor_id().to_string()
+        } else {
+            request.driver_bot_uuid.clone()
+        };
+        let (strategy, routing_policy, state_machine) =
+            map_create_collaboration(request.collaboration.clone());
+        if state_machine.is_some() && self.collaboration_runtime.is_none() {
+            return Err(ApplicationError::internal(
+                "StateMachine creation requires CollaborationRuntimeService",
+            ));
+        }
+        if let Some(state_machine) = &state_machine {
+            let canonical_actor_ids = request
+                .participants
+                .iter()
+                .map(|participant| participant.actor_id.as_str())
+                .chain(std::iter::once(request.driver_bot_uuid.as_str()))
+                .collect::<HashSet<_>>();
+            if state_machine
+                .participant_bindings
+                .iter()
+                .flat_map(|binding| binding.actor_ids.iter())
+                .any(|actor_id| !canonical_actor_ids.contains(actor_id.as_str()))
+            {
+                return Err(ApplicationError::invalid(
+                    "invalid_participant_binding",
+                    "StateMachine participant bindings must reference Group participants",
+                ));
+            }
+        }
+
+        let participants = request
+            .participants
+            .into_iter()
+            .map(|participant| GroupCreateParticipantCommand {
+                bot_id: participant.actor_id,
+                role: Some(role_name(participant.role).to_string()),
+            })
+            .collect::<Vec<_>>();
+        let created = self
+            .management
+            .create_group(GroupCreateCommand {
+                group_id: None,
+                caller_actor_id: Some(originator.clone()),
+                driver_bot_id: request.driver_bot_uuid,
+                label: request.name,
+                topic: None,
+                context: request.context,
+                routing_policy,
+                participants,
+                member_bot_ids: Vec::new(),
+                group_kind: Some(GroupKind::Normal),
+                service_spec: None,
+                group_strategy: Some(strategy),
+                originator: Some(originator),
+                visibility: Some(visibility_name(request.visibility).to_string()),
+            })
+            .await
+            .map_err(map_group_error)?;
+
+        if let Some(state_machine) = state_machine {
+            let runtime = self
+                .collaboration_runtime
+                .as_ref()
+                .expect("StateMachine runtime checked before Group creation");
+            let participant_bindings = state_machine
+                .participant_bindings
+                .into_iter()
+                .map(|binding| {
+                    (
+                        binding.binding,
+                        RuntimeParticipantBinding {
+                            source: "openapi_v1".to_string(),
+                            bot_ids: binding.actor_ids,
+                            extensions: Default::default(),
+                        },
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            if let Err(error) = runtime
+                .configure_group_runtime(ConfigureGroupRuntimeCommand {
+                    group_id: created.group_id.clone(),
+                    definition_yaml: None,
+                    definition: None,
+                    definition_ref: Some(CollaborationDefinitionRef {
+                        id: state_machine.definition.definition_id,
+                        version: state_machine.definition.version,
+                    }),
+                    participant_bindings,
+                    auto_start_on_service_invocation: true,
+                })
+                .await
+            {
+                if let Some(session_id) = created.latest_running_session_id.as_deref() {
+                    let _ = self.sessions.delete(session_id).await;
+                }
+                let _ = self.groups.delete(&created.group_id).await;
+                return Err(map_runtime_error(error));
+            }
+        }
+
+        let group = self.groups.get(&created.group_id).await.ok_or_else(|| {
+            ApplicationError::internal("created Group disappeared before projection")
+        })?;
+        self.project_detail(group).await
+    }
+
+    async fn create_dm(
+        &self,
+        principal: Principal,
+        request: CreateDirectMessageGroup,
+    ) -> Result<GroupDetail, ApplicationError> {
+        let result = self
+            .management
+            .create_dm(DmCreateCommand {
+                group_id: None,
+                caller_actor_id: Some(principal.actor_id().to_string()),
+                driver_bot: None,
+                target_actor_id: request.target_actor_id,
+                label: request.name,
+                topic: None,
+                context: request.context,
+            })
+            .await
+            .map_err(map_group_error)?;
+        let group = self
+            .groups
+            .get(&result.group.group_id)
+            .await
+            .ok_or_else(|| {
+                ApplicationError::internal("created DM Group disappeared before projection")
+            })?;
+        self.project_detail(group).await
+    }
+}
+
+#[async_trait]
+impl GroupService for GroupServiceImpl {
+    async fn list_bot_groups(
+        &self,
+        command: ListBotGroups,
+    ) -> Result<Page<GroupSummary>, ApplicationError> {
+        self.authorize_bot_resource(&command.principal, &command.bot_uuid)
+            .await?;
+        if command.limit == 0 || command.limit > 100 {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "limit must be between 1 and 100",
+            ));
+        }
+        if command.kind == GroupKindFilter::Dm && command.strategy.is_some() {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "kind=dm cannot be combined with strategy",
+            ));
+        }
+
+        let direct = self
+            .groups
+            .find_by_participant(&command.bot_uuid)
+            .await
+            .into_iter()
+            .map(|group| (group.id.clone(), (group, Membership::Direct)))
+            .collect::<HashMap<_, _>>();
+        let session_group_ids = self
+            .sessions
+            .list_group_ids_by_session_participant(&command.bot_uuid)
+            .await
+            .map_err(|error| ApplicationError::internal(error.to_string()))?;
+        let mut related = direct;
+        for group_id in session_group_ids {
+            if related.contains_key(&group_id) {
+                continue;
+            }
+            if let Some(group) = self.groups.get(&group_id).await {
+                related.insert(group_id, (group, Membership::SessionOnly));
+            }
+        }
+
+        let q = command
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|query| !query.is_empty())
+            .map(str::to_lowercase);
+        let mut groups = related
+            .into_values()
+            .filter(|(_, membership)| match command.membership {
+                MembershipFilter::All => true,
+                MembershipFilter::Direct => *membership == Membership::Direct,
+                MembershipFilter::SessionOnly => *membership == Membership::SessionOnly,
+            })
+            .filter(|(group, _)| match command.kind {
+                GroupKindFilter::Normal => group.group_kind == GroupKind::Normal,
+                GroupKindFilter::Dm => group.group_kind == GroupKind::Dm,
+                GroupKindFilter::All => true,
+            })
+            .filter(|(group, _)| {
+                command.strategy.is_none_or(|strategy| {
+                    group.group_kind == GroupKind::Normal
+                        && project_strategy(group.group_strategy) == strategy
+                })
+            })
+            .filter(|(group, _)| {
+                q.as_ref().is_none_or(|query| {
+                    group
+                        .label
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(query)
+                })
+            })
+            .collect::<Vec<_>>();
+        groups.sort_by(|(left, _), (right, _)| DomainGroup::cmp_by_updated_at_desc(left, right));
+        let total = groups.len() as u64;
+        let page = groups
+            .into_iter()
+            .skip(saturating_usize(command.offset))
+            .take(saturating_usize(command.limit))
+            .collect::<Vec<_>>();
+        let mut items = Vec::with_capacity(page.len());
+        for (group, membership) in page {
+            items.push(
+                self.project_summary(group, &command.bot_uuid, membership)
+                    .await?,
+            );
+        }
+        Ok(Page {
+            items,
+            total,
+            offset: command.offset,
+            limit: command.limit,
+        })
+    }
+
+    async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError> {
+        match command.group {
+            CreateGroupSpec::Collaboration(request) => {
+                self.create_collaboration(command.principal, request).await
+            }
+            CreateGroupSpec::DirectMessage(request) => {
+                self.create_dm(command.principal, request).await
+            }
+        }
+    }
+
+    async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError> {
+        let group = self
+            .load_readable_group(&query.principal, &query.group_id)
+            .await?;
+        self.project_detail(group).await
+    }
+
+    async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
+        if command.patch.is_empty() {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "at least one mutable field is required",
+            ));
+        }
+        let mut group = self
+            .load_manageable_group(&command.principal, &command.group_id)
+            .await?;
+        if group.group_kind == GroupKind::Dm {
+            if command.patch.delivery_policy.is_some()
+                || command.patch.visibility == Some(GroupVisibility::Public)
+            {
+                return Err(ApplicationError::invalid(
+                    "invalid_request",
+                    "DM Groups do not expose delivery policy or public visibility",
+                ));
+            }
+        }
+        if let Some(name) = command.patch.name {
+            group.label = Some(name);
+        }
+        if let Some(context) = command.patch.context {
+            group.context = Some(context);
+        }
+        if let Some(visibility) = command.patch.visibility {
+            if visibility == GroupVisibility::Public {
+                for participant in &group.participants {
+                    if participant.actor_kind != ActorKind::Bot {
+                        continue;
+                    }
+                    let bot = self
+                        .registry
+                        .get(&participant.bot_uuid)
+                        .await
+                        .ok_or_else(|| {
+                            ApplicationError::not_found(
+                                "bot_not_found",
+                                format!("Bot '{}' was not found", participant.bot_uuid),
+                            )
+                        })?;
+                    if bot.capabilities.visibility != "public" {
+                        return Err(ApplicationError::conflict(
+                            "non_public_participant",
+                            "All Bot participants must be public before Group visibility is public",
+                        ));
+                    }
+                }
+            }
+            group.visibility = visibility_name(visibility).to_string();
+        }
+        if let Some(delivery_policy) = command.patch.delivery_policy {
+            let policy = group
+                .routing_policy
+                .get_or_insert_with(RoutingPolicy::default);
+            policy.default_bot_final_delivery =
+                persist_delivery(delivery_policy.bot_final_delivery);
+        }
+        group.updated_at = now_millis();
+        self.groups
+            .upsert(group.clone())
+            .await
+            .map_err(map_service_error)?;
+        self.project_detail(group).await
+    }
+
+    async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
+        let Some(group) = self.groups.get(&command.group_id).await else {
+            return Ok(DeleteResult {
+                group_id: command.group_id,
+                deleted: false,
+            });
+        };
+        if !Self::can_manage_group(&command.principal, &group) {
+            return Err(ApplicationError::forbidden(
+                "Only the Group originator or driver may delete this Group",
+            ));
+        }
+        let result = self
+            .management
+            .delete_group(GroupDeleteCommand {
+                caller_actor_id: command.principal.actor_id().to_string(),
+                group_id: command.group_id,
+            })
+            .await
+            .map_err(map_group_error)?;
+        Ok(DeleteResult {
+            group_id: result.group_id,
+            deleted: result.deleted,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct DetailCommon {
+    group_id: String,
+    version: i32,
+    name: Option<String>,
+    status: GroupStatus,
+    visibility: GroupVisibility,
+    context: Option<String>,
+    originator_actor_id: String,
+    participants: Vec<V1Participant>,
+    created_at: u64,
+    updated_at: u64,
+}
+
+fn project_participant(participant: &bcs_service_api::Participant) -> V1Participant {
+    V1Participant {
+        actor_id: participant.bot_uuid.clone(),
+        actor_kind: participant.actor_kind,
+        name: participant.bot_name.clone(),
+        role: participant.role,
+        mode: participant.effective_mode(),
+    }
+}
+
+fn project_status(status: bcs_service_api::GroupStatus) -> GroupStatus {
+    match status {
+        bcs_service_api::GroupStatus::Active => GroupStatus::Active,
+        bcs_service_api::GroupStatus::Completed => GroupStatus::Completed,
+        bcs_service_api::GroupStatus::Error => GroupStatus::Error,
+        bcs_service_api::GroupStatus::Closed => GroupStatus::Closed,
+        bcs_service_api::GroupStatus::Inactive => GroupStatus::Inactive,
+    }
+}
+
+fn project_visibility(visibility: &str) -> Result<GroupVisibility, ApplicationError> {
+    match visibility {
+        "private" => Ok(GroupVisibility::Private),
+        "public" => Ok(GroupVisibility::Public),
+        other => Err(ApplicationError::internal(format!(
+            "stored Group has unsupported visibility '{other}'"
+        ))),
+    }
+}
+
+fn project_strategy(strategy: GroupStrategy) -> V1GroupStrategy {
+    match strategy {
+        GroupStrategy::Chat => V1GroupStrategy::Chat,
+        GroupStrategy::ManagerWorker => V1GroupStrategy::ManagerWorker,
+        GroupStrategy::StateMachine => V1GroupStrategy::StateMachine,
+    }
+}
+
+fn project_delivery(delivery: DefaultDelivery) -> BotFinalDelivery {
+    match delivery {
+        DefaultDelivery::SendToDriver => BotFinalDelivery::SendToDriver,
+        DefaultDelivery::InjectObservers => BotFinalDelivery::InjectObservers,
+    }
+}
+
+fn persist_delivery(delivery: BotFinalDelivery) -> DefaultDelivery {
+    match delivery {
+        BotFinalDelivery::SendToDriver => DefaultDelivery::SendToDriver,
+        BotFinalDelivery::InjectObservers => DefaultDelivery::InjectObservers,
+    }
+}
+
+fn map_create_collaboration(
+    collaboration: CollaborationConfiguration,
+) -> (
+    GroupStrategy,
+    Option<RoutingPolicy>,
+    Option<StateMachineConfiguration>,
+) {
+    match collaboration {
+        CollaborationConfiguration::Chat(configuration) => (
+            GroupStrategy::Chat,
+            Some(RoutingPolicy {
+                mode: RoutingMode::Hybrid,
+                default_bot_final_delivery: persist_delivery(
+                    configuration.delivery_policy.bot_final_delivery,
+                ),
+                sender_routes: HashMap::new(),
+            }),
+            None,
+        ),
+        CollaborationConfiguration::ManagerWorker(_) => (GroupStrategy::ManagerWorker, None, None),
+        CollaborationConfiguration::StateMachine(configuration) => {
+            (GroupStrategy::StateMachine, None, Some(configuration))
+        }
+    }
+}
+
+fn role_name(role: bcs_service_api::ParticipantRole) -> &'static str {
+    match role {
+        bcs_service_api::ParticipantRole::Driver => "driver",
+        bcs_service_api::ParticipantRole::Consultant => "consultant",
+        bcs_service_api::ParticipantRole::Manager => "manager",
+        bcs_service_api::ParticipantRole::Worker => "worker",
+        bcs_service_api::ParticipantRole::Observer => "observer",
+    }
+}
+
+fn visibility_name(visibility: GroupVisibility) -> &'static str {
+    match visibility {
+        GroupVisibility::Private => "private",
+        GroupVisibility::Public => "public",
+    }
+}
+
+fn saturating_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn map_group_error(error: GroupUseCaseError) -> ApplicationError {
+    match error {
+        GroupUseCaseError::Unauthorized(_) => ApplicationError::Unauthenticated,
+        GroupUseCaseError::Forbidden(message) => ApplicationError::forbidden(message),
+        GroupUseCaseError::InvalidGroupId(message)
+        | GroupUseCaseError::InvalidGroupStatus(message)
+        | GroupUseCaseError::InvalidProposal(message) => {
+            ApplicationError::invalid("invalid_request", message)
+        }
+        GroupUseCaseError::ProposalNotFound(message)
+        | GroupUseCaseError::ProposalExpired(message) => {
+            ApplicationError::not_found("not_found", message)
+        }
+        GroupUseCaseError::InvalidHistoryLimit(limit) => {
+            ApplicationError::invalid("invalid_request", format!("invalid history limit {limit}"))
+        }
+        GroupUseCaseError::ActorNotFound(actor_id) => ApplicationError::not_found(
+            "actor_not_found",
+            format!("Actor '{actor_id}' was not found"),
+        ),
+        GroupUseCaseError::InvalidParticipantMode { .. } => {
+            ApplicationError::invalid("invalid_participant", error.to_string())
+        }
+        GroupUseCaseError::Conflict(message) => ApplicationError::conflict("conflict", message),
+        GroupUseCaseError::Service(error) => map_service_error(error),
+    }
+}
+
+fn map_service_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::GroupNotFound(id) => {
+            ApplicationError::not_found("group_not_found", format!("Group '{id}' was not found"))
+        }
+        ServiceError::BotNotFound(id) | ServiceError::BotNotRegistered(id) => {
+            ApplicationError::not_found("bot_not_found", format!("Bot '{id}' was not found"))
+        }
+        ServiceError::ParticipantNotFound(id) => ApplicationError::not_found(
+            "participant_not_found",
+            format!("Participant '{id}' was not found"),
+        ),
+        ServiceError::Unauthorized(_) => ApplicationError::Unauthenticated,
+        ServiceError::Forbidden(message) => ApplicationError::forbidden(message),
+        ServiceError::Conflict(message) => ApplicationError::conflict("conflict", message),
+        other => ApplicationError::internal(other.to_string()),
+    }
+}
+
+fn map_runtime_error(error: CollaborationRuntimeError) -> ApplicationError {
+    match error {
+        CollaborationRuntimeError::DefinitionNotFound(id, version) => ApplicationError::not_found(
+            "collaboration_definition_not_found",
+            format!("Collaboration definition '{id}@{version}' was not found"),
+        ),
+        CollaborationRuntimeError::InvalidDefinition(message)
+        | CollaborationRuntimeError::InvalidParticipantBinding(message)
+        | CollaborationRuntimeError::InvalidRequest(message) => {
+            ApplicationError::invalid("invalid_request", message)
+        }
+        CollaborationRuntimeError::Unauthenticated => ApplicationError::Unauthenticated,
+        CollaborationRuntimeError::Forbidden(message) => ApplicationError::forbidden(message),
+        CollaborationRuntimeError::Conflict(message) => {
+            ApplicationError::conflict("conflict", message)
+        }
+        other => ApplicationError::internal(other.to_string()),
+    }
+}

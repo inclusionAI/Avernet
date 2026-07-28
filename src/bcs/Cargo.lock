@@ -386,6 +386,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-api-http"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bcs-service-api",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "ulid",
+]
+
+[[package]]
 name = "bcs-auth-alipay"
 version = "0.1.0"
 dependencies = [
@@ -870,9 +885,14 @@ name = "bcs-group"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bcs-bot",
+ "bcs-friend",
  "bcs-group-store",
+ "bcs-relation",
  "bcs-route-security",
  "bcs-service-api",
+ "bcs-session",
+ "bcs-session-store",
  "bcs-test-support",
  "chrono",
  "serde_json",

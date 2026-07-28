@@ -3,6 +3,7 @@ members = [
     # bootstrap
     "crates/bootstrap/bcs",
     # adapters
+    "crates/adapters/http/bcs-api-http",
     "crates/adapters/http/bcs-http",
     "crates/adapters/http/bcs-provider-http",
     "crates/adapters/ws/bcs-ws",
@@ -200,6 +201,7 @@ redis = { version = "0.27.6", features = ["tokio-comp"] }
 
 # Workspace crates
 bcs            = { path = "crates/bootstrap/bcs" }
+bcs-api-http   = { path = "crates/adapters/http/bcs-api-http" }
 bcs-admin      = { path = "crates/tools/bcs-admin" }
 bcs-cli        = { path = "crates/tools/bcs-cli" }
 bcs-bot   = { path = "crates/services/bcs-bot" }
