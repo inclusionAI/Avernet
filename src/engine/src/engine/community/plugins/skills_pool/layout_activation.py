@@ -194,12 +194,9 @@ def mapping_sources_use_pool(
     rejected because it cannot represent one authoritative runtime layout.
     """
 
-    if not sources:
-        return False
     layout = _Layout.for_engine(engine, Path(home))
     pool_roots = tuple(
-        Path(os.path.abspath(root))
-        for root in (layout.pool_local, layout.pool_repo)
+        Path(os.path.abspath(root)) for root in (layout.pool_local, layout.pool_repo)
     )
     legacy_roots = tuple(
         Path(os.path.abspath(root))
@@ -223,7 +220,38 @@ def mapping_sources_use_pool(
             has_legacy = True
     if has_pool and has_legacy:
         raise ValueError("mapping sources mix Legacy and Pool managed roots")
-    return has_pool
+    if has_pool:
+        return True
+    if has_legacy or not sources:
+        return False
+    return _active_marker_selects_pool(layout=layout, engine=engine)
+
+
+def _active_marker_selects_pool(*, layout: _Layout, engine: str) -> bool:
+    """Resolve an external-only mapping set from the persisted runtime layout.
+
+    External mappings intentionally survive Pool migration, so their source
+    paths cannot identify the authoritative managed layout.  In that narrow
+    case the runtime-owned active marker is the stable authority.
+    """
+
+    marker_path = layout.active_marker
+    if not marker_path.exists() and not marker_path.is_symlink():
+        return False
+    marker = _read_active_marker(marker_path)
+    if marker is None:
+        raise ValueError("Pool active marker is unreadable or malformed")
+    if (
+        marker.get("engine") != engine
+        or marker.get("layout_contract_version") != LAYOUT_CONTRACT_VERSION
+        or not isinstance(marker.get("preparation_id"), str)
+        or not marker["preparation_id"]
+        or not isinstance(marker.get("migration_generation"), str)
+        or not marker["migration_generation"]
+        or marker.get("activation_state") not in {"finalizing", "active"}
+    ):
+        raise ValueError("Pool active marker contract is invalid")
+    return True
 
 
 def _retired_storage_entries(
@@ -298,8 +326,7 @@ def _write_active_marker(
         # skill mappings are mutable product state and must not become part of
         # the persisted layout contract.
         value["mappings"] = [
-            {"source": mapping.source, "target": mapping.target}
-            for mapping in mappings
+            {"source": mapping.source, "target": mapping.target} for mapping in mappings
         ]
     payload = json.dumps(
         value,
@@ -844,10 +871,7 @@ def _capture_recreated_legacy_local(
             )
 
         while residue_index <= 128:
-            residue = (
-                quarantine.parent
-                / f"skills-local-residue-{residue_index}"
-            )
+            residue = quarantine.parent / f"skills-local-residue-{residue_index}"
             residue_index += 1
             if not residue.exists() and not residue.is_symlink():
                 break
@@ -957,9 +981,7 @@ def _ensure_quarantine_generation_owned(
                     "cutover_quarantine_owner_invalid",
                     path=str(owner_path),
                 )
-            owner_path.rename(
-                generation_dir / f".owner.invalid-{uuid4().hex}"
-            )
+            owner_path.rename(generation_dir / f".owner.invalid-{uuid4().hex}")
             owner = None
         if owner == expected_owner:
             return None
@@ -975,9 +997,7 @@ def _ensure_quarantine_generation_owned(
         )
 
     if not created and (
-        not baseline_path.is_file()
-        or baseline_path.is_symlink()
-        or unknown_entries
+        not baseline_path.is_file() or baseline_path.is_symlink() or unknown_entries
     ):
         return _invalid(
             "cutover_quarantine_ownership_unproven",
@@ -1001,9 +1021,7 @@ def _ensure_quarantine_generation_owned(
             os.link(owner_temporary, owner_path)
         except FileExistsError:
             try:
-                raced_owner = json.loads(
-                    owner_path.read_text(encoding="utf-8")
-                )
+                raced_owner = json.loads(owner_path.read_text(encoding="utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 return _invalid(
                     "cutover_quarantine_owner_raced_invalid",
