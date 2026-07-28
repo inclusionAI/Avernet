@@ -187,6 +187,15 @@
         bot**.
   - [x] Invariant assertion helper/test: after each covered flow, exactly one
         live (`is_deleted=0`, non-`RELEASED`) online `bot_uuid` per record/stage.
+  - [x] **E2E reaches `RETIRE_THEN_FIRST_RELEASE`, not just `UPGRADE`.** The
+        stateful BaaS double (`local_baas.py`) models a settable not-live status
+        (`set_bot_status`) so `GET /bots/{uuid}` can report `STOPPED`/`FAILED`
+        instead of always `ACTIVE`, and `/destroy` returns a workflow id.
+        `test_r7_...` drives a teclaw online bot to `STOPPED`, re-publishes, and
+        asserts end-to-end that the old bot is **destroyed** (in the journal, gone
+        server-side, never `UPDATE`'d), a fresh bot is created + `ACTIVE`, and v2
+        is the current deployment (v1 → `UPGRADED`) — the primary orphan guard
+        actually exercising the retire path.
   - [x] `pytest tests/community/core/service_bot/` green.
   - [x] `pytest tests/community/e2e/publish_boundary/` green.
 - **Depends on:** Task 4, Task 5, Task 6
