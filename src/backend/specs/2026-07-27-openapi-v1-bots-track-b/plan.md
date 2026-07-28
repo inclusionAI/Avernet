@@ -35,23 +35,28 @@ with no extra handler logic.
 ## Files
 
 New:
-- `adapters/http/openapi_v1/responses.py` — envelope builders + error mapping.
+- `adapters/http/openapi_v1/responses.py` — envelope builders + error mapping +
+  the `cluster_for_engine` / `validate_engine_cluster` helpers (or a sibling
+  `clusters.py`).
+- `core/bot_management/create_flow.py` — the create + auth-status orchestration
+  extracted from the internal router (decision 3), called by both surfaces.
 - `tests/community/adapters/http/openapi_v1/test_bots_endpoints.py` — per-endpoint
   success-shape tests + the cross-tenant non-reachability test.
 
 Changed:
 - `adapters/http/openapi_v1/bots/router.py` — replace all 13 stub bodies.
-- `adapters/http/openapi_v1/bots/schemas.py` — small adjustments if the
-  `cluster_name` decision (below) changes the `Bot` model.
+- `adapters/http/openapi_v1/bots/schemas.py` — `cluster_name` becomes
+  `Literal["ACRA", "ANDC"]` on `Bot`/`BotCreate` with the combination rule in the
+  field descriptions.
+- `adapters/http/bot_management/router.py` — the internal create / auth-status
+  handlers delegate to `create_flow` instead of inlining it (behavior-preserving).
+- `core/bot_management/services/bot_service.py` — additive `engine`/`status`
+  filter params on the list-by-conditions query (decision 2).
 
-Possibly changed (pending the Passport decision below):
-- `core/bot_management/services/bot_service.py` (or a new
-  `core/bot_management/create_flow.py`) — extract the create + auth-status
-  orchestration currently living in the internal router, so both surfaces call
-  one implementation instead of duplicating ~250 lines.
-
-Not touched: Track A mechanism, guards, middleware, `dependencies.py` seams, and
-every internal router/service behavior (internal tests stay green, unmodified).
+Not touched: Track A mechanism, guards, middleware, `dependencies.py` seams. All
+internal router/service behavior stays green under the unmodified internal suite;
+the only internal edits (create-flow extraction, additive list filters) are
+covered by that suite as regression guards.
 
 ## Response + error contract
 
@@ -93,38 +98,55 @@ every internal router/service behavior (internal tests stay green, unmodified).
 | 13 | PUT `/bots/{id}/engine-config` | `get_bot` prelude + `EngineConfigService.write_bot_config(...)` (async) | dict pass-through |
 
 `BotModel.to_dict()` → `Bot` field map: `bot_id`, `bot_name`, `bot_desc`,
-`engine ← active_engine`, `bot_type`, `status`, `owner_entity_id ← owner_id`.
+`engine ← active_engine`, `bot_type`, `status`, `owner_entity_id ← owner_id`,
+`cluster_name ← cluster_for_engine(active_engine)` (see below).
 The adapter lives as one function `_to_bot(d: dict) -> Bot` in the router.
 
-## Decisions this plan forces (need your call)
+### cluster_name — validated, engine-derived
 
-1. **`cluster_name` has no backing field.** The public `Bot` schema requires
-   `cluster_name`, but no column, `create_bot` param, or `update_bot` param
-   carries it anywhere in the internal path. Options:
-   (a) **drop `cluster_name` from `Bot`/`BotCreate`** (recommended — nothing
-   populates it); (b) source it from the device-binding's cluster on read and
-   ignore on write; (c) stash it in `ext`. Recommend (a) unless the gateway
-   contract needs it.
+`cluster_name` is a public enum with two values, in strict bijection with the
+engine:
 
-2. **List filters `keyword`/`engine`/`status`.** `bot_service.list_bots` doesn't
-   filter by these. `list_bots_by_conditions` covers `bot_name` (≈keyword) and
-   more, but not `engine`/`status` directly. Plan: use `list_bots_by_conditions`
-   for keyword + pagination and apply `engine`/`status` as an in-handler filter
-   on the returned page, OR (cleaner) add the two filter params to the existing
-   service query. Recommend extending the service query so pagination totals stay
-   correct; flag if you'd rather not touch the service.
+- `ANDC` ⟺ engine `teclaw` (the `teclaw` device provider / `TECLAW_PROVIDER_TYPE`
+  in `deploy/provider_resolver.py`).
+- `ACRA` ⟺ every other engine (the ARCA/baas default provider).
 
-3. **Passport-entangled endpoints (create / auth-status).** The create and
-   auth-status orchestration (~250 lines: preflight → passport apply → 202
-   branch → create_bot → relationship) lives in the **internal router**, not a
-   service. Options: (a) **extract it into a shared `create_flow` helper** both
-   routers call (recommended — no duplication, internal behavior preserved by
-   delegating); (b) duplicate the orchestration in the public handler. (a) is
-   more code-movement but avoids two copies drifting. Recommend (a).
+A shared helper in `responses.py` (or a small `clusters.py`) owns both directions
+so the rule lives in one place:
+- `cluster_for_engine(engine) -> "ANDC" | "ACRA"` — used by `_to_bot` on read.
+- `validate_engine_cluster(engine, cluster) -> None` — raises a
+  `ClusterMismatchError` (→ 400) when the pair violates the bijection; used on
+  create.
 
-4. **`check-name` semantics.** The stub `NameCheck` is `{name, exists}` (not
-   `available`). Keeping `exists` matches the internal `check_bot_name_exists`
-   return directly; no inversion. Confirm the field name stays `exists`.
+`Bot.cluster_name` and `BotCreate.cluster_name` become a constrained
+`Literal["ACRA", "ANDC"]`. On create, the handler validates the pair, then passes
+only `engine`/`engine_type` down to `create_bot` (the provider is still resolved
+internally by baas from the container — `cluster_name` is a validated public
+view, not a new provisioning input, so the create internals are untouched). The
+OpenAPI doc advertises the enum + the combination rule in the field
+descriptions so callers learn valid values and valid pairings from the contract.
+
+## Resolved decisions
+
+1. **`cluster_name` — validated, engine-derived (`ACRA`/`ANDC`).** Kept as a
+   public enum in strict bijection with the engine (`ANDC` ⟺ `teclaw`, `ACRA` ⟺
+   everything else). Derived from `active_engine` on read; validated on create
+   (mismatch → 400). Not threaded into provisioning — the provider is still
+   resolved internally. See the "cluster_name" subsection above.
+
+2. **List filters `keyword`/`engine`/`status` — extend the service query.** Add
+   `engine`/`status` (and confirm `keyword`) filter params to
+   `bot_service.list_bots_by_conditions` (additive; existing callers pass
+   nothing new and see identical behavior) so pagination `total` stays exact.
+
+3. **Passport-entangled endpoints — extract to a shared helper.** Move the
+   create + auth-status orchestration out of the internal router into a
+   `core/bot_management` create-flow module both routers call. The internal
+   router delegates to it, preserving its behavior (guarded by the unmodified
+   internal suite); the public handler calls the same entry point.
+
+4. **`check-name` semantics — keep `{name, exists}`.** Matches the internal
+   `check_bot_name_exists` return directly; no inversion to `available`.
 
 ## Test strategy
 
