@@ -253,6 +253,34 @@ def test_list_and_count(repo):
     assert t4 == 2
 
 
+def test_list_by_conditions_owner_engine_status_filters(repo):
+    """Additive owner_id / engine / status filters narrow with exact totals."""
+    repo.insert(_data(bot_id="b1", owner_id="alice", active_engine="teclaw",
+                      status="ACTIVE", bot_name="Alpha"))
+    repo.insert(_data(bot_id="b2", owner_id="alice", active_engine="openclaw",
+                      status="PENDING", bot_name="Beta"))
+    repo.insert(_data(bot_id="b3", owner_id="bob", active_engine="teclaw",
+                      status="ACTIVE", bot_name="Gamma"))
+
+    # No new filters → every row (backward-compatible default).
+    assert repo.list_by_conditions()[0] == 3
+    # owner_id scopes to a single owner.
+    total, rows = repo.list_by_conditions(owner_id="alice")
+    assert total == 2
+    assert {r["bot_id"] for r in rows} == {"b1", "b2"}
+    # engine / status filter independently.
+    assert repo.list_by_conditions(engine="teclaw")[0] == 2
+    assert repo.list_by_conditions(status="PENDING")[0] == 1
+    # Combined filters narrow to the exact row, with an exact total.
+    total, rows = repo.list_by_conditions(
+        owner_id="alice", engine="teclaw", status="ACTIVE"
+    )
+    assert total == 1
+    assert rows[0]["bot_id"] == "b1"
+    # Keyword (bot_name) still composes with the new filters.
+    assert repo.list_by_conditions(owner_id="alice", bot_name="Alpha")[0] == 1
+
+
 def test_count_by_owner_excludes_desktop(repo):
     repo.insert(_data(bot_id="b1", bot_type="personal"))
     repo.insert(_data(bot_id="b2", bot_type="desktop"))

@@ -349,6 +349,9 @@ class BotRepository:
         bot_name: Optional[str] = None,
         owner_name: Optional[str] = None,
         bot_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        engine: Optional[str] = None,
+        status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
@@ -368,6 +371,12 @@ class BotRepository:
                 )
             if bot_id:
                 query = query.filter(self.Model.bot_id == bot_id)
+            if owner_id:
+                query = query.filter(self.Model.owner_id == owner_id)
+            if engine:
+                query = query.filter(self.Model.active_engine == engine)
+            if status:
+                query = query.filter(self.Model.status == status)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc())

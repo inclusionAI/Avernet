@@ -72,17 +72,23 @@ tests. Ordered so shared plumbing exists before the handlers that use it.
         no-fastapi-in-core guards. No internal test edited.
 - **Depends on:** —
 
-## Task 5: Additive list filters  `[ ]`
+## Task 5: Additive list filters  `[x]`
 - **Goal:** Let the list-by-conditions query filter by `engine` and `status`
   (and confirm `keyword`) so the public list returns exact totals.
-- **Files:** `core/bot_management/services/bot_service.py` (+ repository/protocol
-  if the query is built there), existing internal service tests.
+- **Files:** `core/bot_management/services/bot_service.py`,
+  `core/bot_management/repository/protocol.py`,
+  `plugins/bot_repository.py`, `tests/community/plugins/test_bot_repository_unified.py`.
 - **Done when:**
-  - [ ] `list_bots_by_conditions` accepts optional `engine` / `status` (and a
-        keyword param) that narrow the query; omitting them reproduces today's
-        result set and `total` exactly.
-  - [ ] A new service-level test proves each filter narrows and `total` matches.
-  - [ ] Internal suite unmodified and green.
+  - [x] `list_bots_by_conditions` accepts optional `owner_id` / `engine` /
+        `status` (keyword = existing `bot_name`) that narrow the query; omitting
+        them reproduces today's result set and `total` exactly.
+        **Plan correction:** also added `owner_id` — the plan named
+        `list_bots_by_conditions`, but that method was *not* owner-scoped, and
+        the public list must return only the caller's bots. `owner_id` scopes it.
+  - [x] A repository-level test (where the SQL filtering lives) proves each
+        filter narrows and `total` matches; keyword composes with the filters.
+  - [x] Internal suite unmodified and green (prod repo + bot_public caller: 23;
+        unified repo incl. new test: 33).
 - **Depends on:** —
 
 ## Task 6: Read endpoints — get, list, check-name, ceiling, status, passport  `[ ]`

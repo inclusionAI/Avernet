@@ -1768,6 +1768,9 @@ class BotService:
         bot_name: Optional[str] = None,
         owner_name: Optional[str] = None,
         bot_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        engine: Optional[str] = None,
+        status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Dict[str, Any]:
@@ -1779,6 +1782,9 @@ class BotService:
             bot_name: Filter by bot name (fuzzy search)
             owner_name: Filter by owner name
             bot_id: Filter by bot ID (exact match)
+            owner_id: Filter by owner id (exact match) — scopes to one owner
+            engine: Filter by active engine (exact match)
+            status: Filter by lifecycle status (exact match)
             page: Page number (1-based)
             page_size: Items per page
 
@@ -1790,6 +1796,9 @@ class BotService:
             bot_name=bot_name,
             owner_name=owner_name,
             bot_id=bot_id,
+            owner_id=owner_id,
+            engine=engine,
+            status=status,
             page=page,
             page_size=page_size,
         )
