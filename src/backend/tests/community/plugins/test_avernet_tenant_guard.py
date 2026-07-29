@@ -184,3 +184,35 @@ def test_guard_applies_to_each_registered_model_independently(db):
     _current_tenant[0] = "tenant-b"
     with session() as s:
         assert [r.name for r in s.query(_Beta).all()] == ["b-other"]
+
+
+# ── the registrar's own contract ────────────────────────────────────
+
+
+def test_registration_is_idempotent():
+    """A re-import must not double-register a model."""
+    from agentclaw.community.plugin_api.models import BotModel
+    from agentclaw.community.utils.avernet_tenant_guard import (
+        guarded_models,
+        register_avernet_tenant_guard,
+    )
+
+    before = guarded_models()
+    assert BotModel in before
+
+    register_avernet_tenant_guard(BotModel)
+    register_avernet_tenant_guard(BotModel)
+
+    after = guarded_models()
+    assert after == before
+    assert after.count(BotModel) == 1
+
+
+def test_model_without_tenant_column_is_rejected():
+    """Guarding a model that declares no tenant column is a programming error."""
+    from agentclaw.community.utils.avernet_tenant_guard import (
+        register_avernet_tenant_guard,
+    )
+
+    with pytest.raises(TypeError, match="avernet_tenant"):
+        register_avernet_tenant_guard(_Unguarded)

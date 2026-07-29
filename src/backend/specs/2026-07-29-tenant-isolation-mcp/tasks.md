@@ -21,37 +21,41 @@
         **Not triggered** — the assumption held.
 - **Depends on:** —
 
-## Task 2: Lift the tenant guards into a model-agnostic registrar
+## Task 2: [x] Lift the tenant guards into a model-agnostic registrar
 - **Goal:** Move the Stage 1 guards out of `BotModel` and behind
   `register_avernet_tenant_guard(model)`, with bot behavior byte-identical.
 - **Files:** `src/agentclaw/community/utils/avernet_tenant_guard.py` (new),
   `src/agentclaw/community/plugin_api/models.py`,
   `src/agentclaw/community/plugin_api/README.md`
 - **Done when:**
-  - [ ] `utils/avernet_tenant_guard.py` holds `CrossTenantInsertError`, the
+  - [x] `utils/avernet_tenant_guard.py` holds `CrossTenantInsertError`, the
         registry, the single `Session`-level `do_orm_execute` read listener that
         appends one criteria option per registered model, the per-model
         `before_insert` stamp, and `register_avernet_tenant_guard(model)`.
-  - [ ] Read guard keeps the `is_column_load` / `is_relationship_load` skips and
+  - [x] Read guard keeps the `is_column_load` / `is_relationship_load` skips and
         the `skip_avernet_tenant_guard` execution option.
-  - [ ] Criteria are built as direct expressions per call, never lambdas — the
+  - [x] Criteria are built as direct expressions per call, never lambdas — the
         lambda form is cached and would pin the first tenant.
-  - [ ] Registration is idempotent per model and the `Session` listener installs
+  - [x] Registration is idempotent per model and the `Session` listener installs
         once, so a re-import cannot double-register.
-  - [ ] The insert-guard error message names the offending model rather than the
+        Covered by `test_registration_is_idempotent`.
+  - [x] The insert-guard error message names the offending model rather than the
         hardcoded `"bot"`.
-  - [ ] `plugin_api/models.py` keeps `BotModel.avernet_tenant`, drops the guard
+  - [x] `plugin_api/models.py` keeps `BotModel.avernet_tenant`, drops the guard
         bodies (`:101-186`), calls `register_avernet_tenant_guard(BotModel)`, and
         re-exports `CrossTenantInsertError`.
-  - [ ] `plugin_api/README.md` declares
+  - [x] `plugin_api/README.md` declares
         `agentclaw.community.utils.avernet_tenant_guard` in
         `internal_dependencies` — its own line, since the checker matches on
         `d` or `d + "."`.
-  - [ ] `tests/community/plugins/test_bot_tenant_guard.py`,
+  - [x] `tests/community/plugins/test_bot_tenant_guard.py`,
         `test_bot_tenant_isolation.py` and `test_bot_tenant_raw_sql_and_threads.py`
         pass **unmodified**. Any edit needed there is a defect in this task.
-  - [ ] `tests/community/architecture/` passes (the boundary guard failed CI
-        twice in Stage 1 on undeclared imports).
+  - [x] `tests/community/architecture/` passes (the boundary guard failed CI
+        twice in Stage 1 on undeclared imports). 108 passed.
+  - **Also:** added `guarded_models()` for tests/diagnostics, and
+    `register_avernet_tenant_guard` raises `TypeError` for a model that declares
+    no tenant column — a guard against silently registering the wrong class.
 - **Depends on:** Task 1
 
 ## Task 3: Isolate `ac_user_mcp_config`
