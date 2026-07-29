@@ -128,6 +128,26 @@ class TemplateRepository:
             ).count()
             return count > 0
 
+    def list_by_bot_ids(self, bot_ids: List[str]) -> List[Dict[str, Any]]:
+        """List templates by bot IDs.
+
+        Used by bot list APIs to enrich list items with template_config without
+        issuing one template query per bot.
+        """
+        if not bot_ids:
+            return []
+
+        # Preserve only meaningful, unique IDs while keeping the IN clause small.
+        unique_bot_ids = list(dict.fromkeys(str(bot_id) for bot_id in bot_ids if bot_id))
+        if not unique_bot_ids:
+            return []
+
+        with self._db.orm_session() as db:
+            templates = db.query(TemplateModel).filter(
+                TemplateModel.bot_id.in_(unique_bot_ids)
+            ).all()
+            return [t.to_dict() for t in templates]
+
     def list_by_architect_bot_id(self, architect_bot_id: str) -> List[Dict[str, Any]]:
         """List templates whose ext JSON contains the given architect_bot_id.
 

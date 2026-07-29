@@ -275,3 +275,110 @@ class TestTriggerMemoryInitYuquePayload:
             )
 
         assert called["post"] is False
+
+
+class TestTemplateFactoryKnowledgeAliases:
+    def test_yuque_pairs_include_template_factory_wiki_aliases(self):
+        config = {
+            "template_key": "normalCC",
+            "wiki_knowledge_spaces": [
+                {"url": "https://yuque/wiki", "teamToken": "TK1"},
+            ],
+            "business_wiki_spaces": [
+                {"wiki_url": "https://yuque/business", "team_token": "TK2"},
+            ],
+            "repo_wiki_spaces": [
+                {"repo_wiki_url": "https://yuque/repo"},
+            ],
+        }
+
+        assert _extract_yuque_pairs(config) == [
+            ("https://yuque/wiki", "TK1"),
+            ("https://yuque/business", "TK2"),
+            ("https://yuque/repo", ""),
+        ]
+
+    def test_code_repo_urls_include_template_factory_aliases(self):
+        config = {
+            "template_key": "normalCC",
+            "repos": ["https://code/repos-string"],
+            "init_repos": [{"url": "https://code/init"}],
+            "application_repo_urls": [{"git_url": "git@example.com:a/b.git"}],
+        }
+
+        assert _extract_code_repo_urls(config) == [
+            "https://code/repos-string",
+            "https://code/init",
+            "git@example.com:a/b.git",
+        ]
+
+    def test_memory_sources_changed_detects_template_factory_aliases(self):
+        old = {"template_key": "normalCC", "business_wiki_spaces": [{"url": "https://yuque/old"}]}
+        new = {"template_key": "normalCC", "business_wiki_spaces": [{"url": "https://yuque/new"}]}
+
+        assert memory_sources_changed(old, new) is True
+
+    def test_trigger_memory_initialization_payload_uses_aliases(self):
+        payload = self._run_with_aliases(
+            {
+                "template_key": "normalCC",
+                "business_wiki_spaces": [
+                    {"wiki_url": "https://yuque/business", "teamToken": "TK"},
+                ],
+                "init_repos": [{"repo_url": "https://code/init"}],
+            }
+        )
+
+        assert payload["yuqueUrls"] == [
+            {"url": "https://yuque/business", "teamToken": "TK"},
+        ]
+        assert payload["codeRepoUrls"] == ["https://code/init"]
+
+    def _run_with_aliases(self, template_config):
+        captured = {}
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured["payload"] = json
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
+
+        with patch(
+            "agentclaw.community.core.bot_management.utils.get_current_env",
+            return_value="pre",
+        ), patch(
+            "agentclaw.community.core.bot_management.utils.requests.post",
+            side_effect=fake_post,
+        ):
+            trigger_memory_initialization(
+                bot_id="b1",
+                bot_name="n",
+                user_id="u",
+                template_config=template_config,
+                cookie="c=1",
+                aixcore_base_url_pre="https://aixcore.example.com",
+            )
+        return captured.get("payload", {})
+
+
+def test_iter_template_list_items_ignores_non_dict_and_extends_lists():
+    from agentclaw.community.core.bot_management.utils import _iter_template_list_items
+
+    assert _iter_template_list_items(None, ("repos",)) == []  # type: ignore[arg-type]
+    assert _iter_template_list_items({"repos": ["a"], "init_repos": "bad"}, ("repos", "init_repos")) == ["a"]
+
+
+def test_template_factory_yuque_string_alias_skips_invalid_and_keeps_valid_urls():
+    config = {
+        "template_uid": "aicoding",
+        "business_wiki_spaces": [
+            "not-a-url",
+            " https://yuque.antfin.com/securitytec/wiki ",
+            {"space_url": "https://yuque.antfin.com/securitytec/space", "team_token": "TK"},
+        ],
+    }
+
+    assert _extract_yuque_pairs(config) == [
+        ("https://yuque.antfin.com/securitytec/wiki", ""),
+        ("https://yuque.antfin.com/securitytec/space", "TK"),
+    ]

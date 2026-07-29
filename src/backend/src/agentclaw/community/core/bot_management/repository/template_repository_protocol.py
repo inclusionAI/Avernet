@@ -71,6 +71,17 @@ class TemplateRepository(Protocol):
         """
         ...
 
+    def list_by_bot_ids(self, bot_ids: List[str]) -> List[Dict[str, Any]]:
+        """List templates by bot IDs.
+
+        Args:
+            bot_ids: Bot IDs
+
+        Returns:
+            List of template records
+        """
+        ...
+
     def list_by_architect_bot_id(self, architect_bot_id: str) -> List[Dict[str, Any]]:
         """List templates whose ext JSON contains the given architect_bot_id.
 

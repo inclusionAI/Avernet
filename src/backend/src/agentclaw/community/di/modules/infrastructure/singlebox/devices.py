@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.devices.models import (
@@ -181,6 +182,7 @@ class SingleboxDevicesModule(Module):
         mcp_sync_service: MCPSyncService,
         token_vault: TokenVault,
         task_queue_service: TaskQueueService,
+        template_service: TemplateService,
     ) -> BaasDeviceService:
         """Keep BaaS lifecycle wiring while projecting local engine connections."""
         return SingleboxBaasDeviceService(
@@ -193,6 +195,7 @@ class SingleboxDevicesModule(Module):
             template_resolver=SystemConfigBaasTemplateResolver(system_config_service),
             vault=token_vault,
             task_queue_service=task_queue_service,
+            template_service=template_service,
         )
 
     @singleton
