@@ -1,5 +1,7 @@
 # How MCP works in Avernet
 
+**English** | [简体中文](README.zh-CN.md)
+
 A walkthrough of the Model Context Protocol (MCP) subsystem: what it is, which
 tables and services own it, how a user's credential travels from an HTTP request
 to a tool call inside a running bot, and where the in-flight tenant-isolation
