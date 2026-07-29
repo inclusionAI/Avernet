@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use bcs_group_store::MemoryGroupRepo;
 use bcs_service_api::port::repo::GroupRepoPort;
 use bcs_service_api::{
-    ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage, GroupStatus,
-    Participant, ParticipantMode, ParticipantRole, ServiceError, ServiceResult, ServiceSpec,
-    Workspace,
+    ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
+    GroupMutableFieldsPatch, GroupStatus, Participant, ParticipantMode, ParticipantRole,
+    ServiceError, ServiceResult, ServiceSpec, Workspace,
 };
 
 /// Core group service implementation.
@@ -41,6 +41,14 @@ impl Default for GroupCore {
 impl GroupCoreService for GroupCore {
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
         self.repo.upsert(group).await
+    }
+
+    async fn patch_mutable_fields(
+        &self,
+        id: &str,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<()> {
+        self.repo.patch_mutable_fields(id, patch).await
     }
 
     async fn get(&self, id: &str) -> Option<Group> {

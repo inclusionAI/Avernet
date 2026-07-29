@@ -564,6 +564,9 @@ Cover:
 - Human owner may manage an owned Bot's Friendship/resource relation.
 - Human owner is not granted Bot message-sender identity.
 - Cross-tenant access is denied before existence details are disclosed.
+- Until tenant is persisted on Group rows, each V1 Group facade instance has a
+  required tenant binding and rejects a Principal from any other tenant before
+  registry, Group, Session, or role lookup.
 
 Use repository and registry test doubles; do not exercise HTTP.
 
@@ -665,6 +668,9 @@ Test all eight Group/GroupParticipant operations, including:
   Legacy `mode` or `sender_routes`;
 - update uses an explicit allow-list of mutable fields and changing
   `bot_final_delivery` preserves any stored Legacy `mode` and `sender_routes`;
+- the Group core/store contract applies that allow-list as a field-scoped
+  patch; V1 must not persist a previously-read full Group aggregate because
+  that can overwrite concurrent Participant or hidden routing changes;
 - delete is idempotent;
 - Participant duplicate/add/remove conflicts;
 - GroupParticipant paths and commands use `actor_id` and support Human/Bot

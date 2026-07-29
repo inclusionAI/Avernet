@@ -11,9 +11,9 @@ use tracing::debug;
 use bcs_service_api::port::repo::GroupRepoPort;
 use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 use bcs_service_api::{
-    Group as DomainGroup, GroupKind, GroupMessage, GroupStatus, GroupStrategy, Participant,
-    ParticipantMode,
-    ServiceError, ServiceResult, ServiceSpec, Workspace, generated_group_id,
+    Group as DomainGroup, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus,
+    GroupStrategy, Participant, ParticipantMode, ServiceError, ServiceResult, ServiceSpec,
+    Workspace, generated_group_id,
 };
 
 /// In-memory implementation of [`GroupRepoPort`].
@@ -72,6 +72,37 @@ impl GroupRepoPort for MemoryGroupRepo {
         let mut groups = self.groups.write().await;
         debug!(group_id = %group.id, "Group upserted");
         groups.insert(group.id.clone(), group);
+        Ok(())
+    }
+
+    async fn patch_mutable_fields(
+        &self,
+        id: &str,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<()> {
+        let mut groups = self.groups.write().await;
+        let group = groups
+            .get_mut(id)
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        if let Some(label) = patch.label {
+            group.label = Some(label);
+        }
+        if let Some(context) = patch.context {
+            group.context = Some(context);
+        }
+        if let Some(visibility) = patch.visibility {
+            group.visibility = visibility;
+        }
+        if let Some(delivery) = patch.default_bot_final_delivery {
+            group
+                .routing_policy
+                .get_or_insert_with(Default::default)
+                .default_bot_final_delivery = delivery;
+        }
+        group.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
         Ok(())
     }
 
@@ -1045,6 +1076,48 @@ mod tests {
 
         let retrieved = store.get("test-group").await.unwrap();
         assert_eq!(retrieved.label, Some("Updated Label".to_string()));
+    }
+
+    #[tokio::test]
+    async fn mutable_patch_preserves_unrelated_routing_fields() {
+        let store = MemoryGroupRepo::new();
+        let mut group = GroupBuilder::new("driver").id("test-group").build();
+        group.routing_policy = Some(bcs_service_api::RoutingPolicy {
+            mode: bcs_service_api::RoutingMode::Structured,
+            default_bot_final_delivery: bcs_service_api::DefaultDelivery::SendToDriver,
+            sender_routes: HashMap::from([(
+                "worker".to_string(),
+                vec!["driver".to_string()],
+            )]),
+        });
+        store.upsert(group).await.unwrap();
+
+        store
+            .patch_mutable_fields(
+                "test-group",
+                GroupMutableFieldsPatch {
+                    label: Some("Renamed".to_string()),
+                    default_bot_final_delivery: Some(
+                        bcs_service_api::DefaultDelivery::InjectObservers,
+                    ),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let stored = store.get("test-group").await.unwrap();
+        let routing = stored.routing_policy.unwrap();
+        assert_eq!(stored.label.as_deref(), Some("Renamed"));
+        assert_eq!(routing.mode, bcs_service_api::RoutingMode::Structured);
+        assert_eq!(
+            routing.sender_routes.get("worker"),
+            Some(&vec!["driver".to_string()])
+        );
+        assert_eq!(
+            routing.default_bot_final_delivery,
+            bcs_service_api::DefaultDelivery::InjectObservers
+        );
     }
 
     #[tokio::test]

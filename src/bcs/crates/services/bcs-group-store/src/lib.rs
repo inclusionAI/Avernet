@@ -21,9 +21,9 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use bcs_service_api::{
-    ActorKind, Group, GroupMessage, GroupMetricCount, GroupMetricsSnapshotPort,
-    GroupStatus, Participant, ParticipantKind, ParticipantMode, ParticipantRole, RoutingPolicy,
-    ServiceError, ServiceResult, Workspace,GroupStrategy
+    ActorKind, DefaultDelivery, Group, GroupMessage, GroupMetricCount, GroupMetricsSnapshotPort,
+    GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant, ParticipantKind,
+    ParticipantMode, ParticipantRole, RoutingPolicy, ServiceError, ServiceResult, Workspace,
 };
 
 pub mod memory;
@@ -654,33 +654,29 @@ impl MySqlGroupStore {
 
     /// Delete session from MySQL.
     async fn delete_group_from_mysql(&self, group_id: &str) -> ServiceResult<bool> {
-        // Delete participants first
-        self.db.execute_with(
-            &self.logical_db,
-            "DELETE FROM bcs_group_participants WHERE group_id = ? AND env = ?",
-            vec![Value::from(group_id), Value::from(self.env.as_str())],
-        ).await
-            .map_err(|e| {
-                warn!(group_id = %group_id, error = %e, "Failed to delete group participants from MySQL");
-                ServiceError::InternalError(format!("Failed to delete group participants: {}", e))
-            })?;
-
-        // Delete group
-        let deleted = self
+        let env = self.env.as_str();
+        let results = self
             .db
-            .execute_with(
-                &self.logical_db,
-                "DELETE FROM bcs_groups WHERE group_id = ? AND env = ?",
-                vec![Value::from(group_id), Value::from(self.env.as_str())],
-            )
+            .plugin()
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    "DELETE FROM bcs_group_participants WHERE group_id = ? AND env = ?",
+                    vec![Value::from(group_id), Value::from(env)],
+                )),
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    "DELETE FROM bcs_groups WHERE group_id = ? AND env = ?",
+                    vec![Value::from(group_id), Value::from(env)],
+                )),
+            ])
             .await
-            .map(|n| n > 0)
             .map_err(|e| {
-                warn!(group_id = %group_id, error = %e, "Failed to delete group from MySQL");
-                ServiceError::InternalError(format!("Failed to delete group: {}", e))
+                warn!(group_id = %group_id, error = %e, "Failed to delete group transaction");
+                ServiceError::InternalError(format!("Failed to delete group: {e}"))
             })?;
-
-        Ok(deleted)
+        Ok(matches!(
+            results.get(1),
+            Some(DbTransactionStepResult::Executed(result)) if result.affected_rows > 0
+        ))
     }
 }
 
@@ -903,6 +899,71 @@ impl GroupRepoPort for MySqlGroupStore {
         {
             let mut cache = self.cache.write().await;
             cache.insert(group_id, group);
+        }
+        Ok(())
+    }
+
+    async fn patch_mutable_fields(
+        &self,
+        id: &str,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<()> {
+        if self.get(id).await.is_none() {
+            return Err(ServiceError::GroupNotFound(id.to_string()));
+        }
+
+        let mut assignments = Vec::new();
+        let mut params = Vec::new();
+        if let Some(label) = patch.label {
+            assignments.push("label = ?".to_string());
+            params.push(Value::from(label.as_str()));
+        }
+        if let Some(context) = patch.context {
+            assignments.push("context = ?".to_string());
+            params.push(Value::from(context.as_str()));
+        }
+        if let Some(visibility) = patch.visibility {
+            assignments.push("visibility = ?".to_string());
+            params.push(Value::from(visibility.as_str()));
+        }
+        if let Some(delivery) = patch.default_bot_final_delivery {
+            let expression = match self.flavor {
+                DbSqlFlavor::Mysql => {
+                    "routing_policy_json = JSON_SET(COALESCE(routing_policy_json, JSON_OBJECT()), '$.default_bot_final_delivery', ?)"
+                }
+                DbSqlFlavor::Sqlite => {
+                    "routing_policy_json = json_set(COALESCE(routing_policy_json, '{}'), '$.default_bot_final_delivery', ?)"
+                }
+            };
+            assignments.push(expression.to_string());
+            params.push(Value::from(match delivery {
+                DefaultDelivery::SendToDriver => "send_to_driver",
+                DefaultDelivery::InjectObservers => "inject_observers",
+            }));
+        }
+        if assignments.is_empty() {
+            return Ok(());
+        }
+        assignments.push(self.flavor.set_modified_now().to_string());
+        params.push(Value::from(id));
+        params.push(Value::from(self.env.as_str()));
+        let sql = format!(
+            "UPDATE bcs_groups SET {} WHERE group_id = ? AND env = ?",
+            assignments.join(", ")
+        );
+        let affected_rows = self.db
+            .execute_with(&self.logical_db, &sql, params)
+            .await
+            .map_err(|error| {
+                warn!(group_id = %id, error = %error, "Failed to patch mutable group fields");
+                ServiceError::InternalError(error.to_string())
+            })?;
+
+        // Invalidate instead of reconstructing the row so hidden routing fields
+        // changed concurrently are always reloaded from the authoritative store.
+        self.cache.write().await.remove(id);
+        if affected_rows == 0 && self.get(id).await.is_none() {
+            return Err(ServiceError::GroupNotFound(id.to_string()));
         }
         Ok(())
     }
@@ -1215,12 +1276,15 @@ impl GroupRepoPort for MySqlGroupStore {
         let group = self.get(id).await;
 
         // Delete from MySQL
-        self.delete_group_from_mysql(id).await?;
+        let deleted = self.delete_group_from_mysql(id).await?;
 
-        debug!(group_id = %id, "Group deleted");
         // Remove from cache
         self.cache.write().await.remove(id);
+        if !deleted {
+            return Ok(None);
+        }
 
+        debug!(group_id = %id, "Group deleted");
         Ok(group)
     }
 
@@ -2660,6 +2724,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingDbPlugin {
         transaction_sql: StdMutex<Vec<String>>,
+        execute_statements: StdMutex<Vec<DbStatement>>,
         first_execute_affected_rows: u64,
     }
 
@@ -2678,8 +2743,15 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn execute(&self, _statement: DbStatement) -> DbResult<DbExecuteResult> {
-            Ok(DbExecuteResult::default())
+        async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+            self.execute_statements
+                .lock()
+                .expect("execute statements")
+                .push(statement);
+            Ok(DbExecuteResult {
+                affected_rows: self.first_execute_affected_rows,
+                last_insert_id: None,
+            })
         }
 
         async fn transaction(
@@ -2799,6 +2871,62 @@ mod tests {
         let stored = repo.get("group-1").await.expect("group exists");
         assert_eq!(stored.workspace.decisions, workspace.decisions);
         assert_eq!(stored.workspace.notes, workspace.notes);
+    }
+
+    #[tokio::test]
+    async fn mutable_patch_uses_field_scoped_sql() {
+        let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
+        let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
+        let group = Group::new("group-1", "driver", Vec::new());
+        repo.cache
+            .write()
+            .await
+            .insert(group.id.clone(), group);
+
+        repo.patch_mutable_fields(
+            "group-1",
+            GroupMutableFieldsPatch {
+                label: Some("Renamed".to_string()),
+                default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("patch mutable fields");
+
+        let statements = db.execute_statements.lock().expect("execute statements");
+        assert_eq!(statements.len(), 1);
+        let sql = statements[0].sql();
+        assert!(sql.contains("label = ?"));
+        assert!(sql.contains("JSON_SET"));
+        assert!(sql.contains("$.default_bot_final_delivery"));
+        assert!(!sql.contains("sender_routes"));
+        assert!(!sql.contains("participants"));
+        assert_eq!(
+            statements[0].params(),
+            &[
+                Value::from("Renamed"),
+                Value::from("inject_observers"),
+                Value::from("group-1"),
+                Value::from("local"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_returns_none_when_the_group_row_lost_a_race() {
+        let db = Arc::new(RecordingDbPlugin::default());
+        let repo = MySqlGroupStore::new(db, "local".to_string());
+        let group = Group::new("group-1", "driver", Vec::new());
+        repo.cache
+            .write()
+            .await
+            .insert(group.id.clone(), group);
+
+        let deleted = repo.delete("group-1").await.expect("delete group");
+
+        assert!(deleted.is_none());
+        assert!(repo.cache.read().await.get("group-1").is_none());
     }
 
     #[test]

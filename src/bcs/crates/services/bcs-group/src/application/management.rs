@@ -479,6 +479,14 @@ impl GroupManagement {
         if group.originator() == caller_actor_id || group.driver_bot == caller_actor_id {
             return Ok(());
         }
+        if group.group_strategy == GroupStrategy::ManagerWorker
+            && group.participants.iter().any(|participant| {
+                participant.bot_uuid == caller_actor_id
+                    && participant.role == ParticipantRole::Manager
+            })
+        {
+            return Ok(());
+        }
 
         Err(GroupUseCaseError::Forbidden(format!(
             "Only the group coordinator (originator: {} or driver: {}) can {}, not '{}'",
@@ -1269,11 +1277,12 @@ impl GroupManagementService for GroupManagement {
         &self,
         cmd: GroupDeleteCommand,
     ) -> Result<GroupDeleteResult, GroupUseCaseError> {
-        let group = self
-            .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
+        let Some(group) = self.group.get(&cmd.group_id).await else {
+            return Ok(GroupDeleteResult {
+                group_id: cmd.group_id,
+                deleted: false,
+            });
+        };
 
         if group.group_kind == GroupKind::Dm {
             return Err(GroupUseCaseError::InvalidProposal(
@@ -1284,13 +1293,18 @@ impl GroupManagementService for GroupManagement {
 
         // Remove the group first so concurrent binding creation can no longer validate the target.
         // If binding cleanup fails, restore the group instead of leaving a dangling binding.
-        self.group.delete(&cmd.group_id).await?;
+        let Some(deleted_group) = self.group.delete(&cmd.group_id).await? else {
+            return Ok(GroupDeleteResult {
+                group_id: cmd.group_id,
+                deleted: false,
+            });
+        };
         if let Err(cleanup_error) = self
             .channel_binding_cleanup
             .delete_bindings_for_group(&cmd.group_id)
             .await
         {
-            if let Err(rollback_error) = self.group.upsert(group).await {
+            if let Err(rollback_error) = self.group.upsert(deleted_group).await {
                 return Err(ServiceError::InternalError(format!(
                     "Failed to delete channel bindings for group '{}': {}; group rollback also failed: {}",
                     cmd.group_id, cleanup_error, rollback_error

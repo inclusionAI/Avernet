@@ -76,7 +76,10 @@ impl Fixture {
             relation,
             sessions.clone(),
             management,
-            GroupServiceConfig::default(),
+            GroupServiceConfig {
+                relation_env: "dev".to_string(),
+                tenant: "tenant-a".to_string(),
+            },
         );
         if let Some(runtime) = runtime {
             service = service.with_collaboration_runtime(runtime);
@@ -118,6 +121,8 @@ impl Fixture {
 #[derive(Default)]
 struct RecordingRuntime {
     configured: Mutex<Option<ConfigureGroupRuntimeCommand>>,
+    configure_error: Mutex<Option<String>>,
+    projection_error: Mutex<Option<String>>,
 }
 
 #[async_trait]
@@ -190,6 +195,9 @@ impl CollaborationRuntimeService for RecordingRuntime {
         &self,
         cmd: ConfigureGroupRuntimeCommand,
     ) -> Result<ConfigureGroupRuntimeOutcome, CollaborationRuntimeError> {
+        if let Some(message) = self.configure_error.lock().expect("runtime lock").clone() {
+            return Err(CollaborationRuntimeError::InvalidRequest(message));
+        }
         let outcome = ConfigureGroupRuntimeOutcome {
             group_id: cmd.group_id.clone(),
             default_definition: cmd.definition_ref.clone(),
@@ -203,6 +211,14 @@ impl CollaborationRuntimeService for RecordingRuntime {
         &self,
         group_id: &str,
     ) -> Result<GroupCollaborationDefinitionView, CollaborationRuntimeError> {
+        if let Some(message) = self
+            .projection_error
+            .lock()
+            .expect("projection error lock")
+            .clone()
+        {
+            return Err(CollaborationRuntimeError::InvalidRequest(message));
+        }
         let configured = self.configured.lock().expect("runtime lock");
         let configured = configured.as_ref().ok_or_else(|| {
             CollaborationRuntimeError::InvalidRequest("Group runtime is not configured".into())
@@ -225,6 +241,10 @@ impl CollaborationRuntimeService for RecordingRuntime {
 
 fn bot_principal(bot_uuid: &str) -> Principal {
     Principal::bot(bot_uuid, "tenant-a", BTreeSet::new())
+}
+
+fn bot_principal_in_tenant(bot_uuid: &str, tenant: &str) -> Principal {
+    Principal::bot(bot_uuid, tenant, BTreeSet::new())
 }
 
 fn human_principal(actor_id: &str, subject_id: &str) -> Principal {
@@ -563,7 +583,7 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
-                    role: ParticipantRole::Worker,
+                    role: ParticipantRole::Consultant,
                 }],
                 collaboration:
                     bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(
@@ -590,6 +610,50 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
 }
 
 #[tokio::test]
+async fn state_machine_runtime_failure_rolls_back_created_group() {
+    let runtime = Arc::new(RecordingRuntime::default());
+    *runtime.configure_error.lock().expect("runtime lock") =
+        Some("invalid runtime configuration".to_string());
+    let fixture = Fixture::new_with_runtime(runtime).await;
+    fixture.add_public_bot("driver").await;
+    fixture.add_public_bot("worker").await;
+
+    let result = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: Some("State machine".into()),
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "worker".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration:
+                    bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(
+                        bcs_service_api::application::v1::StateMachineConfiguration {
+                            definition:
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "definition-1".into(),
+                                    version: 1,
+                                },
+                            participant_bindings: vec![],
+                        },
+                    ),
+            }),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::InvalidInput { code, .. }) if code == "invalid_request"
+    ));
+    assert_eq!(fixture.groups.count().await, 0);
+}
+
+#[tokio::test]
 async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
     let runtime = Arc::new(RecordingRuntime::default());
     let fixture = Fixture::new_with_runtime(runtime.clone()).await;
@@ -607,7 +671,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
                 driver_bot_uuid: "driver".into(),
                 participants: vec![CreateParticipant {
                     actor_id: "worker".into(),
-                    role: ParticipantRole::Worker,
+                    role: ParticipantRole::Consultant,
                 }],
                 collaboration:
                     bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(
@@ -664,6 +728,14 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
             .expect("worker binding")
             .bot_ids,
         vec!["worker"]
+    );
+    assert_eq!(
+        configured
+            .participant_bindings
+            .get("worker")
+            .expect("worker binding")
+            .source,
+        "manual"
     );
 }
 
@@ -768,4 +840,392 @@ async fn get_requires_a_group_relation_and_delete_is_idempotent() {
         .await
         .expect("second delete");
     assert!(!second.deleted);
+}
+
+#[tokio::test]
+async fn tenant_mismatch_is_rejected_before_group_lookup() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    fixture
+        .groups
+        .upsert(normal_group(
+            "group-1",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            GroupStrategy::Chat,
+            1,
+        ))
+        .await
+        .expect("store group");
+
+    for group_id in ["group-1", "missing"] {
+        let result = fixture
+            .service
+            .get(GetGroup {
+                principal: bot_principal_in_tenant("driver", "tenant-b"),
+                group_id: group_id.into(),
+            })
+            .await;
+        assert!(matches!(result, Err(ApplicationError::Forbidden(_))));
+    }
+}
+
+#[tokio::test]
+async fn manager_worker_manager_can_update_and_delete_group() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "manager", "worker"] {
+        fixture.add_public_bot(bot).await;
+    }
+    let mut group = normal_group(
+        "group-1",
+        "driver",
+        vec![
+            Participant::bot("driver", ParticipantRole::Worker),
+            Participant::bot("manager", ParticipantRole::Manager),
+            Participant::bot("worker", ParticipantRole::Worker),
+        ],
+        GroupStrategy::ManagerWorker,
+        1,
+    );
+    group.originator = Some("driver".into());
+    fixture.groups.upsert(group).await.expect("store group");
+
+    fixture
+        .service
+        .update(UpdateGroup {
+            principal: bot_principal("manager"),
+            group_id: "group-1".into(),
+            patch: GroupPatch {
+                name: Some("Managed".into()),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("manager may update");
+
+    let deleted = fixture
+        .service
+        .delete(DeleteGroup {
+            principal: bot_principal("manager"),
+            group_id: "group-1".into(),
+        })
+        .await
+        .expect("manager may delete");
+    assert!(deleted.deleted);
+}
+
+#[tokio::test]
+async fn delete_does_not_reveal_group_existence_to_unrelated_principal() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "outsider"] {
+        fixture.add_public_bot(bot).await;
+    }
+    fixture
+        .groups
+        .upsert(normal_group(
+            "group-1",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            GroupStrategy::Chat,
+            1,
+        ))
+        .await
+        .expect("store group");
+
+    for group_id in ["group-1", "missing"] {
+        let result = fixture
+            .service
+            .delete(DeleteGroup {
+                principal: bot_principal("outsider"),
+                group_id: group_id.into(),
+            })
+            .await
+            .expect("existence-safe idempotent delete");
+        assert!(!result.deleted);
+    }
+}
+
+#[tokio::test]
+async fn state_machine_patch_failure_does_not_commit_requested_changes() {
+    let runtime = Arc::new(RecordingRuntime::default());
+    let fixture = Fixture::new_with_runtime(runtime.clone()).await;
+    for bot in ["driver", "helper"] {
+        fixture.add_public_bot(bot).await;
+    }
+
+    fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: Some("Before".into()),
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "helper".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration:
+                    bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(
+                        bcs_service_api::application::v1::StateMachineConfiguration {
+                            definition:
+                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                    definition_id: "definition-1".into(),
+                                    version: 1,
+                                },
+                            participant_bindings: Vec::new(),
+                        },
+                    ),
+            }),
+        })
+        .await
+        .expect("create state-machine group");
+    let group_id = runtime
+        .configured
+        .lock()
+        .expect("runtime lock")
+        .as_ref()
+        .expect("configured runtime")
+        .group_id
+        .clone();
+    *runtime
+        .projection_error
+        .lock()
+        .expect("projection error lock") = Some("runtime unavailable".into());
+
+    let result = fixture
+        .service
+        .update(UpdateGroup {
+            principal: bot_principal("driver"),
+            group_id: group_id.clone(),
+            patch: GroupPatch {
+                name: Some("After".into()),
+                ..Default::default()
+            },
+        })
+        .await;
+    assert!(matches!(result, Err(ApplicationError::InvalidInput { .. })));
+    assert_eq!(
+        fixture
+            .groups
+            .get(&group_id)
+            .await
+            .expect("stored group")
+            .label
+            .as_deref(),
+        Some("Before")
+    );
+}
+
+#[tokio::test]
+async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "manager", "worker"] {
+        fixture.add_public_bot(bot).await;
+    }
+
+    let invalid_chat = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: None,
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "manager".into(),
+                    role: ParticipantRole::Manager,
+                }],
+                collaboration: bcs_service_api::application::v1::CollaborationConfiguration::Chat(
+                    bcs_service_api::application::v1::ChatConfiguration {
+                        delivery_policy: GroupDeliveryPolicy {
+                            bot_final_delivery: BotFinalDelivery::SendToDriver,
+                        },
+                    },
+                ),
+            }),
+        })
+        .await;
+    assert!(matches!(
+        invalid_chat,
+        Err(ApplicationError::InvalidInput { code, .. }) if code == "invalid_participant"
+    ));
+
+    let invalid_manager_worker = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: None,
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![
+                    CreateParticipant {
+                        actor_id: "manager".into(),
+                        role: ParticipantRole::Manager,
+                    },
+                    CreateParticipant {
+                        actor_id: "worker".into(),
+                        role: ParticipantRole::Worker,
+                    },
+                ],
+                collaboration:
+                    bcs_service_api::application::v1::CollaborationConfiguration::ManagerWorker(
+                        Default::default(),
+                    ),
+            }),
+        })
+        .await;
+    assert!(matches!(
+        invalid_manager_worker,
+        Err(ApplicationError::InvalidInput { code, .. }) if code == "invalid_participant"
+    ));
+}
+
+#[tokio::test]
+async fn canonical_human_principal_can_create_dm_without_legacy_actor_prefix() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("bot-b").await;
+
+    let detail = fixture
+        .service
+        .create(CreateGroup {
+            principal: human_principal("human-actor-1", "staff-1"),
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                name: Some("Human and B".into()),
+                context: None,
+                target_actor_id: "bot-b".into(),
+            }),
+        })
+        .await
+        .expect("canonical Human actor creates DM");
+
+    let GroupDetail::DirectMessage(detail) = detail else {
+        panic!("expected DM detail");
+    };
+    assert!(
+        detail
+            .participants
+            .iter()
+            .any(|participant| participant.actor_id == "human-actor-1")
+    );
+}
+
+#[tokio::test]
+async fn client_caused_group_errors_map_to_documented_4xx_classes() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    fixture.add_protected_bot("protected").await;
+    fixture
+        .friends
+        .add_friendship("driver", "protected")
+        .await
+        .expect("driver/protected friendship");
+
+    let self_dm = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                name: None,
+                context: None,
+                target_actor_id: "driver".into(),
+            }),
+        })
+        .await;
+    assert!(matches!(
+        self_dm,
+        Err(ApplicationError::InvalidInput { code, .. }) if code == "invalid_request"
+    ));
+
+    let public_with_protected = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: None,
+                context: None,
+                visibility: GroupVisibility::Public,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "protected".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration: bcs_service_api::application::v1::CollaborationConfiguration::Chat(
+                    bcs_service_api::application::v1::ChatConfiguration {
+                        delivery_policy: GroupDeliveryPolicy {
+                            bot_final_delivery: BotFinalDelivery::SendToDriver,
+                        },
+                    },
+                ),
+            }),
+        })
+        .await;
+    assert!(matches!(
+        public_with_protected,
+        Err(ApplicationError::Conflict { code, .. }) if code == "non_public_participant"
+    ));
+}
+
+#[tokio::test]
+async fn session_only_nonmember_dm_summary_omits_peer_actor() {
+    let fixture = Fixture::new().await;
+    for bot in ["bot-a", "bot-b", "target"] {
+        fixture.add_public_bot(bot).await;
+    }
+    let (group, _) = fixture
+        .groups
+        .create_or_reuse_actor_dm_group(
+            "dm-1",
+            bcs_service_api::DmActorSpec {
+                actor_id: "bot-a".into(),
+                actor_kind: bcs_service_api::ActorKind::Bot,
+                display_name: Some("bot-a".into()),
+            },
+            bcs_service_api::DmActorSpec {
+                actor_id: "bot-b".into(),
+                actor_kind: bcs_service_api::ActorKind::Bot,
+                display_name: Some("bot-b".into()),
+            },
+            "bot-a",
+            "bot-a",
+            None,
+            None,
+        )
+        .await
+        .expect("create DM");
+    fixture
+        .sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: group.id,
+            session_id: None,
+            params: NewSessionParams {
+                participants: vec![Participant::bot("target", ParticipantRole::Consultant)],
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("create session");
+
+    let page = fixture
+        .service
+        .list_bot_groups(ListBotGroups {
+            principal: bot_principal("target"),
+            bot_uuid: "target".into(),
+            offset: 0,
+            limit: 20,
+            q: None,
+            membership: MembershipFilter::SessionOnly,
+            kind: GroupKindFilter::Dm,
+            strategy: None,
+        })
+        .await
+        .expect("list related DMs");
+    let GroupSummary::DirectMessage(summary) = &page.items[0] else {
+        panic!("expected DM summary");
+    };
+    assert!(summary.peer_actor.is_none());
 }

@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
 use crate::types::{
-    Group, GroupKind, GroupMessage, Participant, ParticipantMode, ServiceResult, ServiceSpec,
-    GroupStatus, Workspace,
+    Group, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus, Participant,
+    ParticipantMode, ServiceResult, ServiceSpec, Workspace,
 };
 
 /// Repository contract for group persistence implementations.
@@ -13,6 +13,11 @@ use crate::types::{
 #[async_trait]
 pub trait GroupRepoPort: Send + Sync {
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
+    async fn patch_mutable_fields(
+        &self,
+        id: &str,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<()>;
     async fn get(&self, id: &str) -> Option<Group>;
     async fn add_message(&self, id: &str, message: GroupMessage) -> ServiceResult<()>;
     async fn add_participant(&self, id: &str, participant: Participant) -> ServiceResult<()>;

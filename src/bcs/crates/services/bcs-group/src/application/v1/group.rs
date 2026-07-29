@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     Actor, ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
     CollaborationGroupDetail, CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup,
-    CreateGroupSpec, DeleteGroup, DeleteResult, DirectMessageGroupDetail,
+    CreateGroupSpec, CreateParticipant, DeleteGroup, DeleteResult, DirectMessageGroupDetail,
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter, GroupService, GroupStatus,
     GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, ListBotGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
@@ -16,23 +16,18 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, CollaborationDefinitionRef,
     CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    DefaultDelivery, DmCreateCommand, FriendCoreService, Group as DomainGroup, GroupCoreService,
+    DefaultDelivery, DmActorSpec, FriendCoreService, Group as DomainGroup, GroupCoreService,
     GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand, GroupKind,
-    GroupManagementService, GroupStrategy, GroupUseCaseError, RelationCoreService, RoutingMode,
-    RoutingPolicy, RuntimeParticipantBinding, ServiceError, SessionManagementService,
+    GroupManagementService, GroupMutableFieldsPatch, GroupStrategy, GroupUseCaseError,
+    RelationCoreService, RoutingMode, RoutingPolicy, RuntimeParticipantBinding, ServiceError,
+    SessionManagementService, generated_group_id,
 };
 
 #[derive(Debug, Clone)]
 pub struct GroupServiceConfig {
     pub relation_env: String,
-}
-
-impl Default for GroupServiceConfig {
-    fn default() -> Self {
-        Self {
-            relation_env: "dev".to_string(),
-        }
-    }
+    /// The one tenant served by this BCN instance.
+    pub tenant: String,
 }
 
 /// OpenAPI v1 Group facade.
@@ -80,6 +75,15 @@ impl GroupServiceImpl {
     ) -> Self {
         self.collaboration_runtime = Some(collaboration_runtime);
         self
+    }
+
+    fn ensure_principal_tenant(&self, principal: &Principal) -> Result<(), ApplicationError> {
+        if principal.tenant() == self.config.tenant {
+            return Ok(());
+        }
+        Err(ApplicationError::forbidden(
+            "Principal tenant is not authorized for this BCN instance",
+        ))
     }
 
     async fn authorize_bot_resource(
@@ -196,7 +200,13 @@ impl GroupServiceImpl {
     }
 
     fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
-        principal.actor_id() == group.driver_bot || principal.actor_id() == group.originator()
+        principal.actor_id() == group.driver_bot
+            || principal.actor_id() == group.originator()
+            || (group.group_strategy == GroupStrategy::ManagerWorker
+                && group.participants.iter().any(|participant| {
+                    participant.bot_uuid == principal.actor_id()
+                        && participant.role == bcs_service_api::ParticipantRole::Manager
+                }))
     }
 
     async fn load_readable_group(
@@ -360,12 +370,19 @@ impl GroupServiceImpl {
             let peer_actor = group
                 .participants
                 .iter()
-                .find(|participant| participant.bot_uuid != target_bot_uuid)
-                .map(|participant| Actor {
-                    actor_id: participant.bot_uuid.clone(),
-                    actor_kind: participant.actor_kind,
-                    name: participant.bot_name.clone(),
-                });
+                .any(|participant| participant.bot_uuid == target_bot_uuid)
+                .then(|| {
+                    group
+                        .participants
+                        .iter()
+                        .find(|participant| participant.bot_uuid != target_bot_uuid)
+                        .map(|participant| Actor {
+                            actor_id: participant.bot_uuid.clone(),
+                            actor_kind: participant.actor_kind,
+                            name: participant.bot_name.clone(),
+                        })
+                })
+                .flatten();
             return Ok(GroupSummary::DirectMessage(DirectMessageGroupSummary {
                 group_id: group.id,
                 version: group.version,
@@ -400,7 +417,7 @@ impl GroupServiceImpl {
     async fn create_collaboration(
         &self,
         principal: Principal,
-        request: CreateCollaborationGroup,
+        mut request: CreateCollaborationGroup,
     ) -> Result<GroupDetail, ApplicationError> {
         self.ensure_collaboration_eligible(&principal, &request.driver_bot_uuid)
             .await?;
@@ -427,6 +444,42 @@ impl GroupServiceImpl {
         };
         let (strategy, routing_policy, state_machine) =
             map_create_collaboration(request.collaboration.clone());
+        let lead_role = strategy.lead_role();
+        if request
+            .participants
+            .iter()
+            .any(|participant| !strategy.allows_role(participant.role))
+        {
+            return Err(ApplicationError::invalid(
+                "invalid_participant",
+                "Participant role is not allowed by the selected collaboration strategy",
+            ));
+        }
+        match request
+            .participants
+            .iter()
+            .find(|participant| participant.actor_id == request.driver_bot_uuid)
+        {
+            Some(driver) if driver.role != lead_role => {
+                return Err(ApplicationError::invalid(
+                    "invalid_participant",
+                    "driver_bot_uuid must have the strategy lead role",
+                ));
+            }
+            None => request.participants.push(CreateParticipant {
+                actor_id: request.driver_bot_uuid.clone(),
+                role: lead_role,
+            }),
+            _ => {}
+        }
+        if request.participants.iter().any(|participant| {
+            participant.actor_id != request.driver_bot_uuid && participant.role == lead_role
+        }) {
+            return Err(ApplicationError::invalid(
+                "invalid_participant",
+                "Only driver_bot_uuid may have the strategy lead role",
+            ));
+        }
         if state_machine.is_some() && self.collaboration_runtime.is_none() {
             return Err(ApplicationError::internal(
                 "StateMachine creation requires CollaborationRuntimeService",
@@ -493,7 +546,7 @@ impl GroupServiceImpl {
                     (
                         binding.binding,
                         RuntimeParticipantBinding {
-                            source: "openapi_v1".to_string(),
+                            source: "manual".to_string(),
                             bot_ids: binding.actor_ids,
                             extensions: Default::default(),
                         },
@@ -514,11 +567,27 @@ impl GroupServiceImpl {
                 })
                 .await
             {
-                if let Some(session_id) = created.latest_running_session_id.as_deref() {
-                    let _ = self.sessions.delete(session_id).await;
-                }
-                let _ = self.groups.delete(&created.group_id).await;
-                return Err(map_runtime_error(error));
+                let session_cleanup_error =
+                    if let Some(session_id) = created.latest_running_session_id.as_deref() {
+                        self.sessions
+                            .delete(session_id)
+                            .await
+                            .err()
+                            .map(|cleanup| cleanup.to_string())
+                    } else {
+                        None
+                    };
+                let group_cleanup_error = self
+                    .groups
+                    .delete(&created.group_id)
+                    .await
+                    .err()
+                    .map(|cleanup| cleanup.to_string());
+                return Err(map_runtime_and_rollback_error(
+                    error,
+                    session_cleanup_error,
+                    group_cleanup_error,
+                ));
             }
         }
 
@@ -533,26 +602,74 @@ impl GroupServiceImpl {
         principal: Principal,
         request: CreateDirectMessageGroup,
     ) -> Result<GroupDetail, ApplicationError> {
-        let result = self
-            .management
-            .create_dm(DmCreateCommand {
-                group_id: None,
-                caller_actor_id: Some(principal.actor_id().to_string()),
-                driver_bot: None,
-                target_actor_id: request.target_actor_id,
-                label: request.name,
-                topic: None,
-                context: request.context,
-            })
-            .await
-            .map_err(map_group_error)?;
-        let group = self
-            .groups
-            .get(&result.group.group_id)
+        self.ensure_collaboration_eligible(&principal, &request.target_actor_id)
+            .await?;
+        let target = self
+            .registry
+            .get(&request.target_actor_id)
             .await
             .ok_or_else(|| {
-                ApplicationError::internal("created DM Group disappeared before projection")
+                ApplicationError::not_found(
+                    "bot_not_found",
+                    format!("Bot '{}' was not found", request.target_actor_id),
+                )
             })?;
+        let target_actor = DmActorSpec {
+            actor_id: target.bot_uuid.clone(),
+            actor_kind: ActorKind::Bot,
+            display_name: target.capabilities.name.clone(),
+        };
+        let (source_actor, legacy_driver_bot) = match &principal {
+            Principal::Human(human) => (
+                DmActorSpec {
+                    actor_id: human.actor_id.clone(),
+                    actor_kind: ActorKind::Human,
+                    display_name: human
+                        .subject
+                        .display_name
+                        .clone()
+                        .or_else(|| human.subject.full_name.clone())
+                        .or_else(|| Some(human.subject.username.clone())),
+                },
+                target.bot_uuid.clone(),
+            ),
+            Principal::Bot(bot) => {
+                let source = self.registry.get(&bot.bot_uuid).await.ok_or_else(|| {
+                    ApplicationError::not_found(
+                        "bot_not_found",
+                        format!("Bot '{}' was not found", bot.bot_uuid),
+                    )
+                })?;
+                (
+                    DmActorSpec {
+                        actor_id: source.bot_uuid.clone(),
+                        actor_kind: ActorKind::Bot,
+                        display_name: source.capabilities.name.clone(),
+                    },
+                    source.bot_uuid,
+                )
+            }
+        };
+        let label = request.name.or_else(|| {
+            Some(format!(
+                "DM: {} - {}",
+                principal.actor_id(),
+                request.target_actor_id
+            ))
+        });
+        let (group, _) = self
+            .groups
+            .create_or_reuse_actor_dm_group(
+                &generated_group_id(GroupKind::Dm),
+                source_actor,
+                target_actor,
+                &legacy_driver_bot,
+                principal.actor_id(),
+                label,
+                request.context,
+            )
+            .await
+            .map_err(map_service_error)?;
         self.project_detail(group).await
     }
 }
@@ -563,6 +680,7 @@ impl GroupService for GroupServiceImpl {
         &self,
         command: ListBotGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
+        self.ensure_principal_tenant(&command.principal)?;
         self.authorize_bot_resource(&command.principal, &command.bot_uuid)
             .await?;
         if command.limit == 0 || command.limit > 100 {
@@ -658,6 +776,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError> {
+        self.ensure_principal_tenant(&command.principal)?;
         match command.group {
             CreateGroupSpec::Collaboration(request) => {
                 self.create_collaboration(command.principal, request).await
@@ -669,6 +788,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError> {
+        self.ensure_principal_tenant(&query.principal)?;
         let group = self
             .load_readable_group(&query.principal, &query.group_id)
             .await?;
@@ -676,6 +796,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
+        self.ensure_principal_tenant(&command.principal)?;
         if command.patch.is_empty() {
             return Err(ApplicationError::invalid(
                 "invalid_request",
@@ -695,13 +816,17 @@ impl GroupService for GroupServiceImpl {
                 ));
             }
         }
-        if let Some(name) = command.patch.name {
-            group.label = Some(name);
+        let patch = command.patch;
+        let mut persistence_patch = GroupMutableFieldsPatch::default();
+        if let Some(name) = patch.name {
+            group.label = Some(name.clone());
+            persistence_patch.label = Some(name);
         }
-        if let Some(context) = command.patch.context {
-            group.context = Some(context);
+        if let Some(context) = patch.context {
+            group.context = Some(context.clone());
+            persistence_patch.context = Some(context);
         }
-        if let Some(visibility) = command.patch.visibility {
+        if let Some(visibility) = patch.visibility {
             if visibility == GroupVisibility::Public {
                 for participant in &group.participants {
                     if participant.actor_kind != ActorKind::Bot {
@@ -726,23 +851,27 @@ impl GroupService for GroupServiceImpl {
                 }
             }
             group.visibility = visibility_name(visibility).to_string();
+            persistence_patch.visibility = Some(group.visibility.clone());
         }
-        if let Some(delivery_policy) = command.patch.delivery_policy {
+        if let Some(delivery_policy) = patch.delivery_policy {
             let policy = group
                 .routing_policy
                 .get_or_insert_with(RoutingPolicy::default);
             policy.default_bot_final_delivery =
                 persist_delivery(delivery_policy.bot_final_delivery);
+            persistence_patch.default_bot_final_delivery = Some(policy.default_bot_final_delivery);
         }
         group.updated_at = now_millis();
+        let detail = self.project_detail(group).await?;
         self.groups
-            .upsert(group.clone())
+            .patch_mutable_fields(&command.group_id, persistence_patch)
             .await
             .map_err(map_service_error)?;
-        self.project_detail(group).await
+        Ok(detail)
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
+        self.ensure_principal_tenant(&command.principal)?;
         let Some(group) = self.groups.get(&command.group_id).await else {
             return Ok(DeleteResult {
                 group_id: command.group_id,
@@ -750,9 +879,10 @@ impl GroupService for GroupServiceImpl {
             });
         };
         if !Self::can_manage_group(&command.principal, &group) {
-            return Err(ApplicationError::forbidden(
-                "Only the Group originator or driver may delete this Group",
-            ));
+            return Ok(DeleteResult {
+                group_id: command.group_id,
+                deleted: false,
+            });
         }
         let result = self
             .management
@@ -932,6 +1062,23 @@ fn map_service_error(error: ServiceError) -> ApplicationError {
         ServiceError::Unauthorized(_) => ApplicationError::Unauthenticated,
         ServiceError::Forbidden(message) => ApplicationError::forbidden(message),
         ServiceError::Conflict(message) => ApplicationError::conflict("conflict", message),
+        ServiceError::InvalidOperation { message, .. }
+        | ServiceError::SessionInvalidParams(message) => {
+            ApplicationError::invalid("invalid_request", message)
+        }
+        ServiceError::ExistNonPublicBots { .. } => ApplicationError::conflict(
+            "non_public_participant",
+            "All Bot participants must be public for this operation",
+        ),
+        ServiceError::BotHidden(id) => {
+            ApplicationError::forbidden(format!("Bot '{id}' is hidden and cannot collaborate"))
+        }
+        ServiceError::PrivateBotCannotCollaborate => {
+            ApplicationError::forbidden("Private Bot cannot collaborate")
+        }
+        ServiceError::NotFriends(_) => {
+            ApplicationError::forbidden("Actors are not collaboration-eligible")
+        }
         other => ApplicationError::internal(other.to_string()),
     }
 }
@@ -953,5 +1100,57 @@ fn map_runtime_error(error: CollaborationRuntimeError) -> ApplicationError {
             ApplicationError::conflict("conflict", message)
         }
         other => ApplicationError::internal(other.to_string()),
+    }
+}
+
+fn map_runtime_and_rollback_error(
+    runtime_error: CollaborationRuntimeError,
+    session_cleanup_error: Option<String>,
+    group_cleanup_error: Option<String>,
+) -> ApplicationError {
+    if session_cleanup_error.is_none() && group_cleanup_error.is_none() {
+        return map_runtime_error(runtime_error);
+    }
+    ApplicationError::internal(format!(
+        "StateMachine runtime configuration failed: {runtime_error}; rollback failed: session cleanup: {}; group cleanup: {}",
+        session_cleanup_error.as_deref().unwrap_or("ok"),
+        group_cleanup_error.as_deref().unwrap_or("ok"),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_rollback_failure_preserves_primary_and_cleanup_errors() {
+        let error = map_runtime_and_rollback_error(
+            CollaborationRuntimeError::InvalidRequest("bad definition".to_string()),
+            Some("session store unavailable".to_string()),
+            Some("group store unavailable".to_string()),
+        );
+
+        assert!(matches!(
+            error,
+            ApplicationError::Internal(message)
+                if message.contains("bad definition")
+                    && message.contains("session store unavailable")
+                    && message.contains("group store unavailable")
+        ));
+    }
+
+    #[test]
+    fn successful_runtime_rollback_keeps_client_error_classification() {
+        let error = map_runtime_and_rollback_error(
+            CollaborationRuntimeError::InvalidParticipantBinding("unknown actor".to_string()),
+            None,
+            None,
+        );
+
+        assert!(matches!(
+            error,
+            ApplicationError::InvalidInput { code, message }
+                if code == "invalid_request" && message == "unknown actor"
+        ));
     }
 }
