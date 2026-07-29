@@ -867,10 +867,17 @@ runtime:
             detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]["kind"],
             "human_input"
         );
-        assert!(
-            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]
-                .get("assignee")
-                .is_none()
+        assert_eq!(
+            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]["assignee"],
+            serde_json::json!({
+                "type": "runtime_actor",
+                "actor": "human_1001",
+            })
+        );
+        assert_eq!(
+            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]["notification"]
+                ["mode"],
+            "direct_assignee"
         );
         assert_eq!(
             detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]

@@ -354,10 +354,18 @@ mod tests {
                 ["kind"],
             "human_input"
         );
-        assert!(
+        assert_eq!(
             human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
-                .get("assignee")
-                .is_none()
+                ["assignee"],
+            serde_json::json!({
+                "type": "runtime_actor",
+                "actor": "human_1001",
+            })
+        );
+        assert_eq!(
+            human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
+                ["notification"]["mode"],
+            "direct_assignee"
         );
 
         Ok(())
