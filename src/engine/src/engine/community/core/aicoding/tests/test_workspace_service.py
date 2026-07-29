@@ -327,9 +327,55 @@ async def test_list_file_tree_prunes_mounts_and_returns_sorted_tree(
     assert "-name .git" in command
     assert "-name node_modules" in command
     assert "-path './skills'" in command
+    assert "-path './skills-repo'" in command
     assert "-path './.repos'" in command
     assert "%s" not in command
     assert file_plugin.calls == []
+
+
+async def test_list_file_tree_preserves_directories_at_depth_limit(
+    workspace_dir: Path,
+) -> None:
+    """Directories emitted at maxdepth remain visible without loaded children."""
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout=(
+                "d\0modelha\0"
+                "d\0modelha/app\0"
+                "d\0modelha/app/bootstrap\0"
+                "d\0modelha/conf\0"
+                "d\0modelha/config\0"
+                "f\0modelha/README.md\0"
+            ),
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    tree = await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID,
+        max_depth=3,
+    )
+
+    assert [node.name for node in tree] == ["modelha"]
+    modelha = tree[0]
+    assert modelha.children is not None
+    assert [node.name for node in modelha.children] == [
+        "app",
+        "conf",
+        "config",
+        "README.md",
+    ]
+
+    app = modelha.children[0]
+    assert app.children is not None
+    assert [node.name for node in app.children] == ["bootstrap"]
+    assert app.children[0].children is None
+    assert modelha.children[1].children is None
+    assert modelha.children[2].children is None
 
 
 @pytest.mark.parametrize("max_depth", [1, 2, 5])

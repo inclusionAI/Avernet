@@ -72,6 +72,14 @@ pub struct CreateCustomGroupOptions {
     pub auto_start_on_service_invocation: bool,
 }
 
+#[derive(Debug)]
+pub struct RunSessionCollaborationOptions {
+    pub session_id: String,
+    pub participant_bindings: BTreeMap<String, ParticipantBindingInfo>,
+    pub definition_yaml: String,
+    pub input: serde_json::Value,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CurrentActorGroupListPage {
     pub actor_id: String,
@@ -1575,6 +1583,66 @@ impl BcsClient {
             .context("Invalid collaboration definition validation response")
     }
 
+    pub async fn get_session_state_machine_permission(
+        &self,
+        session_id: &str,
+    ) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/sessions/{}/state-machine-permission",
+            self.base_url, session_id
+        );
+        let response = self
+            .add_auth(self.http_client.get(&url))
+            .send()
+            .await
+            .context("Failed to query session state-machine permission")?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "Query session state-machine permission failed ({}): {}",
+                status,
+                body
+            ));
+        }
+        response
+            .json()
+            .await
+            .context("Invalid session state-machine permission response")
+    }
+
+    pub async fn run_session_collaboration(
+        &self,
+        options: RunSessionCollaborationOptions,
+    ) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/sessions/{}/state-machine-runs",
+            self.base_url, options.session_id
+        );
+        let response = self
+            .add_auth(self.http_client.post(&url).json(&serde_json::json!({
+                "definition_yaml": options.definition_yaml,
+                "participant_bindings": options.participant_bindings,
+                "input": options.input,
+            })))
+            .send()
+            .await
+            .context("Failed to start session state-machine run")?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "Start session state-machine run failed ({}): {}",
+                status,
+                body
+            ));
+        }
+        response
+            .json()
+            .await
+            .context("Invalid session state-machine run response")
+    }
+
     /// Create a state-machine group from authoring YAML and logical participant bindings.
     pub async fn create_custom_group(
         &self,
@@ -1598,6 +1666,7 @@ impl BcsClient {
             originator: Some(options.driver_bot),
             collaboration_definition_yaml: Some(options.definition_yaml),
             auto_start_on_service_invocation: Some(options.auto_start_on_service_invocation),
+            start_initial_run: None,
             visibility: None,
         };
         let response = self
@@ -1649,6 +1718,7 @@ impl BcsClient {
             originator: None,
             collaboration_definition_yaml: None,
             auto_start_on_service_invocation: None,
+            start_initial_run: None,
             visibility: None,
         };
 
@@ -1725,6 +1795,7 @@ impl BcsClient {
             originator: None,
             collaboration_definition_yaml: None,
             auto_start_on_service_invocation: None,
+            start_initial_run: None,
             visibility: None,
         };
 

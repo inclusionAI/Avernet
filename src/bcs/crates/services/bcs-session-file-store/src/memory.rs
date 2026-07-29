@@ -166,7 +166,7 @@ impl SessionFileRepoPort for MemorySessionFileRepo {
             })
             .cloned()
             .collect();
-        items.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.file_id.cmp(&b.file_id)));
+        items.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.file_id.cmp(&a.file_id)));
 
         let total = items.len() as u64;
 
@@ -381,6 +381,33 @@ mod tests {
             .unwrap();
         assert_eq!(p3.items.len(), 1);
         assert_eq!(p3.total, 5);
+    }
+
+    #[tokio::test]
+    async fn list_defaults_to_newest_first() {
+        // Default order is created_at DESC, file_id DESC — newest uploads first.
+        // f5 is inserted last, so it must be the first item returned.
+        let repo = MemorySessionFileRepo::new();
+        for i in 1u8..=5 {
+            repo.insert(params(&format!("f{i}"), "s_order", 9999)).await.unwrap();
+        }
+        let page = repo
+            .list(
+                "s_order",
+                SessionFileListParams {
+                    prefix: None,
+                    status: None,
+                    limit: 100,
+                    offset: 0,
+                },
+            )
+            .await
+            .unwrap();
+        let ids: Vec<&str> = page.items.iter().map(|f| f.file_id.as_str()).collect();
+        // Last-inserted file_id is first; tie-broken by file_id DESC.
+        assert_eq!(ids.first().copied(), Some("f5"), "newest upload must lead: {ids:?}");
+        // And the full order is f5..f1 (reverse insertion), not insertion order.
+        assert_eq!(ids, vec!["f5", "f4", "f3", "f2", "f1"], "order should be DESC: {ids:?}");
     }
 
     #[tokio::test]

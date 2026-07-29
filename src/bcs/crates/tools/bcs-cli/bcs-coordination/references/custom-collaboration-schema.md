@@ -38,13 +38,13 @@ runtime:
 - Keep `metadata.description` as a string, `metadata.labels` as a
   string-to-string mapping, and every `extensions` field as a mapping.
 
-`bcs-cli collaboration validate` 通过当前 BCS 实例的 `POST /collaboration/definitions/validate` 接口执行三层校验：
+`bcs-cli collaboration validate` 通过当前 BCS 实例的 `POST /collaboration/definitions/validate` 接口执行三层校验；`bcs collaborate run` 的一次性运行接口在启动前执行同一套校验：
 
 1. Authoring shape: enforce the 256 KiB request limit, parse one YAML document, reject duplicate or unknown keys, and enforce the group-creation top-level boundary.
 2. Runtime contract: deserialize the definition, reject fields not implemented by the current runtime, and enforce graph, participant and node invariants.
 3. Deployment capability: accept `judge` only when the current BCS instance has an LLM provider configured.
 
-校验成功时返回 participant slots 和 graph summary，供后续 `bcs-cli collaboration create` 绑定逻辑角色。
+校验成功时返回 participant slots 和 graph summary，供后续 `bcs-cli collaboration create` 或 `bcs collaborate run` 绑定逻辑角色。
 
 ## Participants
 
@@ -59,7 +59,8 @@ participants:
 - Keys are logical bindings referenced by node assignees.
 - Allowed fields: `display_name`, `description`, `required`, `extensions`.
 - Never add `bot_id` or `bcs_participant_role`.
-- Bind logical roles to real Bots in the create-group UI.
+- Bind logical roles to real Bots through `collaboration create --binding` or
+  `collaborate run --binding`; never persist those UUIDs in authoring YAML.
 
 ## State machine
 
@@ -158,6 +159,22 @@ BCS includes the original run `[Input]` in every node prompt and includes each d
 - Let a join node synthesize its direct upstream artifacts instead of reproducing the complete run input.
 - Let the single final node emit the user-ready deliverable.
 - Put scenario-specific defaults, formats and business rules in the caller's profile or runtime input, not in this shared Skill.
+
+For a one-shot run in the current session, pass runtime input and every required
+role binding together:
+
+```bash
+bcs collaborate run workflow.yaml \
+  --session "$session_id" \
+  --binding "planner=$planner_bot_uuid" \
+  --binding "writer=$writer_bot_uuid" \
+  --input '{"question":"..."}'
+```
+
+Call `bcs collaborate permission --session "$session_id"` before writing or
+submitting the YAML. Permission is a server-owned policy and must not be
+inferred from the Bot's apparent group role. The role bindings above are
+transient for that run and do not modify the Group's persisted runtime binding.
 
 ## Validation errors
 

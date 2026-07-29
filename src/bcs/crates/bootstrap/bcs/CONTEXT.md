@@ -5,6 +5,8 @@
 - BCS process entrypoint and composition root.
 - Config loading, logging bootstrap, runtime assembly, and adapter registration.
 - Concrete selection of services, plugins, and external clients from validated config.
+- Composition adapter that publishes a completed one-shot state-machine result
+  through the message-flow service under the initiating Bot identity.
 
 ## Consumes
 

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use axum::{
     Json,
     extract::{OriginalUri, Path, State},
@@ -7,12 +9,15 @@ use axum::{
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::caller::authenticated_bot_from_headers;
 use super::{reject_judge_definition_value_when_unavailable, reject_judge_yaml_when_unavailable};
 use crate::state::HttpAppState;
 use bcs_service_api::{
     AuthenticatedHumanCaller, CollaborationDefinitionRef, CollaborationRuntimeError,
     HumanResponseSource, ListPendingHumanNodesCommand, RespondHumanNodeCommand,
-    StartStateMachineRunCommand, StateMachineRunAccessCommand,
+    RuntimeParticipantBinding, SessionStateMachinePermissionCommand,
+    StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
+    StateMachineRunAccessCommand,
 };
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +38,14 @@ pub struct StartStateMachineRunRequest {
 pub struct CancelStateMachineRunRequest {
     #[serde(default)]
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StartSessionStateMachineRunRequest {
+    pub definition_yaml: String,
+    pub participant_bindings: BTreeMap<String, RuntimeParticipantBinding>,
+    #[serde(default)]
+    pub input: Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,11 +85,68 @@ pub async fn start_state_machine_run(
             definition_yaml: body.definition_yaml,
             definition: body.definition,
             definition_ref: body.definition_ref,
+            participant_bindings: None,
             input: body.input,
             caller_id: authenticated_human
                 .as_ref()
                 .map(|human| human.actor_id.clone()),
             authenticated_human,
+        })
+        .await
+    {
+        Ok(outcome) => (StatusCode::ACCEPTED, Json(outcome.view)).into_response(),
+        Err(error) => collaboration_error_to_response(error),
+    }
+}
+
+pub async fn get_session_state_machine_permission(
+    State(state): State<HttpAppState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let caller_bot_id = match authenticated_bot_from_headers(&state, &headers).await {
+        Ok(bot_id) => bot_id,
+        Err(error) => return error.into_response(),
+    };
+    match state
+        .services
+        .collaboration_runtime
+        .get_session_state_machine_permission(SessionStateMachinePermissionCommand {
+            session_id,
+            caller_bot_id,
+        })
+        .await
+    {
+        Ok(permission) => Json(permission).into_response(),
+        Err(error) => collaboration_error_to_response(error),
+    }
+}
+
+pub async fn start_session_state_machine_run(
+    State(state): State<HttpAppState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<StartSessionStateMachineRunRequest>,
+) -> Response {
+    let caller_bot_id = match authenticated_bot_from_headers(&state, &headers).await {
+        Ok(bot_id) => bot_id,
+        Err(error) => return error.into_response(),
+    };
+    if let Err(error) =
+        reject_judge_yaml_when_unavailable(&state, &body.definition_yaml, "definition_yaml")
+    {
+        return error.into_response();
+    }
+    match state
+        .services
+        .collaboration_runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id,
+            caller_bot_id,
+            definition_yaml: body.definition_yaml,
+            participant_bindings: body.participant_bindings,
+            input: body.input,
+            judge_available: state.judge_enabled,
         })
         .await
     {

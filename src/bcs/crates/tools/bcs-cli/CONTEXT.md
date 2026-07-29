@@ -4,6 +4,8 @@
 
 - CLI and admin entrypoints for testing and operating BCS.
 - Operator-facing flows such as debugging, admin commands, and protocol-level requests.
+- `collaborate permission` and `collaborate run` for server-authorized,
+  one-shot state-machine execution in the current BCS session.
 - A tool boundary separate from server runtime assembly.
 
 ## Consumes
