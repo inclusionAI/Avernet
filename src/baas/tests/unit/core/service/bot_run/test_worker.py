@@ -85,10 +85,13 @@ class _QpmRepo:
 
 
 def _qpm(bot_qpm: int = 600) -> BotConcurrencyManager:
-    return BotConcurrencyManager(
+    mgr = BotConcurrencyManager(
         _QpmRepo(bot_qpm=bot_qpm),
         refresh_interval_seconds=999,
     )
+    # 预设 _configs，避免依赖 refresh() 的 import 时序
+    mgr._configs = {"bot-1": bot_qpm}
+    return mgr
 
 
 class _CompletingExecutor:
@@ -752,9 +755,8 @@ def test_limiter_cached_when_params_unchanged(repo, queue):
 
 def test_limiter_rebuilt_when_qpm_changes(repo, queue):
     """qpm 变化后，limiter 重建。"""
-    from tests.unit.core.service.bot_run.test_worker import _QpmRepo
-
     qpm_mgr = BotConcurrencyManager(_QpmRepo(bot_qpm=3), refresh_interval_seconds=999)
+    qpm_mgr._configs = {"bot-1": 3}
     ex = _CompletingExecutor(repo)
     worker = BotRequestWorker(
         queue_repository=queue,
