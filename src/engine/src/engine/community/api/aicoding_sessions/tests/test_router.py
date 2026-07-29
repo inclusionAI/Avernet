@@ -65,9 +65,21 @@ class FakeWorkspaceService:
     calls: list[tuple[str, dict]] = field(default_factory=list)
 
     async def list_file_tree(
-        self, session_id: str | None, cwd: str | None = None
+        self,
+        session_id: str | None,
+        cwd: str | None = None,
+        max_depth: int = 3,
     ):
-        self.calls.append(("list_file_tree", {"session_id": session_id, "cwd": cwd}))
+        self.calls.append(
+            (
+                "list_file_tree",
+                {
+                    "session_id": session_id,
+                    "cwd": cwd,
+                    "max_depth": max_depth,
+                },
+            )
+        )
         if self.list_file_tree_raise:
             raise self.list_file_tree_raise
         return self.list_file_tree_return or []
@@ -274,6 +286,42 @@ def test_file_tree_success(client, workspace_svc):
     assert body["tree"][0]["children"][0]["name"] == "README.md"
 
 
+def test_file_tree_defaults_to_three_levels(client, workspace_svc):
+    workspace_svc.list_file_tree_return = []
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1"},
+    )
+
+    assert resp.status_code == 200
+    assert workspace_svc.calls[-1][1]["max_depth"] == 3
+
+
+@pytest.mark.parametrize("depth", [0, 1, 5])
+def test_file_tree_forwards_depth(client, workspace_svc, depth):
+    workspace_svc.list_file_tree_return = []
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1", "depth": depth},
+    )
+
+    assert resp.status_code == 200
+    assert workspace_svc.calls[-1][1]["max_depth"] == depth
+
+
+@pytest.mark.parametrize("depth", [-1, "abc", "1.5"])
+def test_file_tree_rejects_invalid_depth(client, workspace_svc, depth):
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1", "depth": depth},
+    )
+
+    assert resp.status_code == 422
+    assert workspace_svc.calls == []
+
+
 def test_file_tree_keeps_size_field_when_service_leaves_it_unset(
     client, workspace_svc,
 ):
@@ -307,7 +355,7 @@ def test_file_tree_accepts_cwd_with_blank_session_id(client, workspace_svc):
     assert resp.json()["session_id"] is None
     assert workspace_svc.calls[-1] == (
         "list_file_tree",
-        {"session_id": None, "cwd": cwd},
+        {"session_id": None, "cwd": cwd, "max_depth": 3},
     )
 
 
@@ -327,6 +375,7 @@ def test_file_tree_normalizes_optional_locators(client, workspace_svc):
     assert workspace_svc.calls[-1][1] == {
         "session_id": "s1",
         "cwd": "/home/admin/.aicoding/workspace/s1",
+        "max_depth": 3,
     }
 
 
