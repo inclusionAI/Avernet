@@ -584,6 +584,28 @@ fn rejects_im_human_input_without_channel() {
 }
 
 #[test]
+fn rejects_fixed_group_human_input_without_fixed_group_channel() {
+    let mut definition = human_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine
+        .human_input_channel
+        .as_mut()
+        .expect("HumanInput channel")
+        .fixed_group = None;
+
+    let error =
+        validate_definition(definition).expect_err("fixed_group notification requires a group");
+    assert!(
+        error
+            .to_string()
+            .contains("fixed_group notification requires state_machine.human_input_channel.fixed_group")
+    );
+}
+
+#[test]
 fn rejects_frontend_human_input_with_assignee() {
     let mut definition = human_review_definition();
     let review = human_node_mut(&mut definition);
