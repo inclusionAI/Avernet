@@ -36,6 +36,7 @@ from __future__ import annotations
 from typing import Any, Final
 
 from sqlalchemy import event
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session, with_loader_criteria
 
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
@@ -78,7 +79,11 @@ def _read_guard(orm_execute_state: Any) -> None:
     if orm_execute_state.execution_options.get(SKIP_GUARD_OPTION):
         return
     tenant = get_current_avernet_tenant()
-    for model in _GUARDED_MODELS:
+    # Iterate a snapshot: model modules are routinely imported lazily inside
+    # functions, so a registration can land on one thread while another is
+    # inside this listener. Iterating the live dict would raise
+    # "dictionary changed size during iteration" from inside do_orm_execute.
+    for model in tuple(_GUARDED_MODELS):
         # A direct expression, never a lambda: the lambda form of
         # with_loader_criteria is cached and would pin the first tenant it saw
         # — a leak. Verified in Stage 1.
@@ -123,9 +128,18 @@ def register_avernet_tenant_guard(model: type) -> None:
     """
     global _READ_GUARD_INSTALLED
 
-    if not hasattr(model, AVERNET_TENANT_COLUMN):
+    # Validate against the mapper, not the class namespace. ``hasattr`` is true
+    # for any class attribute, so a model declaring ``avernet_tenant`` as a
+    # plain value would register happily — and then
+    # ``getattr(model, ...) == tenant`` evaluates to a Python bool, which
+    # with_loader_criteria renders as ``WHERE 1 = 1``: a silent, total
+    # isolation bypass with no error and no warning. This registrar is the only
+    # thing standing between a bad declaration in another module and a
+    # cross-tenant read, so the check has to be about the mapped column.
+    mapper = sa_inspect(model, raiseerr=False)
+    if mapper is None or AVERNET_TENANT_COLUMN not in mapper.columns:
         raise TypeError(
-            f"{model.__name__} cannot be tenant-guarded: it declares no "
+            f"{model.__name__} cannot be tenant-guarded: it declares no mapped "
             f"{AVERNET_TENANT_COLUMN!r} column"
         )
 
