@@ -210,6 +210,31 @@ class TestGetUploadUrl:
         detail = resp.json()["detail"]
         assert detail["error_code"] == "NOT_IMPLEMENTED"
 
+    @pytest.mark.asyncio
+    async def test_upload_url_content_type_pass_through(self, mock_dispatcher):
+        """content_type='image/png' in request → passed to dispatcher."""
+        mock_dispatcher.dispatch_get_upload_url.return_value = (
+            SessionGetUploadUrlResponse(
+                upload_url="https://oss.example.com/upload?token=abc",
+                transfer_id="tf-ct",
+                expires_at="2099-01-01T00:00:00",
+                type="SINGLE",
+            )
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/upload-url",
+            json_data={
+                "filename": "img.png",
+                "content_type": "image/png",
+            },
+        )
+
+        assert resp.status_code == 200
+        mock_dispatcher.dispatch_get_upload_url.assert_called_once()
+        call_kwargs = mock_dispatcher.dispatch_get_upload_url.call_args.kwargs
+        assert call_kwargs["content_type"] == "image/png"
+
 
 # ==========================================================================
 # Complete Upload endpoint tests
@@ -525,6 +550,25 @@ class TestGenerateShareLink:
         assert resp.status_code == 500
         detail = resp.json()["detail"]
         assert detail["error_code"] == "INTERNAL_ERROR"
+
+    @pytest.mark.asyncio
+    async def test_share_link_show_true_pass_through(self, mock_dispatcher):
+        """show=True in request body → passed to dispatcher."""
+        mock_dispatcher.dispatch_get_share_link.return_value = SessionShareLinkResponse(
+            share_url="https://oss.example.com/dl?token=abc",
+            transfer_id="tf-001",
+            expires_at="2099-01-01T00:00:00",
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
+            json_data={"expire_seconds": 3600, "show": True, "operator": "test-user"},
+        )
+
+        assert resp.status_code == 200
+        mock_dispatcher.dispatch_get_share_link.assert_called_once()
+        call_kwargs = mock_dispatcher.dispatch_get_share_link.call_args.kwargs
+        assert call_kwargs["show"] is True
 
 
 # ==========================================================================

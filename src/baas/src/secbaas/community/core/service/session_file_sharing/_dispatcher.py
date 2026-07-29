@@ -81,6 +81,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         file_size: int = 0,
         part_size: int | None = None,
         operator: str | None = None,
+        content_type: str | None = None,
     ) -> SessionGetUploadUrlResponse:
         """Orchestrate upload URL generation for a Session file.
 
@@ -123,6 +124,10 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         if file_size < 0:
             raise ValueError(f"file_size must be non-negative, got {file_size}")
 
+        # Validate content_type — reject empty/whitespace-only strings (D-04)
+        if content_type is not None and not content_type.strip():
+            raise ValueError("content_type must not be empty or whitespace-only")
+
         transfer_id = uuid.uuid4().hex
 
         # Construct Session-scoped staging path via backend (D-01, CORE-05)
@@ -142,6 +147,9 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             effective_part_size = (
                 part_size if part_size is not None else self.DEFAULT_PART_SIZE
             )
+            # Defense-in-depth: Pydantic ge=1048576 + DEFAULT_PART_SIZE guarantee
+            # positive, but guard against programmatic construction bypassing
+            # model validation.
             if effective_part_size <= 0:
                 raise ValueError(
                     f"part_size must be positive, got {effective_part_size}"
@@ -166,6 +174,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 staging_path,
                 expire_seconds,
                 part_count,
+                content_type,
             )
 
             logger.info(
@@ -217,6 +226,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 self._file_transfer_backend.generate_upload_url,
                 staging_path,
                 expire_seconds,
+                content_type,
             )
 
             logger.info(
@@ -461,7 +471,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         tenant: str,
         session_id: str,
         expire_seconds: int = 3600,
-        show: bool = False,
+        show: bool | None = False,
         operator: str | None = None,
     ) -> SessionShareLinkResponse:
         """Generate a shareable download link for a completed Session upload.
@@ -470,8 +480,12 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         ownership before generating the pre-signed GET URL.  Synchronous
         — no ticket is created (unlike Bot's async download flow).
 
-        ``show=False`` adds ``Content-Disposition: attachment`` to force
-        download; ``show=True`` produces an inline/preview URL.
+        ``show`` controls the ``Content-Disposition`` behavior of the
+        generated share link (three-state):
+        - ``False`` (default) → ``Content-Disposition: attachment`` force download
+        - ``True`` → ``Content-Disposition: inline`` browser inline preview
+        - ``None`` → no ``Content-Disposition`` intervention (OSS original headers,
+          backward-compatible with old ``show=True`` behavior)
         """
         logger.info(
             "dispatch_get_share_link: transfer_id=%s, tenant=%s, "
@@ -491,6 +505,14 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
 
         # Verify session_id ownership (per D-05 — don't reveal existence)
         if ticket.session_id != session_id:
+            logger.warning(
+                "dispatch_get_share_link: session_id mismatch — ticket belongs to "
+                "session_id=%s but request had session_id=%s (transfer_id=%s, tenant=%s)",
+                ticket.session_id,
+                session_id,
+                transfer_id,
+                tenant,
+            )
             raise SourceTransferNotFoundError(transfer_id=transfer_id)
 
         # Only DONE tickets are shareable
@@ -500,11 +522,14 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 current_status=ticket.status,
             )
 
-        # Build response_params based on show flag
-        # show=False → attachment (download); show=True → inline (preview)
-        response_params = None
-        if not show:
+        # Build response_params based on show flag (three-state)
+        # False → attachment (download); True → inline (preview); None → no intervention
+        if show is True:
+            response_params = {"response-content-disposition": "inline"}
+        elif show is False:
             response_params = {"response-content-disposition": "attachment"}
+        else:  # show is None — preserve backward-compatible "don't intervene" behavior
+            response_params = None
 
         share_url = await asyncio.to_thread(
             self._file_transfer_backend.generate_download_url,
@@ -564,6 +589,14 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
 
         # Ownership validation — don't reveal existence (per D-05)
         if session_id is not None and record.session_id != session_id:
+            logger.warning(
+                "dispatch_get_transfer_status: session_id mismatch — ticket belongs to "
+                "session_id=%s but request had session_id=%s (transfer_id=%s, tenant=%s)",
+                record.session_id,
+                session_id,
+                transfer_id,
+                tenant,
+            )
             raise TransferNotFoundError(f"Transfer not found: {transfer_id}")
 
         # Conditional fields per status
