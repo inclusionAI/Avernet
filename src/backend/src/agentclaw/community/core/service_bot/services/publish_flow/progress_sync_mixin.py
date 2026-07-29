@@ -99,6 +99,10 @@ class ProgressSyncMixin:
         # together with ext under the optimistic lock (a separate status-then-ext
         # write would be a TOCTOU race against a concurrent transition).
         ext.pop("retry", None)
+        # Clear restart in-progress marker
+        restart_ext = ext.get("restart")
+        if isinstance(restart_ext, dict):
+            restart_ext.pop("restarting", None)
         self._update_publish_status(
             publish_id=publish_id,
             target_status=target_status,
@@ -310,6 +314,10 @@ class ProgressSyncMixin:
         )
 
         self._clear_retry_flag(ext)
+        # Clear restart in-progress marker
+        restart_ext = ext.get("restart")
+        if isinstance(restart_ext, dict):
+            restart_ext.pop("restarting", None)
         ext["error_message"] = error_message
         ext["source_status"] = current_status.value
         self._update_publish_status(
