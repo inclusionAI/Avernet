@@ -18,7 +18,8 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 
 pub use bcs_storage_api::{
-    ActorRef, ByteStream, ByteStreamTrait, ClientUploadTarget, PreparedUpload, PresignGetTicket,
+    ActorRef, ByteStream, ByteStreamTrait, ClientUploadTarget, PreparedUpload, PresignGetOptions,
+    PresignGetTicket,
     StorageCapabilities, StorageError, StorageHandle, StorageHealth, StorageObjectMeta,
     StoragePlugin, UploadHandle, UploadPrepareRequest,
 };
@@ -49,6 +50,7 @@ impl LocalStoragePlugin {
             supports_presign_download: false,
             supports_stream_put: true,
             supports_stream_get: true,
+            supports_inline_view: true,
             max_object_size: cfg.max_object_size,
         };
         Self { data_dir: cfg.data_dir, caps }
@@ -399,7 +401,7 @@ impl StoragePlugin for LocalStoragePlugin {
     async fn presign_get(
         &self,
         _handle: &StorageHandle,
-        _ttl_secs: u64,
+        _opts: PresignGetOptions,
         _caller: Option<&ActorRef>,
     ) -> Result<PresignGetTicket, StorageError> {
         Err(StorageError::Unsupported("local"))
@@ -522,7 +524,7 @@ mod tests {
             key: "k3".into(),
             backend_handle: serde_json::Value::Null,
         };
-        let err = p.presign_get(&h, 300, None).await.unwrap_err();
+        let err = p.presign_get(&h, PresignGetOptions { ttl_secs: 300, show: false }, None).await.unwrap_err();
         assert!(matches!(err, StorageError::Unsupported("local")));
     }
 

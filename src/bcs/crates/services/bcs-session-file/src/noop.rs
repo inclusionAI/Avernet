@@ -23,6 +23,7 @@ impl SessionFileService for NoopSessionFileService {
             storage: "noop".to_string(),
             presign_upload: false,
             presign_download: false,
+            inline_view: false,
             max_size: 0,
         }
     }
@@ -90,6 +91,7 @@ impl SessionFileService for NoopSessionFileService {
         _session_id: &str,
         _file_id: &str,
         _ttl_secs: Option<u64>,
+        _show: bool,
     ) -> Result<(SessionFile, DownloadRoute), SessionFileUseCaseError> {
         Err(SessionFileUseCaseError::NotFound(NOT_SUPPORTED.into()))
     }

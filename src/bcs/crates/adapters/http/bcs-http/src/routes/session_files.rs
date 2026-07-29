@@ -184,6 +184,8 @@ pub struct DownloadQuery {
     pub ttl: Option<u64>,
     #[serde(default)]
     pub token: Option<String>,
+    #[serde(default)]
+    pub show: bool,
 }
 
 // ---------------------------------------------------------------
@@ -587,7 +589,7 @@ pub async fn download_content(
     Path((sid, file_id)): Path<(String, String)>,
     headers: HeaderMap,
     uri: Uri,
-    Query(_q): Query<DownloadQuery>, // q.ttl accepted-but-ignored (unified share_link_ttl)
+    Query(q): Query<DownloadQuery>,
 ) -> Response {
     let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
         Ok(c) => c,
@@ -597,7 +599,7 @@ pub async fn download_content(
         return forbidden_not_participant();
     }
     // TTL hidden from frontend: always None → download_route uses share_link_ttl.
-    download_file_by_id(&state, &sid, &file_id, None).await
+    download_file_by_id(&state, &sid, &file_id, None, q.show).await
 }
 
 /// Shared streaming/redirect logic for both authenticated download_content
@@ -609,11 +611,12 @@ async fn download_file_by_id(
     sid: &str,
     file_id: &str,
     ttl: Option<u64>,
+    show: bool,
 ) -> Response {
     match state
         .services
         .session_files
-        .download_route(sid, file_id, ttl)
+        .download_route(sid, file_id, ttl, show)
         .await
     {
         Ok((file, route)) => match route.presign {
@@ -627,8 +630,10 @@ async fn download_file_by_id(
                     if let Ok(v) = file.size.to_string().parse() {
                         h.insert(header::CONTENT_LENGTH, v);
                     }
+                    let disposition = if show { "inline" } else { "attachment" };
                     if let Ok(v) = format!(
-                        "attachment; filename=\"{}\"",
+                        "{}; filename=\"{}\"",
+                        disposition,
                         file.file_name.replace('"', "\\\"")
                     )
                     .parse()
@@ -715,7 +720,7 @@ pub async fn shared_file_content(
             let fid = r.file.file_id.clone();
             // TTL hidden from frontend: always None so download_route
             // uses share_link_ttl. q.ttl is accepted-but-ignored.
-            download_file_by_id(&state, &sid_owned, &fid, None).await
+            download_file_by_id(&state, &sid_owned, &fid, None, q.show).await
         }
         Err(_) => share_consume_err_to_response(),
     }
@@ -887,6 +892,7 @@ mod tests {
             supports_presign_download: false,
             supports_stream_put: true,
             supports_stream_get: true,
+            supports_inline_view: true,
             max_object_size: 1024 * 1024 * 1024,
         }
     }
@@ -1280,6 +1286,11 @@ mod tests {
             body.get("presign_upload").and_then(|v| v.as_bool()),
             Some(false)
         );
+        assert_eq!(
+            body.get("inline_view").and_then(|v| v.as_bool()),
+            Some(true),
+            "expected inline_view in capabilities: {body:?}"
+        );
     }
 
     #[tokio::test]
@@ -1364,6 +1375,33 @@ mod tests {
         let cd = cd.expect("content-disposition on shared-file content");
         let s = cd.to_str().unwrap();
         assert!(s.contains("attachment"), "cd: {s}");
+        assert!(s.contains("share.txt"), "cd: {s}");
+    }
+
+    #[tokio::test]
+    async fn shared_file_show_true_uses_inline_disposition() {
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "share.txt", b"s").await;
+
+        // Mint share token (verbatim steps from share_mint_then_consume).
+        let mint_uri = format!("/sessions/{}/files/{}/share", app.sid, file_id);
+        let req = post_json(&app, &mint_uri, &app.bot_a_token, json!({}));
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::CREATED, "share mint body: {body:?}");
+        let token = body
+            .get("share_token")
+            .and_then(|v| v.as_str())
+            .expect("share_token in mint response")
+            .to_string();
+
+        // Consume shared-file content with show=true → inline disposition.
+        let content_uri = format!("/sessions/shared-file/content?token={}&show=true", token);
+        let req = auth_request(Method::GET, &content_uri, &app.bot_a_token, None);
+        let (status, _body, cd) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK);
+        let cd = cd.expect("content-disposition on shared-file content");
+        let s = cd.to_str().unwrap();
+        assert!(s.contains("inline"), "shared-file show=true must be inline, got: {s}");
         assert!(s.contains("share.txt"), "cd: {s}");
     }
 
@@ -1499,6 +1537,35 @@ mod tests {
         let s = cd.to_str().unwrap();
         assert!(s.contains("attachment"), "cd: {s}");
         assert!(s.contains("disp.txt"), "cd: {s}");
+    }
+
+    #[tokio::test]
+    async fn local_download_show_true_uses_inline_disposition() {
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "view.txt", b"abc").await;
+        let uri = format!("/sessions/{}/files/{}/content?show=true", app.sid, file_id);
+        let req = auth_request(Method::GET, &uri, &app.bot_a_token, None);
+        let (status, _body, cd) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK);
+        let cd = cd.expect("content-disposition header");
+        let s = cd.to_str().unwrap();
+        assert!(s.contains("inline"), "expected inline disposition for show=true, got: {s}");
+        assert!(s.contains("view.txt"), "filename must still be present: {s}");
+    }
+
+    #[tokio::test]
+    async fn local_download_show_false_and_absent_still_attach() {
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "dl.txt", b"abc").await;
+        for q in &["?show=false", ""] {
+            let uri = format!("/sessions/{}/files/{}/content{}", app.sid, file_id, q);
+            let req = auth_request(Method::GET, &uri, &app.bot_a_token, None);
+            let (status, _body, cd) = send(&app, req).await;
+            assert_eq!(status, StatusCode::OK);
+            let s = cd.expect("content-disposition").to_str().unwrap().to_string();
+            assert!(s.contains("attachment"), "absent/show=false must attach: {s}");
+            assert!(s.contains("dl.txt"), "cd: {s}");
+        }
     }
 
     #[tokio::test]

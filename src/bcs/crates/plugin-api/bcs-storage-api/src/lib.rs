@@ -26,6 +26,7 @@ pub struct StorageCapabilities {
     pub supports_presign_download: bool,
     pub supports_stream_put: bool,
     pub supports_stream_get: bool,
+    pub supports_inline_view: bool,
     pub max_object_size: u64,
 }
 
@@ -93,6 +94,12 @@ pub struct PresignGetTicket {
     pub expires_at: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PresignGetOptions {
+    pub ttl_secs: u64,
+    pub show: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorageObjectMeta {
     pub key: String,
@@ -140,7 +147,7 @@ pub trait StoragePlugin: Send + Sync + 'static {
     async fn presign_get(
         &self,
         handle: &StorageHandle,
-        ttl_secs: u64,
+        opts: PresignGetOptions,
         caller: Option<&ActorRef>,
     ) -> Result<PresignGetTicket, StorageError>;
     async fn delete(&self, handle: &StorageHandle) -> Result<(), StorageError>;

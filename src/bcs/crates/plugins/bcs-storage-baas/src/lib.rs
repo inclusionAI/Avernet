@@ -14,7 +14,7 @@ pub use handle::{BaasPendingHandle, BaasReadyHandle};
 use async_trait::async_trait;
 use bcs_domain::{ActorKind, ActorRef};
 use bcs_storage_api::{
-    ByteStream, ClientUploadTarget, PresignGetTicket, PreparedUpload, StorageCapabilities,
+    ByteStream, ClientUploadTarget, PresignGetOptions, PresignGetTicket, PreparedUpload, StorageCapabilities,
     StorageError, StorageHandle, StorageHealth, StorageObjectMeta, StoragePlugin, UploadHandle,
     UploadMode, UploadPartUrl, UploadPrepareRequest,
 };
@@ -34,6 +34,7 @@ impl BaasStoragePlugin {
             supports_presign_download: true,
             supports_stream_put: true,
             supports_stream_get: true,
+            supports_inline_view: true,
             max_object_size,
         };
         let builder = reqwest::Client::builder().timeout(cfg.http_timeout);
@@ -298,20 +299,26 @@ impl StoragePlugin for BaasStoragePlugin {
     async fn get_stream(&self, _h: &StorageHandle) -> Result<ByteStream, StorageError> {
         Err(StorageError::Unsupported("baas")) // presign_download backend: 302 path used instead
     }
-    async fn presign_get(&self, handle: &StorageHandle, ttl_secs: u64, caller: Option<&ActorRef>) -> Result<PresignGetTicket, StorageError> {
+    async fn presign_get(&self, handle: &StorageHandle, opts: PresignGetOptions, caller: Option<&ActorRef>) -> Result<PresignGetTicket, StorageError> {
         let ready: BaasReadyHandle = serde_json::from_value(handle.backend_handle.clone())
             .or_else(|_| serde_json::from_value::<BaasPendingHandle>(handle.backend_handle.clone())
                         .map(|p| BaasReadyHandle { transfer_id: p.transfer_id }))
             .map_err(|e| StorageError::Backend(e.into()))?;
         let session_id = session_id_from_key(&handle.key);
         let base = self.base_for_session(session_id);
-        let body = serde_json::json!({ "expire_seconds": ttl_secs, "operator": operator_str(caller) });
+        let mut body = serde_json::json!({
+            "expire_seconds": opts.ttl_secs,
+            "operator": operator_str(caller),
+        });
+        if opts.show {
+            body["show"] = serde_json::Value::Bool(true);
+        }
         let resp = self.auth(self.http.post(format!("{base}/transfers/{}/share-link",
                     percent_encode_path(&ready.transfer_id))).json(&body)).send().await
             .map_err(|e| StorageError::Backend(e.into()))?;
         let data = baas_data(resp).await?;
         let share_url = data["share_url"].as_str().ok_or_else(|| bad("missing share_url"))?.to_string();
-        let expires_at = parse_iso_to_unix(data["expires_at"].as_str().unwrap_or("")).unwrap_or_else(|| now_unix_secs().saturating_add(ttl_secs));
+        let expires_at = parse_iso_to_unix(data["expires_at"].as_str().unwrap_or("")).unwrap_or_else(|| now_unix_secs().saturating_add(opts.ttl_secs));
         Ok(PresignGetTicket { download_url: share_url, expires_at })
     }
     async fn delete(&self, handle: &StorageHandle) -> Result<(), StorageError> {
