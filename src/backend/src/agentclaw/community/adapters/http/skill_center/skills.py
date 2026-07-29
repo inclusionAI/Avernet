@@ -112,6 +112,8 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
+    InterceptedResponse,
+    InterceptorContext,
     with_interceptors,
 )
 from agentclaw.community.core.bot_collaborator.interceptor.extractors import PermissionParams
@@ -2109,6 +2111,31 @@ async def delete_skill(
 # ==================== Skill Parameters Endpoints (设备文件版) ====================
 
 
+class _SkillParameterPermissionInterceptor(CollaboratorPermissionInterceptor):
+    """Fail closed for owner-backed parameter access when auth is unavailable."""
+
+    async def before(
+        self,
+        ctx: InterceptorContext,
+    ) -> InterceptorContext | None:
+        result = await super().before(ctx)
+        if result is None:
+            return None
+        actor_id = ctx.metadata.get("_log_user_id")
+        owner_id = ctx.metadata.get("_log_owner_id")
+        if (
+            actor_id != owner_id
+            and not ctx.metadata.get("permission_level")
+        ):
+            ctx.response = InterceptedResponse(
+                success=False,
+                message="协作者权限服务暂不可用",
+                error_code=503,
+            )
+            return None
+        return result
+
+
 def _resolve_parameter_bot(
     *,
     skill: dict[str, Any],
@@ -2218,11 +2245,10 @@ async def _create_skill_parameter_service(
 
 
 @router.get("/{skill_id}/parameters", response_model=SkillParametersResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
+@with_interceptors(_SkillParameterPermissionInterceptor(
     params_extractor=_extract_parameter_permission,
     extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
     persist_audit_log=False,
-    fail_closed_on_permission_error=True,
 ))
 async def get_skill_parameters(
     skill_id: str,
@@ -2260,13 +2286,12 @@ async def get_skill_parameters(
 
 
 @router.post("/{skill_id}/parameters", response_model=SkillParametersResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
+@with_interceptors(_SkillParameterPermissionInterceptor(
     params_extractor=_extract_parameter_permission,
     extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
     # Keep edit-lock enforcement and audit metadata, but never serialize
     # credential-bearing parameter values.
     audit_excluded_params={"request"},
-    fail_closed_on_permission_error=True,
 ))
 async def save_skill_parameters(
     skill_id: str,

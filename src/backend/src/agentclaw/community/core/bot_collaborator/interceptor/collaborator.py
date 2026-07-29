@@ -90,7 +90,6 @@ class CollaboratorPermissionInterceptor:
         audit_excluded_params: set[str] | frozenset[str] | None = None,
         # 锁检查控制
         skip_lock_check: bool = False,
-        fail_closed_on_permission_error: bool = False,
     ):
         """初始化拦截器。
 
@@ -106,7 +105,6 @@ class CollaboratorPermissionInterceptor:
             audit_excluded_params: 审计日志中排除的请求参数名，用于敏感字段脱敏。
             skip_lock_check: 是否跳过锁检查，默认 False。
                 设置为 True 时，只检查协作者权限，不检查锁状态（用于抢锁等特殊操作）。
-            fail_closed_on_permission_error: 协作者权限服务异常时是否拒绝请求。
         """
         self.required_level = required_level
         self.bot_id_expr = bot_id
@@ -116,7 +114,6 @@ class CollaboratorPermissionInterceptor:
         self.persist_audit_log = persist_audit_log
         self.audit_excluded_params = frozenset(audit_excluded_params or ())
         self.skip_lock_check = skip_lock_check
-        self.fail_closed_on_permission_error = fail_closed_on_permission_error
         self.resolver = ExpressionResolver()
 
         # 简单模式的提取器
@@ -244,8 +241,6 @@ class CollaboratorPermissionInterceptor:
                 # owner 已经在上面放行
                 if user_id != params.owner_id and params.bot_id:
                     service = self._get_collaborator_service(ctx)
-                    if service is None and self.fail_closed_on_permission_error:
-                        return self._reject_permission_service_error(ctx)
                     if service:
                         try:
                             result = service.check_collaborator_permission(
@@ -263,13 +258,7 @@ class CollaboratorPermissionInterceptor:
                                 return None
                             ctx.metadata["permission_level"] = result["level"]
                         except Exception as e:
-                            if self.fail_closed_on_permission_error:
-                                logger.warning(
-                                    "[before] collaborator permission check failed: %s",
-                                    e,
-                                )
-                                return self._reject_permission_service_error(ctx)
-                            # 兼容旧接口：Bot 不存在或其他错误，放行业务处理
+                            # Bot 不存在或其他错误，放行让业务处理
                             ctx.metadata["permission_check_error"] = str(e)
                 return ctx
 
@@ -303,8 +292,6 @@ class CollaboratorPermissionInterceptor:
             # 自己持锁，检查权限（owner 已经在上面放行）
             if user_id != params.owner_id and params.bot_id:
                 service = self._get_collaborator_service(ctx)
-                if service is None and self.fail_closed_on_permission_error:
-                    return self._reject_permission_service_error(ctx)
                 if service:
                     try:
                         result = service.check_collaborator_permission(
@@ -322,13 +309,7 @@ class CollaboratorPermissionInterceptor:
                             return None
                         ctx.metadata["permission_level"] = result["level"]
                     except Exception as e:
-                        if self.fail_closed_on_permission_error:
-                            logger.warning(
-                                "[before] collaborator permission check failed: %s",
-                                e,
-                            )
-                            return self._reject_permission_service_error(ctx)
-                        # 兼容旧接口：Bot 不存在或其他错误，放行业务处理
+                        # Bot 不存在或其他错误，放行让业务处理
                         ctx.metadata["permission_check_error"] = str(e)
 
         return ctx
@@ -404,17 +385,6 @@ class CollaboratorPermissionInterceptor:
             asyncio.create_task(asyncio.to_thread(_do_log))
         except Exception as e:
             logger.warning("[after] Failed to create log task: %s", e)
-
-    @staticmethod
-    def _reject_permission_service_error(
-        ctx: InterceptorContext,
-    ) -> None:
-        ctx.response = InterceptedResponse(
-            success=False,
-            message="协作者权限服务暂不可用",
-            error_code=503,
-        )
-        return None
 
     async def _extract_params(self, ctx: InterceptorContext) -> PermissionParams:
         """提取权限参数。"""
