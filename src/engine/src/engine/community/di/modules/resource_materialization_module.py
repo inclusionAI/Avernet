@@ -1,19 +1,19 @@
 """DI bindings for shared resource materialization."""
 from __future__ import annotations
 
-from injector import Binder, Module, inject, provider, singleton
-
 from engine.community.core.resource_materialization.service import (
     ResourceMaterializationService,
 )
+from engine.community.core.session_files.service import SessionFileService
 from engine.community.plugin_api.resource_materialization import (
-    BackendMaterializationCallbackClient,
     BaasMaterializationClient,
+    BackendMaterializationCallbackClient,
 )
 from engine.community.plugins.resource_materialization import (
-    NotConfiguredBackendMaterializationCallbackClient,
     NotConfiguredBaasMaterializationClient,
+    NotConfiguredBackendMaterializationCallbackClient,
 )
+from injector import Binder, Module, inject, provider, singleton
 
 
 class ResourceMaterializationModule(Module):
@@ -42,3 +42,8 @@ class ResourceMaterializationModule(Module):
             pull_client=pull_client,
             callback_client=callback_client,
         )
+
+    @singleton
+    @provider
+    def session_file_service(self) -> SessionFileService:
+        return SessionFileService()

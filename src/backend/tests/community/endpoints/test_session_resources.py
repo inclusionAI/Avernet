@@ -506,16 +506,16 @@ def content_ok():
 @endpoint_test(
     method="GET",
     path="/api/session-resources/{resource_id}/content",
-    scenario="engine_file_missing_requeues",
+    scenario="engine_file_missing_requires_reupload",
     input=_resource_input(),
     seed=_seed_content_missing,
     expect=ExpectError(
         status=409,
-        json_contains={"detail": "resource_materializing"},
+        json_contains={"detail": "resource_missing"},
     ),
 )
-def content_missing_requeues():
-    """A missing Engine file schedules real re-materialization."""
+def content_missing_requires_reupload():
+    """A missing Engine file does not re-materialize from BaaS."""
 
 
 @endpoint_test(
