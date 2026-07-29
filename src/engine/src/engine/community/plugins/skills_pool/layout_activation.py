@@ -1456,21 +1456,31 @@ def _activate_pool(
         committed = layout.legacy_local.is_symlink() and _lexical_target(
             layout.legacy_local
         ) == Path(os.path.abspath(layout.pool_local))
+        evidence: dict[str, object] = {
+            "reason": (
+                "post_cutover_cleanup_failed"
+                if committed
+                else "filesystem_operation_failed"
+            ),
+            "error_type": type(error).__name__,
+            "errno": error.errno,
+        }
+        if committed:
+            evidence.update(
+                {
+                    "quarantine": str(quarantine),
+                    "quarantine_cleanup_pending": (
+                        quarantine.exists() or quarantine.is_symlink()
+                    ),
+                }
+            )
         return PoolActivationResult(
             (
                 PoolActivationStatus.COMMITTED
                 if committed
                 else PoolActivationStatus.TRANSIENT_ERROR
             ),
-            {
-                "reason": (
-                    "post_cutover_cleanup_failed"
-                    if committed
-                    else "filesystem_operation_failed"
-                ),
-                "error_type": type(error).__name__,
-                "errno": error.errno,
-            },
+            evidence,
         )
 
 

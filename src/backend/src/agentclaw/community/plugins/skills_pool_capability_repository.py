@@ -29,7 +29,7 @@ class SkillsPoolCapabilityRepositoryMixin:
         lease_owner: str,
         evidence: dict[str, object],
     ) -> bool:
-        """Persist old-runtime evidence and release only a preparing claim."""
+        """Persist old-runtime evidence and release a provably pre-cutover claim."""
 
         evidence_json = json.dumps(evidence, ensure_ascii=False)
         with self._database.transactional_orm_session() as session:
@@ -39,12 +39,14 @@ class SkillsPoolCapabilityRepositoryMixin:
                     BotSkillLayoutStateModel.env == scope.env,
                     BotSkillLayoutStateModel.entity_id == scope.entity_id,
                     BotSkillLayoutStateModel.bot_id == scope.bot_id,
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
-                    BotSkillLayoutStateModel.phase
-                    == SkillLayoutPhase.POOL_PREPARING.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase.in_(
+                        (
+                            SkillLayoutPhase.POOL_PREPARING.value,
+                            SkillLayoutPhase.POOL_READY.value,
+                        )
+                    ),
                     BotSkillLayoutStateModel.data_plane_cutover_committed == 0,
                     BotSkillLayoutStateModel.migration_generation
                     == migration_generation,
