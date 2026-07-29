@@ -57,7 +57,9 @@ Engine Layout Descriptor 仍不在本期范围内。
   附带操作者、备注和已核验的数据面事实，之后才会重新入队同一 generation。
 - bridge 已提交后的 `POST_CUTOVER_SYNC_PENDING`、mapping 与数据库失败均
   持久化阶段、错误码、可重试性、证据和时间；重试只补齐 mapping、locator
-  与 `POOL_ACTIVE`，不恢复隔离副本。
+  与 `POOL_ACTIVE`，不恢复隔离副本。已提交状态的 runtime 重入只补齐
+  quarantine/marker 证据，不重复执行数据面 commit CAS；transport 或校验失败
+  只记录 forward-only failure。
 - 在递归版 OpenClaw 发布前的 Pool 独立 rollout 窗口，显式回滚先持久化
   `LEGACY_ROLLBACK_PREPARING` 作为 Bot 级编辑暂停状态，
   再从当前 Pool 全量重建新的 Legacy local 并提交切换。切换后即使 mapping
