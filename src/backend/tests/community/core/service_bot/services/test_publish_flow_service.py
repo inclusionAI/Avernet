@@ -777,7 +777,7 @@ def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():
     ext = {
         'retry': True,
         'source_status': PublishStatus.ONLINE_PUB.value,
-        'restart': {'online': '456'},
+        'restart': {'online': '456', 'restarting': True},
     }
 
     result = svc._handle_sync_failure(
@@ -792,6 +792,7 @@ def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():
     publish_service.update_publish_status_with_ext.assert_called_once()
     updated_ext = publish_service.update_publish_status_with_ext.call_args.kwargs['ext']
     assert 'retry' not in updated_ext
+    assert 'restarting' not in updated_ext['restart']
     assert updated_ext['source_status'] == PublishStatus.ONLINE_PUB.value
     assert updated_ext['error_message'] == 'BaaS publish failed: 1 device(s) failed'
 
@@ -963,6 +964,59 @@ def _setup_restart(svc, record, bot_uuid="BOT-x"):
     svc._bot_service.get_bot = Mock(return_value={"bot_id": "b", "entity_id": "u"})
     svc._mutate_and_update_ext = Mock()
     svc.refresh_publish_handle = Mock()
+
+
+@pytest.mark.asyncio
+async def test_restart_sets_restarting_flag_in_ext():
+    """Test that execute_restart sets ext.restart.restarting = True at the start."""
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(return_value={"publish_id": 100})
+    baas_service = Mock()
+    svc = _pf(
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
+    )
+
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "migration_path": "/path/to/artifact"},
+    )
+    _setup_restart(svc, record)
+
+    # Track the mutator calls
+    mutate_calls = []
+
+    def track_mutate(publish_id, mutator):
+        test_ext = {}
+        mutator(test_ext)
+        mutate_calls.append(test_ext)
+        # Return the ext for the real call (which is mocked anyway)
+        return test_ext
+
+    svc._mutate_and_update_ext = Mock(side_effect=track_mutate)
+
+    # Mock the operation runner's complete_operation to avoid DB issues
+    svc._operation_runner.complete_operation = Mock()
+
+    # Use async mock for acquire_deploy_workflow via MonkeyPatch
+    async def mock_acquire(runner, publish_id, kind, stage, operator, issue, **kwargs):
+        # Create a simple object with the required attributes
+        from types import SimpleNamespace
+        return SimpleNamespace(id=1, baas_publish_id=100, bot_uuid="BOT-x")
+
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(
+            "agentclaw.community.core.service_bot.services.publish_flow.restart_mixin.acquire_deploy_workflow",
+            mock_acquire,
+        )
+        result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+
+    # Verify the restarting flag was set in the first mutate call
+    assert len(mutate_calls) >= 1
+    first_ext = mutate_calls[0]
+    assert first_ext.get("restart", {}).get("restarting") is True
 
 
 @pytest.mark.asyncio
@@ -3042,7 +3096,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
     publish_record = _make_publish_record(
         id=23,
         status=PublishStatus.VALIDATE_PUB.value,
-        ext={"binding": {PublishStage.VERIFY.value: 300}, "retry": True},
+        ext={"binding": {PublishStage.VERIFY.value: 300}, "retry": True, "restart": {"verify": 123, "restarting": True}},
     )
     ext = dict(publish_record.ext)
     progress = {"status": "SUCCESS", "device_details": []}
@@ -3065,6 +3119,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
     assert result.message == "Publish progress synced successfully, status: SUCCESS"
     assert result.data == progress
     assert "retry" not in ext
+    assert "restarting" not in ext["restart"]
     publish_service.update_publish_status_with_ext.assert_called_once_with(
         publish_id=23,
         target_status=PublishStatus.VALIDATING,

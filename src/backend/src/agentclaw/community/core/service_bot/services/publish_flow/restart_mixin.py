@@ -229,6 +229,12 @@ class RestartMixin:
         if not migration_path and not config_artifact:
             return {"success": False, "message": f"Missing build artifact: publish_id={publish_id}"}
 
+        # Mark restart in progress (cleared on success/failure by sync_restart_progress)
+        def _set_restarting_flag(latest_ext: dict) -> None:
+            latest_ext.setdefault("restart", {})["restarting"] = True
+
+        self._mutate_and_update_ext(publish_id=publish_id, mutator=_set_restarting_flag)
+
         version = f"{publish_record.version}"
         # STORED overrides slot: reproduce what was promoted (not a live re-fetch),
         # so restarting a non-latest stage never delivers another stage's channels.
