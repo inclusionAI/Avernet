@@ -1150,6 +1150,10 @@ def _activate_pool(
             {
                 "active_marker": str(layout.active_marker),
                 "legacy_storage_entries_absent": True,
+                "quarantine": str(quarantine),
+                "quarantine_cleanup_pending": (
+                    quarantine.exists() or quarantine.is_symlink()
+                ),
             },
         )
 

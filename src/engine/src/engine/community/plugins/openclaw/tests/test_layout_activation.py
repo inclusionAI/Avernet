@@ -1198,6 +1198,10 @@ def test_cutover_retry_replays_residue_after_merge_failure(
     )
 
     assert retry.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert retry.evidence["quarantine"] == str(
+        pool_local.parent / ".migration-quarantine" / "generation-1" / "skills-local"
+    )
+    assert retry.evidence["quarantine_cleanup_pending"] is True
     assert not legacy_local.exists()
     assert (
         pool_local / "created-before-merge-failure" / "SKILL.md"
