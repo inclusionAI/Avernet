@@ -1,4 +1,5 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -7,7 +8,7 @@ use bcs_bot_store::PersistentBotRepo;
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
-    DbTransactionStepResult,
+    DbTransactionStepResult, DbValue,
 };
 use bcs_friend::FriendCore;
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
@@ -254,6 +255,43 @@ impl DbPlugin for FailingDb {
 
     async fn health_check(&self) -> DbResult<DbHealth> {
         Ok(DbHealth::unhealthy("bot database unavailable"))
+    }
+}
+
+#[derive(Default)]
+struct DriverThenFailingDb {
+    queries: AtomicUsize,
+}
+
+#[async_trait]
+impl DbPlugin for DriverThenFailingDb {
+    async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        if self.queries.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Ok(vec![DbRow::new(BTreeMap::from([
+                ("name".into(), DbValue::from("driver")),
+                ("bot_info".into(), DbValue::from("{}")),
+                ("visibility".into(), DbValue::from("public")),
+                ("status".into(), DbValue::from("online")),
+                ("actor_kind".into(), DbValue::from("bot")),
+                ("env".into(), DbValue::from("dev")),
+            ]))]);
+        }
+        Err(DbError::Backend("participant registry unavailable".into()))
+    }
+
+    async fn execute(&self, _statement: DbStatement) -> DbResult<DbExecuteResult> {
+        Err(DbError::Backend("participant registry unavailable".into()))
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        Err(DbError::Backend("participant registry unavailable".into()))
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Ok(DbHealth::unhealthy("participant registry unavailable"))
     }
 }
 
@@ -866,6 +904,45 @@ async fn create_group_propagates_quota_lookup_database_failure() {
         result,
         Err(ApplicationError::Internal(message))
             if message.contains("find Groups for participant")
+    ));
+}
+
+#[tokio::test]
+async fn create_group_propagates_non_driver_registry_database_failure() {
+    let bots = Arc::new(BotCore::with_repo(Arc::new(
+        PersistentBotRepo::with_plugins(
+            Arc::new(InMemoryCachePlugin::new()),
+            Arc::new(DriverThenFailingDb::default()),
+        ),
+    )));
+    let fixture = Fixture::new_with_bots(bots).await;
+
+    let result = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                driver_bot_uuid: "driver".into(),
+                name: Some("registry failure".into()),
+                context: None,
+                visibility: GroupVisibility::Private,
+                participants: vec![CreateParticipant {
+                    actor_id: "helper".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+            }),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::Internal(message))
+            if message.contains("participant registry unavailable")
     ));
 }
 

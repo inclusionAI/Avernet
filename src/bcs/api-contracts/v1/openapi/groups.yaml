@@ -269,9 +269,10 @@ GroupPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: Group is missing or intentionally hidden.
+        description: Group is missing or intentionally hidden, or a persisted participant Bot is missing.
         x-error-codes:
           - group_not_found
+          - bot_not_found
         content:
           application/json:
             schema:

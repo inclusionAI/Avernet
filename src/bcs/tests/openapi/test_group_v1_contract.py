@@ -116,6 +116,11 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     )
     assert set(
         contract["paths"]["/openapi/v1/groups/{group_id}"]["patch"]["responses"][
+            "404"
+        ]["x-error-codes"]
+    ) == {"group_not_found", "bot_not_found"}
+    assert set(
+        contract["paths"]["/openapi/v1/groups/{group_id}"]["patch"]["responses"][
             "409"
         ]["x-error-codes"]
     ) == {

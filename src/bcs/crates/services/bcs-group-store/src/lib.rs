@@ -1484,8 +1484,10 @@ impl GroupRepoPort for MySqlGroupStore {
 
     /// Delete a session.
     async fn delete(&self, id: &str) -> ServiceResult<Option<Group>> {
-        // Get group before deleting
-        let group = self.get(id).await;
+        // Capture a fallible rollback snapshot before deleting. Proceeding
+        // after a failed read can delete the persistent Group while returning
+        // `None`, which prevents callers from running committed-delete cleanup.
+        let group = self.try_get(id).await?;
 
         // Delete from MySQL
         let deleted = self.delete_group_from_mysql(id).await?;
@@ -3128,6 +3130,26 @@ mod tests {
             .await
             .expect_err("participant query must fail");
         assert!(list_error.to_string().contains("database unavailable"));
+    }
+
+    #[tokio::test]
+    async fn delete_aborts_before_persistence_when_snapshot_read_fails() {
+        let db = Arc::new(RecordingDbPlugin::failing_queries());
+        let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
+
+        let error = repo
+            .delete("group-1")
+            .await
+            .expect_err("snapshot failure must abort deletion");
+
+        assert!(error.to_string().contains("database unavailable"));
+        assert!(
+            db.transaction_sql
+                .lock()
+                .expect("transaction sql")
+                .is_empty(),
+            "delete transaction must not run without a rollback snapshot"
+        );
     }
 
     #[tokio::test]

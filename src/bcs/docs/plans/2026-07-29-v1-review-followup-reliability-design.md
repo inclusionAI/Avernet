@@ -107,6 +107,14 @@ The final review passes keep the same V1-only compatibility boundary:
 - Visibility-guarded participant insertion increments the persisted Group
   version only when the actor is not already a participant, matching the
   in-memory idempotency behavior.
+- V1 creation uses fallible registry reads for every requested participant,
+  while the Legacy creation policy retains its existing missing-on-error
+  compatibility behavior.
+- Persistent Group deletion acquires a fallible rollback snapshot before
+  issuing DELETE statements, so a snapshot failure cannot be mistaken for a
+  successful idempotent no-op or skip committed-delete cleanup.
+- PATCH explicitly declares `bot_not_found` when a persisted participant has
+  since been soft-deleted from the registry.
 
 ## Error behavior
 

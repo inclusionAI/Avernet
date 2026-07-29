@@ -814,11 +814,12 @@ impl GroupManagementService for GroupManagement {
             if !seen.insert(bot_id.clone()) {
                 continue;
             }
-            let bot = self
-                .registry
-                .get(&bot_id)
-                .await
-                .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
+            let bot = if self.v1_openapi_create_policy {
+                self.registry.try_get(&bot_id).await?
+            } else {
+                self.registry.get(&bot_id).await
+            }
+            .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
             if bot.actor_kind == ActorKind::Bot {
                 if self.v1_openapi_create_policy {
                     if bot_id != cmd.driver_bot_id {
