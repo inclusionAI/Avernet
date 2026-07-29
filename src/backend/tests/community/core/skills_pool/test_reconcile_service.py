@@ -184,8 +184,14 @@ class FakeLayoutRepository:
         if not self._owns(kwargs):
             return False
         self.events.append("post_failure")
+        refresh_pending = self.state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
         self.state = replace(
             self.state,
+            phase=(
+                SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+                if refresh_pending
+                else self.state.phase
+            ),
             last_failure_code=str(kwargs["failure_code"]),
             last_failure_stage=str(kwargs["failure_stage"]),
             last_failure_retryable=bool(kwargs["retryable"]),
@@ -633,7 +639,7 @@ async def test_committed_repair_transport_failure_records_forward_only_and_retri
     assert first.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
     assert first.retryable is True
     assert layouts.events == ["post_failure"]
-    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
     assert layouts.state.data_plane_cutover_committed is True
     assert layouts.state.last_failure_stage == "post_cutover_refresh"
 
@@ -651,8 +657,8 @@ async def test_committed_repair_transport_failure_records_forward_only_and_retri
     )
 
     assert retried.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
-    assert runtime.events == ["probe", "mapping", "verify"]
-    assert layouts.events == ["database"]
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.events == ["evidence", "database"]
 
 
 @pytest.mark.asyncio
@@ -719,7 +725,7 @@ async def test_committed_repair_invalid_refresh_stays_forward_only() -> None:
     assert result.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
     assert result.retryable is False
     assert layouts.events == ["post_failure"]
-    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
     assert layouts.state.data_plane_cutover_committed is True
     assert layouts.state.last_failure_stage == "post_cutover_refresh"
 

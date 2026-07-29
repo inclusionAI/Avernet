@@ -387,18 +387,19 @@ class SkillsPoolLayoutRepository(
             engine = json.loads(row.rollout_evidence).get("engine_type")
             if not isinstance(engine, str) or not engine:
                 return False
-            if not isinstance(quarantine_path, str) or not quarantine_path:
-                log_missing_quarantine_path(scope, migration_generation)
-                return False
-            if not self._upsert_quarantine(
-                session,
-                scope=scope,
-                migration_generation=migration_generation,
-                engine=engine,
-                path=quarantine_path,
-                evidence_json=evidence_json,
-            ):
-                return False
+            # Some post-boundary Engine failures cannot yet report the
+            # quarantine path. Persist the irreversible boundary first and
+            # keep FINALIZING until a later successful refresh supplies it.
+            if isinstance(quarantine_path, str) and quarantine_path:
+                if not self._upsert_quarantine(
+                    session,
+                    scope=scope,
+                    migration_generation=migration_generation,
+                    engine=engine,
+                    path=quarantine_path,
+                    evidence_json=evidence_json,
+                ):
+                    return False
             row.phase = SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value
             row.data_plane_cutover_committed = 1
             row.last_failure_code = "POST_CUTOVER_SYNC_PENDING"
@@ -567,7 +568,7 @@ class SkillsPoolLayoutRepository(
 
         evidence_json = json.dumps(evidence, ensure_ascii=False)
         with self._database.transactional_orm_session() as session:
-            affected = (
+            row = (
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
@@ -585,18 +586,22 @@ class SkillsPoolLayoutRepository(
                     BotSkillLayoutStateModel.lease_owner == lease_owner,
                     BotSkillLayoutStateModel.lease_expires_at > func.now(),
                 )
-                .update(
-                    {
-                        BotSkillLayoutStateModel.last_failure_code: failure_code,
-                        BotSkillLayoutStateModel.last_failure_stage: failure_stage,
-                        BotSkillLayoutStateModel.last_failure_retryable: int(retryable),
-                        BotSkillLayoutStateModel.last_failure_evidence: (evidence_json),
-                        BotSkillLayoutStateModel.last_failure_at: func.now(),
-                    },
-                    synchronize_session=False,
-                )
+                .with_for_update()
+                .one_or_none()
             )
-        return affected == 1
+            if row is None:
+                return False
+            # Older Backend versions used this failure code as the durable
+            # "runtime evidence still missing" signal. Move that signal into
+            # the phase before replacing the code with the latest failure.
+            if row.last_failure_code == "MANUAL_REPAIR_RESOLVED":
+                row.phase = SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value
+            row.last_failure_code = failure_code
+            row.last_failure_stage = failure_stage
+            row.last_failure_retryable = int(retryable)
+            row.last_failure_evidence = evidence_json
+            row.last_failure_at = func.now()
+        return True
 
     def mark_repair_required(
         self,
