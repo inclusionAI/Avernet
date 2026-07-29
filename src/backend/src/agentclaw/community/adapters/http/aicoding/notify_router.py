@@ -1,8 +1,8 @@
 """
-Notify router — aggregates pending HITL interactions from all bots via Engine.
+Notify router — aggregates pending HITL interactions from notification-capable bots.
 
 GET /api/v1/notify:
-  1. Get user's active device bindings (bots with sandboxes)
+  1. List notification-capable bots with active device bindings.
   2. Parallel probe each bot's Engine /api/notify endpoint — routed by
      ``device_provider`` via ``DeviceContextResolver`` (same path chat / cron
      use), so BaaS (desktop + cloud), Arca, teclaw and local each reach their
@@ -281,7 +281,7 @@ async def get_notify_summary(
     transport: DeviceAdapterTransport = Injected(DeviceAdapterTransport),
 ):
     """
-    Get aggregated pending notifications from all user bots.
+    Get aggregated pending notifications from notification-capable user bots.
 
     Returns a list of bot summaries, each containing the pending HITL
     interactions from that bot's engine.
