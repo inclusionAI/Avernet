@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from engine.community.plugins.openclaw.layout_probe import (
+    CUTOVER_EVIDENCE_CONTRACT_VERSION,
     LAYOUT_CONTRACT_VERSION,
     RuntimeLayoutInspectionStatus,
     inspect_runtime_layout,
@@ -65,6 +66,10 @@ def test_ready_requires_real_bridge_mount_and_readable_repo(tmp_path):
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
     assert result.preparation_id == "2a958f59-8cf4-4413-a267-7d56d3382f23"
+    assert (
+        result.evidence["cutover_evidence_contract_version"]
+        == CUTOVER_EVIDENCE_CONTRACT_VERSION
+    )
     assert result.evidence["checks"]["pool_repo_mounted"] is True
     assert result.evidence["checks"]["legacy_repo_bridge_valid"] is True
 
@@ -100,6 +105,10 @@ def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
     assert result.evidence["activation_state"] == "active"
+    assert (
+        result.evidence["cutover_evidence_contract_version"]
+        == CUTOVER_EVIDENCE_CONTRACT_VERSION
+    )
     assert result.evidence["checks"]["legacy_storage_entries_absent"] is True
 
 
@@ -171,13 +180,7 @@ def test_active_marker_allows_normal_skill_activation(tmp_path):
 
 
 def _active_marker_path(home: Path) -> Path:
-    return (
-        home
-        / ".openclaw"
-        / "workspace"
-        / "skills-pool"
-        / ".pool-active"
-    )
+    return home / ".openclaw" / "workspace" / "skills-pool" / ".pool-active"
 
 
 def _write_active_marker(
@@ -196,9 +199,7 @@ def _write_active_marker(
     }
     if activation_state == "finalizing" or mappings is not None:
         marker["mappings"] = [] if mappings is None else mappings
-    marker_path.write_text(
-        json.dumps(marker)
-    )
+    marker_path.write_text(json.dumps(marker))
     return marker_path
 
 

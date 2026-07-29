@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    CUTOVER_EVIDENCE_CONTRACT_VERSION,
     LAYOUT_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
     RuntimeLayoutProbeStatus,
@@ -82,6 +83,7 @@ class FakeLayoutRepository:
         self.committed_locators: dict[int, str] | None = None
         self.lease_valid = True
         self.fail_once_at: str | None = None
+        self.quarantine_identity = True
 
     def _should_fail(self, stage: str) -> bool:
         if self.fail_once_at != stage:
@@ -142,6 +144,13 @@ class FakeLayoutRepository:
         )
         return True
 
+    def has_quarantine_identity(self, **kwargs: object) -> bool:
+        return (
+            kwargs["scope"] == SCOPE
+            and kwargs["migration_generation"] == GENERATION
+            and self.quarantine_identity
+        )
+
     def record_post_cutover_evidence(self, **kwargs: object) -> bool:
         if self._should_fail("post_cutover_evidence"):
             return False
@@ -152,6 +161,7 @@ class FakeLayoutRepository:
             self.state,
             phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
             data_plane_cutover_committed=True,
+            last_probe_evidence={"post_cutover_evidence_recorded": True},
         )
         return True
 
@@ -184,7 +194,13 @@ class FakeLayoutRepository:
         if not self._owns(kwargs):
             return False
         self.events.append("post_failure")
-        refresh_pending = self.state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+        refresh_pending = (
+            self.state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+            and (self.state.last_probe_evidence or {}).get(
+                "post_cutover_evidence_recorded"
+            )
+            is not True
+        )
         self.state = replace(
             self.state,
             phase=(
@@ -339,7 +355,12 @@ class FakeRuntime:
             engine=engine,
             layout_contract_version="skills-pool-p3-v1",
             preparation_id=PREPARATION_ID,
-            evidence={"marker": "valid"},
+            evidence={
+                "marker": "valid",
+                "cutover_evidence_contract_version": (
+                    CUTOVER_EVIDENCE_CONTRACT_VERSION
+                ),
+            },
         )
 
     async def probe(self, **kwargs: object) -> RuntimeLayoutProbeResult:
@@ -407,6 +428,31 @@ async def test_ready_claimed_bot_completes_pool_activation() -> None:
             "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"
         ),
     }
+
+
+@pytest.mark.asyncio
+async def test_pre_upgrade_runtime_stays_legacy_before_cutover() -> None:
+    layouts = FakeLayoutRepository()
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        evidence={"marker": "valid"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.NOT_CAPABLE
+    assert result.evidence == {
+        "marker": "valid",
+        "reason": "cutover_evidence_contract_not_supported",
+        "required_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+    }
+    assert runtime.events == ["probe"]
+    assert layouts.state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert layouts.state.data_plane_cutover_committed is False
 
 
 @pytest.mark.asyncio
@@ -478,10 +524,11 @@ async def test_hermes_h0_ready_uses_its_own_pool_paths_for_full_activation() -> 
     runtime.probe_result = replace(
         runtime.probe_result,
         evidence={
+            "cutover_evidence_contract_version": (CUTOVER_EVIDENCE_CONTRACT_VERSION),
             "checks": {
                 "legacy_local_bridge_valid": True,
                 "stable_repo_bridge_valid": True,
-            }
+            },
         },
     )
 
@@ -610,6 +657,76 @@ async def test_resolved_pool_committed_repair_skips_duplicate_cutover_ledger_cas
     assert runtime.events == ["probe", "cutover", "mapping", "verify"]
     assert layouts.events == ["evidence", "database"]
     assert layouts.state.active_layout is SkillLayout.POOL
+
+
+@pytest.mark.asyncio
+async def test_committed_old_runtime_without_quarantine_waits_for_upgrade() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    layouts.quarantine_identity = False
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"active_marker": "same-generation"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.TRANSIENT_ERROR
+    assert result.retryable is True
+    assert runtime.events == ["probe", "cutover"]
+    assert layouts.events == ["post_failure"]
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert layouts.state.last_failure_code == "RUNTIME_CONTRACT_UPGRADE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_mapping_failure_after_repair_evidence_does_not_reopen_cutover() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            last_failure_code="MANUAL_REPAIR_RESOLVED",
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"active_marker": "same-generation"},
+    )
+    runtime.publish_success = False
+
+    first = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert layouts.state.last_failure_code == "MAPPING_PUBLISH_FAILED"
+
+    runtime.publish_success = True
+    runtime.events.clear()
+    layouts.events.clear()
+    retried = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert retried.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "mapping", "verify"]
+    assert layouts.events == ["database"]
 
 
 @pytest.mark.asyncio
@@ -1146,7 +1263,10 @@ async def test_pool_active_reconciliation_probes_current_runtime() -> None:
     )
 
     assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
-    assert result.evidence == {"marker": "valid"}
+    assert result.evidence == {
+        "marker": "valid",
+        "cutover_evidence_contract_version": (CUTOVER_EVIDENCE_CONTRACT_VERSION),
+    }
     assert runtime.events == ["probe"]
 
 
@@ -1287,7 +1407,10 @@ def test_real_reconciliation_retry_resumes_same_generation_without_repeating_cut
         engine="openclaw",
         layout_contract_version=LAYOUT_CONTRACT_VERSION,
         preparation_id=PREPARATION_ID,
-        evidence={"marker": "valid"},
+        evidence={
+            "marker": "valid",
+            "cutover_evidence_contract_version": (CUTOVER_EVIDENCE_CONTRACT_VERSION),
+        },
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -1363,7 +1486,12 @@ class ReadyProbeService:
             engine="openclaw",
             layout_contract_version=LAYOUT_CONTRACT_VERSION,
             preparation_id=PREPARATION_ID,
-            evidence={"marker": "valid"},
+            evidence={
+                "marker": "valid",
+                "cutover_evidence_contract_version": (
+                    CUTOVER_EVIDENCE_CONTRACT_VERSION
+                ),
+            },
         )
 
 

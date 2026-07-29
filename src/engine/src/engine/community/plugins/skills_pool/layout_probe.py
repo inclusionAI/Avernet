@@ -14,6 +14,7 @@ from uuid import UUID
 
 
 LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
+CUTOVER_EVIDENCE_CONTRACT_VERSION = "quarantine-v1"
 
 
 class RuntimeLayoutInspectionStatus(str, Enum):
@@ -400,8 +401,7 @@ def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
     """Validate mutable managed entries without freezing an old mapping set."""
 
     pool_roots = tuple(
-        Path(os.path.abspath(root))
-        for root in (layout.pool_local, layout.pool_repo)
+        Path(os.path.abspath(root)) for root in (layout.pool_local, layout.pool_repo)
     )
     retired_roots = tuple(
         Path(os.path.abspath(root))
@@ -745,6 +745,9 @@ def inspect_runtime_layout(
                 "active_marker": str(layout.active_marker),
                 "prepared_at": marker["prepared_at"],
                 "activation_state": active_marker["activation_state"],
+                "cutover_evidence_contract_version": (
+                    CUTOVER_EVIDENCE_CONTRACT_VERSION
+                ),
                 "checks": {
                     "marker_valid": True,
                     "active_marker_valid": True,
@@ -755,9 +758,7 @@ def inspect_runtime_layout(
                     "legacy_storage_entries_absent": (
                         active_marker["activation_state"] == "active"
                     ),
-                    "stable_repo_bridge_valid": (
-                        engine in {"aicoding", "hermes"}
-                    ),
+                    "stable_repo_bridge_valid": (engine in {"aicoding", "hermes"}),
                 },
             },
         )
@@ -850,6 +851,7 @@ def inspect_runtime_layout(
         evidence={
             "marker": str(layout.marker),
             "prepared_at": marker["prepared_at"],
+            "cutover_evidence_contract_version": (CUTOVER_EVIDENCE_CONTRACT_VERSION),
             "checks": checks,
         },
     )
@@ -857,6 +859,7 @@ def inspect_runtime_layout(
 
 __all__ = [
     "LAYOUT_CONTRACT_VERSION",
+    "CUTOVER_EVIDENCE_CONTRACT_VERSION",
     "RuntimeLayoutInspection",
     "RuntimeLayoutInspectionStatus",
     "inspect_runtime_layout",

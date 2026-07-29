@@ -25,6 +25,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 
 
 LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
+CUTOVER_EVIDENCE_CONTRACT_VERSION = "quarantine-v1"
 
 
 class RuntimeLayoutProbeStatus(str, Enum):
@@ -304,6 +305,7 @@ OpenClawPoolLayout = RuntimePoolLayout
 __all__ = [
     "CurrentRuntimeLayoutProbeService",
     "LAYOUT_CONTRACT_VERSION",
+    "CUTOVER_EVIDENCE_CONTRACT_VERSION",
     "OpenClawPoolLayout",
     "RuntimePoolLayout",
     "RuntimeLayoutProbeResult",

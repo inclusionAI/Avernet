@@ -122,6 +122,15 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """在边界已提交时补齐运行时证据，不重复提交数据面边界。"""
         ...
 
+    def has_quarantine_identity(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+    ) -> bool:
+        """确认该 generation 已持久化 quarantine 身份。"""
+        ...
+
     def record_cutover_finalizing(
         self,
         *,
