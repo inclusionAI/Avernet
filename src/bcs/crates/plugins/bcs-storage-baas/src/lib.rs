@@ -42,16 +42,21 @@ impl BaasStoragePlugin {
         Self { cfg, caps, http }
     }
 
-    /// Build the baas base path: {endpoint}/api/v1/sessions/{tenant}/{session_id percent-encoded}/files.
-    /// transfer_id and session_id are percent-encoded to be safe path segments.
-    fn base_for_session(&self, session_id: &str) -> String {
-        let sid = percent_encode_path(session_id);
+    /// Build the baas session root path (files/transfers are siblings under it):
+    /// {endpoint}/api/v1/sessions/{tenant}/{session_id percent-encoded}.
+    /// tenant and session_id are percent-encoded to be safe path segments.
+    fn session_path_root(&self, session_id: &str) -> String {
         format!(
-            "{}/api/v1/sessions/{}/{}/files",
+            "{}/api/v1/sessions/{}/{}",
             self.cfg.endpoint.trim_end_matches('/'),
             percent_encode_path(&self.cfg.tenant),
-            sid
+            percent_encode_path(session_id)
         )
+    }
+
+    /// Build the baas files base path: {session_path_root}/files.
+    fn base_for_session(&self, session_id: &str) -> String {
+        format!("{}/files", self.session_path_root(session_id))
     }
 
     fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -320,8 +325,8 @@ impl StoragePlugin for BaasStoragePlugin {
                         .map(|p| BaasReadyHandle { transfer_id: p.transfer_id }))
             .map_err(|e| StorageError::Backend(e.into()))?;
         let session_id = session_id_from_key(&handle.key);
-        let base = self.base_for_session(session_id);
-        let resp = self.auth(self.http.delete(format!("{base}/transfers/{}",
+        let root = self.session_path_root(session_id);
+        let resp = self.auth(self.http.delete(format!("{root}/transfers/{}",
                     percent_encode_path(&ready.transfer_id)))).send().await
             .map_err(|e| StorageError::Backend(e.into()))?;
         if resp.status().is_success() {

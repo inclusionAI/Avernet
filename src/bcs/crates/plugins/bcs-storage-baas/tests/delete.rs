@@ -15,7 +15,7 @@ fn h(key: &str, tid: &str) -> StorageHandle {
 #[tokio::test]
 async fn delete_returns_ok_on_deleted() {
     let server = MockServer::start().await;
-    Mock::given(method("DELETE")).and(path("/api/v1/sessions/t/sid/files/transfers/tid"))
+    Mock::given(method("DELETE")).and(path("/api/v1/sessions/t/sid/transfers/tid"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"code":0,"data":{"transfer_id":"tid","previous_status":"DONE","new_status":"DELETED"}})))
         .mount(&server).await;
     plugin(server.uri()).delete(&h("session-files/prod/sid/f/f", "tid")).await.unwrap();
@@ -24,7 +24,7 @@ async fn delete_returns_ok_on_deleted() {
 #[tokio::test]
 async fn delete_idempotent_on_transfer_not_found() {
     let server = MockServer::start().await;
-    Mock::given(method("DELETE")).and(path("/api/v1/sessions/t/sid/files/transfers/tid"))
+    Mock::given(method("DELETE")).and(path("/api/v1/sessions/t/sid/transfers/tid"))
         .respond_with(ResponseTemplate::new(404).set_body_json(json!({"detail":{"error":"TRANSFER_NOT_FOUND","message":"gone"}})))
         .mount(&server).await;
     plugin(server.uri()).delete(&h("session-files/prod/sid/f/f", "tid")).await.unwrap(); // 404 -> Ok idempotent
@@ -33,7 +33,7 @@ async fn delete_idempotent_on_transfer_not_found() {
 #[tokio::test]
 async fn delete_not_terminal_maps_conflict() {
     let server = MockServer::start().await;
-    Mock::given(method("DELETE")).and(path("/api/v1/sessions/t/sid/files/transfers/tid"))
+    Mock::given(method("DELETE")).and(path("/api/v1/sessions/t/sid/transfers/tid"))
         .respond_with(ResponseTemplate::new(409).set_body_json(json!({"detail":{"error":"TRANSFER_NOT_TERMINAL","message":"UPLOADING"}})))
         .mount(&server).await;
     let err = plugin(server.uri()).delete(&h("session-files/prod/sid/f/f", "tid")).await.unwrap_err();
