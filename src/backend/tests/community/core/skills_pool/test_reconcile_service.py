@@ -540,6 +540,40 @@ async def test_pre_upgrade_runtime_reconciles_activating_generation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_activating_generation_rejects_changed_preparation_identity() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER,
+            preparation_id="persisted-preparation",
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        preparation_id="regenerated-preparation",
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.MANUAL_REPAIR_REQUIRED
+    assert result.retryable is False
+    assert runtime.events == ["probe"]
+    assert layouts.events == ["manual_repair"]
+    assert layouts.state.phase is SkillLayoutPhase.NEEDS_MANUAL_REPAIR
+    assert layouts.state.last_failure_code == "PREPARATION_IDENTITY_CHANGED"
+    assert layouts.state.last_failure_evidence == {
+        "marker": "valid",
+        "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        "reason": "preparation_identity_changed_during_cutover",
+        "persisted_preparation_id": "persisted-preparation",
+        "observed_preparation_id": "regenerated-preparation",
+    }
+
+
+@pytest.mark.asyncio
 async def test_activating_old_runtime_without_identity_waits_for_upgrade() -> None:
     layouts = FakeLayoutRepository(
         claimed_state(
