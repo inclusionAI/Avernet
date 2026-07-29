@@ -258,14 +258,7 @@ modules:
       reason: ResourceRepository is a Core persistence seam, not a declared Plugin API protocol.
       items: []
     thresholds:
-      # Lowered 2026-07-29 (lucas-xzp): openapi_v1 resources handler wiring
-      # (Phase 1+3, 9 endpoints) added code under core/resources/ without
-      # singlebox acceptance coverage for the new /openapi/v1/bots/resources
-      # paths (acceptance_targets still targets legacy /api/resources). Known
-      # coverage debt, not a regression in existing coverage — raise back
-      # toward 39.07 once openapi_v1 acceptance stories land.
-      # Previous baseline 39.07; actual after wiring 35.99.
-      core_min_percent: 35.0
+      core_min_percent: 39.07
       router_min_percent: 100.0
 
 pending_modules:
