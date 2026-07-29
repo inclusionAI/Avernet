@@ -97,6 +97,12 @@ pub trait SessionRepoPort: Send + Sync {
     async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()>;
     async fn update_title(&self, session_id: &str, title: Option<String>) -> ServiceResult<Session>;
     async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String>;
+    async fn try_list_group_ids_by_session_participant(
+        &self,
+        bot_uuid: &str,
+    ) -> ServiceResult<Vec<String>> {
+        Ok(self.list_group_ids_by_session_participant(bot_uuid).await)
+    }
     async fn delete(&self, session_id: &str) -> ServiceResult<bool>;
 
     // ── session collection (收藏) ──────────────────────────────

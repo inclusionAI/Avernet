@@ -6,12 +6,12 @@ use bcs_service_api::application::session::{
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams};
+use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
     BotDeliveryTarget, BotRuntimeConnectCommand, BotRuntimeConnectOutcome,
     BotRuntimeConnectionService, BotRuntimeDisconnectCommand, BotRuntimeStatusCommand,
     BotRuntimeStatusOutcome, BotUseCaseError, Group, GroupStrategy, Participant, ParticipantRole,
-    ServiceResult, SessionKind, SessionStatus,
+    ParticipantMode, ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
 };
 use bcs_group_store::MemoryGroupRepo;
 use bcs_session::{NoopSessionManagementService, SessionManagementServiceImpl};
@@ -26,6 +26,139 @@ fn manager_worker_participants(worker_id: &str) -> Vec<Participant> {
         Participant::bot("manager", ParticipantRole::Manager),
         Participant::bot(worker_id, ParticipantRole::Worker),
     ]
+}
+
+struct FailingMembershipSessionRepo;
+
+#[async_trait]
+impl SessionRepoPort for FailingMembershipSessionRepo {
+    async fn create(&self, _group_id: &str, _params: NewSessionParams) -> ServiceResult<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn get(&self, _session_id: &str) -> Option<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn belongs_to_group(&self, _session_id: &str, _group_id: &str) -> bool {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn list_by_group(
+        &self,
+        _group_id: &str,
+        _status: Option<SessionStatus>,
+        _offset: u64,
+        _limit: u64,
+        _title_contains: Option<&str>,
+        _participant_id: Option<&str>,
+    ) -> Vec<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn latest_running(&self, _group_id: &str) -> Option<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn count_running_service(&self, _group_id: &str) -> u64 {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn list_running_service(&self, _offset: u64, _limit: u64) -> Vec<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn complete_if_running(
+        &self,
+        _session_id: &str,
+        _output: Option<serde_json::Value>,
+        _error: Option<String>,
+    ) -> ServiceResult<Option<Session>> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn reactivate(
+        &self,
+        _session_id: &str,
+        _new_input: Option<serde_json::Value>,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn add_participant(
+        &self,
+        _session_id: &str,
+        _participant: Participant,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn remove_participant(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn update_participant_mode(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+        _mode: ParticipantMode,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn update_callback_status(
+        &self,
+        _session_id: &str,
+        _status: &str,
+    ) -> ServiceResult<()> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn update_title(
+        &self,
+        _session_id: &str,
+        _title: Option<String>,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by membership error test")
+    }
+
+    async fn list_group_ids_by_session_participant(&self, _bot_uuid: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    async fn try_list_group_ids_by_session_participant(
+        &self,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Vec<String>> {
+        Err(ServiceError::InternalError(
+            "session membership store unavailable".into(),
+        ))
+    }
+
+    async fn delete(&self, _session_id: &str) -> ServiceResult<bool> {
+        unimplemented!("not used by membership error test")
+    }
+}
+
+#[tokio::test]
+async fn impl_propagates_session_participant_group_list_failure() {
+    let repo = Arc::new(FailingMembershipSessionRepo);
+    let group_repo = Arc::new(MemoryGroupRepo::new());
+    let svc = SessionManagementServiceImpl::new(repo, group_repo);
+
+    let result = svc
+        .list_group_ids_by_session_participant("bot-1")
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(SessionUseCaseError::Internal(ServiceError::InternalError(message)))
+            if message == "session membership store unavailable"
+    ));
 }
 
 #[tokio::test]

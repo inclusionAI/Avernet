@@ -17,11 +17,12 @@ use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand, CollaborationDefinition,
     CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
     ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, DefaultDelivery, DefinitionYamlSource,
-    FriendCoreService, Group, GroupCollaborationDefinitionView, GroupCoreService, GroupStrategy,
-    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, NewSessionParams, Participant,
-    ParticipantRole, RoutingMode, RoutingPolicy, SessionHistoryResult, SessionManagementService,
-    StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
-    StateMachineRun, StateMachineRunStatus, StateMachineRunView, SystemMessageService,
+    FriendCoreService, FriendRepoPort, Group, GroupCollaborationDefinitionView, GroupCoreService,
+    GroupStrategy, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, NewSessionParams,
+    Participant, ParticipantRole, RoutingMode, RoutingPolicy, ServiceError, ServiceResult,
+    SessionHistoryResult, SessionManagementService, StartStateMachineRunCommand,
+    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
+    StateMachineRunStatus, StateMachineRunView, SystemMessageService,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -39,19 +40,27 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
-        Self::build(None).await
+        Self::build(None, None).await
     }
 
     async fn new_with_runtime(runtime: Arc<dyn CollaborationRuntimeService>) -> Self {
-        Self::build(Some(runtime)).await
+        Self::build(Some(runtime), None).await
     }
 
-    async fn build(runtime: Option<Arc<dyn CollaborationRuntimeService>>) -> Self {
+    async fn new_with_friends(friends: Arc<FriendCore>) -> Self {
+        Self::build(None, Some(friends)).await
+    }
+
+    async fn build(
+        runtime: Option<Arc<dyn CollaborationRuntimeService>>,
+        friends: Option<Arc<FriendCore>>,
+    ) -> Self {
         let group_repo = Arc::new(MemoryGroupRepo::new());
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
         let bots = Arc::new(BotCore::memory());
         let relation = Arc::new(RelationCore::memory());
-        let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
+        let friends = friends
+            .unwrap_or_else(|| Arc::new(FriendCore::memory().with_relation(relation.clone())));
         let sessions = Arc::new(SessionManagementServiceImpl::new(
             Arc::new(MemorySessionRepo::new()),
             group_repo,
@@ -114,6 +123,35 @@ impl Fixture {
             .register(bot_uuid.to_string(), capabilities)
             .await
             .expect("register bot");
+    }
+}
+
+struct FailingFriendRepo;
+
+#[async_trait]
+impl FriendRepoPort for FailingFriendRepo {
+    async fn list_friends(&self, _bot_id: &str) -> ServiceResult<Vec<String>> {
+        Err(ServiceError::InternalError(
+            "friend store unavailable".into(),
+        ))
+    }
+
+    async fn are_friends(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError(
+            "friend store unavailable".into(),
+        ))
+    }
+
+    async fn add_friendship(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<()> {
+        Err(ServiceError::InternalError(
+            "friend store unavailable".into(),
+        ))
+    }
+
+    async fn remove_all_friendships(&self, _bot_id: &str) -> ServiceResult<usize> {
+        Err(ServiceError::InternalError(
+            "friend store unavailable".into(),
+        ))
     }
 }
 
@@ -1431,6 +1469,79 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
             .as_deref(),
         Some("Before")
     );
+}
+
+#[tokio::test]
+async fn create_propagates_friendship_lookup_failure() {
+    let friends = Arc::new(FriendCore::with_repo(Arc::new(FailingFriendRepo)));
+    let fixture = Fixture::new_with_friends(friends).await;
+    fixture.add_public_bot("requester").await;
+    fixture.add_protected_bot("driver").await;
+
+    let result = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("requester"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: None,
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: Vec::new(),
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+            }),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::Internal(message)) if message.contains("friend store unavailable")
+    ));
+}
+
+#[tokio::test]
+async fn create_rejects_duplicate_participant_actor_ids() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "helper"] {
+        fixture.add_public_bot(bot).await;
+    }
+
+    let result = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: None,
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![
+                    CreateParticipant {
+                        actor_id: "helper".into(),
+                        role: ParticipantRole::Consultant,
+                    },
+                    CreateParticipant {
+                        actor_id: "helper".into(),
+                        role: ParticipantRole::Observer,
+                    },
+                ],
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+            }),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::InvalidInput { code, .. }) if code == "invalid_participant"
+    ));
 }
 
 #[tokio::test]

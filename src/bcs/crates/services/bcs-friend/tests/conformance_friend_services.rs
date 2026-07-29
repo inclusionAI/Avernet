@@ -8,7 +8,8 @@ use bcs_friend::{
 use bcs_service_api::{
     ActorKind, ActorStatus, AgentCredentials, BotCapabilities, BotDynamicStatus,
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService, FriendRequestDirection,
-    FriendRequestRepoPort, FriendRequestStatus, RegisteredBot, ServiceError, ServiceResult,
+    FriendRepoPort, FriendRequestRepoPort, FriendRequestStatus, RegisteredBot, ServiceError,
+    ServiceResult,
 };
 use bcs_test_support::{
     NoopBotRegistryCoreService, NoopFriendCoreService, NoopFriendRequestCoreService,
@@ -22,6 +23,18 @@ async fn memory_friend_store_passes_core_contract() {
 
     bcs_test_support::contract::core::friend_core_service_contract_tests(&store).await;
     bcs_test_support::contract::repo::friend_repo_contract_tests(repo.as_ref()).await;
+}
+
+#[tokio::test]
+async fn friend_core_propagates_friendship_lookup_failure() {
+    let store = FriendCore::with_repo(Arc::new(FailingFriendRepo));
+
+    let result = store.try_are_friends("alice", "bob").await;
+
+    assert!(matches!(
+        result,
+        Err(ServiceError::InternalError(message)) if message == "friend store unavailable"
+    ));
 }
 
 #[tokio::test]
@@ -43,6 +56,35 @@ async fn memory_friend_request_store_passes_core_contract() {
     )
     .await;
     bcs_test_support::contract::repo::friend_request_repo_contract_tests(repo.as_ref()).await;
+}
+
+struct FailingFriendRepo;
+
+#[async_trait]
+impl FriendRepoPort for FailingFriendRepo {
+    async fn list_friends(&self, _bot_id: &str) -> ServiceResult<Vec<String>> {
+        Err(ServiceError::InternalError(
+            "friend store unavailable".into(),
+        ))
+    }
+
+    async fn are_friends(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError(
+            "friend store unavailable".into(),
+        ))
+    }
+
+    async fn add_friendship(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<()> {
+        Err(ServiceError::InternalError(
+            "friend store unavailable".into(),
+        ))
+    }
+
+    async fn remove_all_friendships(&self, _bot_id: &str) -> ServiceResult<usize> {
+        Err(ServiceError::InternalError(
+            "friend store unavailable".into(),
+        ))
+    }
 }
 
 #[tokio::test]

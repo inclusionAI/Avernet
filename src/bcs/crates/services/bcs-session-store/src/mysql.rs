@@ -1154,11 +1154,37 @@ impl SessionRepoPort for MySqlSessionStore {
             .collect()
     }
 
+    async fn try_list_group_ids_by_session_participant(
+        &self,
+        bot_uuid: &str,
+    ) -> ServiceResult<Vec<String>> {
+        let sql = "SELECT DISTINCT group_id FROM bcs_session_participants \
+                   WHERE env = ? AND bot_uuid = ?";
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(bot_uuid),
+                ],
+            ))
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+
+        rows.iter()
+            .map(|row| {
+                db_get_column::<String>(row, "group_id").map_err(|error| {
+                    ServiceError::InternalError(format!("session db row: {error}"))
+                })
+            })
+            .collect()
+    }
+
     async fn delete(&self, session_id: &str) -> ServiceResult<bool> {
         let del_participants = "DELETE FROM bcs_session_participants \
                                WHERE env = ? AND session_id = ?";
-        let _ = self
-            .db
+        self.db
             .execute(DbStatement::with_params(
                 del_participants,
                 vec![
@@ -1166,10 +1192,11 @@ impl SessionRepoPort for MySqlSessionStore {
                     DbValue::from(session_id),
                 ],
             ))
-            .await;
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
 
         let del_session = "DELETE FROM bcs_group_sessions WHERE env = ? AND session_id = ?";
-        match self
+        let result = self
             .db
             .execute(DbStatement::with_params(
                 del_session,
@@ -1179,10 +1206,8 @@ impl SessionRepoPort for MySqlSessionStore {
                 ],
             ))
             .await
-        {
-            Ok(result) => Ok(result.affected_rows > 0),
-            Err(_) => Ok(false),
-        }
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+        Ok(result.affected_rows > 0)
     }
 
     async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {

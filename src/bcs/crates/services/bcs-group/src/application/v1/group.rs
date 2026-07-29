@@ -158,8 +158,9 @@ impl GroupServiceImpl {
 
         if self
             .friends
-            .are_friends(&principal_actor_id, bot_uuid)
+            .try_are_friends(&principal_actor_id, bot_uuid)
             .await
+            .map_err(map_service_error)?
         {
             return Ok(());
         }
@@ -447,6 +448,17 @@ impl GroupServiceImpl {
             return Err(ApplicationError::invalid(
                 "invalid_participant",
                 "participant actor_id cannot be empty",
+            ));
+        }
+        let mut participant_actor_ids = HashSet::new();
+        if request
+            .participants
+            .iter()
+            .any(|participant| !participant_actor_ids.insert(participant.actor_id.as_str()))
+        {
+            return Err(ApplicationError::invalid(
+                "invalid_participant",
+                "participant actor_id values must be unique",
             ));
         }
 

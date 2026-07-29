@@ -68,6 +68,10 @@ impl FriendCoreService for FriendCore {
         }
     }
 
+    async fn try_are_friends(&self, bot_a: &str, bot_b: &str) -> ServiceResult<bool> {
+        self.repo.are_friends(bot_a, bot_b).await
+    }
+
     async fn are_all_friends(&self, bot_id: &str, others: &[String]) -> ServiceResult<()> {
         let mut non_friends = Vec::new();
         for other in others {

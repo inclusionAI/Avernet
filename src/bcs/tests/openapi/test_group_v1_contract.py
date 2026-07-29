@@ -90,6 +90,11 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         ]
     ) == {"bot_not_found", "collaboration_definition_not_found"}
     assert set(
+        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["409"][
+            "x-error-codes"
+        ]
+    ) == {"conflict", "non_public_participant"}
+    assert set(
         contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["400"][
             "x-error-codes"
         ]

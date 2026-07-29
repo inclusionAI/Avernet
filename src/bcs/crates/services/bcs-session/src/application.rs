@@ -221,7 +221,10 @@ impl SessionManagementService for SessionManagementServiceImpl {
         &self,
         bot_uuid: &str,
     ) -> Result<Vec<String>, SessionUseCaseError> {
-        Ok(self.repo.list_group_ids_by_session_participant(bot_uuid).await)
+        Ok(self
+            .repo
+            .try_list_group_ids_by_session_participant(bot_uuid)
+            .await?)
     }
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {

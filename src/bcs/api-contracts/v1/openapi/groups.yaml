@@ -159,6 +159,7 @@ CreateGroupPath:
         description: Group conflicts with an existing resource.
         x-error-codes:
           - conflict
+          - non_public_participant
         content:
           application/json:
             schema:
