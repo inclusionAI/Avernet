@@ -175,6 +175,11 @@ class TaskService:
         return self._task_repo.get_by_id(task_id)
 
     def finalize_plan(self, task_id: str, plan: Plan) -> Optional[Task]:
+        # Accept a dict plan_payload (HTTP /plan endpoint) by coercing it into a
+        # Plan via the same _plan_from_dict used by amend; e2e callers pass a
+        # Plan object unchanged. Phase 6.9 smoke gap ② fix.
+        if isinstance(plan, dict):
+            plan = self._plan_from_dict(plan)
         task = self._load(task_id)
         if task is None:
             return None
