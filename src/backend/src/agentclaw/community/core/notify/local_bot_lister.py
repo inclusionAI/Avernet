@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.notify.constants import NOTIFY_SUPPORTED_ENGINES
 from agentclaw.community.core.notify.protocol import NotifyTarget
 
 
@@ -18,6 +19,9 @@ class LocalNotifyBotLister:
         )
         mappings: list[NotifyTarget] = []
         for bot in bots:
+            active_engine = str(bot.get("active_engine") or "").strip().lower()
+            if active_engine not in NOTIFY_SUPPORTED_ENGINES:
+                continue
             binding_id = bot.get("binding_id")
             if not binding_id:
                 continue
