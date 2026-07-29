@@ -433,6 +433,9 @@ impl GroupManagement {
             return Ok(true);
         }
 
+        if self.v1_openapi_create_policy {
+            return Ok(self.friend.try_are_friends(actor_id, bot_id).await?);
+        }
         Ok(self.friend.are_friends(actor_id, bot_id).await)
     }
 
@@ -1038,16 +1041,18 @@ impl GroupManagementService for GroupManagement {
             .filter(|caller| !caller.is_empty())
             .ok_or_else(|| GroupUseCaseError::Unauthorized("caller is required".to_string()))?;
 
-        let caller_actor = self
-            .registry
-            .get(caller)
-            .await
-            .ok_or_else(|| GroupUseCaseError::ActorNotFound(caller.to_string()))?;
-        let target = self
-            .registry
-            .get(&cmd.target_actor_id)
-            .await
-            .ok_or_else(|| GroupUseCaseError::ActorNotFound(cmd.target_actor_id.clone()))?;
+        let caller_actor = if self.v1_openapi_create_policy {
+            self.registry.try_get(caller).await?
+        } else {
+            self.registry.get(caller).await
+        }
+        .ok_or_else(|| GroupUseCaseError::ActorNotFound(caller.to_string()))?;
+        let target = if self.v1_openapi_create_policy {
+            self.registry.try_get(&cmd.target_actor_id).await?
+        } else {
+            self.registry.get(&cmd.target_actor_id).await
+        }
+        .ok_or_else(|| GroupUseCaseError::ActorNotFound(cmd.target_actor_id.clone()))?;
         if target.actor_kind != ActorKind::Bot {
             return Err(GroupUseCaseError::InvalidProposal(
                 "DM target must be a Bot actor".to_string(),
@@ -1087,7 +1092,11 @@ impl GroupManagementService for GroupManagement {
                 )
             }
             ActorKind::Bot => {
-                self.ensure_reachable(caller, &target.bot_uuid).await?;
+                if self.v1_openapi_create_policy {
+                    self.ensure_v1_reachable(caller, &target).await?;
+                } else {
+                    self.ensure_reachable(caller, &target.bot_uuid).await?;
+                }
                 (
                     DmActorSpec {
                         actor_id: caller_actor.bot_uuid.clone(),

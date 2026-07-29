@@ -115,6 +115,9 @@ The final review passes keep the same V1-only compatibility boundary:
   successful idempotent no-op or skip committed-delete cleanup.
 - PATCH explicitly declares `bot_not_found` when a persisted participant has
   since been soft-deleted from the registry.
+- V1 DM delegation preserves fallible caller/target registry reads and
+  friendship checks through the Legacy-compatible management layer; the
+  Legacy policy keeps its existing missing-or-unreachable fallback behavior.
 
 ## Error behavior
 

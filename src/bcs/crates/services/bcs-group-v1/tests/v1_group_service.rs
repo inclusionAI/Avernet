@@ -324,6 +324,35 @@ impl FriendRepoPort for FailingFriendRepo {
     }
 }
 
+#[derive(Default)]
+struct FirstFriendCheckThenFailingRepo {
+    checks: AtomicUsize,
+}
+
+#[async_trait]
+impl FriendRepoPort for FirstFriendCheckThenFailingRepo {
+    async fn list_friends(&self, _bot_id: &str) -> ServiceResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    async fn are_friends(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<bool> {
+        if self.checks.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Ok(true);
+        }
+        Err(ServiceError::InternalError(
+            "friend store unavailable after validation".into(),
+        ))
+    }
+
+    async fn add_friendship(&self, _bot_a: &str, _bot_b: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn remove_all_friendships(&self, _bot_id: &str) -> ServiceResult<usize> {
+        Ok(0)
+    }
+}
+
 struct FailingChannelBindingCleanup;
 
 #[async_trait]
@@ -943,6 +972,63 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
         result,
         Err(ApplicationError::Internal(message))
             if message.contains("participant registry unavailable")
+    ));
+}
+
+#[tokio::test]
+async fn bot_dm_propagates_caller_registry_failure_after_target_validation() {
+    let bots = Arc::new(BotCore::with_repo(Arc::new(
+        PersistentBotRepo::with_plugins(
+            Arc::new(InMemoryCachePlugin::new()),
+            Arc::new(DriverThenFailingDb::default()),
+        ),
+    )));
+    let fixture = Fixture::new_with_bots(bots).await;
+
+    let result = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("caller"),
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                name: None,
+                context: None,
+                target_actor_id: "target".into(),
+            }),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::Internal(message))
+            if message.contains("participant registry unavailable")
+    ));
+}
+
+#[tokio::test]
+async fn bot_dm_propagates_friendship_failure_after_initial_validation() {
+    let friends = Arc::new(FriendCore::with_repo(Arc::new(
+        FirstFriendCheckThenFailingRepo::default(),
+    )));
+    let fixture = Fixture::new_with_friends(friends).await;
+    fixture.add_public_bot("caller").await;
+    fixture.add_protected_bot("target").await;
+
+    let result = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("caller"),
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                name: None,
+                context: None,
+                target_actor_id: "target".into(),
+            }),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::Internal(message))
+            if message.contains("friend store unavailable after validation")
     ));
 }
 
