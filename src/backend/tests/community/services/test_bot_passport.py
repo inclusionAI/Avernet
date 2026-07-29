@@ -130,7 +130,7 @@ class TestCreateBotWithBotId(TestBotServicePassportIntegration):
         mock_bot_repository.update_by_owner.return_value = new_bot
 
         bot_service._device_service_provider = lambda: mock_device_service
-        with patch('agentclaw.community.core.bot_management.services.bot_service.SUPPORTED_ENGINE_TYPES', ['moltis']), \
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
              patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
@@ -498,7 +498,7 @@ class TestCreateServiceBotPublish:
         mock_publish_service.create_publish.return_value = mock_publish_record
         bot_service._bot_publish_provider = lambda: mock_publish_service
 
-        with patch('agentclaw.community.core.bot_management.services.bot_service.SUPPORTED_ENGINE_TYPES', ['moltis']), \
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
              patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
@@ -560,7 +560,7 @@ class TestCreateServiceBotPublish:
         mock_publish_service = MagicMock()
         bot_service._bot_publish_provider = lambda: mock_publish_service
 
-        with patch('agentclaw.community.core.bot_management.services.bot_service.SUPPORTED_ENGINE_TYPES', ['moltis']), \
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
              patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
@@ -613,7 +613,7 @@ class TestCreateServiceBotPublish:
         mock_publish_service.create_publish.side_effect = Exception("Database error")
         bot_service._bot_publish_provider = lambda: mock_publish_service
 
-        with patch('agentclaw.community.core.bot_management.services.bot_service.SUPPORTED_ENGINE_TYPES', ['moltis']), \
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
              patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
