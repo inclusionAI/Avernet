@@ -562,6 +562,149 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
 }
 
 #[tokio::test]
+async fn frontend_human_input_skips_im_delivery_and_accepts_present_human() {
+    let group = Arc::new(GroupStore::new());
+    group
+        .upsert(state_machine_test_group())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    )
+    .with_session_channel_outbound(channel_outbound.clone());
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(frontend_human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "review in frontend"}),
+            caller_id: Some("human_1001".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("start frontend HumanInput run");
+
+    assert_eq!(
+        started.view.nodes[0].status,
+        StateMachineNodeStatus::Running
+    );
+    assert!(channel_outbound.events.lock().await.is_empty());
+
+    let pending = runtime
+        .list_pending_human_nodes(ListPendingHumanNodesCommand {
+            run_id: started.view.run.run_id.clone(),
+            caller_actor_id: "human_1001".to_string(),
+        })
+        .await
+        .expect("frontend Human lists pending node");
+    assert_eq!(pending.len(), 1);
+
+    let completed = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: started.view.run.run_id,
+            node_id: "review".to_string(),
+            caller_actor_id: "human_1001".to_string(),
+            content: "approved in frontend".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect("Present Human responds from frontend");
+
+    assert_eq!(completed.node.status, StateMachineNodeStatus::Completed);
+    assert_eq!(completed.run.status, StateMachineRunStatus::Completed);
+}
+
+#[tokio::test]
+async fn im_human_input_rejects_a_different_present_human() {
+    let group = Arc::new(GroupStore::new());
+    let seeded_group = state_machine_test_group();
+    group
+        .upsert(seeded_group.clone())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let mut assigned = Participant::human("human_1001", ParticipantRole::Observer);
+    assigned.mode = Some(ParticipantMode::Present);
+    let mut other = Participant::human("human_2002", ParticipantRole::Observer);
+    other.mode = Some(ParticipantMode::Present);
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: seeded_group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::ServiceInvocation,
+                participants: vec![assigned, other],
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    );
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: seeded_group.id,
+            session_id: Some(session.id),
+            definition_yaml: Some(human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "assigned review"}),
+            caller_id: Some("bot_driver".to_string()),
+            authenticated_human: None,
+        })
+        .await
+        .expect("start assigned IM HumanInput run");
+
+    let pending = runtime
+        .list_pending_human_nodes(ListPendingHumanNodesCommand {
+            run_id: started.view.run.run_id.clone(),
+            caller_actor_id: "human_2002".to_string(),
+        })
+        .await
+        .expect("other Present Human may inspect the run");
+    assert!(pending.is_empty());
+
+    let error = runtime
+        .respond_human_node(RespondHumanNodeCommand {
+            run_id: started.view.run.run_id,
+            node_id: "review".to_string(),
+            caller_actor_id: "human_2002".to_string(),
+            content: "attempted response".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect_err("IM HumanInput must reject a non-assignee");
+    assert!(matches!(error, CollaborationRuntimeError::Forbidden(_)));
+}
+
+#[tokio::test]
 async fn state_machine_session_rejects_message_without_pending_human_input() {
     let group = Arc::new(GroupStore::new());
     group
@@ -3021,6 +3164,28 @@ runtime:
         notification:
           mode: fixed_group
         instruction: 请用自然语言给出你的意见。
+        node_timeout_ms: 60000
+"#
+    .to_string()
+}
+
+fn frontend_human_input_yaml() -> String {
+    r#"
+api_version: bcs.collaboration/v1
+id: frontend_human_input
+version: 1
+name: Frontend Human Review
+participants: {}
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      review:
+        kind: human_input
+        display_name: Review
+        instruction: 请在前端给出你的意见。
         node_timeout_ms: 60000
 "#
     .to_string()
