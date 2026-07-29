@@ -1,10 +1,16 @@
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+    PublishOperationKind,
+    PublishOperationRecord,
+    PublishOperationState,
+    PublishStatus,
+)
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService, BotBuildServiceError
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
@@ -16,6 +22,9 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 )
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    DraftRestoreRetryableError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     operation_request_id,
@@ -3960,3 +3969,607 @@ async def test_retry_from_built_source_enqueues_verify_flow():
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
     assert result.action == "process"
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_uses_migration_path_and_keeps_state():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    assert operation.id is not None
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    draft = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    source = _make_publish_record(
+        id=1,
+        status=PublishStatus.UPGRADED.value,
+        version=1,
+        ext={"migration_path": "/artifact/v1/openclaw"},
+    )
+    publish_service.get_publish_by_id.side_effect = [draft, source]
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-draft", status="ACTIVE"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "binding_id": 77,
+        "active_engine": "openclaw",
+    }
+    build_service.restore_draft_async = AsyncMock(return_value={
+        "restore_type": "migration_path",
+        "artifact_path": "/artifact/v1/openclaw",
+        "draft_path": "/draft/openclaw",
+    })
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2, operation_id=operation.id, operator="admin"
+    )
+
+    assert result["status"] == "success"
+    assert result["draft_binding_id"] == 77
+    kwargs = build_service.restore_draft_async.await_args.kwargs
+    assert "bot_uuid" not in kwargs
+    assert kwargs["source_version"] == 1
+    assert kwargs["artifact_ext"]["migration_path"] == "/artifact/v1/openclaw"
+    assert "config_artifact" not in kwargs["artifact_ext"]
+    publish_service.update_publish_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_rejects_changed_last_publish_id():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    assert operation.id is not None
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2,
+        status=PublishStatus.DRAFT.value,
+        version=3,
+        last_pub_id=9,
+    )
+
+    with pytest.raises(PublishFlowServiceError, match="上一版本已变化"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2,
+            operation_id=operation.id,
+            operator="admin",
+        )
+
+    recorded = operation_repo.get_by_id(operation.id)
+    assert recorded is not None
+    assert recorded.state == PublishOperationState.FAILED.value
+    assert "上一版本已变化" in recorded.last_error
+    build_service.restore_draft_async.assert_not_called()
+    build_service.restore_teclaw_draft_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_operation_mismatch_does_not_fail_other_operation():
+    publish_service = Mock()
+    build_service = Mock()
+    operation_repo = Mock()
+    operation_repo.get_by_id.return_value = PublishOperationRecord(
+        id=7,
+        publish_id=999,
+        operation_kind=str(PublishOperationKind.DRAFT_RESTORE),
+        stage=PublishStage.DRAFT.value,
+        attempt=1,
+        state=PublishOperationState.PENDING.value,
+        request_id="draft-restore-999-1",
+        params={
+            "source_publish_id": 1,
+            "source_version": 1,
+            "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+        },
+        operator="admin",
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+
+    with pytest.raises(PublishFlowServiceError, match="operation 与当前发布单不匹配"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2,
+            operation_id=7,
+            operator="admin",
+        )
+
+    operation_repo.fail.assert_not_called()
+    build_service.restore_draft_async.assert_not_called()
+    build_service.restore_teclaw_draft_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_teclaw_uses_current_binding_and_historical_artifact():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "bot_uuid": "BOT-current-draft",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    assert operation.id is not None
+    svc = _pf(
+        publish_service,
+        build_service,
+        baas_service,
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    draft = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    historical_artifact = {
+        "schema_version": 4,
+        "engine_type": "teclaw",
+        "resources": [{"name": "old.txt", "store": "bot-data", "path": "old"}],
+        "engine_ext": {"stage": "release"},
+    }
+    source = _make_publish_record(
+        id=1,
+        status=PublishStatus.UPGRADED.value,
+        version=1,
+        ext={"config_artifact": historical_artifact},
+    )
+    publish_service.get_publish_by_id.side_effect = [draft, source]
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-current-draft", status="ACTIVE"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "binding_id": 77,
+        "active_engine": "teclaw",
+    }
+    async def _restore_teclaw_draft(**kwargs):
+        if kwargs.get("baas_publish_id") is None:
+            return {
+                "restore_type": "config_artifact",
+                "publish_id": 901,
+                "bot_uuid": "BOT-current-draft",
+                "baas_status": "SUBMITTED",
+                "status": "restoring",
+            }
+        return {
+            "restore_type": "config_artifact",
+            "baas_publish_id": 901,
+            "baas_status": "SUCCESS",
+            "status": "success",
+        }
+    build_service.restore_teclaw_draft_async = AsyncMock(
+        side_effect=_restore_teclaw_draft
+    )
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2,
+        operation_id=operation.id,
+        operator="admin",
+    )
+
+    assert result["status"] == "success"
+    assert result["draft_binding_id"] == 77
+    assert build_service.restore_teclaw_draft_async.await_count == 2
+    kwargs = build_service.restore_teclaw_draft_async.await_args_list[0].kwargs
+    assert kwargs["bot_uuid"] == "BOT-current-draft"
+    assert kwargs["owner_id"] == "u1"
+    assert kwargs["source_version"] == 1
+    assert kwargs["artifact_ext"]["config_artifact"] == historical_artifact
+    assert kwargs["artifact_ext"]["config_artifact"] is not historical_artifact
+    assert kwargs["request_id"]
+    progress_kwargs = build_service.restore_teclaw_draft_async.await_args_list[1].kwargs
+    assert progress_kwargs["baas_publish_id"] == 901
+    recorded = operation_repo.get_by_id(operation.id)
+    assert recorded is not None
+    assert recorded.baas_publish_id == 901
+    assert recorded.bot_uuid == "BOT-current-draft"
+    assert recorded.state == "completed"
+    build_service.restore_draft_async.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_teclaw_resumes_recorded_workflow_without_reissue():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "bot_uuid": "BOT-current-draft",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    operation = operation_repo.record_workflow(
+        operation.id, baas_publish_id=901, bot_uuid="BOT-current-draft"
+    )
+    assert operation is not None
+
+    svc = _pf(
+        publish_service,
+        build_service,
+        baas_service,
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    draft = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    historical_artifact = {
+        "schema_version": 4,
+        "engine_type": "teclaw",
+        "resources": [],
+    }
+    source = _make_publish_record(
+        id=1,
+        status=PublishStatus.UPGRADED.value,
+        version=1,
+        ext={"config_artifact": historical_artifact},
+    )
+    publish_service.get_publish_by_id.side_effect = [draft, source]
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-current-draft", status="ACTIVE"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "binding_id": 77,
+        "active_engine": "teclaw",
+    }
+    build_service.restore_teclaw_draft_async = AsyncMock(
+        return_value={
+            "restore_type": "config_artifact",
+            "baas_publish_id": 901,
+            "baas_status": "SUCCESS",
+            "status": "success",
+        }
+    )
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2,
+        operation_id=operation.id,
+        operator="admin",
+    )
+
+    assert result["status"] == "success"
+    build_service.restore_teclaw_draft_async.assert_awaited_once()
+    kwargs = build_service.restore_teclaw_draft_async.await_args.kwargs
+    assert kwargs["baas_publish_id"] == 901
+    assert kwargs["request_id"] is None
+    recorded = operation_repo.get_by_id(operation.id)
+    assert recorded.state == PublishOperationState.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_teclaw_crash_after_issue_resumes_via_adopt():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "bot_uuid": "BOT-current-draft",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    assert operation.id is not None
+
+    real_record_workflow = operation_repo.record_workflow
+    record_attempts = 0
+
+    def _record_workflow_crashes_once(*args, **kwargs):
+        nonlocal record_attempts
+        record_attempts += 1
+        if record_attempts == 1:
+            raise RuntimeError("database unavailable after BaaS accepted update")
+        return real_record_workflow(*args, **kwargs)
+
+    operation_repo.record_workflow = Mock(side_effect=_record_workflow_crashes_once)
+    svc = _pf(
+        publish_service,
+        build_service,
+        baas_service,
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    draft = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    source = _make_publish_record(
+        id=1,
+        status=PublishStatus.UPGRADED.value,
+        version=1,
+        ext={
+            "config_artifact": {
+                "schema_version": 4,
+                "engine_type": "teclaw",
+                "resources": [],
+            }
+        },
+    )
+    publish_service.get_publish_by_id.side_effect = [draft, source, draft, source]
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-current-draft", status="ACTIVE"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "binding_id": 77,
+        "active_engine": "teclaw",
+    }
+    baas_service.list_bot_publishes.side_effect = [
+        [],
+        [{"id": 901, "publish_type": "UPDATE"}],
+    ]
+    build_service.restore_teclaw_draft_async = AsyncMock(
+        side_effect=[
+            {
+                "restore_type": "config_artifact",
+                "publish_id": 901,
+                "bot_uuid": "BOT-current-draft",
+                "baas_status": "SUBMITTED",
+                "status": "restoring",
+            },
+            {
+                "restore_type": "config_artifact",
+                "baas_publish_id": 901,
+                "baas_status": "SUCCESS",
+                "status": "success",
+            },
+        ]
+    )
+
+    with pytest.raises(DraftRestoreRetryableError, match="database unavailable"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2, operation_id=operation.id, operator="admin"
+        )
+
+    in_doubt = operation_repo.get_by_id(operation.id)
+    assert in_doubt.state == PublishOperationState.PENDING.value
+    assert in_doubt.baas_publish_id is None
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2, operation_id=operation.id, operator="admin"
+    )
+
+    assert result["status"] == "success"
+    assert build_service.restore_teclaw_draft_async.await_count == 2
+    issue_call, poll_call = build_service.restore_teclaw_draft_async.await_args_list
+    assert issue_call.kwargs["baas_publish_id"] is None
+    assert issue_call.kwargs["request_id"]
+    assert poll_call.kwargs["baas_publish_id"] == 901
+    assert poll_call.kwargs["request_id"] is None
+    recorded = operation_repo.get_by_id(operation.id)
+    assert recorded.baas_publish_id == 901
+    assert recorded.state == PublishOperationState.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_rejects_operation_without_deadline():
+    publish_service = Mock()
+    build_service = Mock()
+    operation_repo = Mock()
+    operation_repo.get_by_id.return_value = PublishOperationRecord(
+        id=7,
+        publish_id=2,
+        operation_kind=str(PublishOperationKind.DRAFT_RESTORE),
+        stage=PublishStage.DRAFT.value,
+        attempt=1,
+        state=PublishOperationState.PENDING.value,
+        request_id="draft-restore-2-1",
+        bot_uuid="BOT-current-draft",
+        params={"source_publish_id": 1, "source_version": 1},
+        operator="admin",
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+
+    with pytest.raises(PublishFlowServiceError, match="缺少有效的 deadline_at"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2,
+            operation_id=7,
+            operator="admin",
+        )
+
+    operation_repo.fail.assert_called_once_with(
+        7, "草稿恢复 operation 缺少有效的 deadline_at"
+    )
+    build_service.restore_teclaw_draft_async.assert_not_called()
+    build_service.restore_draft_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_marks_operation_failed_after_30_minutes():
+    publish_service = Mock()
+    build_service = Mock()
+    operation_repo = Mock()
+    operation_repo.get_by_id.return_value = PublishOperationRecord(
+        id=7,
+        publish_id=2,
+        operation_kind=str(PublishOperationKind.DRAFT_RESTORE),
+        stage=PublishStage.DRAFT.value,
+        attempt=1,
+        state=PublishOperationState.ID_RECORDED.value,
+        request_id="draft-restore-2-1",
+        bot_uuid="BOT-current-draft",
+        baas_publish_id=901,
+        params={
+            "source_publish_id": 1,
+            "source_version": 1,
+            "deadline_at": (datetime.now() - timedelta(minutes=1)).isoformat(),
+        },
+        operator="admin",
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+
+    with pytest.raises(PublishFlowServiceError, match="默认限制 30 分钟"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2,
+            operation_id=7,
+            operator="admin",
+        )
+
+    operation_repo.fail.assert_called_once_with(
+        7, "恢复草稿超时（默认限制 30 分钟）"
+    )
+    build_service.restore_teclaw_draft_async.assert_not_called()
+    build_service.restore_draft_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_completed_operation_replay_is_noop():
+    publish_service = Mock()
+    build_service = Mock()
+    operation_repo = Mock()
+    operation_repo.get_by_id.return_value = PublishOperationRecord(
+        id=7,
+        publish_id=2,
+        operation_kind=str(PublishOperationKind.DRAFT_RESTORE),
+        stage=PublishStage.DRAFT.value,
+        attempt=1,
+        state=PublishOperationState.COMPLETED.value,
+        request_id="draft-restore-2-1",
+        result={"restore_type": "config_artifact", "draft_binding_id": 77},
+        operator="admin",
+    )
+    # The user may already have advanced the draft after restore completed. A
+    # redelivered queue task must still acknowledge the completed ledger row.
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2, status=PublishStatus.BUILDING.value, version=2, last_pub_id=1
+    )
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2, operation_id=7, operator="admin"
+    )
+
+    assert result == {
+        "restore_type": "config_artifact",
+        "draft_binding_id": 77,
+        "status": "success",
+    }
+    operation_repo.fail.assert_not_called()
+    build_service.restore_teclaw_draft_async.assert_not_called()
+    build_service.restore_draft_async.assert_not_called()
