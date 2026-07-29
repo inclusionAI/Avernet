@@ -37,6 +37,9 @@ def _app(skill_service):
     }
     bot_repo.get_by_id_and_owner.return_value = default_bot
     bot_repo.get_by_id.return_value = default_bot
+    bot_repo.get_by_id_and_entity.side_effect = (
+        lambda _bot_id, _entity_id: bot_repo.get_by_id.return_value
+    )
 
     resolver = MagicMock()
     resolver.resolve_for_bot.return_value = SimpleNamespace(provider="teclaw")
@@ -512,3 +515,146 @@ def test_shared_git_skill_parameters_use_requested_bot_owner():
         bot_id="b1",
         user_id="owner-u",
     )
+
+
+def test_parameter_route_scopes_duplicate_default_bot_by_entity():
+    """重复 default bot_id 必须由 entity_id 精确消歧，不能读取他人设备。"""
+
+    from agentclaw.community.api.skill_parameter_service_factory import (
+        SkillParameterServiceFactoryProtocol,
+    )
+    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+
+    lookup_svc = MagicMock()
+    skill = {
+        "id": "1",
+        "name": "shared",
+        "link_name": "shared",
+        "git_path": "git://shared",
+        "bolt_id": None,
+        "user_id": None,
+    }
+    client, _, _ = _app(lookup_svc)
+    injector = client.app.state.injector
+    injector.get(SkillRepository).get_by_id.return_value = skill
+    bot_repo = injector.get(BotRepository)
+    bot_repo.get_by_id.return_value = {
+        "bot_id": "default",
+        "owner_id": "other-owner",
+        "entity_id": "other-entity",
+    }
+    bot_repo.get_by_id_and_entity.side_effect = None
+    bot_repo.get_by_id_and_entity.return_value = {
+        "bot_id": "default",
+        "owner_id": "u1",
+        "entity_id": "u1",
+        "active_engine": "openclaw",
+        "bot_type": "personal",
+    }
+    parameter_factory = injector.get(SkillParameterServiceFactoryProtocol)
+
+    response = client.get(
+        "/api/skills/1/parameters",
+        params={**_Q, "bot_id": "default"},
+    )
+
+    assert response.status_code == 200, response.text
+    bot_repo.get_by_id_and_entity.assert_called_with("default", "u1")
+    parameter_factory.create.assert_awaited_once_with(
+        bot_id="default",
+        user_id="u1",
+    )
+
+
+def test_parameter_post_keeps_edit_lock_enforcement():
+    """敏感请求体不入审计，但写操作仍必须持有 Bot 编辑锁。"""
+
+    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
+        CollaboratorLockService,
+    )
+    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+
+    lookup_svc = MagicMock()
+    skill = {
+        "id": "1",
+        "name": "x",
+        "link_name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "b1",
+        "user_id": "owner-u",
+    }
+    client, _, _ = _app(lookup_svc)
+    injector = client.app.state.injector
+    injector.get(SkillRepository).get_by_id.return_value = skill
+    injector.get(BotRepository).get_by_id.return_value = {
+        "bot_id": "b1",
+        "owner_id": "owner-u",
+        "entity_id": "u1",
+        "active_engine": "openclaw",
+        "bot_type": "personal",
+    }
+    injector.get(CollaboratorLockService).get_lock_info.return_value = SimpleNamespace(
+        has_collaborators=True,
+        lock=None,
+        holder_name=None,
+    )
+
+    response = client.post(
+        "/api/skills/1/parameters",
+        params=_Q,
+        json={"parameters": {"token": "must-not-be-audited"}},
+    )
+
+    assert response.status_code == 423
+
+
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_parameter_routes_fail_closed_when_permission_service_errors(method):
+    """协作者鉴权异常时必须在设备访问前返回 503。"""
+
+    from agentclaw.community.api.skill_parameter_service_factory import (
+        SkillParameterServiceFactoryProtocol,
+    )
+    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+        CollaboratorService,
+    )
+    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+
+    lookup_svc = MagicMock()
+    skill = {
+        "id": "1",
+        "name": "x",
+        "link_name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "b1",
+        "user_id": "owner-u",
+    }
+    client, _, _ = _app(lookup_svc)
+    injector = client.app.state.injector
+    injector.get(SkillRepository).get_by_id.return_value = skill
+    injector.get(BotRepository).get_by_id.return_value = {
+        "bot_id": "b1",
+        "owner_id": "owner-u",
+        "entity_id": "u1",
+        "active_engine": "openclaw",
+        "bot_type": "personal",
+    }
+    injector.get(
+        CollaboratorService
+    ).check_collaborator_permission.side_effect = RuntimeError("unavailable")
+    parameter_factory = injector.get(SkillParameterServiceFactoryProtocol)
+
+    if method == "get":
+        response = client.get("/api/skills/1/parameters", params=_Q)
+    else:
+        response = client.post(
+            "/api/skills/1/parameters",
+            params=_Q,
+            json={"parameters": {"token": "secret"}},
+        )
+
+    assert response.status_code == 503
+    parameter_factory.create.assert_not_awaited()

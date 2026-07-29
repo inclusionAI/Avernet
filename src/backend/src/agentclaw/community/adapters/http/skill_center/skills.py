@@ -2113,6 +2113,7 @@ def _resolve_parameter_bot(
     *,
     skill: dict[str, Any],
     requested_bot_id: str,
+    requested_entity_id: str,
     bot_repo: BotRepository,
 ) -> dict[str, Any]:
     """Resolve the trusted Bot identity that owns a Skill parameter file.
@@ -2127,7 +2128,7 @@ def _resolve_parameter_bot(
     across Bots.
     """
 
-    bot = bot_repo.get_by_id(requested_bot_id)
+    bot = bot_repo.get_by_id_and_entity(requested_bot_id, requested_entity_id)
     if not isinstance(bot, dict):
         raise HTTPException(status_code=404, detail="Bot not found")
     bot_owner_id = str(bot.get("owner_id") or "")
@@ -2165,6 +2166,37 @@ def _resolve_parameter_bot(
     return bot
 
 
+async def _extract_parameter_permission(
+    *,
+    bot_id: str,
+    entity_id: str,
+    ctx,
+):
+    """Resolve parameter authorization from the exact Bot identity scope."""
+
+    from agentclaw.community.core.bot_collaborator.interceptor.extractors import (
+        PermissionParams,
+    )
+
+    bot_repo = ctx.injector.get(BotRepository) if ctx.injector is not None else None
+    bot = (
+        bot_repo.get_by_id_and_entity(bot_id, entity_id)
+        if bot_repo is not None
+        else None
+    )
+    owner_id = (
+        str(bot.get("owner_id") or "")
+        if isinstance(bot, dict)
+        else ""
+    )
+    # A non-empty sentinel prevents the generic interceptor from falling back
+    # to its bot_id-only legacy lookup. The route will return the precise 404.
+    return PermissionParams(
+        bot_id=bot_id,
+        owner_id=owner_id or "__parameter_bot_not_found__",
+    )
+
+
 async def _create_skill_parameter_service(
     *,
     parameter_service_factory: SkillParameterServiceFactoryProtocol,
@@ -2187,9 +2219,10 @@ async def _create_skill_parameter_service(
 
 @router.get("/{skill_id}/parameters", response_model=SkillParametersResponse)
 @with_interceptors(CollaboratorPermissionInterceptor(
-    bot_id="$bot_id",
-    owner_id="$__trusted_owner_id",
+    params_extractor=_extract_parameter_permission,
+    extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
     persist_audit_log=False,
+    fail_closed_on_permission_error=True,
 ))
 async def get_skill_parameters(
     skill_id: str,
@@ -2210,6 +2243,7 @@ async def get_skill_parameters(
     bot = _resolve_parameter_bot(
         skill=skill,
         requested_bot_id=bot_id,
+        requested_entity_id=entity_id,
         bot_repo=bot_repo,
     )
     skill_name = skill.get('link_name') or skill.get('name')
@@ -2227,11 +2261,12 @@ async def get_skill_parameters(
 
 @router.post("/{skill_id}/parameters", response_model=SkillParametersResponse)
 @with_interceptors(CollaboratorPermissionInterceptor(
-    bot_id="$bot_id",
-    owner_id="$__trusted_owner_id",
-    # Parameter values may contain credentials. Keep authorization, but do not
-    # persist or log the request body through the generic collaborator audit.
-    persist_audit_log=False,
+    params_extractor=_extract_parameter_permission,
+    extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
+    # Keep edit-lock enforcement and audit metadata, but never serialize
+    # credential-bearing parameter values.
+    audit_excluded_params={"request"},
+    fail_closed_on_permission_error=True,
 ))
 async def save_skill_parameters(
     skill_id: str,
@@ -2256,6 +2291,7 @@ async def save_skill_parameters(
     bot = _resolve_parameter_bot(
         skill=skill,
         requested_bot_id=bot_id,
+        requested_entity_id=entity_id,
         bot_repo=bot_repo,
     )
     trusted_bot_id = str(bot["bot_id"])

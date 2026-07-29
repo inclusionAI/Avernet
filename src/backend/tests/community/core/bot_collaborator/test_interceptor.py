@@ -1,6 +1,6 @@
 """Tests for collaborator permission interceptor."""
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 from agentclaw.community.core.auth.models import AuthenticatedIdentity
 from agentclaw.community.core.bot_collaborator.interceptor import (
@@ -321,6 +321,13 @@ class TestPersistAuditLog:
         interceptor = CollaboratorPermissionInterceptor(persist_audit_log=False)
         assert interceptor.persist_audit_log is False
 
+    def test_audit_excluded_params_are_normalized(self):
+        interceptor = CollaboratorPermissionInterceptor(
+            audit_excluded_params={"request"},
+        )
+        assert interceptor.persist_audit_log is True
+        assert interceptor.audit_excluded_params == frozenset({"request"})
+
     @pytest.mark.asyncio
     async def test_after_skip_when_disabled(self):
         """测试 persist_audit_log=False 时 after 方法直接返回。"""
@@ -508,7 +515,7 @@ class TestExtractOwnerFromRequestBody:
 
         # owner 是 u_owner_001，当前用户是 u_collab
         # 应该检查协作者权限而不是直接放行
-        result = await interceptor.before(ctx)
+        await interceptor.before(ctx)
 
         # 由于没有 CollaboratorService，owner 不等于 user_id 时会放行
         # 但 metadata 中应该正确记录了 owner_id
