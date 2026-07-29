@@ -16,12 +16,18 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from .bots import router as bots_router
+from .contracts import ERROR_RESPONSES
 from .channels import router as channels_router
 from .identity import router as identity_router
 from .mcp import router as mcp_router
 from .resources import router as resources_router
 from .routines import router as routines_router
 from .skills import router as skills_router
+
+# Every public route lives under this prefix. Exported so app-level handlers can
+# tell a public request from an internal one (e.g. to envelope validation errors
+# only on this surface).
+PUBLIC_API_PREFIX = "/openapi/v1"
 
 # Order matters: literal sub-groups first, the `{bot_id}` wildcard group last.
 _SUBGROUPS = [
@@ -35,12 +41,17 @@ _SUBGROUPS = [
 
 
 def build_public_router() -> APIRouter:
-    """Assemble the ``/openapi/v1/bots`` public router."""
+    """Assemble the ``/openapi/v1/bots`` public router.
+
+    ``ERROR_RESPONSES`` is attached here rather than on each handler so the
+    published schema documents the envelope this surface actually returns on
+    failure — every group, every route, one declaration.
+    """
     public = APIRouter()
     for router in _SUBGROUPS:
-        public.include_router(router)
-    public.include_router(bots_router)
+        public.include_router(router, responses=ERROR_RESPONSES)
+    public.include_router(bots_router, responses=ERROR_RESPONSES)
     return public
 
 
-__all__ = ["build_public_router"]
+__all__ = ["build_public_router", "PUBLIC_API_PREFIX"]

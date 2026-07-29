@@ -162,7 +162,7 @@ class TestBotCreationFlow:
 
     def test_create_first_bot(self, bot_service, fake_repo, mock_device_service):
         """首Bot创建成功。"""
-        with patch('agentclaw.community.core.bot_management.services.bot_service.SUPPORTED_ENGINE_TYPES', ['moltis']), \
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
              patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
@@ -210,7 +210,7 @@ class TestBotCreationFlow:
             "status": "ACTIVE",
         })
 
-        with patch('agentclaw.community.core.bot_management.services.bot_service.SUPPORTED_ENGINE_TYPES', ['moltis']), \
+        with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
              patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
 
             result = bot_service.create_bot(
@@ -368,8 +368,11 @@ class TestRouterLogic:
         assert result.data["bot"]["bot_id"] == "default"
         assert result.data["passport"]["token"] == "passport_token_123"
         assert result.data["passport"]["is_first_bot"] is True
+        # bot_name is passed so a taken name is rejected before the external
+        # Passport application, not after it (R13/F48).
         mock_bot_service.check_create_bot_preflight.assert_called_once_with(
             user_id="user_001",
+            bot_name="My First Bot",
         )
         mock_bot_service.create_bot.assert_called_once()
 
@@ -419,8 +422,11 @@ class TestRouterLogic:
         assert result.data["need_authorization"] is True
         assert result.data["bot_id"] == "default"
         assert result.data["iframe_url"] == "https://auth.example.com/iframe"
+        # bot_name is passed so a taken name is rejected before the external
+        # Passport application, not after it (R13/F48).
         mock_bot_service.check_create_bot_preflight.assert_called_once_with(
             user_id="user_001",
+            bot_name="My First Bot",
         )
         mock_bot_service.create_bot.assert_not_called()
 

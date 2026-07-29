@@ -282,6 +282,12 @@ if os.environ.get("SINGLEBOX_COVERAGE") == "1":
 # (tests/architecture/test_domain_error_status_map_complete.py) asserts
 # every concrete DomainError subclass has an entry here.
 from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from fastapi.exception_handlers import (  # noqa: E402
+    http_exception_handler,
+    request_validation_exception_handler,
+)
+from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 from agentclaw.community.core.aicoding.services.data_proxy_service import (  # noqa: E402
     DataProxyError,
     EngineUnreachable,
@@ -345,6 +351,24 @@ def _trace_headers(request: Request) -> dict[str, str]:
     return {"X-Trace-ID": trace_id} if trace_id else {}
 
 
+def _is_public_api(request: Request) -> bool:
+    """Whether this request belongs to the public surface's envelope contract."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import is_public_api
+
+    return is_public_api(request)
+
+
+def _public_error_envelope(
+    status: int, request: Request, headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    """Envelope a public-surface failure that reached an app-level handler."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        unmapped_error_response,
+    )
+
+    return unmapped_error_response(status, request, headers=headers)
+
+
 @app.exception_handler(DomainError)
 async def _domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status = _DOMAIN_ERROR_STATUS_MAP.get(type(exc), 500)
@@ -356,11 +380,62 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
             "[DomainError 5xx] %s on %s %s: %s",
             type(exc).__name__, request.method, request.url.path, exc.detail,
         )
+    if _is_public_api(request):
+        return _public_error_envelope(status, request)
     return JSONResponse(
         status_code=status,
         content={"detail": exc.detail},
         headers=_trace_headers(request),
     )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(
+    request: Request, exc: StarletteHTTPException,
+) -> JSONResponse:
+    """Envelope routing-level HTTP errors on the public surface.
+
+    Starlette raises these *before* any router is reached — an unknown
+    ``/openapi/v1/...`` path (404) or a wrong method on a known one (405) — and
+    its built-in handler answers them, so neither ``@envelope_errors`` nor the
+    generic catch-all ever sees them. They are among the most common failures a
+    new integrator hits, so leaving them as ``{"detail": ...}`` breaks the
+    contract exactly where it is first tested.
+
+    Scoped by path like the other public translations; internal ``/api`` routes
+    keep FastAPI's default shape, including any ``HTTPException`` they raise
+    themselves.
+
+    ``exc.headers`` is forwarded because the protocol headers on these responses
+    carry the actionable part: a 405 without its ``Allow`` list tells the caller
+    they got it wrong but not what would be right.
+    """
+    if _is_public_api(request):
+        return _public_error_envelope(exc.status_code, request, exc.headers)
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(
+    request: Request, exc: RequestValidationError,
+) -> JSONResponse:
+    """Answer public-surface validation failures with the standard Envelope.
+
+    FastAPI raises this *before* the handler runs, so the public routers'
+    ``@envelope_errors`` decorator never sees it. Without this translation a
+    malformed public request (missing field, bad ``cluster_name`` enum,
+    out-of-range page size) would return FastAPI's ``{"detail": [...]}`` and
+    break the uniform-envelope contract that surface promises.
+
+    Scoped by path: internal ``/api`` routes keep FastAPI's default shape, so
+    existing clients are unaffected.
+    """
+    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+    from agentclaw.community.adapters.http.openapi_v1.responses import error_response
+
+    if request.url.path.startswith(PUBLIC_API_PREFIX):
+        return error_response(422, "Invalid request", request)
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.exception_handler(DataProxyError)
@@ -399,6 +474,14 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
         "[Unhandled exception] %s on %s %s",
         type(exc).__name__, request.method, request.url.path,
     )
+    # The public surface guarantees the Envelope on every response, including
+    # the ones nobody anticipated. Enumerating each new escapee in
+    # ENVELOPE_ERRORS is whack-a-mole — services keep growing error types, and
+    # transport failures (httpx, socket) are not domain errors at all. This
+    # backstop closes the class: a specific mapping still gives a precise
+    # status, and anything else at least stays in the contract.
+    if _is_public_api(request):
+        return _public_error_envelope(500, request)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal Server Error"},
