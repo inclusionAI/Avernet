@@ -1687,6 +1687,46 @@ def test_committed_cleanup_failure_keeps_quarantine_evidence(
     assert result.evidence["quarantine_cleanup_pending"] is True
 
 
+def test_already_committed_evidence_does_not_reprobe_quarantine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, _legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    first = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert first.status is PoolActivationStatus.COMMITTED
+
+    quarantine = (
+        pool_local.parent / ".migration-quarantine" / "generation-1" / "skills-local"
+    )
+    real_exists = Path.exists
+
+    def fail_quarantine_probe(path: Path) -> bool:
+        if path == quarantine:
+            raise OSError(5, "injected quarantine probe failure")
+        return real_exists(path)
+
+    monkeypatch.setattr(Path, "exists", fail_quarantine_probe)
+    replay = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert replay.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert replay.evidence["quarantine"] == str(quarantine)
+    assert replay.evidence["quarantine_cleanup_pending"] is True
+
+
 def test_mapping_verifier_reports_each_drift_class(tmp_path: Path) -> None:
     home, legacy_local, pool_local, _pool_repo = _prepared_home(tmp_path)
     valid_source = pool_local / "handmade"

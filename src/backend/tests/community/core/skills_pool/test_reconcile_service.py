@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    CUTOVER_EVIDENCE_CONTRACT_VERSION,
     LAYOUT_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
     RuntimeLayoutProbeStatus,
@@ -409,6 +410,7 @@ class FakeRuntime:
             preparation_id=PREPARATION_ID,
             evidence={
                 "marker": "valid",
+                "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
                 "resolved_layout": {
                     "active_root": "/runtime/skills",
                     "local_root": self.pool_local,
@@ -625,7 +627,7 @@ async def test_pre_upgrade_runtime_reconciles_activating_generation() -> None:
     runtime = FakeRuntime()
     runtime.probe_result = replace(
         runtime.probe_result,
-        evidence={"marker": "valid"},
+        evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -671,6 +673,11 @@ async def test_activating_generation_rejects_changed_preparation_identity() -> N
     assert layouts.state.last_failure_code == "PREPARATION_IDENTITY_CHANGED"
     assert layouts.state.last_failure_evidence == {
         "marker": "valid",
+        "resolved_layout": {
+            "active_root": "/runtime/skills",
+            "local_root": "/home/admin/.openclaw/workspace/skills-pool/skills-local",
+            "repo_root": "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+        },
         "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
         "reason": "preparation_identity_changed_during_cutover",
         "persisted_preparation_id": "persisted-preparation",
@@ -690,7 +697,7 @@ async def test_activating_old_runtime_without_identity_waits_for_upgrade() -> No
     runtime = FakeRuntime()
     runtime.probe_result = replace(
         runtime.probe_result,
-        evidence={"marker": "valid"},
+        evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -876,12 +883,13 @@ async def test_hermes_h0_ready_uses_its_own_pool_paths_for_full_activation() -> 
     )
     runtime.probe_result = replace(
         runtime.probe_result,
-        evidence={
-            "checks": {
-                "legacy_local_bridge_valid": True,
-                "stable_repo_bridge_valid": True,
-            }
-        },
+            evidence={
+                "checks": {
+                    "legacy_local_bridge_valid": True,
+                    "stable_repo_bridge_valid": True,
+                },
+                "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+            },
     )
 
     result = await build_service(
@@ -1801,7 +1809,7 @@ def test_real_reconciliation_retry_resumes_same_generation_without_repeating_cut
         engine="openclaw",
         layout_contract_version=LAYOUT_CONTRACT_VERSION,
         preparation_id=PREPARATION_ID,
-        evidence={"marker": "valid"},
+        evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -1888,7 +1896,7 @@ class ReadyProbeService:
             engine="openclaw",
             layout_contract_version=LAYOUT_CONTRACT_VERSION,
             preparation_id=PREPARATION_ID,
-            evidence={"marker": "valid"},
+            evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
         )
 
 
