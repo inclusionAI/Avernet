@@ -94,23 +94,27 @@
         the failure the key change exists to prevent. Green after: 11 passed.
 - **Depends on:** Task 2
 
-## Task 4: Isolate `ac_bot_mcp_call_config`
+## Task 4: [x] Isolate `ac_bot_mcp_call_config`
 - **Goal:** Put a bot's per-server MCP call identity behind the same guard,
   covering the aggregate reads that never mention a bot record.
 - **Files:** `src/agentclaw/community/core/caller_identity/models.py`,
   `tests/community/plugins/test_bot_mcp_call_config_tenant_isolation.py` (new)
 - **Done when:**
-  - [ ] `BotMcpCallConfigModel` gains the same `avernet_tenant` column.
-  - [ ] `__table_args__` is **unchanged** — `bot_pk` is a global primary key, so
+  - [x] `BotMcpCallConfigModel` gains the same `avernet_tenant` column.
+  - [x] `__table_args__` is **unchanged** — `bot_pk` is a global primary key, so
         the existing unique key already determines tenant and needs no reshape.
-  - [ ] `register_avernet_tenant_guard(BotMcpCallConfigModel)` after the class.
-  - [ ] Both aggregate reads — `list_draft_call_types`
+        The reason is recorded as a comment above `__table_args__`.
+  - [x] `register_avernet_tenant_guard(BotMcpCallConfigModel)` after the class.
+  - [x] Both aggregate reads — `list_draft_call_types`
         (`plugins/caller_identity_repository.py:279`) and the call-type rollup
         (`:302`) — return only the current tenant's rows.
-  - [ ] `replace_draft_call_type` stamps the tenant; a cross-tenant explicit
+  - [x] `replace_draft_call_type` stamps the tenant; a cross-tenant explicit
         insert raises `CrossTenantInsertError`.
-  - [ ] `plugins/caller_identity_repository.py` is **unchanged**.
-  - [ ] Each cross-tenant test's red run is recorded.
+  - [x] `plugins/caller_identity_repository.py` is **unchanged**.
+  - [x] Each cross-tenant test's red run is recorded.
+        **Red run:** with the registration commented out — 5 failed, 2 passed,
+        including both aggregate reads and the cross-tenant delete. Green
+        after: 7 passed.
 - **Depends on:** Task 2
 
 ## Task 5: Prove the internal API is untouched
