@@ -48,6 +48,9 @@ import type {
 import BottomPanel from './BottomPanel/BottomPanel';
 import SessionHeader from './SessionHeader';
 
+// 副屏 panel 自注册:任务执行流程画布(FR-OBS-11,backend create 发 <AixUI panel> 命中)
+import '@/components/TaskWorkflowView/TaskPanel';
+
 registerPanel({ type: 'umd', name: 'UMD面板', component: UmdPanel });
 
 interface GroupChatPageProps {

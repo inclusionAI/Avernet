@@ -39,6 +39,20 @@ export const routes = [
           },
         ],
       },
+      {
+        // 目标驱动任务执行 — 任务入口页(副屏整体动态 DAG,FR-OBS-01~11)
+        name: '任务执行',
+        path: 'task-loop',
+        routes: [
+          { path: '', component: './TaskLoop', hideInMenu: true },
+          {
+            name: '任务执行流程',
+            path: ':taskId',
+            component: './TaskLoop',
+            hideInMenu: true,
+          },
+        ],
+      },
     ],
   },
 ];
