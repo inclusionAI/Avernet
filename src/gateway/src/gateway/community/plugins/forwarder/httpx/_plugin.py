@@ -22,7 +22,7 @@ from gateway.community.spi.forwarder import (
 )
 
 
-class BareForwarder(Forwarder):
+class HttpxForwarder(Forwarder):
     """An httpx-backed :class:`Forwarder`.
 
     A single ``AsyncClient`` is reused across requests (connection pooling). If

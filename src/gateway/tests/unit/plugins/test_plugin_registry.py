@@ -32,7 +32,8 @@ class TestRegisterPluginOption:
 
         register_plugin_option("gateway.cache", "sofa", factory)
         assert has_enterprise_plugins() is True
-        assert registry_mod._extra_options["gateway.cache"]["sofa"] is factory
+        stored_factory, _, _ = registry_mod._extra_options["gateway.cache"]["sofa"]
+        assert stored_factory is factory
 
     def test_register_multiple_plugins(self) -> None:
         register_plugin_option("gateway.cache", "sofa", lambda: "cache-sofa")
@@ -53,7 +54,8 @@ class TestRegisterPluginOption:
         factory2: Callable[[], Any] = lambda: "v2"
         register_plugin_option("gateway.cache", "sofa", factory1)
         register_plugin_option("gateway.cache", "sofa", factory2)
-        assert registry_mod._extra_options["gateway.cache"]["sofa"] is factory2
+        stored_factory, _, _ = registry_mod._extra_options["gateway.cache"]["sofa"]
+        assert stored_factory is factory2
 
     def test_factory_is_stored_not_called(self) -> None:
         call_count = 0
@@ -65,6 +67,7 @@ class TestRegisterPluginOption:
 
         register_plugin_option("gateway.auth", "sofa", factory)
         assert call_count == 0
-        result = registry_mod._extra_options["gateway.auth"]["sofa"]()
+        stored_factory, _, _ = registry_mod._extra_options["gateway.auth"]["sofa"]
+        result = stored_factory()
         assert result == "result"
         assert call_count == 1

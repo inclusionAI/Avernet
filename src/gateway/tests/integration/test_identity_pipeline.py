@@ -13,12 +13,28 @@ import pytest
 
 from gateway.community.bootstrap._authn import build_authenticator
 from gateway.community.core.authn import IdentityChain, authenticate
+from gateway.community.plugins.authn.app_token import (
+    StubAppTokenValidator,
+    StubTenantResolver,
+)
+from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
     CredentialBundle,
     Presence,
     PrincipalType,
 )
+
+
+def _bootstrap_db():
+    from gateway.community.bootstrap._configs import DatabasePluginConfig
+
+    db = SqliteDatabasePlugin()
+    db.init_database(DatabasePluginConfig(plugin_type="SQLITE_ORM", db_url=""))
+    from gateway.community.bootstrap._authn import _seed_authn
+
+    _seed_authn(db)
+    return db
 
 
 def _userinfo_handler(
@@ -34,14 +50,20 @@ _GOOGLE_BODY = {"sub": "g-1", "email": "a@example.com", "name": "A"}
 
 
 def _strategies() -> dict[PrincipalType, IdentityChain]:
-    return build_authenticator().strategies
+    db = _bootstrap_db()
+    return build_authenticator(
+        db, StubAppTokenValidator(), StubTenantResolver()
+    ).strategies
 
 
 def _google_strategies() -> dict[PrincipalType, IdentityChain]:
     """Strategies with a mock-google user strategy (no real network)."""
     from gateway.community.plugins.authn.google_token import GoogleUserStrategy
 
-    strategies = build_authenticator().strategies
+    db = _bootstrap_db()
+    strategies = build_authenticator(
+        db, StubAppTokenValidator(), StubTenantResolver()
+    ).strategies
     strategies[PrincipalType.USER] = IdentityChain(
         PrincipalType.USER,
         (
@@ -57,7 +79,7 @@ def _google_strategies() -> dict[PrincipalType, IdentityChain]:
 
 async def test_app_only_resolves_app_identity() -> None:
     creds = CredentialBundle(
-        headers={"authorization": "Bearer bare-app-token", "x-tenant-token": "t"},
+        headers={"authorization": "Bearer stub-app-token", "x-tenant-token": "t"},
         cookies={},
         query={},
     )
@@ -116,7 +138,7 @@ async def test_mixed_app_and_google_user_resolve_both() -> None:
     creds = CredentialBundle(
         headers={
             "x-google-token": "tok",
-            "authorization": "Bearer bare-app-token",
+            "authorization": "Bearer stub-app-token",
             "x-tenant-token": "t",
         },
         cookies={},

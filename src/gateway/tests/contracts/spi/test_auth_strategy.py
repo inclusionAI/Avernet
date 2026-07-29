@@ -9,8 +9,8 @@ import httpx
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
 from gateway.community.plugins.authn.app_token import (
     AppTokenStrategy,
-    BareAppTokenValidator,
-    BareTenantResolver,
+    StubAppTokenValidator,
+    StubTenantResolver,
 )
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
@@ -111,10 +111,10 @@ class TestBotTokenStrategy(AuthStrategyContract):
 class TestAppTokenStrategy(AuthStrategyContract):
     def setup_method(self) -> None:
         self.strategy = AppTokenStrategy(
-            keys=BareAppTokenValidator(), tenants=BareTenantResolver()
+            keys=StubAppTokenValidator(), tenants=StubTenantResolver()
         )
         self.applicable_creds = CredentialBundle(
-            headers={"authorization": "Bearer bare-app-token", "x-tenant-token": "t"},
+            headers={"authorization": "Bearer stub-app-token", "x-tenant-token": "t"},
             cookies={},
             query={},
         )

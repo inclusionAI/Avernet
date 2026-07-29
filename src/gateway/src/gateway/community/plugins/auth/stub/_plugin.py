@@ -1,4 +1,4 @@
-"""BareAuthPlugin — test double for AuthPlugin.
+"""StubAuthPlugin — test double for AuthPlugin.
 
 Returns a hardcoded user and always-allowed permissions so the
 open-source edition runs without an identity backend.
@@ -9,7 +9,7 @@ from __future__ import annotations
 from gateway.community.spi.auth import AuthenticatedUser, AuthPlugin
 
 
-class BareAuthPlugin(AuthPlugin):
+class StubAuthPlugin(AuthPlugin):
     """Stub implementation of AuthPlugin for bare mode.
 
     Returns a hardcoded user and always-allowed permissions.

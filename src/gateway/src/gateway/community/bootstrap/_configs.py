@@ -1,0 +1,138 @@
+import os
+from dataclasses import dataclass
+from enum import StrEnum
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from ._container import ApplicationContainer
+
+
+class ConfigError(Exception):
+    pass
+
+
+class ConfigKey(StrEnum):
+    PLUGIN_FORWARDER = "plugins.forwarder"
+    PLUGIN_SCHEMA_CATALOG = "plugins.schema_catalog"
+    PLUGIN_CACHE = "plugins.cache"
+    PLUGIN_AUTHN_APP_TOKEN = "plugins.authn.app_token"
+    PLUGIN_AUTHN_TENANT = "plugins.authn.tenant"
+    PLUGIN_DATABASE = "plugins.database.plugin_database"
+    DATABASE_URL = "plugins.database.database_url"
+    WEB_PORT = "web_port"
+
+
+_CFG = SettingsConfigDict(extra="allow")
+
+_CONFIG_SCHEMAS: dict[str, type[BaseSettings]] = {}
+
+
+class ConfigSchema(BaseSettings):
+    model_config = _CFG
+    config_section: ClassVar[str] = ""
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        section = getattr(cls, "config_section", "")
+        if section:
+            _CONFIG_SCHEMAS[section] = cls
+
+
+class DatabasePluginConfig(BaseSettings):
+    model_config = _CFG
+    plugin_database: str = Field(default="SQLITE_ORM")
+    database_url: str = ""
+
+
+class AuthnPluginConfig(BaseSettings):
+    model_config = _CFG
+    app_token: str = Field(default="stub", pattern=r"^(stub|real)$")
+    tenant: str = Field(default="stub", pattern=r"^(stub|real)$")
+
+
+class PluginConfig(ConfigSchema):
+    config_section = "plugins"
+    forwarder: str = Field(default="httpx", pattern=r"^(httpx|sofa)$")
+    schema_catalog: str = Field(default="file", pattern=r"^(file|sofa)$")
+    cache: str = Field(default="stub", pattern=r"^(stub|real)$")
+    authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
+    database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
+
+
+def _read_config(cfg, key: ConfigKey):
+    parts = key.value.split(".")
+    val = cfg
+    for p in parts:
+        try:
+            if isinstance(val, dict):
+                if p not in val:
+                    raise ConfigError(
+                        f"Config path segment '{p}' not found in '{key.value}'"
+                    ) from None
+                val = val[p]
+            else:
+                val = getattr(val, p)
+        except AttributeError:
+            raise ConfigError(
+                f"Config path segment '{p}' not found in '{key.value}'"
+            ) from None
+    if callable(val) and not isinstance(val, dict):
+        try:
+            resolved = val()
+        except Exception as exc:
+            raise ConfigError(
+                f"Config '{key.value}' is not set or failed to resolve"
+            ) from exc
+    else:
+        resolved = val
+    if resolved is None:
+        raise ConfigError(f"Config '{key.value}' is not set")
+    return resolved
+
+
+def _schema_defaults() -> dict:
+    return {
+        section: schema().model_dump() for section, schema in _CONFIG_SCHEMAS.items()
+    }
+
+
+def load_container_config() -> dict:
+    from gateway.community.config import ConfigLoader
+
+    cfg = ConfigLoader.load()
+    user_config = cfg.user_config.model_dump()
+    if cfg.module_config.web:
+        user_config[ConfigKey.WEB_PORT.value] = cfg.module_config.web.port
+    return user_config
+
+
+@dataclass
+class DatabaseConfig:
+    plugin_type: str
+    db_url: str = ""
+
+
+def init_container_config(container: "ApplicationContainer") -> None:
+    from dependency_injector import providers
+
+    config: providers.Configuration = container.config
+    config.from_dict(_schema_defaults())
+    config.from_dict(load_container_config())
+
+
+def resolve_configs_dir() -> Path | None:
+    """Resolve the gateway configuration directory.
+
+    Returns the path to the configs directory (from GATEWAY_CONFIG_PATH env
+    var or ``./configs``), or *None* if no directory is found.
+    """
+    explicit = os.getenv("GATEWAY_CONFIG_PATH", "").strip()
+    if explicit:
+        p = Path(explicit)
+        return p if p.is_dir() else p.parent
+    cwd = Path.cwd() / "configs"
+    return cwd if cwd.exists() else None

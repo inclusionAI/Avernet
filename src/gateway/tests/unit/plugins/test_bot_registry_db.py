@@ -6,12 +6,18 @@ import pytest
 
 from gateway.community.bootstrap._authn import build_database
 from gateway.community.core.bot import BotRepository
+from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.bot import RegisteredBot
+
+
+def _make_db():
+    db = SqliteDatabasePlugin()
+    return build_database(db)
 
 
 @pytest.fixture(scope="module")
 def registry() -> BotRepository:
-    return BotRepository(build_database())
+    return BotRepository(_make_db())
 
 
 async def test_known_token_resolves_seeded_bot(registry: BotRepository) -> None:

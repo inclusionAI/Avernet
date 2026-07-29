@@ -45,7 +45,7 @@
 | **flavor 选择** | `PluginAccessor` + `GATEWAY_RUN_MODE` 环境变量 | `bare`（默认，开源）/ `sofa`（企业，注册 entry point） |
 | **已有身份模型** | `spi/auth/_models.py::AuthenticatedUser` | 中立字段：`id`/`username`/`tenant_id` 等（provider 无关） |
 | **已有 auth 协议骨架** | `spi/auth/_protocols.py::AuthPlugin` | `get_login_user` / `is_allowed` / `check_permission`，第一方为主 |
-| **社区/企业实现样板** | `plugins/auth/bare/_plugin.py::BareAuthPlugin` | 返回硬编码用户；企业版将是 `plugins/auth/sofa/`（BUService） |
+| **社区/企业实现样板** | `plugins/auth/stub/_plugin.py::StubAuthPlugin` | 返回硬编码用户；企业版将是 `plugins/auth/sofa/`（BUService） |
 
 > **术语对齐：** 前几轮讨论里的 "community / corp" 在本组件里就是 flavor **`bare` / `sofa`**。下文统一用 `bare`/`sofa`。
 
@@ -248,7 +248,7 @@ class AuthStrategy(Protocol):
 策略本身**与 flavor 无关**；社区/企业差异下沉到策略依赖的**依赖协议（SPI）**（Rule 14）。
 
 > "依赖协议（SPI）"就是一个策略**调用、但自己不实现**的协议（有方法、可按 flavor 替换实现），
-> 与组件现有的 `AuthPlugin`（协议）+ `BareAuthPlugin`（实现）是同一手法。注意区分：`ApiKeyValidator` /
+> 与组件现有的 `AuthPlugin`（协议）+ `StubAuthPlugin`（实现）是同一手法。注意区分：`ApiKeyValidator` /
 > `TenantResolver` 是**依赖协议**（有 `verify()`/`resolve()`）；`ApiKeyRecord` 只是它们返回的**数据类**，不是协议。
 
 ### 6.1 依赖协议（SPI，策略的依赖）
@@ -361,7 +361,7 @@ class AppKeyStrategy(AuthStrategy):
 
 ```python
 # gateway/community/plugins/authn/tenant_resolver/bare/_plugin.py
-class BareTenantResolver(TenantResolver):
+class StubTenantResolver(TenantResolver):
     async def resolve(self, tenant_token: str) -> str:
         if not tenant_token:
             raise AuthError("missing tenant token")

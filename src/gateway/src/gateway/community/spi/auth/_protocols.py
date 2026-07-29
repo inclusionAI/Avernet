@@ -13,7 +13,7 @@ class AuthPlugin(Protocol):
     Unifies login, whitelist, and permission checking into a single contract.
 
     Implementations:
-    - BareAuthPlugin: returns hardcoded user, always-allowed for tests.
+    - StubAuthPlugin: returns hardcoded user, always-allowed for tests.
     - Enterprise plugin: calls the enterprise SSO / identity API for login.
     """
 
