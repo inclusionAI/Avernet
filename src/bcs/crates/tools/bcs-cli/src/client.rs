@@ -1598,6 +1598,7 @@ impl BcsClient {
             originator: Some(options.driver_bot),
             collaboration_definition_yaml: Some(options.definition_yaml),
             auto_start_on_service_invocation: Some(options.auto_start_on_service_invocation),
+            start_initial_run: None,
             visibility: None,
         };
         let response = self
@@ -1649,6 +1650,7 @@ impl BcsClient {
             originator: None,
             collaboration_definition_yaml: None,
             auto_start_on_service_invocation: None,
+            start_initial_run: None,
             visibility: None,
         };
 
@@ -1725,6 +1727,7 @@ impl BcsClient {
             originator: None,
             collaboration_definition_yaml: None,
             auto_start_on_service_invocation: None,
+            start_initial_run: None,
             visibility: None,
         };
 
