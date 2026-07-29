@@ -206,6 +206,22 @@ async def lifespan(app: FastAPI):
     manager = EngineManager.get_instance()
     await manager.initialize()
 
+    # Engine initialization installs the engine's existing Legacy bridges.
+    # Retry the same sidecar-only preparation afterwards so every filesystem
+    # engine can publish a valid Pool-ready marker without changing active
+    # mappings or blocking startup.
+    try:
+        import asyncio
+        from engine.community.config import is_agentbox_runtime
+        from engine.community.core.skills.skills_repo_download import (
+            prepare_pool_layout,
+        )
+
+        if is_agentbox_runtime():
+            asyncio.create_task(asyncio.to_thread(prepare_pool_layout))
+    except Exception:
+        pass
+
     yield
 
     # ── shutdown ──

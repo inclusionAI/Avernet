@@ -11,6 +11,7 @@ import pytest
 
 from agentclaw.community.core.events.types import (
     BaasPublishCompletedEvent,
+    DeviceActivatedEvent,
     DeviceAliveEvent,
 )
 from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
@@ -82,25 +83,26 @@ def _binding(
     )
 
 
-def _bot() -> dict[str, object]:
+def _bot(*, bot_type: str = "personal") -> dict[str, object]:
     return {
         "bot_id": "bot-1",
         "owner_id": "owner-1",
         "entity_id": "entity-1",
         "env": "pre",
         "active_engine": "openclaw",
-        "bot_type": "personal",
+        "bot_type": bot_type,
     }
 
 
 def _listener(
     *,
     binding,
+    bot_type: str = "personal",
 ) -> tuple[SkillsPoolReconcileWakeupListener, MagicMock]:
     bindings = MagicMock()
     bindings.get_by_id.return_value = binding
     bots = MagicMock()
-    bots.get_by_binding_id.return_value = _bot()
+    bots.get_by_binding_id.return_value = _bot(bot_type=bot_type)
     queue = MagicMock()
     return (
         SkillsPoolReconcileWakeupListener(
@@ -216,7 +218,93 @@ def test_baas_publish_wakeup_rejects_obviously_stale_publish() -> None:
     queue.enqueue.assert_not_called()
 
 
-def test_wakeup_listener_subscribes_both_events_idempotently() -> None:
+def test_desktop_device_activation_enqueues_reconciliation() -> None:
+    listener, queue = _listener(
+        binding=_binding(provider="baas", props={}),
+        bot_type="desktop",
+    )
+
+    listener.handle(
+        DeviceActivatedEvent(
+            device_id="device-current",
+            binding_id=42,
+            entity_id="entity-1",
+            entity_type="staff",
+            device_provider="baas",
+            sandbox_id=None,
+        )
+    )
+
+    payload = queue.enqueue.call_args.args[1]
+    assert payload["source"] == "desktop_device_activated"
+    assert payload["scope"] == {
+        "env": "pre",
+        "entity_id": "entity-1",
+        "bot_id": "bot-1",
+    }
+
+
+@pytest.mark.parametrize(
+    ("binding", "event_overrides"),
+    [
+        (
+            _binding(provider="baas", props={}),
+            {"device_provider": "arca"},
+        ),
+        (
+            None,
+            {},
+        ),
+        (
+            _binding(provider="baas", props={}),
+            {"device_id": "stale-device"},
+        ),
+    ],
+)
+def test_desktop_device_activation_rejects_stale_delivery_signal(
+    binding,
+    event_overrides: dict[str, object],
+) -> None:
+    listener, queue = _listener(binding=binding, bot_type="desktop")
+    values = {
+        "device_id": "device-current",
+        "binding_id": 42,
+        "entity_id": "entity-1",
+        "entity_type": "staff",
+        "device_provider": "baas",
+        "sandbox_id": None,
+        **event_overrides,
+    }
+
+    listener.handle(DeviceActivatedEvent(**values))
+
+    queue.enqueue.assert_not_called()
+
+
+@pytest.mark.parametrize("bot_type", ("personal", "service"))
+def test_non_desktop_device_activation_keeps_existing_wakeup_behavior(
+    bot_type: str,
+) -> None:
+    listener, queue = _listener(
+        binding=_binding(provider="baas", props={}),
+        bot_type=bot_type,
+    )
+
+    listener.handle(
+        DeviceActivatedEvent(
+            device_id="device-current",
+            binding_id=42,
+            entity_id="entity-1",
+            entity_type="staff",
+            device_provider="baas",
+            sandbox_id=None,
+        )
+    )
+
+    queue.enqueue.assert_not_called()
+
+
+def test_wakeup_listener_subscribes_provider_events_idempotently() -> None:
     reset_event_bus()
     try:
         listener, _ = _listener(binding=_binding(provider="arca", props={}))
@@ -226,6 +314,7 @@ def test_wakeup_listener_subscribes_both_events_idempotently() -> None:
 
         bus = get_event_bus()
         assert bus._handlers[DeviceAliveEvent].count(listener.handle) == 1
+        assert listener.handle not in bus._handlers.get(DeviceActivatedEvent, [])
         assert bus._handlers[BaasPublishCompletedEvent].count(listener.handle) == 1
     finally:
         reset_event_bus()

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from engine.community.config import RepoDelivery, current_repo_delivery
 from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
     MAPPING_CONTRACT_VERSION,
@@ -175,6 +176,7 @@ def _marker_contract_valid(
     layout: _FilesystemPoolLayout,
     expected_engine: str,
     expected_contract_version: str,
+    repo_delivery: RepoDelivery,
 ) -> bool:
     summary = marker.get("validation_summary")
     if not isinstance(summary, dict):
@@ -196,11 +198,59 @@ def _marker_contract_valid(
         and pool_local.get("valid") is True
         and isinstance(pool_repo, dict)
         and pool_repo.get("path") == str(layout.pool_repo)
-        and pool_repo.get("readable_mount") is True
         and pool_repo.get("valid") is True
         and isinstance(managed, list)
     )
     if not common:
+        return False
+    if repo_delivery is RepoDelivery.DOWNLOAD:
+        delivery_source = marker.get("repo_delivery_source")
+        delivery_bridge = summary.get("repo_delivery_bridge")
+        delivery_valid = (
+            marker.get("repo_delivery") == RepoDelivery.DOWNLOAD.value
+            and isinstance(delivery_source, str)
+            and bool(delivery_source)
+            and pool_repo.get("readable_delivery") is True
+            and pool_repo.get("source") == delivery_source
+            and isinstance(delivery_bridge, dict)
+            and delivery_bridge.get("path") == str(layout.pool_repo)
+            and delivery_bridge.get("target") == delivery_source
+            and delivery_bridge.get("valid") is True
+        )
+        if not delivery_valid:
+            return False
+        expected_bridges: list[dict[str, object]] = []
+        if expected_engine != "openclaw":
+            expected_bridges.append(
+                {
+                    "name": "stable_local_bridge",
+                    "path": str(layout.local_bridge),
+                    "target": str(layout.legacy_local),
+                    "valid": True,
+                }
+            )
+            expected_bridges.append(
+                {
+                    "name": "legacy_repo_delivery",
+                    "path": str(layout.legacy_repo),
+                    "target": delivery_source,
+                    "valid": True,
+                }
+            )
+        if expected_engine == "claude_code":
+            expected_bridges.append(
+                {
+                    "name": "legacy_repo_bridge",
+                    "path": str(layout.repo_bridge),
+                    "target": str(layout.legacy_repo),
+                    "valid": True,
+                }
+            )
+        bridges_valid = summary.get("structural_bridges") == expected_bridges
+        if expected_engine == "hermes":
+            return bridges_valid and summary.get("legacy_bridge_verified") is True
+        return bridges_valid
+    if pool_repo.get("readable_mount") is not True:
         return False
     if expected_engine == "openclaw":
         return (
@@ -383,6 +433,7 @@ def inspect_runtime_layout(
     mapping_contract_version: str | None = MAPPING_CONTRACT_VERSION,
     home: Path = Path("/home/admin"),
     repo_is_mounted: Callable[[Path], bool] = os.path.ismount,
+    repo_delivery: RepoDelivery | None = None,
 ) -> RuntimeLayoutInspection:
     """Inspect local runtime facts; this function never mutates the filesystem."""
     if engine == "teclaw":
@@ -398,6 +449,7 @@ def inspect_runtime_layout(
             "engine_pool_probe_not_implemented",
         )
 
+    effective_repo_delivery = repo_delivery or current_repo_delivery()
     layout = resolve_filesystem_skill_layout(
         LayoutIdentity(
             engine_type=engine,
@@ -471,6 +523,7 @@ def inspect_runtime_layout(
         layout=layout,
         expected_engine=engine,
         expected_contract_version=expected_contract_version,
+        repo_delivery=effective_repo_delivery,
     ):
         return _invalid(
             engine=engine,
@@ -523,27 +576,50 @@ def inspect_runtime_layout(
             error=error,
             preparation_id=preparation_id,
         )
-    try:
-        pool_repo_mounted = repo_is_mounted(layout.pool_repo)
-    except OSError as error:
-        return _transient(
-            engine=engine,
-            contract_version=expected_contract_version,
-            layout=layout,
-            reason="pool_repo_temporarily_unavailable",
-            error=error,
-            preparation_id=preparation_id,
-        )
+    pool_repo_delivered = False
+    if effective_repo_delivery is RepoDelivery.MOUNT:
+        try:
+            pool_repo_delivered = repo_is_mounted(layout.pool_repo)
+        except OSError as error:
+            return _transient(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="pool_repo_temporarily_unavailable",
+                error=error,
+                preparation_id=preparation_id,
+            )
+    else:
+        try:
+            delivery_source = Path(str(marker["repo_delivery_source"]))
+            pool_repo_delivered = (
+                layout.pool_repo.is_symlink()
+                and _lexical_symlink_target(layout.pool_repo)
+                == Path(os.path.abspath(delivery_source))
+            )
+        except OSError as error:
+            return _transient(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="pool_repo_temporarily_unavailable",
+                error=error,
+                preparation_id=preparation_id,
+            )
     if (
         pool_repo_stat is None
         or not stat.S_ISDIR(pool_repo_stat.st_mode)
-        or not pool_repo_mounted
+        or not pool_repo_delivered
     ):
         return _invalid(
             engine=engine,
             contract_version=expected_contract_version,
             layout=layout,
-            reason="pool_repo_not_mounted",
+            reason=(
+                "pool_repo_not_mounted"
+                if effective_repo_delivery is RepoDelivery.MOUNT
+                else "pool_repo_delivery_invalid"
+            ),
             preparation_id=preparation_id,
         )
     try:
@@ -632,7 +708,10 @@ def inspect_runtime_layout(
             )
         if active_marker["activation_state"] == "active":
             retired_bridges = [("local", layout.local_bridge)]
-            if engine in {"openclaw", "claude_code"}:
+            if engine in {"openclaw", "claude_code"} and not (
+                engine == "openclaw"
+                and effective_repo_delivery is RepoDelivery.DOWNLOAD
+            ):
                 retired_bridges.append(("repo", layout.repo_bridge))
             for bridge_name, bridge_path in retired_bridges:
                 if bridge_path.exists() or bridge_path.is_symlink():
@@ -702,7 +781,11 @@ def inspect_runtime_layout(
                     "marker_valid": True,
                     "active_marker_valid": True,
                     "pool_local_valid": True,
-                    "pool_repo_mounted": True,
+                    (
+                        "pool_repo_mounted"
+                        if effective_repo_delivery is RepoDelivery.MOUNT
+                        else "pool_repo_downloaded"
+                    ): True,
                     "pool_repo_readable": True,
                     "pool_mappings_valid": True,
                     "legacy_storage_entries_absent": (
@@ -712,12 +795,30 @@ def inspect_runtime_layout(
                 },
             ),
         )
-    required_bridges = [("legacy_repo", layout.repo_bridge, layout.pool_repo)]
-    if engine != "openclaw":
-        required_bridges = [
-            ("stable_local", layout.local_bridge, layout.legacy_local),
-            ("stable_repo", layout.repo_bridge, layout.pool_repo),
-        ]
+    if effective_repo_delivery is RepoDelivery.DOWNLOAD:
+        required_bridges = []
+        if engine != "openclaw":
+            required_bridges.append(
+                ("stable_local", layout.local_bridge, layout.legacy_local)
+            )
+            required_bridges.append(
+                (
+                    "legacy_repo_delivery",
+                    layout.legacy_repo,
+                    Path(str(marker["repo_delivery_source"])),
+                )
+            )
+        if engine == "claude_code":
+            required_bridges.append(
+                ("legacy_repo", layout.repo_bridge, layout.legacy_repo)
+            )
+    else:
+        required_bridges = [("legacy_repo", layout.repo_bridge, layout.pool_repo)]
+        if engine != "openclaw":
+            required_bridges = [
+                ("stable_local", layout.local_bridge, layout.legacy_local),
+                ("stable_repo", layout.repo_bridge, layout.pool_repo),
+            ]
     for bridge_name, bridge_path, expected_target in required_bridges:
         try:
             bridge_stat = bridge_path.lstat()
@@ -782,15 +883,21 @@ def inspect_runtime_layout(
     checks = {
         "marker_valid": True,
         "pool_local_valid": True,
-        "pool_repo_mounted": True,
+        (
+            "pool_repo_mounted"
+            if effective_repo_delivery is RepoDelivery.MOUNT
+            else "pool_repo_downloaded"
+        ): True,
         "pool_repo_readable": True,
         "managed_active_entries_valid": True,
     }
-    if engine == "openclaw":
+    if engine == "openclaw" and effective_repo_delivery is RepoDelivery.MOUNT:
         checks["legacy_repo_bridge_valid"] = True
     else:
-        checks["stable_local_bridge_valid"] = True
-        checks["stable_repo_bridge_valid"] = True
+        if engine != "openclaw":
+            checks["stable_local_bridge_valid"] = True
+        if effective_repo_delivery is RepoDelivery.MOUNT:
+            checks["stable_repo_bridge_valid"] = True
         if engine == "hermes":
             checks["legacy_local_bridge_valid"] = True
     return RuntimeLayoutInspection(

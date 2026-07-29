@@ -12,6 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 from uuid import uuid4
 
+from engine.community.config import RepoDelivery, current_repo_delivery
 from engine.community.core.skills.layout_planner import (
     LayoutIdentity,
     RuntimeLayoutContext,
@@ -193,7 +194,10 @@ def _retired_storage_entries(
     """
 
     entries = [layout.legacy_local, layout.local_bridge]
-    if engine in {"openclaw", "claude_code"}:
+    if engine in {"openclaw", "claude_code"} and not (
+        engine == "openclaw"
+        and current_repo_delivery() is RepoDelivery.DOWNLOAD
+    ):
         entries.append(layout.repo_bridge)
     return tuple(dict.fromkeys(entries))
 
@@ -335,6 +339,42 @@ def _retire_bridge(path: Path, *, allowed_targets: tuple[Path, ...]) -> None:
     path.unlink()
 
 
+def _publish_structural_bridge(path: Path, target: Path) -> None:
+    """Atomically publish a descriptor-owned directory symlink."""
+
+    target = Path(os.path.abspath(target))
+    if path.is_symlink() and _lexical_target(path) == target:
+        return
+    if path.exists() and not path.is_symlink():
+        raise OSError(f"stable structure entry is not a symlink: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.pool-bridge")
+    try:
+        temporary.symlink_to(target, target_is_directory=True)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _restore_legacy_repo_bridge(
+    *,
+    engine: str,
+    layout: _Layout,
+) -> None:
+    """Restore the descriptor's Legacy repo view after rollback."""
+
+    repo_delivery = current_repo_delivery()
+    if repo_delivery is RepoDelivery.DOWNLOAD and engine == "openclaw":
+        return
+    if repo_delivery is RepoDelivery.MOUNT:
+        target = layout.pool_repo
+    elif layout.repo_bridge != layout.legacy_repo:
+        target = layout.legacy_repo
+    else:
+        target = _lexical_target(layout.pool_repo)
+    _publish_structural_bridge(layout.repo_bridge, target)
+
+
 def _finalize_active_root(
     *,
     layout: _Layout,
@@ -390,7 +430,13 @@ def _finalize_active_root(
         layout.local_bridge,
         allowed_targets=(layout.legacy_local, layout.pool_local),
     )
-    if engine in {"openclaw", "claude_code"}:
+    repo_delivery = current_repo_delivery()
+    if repo_delivery is RepoDelivery.DOWNLOAD and engine in {"aicoding", "hermes"}:
+        _publish_structural_bridge(layout.repo_bridge, layout.pool_repo)
+    if engine in {"openclaw", "claude_code"} and not (
+        engine == "openclaw"
+        and repo_delivery is RepoDelivery.DOWNLOAD
+    ):
         _retire_bridge(
             layout.repo_bridge,
             allowed_targets=(layout.legacy_repo, layout.pool_repo),
@@ -1655,12 +1701,7 @@ def _rollback_pool(
         # The displaced object is only the compatibility symlink. Pool content
         # itself remains intact for evidence and forward recovery.
         rebuild.unlink(missing_ok=True)
-        layout.repo_bridge.parent.mkdir(parents=True, exist_ok=True)
-        if not layout.repo_bridge.exists() and not layout.repo_bridge.is_symlink():
-            layout.repo_bridge.symlink_to(
-                layout.pool_repo,
-                target_is_directory=True,
-            )
+        _restore_legacy_repo_bridge(engine=engine, layout=layout)
         if layout.local_bridge != layout.legacy_local:
             layout.local_bridge.parent.mkdir(parents=True, exist_ok=True)
             if (
