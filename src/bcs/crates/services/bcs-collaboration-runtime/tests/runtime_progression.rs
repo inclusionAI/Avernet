@@ -100,10 +100,30 @@ fn test_sessions() -> Arc<SessionManagementServiceImpl> {
 #[derive(Default)]
 struct RecordingSessionChannelOutbound {
     events: Mutex<Vec<HumanInputReadyEvent>>,
+    validation_calls: Mutex<Vec<(String, String)>>,
+    validation_error: Mutex<Option<String>>,
 }
 
 #[async_trait]
 impl SessionChannelOutboundPort for RecordingSessionChannelOutbound {
+    async fn validate_human_input_channel(
+        &self,
+        group_id: &str,
+        channel_type: &str,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        self.validation_calls
+            .lock()
+            .await
+            .push((group_id.to_string(), channel_type.to_string()));
+        if let Some(message) = self.validation_error.lock().await.clone() {
+            return Err(ServiceError::InvalidOperation {
+                message,
+                request_id: None,
+            });
+        }
+        Ok(SessionChannelDeliveryOutcome::NotApplicable)
+    }
+
     async fn publish_human_input_ready(
         &self,
         event: HumanInputReadyEvent,
@@ -1916,6 +1936,63 @@ async fn start_run_uses_group_default_definition_binding() {
 
     assert_eq!(started.view.run.definition_id, "single_node");
     assert_eq!(delivery.commands.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn configure_im_definition_defers_channel_validation_until_run_start() {
+    let group = Arc::new(GroupStore::new());
+    group
+        .upsert(state_machine_test_group())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
+    *channel_outbound.validation_error.lock().await =
+        Some("no active dingtalk ChannelBinding exists".to_string());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    )
+    .with_session_channel_outbound(channel_outbound.clone());
+
+    runtime
+        .configure_group_runtime(ConfigureGroupRuntimeCommand {
+            group_id: "group-1".to_string(),
+            definition_yaml: Some(human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: Default::default(),
+            auto_start_on_service_invocation: true,
+        })
+        .await
+        .expect("configuration must not require a binding that needs the group id");
+    assert!(channel_outbound.validation_calls.lock().await.is_empty());
+
+    let error = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: None,
+            definition: None,
+            definition_ref: None,
+            input: Value::Null,
+            caller_id: None,
+            authenticated_human: None,
+        })
+        .await
+        .expect_err("run start must still enforce the active binding");
+    assert!(error.to_string().contains("no active dingtalk ChannelBinding"));
+    assert_eq!(
+        channel_outbound.validation_calls.lock().await.as_slice(),
+        &[("group-1".to_string(), "dingtalk".to_string())]
+    );
 }
 
 #[tokio::test]
