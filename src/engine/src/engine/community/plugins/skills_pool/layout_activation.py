@@ -1469,9 +1469,11 @@ def _activate_pool(
             evidence.update(
                 {
                     "quarantine": str(quarantine),
-                    "quarantine_cleanup_pending": (
-                        quarantine.exists() or quarantine.is_symlink()
-                    ),
+                    # We are already handling an I/O failure after the
+                    # irreversible cutover. Do not probe the filesystem again
+                    # while constructing the COMMITTED response: Python 3.12
+                    # may re-raise permission/I/O errors from Path predicates.
+                    "quarantine_cleanup_pending": True,
                 }
             )
         return PoolActivationResult(

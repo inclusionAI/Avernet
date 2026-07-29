@@ -82,7 +82,7 @@ class SkillsPoolQuarantineRepositoryMixin:
         )
         if existing is not None:
             return existing.engine == engine and (
-                not isinstance(path, str) or existing.path == path
+                not isinstance(path, str) or not path or existing.path == path
             )
         if not isinstance(path, str) or not path:
             return False

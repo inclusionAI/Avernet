@@ -954,6 +954,20 @@ def test_post_cutover_evidence_reuses_existing_quarantine_identity() -> None:
             "evidence": {"active_marker": "same-generation"},
         },
     )
+    assert repository.record_post_cutover_evidence(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "ALREADY_COMMITTED",
+            "evidence": {
+                "active_marker": "same-generation",
+                "quarantine": "",
+            },
+        },
+    )
 
     state = repository.get(scope)
     assert state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
