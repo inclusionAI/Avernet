@@ -189,6 +189,7 @@ class EngineWebSocketServer:
         self._conn_auth: Dict[str, AuthContext] = {}
         self._session_subscribers: Dict[str, set[str]] = {}
         self._conn_sessions: Dict[str, set[str]] = {}
+        self._session_materialized_redaction_paths: Dict[str, tuple[str, ...]] = {}
         self._inject_listener_refs: Dict[
             tuple[str | None, int], tuple[Any, Callable[[EventFrame], Any]]
         ] = {}
@@ -747,6 +748,7 @@ class EngineWebSocketServer:
             subscribers.discard(conn_id)
             if not subscribers:
                 self._session_subscribers.pop(session_key, None)
+                self._session_materialized_redaction_paths.pop(session_key, None)
         self._drop_idle_inject_listeners()
 
     def _unsubscribe_conn_from_session(self, conn_id: str, session_key: str) -> None:
@@ -760,6 +762,7 @@ class EngineWebSocketServer:
             subscribers.discard(conn_id)
             if not subscribers:
                 self._session_subscribers.pop(session_key, None)
+                self._session_materialized_redaction_paths.pop(session_key, None)
 
     async def _ensure_openclaw_inject_listener(self, conn_id: str) -> bool:
         manager = EngineManager.get_instance()
@@ -821,7 +824,10 @@ class EngineWebSocketServer:
         if not subscribers:
             return
 
-        send_payload = dict(payload)
+        send_payload = _redact_materialized_paths(
+            payload,
+            self._session_materialized_redaction_paths.get(session_key, ()),
+        )
         if "seq" not in send_payload:
             send_payload["seq"] = self._next_seq()
         if "ts" not in send_payload:
@@ -1077,6 +1083,9 @@ class EngineWebSocketServer:
                 if workspace_root is not None:
                     materialized_paths = (*materialized_paths, str(workspace_root))
                 materialized_paths = _materialized_path_redaction_targets(
+                    materialized_paths
+                )
+                self._session_materialized_redaction_paths[session_key] = (
                     materialized_paths
                 )
                 log.info(

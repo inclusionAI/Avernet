@@ -1463,6 +1463,35 @@ class TestChatSubscribeFanout:
         ws.send_text.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_fanout_injected_event_redacts_materialized_workspace_paths(
+        self, server,
+    ):
+        ws = MagicMock()
+        ws.send_text = AsyncMock()
+        server._connections["conn-1"] = ws
+        server._session_subscribers = {"sk-1": {"conn-1"}}
+        server._session_materialized_redaction_paths["sk-1"] = (
+            "/bot/work/.teamclaw/session-files/a.txt",
+            "/bot/work",
+        )
+
+        await server._fanout_injected_event(
+            EventFrame(
+                event="agent",
+                payload={
+                    "sessionKey": "sk-1",
+                    "runId": "inject-abc",
+                    "cwd": "/bot/work",
+                    "command": "sed -n 1p /bot/work/.teamclaw/session-files/a.txt",
+                },
+            )
+        )
+
+        outbound = ws.send_text.await_args.args[0]
+        assert "/bot/work" not in outbound
+        assert "[materialized-file]" in outbound
+
+    @pytest.mark.asyncio
     async def test_drop_idle_inject_listeners_tolerates_off_event_failure(
         self, server, fake_engine, auth_gate_service,
     ):
