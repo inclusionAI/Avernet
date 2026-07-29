@@ -98,6 +98,17 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """记录旧运行时证据，并原子释放尚处于准备阶段的迁移认领。"""
         ...
 
+    def release_changed_engine_claim(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """记录引擎身份漂移，并原子释放尚未开始切换的迁移认领。"""
+        ...
+
     def record_cutover_committed(
         self,
         *,
@@ -129,6 +140,17 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         migration_generation: str,
     ) -> bool:
         """确认该 generation 已持久化 quarantine 身份。"""
+        ...
+
+    def quarantine_identity_conflicts(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        engine: str,
+        path: str,
+    ) -> bool:
+        """判断运行时身份是否与该 generation 已持久化身份冲突。"""
         ...
 
     def record_cutover_finalizing(
