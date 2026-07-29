@@ -709,6 +709,57 @@ def test_unknown_cutover_is_fenced_for_manual_repair() -> None:
     assert state.last_failure_evidence == {"reason": "response_lost"}
 
 
+def test_cutover_finalizing_persists_quarantine_at_irreversible_boundary() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    quarantine_path = (
+        "/home/admin/.openclaw/workspace/skills-pool/"
+        ".migration-quarantine/generation-1/skills-local"
+    )
+
+    assert repository.record_cutover_finalizing(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": False,
+            "status": "POST_CUTOVER_SYNC_PENDING",
+            "evidence": {"quarantine": quarantine_path},
+        },
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert state.data_plane_cutover_committed is True
+    with database.transactional_orm_session() as session:
+        quarantine = session.query(SkillMigrationQuarantineModel).one()
+        assert quarantine.path == quarantine_path
+        assert quarantine.pool_activated_at is None
+
+
 def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
@@ -769,7 +820,7 @@ def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
         lease_owner="worker-2",
         lease_seconds=60,
     )
-    assert repository.record_cutover_committed(
+    assert repository.record_post_cutover_evidence(
         scope=scope,
         migration_generation="generation-1",
         lease_owner="worker-2",

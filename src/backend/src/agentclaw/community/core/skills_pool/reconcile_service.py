@@ -273,6 +273,30 @@ class SkillsPoolReconcileService:
             )
             if not cutover.committed:
                 evidence = cutover.to_dict()
+                if state.data_plane_cutover_committed:
+                    outcome, stage, retryable = (
+                        self._post_commit_cutover_failure_profile(cutover.status)
+                    )
+                    recorded = self._layouts.record_post_cutover_failure(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code=cutover.status.value,
+                        failure_stage=stage,
+                        retryable=retryable,
+                        evidence=evidence,
+                    )
+                    if not recorded:
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                            preparation_id=probe.preparation_id,
+                        )
+                    return SkillsPoolReconcileResult(
+                        outcome,
+                        preparation_id=probe.preparation_id,
+                        evidence=evidence,
+                        retryable=retryable,
+                    )
                 if (
                     cutover.status is PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING
                     or cutover_finalizing
@@ -344,9 +368,19 @@ class SkillsPoolReconcileService:
                     preparation_id=probe.preparation_id,
                     evidence=cutover.to_dict(),
                 )
-            if not (
-                state.data_plane_cutover_committed and repair_evidence_refresh
-            ):
+            if state.data_plane_cutover_committed:
+                if not self._layouts.record_post_cutover_evidence(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    preparation_id=probe.preparation_id,
+                    evidence=cutover.to_dict(),
+                ):
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                        preparation_id=probe.preparation_id,
+                    )
+            else:
                 if not self._layouts.record_cutover_committed(
                     scope=scope,
                     migration_generation=generation,
@@ -582,6 +616,33 @@ class SkillsPoolReconcileService:
                 True,
             ),
         }.get(status)
+
+    @classmethod
+    def _post_commit_cutover_failure_profile(
+        cls,
+        status: PoolCutoverStatus,
+    ) -> tuple[SkillsPoolReconcileOutcome, str, bool]:
+        """Classify refresh failures after the irreversible boundary is known."""
+
+        if status in {
+            PoolCutoverStatus.UNKNOWN,
+            PoolCutoverStatus.TRANSIENT_ERROR,
+            PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING,
+        }:
+            return (
+                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
+                "post_cutover_refresh",
+                True,
+            )
+        profile = cls._cutover_failure_profile(status)
+        if profile is not None:
+            outcome, _, retryable = profile
+            return outcome, "post_cutover_refresh", retryable
+        return (
+            SkillsPoolReconcileOutcome.CUTOVER_FAILED,
+            "post_cutover_refresh",
+            False,
+        )
 
     @staticmethod
     def _source_tail(git_path: str, prefix: str) -> PurePosixPath:
