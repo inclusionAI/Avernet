@@ -1151,9 +1151,11 @@ def _activate_pool(
                 "active_marker": str(layout.active_marker),
                 "legacy_storage_entries_absent": True,
                 "quarantine": str(quarantine),
-                "quarantine_cleanup_pending": (
-                    quarantine.exists() or quarantine.is_symlink()
-                ),
+                # Finalization has already crossed the irreversible boundary.
+                # Keep cleanup evidence conservative and deterministic instead
+                # of probing persistent storage again while building the
+                # ALREADY_COMMITTED response.
+                "quarantine_cleanup_pending": True,
             },
         )
 
