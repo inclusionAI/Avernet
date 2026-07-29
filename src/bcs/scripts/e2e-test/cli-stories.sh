@@ -102,19 +102,23 @@ _story_cli_direct_onboard() {
     require_status "removed CLI-onboarded agent returns 404" "404" || return
 }
 
-# User story: An operator validates a custom workflow and creates its group through bcs-cli.
+# User story: An operator validates and trials a custom workflow before persisting it through bcs-cli.
 #
 # Flow:
-#   Author YAML -> validate against the live BCS runtime -> bind logical roles
-#   -> create the state-machine group -> inspect it -> clean up the fixture.
+#   Author YAML -> validate against the live BCS runtime -> create a temporary
+#   chat group -> query current-session permission -> run once with transient
+#   role bindings -> verify the persisted AixUI panel and preserved chat session
+#   -> create the persistent state-machine group -> inspect it -> clean up.
 #
 # Critical assertions:
 #   - Validation returns the participant slots and graph summary from BCS.
+#   - Current-session authorization is decided by BCS and permits the group owner.
+#   - One-shot execution persists an AixUI panel without completing the chat session.
 #   - Group creation binds logical roles without embedding Bot UUIDs in YAML.
 #   - The created group uses the state-machine strategy and contains both bound bots.
 story_cli_operator_creates_custom_collaboration() {
-    info "Story: an operator validates and creates a custom collaboration through bcs-cli"
-    local yaml_file group_id
+    info "Story: an operator validates, trials, and persists a custom collaboration through bcs-cli"
+    local yaml_file group_id trial_group_id trial_session_id run_id cleanup_status
     yaml_file="$(mktemp -t bcs-custom-collaboration.XXXXXX 2>/dev/null || mktemp)"
     printf '%s\n' "name: CLI custom release workflow
 participants:
@@ -157,6 +161,74 @@ runtime:
     assert_json_eq "custom collaboration YAML is valid" "$BCS_CLI_STDOUT" "valid" "true"
     assert_json_eq "custom collaboration exposes two roles" "$BCS_CLI_STDOUT" "summary.participants" "2"
     assert_json_eq "custom collaboration exposes two nodes" "$BCS_CLI_STDOUT" "summary.nodes" "2"
+
+    _cli_story_create_pm_group "CLI one-shot custom collaboration trial" || {
+        rm -f "$yaml_file"
+        return
+    }
+    trial_group_id="$CLI_STORY_GROUP_ID"
+    trial_session_id=$(printf '%s\n' "$BCS_CLI_STDOUT" | sed -n 's/^  Session: //p' | head -1)
+    assert_not_empty "one-shot trial group returns its current session" "$trial_session_id"
+    if [[ -z "$trial_session_id" ]]; then
+        api_delete "/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}"
+        rm -f "$yaml_file"
+        return
+    fi
+
+    _cli_story_run "operator checks current-session state-machine permission" PM \
+        collaborate permission --session "$trial_session_id" || {
+        api_delete "/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}"
+        rm -f "$yaml_file"
+        return
+    }
+    assert_json_eq "group owner may run a one-shot state machine" "$BCS_CLI_STDOUT" "allowed" "true"
+    assert_json_eq "permission belongs to the current session" "$BCS_CLI_STDOUT" "session_id" "$trial_session_id"
+    assert_json_eq "permission belongs to the temporary chat group" "$BCS_CLI_STDOUT" "group_id" "$trial_group_id"
+
+    _cli_story_run "operator trials the custom collaboration in the current session" PM \
+        collaborate run "$yaml_file" --session "$trial_session_id" \
+        --binding "planner=$BOT_PM_UUID" --binding "reviewer=$BOT_ENG_UUID" \
+        --input '{"question":"Review the release workflow before persisting it."}' || {
+        api_delete "/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}"
+        rm -f "$yaml_file"
+        return
+    }
+    run_id=$(json_path "$BCS_CLI_STDOUT" "run.run_id")
+    assert_not_empty "one-shot custom collaboration returns a run id" "$run_id"
+    assert_json_eq "one-shot run stays in the current session" "$BCS_CLI_STDOUT" "run.session_id" "$trial_session_id"
+    assert_json_eq "one-shot run stays in the temporary chat group" "$BCS_CLI_STDOUT" "run.group_id" "$trial_group_id"
+    if [[ -z "$run_id" ]]; then
+        api_delete "/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}"
+        rm -f "$yaml_file"
+        return
+    fi
+
+    _cli_story_run "operator reloads current-session history after the one-shot run" PM \
+        session messages "$trial_session_id" --view-bot "$BOT_PM_UUID" --limit 50 || {
+        bot_post "/state-machine-runs/${run_id}/cancel" PM '{"reason":"E2E cleanup"}'
+        api_delete "/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}"
+        rm -f "$yaml_file"
+        return
+    }
+    assert_contains "one-shot history restores the AixUI state-machine panel" \
+        "$BCS_CLI_STDOUT" "bcsPanel.StateMachineRunView"
+    assert_contains "restored AixUI panel points at the one-shot run" "$BCS_CLI_STDOUT" "$run_id"
+
+    bot_post "/state-machine-runs/${run_id}/cancel" PM \
+        '{"reason":"E2E one-shot trial completed"}'
+    require_status "operator cancels the one-shot trial" "200" || return
+    cleanup_status=$(json_path "$RESPONSE" "run.status")
+    case "$cleanup_status" in
+        aborted|completed|failed) cleanup_status="terminal" ;;
+    esac
+    assert_eq "one-shot trial is terminal after cleanup" "$cleanup_status" "terminal"
+
+    api_get "/sessions/${trial_session_id}"
+    require_status "operator reads the chat session after the one-shot trial" "200" || return
+    assert_json_eq "one-shot execution preserves the chat session" "$RESPONSE" "status" "running"
+
+    api_delete "/groups/${trial_group_id}?bot_id=${BOT_PM_UUID}"
+    require_status "one-shot custom collaboration fixture is cleaned up" "200" || return
 
     _cli_story_run "operator creates the custom collaboration group" PM \
         collaboration create "$yaml_file" --driver "$BOT_PM_UUID" \

@@ -13,6 +13,8 @@ participants:
 runtime:
   kind: state_machine
   state_machine:
+    version: 1
+    graph_mode: acyclic
     nodes:
       answer:
         kind: bot_task
@@ -47,6 +49,111 @@ fn validation_response(valid: bool) -> serde_json::Value {
             {"binding": "writer", "required": true, "assigned": true}
         ]
     })
+}
+
+#[tokio::test]
+async fn collaborate_permission_queries_current_session_with_bot_token() {
+    let ctx = TestContext::new()
+        .await
+        .expect("Failed to create test context");
+
+    Mock::given(method("GET"))
+        .and(path(
+            "/sessions/group-1:abc12345/state-machine-permission",
+        ))
+        .and(bearer_token(&ctx.session.token))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "session_id": "group-1:abc12345",
+            "group_id": "group-1",
+            "caller_bot_id": ctx.session.bot_uuid,
+            "allowed": true,
+            "reason_code": "allowed",
+            "message": "the caller may start a one-shot state-machine run in this session",
+            "policy_version": "session_state_machine_v1",
+            "group_strategy": "chat",
+            "group_owner_bot_id": ctx.session.bot_uuid
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("collaborate")
+        .arg("permission")
+        .arg("--session")
+        .arg("group-1:abc12345")
+        .output()
+        .expect("Failed to execute permission command");
+
+    assert_success(&output);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["allowed"], true);
+    assert_eq!(json["reason_code"], "allowed");
+    assert_eq!(json["session_id"], "group-1:abc12345");
+}
+
+#[tokio::test]
+async fn collaborate_run_posts_yaml_bindings_and_input_once() {
+    let ctx = TestContext::new()
+        .await
+        .expect("Failed to create test context");
+    let yaml_file = ctx.temp_dir.path().join("one-shot.yaml");
+    std::fs::write(&yaml_file, WORKFLOW_YAML).unwrap();
+
+    Mock::given(method("POST"))
+        .and(path("/sessions/group-1:abc12345/state-machine-runs"))
+        .and(bearer_token(&ctx.session.token))
+        .and(body_json(serde_json::json!({
+            "definition_yaml": WORKFLOW_YAML,
+            "participant_bindings": {
+                "planner": {"source": "manual", "bot_ids": [ctx.session.bot_uuid]},
+                "writer": {"source": "manual", "bot_ids": ["bot-writer"]}
+            },
+            "input": {"question": "resolve it"}
+        })))
+        .respond_with(ResponseTemplate::new(202).set_body_json(serde_json::json!({
+            "run": {
+                "run_id": "run-one-shot",
+                "definition_id": "definition-one-shot",
+                "definition_version": 1,
+                "group_id": "group-1",
+                "group_version": 1,
+                "session_id": "group-1:abc12345",
+                "created_by": ctx.session.bot_uuid,
+                "status": "running",
+                "input": {"question": "resolve it"},
+                "created_at": 1,
+                "updated_at": 1
+            },
+            "nodes": [],
+            "judge_outputs": []
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("collaborate")
+        .arg("run")
+        .arg(&yaml_file)
+        .arg("--session")
+        .arg("group-1:abc12345")
+        .arg("--binding")
+        .arg(format!("planner={}", ctx.session.bot_uuid))
+        .arg("--binding")
+        .arg("writer=bot-writer")
+        .arg("--input")
+        .arg(r#"{"question":"resolve it"}"#)
+        .output()
+        .expect("Failed to execute one-shot run command");
+
+    assert_success(&output);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["run"]["run_id"], "run-one-shot");
+    assert_eq!(json["run"]["session_id"], "group-1:abc12345");
+    assert_eq!(json["run"]["status"], "running");
 }
 
 #[tokio::test]

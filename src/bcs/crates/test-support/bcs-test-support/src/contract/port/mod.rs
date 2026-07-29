@@ -7,7 +7,8 @@ use bcs_domain::HumanInputNotificationMode;
 use bcs_service_api::{
     BotDeliveryPort, ChatRunCleanupPort, ChatRunEventPort, FrontendDeliveryPort,
     GroupHistoryBotRequestPort, HumanInputReadyEvent, LeaderElectionPort, LeaderStatus,
-    SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    SessionChannelDeliveryOutcome, SessionChannelOutboundPort, StateMachineResultPublishCommand,
+    StateMachineResultPublisherPort,
 };
 
 pub use metrics::{
@@ -85,4 +86,20 @@ pub async fn session_channel_outbound_port_contract_tests<
             "an unconfigured HumanInput channel must be not-applicable or explicitly rejected, got {other:?}"
         ),
     }
+}
+
+pub async fn state_machine_result_publisher_port_contract_tests<
+    T: StateMachineResultPublisherPort + ?Sized,
+>(
+    port: &T,
+) {
+    port.publish_state_machine_result(StateMachineResultPublishCommand {
+        run_id: "contract-run".to_string(),
+        group_id: "contract-group".to_string(),
+        session_id: "contract-group:00000001".to_string(),
+        sender_bot_id: "contract-initiator".to_string(),
+        content: "contract final result".to_string(),
+    })
+    .await
+    .expect("publish state-machine result under the initiating Bot identity");
 }

@@ -68,8 +68,10 @@ pub use group_id::{
     generated_group_id,
 };
 pub use message::{
-    AuditEntry, DeliveryType, GroupMessage, GroupMessageType, MessageOwnerFilter, MessagePage, MessageQuery,
-    MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus, SenderType, Task, TaskStatus,
+    AuditEntry, BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+    DeliveryType, GroupMessage, GroupMessageType, MessageOwnerFilter, MessagePage, MessageQuery,
+    MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus,
+    STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType, Task, TaskStatus,
 };
 pub use organization::{Organization, OrganizationMember};
 pub use proposal::GroupChatProposal;

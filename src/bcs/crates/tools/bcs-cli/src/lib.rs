@@ -14,7 +14,10 @@ use tracing_subscriber::FmtSubscriber;
 mod client;
 pub mod oauth;
 
-pub use client::{BcsClient, BotGroupListPage, CurrentActorGroupListPage, CreateCustomGroupOptions};
+pub use client::{
+    BcsClient, BotGroupListPage, CreateCustomGroupOptions, CurrentActorGroupListPage,
+    RunSessionCollaborationOptions,
+};
 
 const COMPILED_PRE_BCS_URL: Option<&str> = option_env!("BCS_CLI_DEFAULT_PRE_URL");
 const COMPILED_PROD_BCS_URL: Option<&str> = option_env!("BCS_CLI_DEFAULT_PROD_URL");

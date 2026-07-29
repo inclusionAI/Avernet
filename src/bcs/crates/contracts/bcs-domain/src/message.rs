@@ -2,6 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const BCS_STATE_MACHINE_MESSAGE_SENDER: &str = "bcs_state_machine";
+pub const BCS_STATE_MACHINE_MESSAGE_SENDER_NAME: &str = "BCS State Machine";
+pub const STATE_MACHINE_PANEL_MESSAGE_TYPE: &str = "state_machine_panel";
+
 /// A task in the workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {

@@ -304,6 +304,31 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         Ok(())
     }
 
+    async fn create_run_if_session_idle(
+        &self,
+        run: StateMachineRun,
+        nodes: Vec<StateMachineNodeRun>,
+    ) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if inner.runs.values().any(|existing| {
+            existing.session_id == run.session_id
+                && matches!(
+                    existing.status,
+                    StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+                )
+        }) {
+            return Ok(false);
+        }
+        let run_id = run.run_id.clone();
+        inner.runs.insert(run_id.clone(), run);
+        for node in nodes {
+            inner
+                .nodes
+                .insert((run_id.clone(), node.node_id.clone()), node);
+        }
+        Ok(true)
+    }
+
     async fn get_run(&self, run_id: &str) -> ServiceResult<Option<StateMachineRun>> {
         let inner = self.inner.read().await;
         Ok(inner.runs.get(run_id).cloned())
@@ -1417,23 +1442,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')";
         let mut steps = vec![DbTransactionStep::Execute(DbStatement::with_params(
             run_sql,
-            vec![
-                DbValue::from(self.env.as_str()),
-                DbValue::from(run.run_id.as_str()),
-                DbValue::from(run.definition_id.as_str()),
-                DbValue::from(run.definition_version),
-                DbValue::from(run.group_id.as_str()),
-                DbValue::from(run.group_version),
-                DbValue::from(run.session_id.as_str()),
-                DbValue::from(run.created_by.as_deref()),
-                DbValue::from(run_status_to_str(run.status)),
-                DbValue::from(run.input.to_string()),
-                DbValue::from(run.output.as_deref()),
-                DbValue::from(run.error.as_deref()),
-                DbValue::from(run.created_at),
-                DbValue::from(run.updated_at),
-                optional_u64_value(run.completed_at),
-            ],
+            run_insert_params(&self.env, &run),
         ))];
         if let Some((node_sql, node_params)) =
             build_node_runs_insert(&self.env, &run.run_id, &nodes)
@@ -1447,6 +1456,67 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             ServiceError::InternalError(format!("state machine run create: {error}"))
         })?;
         Ok(())
+    }
+
+    async fn create_run_if_session_idle(
+        &self,
+        run: StateMachineRun,
+        nodes: Vec<StateMachineNodeRun>,
+    ) -> ServiceResult<bool> {
+        let lock_suffix = match self.flavor {
+            DbSqlFlavor::Mysql => " FOR UPDATE",
+            DbSqlFlavor::Sqlite => "",
+        };
+        let lock_sql = format!(
+            "SELECT session_id FROM bcs_group_sessions \
+             WHERE env = ? AND session_id = ?{lock_suffix}"
+        );
+        let run_sql = "INSERT INTO bcs_state_machine_runs \
+                       (env, run_id, definition_id, definition_version, group_id, \
+                        group_version, session_id, created_by, status, input_json, \
+                        output_text, error_message, created_at_ms, updated_at_ms, \
+                        completed_at_ms, record_status) \
+                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
+                       FROM bcs_group_sessions session_lock \
+                       WHERE session_lock.env = ? AND session_lock.session_id = ? \
+                         AND NOT EXISTS ( \
+                           SELECT 1 FROM bcs_state_machine_runs active_run \
+                           WHERE active_run.env = ? \
+                             AND active_run.session_id = ? \
+                             AND active_run.status IN ('pending', 'running') \
+                             AND active_run.record_status = 'active' \
+                         ) \
+                       LIMIT 1";
+        let mut run_params = run_insert_params(&self.env, &run);
+        run_params.extend([
+            DbValue::from(self.env.as_str()),
+            DbValue::from(run.session_id.as_str()),
+            DbValue::from(self.env.as_str()),
+            DbValue::from(run.session_id.as_str()),
+        ]);
+        let mut steps = vec![
+            DbTransactionStep::Query(DbStatement::with_params(
+                lock_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(run.session_id.as_str()),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_params(run_sql, run_params)),
+        ];
+        steps.extend(build_guarded_node_runs_inserts(
+            &self.env,
+            &run.run_id,
+            &nodes,
+        ));
+        let results = self.db.transaction(steps).await.map_err(|error| {
+            ServiceError::InternalError(format!("state machine session run create: {error}"))
+        })?;
+        let created = matches!(
+            results.get(1),
+            Some(DbTransactionStepResult::Executed(result)) if result.affected_rows > 0
+        );
+        Ok(created)
     }
 
     async fn get_run(&self, run_id: &str) -> ServiceResult<Option<StateMachineRun>> {
@@ -2335,6 +2405,51 @@ fn optional_u64_value(value: Option<u64>) -> DbValue {
     value.map(DbValue::from).unwrap_or(DbValue::Null)
 }
 
+fn run_insert_params(env: &str, run: &StateMachineRun) -> Vec<DbValue> {
+    vec![
+        DbValue::from(env),
+        DbValue::from(run.run_id.as_str()),
+        DbValue::from(run.definition_id.as_str()),
+        DbValue::from(run.definition_version),
+        DbValue::from(run.group_id.as_str()),
+        DbValue::from(run.group_version),
+        DbValue::from(run.session_id.as_str()),
+        DbValue::from(run.created_by.as_deref()),
+        DbValue::from(run_status_to_str(run.status)),
+        DbValue::from(run.input.to_string()),
+        DbValue::from(run.output.as_deref()),
+        DbValue::from(run.error.as_deref()),
+        DbValue::from(run.created_at),
+        DbValue::from(run.updated_at),
+        optional_u64_value(run.completed_at),
+    ]
+}
+
+fn build_guarded_node_runs_inserts(
+    env: &str,
+    run_id: &str,
+    nodes: &[StateMachineNodeRun],
+) -> Vec<DbTransactionStep> {
+    nodes
+        .iter()
+        .map(|node| {
+            let sql = "INSERT INTO bcs_state_machine_node_runs \
+                       (env, run_id, node_id, status, attempt, node_timeout_ms, \
+                        timeout_deadline_ms, max_attempts, assignee_bot_id, outcome, responded_by, \
+                        delivery_request_id, bot_delivery_run_id, artifact_text, error_message, \
+                        started_at_ms, completed_at_ms, record_status) \
+                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
+                       WHERE EXISTS ( \
+                         SELECT 1 FROM bcs_state_machine_runs \
+                         WHERE env = ? AND run_id = ? AND record_status = 'active' \
+                       )";
+            let mut params = node_insert_params(env, run_id, node);
+            params.extend([DbValue::from(env), DbValue::from(run_id)]);
+            DbTransactionStep::Execute(DbStatement::with_params(sql, params))
+        })
+        .collect()
+}
+
 fn build_node_runs_insert(
     env: &str,
     run_id: &str,
@@ -2358,25 +2473,35 @@ fn build_node_runs_insert(
     );
     let mut params = Vec::with_capacity(nodes.len() * 17);
     for node in nodes {
-        params.push(DbValue::from(env));
-        params.push(DbValue::from(run_id));
-        params.push(DbValue::from(node.node_id.as_str()));
-        params.push(DbValue::from(node_status_to_str(node.status)));
-        params.push(DbValue::from(node.attempt));
-        params.push(optional_u64_value(node.node_timeout_ms));
-        params.push(optional_u64_value(node.timeout_deadline_ms));
-        params.push(DbValue::from(node.max_attempts));
-        params.push(DbValue::from(node.assignee_bot_id.as_deref().unwrap_or("")));
-        params.push(DbValue::from(node.outcome.as_deref()));
-        params.push(DbValue::from(node.responded_by.as_deref()));
-        params.push(DbValue::from(node.delivery_request_id.as_deref()));
-        params.push(DbValue::from(node.bot_delivery_run_id.as_deref()));
-        params.push(DbValue::from(node.artifact_text.as_deref()));
-        params.push(DbValue::from(node.error.as_deref()));
-        params.push(optional_u64_value(node.started_at));
-        params.push(optional_u64_value(node.completed_at));
+        params.extend(node_insert_params(env, run_id, node));
     }
     Some((sql, params))
+}
+
+fn node_insert_params(
+    env: &str,
+    run_id: &str,
+    node: &StateMachineNodeRun,
+) -> Vec<DbValue> {
+    vec![
+        DbValue::from(env),
+        DbValue::from(run_id),
+        DbValue::from(node.node_id.as_str()),
+        DbValue::from(node_status_to_str(node.status)),
+        DbValue::from(node.attempt),
+        optional_u64_value(node.node_timeout_ms),
+        optional_u64_value(node.timeout_deadline_ms),
+        DbValue::from(node.max_attempts),
+        DbValue::from(node.assignee_bot_id.as_deref().unwrap_or("")),
+        DbValue::from(node.outcome.as_deref()),
+        DbValue::from(node.responded_by.as_deref()),
+        DbValue::from(node.delivery_request_id.as_deref()),
+        DbValue::from(node.bot_delivery_run_id.as_deref()),
+        DbValue::from(node.artifact_text.as_deref()),
+        DbValue::from(node.error.as_deref()),
+        optional_u64_value(node.started_at),
+        optional_u64_value(node.completed_at),
+    ]
 }
 
 fn row_to_state_machine_run(row: DbRow) -> ServiceResult<StateMachineRun> {
@@ -2856,6 +2981,14 @@ mod tests {
     -> Result<(Arc<dyn DbPlugin>, MySqlCollaborationStore), Box<dyn std::error::Error>> {
         let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new()?);
         db.execute(DbStatement::new(
+            "CREATE TABLE bcs_group_sessions (
+                env TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                UNIQUE(env, session_id)
+            )",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
             "CREATE TABLE bcs_state_machine_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2917,7 +3050,12 @@ mod tests {
     #[tokio::test]
     async fn sqlite_store_marks_node_running_with_cas_sql() -> Result<(), Box<dyn std::error::Error>>
     {
-        let (_db, store) = sqlite_state_machine_store().await?;
+        let (db, store) = sqlite_state_machine_store().await?;
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_group_sessions (env, session_id) VALUES (?, ?)",
+            vec![DbValue::from("dev"), DbValue::from("session")],
+        ))
+        .await?;
         let run = StateMachineRun {
             run_id: "run-sqlite-cas".to_string(),
             definition_id: "definition".to_string(),
@@ -2952,7 +3090,34 @@ mod tests {
             started_at: None,
             completed_at: None,
         };
-        store.create_run(run, vec![node]).await?;
+        assert!(
+            store
+                .create_run_if_session_idle(run, vec![node])
+                .await?
+        );
+        assert!(
+            !store
+                .create_run_if_session_idle(
+                    StateMachineRun {
+                        run_id: "run-sqlite-concurrent".to_string(),
+                        definition_id: "definition".to_string(),
+                        definition_version: 1,
+                        group_id: "group".to_string(),
+                        group_version: 1,
+                        session_id: "session".to_string(),
+                        created_by: None,
+                        status: StateMachineRunStatus::Running,
+                        input: serde_json::Value::Null,
+                        output: None,
+                        error: None,
+                        created_at: 1_001,
+                        updated_at: 1_001,
+                        completed_at: None,
+                    },
+                    Vec::new(),
+                )
+                .await?
+        );
 
         let marked = store
             .mark_node_running_if_run_active(
