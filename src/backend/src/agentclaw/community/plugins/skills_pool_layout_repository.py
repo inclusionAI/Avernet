@@ -535,18 +535,16 @@ class SkillsPoolLayoutRepository(
                 )
             except (TypeError, ValueError):
                 last_probe_evidence = {}
-            # Older Backend versions used this failure code as the durable
-            # "runtime evidence still missing" signal. Once refreshed,
+            # Once runtime evidence is refreshed,
             # last_probe_evidence carries an explicit durable success marker,
             # so downstream failures must not reopen runtime finalization.
             cutover_evidence = last_probe_evidence.get("cutover")
+            evidence_refreshed = isinstance(
+                cutover_evidence, dict
+            ) and cutover_evidence.get("post_cutover_evidence_recorded") is True
             if (
                 row.last_failure_code == "MANUAL_REPAIR_RESOLVED"
-                and (
-                    not isinstance(cutover_evidence, dict)
-                    or cutover_evidence.get("post_cutover_evidence_recorded")
-                    is not True
-                )
+                and not evidence_refreshed
             ):
                 row.phase = SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value
             row.last_failure_code = failure_code
