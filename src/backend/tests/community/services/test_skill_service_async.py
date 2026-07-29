@@ -114,6 +114,119 @@ class TestSkillServiceAsyncRouting:
         repo.create.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_reupload_migrates_existing_legacy_locator_to_pool(
+        self, tmp_path
+    ):
+        from pathlib import Path
+
+        from agentclaw.community.core.skill_center.path_resolution import (
+            build_pool_local_path_adapter,
+        )
+
+        legacy_path = (
+            "/home/admin/.openclaw/workspace/"
+            "skills/skills-local/writing-beats"
+        )
+        pool_local = Path(
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+        )
+        pool_path = str(pool_local / "writing-beats")
+        existing = {
+            "id": "1119874",
+            "name": "writing-beats",
+            "user_id": "user1",
+            "git_path": f"local://{legacy_path}",
+        }
+        updated = {
+            **existing,
+            "git_path": f"local://{pool_path}",
+        }
+        repo = MagicMock()
+        repo.get_bot_local_by_name.return_value = existing
+        repo.update.return_value = updated
+        service, device_fs, _ = self._service(tmp_path, mock_repo=repo)
+        service.local_dir = pool_local
+        pool_adapter = build_pool_local_path_adapter(pool_local)
+        service._local_skill_path_adapter = pool_adapter
+        service._local_skill_locator_adapter = pool_adapter
+
+        result = await service.upload_skill(
+            [
+                {
+                    "filename": "SKILL.md",
+                    "content": (
+                        b"---\nname: writing-beats\ndescription: test\n"
+                        b"---\n# Test"
+                    ),
+                    "relative_path": "SKILL.md",
+                }
+            ],
+            user_id="user1",
+            bolt_id="bot1",
+        )
+
+        assert result == updated
+        device_fs.delete_tree.assert_awaited_once_with(pool_path)
+        device_fs.write_file.assert_awaited_once_with(
+            f"{pool_path}/SKILL.md",
+            b"---\nname: writing-beats\ndescription: test\n---\n# Test",
+        )
+        update_data = repo.update.call_args.args[1]
+        assert update_data["git_path"] == f"local://{pool_path}"
+        repo.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_activate_local_skill_fails_closed_when_pool_source_is_absent(
+        self, tmp_path
+    ):
+        from pathlib import Path
+
+        from agentclaw.community.core.skill_center.path_resolution import (
+            build_pool_local_path_adapter,
+        )
+
+        pool_local = Path(
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+        )
+        service, device_fs, _ = self._service(tmp_path)
+        service.local_dir = pool_local
+        service._local_skill_path_adapter = build_pool_local_path_adapter(
+            pool_local
+        )
+        service.runtime_uses_pool_paths = True
+        device_fs.exists = AsyncMock(return_value=False)
+
+        activated = await service.activate_skill(
+            (
+                "local:///home/admin/.openclaw/workspace/skills/"
+                "skills-local/writing-beats"
+            ),
+            user_id="user1",
+            bolt_id="bot1",
+        )
+
+        assert activated is False
+        device_fs.exists.assert_awaited_once_with(
+            f"{pool_local}/writing-beats"
+        )
+
+    @pytest.mark.asyncio
+    async def test_legacy_activate_keeps_best_effort_source_semantics(
+        self, tmp_path
+    ):
+        service, device_fs, _ = self._service(tmp_path)
+        device_fs.exists = AsyncMock(return_value=False)
+
+        activated = await service.activate_skill(
+            f"local://{service.local_dir}/legacy-skill",
+            user_id="user1",
+            bolt_id="bot1",
+        )
+
+        assert activated is True
+        device_fs.exists.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_upload_does_not_overwrite_global_local_skill(
         self, tmp_path
     ):
@@ -310,6 +423,44 @@ class TestSkillServiceAsyncRouting:
         assert any(p == "/path/test" for p in called_paths)
 
     @pytest.mark.asyncio
+    async def test_pool_delete_resolves_legacy_locator_to_pool(self, tmp_path):
+        from pathlib import Path
+
+        from agentclaw.community.core.skill_center.path_resolution import (
+            build_pool_local_path_adapter,
+        )
+
+        legacy_path = (
+            "/home/admin/.openclaw/workspace/"
+            "skills/skills-local/writing-beats"
+        )
+        pool_local = Path(
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+        )
+        service, device_fs, repo = self._service(tmp_path)
+        service.active_dir = Path(
+            "/home/admin/.openclaw/workspace/skills"
+        )
+        service.local_dir = pool_local
+        service._local_skill_path_adapter = build_pool_local_path_adapter(
+            pool_local
+        )
+        repo.get_by_id.return_value = {
+            "id": "1119874",
+            "name": "writing-beats",
+            "git_path": f"local://{legacy_path}",
+            "bolt_id": "bot1",
+            "user_id": "user1",
+        }
+        repo.delete.return_value = True
+        device_fs.delete_tree.return_value = True
+
+        assert await service.delete_skill("1119874", user_id="user1")
+        assert device_fs.delete_tree.await_args_list[-1].args[0] == (
+            f"{pool_local}/writing-beats"
+        )
+
+    @pytest.mark.asyncio
     async def test_readme_reads_via_device_filesystem(self, tmp_path):
         """Test get_skill_readme reads via DeviceFileSystemPlugin."""
         from agentclaw.community.core.skill_center.services.skill_service import SkillService
@@ -338,3 +489,42 @@ class TestSkillServiceAsyncRouting:
         result = await service.get_skill_readme("1", user_id="user1")
         assert result == "# Test Skill"
         mock_device_fs.read_file.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_pool_read_resolves_legacy_locator_to_pool(self, tmp_path):
+        from pathlib import Path
+
+        from agentclaw.community.core.skill_center.path_resolution import (
+            build_pool_local_path_adapter,
+        )
+
+        legacy_path = (
+            "/home/admin/.openclaw/workspace/"
+            "skills/skills-local/writing-beats"
+        )
+        pool_local = Path(
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local"
+        )
+        service, device_fs, repo = self._service(tmp_path)
+        service.local_dir = pool_local
+        service._local_skill_path_adapter = build_pool_local_path_adapter(
+            pool_local
+        )
+        repo.get_by_id.return_value = {
+            "id": "1119874",
+            "name": "writing-beats",
+            "git_path": f"local://{legacy_path}",
+            "bolt_id": "bot1",
+            "user_id": "user1",
+        }
+        device_fs.read_file.return_value = b"# Writing Beats"
+
+        result = await service.get_skill_readme(
+            "1119874",
+            user_id="user1",
+        )
+
+        assert result == "# Writing Beats"
+        device_fs.read_file.assert_awaited_once_with(
+            f"{pool_local}/writing-beats/SKILL.md"
+        )

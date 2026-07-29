@@ -78,11 +78,11 @@ class _FakeAuth:
         self.calls: list[tuple[str, str]] = []
         self.fail = False
 
-    async def authenticate(self, method: str, path: str, bundle: object) -> object:
+    async def authenticate(self, method: str, path: str, bundle: object) -> dict:
         self.calls.append((method, path))
         if self.fail:
             raise AuthError("unauthorized")
-        return object()
+        return {}
 
 
 def _build() -> tuple[FastAPI, _FakeAuth]:
@@ -157,3 +157,78 @@ def test_auth_runs_for_known_domain(method: str) -> None:
     with TestClient(app) as client:
         client.request(method, "/openapi/v1/bots/upload", content=b"x")
     assert (method, "/openapi/v1/bots/upload") in auth.calls
+
+
+def test_real_authenticator_admits_google_token_then_forwards() -> None:
+    """End-to-end sanity: Authenticator + GoogleUserStrategy (MockTransport) → forward 200."""
+    from gateway.community.bootstrap._authn import build_authenticator
+    from gateway.community.core.authn import IdentityChain
+    from gateway.community.plugins.authn.google_token import GoogleUserStrategy
+    from gateway.community.spi.authn import PrincipalType
+
+    def _userinfo_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"sub": "g-1", "email": "a@example.com"})
+
+    authenticator = build_authenticator()
+    # Swap the USER chain to a MockTransport google so no real network call.
+    authenticator.strategies[PrincipalType.USER] = IdentityChain(
+        PrincipalType.USER,
+        (
+            GoogleUserStrategy(
+                token_header="x-google-token",
+                default_tenant="default",
+                transport=httpx.MockTransport(_userinfo_handler),
+            ),
+        ),
+    )
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_stub_upstream))  # type: ignore[arg-type]
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        await client.aclose()
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.domain_map = DomainMap.from_config(
+        {
+            "domains": {"bots": {"server": "up"}},
+            "servers": {"up": {"base_url": "http://upstream"}},
+        }
+    )
+    app.state.forwarder = BareForwarder(client=client)
+    app.state.authenticator = authenticator
+    app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
+
+    with TestClient(app) as c:
+        resp = c.get("/openapi/v1/bots", headers={"x-google-token": "google-tok"})
+    assert resp.status_code == 200
+    assert resp.json() == {"code": 200000}
+
+
+def test_real_authenticator_rejects_missing_required_identity() -> None:
+    """No google token + required user → 401 before forwarding."""
+    from gateway.community.bootstrap._authn import build_authenticator
+
+    authenticator = build_authenticator()
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_stub_upstream))  # type: ignore[arg-type]
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        await client.aclose()
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.domain_map = DomainMap.from_config(
+        {
+            "domains": {"bots": {"server": "up"}},
+            "servers": {"up": {"base_url": "http://upstream"}},
+        }
+    )
+    app.state.forwarder = BareForwarder(client=client)
+    app.state.authenticator = authenticator
+    app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
+
+    with TestClient(app) as c:  # no cookie
+        resp = c.get("/openapi/v1/bots")
+    assert resp.status_code == 401
+    assert resp.json()["code"] == 401001

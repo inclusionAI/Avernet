@@ -879,12 +879,9 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             bot_id: "private-friend".to_string(),
             role: Some("consultant".to_string()),
         })
-        .await;
-    assert!(matches!(
-        private_friend,
-        Err(GroupUseCaseError::Service(ServiceError::BotNotFound(bot_id)))
-            if bot_id == "private-friend"
-    ));
+        .await
+        .expect("private friend target is reachable");
+    assert_eq!(private_friend.member.bot_uuid, "private-friend");
 
     let wrong_human_owner = service
         .add_member(GroupAddMemberCommand {

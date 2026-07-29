@@ -196,28 +196,40 @@ class BotRequestWorker:
             await asyncio.sleep(interval)
 
     async def _timeout_scan_once(self) -> None:
-        """扫描一轮超时工作项并标记失败，触发 post_run_callback。"""
+        """扫描一轮超时工作项并标记失败，触发 post_run_callback。
+
+        幂等：如果 baas_bot_run 已经是终态（executor 先超时或先完成），
+        则 _safety_mark_failed 是 no-op，且跳过 callback（已由 executor
+        路径触发过）。
+        """
         records = self._queue.scan_timeout()
         for record in records:
-            self._safety_mark_failed(record.run_id, "time out")
+            marked = self._safety_mark_failed(record.run_id, "time out")
             with contextlib.suppress(Exception):
                 self._queue.force_done(record.run_id)
-            logger.warning(
-                "[BotRequestWorker] timeout scan: run_id=%s status=%s marked failed",
-                record.run_id,
-                record.status,
-            )
-            callback = self._resolve_callback(record)
-            if callback is not None:
-                try:
-                    await callback(record.run_id)
-                except Exception as e:
-                    logger.error(
-                        "[BotRequestWorker] timeout scan callback failed run_id=%s: %s",
-                        record.run_id,
-                        e,
-                        exc_info=True,
-                    )
+            if marked:
+                logger.warning(
+                    "[BotRequestWorker] timeout scan: run_id=%s marked failed",
+                    record.run_id,
+                )
+                callback = self._resolve_callback(record)
+                if callback is not None:
+                    try:
+                        await callback(record.run_id)
+                    except Exception as e:
+                        logger.error(
+                            "[BotRequestWorker] timeout scan callback failed "
+                            "run_id=%s: %s",
+                            record.run_id,
+                            e,
+                            exc_info=True,
+                        )
+            else:
+                logger.info(
+                    "[BotRequestWorker] timeout scan: run_id=%s already terminal, "
+                    "skip callback",
+                    record.run_id,
+                )
 
     # ----------------------------- 主循环单步 -----------------------------
 
@@ -314,8 +326,19 @@ class BotRequestWorker:
                 self._safety_mark_failed(record.run_id, str(e))
                 await self._post_run(record, post_run_callback)
             else:
-                # 正常执行完成：执行 post_run_callback。
-                await self._post_run(record, post_run_callback)
+                # 正常执行完成。但如果 timeout scan 已经在此期间把
+                # baas_bot_run 标记为终态（FAILED/TIME_OUT）并触发过 callback，
+                # 则跳过本次 callback（避免重复触发）。
+                current = self._run.get_by_run_id(record.run_id)
+                if current is not None and current.status in ("FAILED", "TIME_OUT"):
+                    logger.info(
+                        "[BotRequestWorker] run_id=%s already %s (timeout scan?), "
+                        "skip post_run callback",
+                        record.run_id,
+                        current.status,
+                    )
+                else:
+                    await self._post_run(record, post_run_callback)
             finally:
                 # 统一标记队列工作项 DONE：仅当仍 RUNNING 时生效。
                 # RequeuedToPending 路径已放回 PENDING，此处是 no-op。
@@ -383,15 +406,21 @@ class BotRequestWorker:
                     "[BotRequestWorker] heartbeat failed run_id=%s: %s", run_id, e
                 )
 
-    def _safety_mark_failed(self, run_id: str, error: str) -> None:
+    def _safety_mark_failed(self, run_id: str, error: str) -> bool:
+        """将 baas_bot_run 标记为 FAILED（仅当仍 PENDING/RUNNING）。
+
+        返回 True 表示本次标记生效，False 表示已是终态（no-op）。
+        """
         try:
             current = self._run.get_by_run_id(run_id)
             if current is not None and current.status in ("PENDING", "RUNNING"):
                 self._run.update_error(run_id, f"worker safety-net: {error}")
+                return True
         except Exception as e:
             logger.error(
                 "[BotRequestWorker] safety mark failed run_id=%s: %s", run_id, e
             )
+        return False
 
     # ----------------------------- 并发限制器 -----------------------------
 

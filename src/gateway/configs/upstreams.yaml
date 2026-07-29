@@ -29,8 +29,28 @@ domains:
       source: file
       path: schemas/bots.openapi.json
       refresh_seconds: 300
+  sessions:
+    server: secbaas
+    schema:
+      source: file
+      path: schemas/baas.openapi.json
+      refresh_seconds: 300
+  messages:
+    server: secbaas
+    schema:
+      source: file
+      path: schemas/baas.openapi.json
+      refresh_seconds: 300
+  runs:
+    server: secbaas
+    schema:
+      source: file
+      path: schemas/baas.openapi.json
+      refresh_seconds: 300
 
 servers:
   # base_url supports ${ENV} expansion (see the transparent-forwarding doc §1).
   agentclaw:
     base_url: "${AGENTCLAW_URL}"
+  secbaas:
+    base_url: "${BAAS_URL}"

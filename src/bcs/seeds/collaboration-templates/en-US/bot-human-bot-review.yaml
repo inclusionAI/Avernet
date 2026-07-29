@@ -1,0 +1,62 @@
+# Bot-Human-Bot three-node collaboration template.
+# participants declares only logical roles that must bind to actual bots. The Human is
+# the current group member, so the human_input node has no assignee or participant binding.
+
+api_version: bcs.collaboration/v1
+name: Bot-Human-Bot Review
+
+metadata:
+  description: A Bot creates a draft, waits for Human review, and then produces the final result from the approval or revision feedback.
+
+participants:
+  worker:
+    display_name: Worker Bot
+    description: Creates the draft and produces the final result from Human feedback.
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      generate_draft:
+        kind: bot_task
+        display_name: Generate Draft
+        assignee:
+          type: bot_binding
+          binding: worker
+        instruction: Create a concise draft for the task requested by the user.
+        transitions:
+          complete:
+            targets:
+              - human_review
+
+      human_review:
+        kind: human_input
+        display_name: Human Review
+        instruction: Review the Bot draft. Approve it as-is or provide specific revision feedback.
+        node_timeout_ms: 86400000
+        judge:
+          type: llm
+          criteria:
+            - Determine whether the Human approved the current result or requested revisions.
+          outcomes:
+            - approved
+            - rejected
+        transitions:
+          approved:
+            targets:
+              - finalize
+          rejected:
+            targets:
+              - finalize
+
+      finalize:
+        kind: bot_task
+        display_name: Generate Final Result
+        assignee:
+          type: bot_binding
+          binding: worker
+        instruction: Read the upstream draft and Human review. If approved, refine and confirm the result. If revisions were requested, apply the feedback and produce the final result.
+        final_output: true

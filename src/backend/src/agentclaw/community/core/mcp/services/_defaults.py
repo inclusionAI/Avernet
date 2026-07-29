@@ -41,23 +41,23 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
     ],
     "moltis": [],
     "claude_code": [
-        {"server_code": "mcp.ant.antprocessai.anttaskmcp"},
-        {"server_code": "mcp.ant.arkai.dimamcpserver"},
-        {"server_code": "mcp.ant.homistudio.meetmcp"},
+        {"server_code": "mcp.ant.antprocessai.anttaskmcp", "name": "任务中心MCP", "description": "任务中心待办任务，已办任务等相关任务查询MCP"},
+        {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima MCP", "description": "Dima MCP"},
+        {"server_code": "mcp.ant.homistudio.meetmcp", "name": "会议信息服务", "description": "会议信息相关mcp，提供查询分享给我的会议列表、我创建的会议列表、单个会议的纪要、会议发言信息以及待办查询等功能"},
         {"server_code": _UCT_SERVER_CODE},
-        {"server_code": "mcp.ant.antdingopenapi.antdingeventmcpserver"},
-        {"server_code": "mcp.ant.antdingopenapi.antdingtodomcpserver"},
-        {"server_code": "mcp.ant.antdingopenapi.antdingmessagemcpserver"},
-        {"server_code": "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"},
-        {"server_code": "mcp.ant.antcodemcp.code.mcpserver"},
-        {"server_code": "mcp.ant.brwithub.worksummaryserver"},
-        {"server_code": "mcp.ant.agentclawscs.bcs_mcp"},
-        {"server_code": "mcp.ant.zlatan.yuntumcpserver"},
-        {"server_code": "mcp.ant.alipaybase-antlogsmcp.mcp-server"},
-        {"server_code": "mcp.ant.arkai.assistantmcpserver"},
-        {"server_code": "mcp.ant.agentix.112858.aixAicoding"},
-        {"server_code": "mcp.ant.faas.aixjiter.AixCodingMemoryMCP"},
-        {"server_code": "mcp.ant.rgmcpserver.rgfastcheckmcpserver"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingeventmcpserver", "name": "蚂蚁钉日程相关-MCP服务", "description": "蚂蚁钉日程相关-MCP服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingtodomcpserver", "name": "蚂蚁钉待办服务", "description": "蚂蚁钉待办服务"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingmessagemcpserver", "name": "蚂蚁钉消息相关-MCP服务", "description": "蚂蚁钉消息相关-MCP服务"},
+        {"server_code": "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver", "name": "语雀 MCP", "description": "语雀 MCP 服务，覆盖文档读写、知识库管理、目录操作、团队协作、互动分析全流程。"},
+        {"server_code": "mcp.ant.antcodemcp.code.mcpserver", "name": "AntCodeMCP", "description": "AntCode提供的 MCP 服务"},
+        {"server_code": "mcp.ant.archassistant-mcp.appmcp", "name": "应用信息服务", "description": "架构工作台提供的应用元信息查询服务"},
+        {"server_code": "mcp.ant.brwithub.worksummaryserver", "name": "工作报告撰写", "description": "基于用户输入的结构化数据或非结构化文本，智能生成专业、规范的职场汇报文档（如周报、月报、项目总结等）的 MCP 服务。"},
+        {"server_code": "mcp.ant.agentclawscs.bcs_mcp", "name": "BCN协作服务", "description": "用于BCN群聊中bot间协作"},
+        {"server_code": "mcp.ant.zlatan.yuntumcpserver", "name": "云图 mcp 服务", "description": "云图官方mcp服务，支持链路环境自动检测，链路树状与数组形式详情查询"},
+        {"server_code": "mcp.ant.alipaybase-antlogsmcp.mcp-server", "name": "antlogs mcp 服务", "description": "antlogs mcp 服务"},
+        {"server_code": "mcp.ant.arkai.assistantmcpserver", "name": "Skybase - 知识问答", "description": "Skybase 是蚂蚁的研发 AI 知识库。当前 MCP 主要用于两个方面：1) 知识库的检索、2) 研发通用问答、前端问答、中间件问答。"},
+        {"server_code": "mcp.ant.faas.aixjiter.AixCodingMemoryMCP", "name": "AixCodingMemoryMCP", "description": "用于aixcoding memoryOS知识库查询"},
+        {"server_code": "mcp.ant.rgmcpserver.rgfastcheckmcpserver", "name": "星海MCP服务", "description": "星海MCP服务"},
         {"server_code": "hitl"},
         {"server_code": "clawmind"},
     ],
@@ -138,6 +138,24 @@ def get_default_mcp_servers(engine_type: Optional[str] = None) -> List[dict]:
 def get_default_mcp_server_codes(engine_type: Optional[str] = None) -> List[str]:
     """Return the list of default MCP server_codes for the given engine."""
     return [cfg["server_code"] for cfg in get_default_mcp_servers(engine_type)]
+
+
+def get_default_mcp_config(
+    engine_type: Optional[str],
+    server_code: str,
+) -> Optional[dict]:
+    """Return the default MCP config dict (with optional name/description/icon) for ``server_code``.
+
+    Looks up the per-engine default list by both ``server_code`` and resolved engine.
+    Returns ``None`` when the code is not a default MCP for that engine, so callers
+    can fall back to the legacy mock-name path. Configs that only declare
+    ``server_code`` (no ``name``) also return a dict — callers decide via
+    ``cfg.get("name")`` whether a real name is available.
+    """
+    for cfg in _DEFAULT_MCP_SERVERS_BY_ENGINE.get(_resolve(engine_type), []):
+        if cfg.get("server_code") == server_code:
+            return dict(cfg)
+    return None
 
 
 

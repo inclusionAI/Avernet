@@ -9,6 +9,9 @@ bot across multiple publish records.
 """
 import pytest
 
+from agentclaw.community.core.devices.repository.protocol import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationState,
     PublishStatus,
@@ -57,7 +60,7 @@ async def _upgrade_to_online_pub(app, world, baas) -> str:
     assert status_of(world, V2) == PublishStatus.DRAFT.value
 
     # v2: build + its own verify bot, then go-live issues the UPGRADE on the
-    # shared online bot (v1 SUCCESS ⇒ _should_upgrade_online).
+    # shared online bot (v1's online bot is ACTIVE ⇒ _decide_online_deploy → UPGRADE).
     await api(app, "POST", PROCESS, json={"publish_id": V2})
     await drain(world, until=lambda: status_of(world, V2) == PublishStatus.VALIDATE_PUB.value)
     baas.finish_all("SUCCESS")
@@ -281,3 +284,61 @@ async def test_r6_online_release_redelivery_does_not_reissue(
     baas.finish_all("SUCCESS")
     await drain(world)
     assert status_of(world, V1) == PublishStatus.SUCCESS.value
+
+
+@pytest.mark.asyncio
+async def test_r7_teclaw_not_live_online_bot_retired_then_recreated_single_live_bot(
+    app_with_testing_modules, world
+):
+    """Primary orphan guard, end-to-end. When the shared online teclaw bot is
+    not-live (STOPPED) at the online reuse decision, a re-publish must RETIRE it
+    and first-release a fresh bot — leaving exactly one live online bot with the
+    old one destroyed (no orphan). Exercises RETIRE_THEN_FIRST_RELEASE through the
+    real wiring; without the double modelling a not-live status every bot reads
+    ACTIVE and only UPGRADE is ever reached."""
+    app = app_with_testing_modules
+    seed_draft(world)
+    install_engine(world)
+    baas = install_local_baas(world)
+    shared = await run_v1_to_success(app, world, baas)  # v1 online bot (ACTIVE)
+
+    # v2 upgrade record; drive its verify leg to VALIDATING (verify upgrades the
+    # existing verify bot in place — unaffected by the online bot's status).
+    resp = await api(app, "POST", UPGRADE, json={"publish_id": V1})
+    assert resp.json()["success"] is True, resp.text
+    await api(app, "POST", PROCESS, json={"publish_id": V2})
+    await drain(world, until=lambda: status_of(world, V2) == PublishStatus.VALIDATE_PUB.value)
+    baas.finish_all("SUCCESS")
+    await drain(world)
+    assert status_of(world, V2) == PublishStatus.VALIDATING.value
+
+    # The shared online teclaw bot has gone not-live (e.g. an offline STOP left it
+    # STOPPED; its container is gone and an UPDATE cannot rebuild it).
+    baas.set_bot_status(shared, "STOPPED")
+
+    # Go-live: the online reuse decision reads STOPPED + teclaw →
+    # RETIRE_THEN_FIRST_RELEASE (destroy the old bot, first-release a new one),
+    # never an UPDATE against the gone bot.
+    await api(app, "POST", PROCESS, json={"publish_id": V2})
+    await drain(world, until=lambda: (ext_of(world, V2).get("publish") or {}).get("online"))
+    baas.finish_all("SUCCESS")
+    await drain(world)
+    assert status_of(world, V2) == PublishStatus.SUCCESS.value
+
+    # Single live online bot — the old one was retired, a fresh one created, and
+    # v2 is the current deployment: no orphan, and never an UPGRADE on the gone bot.
+    assert ("destroy", shared) in baas.journal   # old online bot retired
+    assert shared not in baas.bots                # gone server-side
+    assert baas.updates_of(shared) == 0           # never UPDATE'd (retired, not upgraded)
+    assert baas.creates() == ["BOT-1", "BOT-2", "BOT-3"]  # verify, v1 online, recreate
+    # v2's online binding points at the fresh live bot and is ACTIVE.
+    new_binding_id = ext_of(world, V2)["binding"]["online"]
+    new_binding = world.get(DeviceBindingRepository).get_by_id(new_binding_id)
+    assert new_binding.device_id == "BOT-3" and new_binding.status == "ACTIVE"
+    assert "BOT-3" in baas.bots
+    assert flow(world).is_current_online_deployment(V2) is True
+    # v1 is superseded — its status flips to UPGRADED on v2's online success.
+    # (Its ledger liveness stays True on its now-gone bot BOT-2 because the
+    # retire+recreate puts v1 and v2 on separate identities, unlike a shared-bot
+    # UPGRADE; the record status is the meaningful supersede signal here.)
+    assert status_of(world, V1) == PublishStatus.UPGRADED.value

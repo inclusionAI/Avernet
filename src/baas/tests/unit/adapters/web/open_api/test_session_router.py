@@ -656,7 +656,7 @@ class TestGetSession:
                 )
         assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert exc.value.detail["code"] == 50001
-        assert "服务内部错误" in exc.value.detail["message"]
+        assert "Internal server error" in exc.value.detail["message"]
 
 
 # ── get_session_messages ─────────────────────────────────────
@@ -931,4 +931,4 @@ class TestGetSessionMessages:
                 )
         assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert exc.value.detail["code"] == 50001
-        assert "服务内部错误" in exc.value.detail["message"]
+        assert "Internal server error" in exc.value.detail["message"]

@@ -587,7 +587,7 @@ pub async fn download_content(
     Path((sid, file_id)): Path<(String, String)>,
     headers: HeaderMap,
     uri: Uri,
-    Query(q): Query<DownloadQuery>,
+    Query(_q): Query<DownloadQuery>, // q.ttl accepted-but-ignored (unified share_link_ttl)
 ) -> Response {
     let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
         Ok(c) => c,
@@ -596,7 +596,8 @@ pub async fn download_content(
     if ensure_session_member(&state, &sid, &caller).await.is_none() {
         return forbidden_not_participant();
     }
-    download_file_by_id(&state, &sid, &file_id, q.ttl).await
+    // TTL hidden from frontend: always None → download_route uses share_link_ttl.
+    download_file_by_id(&state, &sid, &file_id, None).await
 }
 
 /// Shared streaming/redirect logic for both authenticated download_content
@@ -712,7 +713,9 @@ pub async fn shared_file_content(
         Ok(r) => {
             let sid_owned = r.file.session_id.clone();
             let fid = r.file.file_id.clone();
-            download_file_by_id(&state, &sid_owned, &fid, q.ttl).await
+            // TTL hidden from frontend: always None so download_route
+            // uses share_link_ttl. q.ttl is accepted-but-ignored.
+            download_file_by_id(&state, &sid_owned, &fid, None).await
         }
         Err(_) => share_consume_err_to_response(),
     }
@@ -1066,6 +1069,7 @@ mod tests {
             bcs_base_url: "http://test.local".into(),
             share_secret: b"test-secret-32-bytes-0123456789".to_vec(),
             share_default_ttl: 3600,
+            share_link_ttl: 3600,
             share_base_url: Some("http://test.local".into()),
         };
         let session_files: Arc<dyn SessionFileService> =

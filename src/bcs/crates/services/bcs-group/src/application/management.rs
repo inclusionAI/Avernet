@@ -298,9 +298,10 @@ impl GroupManagement {
             )));
         }
 
+        let is_friend = self.friend.are_friends(driver_bot_id, target_bot_id).await;
         match target.capabilities.visibility.as_str() {
             "public" => Ok(()),
-            "protected" if self.friend.are_friends(driver_bot_id, target_bot_id).await => Ok(()),
+            _ if is_friend => Ok(()),
             "protected" => Err(GroupUseCaseError::Forbidden(format!(
                 "Bot '{}' is not friends with '{}'",
                 driver_bot_id, target_bot_id

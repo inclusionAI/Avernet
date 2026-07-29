@@ -61,6 +61,7 @@ members = [
     # plugins
     "crates/plugins/bcs-cache-local",
     "crates/plugins/bcs-cache-redis",
+    "crates/plugins/bcs-storage-baas",
     "crates/plugins/bcs-storage-local",
     "crates/plugins/bcs-db-local",
     "crates/plugins/bcs-db-mysql",
@@ -79,6 +80,7 @@ members = [
     # tools
     "crates/tools/bcs-admin",
     "crates/tools/bcs-cli",
+    "crates/tools/bcs-rule-bot",
     # auxiliary
     "crates/auxiliary/bcs-telemetry",
     "crates/auxiliary/ding-logger",
@@ -106,6 +108,7 @@ version      = "0.1.0"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 
 # HTTP server
 axum       = { version = "0.8", features = ["ws"] }
@@ -202,6 +205,7 @@ redis = { version = "0.27.6", features = ["tokio-comp"] }
 bcs            = { path = "crates/bootstrap/bcs" }
 bcs-admin      = { path = "crates/tools/bcs-admin" }
 bcs-cli        = { path = "crates/tools/bcs-cli" }
+bcs-rule-bot   = { path = "crates/tools/bcs-rule-bot" }
 bcs-bot   = { path = "crates/services/bcs-bot" }
 bcs-bot-store = { path = "crates/services/bcs-bot-store" }
 bcs-channel-store = { path = "crates/services/bcs-channel-store" }

@@ -31,7 +31,7 @@ pub async fn assert_storage_plugin_conforms(plugin: Arc<dyn StoragePlugin>, expe
             key: key.clone(), file_name: "f".into(), mime_type: "application/octet-stream".into(),
             size: 5, ttl_secs: 300,
         };
-        let prep = plugin.prepare_upload(req).await.unwrap();
+        let prep = plugin.prepare_upload(req, None).await.unwrap();
 
     let payload = Bytes::from_static(b"hello");
     match &prep.client_target {

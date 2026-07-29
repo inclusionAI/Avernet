@@ -678,16 +678,40 @@ def inspect_runtime_layout(
                 preparation_id=preparation_id,
             )
         if active_marker["activation_state"] == "active":
-            for bridge_name, bridge_path in (
-                ("local", layout.local_bridge),
-                ("repo", layout.repo_bridge),
-            ):
+            retired_bridges = [("local", layout.local_bridge)]
+            if engine in {"openclaw", "claude_code"}:
+                retired_bridges.append(("repo", layout.repo_bridge))
+            for bridge_name, bridge_path in retired_bridges:
                 if bridge_path.exists() or bridge_path.is_symlink():
                     return _invalid(
                         engine=engine,
                         contract_version=expected_contract_version,
                         layout=layout,
                         reason=f"retired_{bridge_name}_bridge_present",
+                        preparation_id=preparation_id,
+                    )
+            if engine in {"aicoding", "hermes"}:
+                try:
+                    repo_bridge_valid = (
+                        layout.repo_bridge.is_symlink()
+                        and _lexical_symlink_target(layout.repo_bridge)
+                        == layout.pool_repo
+                    )
+                except OSError as error:
+                    return _transient(
+                        engine=engine,
+                        contract_version=expected_contract_version,
+                        layout=layout,
+                        reason="stable_repo_bridge_temporarily_unavailable",
+                        error=error,
+                        preparation_id=preparation_id,
+                    )
+                if not repo_bridge_valid:
+                    return _invalid(
+                        engine=engine,
+                        contract_version=expected_contract_version,
+                        layout=layout,
+                        reason="stable_repo_bridge_invalid",
                         preparation_id=preparation_id,
                     )
             try:
@@ -730,6 +754,9 @@ def inspect_runtime_layout(
                     "pool_mappings_valid": True,
                     "legacy_storage_entries_absent": (
                         active_marker["activation_state"] == "active"
+                    ),
+                    "stable_repo_bridge_valid": (
+                        engine in {"aicoding", "hermes"}
                     ),
                 },
             },

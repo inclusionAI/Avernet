@@ -29,7 +29,10 @@ from agentclaw.community.core.service_bot.services.publish_flow.errors import (
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     operation_request_id,
 )
-from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.service_bot.types import (
+    OnlineDeployDecision,
+    PublishStage,
+)
 
 
 def _make_publish_record(**kwargs):
@@ -280,7 +283,13 @@ async def test_service_release_uses_frozen_engine_layout_not_live_draft_drift():
 
 
 @pytest.mark.asyncio
-async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_found():
+@pytest.mark.parametrize("error_code,expect_retire", [
+    ("BOT_NOT_FOUND", False),     # bot fully gone → no destroy, but still release binding
+    ("DEVICE_NOT_FOUND", True),   # record lingers → retire before first release
+])
+async def test_execute_upgrade_release_fallback_retires_only_on_device_not_found(
+    error_code, expect_retire
+):
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -294,11 +303,13 @@ async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_fo
     publish_service.get_device_binding_by_id.return_value = binding
     build_service.upgrade_async = AsyncMock(return_value={
         'success': False,
-        'error_code': 'BOT_NOT_FOUND',
-        'message': 'Bot not found or already destroyed',
+        'error_code': error_code,
+        'message': 'gone',
     })
+    build_service.retire_superseded_bot.return_value = 909  # destroy publish id
     expected = Mock()
     svc._execute_first_release = AsyncMock(return_value=expected)
+    svc.release_binding = Mock()
 
     result = await svc._execute_upgrade_release(
         publish_record=publish_record,
@@ -314,58 +325,124 @@ async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_fo
         migration_path='/tmp/migration',
         bot={'bot_id': 'b1'},
     )
+    # The stale binding (id 88) is released either way so it does not linger
+    # ACTIVE; only DEVICE_NOT_FOUND retires the still-registered bot first (and
+    # stashes its destroy id), while BOT_NOT_FOUND is already gone (None).
+    if expect_retire:
+        build_service.retire_superseded_bot.assert_called_once_with(
+            'BOT-old', operator='u1'
+        )
+        svc.release_binding.assert_called_once_with(88, destroy_publish_id=909)
+    else:
+        build_service.retire_superseded_bot.assert_not_called()
+        svc.release_binding.assert_called_once_with(88, destroy_publish_id=None)
 
 
-def test_should_upgrade_online_requires_last_publish_success():
+@pytest.mark.parametrize("provider,status,expected", [
+    # ACTIVE / PENDING → reuse in place on either provider.
+    ("baas", "ACTIVE", OnlineDeployDecision.UPGRADE),
+    ("teclaw", "ACTIVE", OnlineDeployDecision.UPGRADE),
+    ("baas", "PENDING", OnlineDeployDecision.UPGRADE),
+    ("teclaw", "PENDING", OnlineDeployDecision.UPGRADE),
+    # gone / self-terminating → fresh first release, nothing to reuse.
+    ("baas", "RELEASED", OnlineDeployDecision.FIRST_RELEASE),
+    ("teclaw", "RELEASED", OnlineDeployDecision.FIRST_RELEASE),
+    ("baas", "DESTROYING", OnlineDeployDecision.FIRST_RELEASE),
+    ("teclaw", "DESTROYING", OnlineDeployDecision.FIRST_RELEASE),
+    # not-live-but-present → baas/ARCA rebuilds in place; teclaw must retire+recreate.
+    ("baas", "FAILED", OnlineDeployDecision.UPGRADE),
+    ("teclaw", "FAILED", OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE),
+    ("baas", "STOPPED", OnlineDeployDecision.UPGRADE),
+    ("teclaw", "STOPPED", OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE),
+    # STOPPING is a wait state (see test_decide_online_deploy_stopping_waits) —
+    # not in this matrix because it raises rather than returning a decision.
+])
+def test_decide_online_deploy_matrix(provider, status, expected):
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
 
-    publish_record = _make_publish_record(last_pub_id=10)
-    publish_service.get_publish_by_id.return_value = _make_publish_record(
-        id=10,
-        status=PublishStatus.SUCCESS.value,
-    )
-    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': 'RUNNING'})
-    assert svc._should_upgrade_online(publish_record) is True
+    # This record has its OWN online binding (a prior attempt) → the reuse candidate.
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.return_value = {'status': status}
+    baas_service.resolve_container_provider.return_value = provider
 
-    publish_service.get_publish_by_id.return_value = _make_publish_record(
-        id=10,
-        status=PublishStatus.SUCCESS.value,
-    )
-    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': 'RELEASED'})
-    assert svc._should_upgrade_online(publish_record) is False
-
-    publish_service.get_publish_by_id.return_value = _make_publish_record(
-        id=10,
-        status=PublishStatus.RELEASED.value,
-    )
-    assert svc._should_upgrade_online(publish_record) is False
-
-    publish_service.get_publish_by_id.return_value = None
-    assert svc._should_upgrade_online(publish_record) is False
+    assert svc._decide_online_deploy(publish_record, {'bot_id': 'b'}) is expected
 
 
-@pytest.mark.parametrize("baas_status", ["RELEASED", "STOPPED", "STOPPING", "FAILED"])
-def test_should_upgrade_online_forces_first_release_when_prev_bot_gone(baas_status):
-    """Regression (#435): an offlined SUCCESS publish leaves its online bot
-    ``STOPPED`` (a TeClaw STOP physically destroys the device), not
-    ``RELEASED``. The upgrade guard must treat every gone/not-live status —
-    not only ``RELEASED`` — as first-release, or the re-publish issues an
-    UPDATE against the destroyed bot and fails with ``DEVICE_NOT_FOUND``."""
+def test_decide_online_deploy_no_candidate_is_first_release():
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
 
-    publish_record = _make_publish_record(last_pub_id=10)
-    publish_service.get_publish_by_id.return_value = _make_publish_record(
-        id=10,
-        status=PublishStatus.RELEASED.value,
+    # No own binding and no last_pub_id → nothing to reuse; never queries BaaS.
+    publish_record = _make_publish_record(ext={}, last_pub_id=0)
+    assert (
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+        is OnlineDeployDecision.FIRST_RELEASE
     )
-    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': baas_status})
-    assert svc._should_upgrade_online(publish_record) is False
+    baas_service.get_bot.assert_not_called()
+
+
+def test_decide_online_deploy_get_bot_error_propagates():
+    # get_bot normalizes a real 404 to RELEASED; a raised error is transient/
+    # non-404, so it must propagate (durable task retries the status read) rather
+    # than be treated as "gone" and create a replacement for a possibly-live bot.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.side_effect = RuntimeError("baas unreachable")
+
+    with pytest.raises(RuntimeError, match="baas unreachable"):
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+
+
+@pytest.mark.parametrize("provider", ["teclaw", "baas"])
+def test_decide_online_deploy_stopping_waits(provider):
+    # STOPPING has an active STOP publish in flight; BaaS create_publish rejects
+    # any new publish of a different type (UPGRADE's UPDATE or a retire's DESTROY)
+    # while it runs. The decision must WAIT (raise so the durable task retries)
+    # rather than issue a doomed publish — for BOTH providers, no retire.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.return_value = {'status': 'STOPPING'}
+    baas_service.resolve_container_provider.return_value = provider
+
+    with pytest.raises(PublishFlowServiceError, match="STOPPING"):
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+    build_service.retire_superseded_bot.assert_not_called()
+
+
+def test_decide_online_deploy_missing_status_propagates():
+    # A *successful* envelope with no status (get_bot returns `data`, which
+    # defaults to {}) is ambiguous — NOT proof the candidate is gone. It must
+    # raise (durable task retries) rather than map to FIRST_RELEASE and create a
+    # replacement for a possibly-live bot. Only a real 404 (already normalized to
+    # RELEASED) or an explicit terminal status recreates.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.return_value = {}  # 200 envelope, empty data → no status
+
+    with pytest.raises(PublishFlowServiceError, match="no status"):
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+    build_service.retire_superseded_bot.assert_not_called()
 
 
 # (#197 all-auto) approve_baas_publish was removed — every BaaS mutation is
@@ -408,18 +485,21 @@ async def test_execute_release_phase_falls_back_to_first_release_when_last_publi
 
 
 @pytest.mark.asyncio
-async def test_execute_release_phase_first_release_when_offlined_online_bot_stopped():
-    """Regression (#435): the full offline→re-publish cycle. Offlining a SUCCESS
-    publish marks it RELEASED and tears its online bot down via a BaaS STOP —
-    which physically destroys the TeClaw device but leaves ``baas_bot`` STOPPED.
-    The re-publish's online stage must resolve to a fresh CREATE (first release),
-    not an UPDATE against the destroyed bot (which would 404 DEVICE_NOT_FOUND)."""
+@pytest.mark.parametrize("provider", ["teclaw", "baas"])
+async def test_execute_release_phase_offlined_online_bot_stopped_no_orphan(provider):
+    """Offline→re-publish cycle. Offlining a SUCCESS publish tears its online bot
+    down via a BaaS STOP, leaving ``baas_bot`` STOPPED. The re-publish must not
+    orphan that bot:
+    - teclaw: the UPDATE cannot rebuild a gone container → retire the STOPPED bot,
+      then fresh first release (exactly one live bot, old destroyed).
+    - baas/ARCA: the UPDATE rebuilds the device in place → upgrade (reuse)."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
 
-    # The re-publish record (v2) points back at the offlined publish (5724 → id=10).
+    # The re-publish record (v2) points back at the offlined publish (id=10),
+    # whose online binding still references the STOPPED bot.
     publish_record = _make_publish_record(
         id=2,
         status=PublishStatus.VALIDATING.value,
@@ -427,24 +507,111 @@ async def test_execute_release_phase_first_release_when_offlined_online_bot_stop
         last_pub_id=10,
         ext={'migration_path': '/tmp/migration'},
     )
-    # The previous publish is RELEASED (offline flipped SUCCESS→RELEASED)...
     publish_service.get_publish_by_id.return_value = _make_publish_record(
         id=10,
         status=PublishStatus.RELEASED.value,
+        ext={'binding': {'online': 88}},
     )
-    # ...and its online bot is STOPPED, not RELEASED (the offline STOP leaves it so).
-    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': 'STOPPED'})
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id='BOT-stopped'
+    )
+    baas_service.resolve_container_provider.return_value = provider
+    baas_service.get_bot.return_value = {'status': 'STOPPED'}
+    build_service.retire_superseded_bot.return_value = 777  # destroy publish id
 
     bot_service = Mock()
     bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
     svc._bot_service = bot_service
     svc._execute_first_release = AsyncMock(return_value='FIRST')
     svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
+    svc._release_binding = Mock()
 
     result = await svc.execute_release_phase(publish_record, operator='u1')
 
-    assert result == 'FIRST'
-    svc._execute_first_release.assert_awaited_once()
+    if provider == "teclaw":
+        assert result == 'FIRST'
+        build_service.retire_superseded_bot.assert_called_once_with(
+            'BOT-stopped', operator='u1'
+        )
+        # The retired bot's stale binding (id 88) is released, stashing the
+        # destroy workflow id — no lingering ACTIVE binding to a destroyed bot.
+        svc._release_binding.assert_called_once_with(88, destroy_publish_id=777)
+        svc._execute_first_release.assert_awaited_once()
+        svc._execute_upgrade_release.assert_not_awaited()
+    else:
+        assert result == 'UPGRADE'
+        build_service.retire_superseded_bot.assert_not_called()
+        svc._release_binding.assert_not_called()
+        svc._execute_upgrade_release.assert_awaited_once()
+        svc._execute_first_release.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_online_retire_then_first_release_is_crash_safe_on_redelivery():
+    """Crash-safety: a teclaw not-live candidate retires + first-releases. If the
+    durable task is redelivered after destroy(old) but before first-release
+    lands, the candidate now reads gone → the decision is FIRST_RELEASE (no
+    second destroy) and first-release runs again (adopting the in-doubt new bot
+    via the deploy atom). Retire happens exactly once; no double-destroy."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source',
+        ext={'binding': {'online': 99}, 'migration_path': '/m'},
+    )
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id='BOT-old'
+    )
+    baas_service.resolve_container_provider.return_value = 'teclaw'
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    svc._bot_service = bot_service
+    svc._execute_first_release = AsyncMock(return_value='FIRST')
+
+    # Delivery 1: candidate STOPPED (teclaw) → retire old + first release.
+    baas_service.get_bot.return_value = {'status': 'STOPPED'}
+    assert await svc.execute_release_phase(publish_record, operator='op') == 'FIRST'
+
+    # Redelivery: the retired bot now reads gone → first release, NO second destroy.
+    baas_service.get_bot.return_value = {'status': 'RELEASED'}
+    assert await svc.execute_release_phase(publish_record, operator='op') == 'FIRST'
+
+    build_service.retire_superseded_bot.assert_called_once_with('BOT-old', operator='op')
+    assert svc._execute_first_release.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_release_phase_unhandled_decision_fails_loudly():
+    """The dispatch is exhaustive: a new/unknown OnlineDeployDecision must fail
+    the publish loudly, never silently fall through to first-release."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source', ext={'migration_path': '/m'}
+    )
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    svc._bot_service = bot_service
+    svc._decide_online_deploy = Mock(return_value="BOGUS_DECISION")
+    svc._execute_first_release = AsyncMock()
+    svc._execute_upgrade_release = AsyncMock()
+    # Stub the failure-handling plumbing so the guard's raise surfaces as a
+    # FAILED publish result (the process fails), not a silent first-release.
+    svc._get_latest_ext = Mock(return_value={})
+    svc._clear_retry_flag = Mock()
+    svc._update_publish_status = Mock()
+
+    result = await svc.execute_release_phase(publish_record, operator='op')
+
+    assert result.status == PublishStatus.FAILED
+    assert "Unhandled online deploy decision" in result.message
+    svc._execute_first_release.assert_not_awaited()
     svc._execute_upgrade_release.assert_not_awaited()
 
 
@@ -839,6 +1006,166 @@ async def test_restart_recreate_threads_config_artifact():
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
     # The recreate minted a fresh binding for the new bot.
     assert publish_service.create_device_binding.call_args.kwargs["device_id"] == "BOT-recreated"
+    # BOT_NOT_FOUND = the record is already gone → nothing to retire.
+    build_service.retire_superseded_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restart_teclaw_not_live_target_retires_then_recreates():
+    # A teclaw online bot in STOPPED/FAILED can't be rebuilt by an UPDATE, so the
+    # restart must retire it and recreate — never leaving it as an orphan.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock()  # must NOT be issued
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "STOPPED"}
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_called_once_with("BOT-old", operator="op")
+    build_service.upgrade_async.assert_not_awaited()
+    build_service.release_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_restart_first_release_target_releases_stale_binding_no_retire():
+    # A restart whose target is already RELEASED/DESTROYING (e.g. an external BaaS
+    # deletion) → FIRST_RELEASE → recreate. No bot to destroy, but the old ACTIVE
+    # binding must still be released (destroy_publish_id=None) so it does not
+    # linger pointing at the gone bot after ext.binding is rewritten.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock()  # must NOT be issued
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "RELEASED"}
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+    svc._release_binding = Mock()
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_not_called()  # bot already gone
+    build_service.upgrade_async.assert_not_awaited()
+    build_service.release_async.assert_awaited_once()  # recreate
+    # Old binding released with no destroy id (nothing was destroyed).
+    svc._release_binding.assert_called_once_with(1, destroy_publish_id=None)
+
+
+@pytest.mark.asyncio
+async def test_restart_baas_not_live_target_upgrades_in_place():
+    # A baas/ARCA online bot in FAILED is rebuilt in place by the UPDATE, so the
+    # restart upgrades (reuses the bot) — no recreate, no retire.
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"publish_id": 77, "bot_uuid": "BOT-old"}
+    )
+    build_service.release_async = AsyncMock()  # must NOT be called
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "FAILED"}
+    baas_service.resolve_container_provider.return_value = "baas"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "migration_path": "/m/1"},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.upgrade_async.assert_awaited_once()
+    build_service.release_async.assert_not_awaited()
+    build_service.retire_superseded_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restart_device_not_found_fallback_retires_then_recreates():
+    # Secondary net: proactive status said reusable (ACTIVE) but the UPDATE hit a
+    # gone device (DEVICE_NOT_FOUND) → retire the lingering record, then recreate.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "DEVICE_NOT_FOUND"}
+    )
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "ACTIVE"}
+    baas_service.resolve_container_provider.return_value = "baas"
+    build_service.retire_superseded_bot.return_value = 424  # destroy publish id
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+    svc._release_binding = Mock()
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_called_once_with("BOT-old", operator="op")
+    # The lingering bot's stale binding (id 1) is released, stashing the destroy id.
+    svc._release_binding.assert_called_once_with(1, destroy_publish_id=424)
+    build_service.release_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_restart_bot_not_found_fallback_releases_binding_no_retire():
+    # Secondary net: proactive status said reusable (ACTIVE) but the UPDATE raced
+    # with deletion and returned BOT_NOT_FOUND (bot fully gone). No retire, but the
+    # record's stale binding (id 1) must still be released (destroy_publish_id=None)
+    # so it does not linger ACTIVE after the recreate rewrites ext.binding.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "ACTIVE"}
+    baas_service.resolve_container_provider.return_value = "baas"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+    svc._release_binding = Mock()
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_not_called()  # bot already gone
+    svc._release_binding.assert_called_once_with(1, destroy_publish_id=None)
+    build_service.release_async.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -3196,6 +3523,40 @@ def test_sync_restart_progress_stable_status_still_fails_on_baas_failed():
     svc._handle_sync_failure = Mock(return_value=sentinel)
     assert svc.sync_restart_progress(publish_id=1) is sentinel
     svc._handle_sync_failure.assert_called_once()
+
+
+def test_sync_restart_progress_stable_success_activates_recreated_binding():
+    # A restart that RECREATED the target minted a NEW binding as PENDING and
+    # pointed ext.binding.online at it. The record stays SUCCESS (no forward
+    # advance), but on BaaS SUCCESS the recreated binding must be activated here
+    # or it stays PENDING forever. (The in-place upgrade path is unaffected —
+    # _activate_binding is idempotent for an already-ACTIVE binding.)
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        source_bot_id="bot-src",
+        ext={"restart": {"online": 700}, "binding": {"online": 88}},
+    )
+    svc, _ = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    svc._activate_binding = Mock()
+    svc.refresh_publish_handle = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+
+    result = svc.sync_restart_progress(publish_id=1)
+
+    # No status advance (still SUCCESS), but the recreated binding is activated.
+    assert result.status == PublishStatus.SUCCESS
+    svc._activate_binding.assert_called_once()
+    kwargs = svc._activate_binding.call_args.kwargs
+    assert kwargs["stage"] == PublishStage.ONLINE
+    assert kwargs["baas_publish_id"] == 700
+    assert kwargs["bot_id"] == "bot-src"
+    # Activation replaces device_props (reuse_binding), so the teclaw status
+    # handle publish_id is re-merged afterward, pointing at the restart workflow.
+    svc.refresh_publish_handle.assert_called_once_with(88, 700)
+    # A recreated teclaw container needs the post-deploy MCP outbound rule that
+    # _handle_sync_success would apply; this stable branch runs it too.
+    svc._refresh_provider_mcp_after_success.assert_called_once()
 
 
 # ---- restart_bot() submit path ---------------------------------------------

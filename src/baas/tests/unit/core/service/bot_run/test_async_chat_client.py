@@ -7,7 +7,7 @@ Covers:
 - close: normal close, close when not connected
 - context manager: async with pattern, __aexit__ calls close
 - _on_chat: delta, final, error, ignored states
-- _on_agent: tool/result, assistant, lifecycle/end events
+- _on_agent: tool/result, assistant, lifecycle/end, final events
 """
 
 import asyncio
@@ -366,8 +366,8 @@ class TestSendMessage:
         await client.connect()
 
         # Don't fire chat_complete — timeout will occur
-        content, _ = await client.send_message("Hi", timeout=0.01)
-        assert content == ""
+        with pytest.raises(TimeoutError):
+            await client.send_message("Hi", timeout=0.01)
 
     @pytest.mark.asyncio
     async def test_send_message_resets_state(self, mock_bot_ws, mock_bot_ws_instance):
@@ -737,6 +737,60 @@ class TestOnAgent:
         }
         client._on_agent(payload)
         assert state.last_stream_is_assistant is False
+
+    @pytest.mark.asyncio
+    async def test_on_agent_final_sets_complete_events(self, mock_bot_ws):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client)
+        state.stream_queue = asyncio.Queue()
+
+        payload = {
+            "sessionKey": _TEST_SESSION_KEY,
+            "state": "final",
+            "message": {
+                "content": [{"type": "text", "text": "agent final text"}],
+            },
+        }
+        client._on_agent(payload)
+
+        assert state.state == "final"
+        assert state.agent_complete.is_set()
+        assert state.chat_complete.is_set()
+        assert state.content == "agent final text"
+
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "final"
+        assert chunk.content == "agent final text"
+
+    @pytest.mark.asyncio
+    async def test_on_agent_final_empty_message(self, mock_bot_ws):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client)
+        state.stream_queue = asyncio.Queue()
+
+        payload = {
+            "sessionKey": _TEST_SESSION_KEY,
+            "state": "final",
+            "message": {},
+        }
+        client._on_agent(payload)
+
+        assert state.state == "final"
+        assert state.agent_complete.is_set()
+        assert state.chat_complete.is_set()
+        assert state.content == ""
+
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "final"
+        assert chunk.content == ""
 
 
 # ==================== integration: full flow ====================

@@ -57,7 +57,7 @@ class TestStubAdapterBoot:
         body = resp.json()
         # 鉴权层错误响应契约:{"detail":{"code","message"}}
         assert body["detail"]["code"] == 40101
-        assert body["detail"]["message"] == "Token 缺失"
+        assert body["detail"]["message"] == "Token missing"
 
     def test_messages_endpoint_rejects_missing_token(self, bootstrap_init):
         """POST /openapi/v1/messages 无 token → 401。"""

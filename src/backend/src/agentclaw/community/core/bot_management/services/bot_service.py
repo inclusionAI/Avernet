@@ -1157,16 +1157,12 @@ class BotService:
                         f"[bot_service.create_bot] Bot {bot_id} is teclaw, provisioning "
                         f"container via BaaS (skipping DeviceService.apply_device)"
                     )
-                    agent_pass_token = ""
-                    owner_id = bot_record["entity_id"]
-                    try:
-                        agent_pass_token = self._passport_plugin.query_token(bot_id, owner_id) or ""
-                    except Exception as e:
-                        logger.warning(f"[bot_service.create_bot] Teclaw passport token query failed: bot_id={bot_id}, owner_id={owner_id}, error={e}")
+                    # The passport token is fetched and pushed by the create
+                    # publish poll task once BaaS reports the container started —
+                    # the PaaS device it is written onto does not exist yet here.
                     provision = teclaw_provision.provision(
                         bot=bot_record,
                         owner_id=user_id,
-                        agent_pass_token=agent_pass_token,
                     )
                     binding_id = provision.binding_id
                     device_id = provision.device_id
@@ -3472,7 +3468,11 @@ class BotService:
             )
 
         bot_status = str(bot.get("status") or "").upper()
-        if bot_status in {"REACTIVATING", "PENDING"}:
+        # REACTIVATING is an explicit lifecycle operation. PENDING is not:
+        # failed startup reporting can strand a bot there indefinitely, so a
+        # restart request must be allowed to reach the durable restart lock
+        # below instead of being treated as proof that work is still running.
+        if bot_status == "REACTIVATING":
             logger.info(
                 "[bot_service.restart_bot] skip restart while activation is in progress: "
                 "bot_id=%s user_id=%s bot_status=%s",
@@ -3482,7 +3482,7 @@ class BotService:
             )
             return self._activation_in_progress_result(bot)
 
-        if bot_status not in {"ACTIVE", "FAILED"}:
+        if bot_status not in {"ACTIVE", "FAILED", "PENDING"}:
             logger.warning(
                 "[bot_service.restart_bot] reject restart for invalid lifecycle state: "
                 "bot_id=%s user_id=%s bot_status=%s",
@@ -3519,7 +3519,13 @@ class BotService:
                     binding_id=binding_id,
                 )
             )
-            if binding_status == DeviceBindingStatus.PENDING.value:
+            # An ACTIVE bot with a PENDING binding is still converging. When
+            # both records are PENDING, however, allow the explicit restart to
+            # recover the stranded lifecycle through the lock-protected path.
+            if (
+                binding_status == DeviceBindingStatus.PENDING.value
+                and bot_status != "PENDING"
+            ):
                 logger.info(
                     "[bot_service.restart_bot] skip restart while binding is pending: "
                     "bot_id=%s user_id=%s binding_id=%s",
@@ -3532,6 +3538,7 @@ class BotService:
                 return current
             if binding_status and binding_status not in {
                 DeviceBindingStatus.ACTIVE.value,
+                DeviceBindingStatus.PENDING.value,
                 DeviceBindingStatus.FAILED.value,
                 DeviceBindingStatus.STOPPED.value,
             }:

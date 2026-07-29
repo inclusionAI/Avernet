@@ -141,6 +141,7 @@ bcs-session-file = { workspace = true }
 bcs-session-file-store = { workspace = true }
 bcs-storage-api = { workspace = true }
 bcs-storage-local = { workspace = true }
+bcs-storage-baas  = { path = "../../plugins/bcs-storage-baas" }
 bcs-message = { workspace = true }
 bcs-message-store = { workspace = true }
 bcs-callback = { workspace = true }

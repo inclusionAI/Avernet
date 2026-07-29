@@ -22,9 +22,9 @@ from secbaas.community.api.bot_runtime import (
     GetUploadUrlResponse,
     NoActiveDevicesError,
     NoDevicesFoundError,
-    OssObjectNotFoundError,
     ShareLinkRequest,
     ShareLinkResponse,
+    StagingObjectNotFoundError,
     TransferNotFoundError,
     TransferNotTerminalError,
     TransferStateConflictError,
@@ -108,6 +108,11 @@ async def get_upload_url(
                 "message": str(e),
                 "bot_uuid": bot_uuid,
             },
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "INVALID_PARAMETER", "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(
@@ -207,6 +212,11 @@ async def get_download_url(
                 "bot_uuid": bot_uuid,
             },
         )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "INVALID_PARAMETER", "message": str(e)},
+        )
     except NotImplementedError as e:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -280,7 +290,7 @@ async def complete_upload(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "TRANSFER_NOT_FOUND", "message": str(e)},
         )
-    except OssObjectNotFoundError as e:
+    except StagingObjectNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
@@ -293,6 +303,11 @@ async def complete_upload(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": "TRANSFER_STATE_CONFLICT", "message": str(e)},
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "INVALID_TRANSITION", "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(
@@ -348,6 +363,11 @@ async def cancel_upload(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": "TRANSFER_STATE_CONFLICT", "message": str(e)},
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "INVALID_TRANSITION", "message": str(e)},
         )
     except NotImplementedError as e:
         raise HTTPException(

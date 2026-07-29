@@ -35,6 +35,18 @@ class SkillsPoolRolloutServiceProtocol(Protocol):
         reason: str,
     ) -> RolloutConfigSnapshot: ...
 
+    def set_owner_full_rollout(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        engine: str,
+        enabled: bool,
+        acceptance_batch_id: str | None,
+        operator: str,
+        reason: str,
+    ) -> RolloutConfigSnapshot: ...
+
     def promote_engine(
         self,
         *,

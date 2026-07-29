@@ -64,7 +64,16 @@ class TargetBotGoneError(Exception):
 
     Raised out of :func:`acquire_deploy_workflow` after the op has been
     ABANDONED, so the caller runs its fallback (a fresh first-release-shaped
-    op) without touching the dead op again."""
+    op) without touching the dead op again.
+
+    ``error_code`` carries the specific classified code so the caller's fallback
+    can distinguish "the record is already gone" (``BOT_NOT_FOUND`` → nothing to
+    clean up) from "the record lingers, only the container is gone"
+    (``DEVICE_NOT_FOUND`` → retire the stale record before recreating)."""
+
+    def __init__(self, error_code: str = "BOT_NOT_FOUND") -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
 
 
 async def acquire_deploy_workflow(
@@ -118,7 +127,7 @@ async def acquire_deploy_workflow(
             result.get("success") is False
             and result.get("error_code") in BOT_GONE_ERROR_CODES
         ):
-            raise TargetBotGoneError()
+            raise TargetBotGoneError(result.get("error_code"))
         return result
 
     try:

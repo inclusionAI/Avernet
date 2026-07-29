@@ -23,6 +23,20 @@ def test_claude_code_has_its_own_list():
     assert isinstance(servers, list)
 
 
+CLAUDE_CODE_REQUIRED_DEFAULT_MCPS = (
+    "mcp.ant.archassistant-mcp.appmcp",
+    "mcp.ant.antcodemcp.code.mcpserver",
+    "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
+    "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver",
+)
+
+
+def test_claude_code_includes_required_coding_mcps_exactly_once():
+    codes = get_default_mcp_server_codes("claude_code")
+    for code in CLAUDE_CODE_REQUIRED_DEFAULT_MCPS:
+        assert codes.count(code) == 1, f"expected exactly one claude_code default MCP: {code}"
+
+
 def test_claude_code_merges_aicoding_research_mcps():
     servers = get_default_mcp_servers("claude_code")
     codes = [s["server_code"] for s in servers]
@@ -35,7 +49,6 @@ def test_claude_code_merges_aicoding_research_mcps():
         "mcp.ant.zlatan.yuntumcpserver",
         "mcp.ant.alipaybase-antlogsmcp.mcp-server",
         "mcp.ant.arkai.assistantmcpserver",
-        "mcp.ant.agentix.112858.aixAicoding",
         "mcp.ant.faas.aixjiter.AixCodingMemoryMCP",
         "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
     )
@@ -43,7 +56,7 @@ def test_claude_code_merges_aicoding_research_mcps():
         assert code in codes, f"missing aicoding-only MCP in claude_code: {code}"
     # 无重复。
     assert len(codes) == len(set(codes))
-    # 12 原有 + 6 新增 + 1 clawmind = 19。
+    # 12 原有 + 5 研发 MCP + 1 应用信息 MCP + 1 clawmind = 19。
     assert len(codes) == 19
 
 

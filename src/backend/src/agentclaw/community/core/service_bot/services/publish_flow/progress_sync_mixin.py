@@ -619,6 +619,39 @@ class ProgressSyncMixin:
                     error_message=f"Restart publish status: {baas_status}",
                 )
 
+            # A restart that RECREATED the target minted a NEW binding as PENDING
+            # (the normal in-place upgrade reuses the already-ACTIVE one, and
+            # ext.binding.<stage> now points at the new binding). The stable
+            # SUCCESS/VALIDATING record skips the status advance, but the recreated
+            # binding must still be activated on deploy success or it stays PENDING
+            # forever and binding consumers reject it. _activate_binding is
+            # idempotent — a no-op refresh for the in-place upgrade path.
+            if baas_status == "SUCCESS":
+                self._activate_binding(
+                    ext=ext,
+                    stage=stage,
+                    progress=progress,
+                    baas_status=baas_status,
+                    baas_publish_id=restart_publish_id,
+                    bot_id=publish_record.source_bot_id,
+                )
+                # _activate_binding writes device_props via reuse_binding, which
+                # REPLACES (not merges) the dict — dropping the teclaw status-read
+                # handle publish_id that execute_restart / _recreate_restart_target
+                # stored. Re-merge it (refresh_publish_handle merges) so teclaw
+                # consumers keep pointing at the current restart workflow.
+                binding_id = (ext.get("binding") or {}).get(stage.value)
+                if binding_id:
+                    self.refresh_publish_handle(binding_id, restart_publish_id)
+
+                # A restart that RECREATED a teclaw target minted a fresh container
+                # that needs the post-deploy MCP outbound/auth rule normal
+                # first-release success establishes (via _handle_sync_success). This
+                # stable-record branch bypasses that path, so apply it here. No-op
+                # for ARCA/baas; idempotent (a re-push) for teclaw, so it is safe on
+                # the in-place upgrade path too.
+                self._refresh_provider_mcp_after_success(publish_record, ext, stage)
+
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=current_status,

@@ -77,6 +77,9 @@ from secbaas.community.core.service.publish_manage import (
     DefaultPublishService,
 )
 from secbaas.community.core.service.scheduler import AppScheduler
+from secbaas.community.core.service.session_file_sharing import (
+    DefaultSessionFileSharingDispatcher,
+)
 from secbaas.community.core.service.sse import (
     DefaultStreamConverter,  # noqa: F401  triggers side-effect registration of default SSE converter
     SseConverterFactory,
@@ -195,6 +198,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     cache_plugin = providers.Dependency()
     ws_relay_session_repo = providers.Dependency()
     ticket_repository = providers.Dependency()
+    session_ticket_repository = providers.Dependency()
 
     # ── Auth service ──────────────────────────────────────────────────────────
 
@@ -366,6 +370,12 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         paas_facade=paas_facade,
         file_transfer_backend=file_transfer_backend,
         ticket_repo=ticket_repository,
+    )
+
+    session_file_sharing_dispatcher = providers.Singleton(
+        DefaultSessionFileSharingDispatcher,
+        file_transfer_backend=file_transfer_backend,
+        ticket_repo=session_ticket_repository,
     )
 
     bot_binding_resolver = providers.Singleton(
@@ -563,6 +573,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     http_callback = providers.Singleton(
         HttpCallback,
         run_repository=bot_run_repository,
+        origin=config.bot_runner.origin,
     )
 
     task_message_dispatcher = providers.Singleton(
