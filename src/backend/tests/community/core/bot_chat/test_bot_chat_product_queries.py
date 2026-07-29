@@ -301,6 +301,13 @@ def test_group_query_normalizes_session_key_and_returns_optional_labels():
                 env=get_current_env(),
             )
         )
+    repo.upsert_biz_refs(
+        {
+            "biz_scene": "scene_fixture",
+            "biz_task_id": "task_fixture",
+            "refs": [{"ref_type": "trace_id", "ref_value": "trace_group"}],
+        }
+    )
 
     rows, total = repo.list_ocb_traces(
         owner_id="user_fixture",
@@ -324,6 +331,8 @@ def test_group_query_normalizes_session_key_and_returns_optional_labels():
     assert detail_row.group_id == "group_fixture"
     assert detail_row.session_kind == "chat"
     assert detail_row.bot_name == "Fixture Bot"
+    assert detail_row.biz_scene == "scene_fixture"
+    assert detail_row.biz_task_id == "task_fixture"
 
 
 def test_group_query_supports_multiple_sessions_and_existing_agent_prefix():
@@ -509,6 +518,141 @@ def test_task_label_enrichment_preserves_direct_trace_values():
     assert total == 1
     assert rows[0].biz_scene == "direct_scene"
     assert rows[0].biz_task_id == "direct_task"
+
+
+@pytest.mark.parametrize(
+    ("stored_scene", "stored_task", "expected_scene", "expected_task"),
+    [
+        ("shared_scene", None, "shared_scene", "compatible_task"),
+        (None, "shared_task", "compatible_scene", "shared_task"),
+    ],
+)
+def test_partial_task_fields_only_use_a_compatible_relation(
+    stored_scene, stored_task, expected_scene, expected_task
+):
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    refs = [{"ref_type": "trace_id", "ref_value": "trace_partial"}]
+    compatible = (
+        ("shared_scene", "compatible_task")
+        if stored_scene
+        else ("compatible_scene", "shared_task")
+    )
+    for scene, task in (compatible, ("conflicting_scene", "conflicting_task")):
+        repo.upsert_biz_refs(
+            {"biz_scene": scene, "biz_task_id": task, "refs": refs}
+        )
+    row = SimpleNamespace(
+        id="trace_partial",
+        trace_id="trace_partial",
+        session_id=None,
+        session_key=None,
+        biz_scene=stored_scene,
+        biz_task_id=stored_task,
+        match_sources=[],
+    )
+
+    with db.orm_session() as session:
+        enrich_task_labels(session, [row])
+
+    assert (row.biz_scene, row.biz_task_id) == (expected_scene, expected_task)
+
+
+def test_partial_task_fields_do_not_mix_with_a_conflicting_relation():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    repo.upsert_biz_refs(
+        {
+            "biz_scene": "other_scene",
+            "biz_task_id": "other_task",
+            "refs": [{"ref_type": "trace_id", "ref_value": "trace_conflict"}],
+        }
+    )
+    row = SimpleNamespace(
+        id="trace_conflict",
+        trace_id="trace_conflict",
+        session_id=None,
+        session_key=None,
+        biz_scene="stored_scene",
+        biz_task_id=None,
+        match_sources=[],
+    )
+
+    with db.orm_session() as session:
+        enrich_task_labels(session, [row])
+
+    assert (row.biz_scene, row.biz_task_id) == ("stored_scene", None)
+
+
+def test_preferred_biz_ref_replaces_a_conflicting_partial_task():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    repo.upsert_biz_refs(
+        {
+            "biz_scene": "requested_scene",
+            "biz_task_id": "requested_task",
+            "refs": [{"ref_type": "trace_id", "ref_value": "trace_preferred"}],
+        }
+    )
+    row = SimpleNamespace(
+        id="trace_preferred",
+        trace_id="trace_preferred",
+        session_id=None,
+        session_key=None,
+        biz_scene="stale_scene",
+        biz_task_id=None,
+        match_sources=["biz_ref"],
+    )
+
+    with db.orm_session() as session:
+        enrich_task_labels(
+            session,
+            [row],
+            preferred_biz_scene="requested_scene",
+            preferred_biz_task_id="requested_task",
+        )
+
+    assert (row.biz_scene, row.biz_task_id) == (
+        "requested_scene",
+        "requested_task",
+    )
+
+
+def test_task_query_prefers_the_relation_named_by_the_request():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    _write_trace(
+        repo,
+        trace_id="trace_multi_task",
+        session_id="session_multi_task",
+        session_key="agent:main:session_multi_task",
+    )
+    for scene, task in (
+        ("requested_scene", "requested_task"),
+        ("newer_scene", "newer_task"),
+    ):
+        repo.upsert_biz_refs(
+            {
+                "biz_scene": scene,
+                "biz_task_id": task,
+                "refs": [{"ref_type": "trace_id", "ref_value": "trace_multi_task"}],
+            }
+        )
+
+    rows, total = repo.list_ocb_traces(
+        owner_id="user_fixture",
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+        biz_scene="requested_scene",
+        biz_task_id="requested_task",
+    )
+
+    assert total == 1
+    assert rows[0].biz_scene == "requested_scene"
+    assert rows[0].biz_task_id == "requested_task"
+    assert rows[0].match_sources == ["biz_ref"]
 
 
 def test_group_query_supports_legacy_trace_storage():
