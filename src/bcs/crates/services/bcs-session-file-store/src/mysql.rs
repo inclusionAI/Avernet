@@ -34,7 +34,7 @@ const SELECT_BASE_COLS: &str = "file_id, session_id, file_name, mime_type, size,
 /// DB-managed `gmt_create`/`gmt_modified` audit timestamps. The domain fields
 /// are projected from those on read (epoch seconds) in a flavor-aware way
 /// (`UNIX_TIMESTAMP` on MySQL, `strftime('%s', …)` on SQLite), and `list`
-/// orders by `gmt_create`. `json_extract` is lowercase for MySQL/SQLite
+/// orders by `gmt_create DESC` (newest uploads first). `json_extract` is lowercase for MySQL/SQLite
 /// portability, so the dialect branches are the timestamp projection and the
 /// `expires_at` JSON cast (`... AS SIGNED` on MySQL, `... AS INTEGER` on SQLite).
 #[derive(Clone)]
@@ -405,7 +405,7 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         let page_sql = format!(
             "SELECT {} FROM bcs_session_files \
              WHERE {where_clause} \
-             ORDER BY gmt_create, file_id LIMIT ? OFFSET ?",
+             ORDER BY gmt_create DESC, file_id DESC LIMIT ? OFFSET ?",
             self.select_cols()
         );
 
