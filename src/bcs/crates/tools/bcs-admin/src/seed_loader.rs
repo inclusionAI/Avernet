@@ -359,7 +359,7 @@ mod tests {
                 ["assignee"],
             serde_json::json!({
                 "type": "runtime_actor",
-                "actor": "human_1001",
+                "actor": "$authenticated_human",
             })
         );
         assert_eq!(
