@@ -3,7 +3,7 @@
 ## 范围
 
 - Worktree / repo: `refactor-session-file-sharing-rel20260728` / `inclusionAI/Avernet`
-- Head / base: `refactor/session-file-sharing-rel20260728` (`cf2ae463`, local) / `dev` (`79569738`)
+- Head / base: `refactor/session-file-sharing-rel20260728` (`b147dcd2`, remote) / `dev` (`79569738`)
 - PR: https://github.com/inclusionAI/Avernet/pull/544
 - 人工意见模式: auto
 
@@ -28,6 +28,7 @@
 | Backend unit tests（远端旧 head `b4298071`） | FAIL | [job](https://github.com/inclusionAI/Avernet/actions/runs/30419454262/job/90473051382) | coverage gate 缺少 `GET /api/session-resources/{resource_id}/content` 的 happy/error endpoint case。 | `cf2ae463` 已在本地补齐真实 DI 的成功、文件缺失重物化场景。 | 远端日志：9159 passed / 1 failed |
 | Backend unit tests（本地复验） | PASS | `scripts/ci_test.sh` + `report_check.py` | N/A | `cf2ae463` | 9128/9128 passed；总行覆盖 84.02%；变更行覆盖 82.33%（阈值 80%） |
 | BCS e2e、Singlebox coverage、BCS/Engine/BaaS/Gateway unit tests（远端旧 head `b4298071`） | PASS | [PR checks](https://github.com/inclusionAI/Avernet/pull/544/checks) | N/A | N/A | 2026-07-29 GitHub API |
+| 全部远端门禁（当前 head `b147dcd2`） | PENDING | [PR checks](https://github.com/inclusionAI/Avernet/pull/544/checks) | GitHub Actions 已创建 7 个 job，均为 `QUEUED`。 | `cf2ae463`、`b147dcd2` 已推送。 | 2026-07-29 GitHub API 复查 |
 
 ## 人工意见
 
@@ -39,6 +40,6 @@
 
 - PR: OPEN
 - 自动意见: CLEAR
-- ACI/CI: PENDING（远端仍是旧 head `b4298071`，其 Backend unit job 已失败；`cf2ae463` 尚未推送）
+- ACI/CI: PENDING（当前 head `b147dcd2` 的 7 个远端 job 已创建，均在排队）
 - 人工意见: CLEAR（已本地采纳；按流程未 resolve thread 或回复评论）
-- 下一步: 提交本报告并推送 `cf2ae463`，随后复核新 head 的自动意见与全部远端门禁。
+- 下一步: 观察当前 head 的远端门禁结果，并继续复核新增自动/人工意见。
