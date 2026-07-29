@@ -75,11 +75,13 @@ def test_openapi_v1_resources_link_lifecycle(live_backend):
         got = _assert_ok(client.get(f"/openapi/v1/bots/resources/{rid}?bot_id={bot_id}"))
         assert got["resource_id"] == rid
 
-        # --- check-name (taken) ---
+        # --- check-name (taken — don't filter by type: openapi LINK is
+        #     written as legacy URL by create_url_resource, so filtering by
+        #     type=link would miss it across the URL↔LINK divide) ---
         checked = _assert_ok(
             client.get(
                 f"/openapi/v1/bots/resources/check-name?bot_id={bot_id}"
-                f"&name=openapi-link&type=link"
+                f"&name=openapi-link"
             )
         )
         # NameCheck shape: {name, exists}
