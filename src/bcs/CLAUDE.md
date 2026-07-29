@@ -176,12 +176,16 @@ Bots have a `created_by` field set during onboard when a user identity is availa
 - `DELETE /bots/{id}`, `POST /bots/status`, `POST /bots/{id}/chat`
 - `POST /groups/request`, `POST /groups`, `POST /groups/{id}/members`
 - `DELETE /groups/{id}`, `POST /groups/{id}/chat`
+- `POST /sessions/{id}/state-machine-runs` requires an authenticated Bot and
+  delegates current-session authorization to the collaboration runtime
 
 ### Unprotected Endpoints (read-only)
 - `GET /bots`, `GET /bots/{id}`, `GET /bots/discover`
 
 ### Authenticated Endpoints (read-only)
 - `GET /groups/my` lists formal group memberships for the authenticated human or bot; session-only memberships are excluded
+- `GET /sessions/{id}/state-machine-permission` returns the server-owned
+  authorization decision for the authenticated Bot
 
 ### Database Migration
 ```sql
@@ -343,7 +347,7 @@ Repo/store placement:
 
 ## BCS Coordination Skill
 
-Bots integrate with BCS via the `bcs-coordination` skill located at `crates/tools/bcs-cli/SKILL.md`:
+Bots integrate with BCS via the `bcs-coordination` skill located at `crates/tools/bcs-cli/bcs-coordination/SKILL.md`:
 - `bcs-cli onboard` - Register bot capabilities
 - `bcs-cli request-group-help --topic "协作主题"` - Request group collaboration
 - `bcs-cli fuse` - Fuse contexts from participants
@@ -378,6 +382,8 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/groups/{token}/confirm` | POST | Confirm proposal and create group |
 | `/groups` | POST | Create group directly |
 | `/collaboration/definitions/validate` | POST | Validate custom collaboration YAML |
+| `/sessions/{id}/state-machine-permission` | GET | Query whether the authenticated Bot may run a one-shot state machine in the current session |
+| `/sessions/{id}/state-machine-runs` | POST | Submit authoring YAML, transient role bindings, and input for one one-shot run |
 | `/groups` | GET | List all groups |
 | `/groups/my` | GET | List formal groups for the authenticated human or bot |
 | `/groups/{id}` | GET | Get group details |
@@ -513,6 +519,12 @@ bcs-cli create-group --manager zhangsan --participants "lisi,wangwu"
 bcs-cli collaboration validate workflow.yaml
 bcs-cli collaboration create workflow.yaml --driver zhangsan \
   --binding planner=zhangsan --binding reviewer=lisi
+
+# Query server permission, then run YAML once in the current chat session
+bcs-cli collaborate permission --session <session_id>
+bcs-cli collaborate run workflow.yaml --session <session_id> \
+  --binding planner=zhangsan --binding reviewer=lisi \
+  --input '{"question":"resolve the current issue"}'
 
 # Fuse contexts
 bcs-cli fuse --group <group_id> --question "如何协调？" --participants bot1,bot2

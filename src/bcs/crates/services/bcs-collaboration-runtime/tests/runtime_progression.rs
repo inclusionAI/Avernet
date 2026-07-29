@@ -11,26 +11,33 @@ use bcs_collaboration_runtime::CollaborationRuntime;
 use bcs_collaboration_store::MemoryCollaborationStore;
 use bcs_domain::{
     ActorKind, CollaborationDefinition, CollaborationDefinitionRef, Group, GroupMessageType,
-    MessageRole, Participant, ParticipantMode, ParticipantRole, ResolvedParticipantBinding,
-    RuntimeParticipantBinding, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
+    GroupStrategy, MessageRole, Participant, ParticipantMode, ParticipantRole,
+    ResolvedParticipantBinding, RuntimeParticipantBinding, SessionStatus, StateMachineNodeStatus,
+    StateMachineRun, StateMachineRunStatus,
 };
 use bcs_group::GroupStore;
 use bcs_group_store::MemoryGroupRepo;
+use bcs_message_store::MemoryMessageRepo;
 use bcs_protocol::{BcsFrame, ChatSendParams};
+use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, ChatEventState,
     CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, DefinitionYamlSource, FrontendDeliveryCommand,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
+    GroupRuntimeBindingRepoPort,
     HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanInputReadyEvent,
     HumanResponseSource, HumanRunAccessCommand, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
     ListPendingHumanNodesCommand, PatchGroupCollaborationDefinitionCommand,
     RespondHumanNodeCommand, RespondHumanNodeOutcome, ServiceError, ServiceResult, ServiceSpec,
     SessionChannelDeliveryOutcome, SessionChannelOutboundPort, SessionManagementService,
+    SessionStateMachinePermissionCommand, StartSessionStateMachineRunCommand,
     StartStateMachineRunCommand, StateMachineDefinitionRepoPort, StateMachineNodeSubStatus,
+    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
     StateMachineRunAccessCommand, StateMachineRunRepoPort,
 };
+use bcs_domain::{MessageOwnerFilter, MessageQuery, STATE_MACHINE_PANEL_MESSAGE_TYPE};
 use bcs_service_api::{CreateOrReactivateCommand, NewSessionParams, SessionKind};
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -161,6 +168,421 @@ fn assert_inferred_default_requires(definition: &CollaborationDefinition) {
 }
 
 #[tokio::test]
+async fn current_session_permission_is_owned_by_chat_and_manager_group_driver() {
+    let group_store = Arc::new(GroupStore::new());
+    let chat_group = session_collaboration_group(GroupStrategy::Chat);
+    group_store
+        .upsert(chat_group.clone())
+        .await
+        .expect("seed chat group");
+    let sessions = test_sessions();
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: chat_group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: chat_group.participants.clone(),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed chat session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group_store.clone(),
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    );
+
+    let chat_owner = runtime
+        .get_session_state_machine_permission(SessionStateMachinePermissionCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+        })
+        .await
+        .expect("query chat owner permission");
+    assert!(chat_owner.allowed);
+    assert_eq!(chat_owner.reason_code, "allowed");
+    assert_eq!(chat_owner.group_strategy, "chat");
+    assert_eq!(chat_owner.group_owner_bot_id, "driver-bot");
+
+    let chat_member = runtime
+        .get_session_state_machine_permission(SessionStateMachinePermissionCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "worker-bot".to_string(),
+        })
+        .await
+        .expect("query chat member permission");
+    assert!(!chat_member.allowed);
+    assert_eq!(chat_member.reason_code, "caller_not_group_owner");
+    let bypass = runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "worker-bot".to_string(),
+            definition_yaml: one_shot_authoring_yaml(),
+            participant_bindings: BTreeMap::from([(
+                "writer".to_string(),
+                RuntimeParticipantBinding {
+                    source: "manual".to_string(),
+                    bot_ids: vec!["worker-bot".to_string()],
+                    extensions: Default::default(),
+                },
+            )]),
+            input: Value::Null,
+            judge_available: false,
+        })
+        .await
+        .expect_err("run start must re-check permission server-side");
+    assert!(matches!(
+        bypass,
+        CollaborationRuntimeError::Forbidden(message)
+            if message.contains("caller_not_group_owner")
+    ));
+
+    let manager_group = session_collaboration_group(GroupStrategy::ManagerWorker);
+    group_store
+        .upsert(manager_group)
+        .await
+        .expect("switch to manager-worker group");
+    let manager = runtime
+        .get_session_state_machine_permission(SessionStateMachinePermissionCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+        })
+        .await
+        .expect("query manager permission");
+    assert!(manager.allowed);
+    assert_eq!(manager.group_strategy, "manager_worker");
+
+    let state_machine_group = session_collaboration_group(GroupStrategy::StateMachine);
+    group_store
+        .upsert(state_machine_group)
+        .await
+        .expect("switch to state-machine group");
+    let unsupported = runtime
+        .get_session_state_machine_permission(SessionStateMachinePermissionCommand {
+            session_id: session.id,
+            caller_bot_id: "driver-bot".to_string(),
+        })
+        .await
+        .expect("query unsupported strategy");
+    assert!(!unsupported.allowed);
+    assert_eq!(unsupported.reason_code, "unsupported_group_strategy");
+}
+
+#[tokio::test]
+async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publishes_as_initiator() {
+    let group_store = Arc::new(GroupStore::new());
+    let group = test_group();
+    group_store
+        .upsert(group.clone())
+        .await
+        .expect("seed group");
+    let mut session_participants = group.participants.clone();
+    session_participants.push(Participant {
+        bot_uuid: "worker-bot".to_string(),
+        bot_name: Some("Worker".to_string()),
+        kind: None,
+        role: ParticipantRole::Consultant,
+        actor_kind: ActorKind::Bot,
+        mode: Some(ParticipantMode::Auto),
+    });
+    let sessions = test_sessions();
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: session_participants,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed chat session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
+    let result_publisher = Arc::new(RecordingResultPublisher::default());
+    let message_repo = Arc::new(MemoryMessageRepo::new());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        group_store,
+        sessions.clone(),
+        delivery.clone(),
+        noop_judge(),
+    )
+    .with_frontend_delivery(frontend_delivery.clone())
+    .with_message_repo(message_repo.clone())
+    .with_result_publisher(result_publisher.clone());
+
+    let started = runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_authoring_yaml(),
+            participant_bindings: BTreeMap::from([(
+                "writer".to_string(),
+                RuntimeParticipantBinding {
+                    source: "manual".to_string(),
+                    bot_ids: vec!["worker-bot".to_string()],
+                    extensions: Default::default(),
+                },
+            )]),
+            input: json!({"question": "resolve this"}),
+            judge_available: false,
+        })
+        .await
+        .expect("start one-shot run");
+
+    assert_eq!(started.view.run.session_id, session.id);
+    assert_eq!(started.view.run.created_by.as_deref(), Some("driver-bot"));
+    assert_eq!(
+        started.view.nodes[0].assignee_bot_id.as_deref(),
+        Some("worker-bot")
+    );
+    assert_eq!(delivery.commands.lock().await[0].target_bot_id(), "worker-bot");
+    assert!(
+        GroupRuntimeBindingRepoPort::get(&*store, "group-1")
+            .await
+            .expect("read persisted group binding")
+            .is_none(),
+        "one-shot role bindings must not mutate group runtime configuration"
+    );
+    assert!(
+        StateMachineDefinitionRepoPort::get(
+            &*store,
+            &started.view.run.definition_id,
+            started.view.run.definition_version,
+        )
+        .await
+        .expect("read global definition store")
+        .is_none(),
+        "one-shot inline YAML must not create a reusable global definition"
+    );
+    let run_snapshot = StateMachineDefinitionRepoPort::get_run_snapshot(
+        &*store,
+        &started.view.run.run_id,
+    )
+    .await
+    .expect("read one-shot run snapshot")
+    .expect("one-shot run snapshot");
+    assert_eq!(run_snapshot.id, started.view.run.definition_id);
+
+    let frontend_commands = frontend_delivery.commands.lock().await;
+    assert_eq!(frontend_commands.len(), 1);
+    let panel_event: Value =
+        serde_json::from_str(&frontend_commands[0].event_json).expect("panel event json");
+    let panel_text = panel_event["payload"]["message"]["content"][0]["text"]
+        .as_str()
+        .expect("panel AixUI text");
+    assert!(panel_text.contains("<AixUI"));
+    assert!(panel_text.contains("bcsPanel.StateMachineRunView"));
+    drop(frontend_commands);
+
+    let panel_history = message_repo
+        .query_messages(MessageQuery {
+            group_id: group.id.clone(),
+            session_id: session.id.clone(),
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: Some(STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string()),
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: None,
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query persisted panel history");
+    assert_eq!(panel_history.messages.len(), 1);
+    let persisted_panel = &panel_history.messages[0];
+    assert_eq!(
+        persisted_panel.client_msg_id.as_deref(),
+        Some(format!("{}:000-panel", started.view.run.run_id).as_str())
+    );
+    assert_eq!(
+        persisted_panel.content["metadata"]["state_machine"]["event"].as_str(),
+        Some("panel")
+    );
+    assert_eq!(
+        persisted_panel.content["metadata"]["state_machine"]["run_id"].as_str(),
+        Some(started.view.run.run_id.as_str())
+    );
+    assert_eq!(persisted_panel.content["text"].as_str(), Some(panel_text));
+
+    let while_running = runtime
+        .get_session_state_machine_permission(SessionStateMachinePermissionCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+        })
+        .await
+        .expect("query permission while run is active");
+    assert!(!while_running.allowed);
+    assert_eq!(while_running.reason_code, "state_machine_run_active");
+    assert_eq!(
+        while_running.active_run_id.as_deref(),
+        Some(started.view.run.run_id.as_str())
+    );
+
+    let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
+    let completed = runtime
+        .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
+            bot_id: "worker-bot".to_string(),
+            run_id: delivery_run_id.clone(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "run_id": delivery_run_id,
+                "bcs_group_id": "group-1",
+                "state": "final",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "resolved result"}]
+                }
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some(session.id.clone()),
+        })
+        .await
+        .expect("complete one-shot run");
+
+    let view = completed.view.expect("completed run view");
+    assert_eq!(view.run.status, StateMachineRunStatus::Completed);
+    assert_eq!(view.run.output.as_deref(), Some("resolved result"));
+    let publish_commands = result_publisher.commands.lock().await;
+    assert_eq!(publish_commands.len(), 1);
+    assert_eq!(publish_commands[0].run_id, view.run.run_id);
+    assert_eq!(publish_commands[0].group_id, "group-1");
+    assert_eq!(publish_commands[0].session_id, session.id);
+    assert_eq!(publish_commands[0].sender_bot_id, "driver-bot");
+    assert_eq!(publish_commands[0].content, "resolved result");
+    drop(publish_commands);
+
+    let preserved_session = sessions
+        .get(&session.id)
+        .await
+        .expect("read chat session")
+        .expect("chat session exists");
+    assert_eq!(preserved_session.status, SessionStatus::Running);
+}
+
+#[tokio::test]
+async fn one_shot_result_publication_failure_marks_run_failed_instead_of_completed() {
+    let group_store = Arc::new(GroupStore::new());
+    let group = test_group();
+    group_store
+        .upsert(group.clone())
+        .await
+        .expect("seed group");
+    let mut session_participants = group.participants.clone();
+    session_participants.push(Participant {
+        bot_uuid: "worker-bot".to_string(),
+        bot_name: Some("Worker".to_string()),
+        kind: None,
+        role: ParticipantRole::Consultant,
+        actor_kind: ActorKind::Bot,
+        mode: Some(ParticipantMode::Auto),
+    });
+    let sessions = test_sessions();
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: session_participants,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed chat session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group_store,
+        sessions.clone(),
+        delivery.clone(),
+        noop_judge(),
+    )
+    .with_message_repo(Arc::new(MemoryMessageRepo::new()))
+    .with_result_publisher(Arc::new(FailingResultPublisher));
+
+    let started = runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_authoring_yaml(),
+            participant_bindings: BTreeMap::from([(
+                "writer".to_string(),
+                RuntimeParticipantBinding {
+                    source: "manual".to_string(),
+                    bot_ids: vec!["worker-bot".to_string()],
+                    extensions: Default::default(),
+                },
+            )]),
+            input: json!({"question": "resolve this"}),
+            judge_available: false,
+        })
+        .await
+        .expect("start one-shot run");
+    let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
+    let completed = runtime
+        .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
+            bot_id: "worker-bot".to_string(),
+            run_id: delivery_run_id.clone(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "run_id": delivery_run_id,
+                "bcs_group_id": "group-1",
+                "state": "final",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "resolved result"}]
+                }
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some(session.id.clone()),
+        })
+        .await
+        .expect("terminal event returns failed run");
+
+    let view = completed.view.expect("failed run view");
+    assert_eq!(view.run.run_id, started.view.run.run_id);
+    assert_eq!(view.run.status, StateMachineRunStatus::Failed);
+    assert!(
+        view.run
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("result publication failed"))
+    );
+    assert_eq!(
+        sessions
+            .get(&session.id)
+            .await
+            .expect("read chat session")
+            .expect("chat session")
+            .status,
+        SessionStatus::Running
+    );
+}
+
+#[tokio::test]
 async fn human_input_without_authenticated_or_present_human_is_invalid_request() {
     let group = Arc::new(GroupStore::new());
     group
@@ -188,6 +610,7 @@ async fn human_input_without_authenticated_or_present_human_is_invalid_request()
             definition_yaml: Some(human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_untrusted".to_string()),
             authenticated_human: None,
@@ -246,6 +669,7 @@ async fn human_input_can_start_without_authenticated_human_when_session_has_pres
             definition_yaml: Some(human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("bot_driver".to_string()),
             authenticated_human: None,
@@ -300,6 +724,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
             definition_yaml: Some(human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("bot_driver".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -353,6 +778,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
             ),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("bot_driver".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -406,6 +832,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
             definition_yaml: Some(human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -610,6 +1037,7 @@ async fn frontend_human_input_skips_im_delivery_and_accepts_present_human() {
             definition_yaml: Some(frontend_human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "review in frontend"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -695,6 +1123,7 @@ async fn im_human_input_rejects_a_different_present_human() {
             definition_yaml: Some(human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "assigned review"}),
             caller_id: Some("bot_driver".to_string()),
             authenticated_human: None,
@@ -751,6 +1180,7 @@ async fn state_machine_session_rejects_message_without_pending_human_input() {
             definition_yaml: Some(single_node_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "wait for the bot"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -816,6 +1246,7 @@ async fn human_run_owner_can_cancel_through_human_access_api() {
             definition_yaml: Some(human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "cancel it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -880,6 +1311,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
             definition_yaml: Some(human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "validate errors"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -905,6 +1337,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
                 definition_yaml: Some(human_input_yaml()),
                 definition: None,
                 definition_ref: None,
+                participant_bindings: None,
                 input: json!({"proposal": "invalid start"}),
                 caller_id: Some("human_1001".to_string()),
                 authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1071,6 +1504,7 @@ async fn human_input_uses_the_same_judge_contract_as_bot_output() {
             definition_yaml: Some(judged_human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1122,6 +1556,7 @@ async fn human_input_is_persisted_and_no_longer_pending_while_judging() {
             definition_yaml: Some(judged_human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1213,6 +1648,7 @@ async fn human_input_remains_persisted_when_judge_fails() {
             definition_yaml: Some(judged_human_input_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1272,6 +1708,7 @@ async fn human_input_timeout_fails_run_without_bot_retry_and_rejects_late_respon
             definition_yaml: Some(human_input_yaml().replace("60000", "1")),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1338,6 +1775,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
             definition_yaml: Some(single_node_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "review this"}),
             caller_id: None,
             authenticated_human: None,
@@ -1603,6 +2041,7 @@ async fn start_run_fails_and_marks_node_failed_when_delivery_returns_not_deliver
             definition_yaml: Some(single_node_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "review this"}),
             caller_id: None,
             authenticated_human: None,
@@ -1665,6 +2104,7 @@ async fn message_less_final_fails_attempt_and_schedules_retry() {
             definition_yaml: Some(single_node_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "empty final should retry"}),
             caller_id: None,
             authenticated_human: None,
@@ -1777,6 +2217,7 @@ async fn state_machine_completion_dispatches_service_callback() {
             definition_yaml: Some(single_node_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "callback after completion"}),
             caller_id: None,
             authenticated_human: None,
@@ -1828,6 +2269,7 @@ async fn state_machine_runtime_logs_run_node_and_terminal_lifecycle() {
                 definition_yaml: Some(single_node_yaml()),
                 definition: None,
                 definition_ref: None,
+                participant_bindings: None,
                 input: json!({"question": "logging"}),
                 caller_id: Some("caller-1".to_string()),
                 authenticated_human: None,
@@ -1927,6 +2369,7 @@ async fn start_run_uses_group_default_definition_binding() {
             definition_yaml: None,
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "use binding"}),
             caller_id: None,
             authenticated_human: None,
@@ -2214,6 +2657,7 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
     let backing_store = Arc::new(MemoryCollaborationStore::new());
     let definitions = Arc::new(CountingDefinitionRepo::new(backing_store.clone()));
     let delivery = Arc::new(RecordingDelivery::default());
+    let message_repo = Arc::new(MemoryMessageRepo::new());
     let runtime = CollaborationRuntime::new(
         definitions.clone(),
         backing_store.clone(),
@@ -2223,7 +2667,8 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
         sessions,
         delivery.clone(),
         noop_judge(),
-    );
+    )
+    .with_message_repo(message_repo.clone());
 
     runtime
         .configure_group_runtime(ConfigureGroupRuntimeCommand {
@@ -2245,6 +2690,7 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
             definition_yaml: None,
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "use binding without rewriting definition"}),
             caller_id: None,
             authenticated_human: None,
@@ -2265,6 +2711,25 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
             .expect("run snapshot");
     assert_inferred_default_requires(&snapshot);
     assert_eq!(delivery.commands.lock().await.len(), 1);
+    let panels = message_repo
+        .query_messages(MessageQuery {
+            group_id: "group-1".to_string(),
+            session_id: started.view.run.session_id.clone(),
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: Some(STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string()),
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: None,
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query generic run panel anchors");
+    assert!(
+        panels.messages.is_empty(),
+        "configured service-invocation runs must not write chat panel anchors"
+    );
 }
 
 #[tokio::test]
@@ -2311,6 +2776,7 @@ async fn start_run_uses_group_participant_bindings_for_template_definition() {
             definition_yaml: None,
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "use participant binding"}),
             caller_id: None,
             authenticated_human: None,
@@ -2378,6 +2844,7 @@ async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime()
             definition_yaml: None,
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "multi"}),
             caller_id: None,
             authenticated_human: None,
@@ -2413,6 +2880,7 @@ async fn graph_view_returns_snapshot_edges_and_node_status() {
             definition_yaml: Some(join_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "graph"}),
             caller_id: None,
             authenticated_human: None,
@@ -2484,6 +2952,7 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
             definition_yaml: Some(join_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "join"}),
             caller_id: None,
             authenticated_human: None,
@@ -2558,6 +3027,7 @@ async fn judged_node_routes_selected_outcome_and_skips_unselected_branch() {
             definition_yaml: Some(judge_branch_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
@@ -2647,6 +3117,7 @@ async fn judged_node_publishes_bot_output_but_not_judge_message_to_workbench() {
             definition_yaml: Some(judge_branch_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
@@ -2711,6 +3182,7 @@ async fn judged_node_failure_records_runtime_event_and_fails_run() {
             definition_yaml: Some(judge_branch_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
@@ -2790,6 +3262,7 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
             definition_yaml: Some(judge_timeout_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
@@ -2865,6 +3338,7 @@ async fn judged_node_keeps_shared_merge_reachable_from_selected_branch() {
             definition_yaml: Some(judge_shared_merge_yaml()),
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: json!({"question": "judge shared merge"}),
             caller_id: None,
             authenticated_human: None,
@@ -3149,6 +3623,36 @@ impl FrontendDeliveryPort for RecordingFrontendDelivery {
     }
 }
 
+#[derive(Default)]
+struct RecordingResultPublisher {
+    commands: Mutex<Vec<StateMachineResultPublishCommand>>,
+}
+
+#[async_trait]
+impl StateMachineResultPublisherPort for RecordingResultPublisher {
+    async fn publish_state_machine_result(
+        &self,
+        cmd: StateMachineResultPublishCommand,
+    ) -> ServiceResult<()> {
+        self.commands.lock().await.push(cmd);
+        Ok(())
+    }
+}
+
+struct FailingResultPublisher;
+
+#[async_trait]
+impl StateMachineResultPublisherPort for FailingResultPublisher {
+    async fn publish_state_machine_result(
+        &self,
+        _cmd: StateMachineResultPublishCommand,
+    ) -> ServiceResult<()> {
+        Err(ServiceError::InternalError(
+            "simulated result persistence failure".to_string(),
+        ))
+    }
+}
+
 fn chat_send_params(command: &BotDeliveryCommand) -> ChatSendParams {
     match &command.frame {
         BcsFrame::Request(request) => {
@@ -3175,10 +3679,69 @@ fn test_group() -> Group {
     )
 }
 
+fn session_collaboration_group(strategy: GroupStrategy) -> Group {
+    let mut group = Group::new(
+        "group-1",
+        "driver-bot",
+        vec![
+            Participant {
+                bot_uuid: "driver-bot".to_string(),
+                bot_name: Some("Driver".to_string()),
+                kind: None,
+                role: match strategy {
+                    GroupStrategy::ManagerWorker => ParticipantRole::Manager,
+                    GroupStrategy::Chat | GroupStrategy::StateMachine => ParticipantRole::Driver,
+                },
+                actor_kind: ActorKind::Bot,
+                mode: Some(ParticipantMode::Auto),
+            },
+            Participant {
+                bot_uuid: "worker-bot".to_string(),
+                bot_name: Some("Worker".to_string()),
+                kind: None,
+                role: match strategy {
+                    GroupStrategy::ManagerWorker => ParticipantRole::Worker,
+                    GroupStrategy::Chat | GroupStrategy::StateMachine => {
+                        ParticipantRole::Consultant
+                    }
+                },
+                actor_kind: ActorKind::Bot,
+                mode: Some(ParticipantMode::Auto),
+            },
+        ],
+    );
+    group.group_strategy = strategy;
+    group
+}
+
 fn state_machine_test_group() -> Group {
     let mut group = test_group();
-    group.group_strategy = bcs_domain::GroupStrategy::StateMachine;
+    group.group_strategy = GroupStrategy::StateMachine;
     group
+}
+
+fn one_shot_authoring_yaml() -> String {
+    r#"
+name: One Shot
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      answer:
+        kind: bot_task
+        display_name: Answer
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Answer the current question.
+        final_output: true
+"#
+    .to_string()
 }
 
 fn single_node_yaml() -> String {

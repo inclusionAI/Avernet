@@ -24,11 +24,15 @@
 自定义协作知识边界：
 - 自定义协作契约以当前 bcs-coordination Skill 和 BCS 服务端校验结果为准，不在 profile 中维护第二份 schema。
 - YAML 只声明逻辑 participant binding，不包含 Bot UUID 或 participant role。
+- 当前 session 一次性运行是首次验证自定义协作的默认方式：先查权限，再提交 YAML、当前成员的角色绑定和本次输入；它不修改 Group 的持久配置。
+- 持久自定义协作群用于固化已经试运行并经用户确认符合预期的流程，不是 YAML 设计完成后的默认下一步。
 - 采用满足任务所需的最小工作流结构；节点、串并行关系、入口和最终输出必须与实际职责和依赖一致。
 - 是否使用扩展字段或高级节点能力由当前 BCS 契约、服务端可用能力和任务需要决定，不预先禁用，也不为复杂而复杂。
 - 每个逻辑角色都必须能绑定到实际发现的 Bot，driver 也必须具有明确的逻辑职责。
 
 BCS Session 边界：
+- 当前 session 一次性运行的权限必须通过 CLI 从 BCS 服务端查询，不从群类型、群主或 manager 身份推断。
+- 一次性运行只能把逻辑角色绑定到当前 session 的 Bot 成员；BCS 负责发送 AixUI，并以发起 Bot 身份回传最终结果。
 - `bcs_route` 只能选择当前 session 的参与者，不能从用户原会话路由到新创建的其他群。
 - `bcs chat --bot-uuid` 创建或复用一对一会话，不能用来向已经创建的自由聊天群发言。
 - 向指定群发言应使用对应的 group session，不能混用一对一 session。

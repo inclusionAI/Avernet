@@ -34,41 +34,28 @@ allowed-tools:
 本技能不安装内部依赖，也不假设公司网络。执行任何 BCS 命令前，先确认：
 
 - `bcs-cli` 已安装并在 `PATH` 中
-- `BOT_DATA_DIR` 指向当前 Bot 的数据目录
+- 保留运行环境已有的 `BOT_DATA_DIR`；未设置时优先使用当前 Bot 的 `OPENCLAW_DATA_DIR`，最后才回退到单 Bot 默认目录 `$HOME/.openclaw`
 - `BCS_API_BASE_URL` 指向 BCS HTTP API；未设置时使用本地默认 `http://127.0.0.1:21000`
 
 ```bash
-export BOT_DATA_DIR="${BOT_DATA_DIR:-$HOME/.openclaw}"
+export BOT_DATA_DIR="${BOT_DATA_DIR:-${OPENCLAW_DATA_DIR:-$HOME/.openclaw}}"
 export BCS_API_BASE_URL="${BCS_API_BASE_URL:-http://127.0.0.1:21000}"
 
 bcs() {
-  if [ -n "${BCS_BOT_TOKEN:-}" ]; then
-    BOT_DATA_DIR="$BOT_DATA_DIR" BCN_BOT_TOKEN="$BCS_BOT_TOKEN" bcs-cli --url "$BCS_API_BASE_URL" "$@"
-  else
-    BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" "$@"
-  fi
+  BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" "$@"
 }
 ```
 
-### Token 自动发现
+不得把上述回退改写为 `BOT_DATA_DIR="$HOME/.openclaw"`。这种写法会覆盖 singlebox 等多 Bot 运行环境为当前 Bot 注入的隔离目录，导致使用其他 Bot 的身份。
 
-本技能会按以下顺序查找 token：
+### 认证与 Token
 
-1. `--token` 显式参数：需要手动覆盖时，把它放在 `collaboration` 命令之后，例如 `bcs-cli --url "$BCS_API_BASE_URL" collaboration --token "<token>" create workflow.yaml ...`
-2. `BCS_BOT_TOKEN` 环境变量：由上面的 `bcs` 包装函数传给 CLI 支持的 `BCN_BOT_TOKEN`
-3. `$BOT_DATA_DIR/.bcs/session.json`：由 `bcs connect` 或 WebSocket channel 写入
+- 直接运行 `bcs-cli`，由 CLI 使用运行环境已有的 `BCN_BOT_TOKEN`，或从当前 `$BOT_DATA_DIR/.bcs/session.json` 读取认证信息。
+- 不主动查找、读取、复制、打印或拼接 token；不要创建 `TOKEN`、`TOKEN2` 等临时变量。
+- 不设置 `BCN_BOT_TOKEN` 或 `BCS_BOT_TOKEN`，也不传 `--token`。只有用户明确要求人工调试并直接提供 token 时，才允许按用户指定方式覆盖。
+- session 文件由 WebSocket channel 或 `bcs connect` 管理。不要遍历其他 OpenClaw 目录寻找 session 文件。
 
-### 会话文件示例
-
-`$BOT_DATA_DIR/.bcs/session.json` 可以包含：
-
-```json
-{
-  "bot_uuid": "bot-demo",
-  "token": "replace-with-bot-token",
-  "bcs_url": "http://127.0.0.1:21000"
-}
-```
+正常 Bot 运行时只需保证 `BOT_DATA_DIR` 指向当前 Bot；认证发现由 CLI 完成，skill 不接触 token 内容。
 
 ---
 
@@ -81,6 +68,7 @@ bcs health
 bcs list
 bcs request-group-help --topic "数据库死锁排查，需要DBA专家"
 bcs collaboration validate /path/to/workflow.yaml
+bcs collaborate permission --session "$current_bcs_session_id"
 ```
 
 若不使用 shell 函数，等价写法为：
@@ -108,12 +96,12 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 | session | 同一 Group 内管理多个独立对话/并发，即同一个 Group 配置实例化出多个 Session | [references/session.md](references/session.md) |
 | session-file | 会话工作区文件上传/下载/分享/列/删 | [references/session-file.md](references/session-file.md) |
 | service | 把 Group 当成服务对外暴露，带鉴权和 callback                    | [references/service.md](references/service.md) |
-| custom-collaboration | 自定义参与角色、步骤、串并行关系和最终交付物；产品名称统一为“自定义协作”，技术实现为 `state_machine` | [references/custom-collaboration.md](references/custom-collaboration.md) |
+| custom-collaboration | 在当前 session 一次性运行，或新建持久群；自定义参与角色、步骤、串并行关系和最终交付物，技术实现为 `state_machine` | [references/custom-collaboration.md](references/custom-collaboration.md) |
 
 处理自定义协作时，还需按任务直接读取以下资料：
 
 - 编写或修改 YAML：读取 [references/custom-collaboration-schema.md](references/custom-collaboration-schema.md)。
-- 校验 YAML 与新建自定义协作群：严格执行 [references/custom-collaboration.md](references/custom-collaboration.md) 中的 CLI 流程。
+- 当前 session 一次性运行，或校验 YAML 与新建自定义协作群：严格执行 [references/custom-collaboration.md](references/custom-collaboration.md) 中对应的 CLI 流程。
 
 ---
 
@@ -151,9 +139,9 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 
 ## 注意事项
 
-1. **Token 自动发现**: 优先使用 `BCS_BOT_TOKEN`，否则从 `$BOT_DATA_DIR/.bcs/session.json` 读取
-2. **安全约束**: `BOT_DATA_DIR` 环境变量必须显式设置，不允许回退到当前目录
-3. **当前 Bot UUID**: 需要 `--collaborate-bot` 时，使用运行环境提供的 `BCS_BOT_UUID`，或读取 `$BOT_DATA_DIR/.bcs/session.json` 中的 `bot_uuid`
+1. **Token 由 CLI 管理**: 不读取或传递 token；直接运行 CLI，让它使用已有环境或当前 `$BOT_DATA_DIR/.bcs/session.json`
+2. **身份目录不覆盖**: 保留已有 `BOT_DATA_DIR`；仅在未设置时依次回退到 `OPENCLAW_DATA_DIR`、`$HOME/.openclaw`，不得搜索其他目录
+3. **当前 Bot UUID**: 需要 `--collaborate-bot` 时，优先使用运行环境提供的 `BCN_BOT_UUID`；否则只读取当前 `$BOT_DATA_DIR/.bcs/session.json` 的 `bot_uuid` 字段，不得输出 token
 4. **Bot UUID 自动分配**: BCS 自动分配 bot_uuid，不可自行指定
 5. **及时确认**: `confirm_url` 有效期为10分钟
 6. **尊重专长**: 不要强迫其他Bot接受超出其能力范围的任务
@@ -161,3 +149,5 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 8. **返回群聊入口**: 建群响应包含 `chat_url` 时，必须立即把可点击的群聊入口提供给用户，不能只保留在工具输出中
 9. **保留默认会话**: 建群响应包含 `session_id` 时，保留它供后续 BCS Session 操作使用。若运行环境使用 `sessions_send`，先通过会话列表找到与该 BCS `session_id` 对应的完整 `sessionKey`，并以 `sessionKey` 发送；不得把 Bot 名称作为 `agentId` 代替会话定位。无法解析或看不到目标会话时，使用 `bcs session chat --session "$session_id" --message "..."`
 10. **明确建群授权**: 自定义协作 YAML 校验通过但用户尚未明确要求建群时，必须用问句请求确认，例如：“是否现在按以上 YAML 创建自定义协作群？回复‘确认创建’后我将建群并返回群聊入口。”不得只用“如需创建……”模糊收尾。用户已经明确要求创建时，不重复确认
+11. **当前会话权限以服务端为准**: 成员决定在当前 session 使用状态机时，必须先执行 `bcs collaborate permission --session "$session_id"` 并读取 `allowed`。不得根据当前 Bot 的群角色、群类型或历史权限自行推断；`allowed: false` 时停止提交 YAML，并向群里说明服务端返回的 `reason_code` 和 `message`
+12. **一次性结果不重复转发**: `bcs collaborate run` 成功提交后，BCS 会发送 AixUI 副屏消息，并在完成时以发起 Bot 身份把最终结果发回原群。发起 Bot 不得再手工复制或转发同一结果
