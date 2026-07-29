@@ -623,8 +623,16 @@ bcs_cli() {
     fi
     command_path="$sub"
     case "$sub" in
-        friend|channel|visibility|session|service|collaboration)
+        friend|channel|visibility|session|service|collaboration|collaborate)
             [[ -n "$nested" && "$nested" != -* ]] && command_path="$sub $nested"
+            ;;
+    esac
+    # Clap exposes `collaborate` as a visible alias of the canonical
+    # `collaboration` command. The coverage inventory intentionally excludes
+    # aliases, so normalize real alias invocations to the canonical leaf path.
+    case "$command_path" in
+        collaborate|collaborate\ *)
+            command_path="collaboration${command_path#collaborate}"
             ;;
     esac
     # `session file <leaf>` is a 3-level command tree (session -> file ->
