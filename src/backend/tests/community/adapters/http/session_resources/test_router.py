@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
 
 from fastapi import HTTPException
@@ -9,6 +10,7 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.session_resources.router import (
     materialize_status,
     materialized_callback,
+    stream_content,
 )
 from agentclaw.community.adapters.http.session_resources.schemas import (
     MaterializedCallbackRequest,
@@ -16,6 +18,9 @@ from agentclaw.community.adapters.http.session_resources.schemas import (
 from agentclaw.community.core.session_resources.types import (
     SessionResourceRecord,
     SessionResourceStatus,
+)
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterStreamResponse,
 )
 
 
@@ -52,6 +57,31 @@ class _Service:
     def materialized_callback(self, **kwargs):
         self.callback_kwargs = kwargs
         return replace(_record(), status=SessionResourceStatus.READY)
+
+    async def open_content(self, **kwargs):
+        self.content_kwargs = kwargs
+
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"hello"
+
+        async def close() -> None:
+            self.content_closed = True
+
+        self.content_closed = False
+        return (
+            replace(_record(), status=SessionResourceStatus.READY),
+            DeviceAdapterStreamResponse(
+                status_code=200,
+                headers={
+                    "content-type": "text/plain",
+                    "content-length": "5",
+                    "content-disposition": 'inline; filename="a.txt"',
+                    "x-internal-token": "hidden",
+                },
+                body=chunks(),
+                close=close,
+            ),
+        )
 
 
 @pytest.mark.asyncio
@@ -120,3 +150,25 @@ async def test_callback_rejects_wrong_task_capability():
         )
 
     assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_content_proxies_only_safe_headers_and_closes_upstream():
+    service = _Service()
+    user = AuthenticatedUser("id", "owner-1", "owner-1")
+
+    response = await stream_content(
+        "sr_001",
+        "bot-1",
+        "session-raw",
+        disposition="inline",
+        user=user,
+        service=service,
+    )
+
+    assert service.content_kwargs["disposition"] == "inline"
+    assert response.headers["content-type"] == "text/plain"
+    assert response.headers["content-length"] == "5"
+    assert "x-internal-token" not in response.headers
+    assert [chunk async for chunk in response.body_iterator] == [b"hello"]
+    assert service.content_closed is True

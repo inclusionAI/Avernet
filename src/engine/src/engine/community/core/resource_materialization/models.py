@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -19,10 +21,25 @@ class MaterializationRequest(BaseModel):
     task_version: int = Field(ge=1)
     scope_key_hash: str = Field(min_length=1, max_length=128)
     session_key_hash: str = Field(min_length=1, max_length=128)
-    device_path: str = Field(min_length=1, max_length=2048)
+    transfer_api_version: Literal["session_v2", "bot_device_v1"] = "bot_device_v1"
+    tenant: str | None = Field(default=None, min_length=1, max_length=128)
+    session_id: str | None = Field(default=None, min_length=1, max_length=2048)
+    workspace_relative_path: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+    )
+    device_path: str | None = Field(default=None, min_length=1, max_length=2048)
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int | None = Field(default=None, ge=0)
     content_hash: str | None = Field(default=None, min_length=1, max_length=128)
+
+    def model_post_init(self, __context, /) -> None:
+        if self.transfer_api_version == "session_v2":
+            if not self.tenant or not self.session_id or not self.workspace_relative_path:
+                raise ValueError("session_v2 requires tenant, session_id, and workspace_relative_path")
+        elif not self.device_path:
+            raise ValueError("bot_device_v1 requires device_path")
 
 
 class MaterializationResult(BaseModel):
@@ -51,3 +68,14 @@ class ManifestEntry(BaseModel):
     size_bytes: int
     content_hash: str
     status: Literal["ready", "failed"]
+
+
+@dataclass(frozen=True)
+class MaterializedContent:
+    """Controlled metadata for a file resolved from a ready manifest entry."""
+
+    path: Path
+    filename: str
+    media_type: str
+    content_disposition: str
+    size_bytes: int

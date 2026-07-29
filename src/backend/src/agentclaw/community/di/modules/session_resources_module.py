@@ -11,6 +11,7 @@ from agentclaw.community.api.session_resource_service import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.session_resources.baas_client import (
     SessionResourceBaasClient,
 )
@@ -26,6 +27,9 @@ from agentclaw.community.core.task_queue.services.task_queue_service import Task
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
     HttpClient,
+)
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterTransport,
 )
 from agentclaw.community.plugins.session_resource_repository import (
     SessionResourceRepository,
@@ -68,12 +72,16 @@ class SessionResourcesModule(Module):
         baas_client: SessionResourceBaasClient,
         task_queue: TaskQueueService,
         resolver: DeviceContextResolver,
+        token_vault: TokenVault,
+        adapter_transport: DeviceAdapterTransport,
     ) -> SessionResourceService:
         return SessionResourceService(
             repository=repository,
             baas_client=baas_client,
             task_queue=task_queue,
             device_context_resolver=resolver,
+            token_vault=token_vault,
+            adapter_transport=adapter_transport,
         )
 
     @singleton

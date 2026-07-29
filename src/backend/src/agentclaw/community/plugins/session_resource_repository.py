@@ -104,7 +104,14 @@ class SessionResourceRepository:
         session_key_hash: str,
         transfer_id: str,
         task_id: str,
+        allow_ready: bool = False,
     ) -> SessionResourceRecord | None:
+        eligible_statuses = [
+            SessionResourceStatus.UPLOAD_URL_ISSUED.value,
+            SessionResourceStatus.DEVICE_SYNC_FAILED.value,
+        ]
+        if allow_ready:
+            eligible_statuses.append(SessionResourceStatus.READY.value)
         with self._db.orm_session() as session:
             statement = (
                 update(SessionResourceModel)
@@ -114,12 +121,7 @@ class SessionResourceRepository:
                     SessionResourceModel.bot_id == bot_id,
                     SessionResourceModel.session_key_hash == session_key_hash,
                     SessionResourceModel.transfer_id == transfer_id,
-                    SessionResourceModel.status.in_(
-                        [
-                            SessionResourceStatus.UPLOAD_URL_ISSUED.value,
-                            SessionResourceStatus.DEVICE_SYNC_FAILED.value,
-                        ]
-                    ),
+                    SessionResourceModel.status.in_(eligible_statuses),
                 )
                 .values(
                     status=SessionResourceStatus.DEVICE_SYNCING.value,

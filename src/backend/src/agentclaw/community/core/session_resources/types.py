@@ -19,6 +19,13 @@ class SessionResourceStatus(str, Enum):
     DELETED = "deleted"
 
 
+class TransferApiVersion(str, Enum):
+    """The BaaS transfer contract used to materialize a resource."""
+
+    SESSION_V2 = "session_v2"
+    BOT_DEVICE_V1 = "bot_device_v1"
+
+
 @dataclass(frozen=True)
 class SessionResourceRecord:
     resource_id: str
@@ -36,6 +43,8 @@ class SessionResourceRecord:
     workspace_relative_path: str
     transfer_id: str
     status: SessionResourceStatus
+    transfer_api_version: TransferApiVersion = TransferApiVersion.BOT_DEVICE_V1
+    session_key_ciphertext: str | None = None
     task_id: str | None = None
     task_version: int = 0
     size_bytes: int | None = None
@@ -49,17 +58,15 @@ class SessionResourceRecord:
 
 @dataclass(frozen=True)
 class UploadGrant:
-    upload_url: str
     transfer_id: str
-    expires_at: str
-
-
-@dataclass(frozen=True)
-class DownloadGrant:
-    download_url: str
-    filename: str
-    file_size: int
-    expires_at: str
+    upload_type: str
+    upload_url: str | None = None
+    http_method: str = "PUT"
+    expires_at: str | None = None
+    upload_session_id: str | None = None
+    part_size: int | None = None
+    part_count: int | None = None
+    parts: list[dict] | None = None
 
 
 @dataclass(frozen=True)

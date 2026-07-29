@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
 
 import httpx
 import pytest
 
+from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.session_resources.baas_client import (
     SessionResourceBaasClient,
 )
 from agentclaw.community.core.session_resources.service import SessionResourceService
-from agentclaw.community.core.session_resources.types import (
-    SessionResourceStatus,
+from agentclaw.community.core.session_resources.types import SessionResourceStatus
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterStreamResponse,
 )
 
 
@@ -40,19 +43,26 @@ class _Repo:
 
     def list_owned(self, owner_id, bot_id, session_key_hash):
         value = self.value
-        return [value] if value and self.get_owned(value.resource_id, owner_id, bot_id, session_key_hash) else []
+        if value and self.get_owned(value.resource_id, owner_id, bot_id, session_key_hash):
+            return [value]
+        return []
 
     def cas_start_materialization(self, **kwargs):
-        if self.value.status not in {
+        allowed = {
             SessionResourceStatus.UPLOAD_URL_ISSUED,
             SessionResourceStatus.DEVICE_SYNC_FAILED,
-        }:
+        }
+        if kwargs.get("allow_ready"):
+            allowed.add(SessionResourceStatus.READY)
+        if self.value.status not in allowed:
             return None
         self.value = replace(
             self.value,
             status=SessionResourceStatus.DEVICE_SYNCING,
             task_id=kwargs["task_id"],
             task_version=self.value.task_version + 1,
+            error_code=None,
+            materialized_ref=None,
         )
         return self.value
 
@@ -81,8 +91,9 @@ class _Repo:
 
 
 class _HttpClient:
-    def __init__(self) -> None:
+    def __init__(self, complete_status: str = "DONE") -> None:
         self.calls = []
+        self.complete_status = complete_status
 
     def post(self, path, **kwargs):
         self.calls.append((path, kwargs))
@@ -92,15 +103,12 @@ class _HttpClient:
                 "upload_url": "https://oss.example/object?Signature=secret",
                 "transfer_id": "transfer-1",
                 "expires_at": "2026-07-13T00:00:00Z",
+                "type": "SINGLE",
+                "http_method": "PUT",
             }
         else:
-            data = {
-                "download_url": "https://oss.example/download?Signature=secret",
-                "filename": "report.txt",
-                "file_size": 4,
-                "expires_at": "2026-07-13T00:00:00Z",
-            }
-        return httpx.Response(200, request=request, json={"data": data, "error": None})
+            data = {"transfer_id": "transfer-1", "status": self.complete_status}
+        return httpx.Response(200, request=request, json={"code": 0, "data": data})
 
 
 class _Resolver:
@@ -126,60 +134,140 @@ class _Queue:
         self.calls.append((task_type, payload, deadline_seconds, kwargs))
 
 
-def _service(queue=None):
+class _Transport:
+    def __init__(self, status_code: int = 200) -> None:
+        self.status_code = status_code
+        self.calls = []
+        self.closed = False
+
+    async def stream(self, conn_info, method, path, body=None, params=None, *, timeout=None):
+        self.calls.append((conn_info, method, path, body, params, timeout))
+
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"materialized bytes"
+
+        async def close() -> None:
+            self.closed = True
+
+        return DeviceAdapterStreamResponse(
+            status_code=self.status_code,
+            headers={"content-type": "text/plain", "x-internal": "hidden"},
+            body=chunks(),
+            close=close,
+        )
+
+
+def _service(queue=None, *, complete_status="DONE", transport=None):
     repo = _Repo()
-    http = _HttpClient()
+    http = _HttpClient(complete_status=complete_status)
     service = SessionResourceService(
         repository=repo,
         baas_client=SessionResourceBaasClient(http),
         task_queue=queue or _Queue(),
         device_context_resolver=_Resolver(),
+        token_vault=TokenVault(master_key="test-master-key"),
+        adapter_transport=transport or _Transport(),
     )
     return service, repo, http
 
 
-def test_upload_complete_persists_syncing_before_durable_dispatch():
-    queue = _Queue()
-    service, repo, _ = _service(queue)
-    intent = service.create_upload_intent(
+def _intent(service):
+    return service.create_upload_intent(
         owner_id="owner-1",
         bot_id="bot-1",
-        session_key="session-raw",
+        session_key="session/raw value",
         scope_type="personal_bot_chat",
         engine_type="claude_code",
         filename="report.txt",
+        size_bytes=4,
     )
+
+
+def test_upload_intent_uses_session_api_and_persists_encrypted_session_key():
+    service, repo, http = _service()
+
+    intent = _intent(service)
+
+    path, kwargs = http.calls[0]
+    assert path == "/api/v1/sessions/tenant-1/session%2Fraw%20value/files/upload-url"
+    assert kwargs["json"] == {
+        "filename": "report.txt",
+        "file_size": 4,
+        "operator": "owner-1",
+        "expire_seconds": 3600,
+    }
+    assert intent.grant.upload_type == "SINGLE"
+    assert repo.value.session_key_ciphertext != "session/raw value"
+    assert repo.value.session_key_hash != "session/raw value"
+    assert repo.value.transfer_api_version.value == "session_v2"
+
+
+def test_upload_complete_requires_baas_done_then_queues_identity_only():
+    queue = _Queue()
+    service, repo, http = _service(queue)
+    intent = _intent(service)
 
     result = service.complete_upload(
         owner_id="owner-1",
         bot_id="bot-1",
-        session_key="session-raw",
+        session_key="session/raw value",
         resource_id=intent.resource.resource_id,
         transfer_id="transfer-1",
     )
 
     assert result.status is SessionResourceStatus.DEVICE_SYNCING
+    assert http.calls[1][0].endswith("/upload-url/transfer-1/complete")
+    payload = queue.calls[0][1]
+    assert set(payload) == {"resource_id", "task_id", "task_version"}
+    assert "session/raw value" not in repr(payload)
     assert repo.value.status is SessionResourceStatus.DEVICE_SYNCING
-    assert queue.calls[0][0] == "session_resource.materialize"
-    assert queue.calls[0][1]["task_version"] == 1
+
+
+def test_upload_complete_does_not_dispatch_when_baas_is_not_done():
+    queue = _Queue()
+    service, repo, _ = _service(queue, complete_status="UPLOADING")
+    intent = _intent(service)
+
+    with pytest.raises(ValueError, match="transfer_not_done"):
+        service.complete_upload(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            session_key="session/raw value",
+            resource_id=intent.resource.resource_id,
+            transfer_id="transfer-1",
+        )
+
+    assert not queue.calls
+    assert repo.value.status is SessionResourceStatus.UPLOAD_URL_ISSUED
+
+
+def test_upload_and_completion_logs_do_not_expose_signed_url_or_raw_session(caplog):
+    caplog.set_level("INFO")
+    service, _, _ = _service()
+    intent = _intent(service)
+
+    service.complete_upload(
+        owner_id="owner-1",
+        bot_id="bot-1",
+        session_key="session/raw value",
+        resource_id=intent.resource.resource_id,
+        transfer_id="transfer-1",
+    )
+
+    assert "Signature=secret" not in caplog.text
+    assert "https://oss.example" not in caplog.text
+    assert "session/raw value" not in caplog.text
 
 
 def test_upload_complete_enqueue_failure_compensates_to_failed():
     service, repo, _ = _service(_Queue(RuntimeError("queue unavailable")))
-    intent = service.create_upload_intent(
-        owner_id="owner-1",
-        bot_id="bot-1",
-        session_key="session-raw",
-        scope_type="personal_bot_chat",
-        engine_type="claude_code",
-        filename="report.txt",
-    )
+    intent = _intent(service)
 
     with pytest.raises(RuntimeError, match="queue unavailable"):
         service.complete_upload(
             owner_id="owner-1",
             bot_id="bot-1",
-            session_key="session-raw",
+            session_key="session/raw value",
             resource_id=intent.resource.resource_id,
             transfer_id="transfer-1",
         )
@@ -188,123 +276,47 @@ def test_upload_complete_enqueue_failure_compensates_to_failed():
     assert repo.value.error_code == "dispatch_failed"
 
 
-def test_download_requires_ready_before_calling_baas():
-    service, _, http = _service()
-    intent = service.create_upload_intent(
+@pytest.mark.asyncio
+async def test_content_streams_from_engine_without_baas_download_call():
+    transport = _Transport()
+    service, repo, http = _service(transport=transport)
+    intent = _intent(service)
+    repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
+
+    record, response = await service.open_content(
         owner_id="owner-1",
         bot_id="bot-1",
-        session_key="session-raw",
-        scope_type="personal_bot_chat",
-        engine_type="claude_code",
-        filename="report.txt",
+        session_key="session/raw value",
+        resource_id=intent.resource.resource_id,
+        disposition="inline",
     )
 
-    with pytest.raises(ValueError, match="resource_not_ready"):
-        service.create_download_grant(
+    assert record.resource_id == intent.resource.resource_id
+    assert transport.calls[0][2].endswith(f"/{intent.resource.resource_id}/content")
+    assert len(http.calls) == 1
+    assert [chunk async for chunk in response.body] == [b"materialized bytes"]
+    await response.close()
+    assert transport.closed is True
+
+
+@pytest.mark.asyncio
+async def test_missing_engine_file_requeues_materialization_without_oss_fallback():
+    queue = _Queue()
+    transport = _Transport(status_code=409)
+    service, repo, http = _service(queue, transport=transport)
+    intent = _intent(service)
+    repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
+
+    with pytest.raises(ValueError, match="resource_materializing"):
+        await service.open_content(
             owner_id="owner-1",
             bot_id="bot-1",
-            session_key="session-raw",
+            session_key="session/raw value",
             resource_id=intent.resource.resource_id,
+            disposition="attachment",
         )
 
-    assert len(http.calls) == 1
-
-
-def test_ready_callback_rejects_relative_path_different_from_backend_path():
-    service, repo, _ = _service()
-    intent = service.create_upload_intent(
-        owner_id="owner-1",
-        bot_id="bot-1",
-        session_key="session-raw",
-        scope_type="personal_bot_chat",
-        engine_type="claude_code",
-        filename="report.txt",
-    )
-    syncing = service.complete_upload(
-        owner_id="owner-1",
-        bot_id="bot-1",
-        session_key="session-raw",
-        resource_id=intent.resource.resource_id,
-        transfer_id="transfer-1",
-    )
-
-    with pytest.raises(ValueError, match="materialized_ref_mismatch"):
-        service.materialized_callback(
-            resource_id=syncing.resource_id,
-            transfer_id=syncing.transfer_id,
-            task_id=syncing.task_id,
-            task_version=syncing.task_version,
-            ready=True,
-            materialized_ref={"relative_path": ".teamclaw/session-files/other.txt"},
-            error_code=None,
-        )
-
+    assert transport.closed is True
     assert repo.value.status is SessionResourceStatus.DEVICE_SYNCING
-
-
-def test_polling_becomes_ready_only_after_matching_callback():
-    service, _, _ = _service()
-    intent = service.create_upload_intent(
-        owner_id="owner-1",
-        bot_id="bot-1",
-        session_key="session-raw",
-        scope_type="personal_bot_chat",
-        engine_type="claude_code",
-        filename="report.txt",
-    )
-    syncing = service.complete_upload(
-        owner_id="owner-1",
-        bot_id="bot-1",
-        session_key="session-raw",
-        resource_id=intent.resource.resource_id,
-        transfer_id="transfer-1",
-    )
-
-    before = service.get_status(
-        owner_id="owner-1",
-        bot_id="bot-1",
-        session_key="session-raw",
-        resource_id=syncing.resource_id,
-    )
-    assert before.status is SessionResourceStatus.DEVICE_SYNCING
-
-    applied = service.materialized_callback(
-        resource_id=syncing.resource_id,
-        transfer_id=syncing.transfer_id,
-        task_id=syncing.task_id,
-        task_version=syncing.task_version,
-        ready=True,
-        materialized_ref={
-            "relative_path": syncing.workspace_relative_path,
-            "path_hash": "hashed-only",
-        },
-        error_code=None,
-    )
-    after = service.get_status(
-        owner_id="owner-1",
-        bot_id="bot-1",
-        session_key="session-raw",
-        resource_id=syncing.resource_id,
-    )
-
-    assert applied.status is SessionResourceStatus.READY
-    assert after.status is SessionResourceStatus.READY
-
-
-def test_upload_logs_do_not_expose_signed_url_or_raw_session(caplog):
-    caplog.set_level("INFO")
-    service, _, _ = _service()
-
-    service.create_upload_intent(
-        owner_id="owner-1",
-        bot_id="bot-1",
-        session_key="raw-session-secret",
-        scope_type="personal_bot_chat",
-        engine_type="claude_code",
-        filename="report.txt",
-    )
-
-    logs = caplog.text
-    assert "Signature=secret" not in logs
-    assert "https://oss.example" not in logs
-    assert "raw-session-secret" not in logs
+    assert len(queue.calls) == 1
+    assert len(http.calls) == 1

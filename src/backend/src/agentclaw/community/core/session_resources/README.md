@@ -13,8 +13,11 @@ consumes:
   - HttpClient
   - TaskQueueService
   - DeviceContextResolver
+  - DeviceAdapterTransport
+  - TokenVault
 internal_dependencies:
   - agentclaw.community.api
+  - agentclaw.community.core.bot_management
   - agentclaw.community.core.devices
   - agentclaw.community.core.session_resources
   - agentclaw.community.core.task_queue
