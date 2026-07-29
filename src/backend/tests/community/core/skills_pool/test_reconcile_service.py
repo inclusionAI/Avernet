@@ -142,6 +142,19 @@ class FakeLayoutRepository:
         )
         return True
 
+    def record_post_cutover_evidence(self, **kwargs: object) -> bool:
+        if self._should_fail("post_cutover_evidence"):
+            return False
+        if not self._owns(kwargs):
+            return False
+        self.events.append("evidence")
+        self.state = replace(
+            self.state,
+            phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+            data_plane_cutover_committed=True,
+        )
+        return True
+
     def begin_cutover(self, **kwargs: object) -> bool:
         if self._should_fail("begin"):
             return False
@@ -564,7 +577,9 @@ async def test_unknown_cutover_enters_manual_repair_and_stops_automation() -> No
 
 
 @pytest.mark.asyncio
-async def test_resolved_pool_committed_repair_skips_duplicate_cutover_ledger_cas() -> None:
+async def test_resolved_pool_committed_repair_skips_duplicate_cutover_ledger_cas() -> (
+    None
+):
     layouts = FakeLayoutRepository(
         claimed_state(
             phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
@@ -587,8 +602,57 @@ async def test_resolved_pool_committed_repair_skips_duplicate_cutover_ledger_cas
 
     assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
     assert runtime.events == ["probe", "cutover", "mapping", "verify"]
-    assert layouts.events == ["database"]
+    assert layouts.events == ["evidence", "database"]
     assert layouts.state.active_layout is SkillLayout.POOL
+
+
+@pytest.mark.asyncio
+async def test_committed_repair_transport_failure_records_forward_only_and_retries() -> (
+    None
+):
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            last_failure_code="MANUAL_REPAIR_RESOLVED",
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=False,
+        status=PoolCutoverStatus.UNKNOWN,
+        evidence={"reason": "transport_response_unavailable"},
+    )
+
+    first = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert first.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
+    assert first.retryable is True
+    assert layouts.events == ["post_failure"]
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert layouts.state.data_plane_cutover_committed is True
+    assert layouts.state.last_failure_stage == "post_cutover_refresh"
+
+    runtime.events.clear()
+    layouts.events.clear()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"active_marker": "same-generation"},
+    )
+
+    retried = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert retried.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "mapping", "verify"]
+    assert layouts.events == ["database"]
 
 
 @pytest.mark.asyncio
@@ -627,7 +691,67 @@ async def test_post_cutover_sync_pending_retries_finalization_before_mappings() 
 
     assert second.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
     assert runtime.events == ["probe", "cutover", "mapping", "verify"]
-    assert layouts.events == ["cutover", "database"]
+    assert layouts.events == ["evidence", "database"]
+
+
+@pytest.mark.asyncio
+async def test_committed_repair_invalid_refresh_stays_forward_only() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            last_failure_code="MANUAL_REPAIR_RESOLVED",
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=False,
+        status=PoolCutoverStatus.INVALID,
+        evidence={"reason": "active_marker_identity_mismatch"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
+    assert result.retryable is False
+    assert layouts.events == ["post_failure"]
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert layouts.state.data_plane_cutover_committed is True
+    assert layouts.state.last_failure_stage == "post_cutover_refresh"
+
+
+@pytest.mark.asyncio
+async def test_finalizing_transport_failure_does_not_reenter_pre_cutover_cas() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            last_failure_code="POST_CUTOVER_SYNC_PENDING",
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=False,
+        status=PoolCutoverStatus.TRANSIENT_ERROR,
+        evidence={"reason": "adapter_temporarily_unreachable"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
+    assert result.retryable is True
+    assert layouts.events == ["post_failure"]
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert layouts.state.data_plane_cutover_committed is True
+    assert layouts.state.last_failure_stage == "post_cutover_refresh"
 
 
 @pytest.mark.asyncio
@@ -812,8 +936,7 @@ async def test_mixed_image_bots_reconcile_independently_in_one_environment() -> 
         def _owns(self, values: dict[str, object]) -> bool:
             return (
                 values["scope"] == self._current_scope
-                and values["migration_generation"]
-                == self.state.migration_generation
+                and values["migration_generation"] == self.state.migration_generation
                 and values["lease_owner"] == self.state.lease_owner
             )
 
