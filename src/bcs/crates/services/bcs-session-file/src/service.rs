@@ -26,7 +26,7 @@ use bcs_service_api::port::repo::{
     NewSessionFileParams, SessionFileListParams, SessionFileRepoPort, SessionRepoPort,
 };
 use bcs_storage_api::{
-    ByteStream, ClientUploadTarget, PresignGetTicket, PreparedUpload, StorageCapabilities,
+    ByteStream, ClientUploadTarget, PresignGetOptions, PresignGetTicket, PreparedUpload, StorageCapabilities,
     StorageError, StorageHandle, UploadHandle, UploadMode, UploadPrepareRequest,
 };
 
@@ -197,6 +197,7 @@ impl SessionFileService for SessionFileServiceImpl {
             storage: self.cfg.storage.backend_name().to_string(),
             presign_upload: self.caps.supports_presign_put,
             presign_download: self.caps.supports_presign_download,
+            inline_view: self.caps.supports_inline_view,
             max_size: self.max_size(),
         }
     }
@@ -532,6 +533,7 @@ impl SessionFileService for SessionFileServiceImpl {
         session_id: &str,
         file_id: &str,
         ttl_secs: Option<u64>,
+        show: bool,
     ) -> Result<(SessionFile, DownloadRoute), SessionFileUseCaseError> {
         let row = self
             .cfg
@@ -560,7 +562,7 @@ impl SessionFileService for SessionFileServiceImpl {
                 // path is unauthenticated); baas falls back to operator "bcs".
                 // Wiring caller into download_route would cascade through
                 // SessionFileService trait — deferred.
-                .presign_get(&handle, ttl, None)
+                .presign_get(&handle, PresignGetOptions { ttl_secs: ttl, show }, None)
                 .await
                 .map_err(map_storage_err)?;
             Ok((row, DownloadRoute { presign: Some(ticket) }))
@@ -1011,6 +1013,7 @@ mod tests {
             supports_presign_download: false,
             supports_stream_put: true,
             supports_stream_get: true,
+            supports_inline_view: true,
             max_object_size: 5_000_000_000,
         }
     }
@@ -1021,6 +1024,7 @@ mod tests {
             supports_presign_download: true,
             supports_stream_put: true,
             supports_stream_get: true,
+            supports_inline_view: true,
             max_object_size: 5_000_000_000,
         }
     }
@@ -1034,8 +1038,8 @@ mod tests {
     /// routes `download_route` through `presign_get`.
     fn build_svc(
         caps: StorageCapabilities,
-    ) -> (SessionFileServiceImpl, Arc<dyn StoragePlugin>, Arc<dyn SessionFileRepoPort>) {
-        let storage: Arc<dyn StoragePlugin> = Arc::new(FakeStoragePlugin::new(caps));
+    ) -> (SessionFileServiceImpl, Arc<FakeStoragePlugin>, Arc<dyn SessionFileRepoPort>) {
+        let storage: Arc<FakeStoragePlugin> = Arc::new(FakeStoragePlugin::new(caps));
         let repo: Arc<dyn SessionFileRepoPort> = Arc::new(MemorySessionFileRepo::new());
         let session_repo: Arc<dyn SessionRepoPort> =
             Arc::new(FakeSessionRepo::with_sessions(&["g1:abcd1234", "g1:other"]));
@@ -1134,6 +1138,7 @@ mod tests {
             supports_presign_download: false,
             supports_stream_put: true,
             supports_stream_get: true,
+            supports_inline_view: true,
             max_object_size: u64::MAX,
         };
         let storage: Arc<dyn StoragePlugin> = Arc::new(FakeStoragePlugin::new(unbounded_caps));
@@ -1337,7 +1342,7 @@ mod tests {
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
         s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
-        let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, None).await.unwrap();
+        let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, None, false).await.unwrap();
         assert!(route.presign.is_none());
     }
 
@@ -1348,7 +1353,7 @@ mod tests {
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
         s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
-        let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, Some(60)).await.unwrap();
+        let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, Some(60), false).await.unwrap();
         let ticket = route.presign.unwrap();
         assert!(ticket.download_url.starts_with("fake://"));
     }
@@ -1364,7 +1369,7 @@ mod tests {
         s.complete_upload("g1:abcd1234", &r1.file.file_id).await.unwrap();
 
         // download_route(..., None) should pass share_link_ttl (7777) to presign_get.
-        let (_row, route) = s.download_route("g1:abcd1234", &r1.file.file_id, None).await.unwrap();
+        let (_row, route) = s.download_route("g1:abcd1234", &r1.file.file_id, None, false).await.unwrap();
         let ticket = route.presign.expect("presign backend returns a ticket");
         // FakeStoragePlugin.presign_get sets expires_at = ttl_secs.
         assert_eq!(ticket.expires_at, 7777,
@@ -1372,10 +1377,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn download_route_presign_forwards_show_true() {
+        let (s, storage, _) = build_svc(presign_caps());
+        let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
+        let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
+        s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, None, true).await.unwrap();
+        let _ticket = route.presign.expect("presign backend yields a ticket");
+        let opts = storage.last_presign_opts().expect("presign_get was called");
+        assert_eq!(opts.show, true, "download_route(show=true) must forward show=true");
+        assert_eq!(opts.ttl_secs, 7777, "ttl must fall back to share_link_ttl when query ttl is None");
+    }
+
+    #[tokio::test]
+    async fn download_route_presign_forwards_show_false() {
+        let (s, storage, _) = build_svc(presign_caps());
+        let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
+        let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
+        s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        let (_file, _route) = s.download_route("g1:abcd1234", &r.file.file_id, None, false).await.unwrap();
+        let opts = storage.last_presign_opts().expect("presign_get was called");
+        assert_eq!(opts.show, false, "download_route(show=false) must forward show=false");
+    }
+
+    #[tokio::test]
     async fn download_route_rejects_non_ready() {
         let (s, _, _) = build_svc(local_caps());
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
-        let err = s.download_route("g1:abcd1234", &r.file.file_id, None).await.unwrap_err();
+        let err = s.download_route("g1:abcd1234", &r.file.file_id, None, false).await.unwrap_err();
         assert!(matches!(err, SessionFileUseCaseError::InvalidState(_)));
     }
 
@@ -1539,6 +1570,11 @@ mod tests {
         assert!(!c.presign_upload);
         assert!(!c.presign_download);
         assert_eq!(c.max_size, 5_000_000_000);
+        assert_eq!(
+            c.inline_view,
+            true,
+            "local backend must advertise inline_view support"
+        );
     }
 
     // ---- list ---------------------------------------------------------------
@@ -1718,10 +1754,10 @@ mod tests {
         async fn presign_get(
             &self,
             handle: &StorageHandle,
-            ttl_secs: u64,
+            opts: PresignGetOptions,
             caller: Option<&ActorRef>,
         ) -> Result<PresignGetTicket, StorageError> {
-            self.inner.presign_get(handle, ttl_secs, caller).await
+            self.inner.presign_get(handle, opts, caller).await
         }
         async fn delete(&self, _handle: &StorageHandle) -> Result<(), StorageError> {
             Err(StorageError::Backend(anyhow::anyhow!("forced delete failure")))
@@ -1750,6 +1786,7 @@ mod tests {
                 supports_presign_download: false,
                 supports_stream_put: true,
                 supports_stream_get: true,
+                supports_inline_view: true,
                 max_object_size: u64::MAX,
             }
         }
@@ -1801,12 +1838,12 @@ mod tests {
         async fn presign_get(
             &self,
             _: &StorageHandle,
-            t: u64,
+            opts: PresignGetOptions,
             _caller: Option<&ActorRef>,
         ) -> Result<PresignGetTicket, StorageError> {
             Ok(PresignGetTicket {
                 download_url: "x".into(),
-                expires_at: t,
+                expires_at: opts.ttl_secs,
             })
         }
         async fn delete(&self, _: &StorageHandle) -> Result<(), StorageError> {
