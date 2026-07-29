@@ -133,7 +133,11 @@ class FileTransferBackend(Protocol):
         ...
 
     def initiate_multipart_upload(
-        self, staging_path: str, expire_seconds: int, part_count: int = 2
+        self,
+        staging_path: str,
+        expire_seconds: int,
+        part_count: int = 2,
+        content_type: str | None = None,
     ) -> MultipartSession:
         """Kick off multipart upload.
 
@@ -146,6 +150,10 @@ class FileTransferBackend(Protocol):
             staging_path: Complete OSS object key.
             expire_seconds: URL validity duration in seconds.
             part_count: Number of parts to generate pre-signed URLs for.
+            content_type: Optional MIME type to include in per-part
+                pre-signed signatures. When set, OSS enforces Content-Type
+                matching on each part's PUT request (mismatched requests
+                receive 403).
 
         Returns:
             MultipartSession with session_id and per-part upload URLs.

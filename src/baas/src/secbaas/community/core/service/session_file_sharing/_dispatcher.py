@@ -147,6 +147,9 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             effective_part_size = (
                 part_size if part_size is not None else self.DEFAULT_PART_SIZE
             )
+            # Defense-in-depth: Pydantic ge=1048576 + DEFAULT_PART_SIZE guarantee
+            # positive, but guard against programmatic construction bypassing
+            # model validation.
             if effective_part_size <= 0:
                 raise ValueError(
                     f"part_size must be positive, got {effective_part_size}"
@@ -171,6 +174,7 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 staging_path,
                 expire_seconds,
                 part_count,
+                content_type,
             )
 
             logger.info(

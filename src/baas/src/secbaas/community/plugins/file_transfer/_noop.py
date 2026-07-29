@@ -45,7 +45,8 @@ class NoopFileTransferBackend(FileTransferBackend):
         )
 
     def initiate_multipart_upload(
-        self, staging_path: str, expire_seconds: int, part_count: int = 2
+        self, staging_path: str, expire_seconds: int, part_count: int = 2,
+        content_type: str | None = None,
     ) -> MultipartSession:
         raise NotImplementedError(
             "File transfer is not configured. "
