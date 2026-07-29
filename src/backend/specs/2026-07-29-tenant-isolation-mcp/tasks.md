@@ -2,19 +2,23 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Spike — confirm the guard is inert for unrelated models
+## Task 1: [x] Spike — confirm the guard is inert for unrelated models
 - **Goal:** Prove that appending a `with_loader_criteria` option for a model
   absent from a statement is a no-op, before the mechanism is built on that
   assumption.
 - **Files:** `tests/community/plugins/test_avernet_tenant_guard.py` (new)
 - **Done when:**
-  - [ ] A query touching only model X, executed while criteria for models X, Y
+  - [x] A query touching only model X, executed while criteria for models X, Y
         and Z are all appended, returns exactly what it returns with only X's
         criteria appended — no extra join, no extra `WHERE` term, no error.
-  - [ ] The assertion is left in the tree as a regression test, not deleted
+        **Confirmed:** the emitted SQL is
+        `FROM spike_alpha WHERE spike_alpha.avernet_tenant = ?` — the other two
+        models' criteria leave no trace.
+  - [x] The assertion is left in the tree as a regression test, not deleted
         after the spike (mirrors how Stage 1 kept its `Query.update()` spike).
-  - [ ] If it does **not** hold: stop, record the finding, and revise `plan.md`
+  - [x] If it does **not** hold: stop, record the finding, and revise `plan.md`
         before any further task — the one-listener design depends on it.
+        **Not triggered** — the assumption held.
 - **Depends on:** —
 
 ## Task 2: Lift the tenant guards into a model-agnostic registrar
