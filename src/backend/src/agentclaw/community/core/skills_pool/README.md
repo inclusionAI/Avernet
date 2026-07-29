@@ -69,6 +69,11 @@ Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
   与 `POOL_ACTIVE`，不恢复隔离副本。已提交状态的 runtime 重入只补齐
   quarantine/marker 证据，不重复执行数据面 commit CAS；transport 或校验失败
   只记录 forward-only failure。
+- runtime probe 通过 `cutover_evidence_contract_version=quarantine-v1`
+  声明激活响应能够返回 generation-scoped quarantine 证据。新 Backend 遇到
+  未声明该能力的旧 runtime 时只释放尚未切换的 claim 并保持 Legacy；对于
+  已跨界重试，允许旧响应复用 DB 中既有 quarantine 身份。两边都缺少身份时
+  记录可重试的 runtime 升级要求，不由 Backend 推导引擎物理路径。
 - 在递归版 OpenClaw 发布前的 Pool 独立 rollout 窗口，显式回滚先持久化
   `LEGACY_ROLLBACK_PREPARING` 作为 Bot 级编辑暂停状态，
   再从当前 Pool 全量重建新的 Legacy local 并提交切换。切换后即使 mapping
