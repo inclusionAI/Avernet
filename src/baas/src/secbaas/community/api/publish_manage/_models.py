@@ -44,10 +44,10 @@ from ._enums import PublishType, RestartScope  # noqa: E402 — cyclic import gu
 
 # ==================== Constants ====================
 
-DEFAULT_CALLBACK_TIMEOUT_SECONDS = 900
+DEFAULT_CALLBACK_TIMEOUT_SECONDS = 1800
 """Device callback timeout in seconds."""
 
-DEFAULT_PUBLISH_LEVEL_TIMEOUT_SECONDS = 900
+DEFAULT_PUBLISH_LEVEL_TIMEOUT_SECONDS = 1800
 """Maximum time a publish can stay in non-terminal state before auto-resolution.
 
 When a publish is stuck in PENDING/ACTIVE/APPROVING for longer than this

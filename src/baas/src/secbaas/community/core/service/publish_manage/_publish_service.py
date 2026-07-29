@@ -19,6 +19,7 @@ from secbaas.community.api.bot_manage import BotManageService, BotStatus
 from secbaas.community.api.bot_runtime import BotNotFoundError
 from secbaas.community.api.device_manage import DeviceService
 from secbaas.community.api.publish_manage import (
+    DEFAULT_CALLBACK_TIMEOUT_SECONDS,
     DEFAULT_PUBLISH_LEVEL_TIMEOUT_SECONDS,
     BatchDeviceProgress,
     BatchResult,
@@ -4248,7 +4249,7 @@ class DefaultPublishService(PublishService):
         full callback pipeline (device update, record update, batch/stage check).
         """
         env = get_current_env()
-        timeout_seconds = 600  # default
+        timeout_seconds = DEFAULT_CALLBACK_TIMEOUT_SECONDS  # default
 
         publish_config = _extra_config_to_publish_config(publish_record.extra_config)
         if publish_config is not None:
