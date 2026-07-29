@@ -25,7 +25,7 @@ pub struct SessionFileListParams {
     pub prefix: Option<String>,
     pub status: Option<FileStatus>,
     pub limit: u32,   // 0 => 100, clamped to [1, 1000] in impls
-    pub offset: u32,  // skip this many (in created_at,file_id order)
+    pub offset: u32,  // skip this many (in created_at DESC, file_id DESC order)
 }
 
 #[derive(Debug, Clone)]
