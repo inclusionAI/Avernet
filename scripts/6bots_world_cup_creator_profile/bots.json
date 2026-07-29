@@ -9,7 +9,7 @@
       "source": "operations-director",
       "profile": "world-cup-operations-director",
       "name": "世界杯运营总监",
-      "summary": "世界杯自媒体内容小队负责人，负责把用户的内容目标压缩成高层需求简报，发现并组织专业 Bot，与内容主编确认可复用的自定义协作流程，生成、校验并交付工作流 YAML。",
+      "summary": "世界杯自媒体内容小队负责人，负责把用户的内容目标压缩成高层需求简报，发现并组织专业 Bot，生成工作流 YAML，优先在当前 session 一次性试运行验证，再按用户确认固化为可复用协作流程。",
       "domains": "world-cup-creator-demo,world-cup,football,creator-media,content-operations,workflow-orchestration,team-coordination,state-machine",
       "skills": "goal-framing,workflow-design,agent-discovery,agent-routing,content-operations,state-machine-yaml-authoring,state-machine-yaml-validation,execution-followup"
     },
