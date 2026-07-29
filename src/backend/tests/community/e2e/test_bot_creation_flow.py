@@ -375,6 +375,8 @@ class TestRouterLogic:
         # Passport application, not after it (R13/F48).
         mock_bot_service.check_create_bot_preflight.assert_called_once_with(
             user_id="user_001",
+            bot_id="default",
+            engine_type="openclaw",
             bot_name="My First Bot",
         )
         mock_bot_service.create_bot.assert_called_once()
@@ -429,6 +431,8 @@ class TestRouterLogic:
         # Passport application, not after it (R13/F48).
         mock_bot_service.check_create_bot_preflight.assert_called_once_with(
             user_id="user_001",
+            bot_id="default",
+            engine_type="openclaw",
             bot_name="My First Bot",
         )
         mock_bot_service.create_bot.assert_not_called()

@@ -176,6 +176,18 @@ class BotLimitExceededError(BotServiceError):
     pass
 
 
+DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE = (
+    "Teclaw Cloud Bot 不能作为 Default Bot，请先创建其他类型的 Bot。"
+)
+
+
+class DefaultBotTeclawNotAllowedError(BotServiceError):
+    """Default Bot cannot use a Teclaw Cloud engine."""
+
+    def __init__(self) -> None:
+        super().__init__(DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE)
+
+
 # 仅允许中英文、数字、下划线、中划线、空格；禁止 @ # / 等特殊字符。
 _BOT_NAME_MAX_LEN = 32
 _BOT_NAME_ALLOWED_RE = re.compile(r"^[\w一-鿿 \-]+$", re.UNICODE)
@@ -922,6 +934,8 @@ class BotService:
     def check_create_bot_preflight(
         self,
         user_id: str,
+        bot_id: Optional[str] = None,
+        engine_type: Optional[str] = None,
         bot_name: Optional[str] = None,
     ) -> None:
         """Validate whether a bot creation request can start external auth.
@@ -942,6 +956,13 @@ class BotService:
         if bot_name and bot_name.strip():
             if self._repository.get_by_bot_name(bot_name.strip()):
                 raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
+        if bot_id is not None and engine_type is not None:
+            self._validate_default_bot_engine(bot_id, engine_type)
+
+    def _validate_default_bot_engine(self, bot_id: str, engine_type: str) -> None:
+        """Reject Teclaw Cloud as the engine of the reserved Default Bot."""
+        if bot_id == "default" and self.is_teclaw_bot(engine_type):
+            raise DefaultBotTeclawNotAllowedError()
 
     def _check_device_limit(self, entity_id: str, entity_type: str, owner_id: str) -> None:
         """
@@ -1161,10 +1182,15 @@ class BotService:
             # 未传入 bot_id，生成新的
             bot_id = generate_bot_id(user_id, self._repository)
 
-        # ===== 数量上限校验：避免单用户无限创建 Bot =====
-        # 复用 device_allocation.max_devices_per_entity 作为每用户 Bot 上限
-        # （语义同源：每用户最多 N 个 Bot/设备）。
-        self._check_bot_count_limit(user_id)
+        # Resolve active engine before creation preflight validation.
+        resolved_active_engine = engine_type or DEFAULT_ENGINE_TYPE
+
+        # ===== 创建前置校验：数量上限 + Default Bot 引擎约束 =====
+        self.check_create_bot_preflight(
+            user_id=user_id,
+            bot_id=bot_id,
+            engine_type=resolved_active_engine,
+        )
 
         # Resolve entity info
         resolved_entity_id = entity_id or f"staff_{user_id}"
@@ -1178,8 +1204,6 @@ class BotService:
         # engine — so switch_engine would refuse to switch back to it.
         resolved_engine_types = _get_engine_types()
 
-        # Resolve active engine: use frontend specified, otherwise use default
-        resolved_active_engine = engine_type or DEFAULT_ENGINE_TYPE
         # A bot's active engine must be a member of its own enabled-engine list —
         # switch_engine checks that list, so a row violating this can never
         # return to the engine it was created on. The invariant held by accident
@@ -3126,6 +3150,8 @@ class BotService:
         bot = self._repository.get_by_id_and_owner(bot_id, user_id)
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
+
+        self._validate_default_bot_engine(bot_id, engine_type)
 
         # Check if the engine is in bot's engine_types
         bot_engine_types = bot.get("engine_types", [])
