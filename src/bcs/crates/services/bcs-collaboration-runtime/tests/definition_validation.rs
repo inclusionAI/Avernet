@@ -552,6 +552,53 @@ fn validates_human_input_with_natural_language_judge_outcomes() {
 }
 
 #[test]
+fn validates_frontend_human_input_without_channel_or_assignee() {
+    let mut definition = human_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine.human_input_channel = None;
+    let review = state_machine.nodes.get_mut("review").expect("review node");
+    review.assignee = None;
+    review.notification = None;
+
+    validate_definition(definition).expect("frontend HumanInput should remain valid");
+}
+
+#[test]
+fn rejects_im_human_input_without_channel() {
+    let mut definition = human_review_definition();
+    let state_machine = match &mut definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => panic!("expected state machine"),
+    };
+    state_machine.human_input_channel = None;
+
+    let error = validate_definition(definition).expect_err("IM HumanInput requires a channel");
+    assert!(
+        error
+            .to_string()
+            .contains("with notification requires state_machine.human_input_channel")
+    );
+}
+
+#[test]
+fn rejects_frontend_human_input_with_assignee() {
+    let mut definition = human_review_definition();
+    let review = human_node_mut(&mut definition);
+    review.notification = None;
+
+    let error =
+        validate_definition(definition).expect_err("frontend HumanInput has no fixed assignee");
+    assert!(
+        error
+            .to_string()
+            .contains("frontend human_input node review must not define assignee")
+    );
+}
+
+#[test]
 fn validates_human_input_without_judge_uses_complete_transition() {
     let mut definition = human_review_definition();
     let state_machine = match &mut definition.runtime {

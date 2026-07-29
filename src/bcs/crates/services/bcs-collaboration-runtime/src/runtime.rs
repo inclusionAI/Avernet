@@ -381,28 +381,6 @@ impl CollaborationRuntime {
         let node = state_machine.nodes.get(node_id).ok_or_else(|| {
             CollaborationRuntimeError::InvalidDefinition(format!("node not found: {node_id}"))
         })?;
-        let assignee_actor_id = match &node.assignee {
-            Some(StateMachineAssignee::RuntimeActor { actor }) => actor.clone(),
-            _ => {
-                return Err(CollaborationRuntimeError::InvalidDefinition(format!(
-                    "human_input node {node_id} requires runtime_actor assignee"
-                )));
-            }
-        };
-        let notification_mode = node
-            .notification
-            .as_ref()
-            .ok_or_else(|| {
-                CollaborationRuntimeError::InvalidDefinition(format!(
-                    "human_input node {node_id} notification is required"
-                ))
-            })?
-            .mode;
-        let human_input_channel = state_machine.human_input_channel.as_ref().ok_or_else(|| {
-            CollaborationRuntimeError::InvalidDefinition(format!(
-                "human_input node {node_id} requires state_machine.human_input_channel"
-            ))
-        })?;
         let node_run = self
             .runs
             .get_node_run(&run.run_id, node_id)
@@ -418,7 +396,6 @@ impl CollaborationRuntime {
             ))
         })?;
         let deadline = now.saturating_add(timeout_ms);
-        let event_id = format!("human-ready:{}:{}", run.run_id, node_id);
         let marked = self
             .runs
             .mark_human_node_running_if_run_active(MarkHumanNodeRunningCommand {
@@ -432,6 +409,27 @@ impl CollaborationRuntime {
         if !marked {
             return Ok(());
         }
+        self.publish_state_machine_panel_event(group, run, None)
+            .await;
+        let Some(notification) = node.notification.as_ref() else {
+            return Ok(());
+        };
+        let assignee_actor_id = match &node.assignee {
+            Some(StateMachineAssignee::RuntimeActor { actor }) => actor.clone(),
+            _ => {
+                return Err(CollaborationRuntimeError::InvalidDefinition(format!(
+                    "human_input node {node_id} with notification requires runtime_actor assignee"
+                )));
+            }
+        };
+        let human_input_channel = state_machine.human_input_channel.as_ref().ok_or_else(|| {
+            CollaborationRuntimeError::InvalidDefinition(format!(
+                "human_input node {node_id} with notification requires state_machine.human_input_channel"
+            ))
+        })?;
+        let Some(outbound) = self.session_channel_outbound.as_ref() else {
+            return Ok(());
+        };
         let running_node = self
             .runs
             .get_node_run(&run.run_id, node_id)
@@ -443,13 +441,8 @@ impl CollaborationRuntime {
         let pending = self
             .pending_human_node_view(compiled, run, &running_node)
             .await?;
-        self.publish_state_machine_panel_event(group, run, None)
-            .await;
-        let Some(outbound) = self.session_channel_outbound.as_ref() else {
-            return Ok(());
-        };
         let event = HumanInputReadyEvent {
-            event_id,
+            event_id: format!("human-ready:{}:{}", run.run_id, node_id),
             group_id: run.group_id.clone(),
             session_id: run.session_id.clone(),
             run_id: run.run_id.clone(),
@@ -458,7 +451,7 @@ impl CollaborationRuntime {
             instruction: pending.instruction,
             assignee_actor_id,
             channel_type: human_input_channel.channel_type.clone(),
-            notification_mode,
+            notification_mode: notification.mode,
             fixed_group_conversation_id: human_input_channel
                 .fixed_group
                 .as_ref()
@@ -2047,12 +2040,15 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 cmd.node_id
             )));
         }
-        // COSEC: a channel sender must match the assignee frozen in the run
-        // definition; being any Present Human in the session is insufficient.
-        if !matches!(
-            &node_definition.assignee,
-            Some(StateMachineAssignee::RuntimeActor { actor }) if actor == &cmd.caller_actor_id
-        ) {
+        // COSEC: IM-targeted input is restricted to its frozen assignee. A
+        // frontend-only node has no assignee and retains the existing rule
+        // that any Present Human participant in the run session may respond.
+        let caller_matches_node = match &node_definition.assignee {
+            None => true,
+            Some(StateMachineAssignee::RuntimeActor { actor }) => actor == &cmd.caller_actor_id,
+            Some(StateMachineAssignee::BotBinding { .. }) => false,
+        };
+        if !caller_matches_node {
             return Err(CollaborationRuntimeError::Forbidden(
                 "caller is not the HumanInput node assignee".to_string(),
             ));
@@ -2197,17 +2193,16 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             {
                 continue;
             }
-            if !state_machine
-                .nodes
-                .get(&node_run.node_id)
-                .is_some_and(|node| {
-                    node.kind == StateMachineNodeKind::HumanInput
-                        && matches!(
-                            &node.assignee,
-                            Some(StateMachineAssignee::RuntimeActor { actor })
-                                if actor == &cmd.caller_actor_id
-                        )
-                })
+            if !state_machine.nodes.get(&node_run.node_id).is_some_and(|node| {
+                node.kind == StateMachineNodeKind::HumanInput
+                    && match &node.assignee {
+                        None => true,
+                        Some(StateMachineAssignee::RuntimeActor { actor }) => {
+                            actor == &cmd.caller_actor_id
+                        }
+                        Some(StateMachineAssignee::BotBinding { .. }) => false,
+                    }
+            })
             {
                 continue;
             }
