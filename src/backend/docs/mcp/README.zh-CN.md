@@ -465,6 +465,10 @@ server，却不知道往哪连；只有详情没有白名单，配置躺在设�
 顺序是有意的：**设备是执行方，passport 是对外的声明。** 设备没改成功就提前返回，
 passport 完全不动 —— 宁可两边都停在旧状态，也不要 passport 宣称一份设备并未生效的范围。
 
+> **不熟悉 Passport？** 它是 bot 的身份凭证 —— 这个 bot 是谁、被授权触达什么。
+> [`docs/passport/README.zh-CN.md`](../passport/README.zh-CN.md) 有完整讲解，
+> 其中 §7 列出了 MCP 与它的每一处交集。
+
 ### 6.3 为什么"空列表也必须推"
 
 上面那句注释里最容易被读过去的，是"即使 `active_mcps` 为空也会调用"。这不是防御性编程，
@@ -901,6 +905,8 @@ class CommunityMCPCenter(MCPCenterPlugin):
 
 相关文档：
 
+- [`src/backend/docs/passport/README.zh-CN.md`](../passport/README.zh-CN.md) —— Passport，
+  即本文 §6.2/§6.5/§6.9 写入的那份 bot 身份凭证。
 - `src/backend/src/agentclaw/community/core/mcp/README.md` —— 本模块受机器校验的
   context boundary。
 - `src/backend/docs/openapi-v1/README.zh-CN.md` —— Track A / Track B 交接看板。

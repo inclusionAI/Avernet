@@ -495,6 +495,10 @@ device write fails the method returns early and passport is never touched —
 better that both sides stay on the old state than have passport advertise a
 scope the device never took.
 
+> **New to Passport?** It's the bot's identity credential — who the bot is, and
+> what it's authorized to reach. [`docs/passport/README.md`](../passport/README.md)
+> explains it end to end; §7 there maps every point where MCP touches it.
+
 ### 6.3 Why an empty list must still be pushed
 
 The easiest phrase to skim past in that comment is "called even when
@@ -964,6 +968,8 @@ Tests worth reading as executable documentation:
 
 Related docs:
 
+- [`src/backend/docs/passport/README.md`](../passport/README.md) — Passport, the
+  bot identity credential this doc writes to in §6.2/§6.5/§6.9.
 - `src/backend/src/agentclaw/community/core/mcp/README.md` — the module's
   machine-checked context boundary.
 - `src/backend/docs/openapi-v1/README.md` — the Track A / Track B handoff board.
