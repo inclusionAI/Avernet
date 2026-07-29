@@ -206,7 +206,8 @@ class _McpPortMixin:
         """
         import subprocess as _sp  # noqa: PLC0415
 
-        cmd = ["mcporter", "call", tool]
+        config_path = self._mcporter_config_path()
+        cmd = ["mcporter", "call", "--config", str(config_path), tool]
         for key, value in (args or {}).items():
             cmd.append(f"{key}={value}")
 
@@ -260,7 +261,8 @@ class _McpPortMixin:
         csv_codes = (
             ",".join(normalized) if normalized else "__EMPTY_FILTER_DISABLE_ALL__"
         )
-        command = ["mcporter", "filter-servers", csv_codes]
+        config_path = self._mcporter_config_path()
+        command = ["mcporter", "filter-servers", "--config", str(config_path), csv_codes]
         try:
             proc = _sp.run(
                 command,

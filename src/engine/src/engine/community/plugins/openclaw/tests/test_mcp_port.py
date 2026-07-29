@@ -280,7 +280,10 @@ async def test_call_tool_builds_correct_argv(impl, monkeypatch):
     import subprocess as _sp  # noqa: PLC0415
     monkeypatch.setattr(_sp, "run", fake_run)
     result = await impl.call_tool("my_tool", {"key": "val", "num": 42})
-    assert captured["cmd"] == ["mcporter", "call", "my_tool", "key=val", "num=42"]
+    cfg_path = impl._mcporter_config_path()
+    assert captured["cmd"] == [
+        "mcporter", "call", "--config", str(cfg_path), "my_tool", "key=val", "num=42",
+    ]
     assert result["tool_name"] == "my_tool"
     assert result["is_error"] is False
     assert result["content"] == [{"type": "text", "text": "tool_output"}]
@@ -324,7 +327,8 @@ async def test_call_tool_no_args(impl, monkeypatch):
     import subprocess as _sp  # noqa: PLC0415
     monkeypatch.setattr(_sp, "run", fake_run)
     await impl.call_tool("bare_tool", {})
-    assert captured["cmd"] == ["mcporter", "call", "bare_tool"]
+    cfg_path = impl._mcporter_config_path()
+    assert captured["cmd"] == ["mcporter", "call", "--config", str(cfg_path), "bare_tool"]
 
 
 @pytest.mark.asyncio
@@ -366,7 +370,10 @@ async def test_filter_servers_passes_csv_to_subprocess(impl, monkeypatch):
     import subprocess as _sp  # noqa: PLC0415
     monkeypatch.setattr(_sp, "run", fake_run)
     result = await impl.filter_servers(["a", "b"], timeout=5)
-    assert captured["cmd"] == ["mcporter", "filter-servers", "a,b"]
+    cfg_path = impl._mcporter_config_path()
+    assert captured["cmd"] == [
+        "mcporter", "filter-servers", "--config", str(cfg_path), "a,b",
+    ]
     assert result["return_code"] == 0
     assert result["stdout"] == "out"
     assert result["server_codes"] == ["a", "b"]
@@ -397,7 +404,8 @@ async def test_filter_servers_empty_uses_sentinel(impl, monkeypatch):
     import subprocess as _sp  # noqa: PLC0415
     monkeypatch.setattr(_sp, "run", fake_run)
     await impl.filter_servers([])
-    assert captured["cmd"][2] == "__EMPTY_FILTER_DISABLE_ALL__"
+    # --config and its value shift the CSV arg to index 4
+    assert captured["cmd"][4] == "__EMPTY_FILTER_DISABLE_ALL__"
 
 
 @pytest.mark.asyncio
@@ -454,7 +462,8 @@ async def test_filter_servers_skips_empty_codes(impl, monkeypatch):
     monkeypatch.setattr(_sp, "run", fake_run)
     result = await impl.filter_servers(["a", "", "b"])
     # empty string stripped → only a,b normalised
-    assert captured["cmd"][2] == "a,b"
+    # --config and its value shift the CSV arg to index 4
+    assert captured["cmd"][4] == "a,b"
     assert result["server_codes"] == ["a", "b"]
 
 
@@ -472,3 +481,44 @@ async def test_list_reads_legacy_servers_key(impl, cfg_path):
     out = await impl.list_servers()
     assert len(out) == 1
     assert out[0]["server_code"] == "alt"
+
+
+# ── regression: --config absolute path ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_call_tool_passes_absolute_config_path(impl, monkeypatch):
+    """call_tool must pass --config <absolute-path> to mcporter."""
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "ok", "")
+
+    import subprocess as _sp  # noqa: PLC0415
+    monkeypatch.setattr(_sp, "run", fake_run)
+    await impl.call_tool("t", {})
+    cfg_path = impl._mcporter_config_path()
+    idx = captured["cmd"].index("--config")
+    assert captured["cmd"][idx + 1] == str(cfg_path)
+    # Verify the path is absolute (not cwd-relative)
+    assert str(cfg_path) == str(cfg_path.resolve())
+
+
+@pytest.mark.asyncio
+async def test_filter_servers_passes_absolute_config_path(impl, monkeypatch):
+    """filter_servers must pass --config <absolute-path> to mcporter."""
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "ok", "")
+
+    import subprocess as _sp  # noqa: PLC0415
+    monkeypatch.setattr(_sp, "run", fake_run)
+    await impl.filter_servers(["x"], timeout=5)
+    cfg_path = impl._mcporter_config_path()
+    idx = captured["cmd"].index("--config")
+    assert captured["cmd"][idx + 1] == str(cfg_path)
+    # Verify the path is absolute (not cwd-relative)
+    assert str(cfg_path) == str(cfg_path.resolve())
