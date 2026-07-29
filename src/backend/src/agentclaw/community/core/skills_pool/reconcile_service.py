@@ -117,6 +117,11 @@ class SkillsPoolReconcileService:
         engine = bot.get("active_engine")
         if bot.get("env") != scope.env or not isinstance(engine, str):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+        if (
+            state.rollout_evidence is not None
+            and state.rollout_evidence.engine_type != engine
+        ):
+            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
 
@@ -200,6 +205,11 @@ class SkillsPoolReconcileService:
 
         if (
             not state.data_plane_cutover_committed
+            and state.phase
+            in {
+                SkillLayoutPhase.POOL_PREPARING,
+                SkillLayoutPhase.POOL_READY,
+            }
             and probe.evidence.get("cutover_evidence_contract_version")
             != CUTOVER_EVIDENCE_CONTRACT_VERSION
         ):
@@ -208,23 +218,12 @@ class SkillsPoolReconcileService:
                 "reason": "cutover_evidence_contract_not_supported",
                 "required_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
             }
-            if state.phase is SkillLayoutPhase.POOL_PREPARING:
-                recorded = self._layouts.release_not_capable_claim(
-                    scope=scope,
-                    migration_generation=generation,
-                    lease_owner=lease_owner,
-                    evidence=compatibility_evidence,
-                )
-            else:
-                recorded = self._layouts.record_pre_cutover_failure(
-                    scope=scope,
-                    migration_generation=generation,
-                    lease_owner=lease_owner,
-                    failure_code="NOT_CAPABLE",
-                    failure_stage="runtime_contract",
-                    retryable=False,
-                    evidence=compatibility_evidence,
-                )
+            recorded = self._layouts.release_not_capable_claim(
+                scope=scope,
+                migration_generation=generation,
+                lease_owner=lease_owner,
+                evidence=compatibility_evidence,
+            )
             if not recorded:
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.STATE_RACE_LOST
@@ -442,6 +441,35 @@ class SkillsPoolReconcileService:
                         preparation_id=probe.preparation_id,
                     )
             else:
+                quarantine_path = cutover.evidence.get("quarantine")
+                if (
+                    not isinstance(quarantine_path, str) or not quarantine_path
+                ) and not self._layouts.has_quarantine_identity(
+                    scope=scope,
+                    migration_generation=generation,
+                ):
+                    contract_evidence = {
+                        **cutover.to_dict(),
+                        "reason": ("quarantine_identity_missing_from_runtime_and_db"),
+                        "required_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+                    }
+                    if not self._layouts.record_cutover_finalizing(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        preparation_id=probe.preparation_id,
+                        evidence=contract_evidence,
+                    ):
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                            preparation_id=probe.preparation_id,
+                        )
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.TRANSIENT_ERROR,
+                        preparation_id=probe.preparation_id,
+                        evidence=contract_evidence,
+                        retryable=True,
+                    )
                 if not self._layouts.record_cutover_committed(
                     scope=scope,
                     migration_generation=generation,

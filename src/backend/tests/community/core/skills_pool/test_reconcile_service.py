@@ -32,6 +32,7 @@ from agentclaw.community.core.skills_pool.reconcile_task import (
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
+    RolloutEvidence,
     SkillLayout,
     SkillLayoutPhase,
 )
@@ -544,6 +545,126 @@ async def test_conflicting_same_name_sources_fail_before_cutover() -> None:
     assert runtime.physical_cutovers == 0
     assert layouts.events == ["failure"]
     assert layouts.state.data_plane_cutover_committed is False
+
+
+@pytest.mark.asyncio
+async def test_pre_upgrade_runtime_releases_ready_claim_safely() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_READY,
+            preparation_id=PREPARATION_ID,
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        evidence={"marker": "valid"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.NOT_CAPABLE
+    assert runtime.events == ["probe"]
+    assert layouts.events == ["not_capable_release"]
+    assert layouts.state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert layouts.state.migration_generation is None
+
+
+@pytest.mark.asyncio
+async def test_pre_upgrade_runtime_reconciles_activating_generation() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER,
+            preparation_id=PREPARATION_ID,
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        evidence={"marker": "valid"},
+    )
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"quarantine": "/runtime/quarantine/generation-1/skills-local"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.events == ["ready", "begin", "cutover", "database"]
+    assert "not_capable_release" not in layouts.events
+
+
+@pytest.mark.asyncio
+async def test_activating_old_runtime_without_identity_waits_for_upgrade() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER,
+            preparation_id=PREPARATION_ID,
+        )
+    )
+    layouts.quarantine_identity = False
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        evidence={"marker": "valid"},
+    )
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"active_marker": "same-generation"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.TRANSIENT_ERROR
+    assert result.retryable is True
+    assert runtime.events == ["probe", "cutover"]
+    assert layouts.events == ["ready", "begin", "finalizing"]
+    assert "not_capable_release" not in layouts.events
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert layouts.state.data_plane_cutover_committed is True
+
+
+@pytest.mark.asyncio
+async def test_changed_engine_is_rejected_before_runtime_access() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            rollout_evidence=RolloutEvidence(
+                env=SCOPE.env,
+                config_id=12,
+                config_version="revision-1",
+                batch_id="openclaw-batch",
+                engine_type="openclaw",
+                decision_reason="whitelist",
+            )
+        )
+    )
+    runtime = FakeRuntime(engine="claude_code")
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine="claude_code",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.BOT_CHANGED
+    assert runtime.events == []
+    assert layouts.events == []
 
 
 @pytest.mark.asyncio
