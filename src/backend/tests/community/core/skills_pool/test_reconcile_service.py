@@ -1170,6 +1170,47 @@ async def test_post_cutover_sync_pending_retries_finalization_before_mappings() 
 
 
 @pytest.mark.asyncio
+async def test_finalizing_without_persisted_quarantine_uses_runtime_identity() -> None:
+    quarantine = (
+        "/home/admin/.aicoding/workspace/skills-pool/"
+        ".migration-quarantine/generation-1/skills-local"
+    )
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            last_failure_code="POST_CUTOVER_SYNC_PENDING",
+        )
+    )
+    layouts.quarantine_identity = False
+    runtime = FakeRuntime(engine="aicoding")
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={
+            "active_marker": "same-generation",
+            "quarantine": quarantine,
+            "quarantine_cleanup_pending": True,
+        },
+    )
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine="aicoding",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.events == ["evidence", "database"]
+    assert layouts.state.active_layout is SkillLayout.POOL
+
+
+@pytest.mark.asyncio
 async def test_committed_repair_invalid_refresh_stays_forward_only() -> None:
     layouts = FakeLayoutRepository(
         claimed_state(
