@@ -48,6 +48,7 @@ from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, end
 
 
 _USER_HEADER = {"x-user-id": "88888"}
+_NON_OP_USER_HEADER = {"x-user-id": "99999"}
 
 
 # ---------------------------------------------------------------------------
@@ -1348,3 +1349,95 @@ def tickets_delete_cascade_error_missing_reason():
 )
 def tickets_delete_cascade_no_auth():
     """Error path: 无鉴权 → 401。"""
+
+
+# ---------------------------------------------------------------------------
+# 17. Non-operator 403 Forbidden (require_operator router-level gate)
+# ---------------------------------------------------------------------------
+
+
+def _seed_non_operator(world) -> None:
+    """Patch LocalAuth.is_operator_allowed to return False for non-operator tests.
+
+    The router-level ``dependencies=[Depends(require_operator)]`` gate calls
+    ``auth_plugin.is_operator_allowed(staff_id)``. In local mode LocalAuth
+    always returns True; this seed patches it to return False so the 403
+    path is exercised.
+    """
+    from unittest.mock import patch
+
+    patch(
+        "agentclaw.community.plugins.local.auth.LocalAuth.is_operator_allowed",
+        return_value=False,
+    ).start()
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/tickets:offline-renew",
+    scenario="forbidden_non_operator",
+    input=CaseInput(
+        headers=_NON_OP_USER_HEADER,
+        json_body={
+            "owner_id": "owner-x",
+            "bot_id": "bot-x",
+            "governance_decision": "actionable",
+            "dt_version": "20260710",
+        },
+    ),
+    seed=_seed_non_operator,
+    expect=ExpectError(status=403),
+)
+def tickets_offline_renew_forbidden():
+    """Non-operator gets 403 on offline-renew."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/tickets:deliver",
+    scenario="forbidden_non_operator",
+    input=CaseInput(
+        headers=_NON_OP_USER_HEADER,
+        json_body={
+            "worker_id": "owner-dl:bot-dl",
+            "dry_run": True,
+        },
+    ),
+    seed=_seed_non_operator,
+    expect=ExpectError(status=403),
+)
+def tickets_deliver_forbidden():
+    """Non-operator gets 403 on deliver."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/brake",
+    scenario="forbidden_non_operator",
+    input=CaseInput(
+        headers=_NON_OP_USER_HEADER,
+        json_body={"enabled": True, "reason": "unauthorized attempt"},
+    ),
+    seed=_seed_non_operator,
+    expect=ExpectError(status=403),
+)
+def brake_toggle_forbidden():
+    """Non-operator gets 403 on brake toggle."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/economy/governance/admin/whitelist:delete",
+    scenario="forbidden_non_operator",
+    input=CaseInput(
+        headers=_NON_OP_USER_HEADER,
+        json_body={
+            "bot_owner_pairs": [{"bot_id": "b1", "owner_id": "o1"}],
+            "reason": "unauthorized",
+        },
+    ),
+    seed=_seed_non_operator,
+    expect=ExpectError(status=403),
+)
+def whitelist_delete_forbidden():
+    """Non-operator gets 403 on whitelist delete."""

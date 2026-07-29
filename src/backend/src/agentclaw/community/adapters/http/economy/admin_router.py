@@ -30,6 +30,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from agentclaw.community.adapters.http.auth.dependencies import require_operator
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.adapters.http.economy.schemas import (
     ApiResponse,
@@ -60,6 +61,7 @@ log = logging.getLogger(__name__)
 admin_router = APIRouter(
     prefix="/api/economy/governance",
     tags=["economy-governance-admin"],
+    dependencies=[Depends(require_operator)],
 )
 
 _AdminSvc = GovernanceAdminServiceProtocol
@@ -386,7 +388,7 @@ async def trigger_scan(
     summary="扫描+投递通知 (可指定收件人, 可 dry-run)",
 )
 async def scan_and_deliver(
-    ctx: RequestContext = None,  # TODO: revert — temporarily disabled auth for dev testing
+    ctx: RequestContext = Depends(get_request_context),
     override_recipient: str = Query(
         ...,
         pattern=r"^\d{4,10}$",
