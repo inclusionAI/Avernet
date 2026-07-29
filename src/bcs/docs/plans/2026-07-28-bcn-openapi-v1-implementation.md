@@ -61,8 +61,6 @@ cryptography by assumption.
 
 **Files:**
 
-- Modify: `pyproject.toml`
-- Modify: `uv.lock`
 - Create: `src/bcs/api-contracts/v1/openapi.yaml`
 - Create: `src/bcs/api-contracts/v1/shared.yaml`
 - Create: `src/bcs/api-contracts/v1/domain-models.yaml`
@@ -126,15 +124,18 @@ assert not internal_operations
 Run:
 
 ```bash
-uv run pytest src/bcs/tests/openapi/test_contract.py -q
+uv run --with pytest --with pyyaml \
+  pytest src/bcs/tests/openapi/test_contract.py -q
 ```
 
 Expected: FAIL because the contract files and loader do not exist.
 
-**Step 3: Add public YAML tooling**
+**Step 3: Use task-scoped public YAML tooling**
 
-Add `pyyaml>=6.0` as a public root development dependency and update `uv.lock`.
-Do not add a company-only package source.
+Run the contract validator, bundler, and tests with task-scoped public
+dependencies such as `uv run --with pyyaml` and
+`uv run --with pytest --with pyyaml`. Do not change the repository-wide
+`pyproject.toml` or `uv.lock`, and do not add a company-only package source.
 
 **Step 4: Create the contract fragments**
 
@@ -249,8 +250,10 @@ directory; it must not commit generated output.
 Run:
 
 ```bash
-uv run pytest src/bcs/tests/openapi/test_contract.py -q
-uv run python src/bcs/scripts/validate_openapi_contract.py --root src/bcs/api-contracts/v1
+uv run --with pytest --with pyyaml \
+  pytest src/bcs/tests/openapi/test_contract.py -q
+uv run --with pyyaml python src/bcs/scripts/validate_openapi_contract.py \
+  --root src/bcs/api-contracts/v1
 ```
 
 Expected: PASS and `27 operations validated`.
@@ -258,7 +261,7 @@ Expected: PASS and `27 operations validated`.
 **Step 7: Commit**
 
 ```bash
-git add pyproject.toml uv.lock src/bcs/api-contracts src/bcs/scripts/validate_openapi_contract.py src/bcs/scripts/bundle_openapi_contract.py src/bcs/tests/openapi
+git add src/bcs/api-contracts src/bcs/scripts/validate_openapi_contract.py src/bcs/scripts/bundle_openapi_contract.py src/bcs/tests/openapi
 git commit -m "docs(bcs): add candidate OpenAPI v1 contract"
 ```
 
