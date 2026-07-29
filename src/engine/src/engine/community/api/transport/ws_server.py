@@ -190,6 +190,7 @@ class EngineWebSocketServer:
         self._session_subscribers: Dict[str, set[str]] = {}
         self._conn_sessions: Dict[str, set[str]] = {}
         self._session_materialized_redaction_paths: Dict[str, tuple[str, ...]] = {}
+        self._conn_materialized_redaction_paths: Dict[str, tuple[str, ...]] = {}
         self._inject_listener_refs: Dict[
             tuple[str | None, int], tuple[Any, Callable[[EventFrame], Any]]
         ] = {}
@@ -741,6 +742,7 @@ class EngineWebSocketServer:
         return await self._ensure_openclaw_inject_listener(conn_id)
 
     def _unsubscribe_conn(self, conn_id: str) -> None:
+        self._conn_materialized_redaction_paths.pop(conn_id, None)
         for session_key in list(self._conn_sessions.pop(conn_id, set())):
             subscribers = self._session_subscribers.get(session_key)
             if subscribers is None:
@@ -824,20 +826,11 @@ class EngineWebSocketServer:
         if not subscribers:
             return
 
-        send_payload = _redact_materialized_paths(
-            payload,
-            self._session_materialized_redaction_paths.get(session_key, ()),
-        )
+        send_payload = dict(payload)
         if "seq" not in send_payload:
             send_payload["seq"] = self._next_seq()
         if "ts" not in send_payload:
             send_payload["ts"] = int(time.time() * 1000)
-        frame = EventFrame(
-            event=event.event,
-            payload=send_payload,
-            seq=send_payload["seq"],
-        )
-        raw = frame.to_json()
         stale: list[str] = []
         for subscriber_conn_id in subscribers:
             websocket = self._connections.get(subscriber_conn_id)
@@ -845,7 +838,26 @@ class EngineWebSocketServer:
                 stale.append(subscriber_conn_id)
                 continue
             try:
-                await websocket.send_text(raw)
+                redaction_paths = self._conn_materialized_redaction_paths.get(
+                    subscriber_conn_id,
+                    self._session_materialized_redaction_paths.get(session_key, ()),
+                )
+                outbound_payload = _redact_materialized_paths(
+                    send_payload,
+                    redaction_paths,
+                )
+                if redaction_paths:
+                    log.info(
+                        "engine.ws_injected_event.redaction session_key_hash=%s target_count=%s",
+                        hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16],
+                        len(redaction_paths),
+                    )
+                frame = EventFrame(
+                    event=event.event,
+                    payload=outbound_payload,
+                    seq=send_payload["seq"],
+                )
+                await websocket.send_text(frame.to_json())
             except Exception as e:
                 log.debug(
                     "chat.subscribe: fanout failed conn=%s: %s",
@@ -1088,6 +1100,7 @@ class EngineWebSocketServer:
                 self._session_materialized_redaction_paths[session_key] = (
                     materialized_paths
                 )
+                self._conn_materialized_redaction_paths[conn_id] = materialized_paths
                 log.info(
                     "engine.resource_reference.validate session_key_hash=%s reference_count=%s ok=true",
                     session_key_hash,

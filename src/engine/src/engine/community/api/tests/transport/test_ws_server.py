@@ -1470,7 +1470,7 @@ class TestChatSubscribeFanout:
         ws.send_text = AsyncMock()
         server._connections["conn-1"] = ws
         server._session_subscribers = {"sk-1": {"conn-1"}}
-        server._session_materialized_redaction_paths["sk-1"] = (
+        server._conn_materialized_redaction_paths["conn-1"] = (
             "/bot/work/.teamclaw/session-files/a.txt",
             "/bot/work",
         )
