@@ -383,6 +383,31 @@ def test_service_draft_is_editable_but_published_service_is_not(
     )
 
 
+@pytest.mark.parametrize(
+    "engine_type",
+    ["openclaw", "claude_code", "aicoding", "hermes"],
+)
+def test_desktop_uses_the_existing_engine_and_whitelist_gate(
+    engine_type: str,
+) -> None:
+    gate = make_gate(
+        enabled_config(
+            promoted_engines=[
+                "openclaw",
+                "claude_code",
+                "aicoding",
+                "hermes",
+            ],
+        )
+    )
+
+    assert evaluate(
+        gate,
+        engine_type=engine_type,
+        runtime_form=BotRuntimeForm.DESKTOP,
+    ).eligible
+
+
 @pytest.mark.parametrize("runtime_form", [None, "personal", object()])
 def test_unknown_runtime_form_fails_closed(runtime_form: object) -> None:
     decision = evaluate(make_gate(enabled_config()), runtime_form=runtime_form)

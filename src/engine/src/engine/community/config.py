@@ -11,11 +11,13 @@ import json
 import os
 import shlex
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 # 默认连接超时时间（秒）
 DEFAULT_CONNECTION_TIMEOUT = 10
+AGENTBOX_ENV_VAR = "MAC_CONTAINER"
 
 CONFIG_DIR = Path(__file__).parent
 # 统一配置文件入口（Moltis/OpenClaw 共用）
@@ -67,6 +69,27 @@ def _to_bool(value: Any, default: bool) -> bool:
         if normalized in {"0", "false", "no", "off"}:
             return False
     return default
+
+
+def is_agentbox_runtime() -> bool:
+    """Return whether this process uses Desktop's downloaded repo delivery."""
+
+    return os.getenv(AGENTBOX_ENV_VAR, "").strip().lower() in {"1", "true"}
+
+
+class RepoDelivery(StrEnum):
+    """Runtime provider's mechanism for exposing the current Skills repo."""
+
+    MOUNT = "mount"
+    DOWNLOAD = "download"
+
+
+def current_repo_delivery() -> RepoDelivery:
+    """Resolve the runtime-owned repo delivery mechanism."""
+
+    if is_agentbox_runtime():
+        return RepoDelivery.DOWNLOAD
+    return RepoDelivery.MOUNT
 
 
 def _normalize_header_name(value: Any) -> str:
