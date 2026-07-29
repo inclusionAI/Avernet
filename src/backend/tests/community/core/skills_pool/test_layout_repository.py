@@ -347,6 +347,48 @@ def test_not_capable_probe_releases_ready_claim_before_cutover() -> None:
     assert state.preparation_id is None
 
 
+def test_changed_engine_releases_ready_claim_before_cutover() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+
+    assert repository.release_changed_engine_claim(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        evidence={
+            "reason": "bot_engine_changed",
+            "claimed_engine": "openclaw",
+            "current_engine": "claude_code",
+        },
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert state.target_layout is None
+    assert state.migration_generation is None
+    assert state.last_probe_result == "BOT_CHANGED"
+    assert state.last_probe_evidence == {
+        "reason": "bot_engine_changed",
+        "claimed_engine": "openclaw",
+        "current_engine": "claude_code",
+    }
+
+
 def test_claim_updates_an_existing_unclaimed_legacy_row() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
@@ -882,6 +924,24 @@ def test_post_cutover_evidence_reuses_existing_quarantine_identity() -> None:
     assert repository.has_quarantine_identity(
         scope=scope,
         migration_generation="generation-1",
+    )
+    assert not repository.quarantine_identity_conflicts(
+        scope=scope,
+        migration_generation="generation-1",
+        engine="openclaw",
+        path=quarantine_path,
+    )
+    assert repository.quarantine_identity_conflicts(
+        scope=scope,
+        migration_generation="generation-1",
+        engine="openclaw",
+        path=f"{quarantine_path}-other",
+    )
+    assert repository.quarantine_identity_conflicts(
+        scope=scope,
+        migration_generation="generation-1",
+        engine="claude_code",
+        path=quarantine_path,
     )
     assert repository.record_post_cutover_evidence(
         scope=scope,
