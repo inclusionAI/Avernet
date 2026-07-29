@@ -140,25 +140,30 @@
     to isolation — now pinned by the test so it cannot drift silently.
 - **Depends on:** Tasks 3, 4
 
-## Task 6: Update the handoff board and record the schema change
+## Task 6: [x] Update the handoff board and record the schema change
 - **Goal:** Leave the board showing what is actually done and what is actually
   next, and put the DDL where whoever applies it will find it.
 - **Files:** `src/backend/docs/openapi-v1/README.md`,
   `src/backend/docs/openapi-v1/README.zh-CN.md`
 - **Done when:**
-  - [ ] Track A Stage 5 shows ✅ DONE in both editions
-        (`README.md:108`, `README.zh-CN.md:95`).
-  - [ ] Channels show **deprioritized** rather than P2 in both editions, for
-        **both** the Track A stage (`README.md:103`, `README.zh-CN.md:93`) and
-        the Track B endpoint row (`README.md:119`, `README.zh-CN.md:109`), with
-        the reason recorded. Rows keep their scope — deprioritized, not removed.
-  - [ ] The three `ALTER TABLE` statements and **both** ordering constraints are
-        recorded in the cross-cutting deferred-items section of both editions:
-        the column adds must precede the code deploy; the unique-key swap must
-        precede a second tenant writing, and is create-before-drop.
-  - [ ] A dated changelog line is appended in both editions
-        (`README.md:418`, `README.zh-CN.md:366`).
-  - [ ] The English and Chinese editions say the same thing — no drift.
+  - [x] Track A Stage 5 shows ✅ DONE in both editions, naming both isolated
+        tables and PR #564.
+  - [x] Channels show **deprioritized** rather than P2 in both editions, for
+        **both** the Track A stage and the Track B endpoint row, with the reason
+        recorded. Rows keep their scope — deprioritized, not removed, and the
+        note says explicitly that cancellation would mean deleting them.
+  - [x] The `ALTER TABLE` statements and **both** ordering constraints are
+        recorded — in a new top-level "Schema changes applied out-of-band"
+        section rather than buried in cross-cutting, with a cross-cutting row
+        pointing at it. Stage 1's DDL is recorded alongside so the section is
+        the one place to look.
+  - [x] A dated changelog line is appended in both editions — two, in fact:
+        Stage 5 done (with the four things a later stage needs to know) and
+        channels deprioritized.
+  - [x] The English and Chinese editions say the same thing — no drift.
+        Cross-checked by marker counts: 2 deprioritized markers, 1 unique-key
+        definition, 3 dated lines, 0 references to the deleted
+        `_AVERNET_TENANT_GUARDS_INSTALLED` in each.
 - **Depends on:** Tasks 3, 4
 
 ## Task 7: Tests & Verification

@@ -103,9 +103,9 @@ must implement._
 |---|---|---|---|---|---|
 | 1 | Bot records (`ac_bots` / `BotModel`) | totalfrank | P1 | ✅ DONE — **PR #456 (awaiting approval, not yet merged)** | PR #456 merges |
 | 2 | Resources (`ac_resource`) | lucas-xzp | P1 | ⬜ TODO | column + guards + tests green; internal API unchanged |
-| 3 | Channels (`ac_channel_config`) | totalfrank | P2 | ⬜ TODO | same |
+| 3 | Channels (`ac_channel_config`) | totalfrank | 🅳 **DEPRIORITIZED** | ⏸️ PARKED — scope intact, not cancelled | same, if picked back up |
 | 4 | Skills (skill tables) | totalfrank + lucas-xzp | P3 | ⬜ TODO | same |
-| 5 | MCP configuration | totalfrank | P1 | ⬜ TODO | same |
+| 5 | MCP configuration (`ac_user_mcp_config` + `ac_bot_mcp_call_config`) | totalfrank | P1 | ✅ DONE — **PR #564** | PR #564 merges |
 | 6 | Routines | lucas-xzp | P1 | ⬜ TODO | same |
 
 > Stage 1 also builds the **reusable mechanism** (see below) that every later
@@ -116,10 +116,10 @@ _Ordered by priority tier._
 | Category | Owner | Pri | Router (stubs today) | State | Depends on |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ⬜ TODO | Track A stage 1 (PR #456) |
-| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ⬜ TODO | Track A mcp (totalfrank) |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ⬜ TODO — **unblocked** | Track A stage 5 ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | ⬜ TODO | Track A resources (lucas-xzp) |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | ⬜ TODO | Track A routines (lucas-xzp) |
-| channels | totalfrank | P2 | `openapi_v1/channels/router.py` | ⬜ TODO | Track A channels (totalfrank) |
+| channels | totalfrank | 🅳 **DEPRIORITIZED** | `openapi_v1/channels/router.py` | ⏸️ PARKED — scope intact, not cancelled | Track A stage 3 (also parked) |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | ⬜ TODO | bots isolation (Stage 1 ✅) |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | ⬜ TODO | Track A skills (shared) |
 
@@ -129,6 +129,67 @@ _Ordered by priority tier._
 | Real caller-identity verifier (auth workstream) | ⬜ TODO (other team) | swap `resolve_avernet_tenant` body to read the gateway principal's tenant; unblocks a real 2nd tenant |
 | Tenant-leading indexes (F2, **MANDATORY** policy) | ⬜ TODO | before multi-tenant go-live |
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
+| **Stage 5 unique-key swap on `ac_user_mcp_config`** | ⬜ TODO (DDL below) | **before a 2nd tenant writes MCP config** — not before deploy |
+
+> **⏸️ Why channels are parked (2026-07-29).** The product does not need
+> channels at this point, so they must stop presenting as the next thing to
+> pick up. This is a **deprioritization, not a cancellation** — both rows keep
+> their full scope and can be picked back up unchanged. If channels are ever
+> actually cancelled, delete the rows rather than leaving them parked.
+
+---
+
+## Schema changes applied out-of-band (no migration files in-repo)
+
+Per the standing decision, tenant-isolation schema changes are applied on the
+platform out of band, so **these statements are the authoritative record**.
+Hand them to whoever applies DDL together with the ordering notes.
+
+**Stage 1 — `ac_bots`** (already applied):
+
+```sql
+ALTER TABLE ac_bots
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+```
+
+**Stage 5 — MCP configuration** (PR #564). Three statements, **two different
+deadlines**:
+
+```sql
+-- 1. Column adds. MUST land BEFORE the code deploy: a SELECT naming a column
+--    that does not exist fails outright, so a code-first deploy takes MCP
+--    config reads down. NOT NULL DEFAULT backfills existing rows in place and
+--    is inert against currently-deployed code, so DDL-first is safe.
+ALTER TABLE ac_user_mcp_config
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+ALTER TABLE ac_bot_mcp_call_config
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+-- 2. Unique-key swap. NOT required before the code deploy — with one tenant
+--    the old key and the new one accept exactly the same rows. It becomes
+--    load-bearing the moment a SECOND TENANT WRITES MCP config, because
+--    (user_id, server_code, env) rejects a second tenant's row for a user id
+--    it shares — a duplicate-key error against a row it cannot see.
+--    Create-before-drop so uniqueness is never unenforced. Adding a leading
+--    column only loosens a unique key, so every existing row stays valid.
+ALTER TABLE ac_user_mcp_config
+  ADD UNIQUE KEY uix_user_mcp_config_tenant
+    (avernet_tenant, user_id, server_code, env) GLOBAL;
+ALTER TABLE ac_user_mcp_config
+  DROP INDEX uix_user_mcp_config;
+```
+
+`ac_bot_mcp_call_config` needs **no** key change: its key
+`(bot_pk, server_code, engine_type, env)` leads with `ac_bots.id`, a global
+primary key, so the tenant is already functionally determined and the
+collision above is not representable.
+
+Local and singlebox runtimes need no DDL — `Base.metadata.create_all` builds
+both tables from the models.
 
 > **Sequencing decision — DECIDED 2026-07-27:** per-category **vertical slices**.
 > Each owner isolates a category (Track A) then implements its endpoints
@@ -438,3 +499,24 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 - **2026-07-27** — Skills endpoints merged from two tables (5 in-stub + 2
   proposed) into a **single 7-row table with a Status column**, so the full
   surface reads as 7 at a glance instead of looking like 2.
+- **2026-07-29** — **Track A Stage 5 (MCP configuration) done — PR #564.** Two
+  tables isolated: `ac_user_mcp_config` and `ac_bot_mcp_call_config`. Track B
+  `mcp` is unblocked. Four things worth knowing before you copy this stage:
+  1. The Stage 1 guard is now **model-agnostic** — `utils/avernet_tenant_guard`
+     with `register_avernet_tenant_guard(Model)`. Later stages register rather
+     than re-implement. `plugin_api/models.py` no longer holds the guard bodies.
+  2. **Check your table for a unique key that includes the isolated dimension.**
+     `ac_user_mcp_config` had `UNIQUE (user_id, server_code, env)`, which makes
+     "two tenants, same user id" fail with a duplicate-key error at *write*
+     time even though isolation reads correctly. `ac_bots` had no unique key, so
+     Stage 1 never hit this. The key must lead with `avernet_tenant`.
+  3. Its **deploy deadline differs from the column's**: the column before the
+     code deploy, the key swap before a second tenant writes. Both recorded in
+     the new "Schema changes applied out-of-band" section above.
+  4. **Scope first, then isolate.** Four of the six `mcp` endpoints turned out
+     to be MCP Center over HTTP with no local table at all, and
+     `ac_entity_device_binding` — which the config write path does reach — needs
+     nothing, because the query joins through `ac_bots` and
+     `with_loader_criteria` applies to join clauses. Verified, not assumed.
+- **2026-07-29** — **Channels deprioritized (not cancelled)**, Track A stage 3
+  and Track B endpoints both parked with scope intact.
