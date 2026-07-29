@@ -13,10 +13,12 @@ pub struct AuthenticatedUser {
     pub full_name: Option<String>,
 }
 
-/// Human Actor projection consumed by BCN.
+/// Gateway-authenticated Human identity consumed by BCN.
+///
+/// BCN derives its legacy `human_<subject.id>` Actor ID at the application
+/// boundary; that storage convention is not part of this identity payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HumanPrincipal {
-    pub actor_id: String,
     pub subject: AuthenticatedUser,
     pub tenant: String,
     #[serde(default)]
@@ -42,13 +44,11 @@ pub enum Principal {
 
 impl Principal {
     pub fn human(
-        actor_id: impl Into<String>,
         subject: AuthenticatedUser,
         tenant: impl Into<String>,
         scopes: BTreeSet<String>,
     ) -> Self {
         Self::Human(HumanPrincipal {
-            actor_id: actor_id.into(),
             subject,
             tenant: tenant.into(),
             scopes,
@@ -67,10 +67,10 @@ impl Principal {
         })
     }
 
-    pub fn actor_id(&self) -> &str {
+    pub fn actor_id(&self) -> String {
         match self {
-            Self::Human(principal) => &principal.actor_id,
-            Self::Bot(principal) => &principal.bot_uuid,
+            Self::Human(principal) => format!("human_{}", principal.subject.id),
+            Self::Bot(principal) => principal.bot_uuid.clone(),
         }
     }
 

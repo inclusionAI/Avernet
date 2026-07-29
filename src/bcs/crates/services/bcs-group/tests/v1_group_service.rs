@@ -246,14 +246,22 @@ fn bot_principal_in_tenant(bot_uuid: &str, tenant: &str) -> Principal {
     Principal::bot(bot_uuid, tenant, BTreeSet::new())
 }
 
-fn human_principal(actor_id: &str, subject_id: &str) -> Principal {
+fn human_principal(subject_id: &str) -> Principal {
+    human_principal_with_profile(subject_id, subject_id, None, None)
+}
+
+fn human_principal_with_profile(
+    subject_id: &str,
+    username: &str,
+    display_name: Option<&str>,
+    full_name: Option<&str>,
+) -> Principal {
     Principal::human(
-        actor_id,
         AuthenticatedUser {
             id: subject_id.into(),
-            username: subject_id.into(),
-            display_name: None,
-            full_name: None,
+            username: username.into(),
+            display_name: display_name.map(str::to_string),
+            full_name: full_name.map(str::to_string),
         },
         "tenant-a",
         BTreeSet::new(),
@@ -451,7 +459,7 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: human_principal("human_staff-1", "staff-1"),
+            principal: human_principal("staff-1"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("Protected collaboration".into()),
                 context: None,
@@ -1090,14 +1098,84 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
 }
 
 #[tokio::test]
-async fn canonical_human_principal_can_create_dm_without_legacy_actor_prefix() {
+async fn human_principal_creates_legacy_actor_with_current_display_name_priority() {
     let fixture = Fixture::new().await;
     fixture.add_public_bot("bot-b").await;
 
-    let detail = fixture
+    for (staff_no, username, display_name, full_name, expected_name) in [
+        (
+            "staff-display",
+            "alice-login",
+            Some("Alice Display"),
+            Some("Alice Full"),
+            "Alice Display",
+        ),
+        (
+            "staff-full",
+            "bob-login",
+            None,
+            Some("Bob Full"),
+            "Bob Full",
+        ),
+        ("staff-login", "carol-login", None, None, "carol-login"),
+    ] {
+        let detail = fixture
+            .service
+            .create(CreateGroup {
+                principal: human_principal_with_profile(
+                    staff_no,
+                    username,
+                    display_name,
+                    full_name,
+                ),
+                group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                    name: Some("Human and B".into()),
+                    context: None,
+                    target_actor_id: "bot-b".into(),
+                }),
+            })
+            .await
+            .expect("canonical Human actor creates DM");
+
+        let GroupDetail::DirectMessage(detail) = detail else {
+            panic!("expected DM detail");
+        };
+        let actor_id = format!("human_{staff_no}");
+        assert!(
+            detail
+                .participants
+                .iter()
+                .any(|participant| participant.actor_id == actor_id)
+        );
+        let human = fixture
+            .bots
+            .get(&actor_id)
+            .await
+            .expect("V1 must materialize the legacy Human Actor");
+        assert_eq!(human.capabilities.name.as_deref(), Some(expected_name));
+        assert_eq!(human.created_by.as_deref(), Some(staff_no));
+    }
+}
+
+#[tokio::test]
+async fn human_principal_preserves_existing_legacy_actor_display_name() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("bot-b").await;
+    fixture
+        .bots
+        .ensure_human_actor("staff-1", "Original Name")
+        .await
+        .expect("register existing Human actor");
+
+    fixture
         .service
         .create(CreateGroup {
-            principal: human_principal("human-actor-1", "staff-1"),
+            principal: human_principal_with_profile(
+                "staff-1",
+                "alice-login",
+                Some("Changed Name"),
+                None,
+            ),
             group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
                 name: Some("Human and B".into()),
                 context: None,
@@ -1105,17 +1183,14 @@ async fn canonical_human_principal_can_create_dm_without_legacy_actor_prefix() {
             }),
         })
         .await
-        .expect("canonical Human actor creates DM");
+        .expect("existing Human actor creates DM");
 
-    let GroupDetail::DirectMessage(detail) = detail else {
-        panic!("expected DM detail");
-    };
-    assert!(
-        detail
-            .participants
-            .iter()
-            .any(|participant| participant.actor_id == "human-actor-1")
-    );
+    let human = fixture
+        .bots
+        .get("human_staff-1")
+        .await
+        .expect("existing Human actor remains registered");
+    assert_eq!(human.capabilities.name.as_deref(), Some("Original Name"));
 }
 
 #[tokio::test]

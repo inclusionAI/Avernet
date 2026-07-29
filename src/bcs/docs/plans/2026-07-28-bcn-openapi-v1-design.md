@@ -168,7 +168,8 @@ BCN 新 API 只接受投影后的领域 Principal：
 
 ```text
 Principal
-├── Human { actor_id, authenticated_user, tenant, scopes }
+├── Human { authenticated_user, tenant, scopes }
+│           └── BCN application projection: human_<subject.id>
 └── Bot   { actor_id = bot_uuid, bot_uuid, tenant, scopes }
 ```
 
@@ -176,22 +177,26 @@ Principal
 
 - Gateway BotPrincipal 中的 Bot UUID 必须与 BCN `bot_uuid` 属于同一全局唯一的
   标识空间，不能因租户不同而复用同一个 Bot UUID。
-- 每个 Principal 都提供规范化的 `actor_id`，供 BCN 统一执行 Participant
-  和 Group role 授权。Human `actor_id` 不能当作 `bot_uuid` 使用，也不代表
+- Human Principal 不携带 BCN `actor_id`。BCN Application 根据权威
+  `subject.id` 投影为现有 `human_<subject.id>`，供 Participant、Relation 和
+  Group role 授权使用。该内部 Actor ID 不能当作 `bot_uuid` 使用，也不代表
   Human 可以作为其管理的 Bot 发言。
 - `tenant` 是 Principal 的身份元数据，不是 BCN 协作隔离边界。Group 不绑定
   tenant，也不要求 caller、driver 或 Participant 属于同一 tenant。跨租户 Bot
   的发现、DM、群聊和建群协作与同租户行为一致，统一由 Bot visibility、
-  Friendship/Relation、Group Participant 和 role 规则授权。
+  Friendship/Relation、Group Participant 和 role 规则授权。Human Actor ID
+  和 `created_by` 均不拼接 tenant；相同 `subject.id` 按同一个自然人处理。
 - Human Principal 参与 Bot 资源关系管理时，请求中的 `bot_uuid` 必须由 BCN
-  根据权威 `created_by` 关系授权；该关系不改变 Human 的 `actor_id`。
+  根据权威 `created_by = subject.id` 关系授权。
+- V1 Human 创建 DM 时，BCN 继续调用现有 `ensure_human_actor`，展示名称沿用
+  `display_name -> full_name -> username`，并把内部
+  `human_<subject.id>` 交给现有 Group Management 流程。
 - BCN 不接触外部原始 Cookie、Bearer Token 或 AgentPass。
 - ProviderPrincipal、ServiceKey 和 InternalService 不在第一阶段 union 中。
 
-Gateway `UserPrincipal.subject.id` 与 BCN Bot `created_by` 必须采用同一稳定身份
-空间，或由明确的身份映射契约转换。这是上线前置项，不应在业务代码中用
-`username` 或展示字段 fallback 掩盖。Human `actor_id` 的规范化规则也必须由
-同一身份契约定义，不能由各个 Route 自行拼接。
+Gateway `UserPrincipal.subject.id` 与 BCN Bot `created_by` 采用同一稳定身份
+空间。BCN 不使用 `username`、展示名称或 tenant 构造 ownership identity；
+`human_` 只由 BCN Application 统一添加，不能由各个 Route 自行拼接。
 
 ### 6.3 Principal 如何进入 BCN
 
@@ -577,7 +582,7 @@ Join 两套 endpoint。
 | 调用入口 | 客户端可直接调用 `bcs-http` | 客户端必须先经过 Gateway |
 | 原始凭证认证 | BCN Route 解析 Bot token、Human cookie/mock identity 等 | Gateway 认证原始凭证；BCN 不解析上游用户 Cookie/Token |
 | Gateway → BCN 信任 | 不适用或依赖现有直连方式 | BCN 必须验证请求来自合法 Gateway；签名/验签方案仍是上线阻塞项 |
-| Principal | 多种 Route 自行构造 `CallerContext`/actor string，行为不完全统一 | Gateway 形成规范化 `HumanPrincipal` 或 `BotPrincipal`，BCN V1 Adapter 只读取已验证 Principal |
+| Principal | 多种 Route 自行构造 `CallerContext`/actor string，行为不完全统一 | Gateway 形成原始 Human 身份或规范化 BotPrincipal；BCN V1 Application 将 `subject.id` 统一投影为现有 `human_<subject.id>` |
 | 匿名读取 | 部分 GET 允许 Public/无认证，例如 Group、Session 详情及部分 message history | 第一阶段没有 Public Principal，27 个 operation 全部要求已认证 Principal |
 | caller 参数 | 个别接口使用 query/body 中的 `bot_id`、`from_bot`、`bot_uuid` 辅助决定调用身份 | path/body 中的 `bot_uuid` 只是目标资源；不能覆盖 Principal |
 | Human 与 Bot | 部分 Legacy 流程把 Human 建成 Actor 或自动加入 Session | GroupParticipant 可以是 Human 或 Bot，Group 管理按 Actor-role 统一授权；Human 仍不能作为 Bot 发言。Session 第一阶段不继承 Legacy 的 Human 自动加入行为 |
@@ -904,11 +909,12 @@ PR 中，以满足架构规则要求的“Contract 变更同时具有文档和 c
 以下问题不阻止定义 Application/Adapter 边界，但阻止生产开放：
 
 1. Gateway BotPrincipal 的正式 Schema、认证入口和实现。
-2. Human `actor_id` 的规范化规则，以及 `AuthenticatedUser.subject.id`
-   与 BCN Bot `created_by` 的身份空间或映射契约。
-3. Gateway → BCN Principal 的签名、传递、验签、audience 和密钥轮换。
-4. Gateway 对 `bots/collaboration` 使用最长前缀路由的配置能力。
-5. 权限 scope 词表；在其落地前，BCN 仍必须执行完整资源关系授权。
+2. Gateway → BCN Principal 的签名、传递、验签、audience 和密钥轮换。
+3. Gateway 对 `bots/collaboration` 使用最长前缀路由的配置能力。
+4. 权限 scope 词表；在其落地前，BCN 仍必须执行完整资源关系授权。
+
+Human identity 映射已经确定：`subject.id` 原样用于 `created_by`，BCN 内部
+Actor ID 为 `human_<subject.id>`，tenant 不参与二者的构造。
 
 第一阶段 Internal API 为空不是待定项。未来只有出现明确内部调用者和无法通过
 OpenAPI 表达的受信任 Use Case 时，才新增 Internal API。
@@ -924,7 +930,7 @@ OpenAPI 表达的受信任 Use Case 时，才新增 Internal API。
 | 资源命名 | 使用 `bots`；BCN 只拥有 `/bots/collaboration/{bot_uuid}/**` |
 | Bot ID | 公共 Contract、Application 和领域关系统一使用 `bot_uuid` |
 | GroupParticipant ID | Human/Bot 统一使用规范化 `actor_id` |
-| 身份职责 | Gateway 认证并形成 Principal；BCN 做资源授权 |
+| 身份职责 | Gateway 认证并形成原始 Principal；BCN 投影 legacy Human Actor ID 并做资源授权 |
 | driver 选择 | Human/Bot 都可选择任意可协作 Bot，不要求所有权或自身身份 |
 | originator 推导 | 请求者属于 canonical Participants 时取请求者，否则 fallback 到 driver |
 | Group 管理 | originator、driver 和领域管理角色按 Actor-role 统一授权，不区分 Human/Bot |

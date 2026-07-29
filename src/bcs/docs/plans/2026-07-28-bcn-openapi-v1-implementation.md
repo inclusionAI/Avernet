@@ -50,12 +50,15 @@ blocked until Gateway and BCN agree on the signed Principal transport.
 Obtain explicit decisions from the Gateway/identity owners for:
 
 1. the BotPrincipal schema and authentication strategy;
-2. the Human `subject.id` to BCN Bot `created_by` identity mapping;
-3. the signed Principal token format, algorithm, issuer, audience, TTL, and key
+2. the signed Principal token format, algorithm, issuer, audience, TTL, and key
    rotation contract.
 
 Tasks 1–14 may use an injected test verifier. Task 15 must not choose production
 cryptography by assumption.
+
+The Human identity mapping is resolved: BCN keeps raw `subject.id` in
+`created_by`, derives the legacy Actor ID as `human_<subject.id>`, and does not
+include tenant in either value.
 
 ### Task 1: Land the candidate OpenAPI contract and validator
 
@@ -290,7 +293,6 @@ fn bot_principal_uses_the_bcn_bot_uuid() {
 #[test]
 fn human_principal_does_not_claim_a_bot_identity() {
     let principal = Principal::human(
-        "human-actor-1",
         AuthenticatedUser {
             id: "user-1".into(),
             username: "alice".into(),
@@ -301,8 +303,9 @@ fn human_principal_does_not_claim_a_bot_identity() {
         [],
     );
     assert_eq!(principal.bot_uuid(), None);
-    assert_eq!(principal.actor_id(), "human-actor-1");
+    assert_eq!(principal.actor_id(), "human_user-1");
     assert_eq!(principal.authenticated_user().unwrap().id, "user-1");
+    assert!(serde_json::to_value(&principal).unwrap().get("actor_id").is_none());
 }
 ```
 
@@ -332,7 +335,6 @@ pub enum Principal {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HumanPrincipal {
-    pub actor_id: String,
     pub subject: AuthenticatedUser,
     pub tenant: String,
     pub scopes: BTreeSet<String>,
@@ -346,10 +348,10 @@ pub struct BotPrincipal {
 }
 ```
 
-`Principal::actor_id()` returns `HumanPrincipal.actor_id` for Human and
-`BotPrincipal.bot_uuid` for Bot. The Gateway identity contract owns Human
-`actor_id` normalization; BCN routes must not construct it from username or
-other display fields.
+`Principal::actor_id()` derives `human_<subject.id>` for Human and returns
+`BotPrincipal.bot_uuid` for Bot. Human Principal itself never carries the BCN
+Actor ID. BCN Application owns this compatibility projection; routes must not
+construct it from username, display fields, or tenant.
 
 Do not add Provider, ServiceKey, Admin, Integration, Public, or
 InternalService variants to this V1 enum.

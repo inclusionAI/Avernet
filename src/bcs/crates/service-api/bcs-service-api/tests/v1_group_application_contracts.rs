@@ -49,7 +49,6 @@ fn principal_preserves_gateway_identity_without_bot_impersonation() {
     assert_eq!(bot.bot_uuid(), Some("bot-123"));
 
     let human = Principal::human(
-        "human-actor-1",
         AuthenticatedUser {
             id: "staff-1".into(),
             username: "alice".into(),
@@ -59,12 +58,14 @@ fn principal_preserves_gateway_identity_without_bot_impersonation() {
         "tenant-a",
         BTreeSet::new(),
     );
-    assert_eq!(human.actor_id(), "human-actor-1");
+    assert_eq!(human.actor_id(), "human_staff-1");
     assert_eq!(human.bot_uuid(), None);
     assert_eq!(
         human.authenticated_user().expect("human subject").id,
         "staff-1"
     );
+    let value = serde_json::to_value(&human).expect("serialize Human Principal");
+    assert!(value.get("actor_id").is_none());
 }
 
 #[test]

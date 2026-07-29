@@ -10,17 +10,17 @@ use bcs_service_api::application::v1::{
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter, GroupService, GroupStatus,
     GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, ListBotGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
-    Participant as V1Participant, Principal, StateMachineConfiguration,
+    Participant as V1Participant, HumanPrincipal, Principal, StateMachineConfiguration,
     StateMachineDefinitionReference, StateMachineParticipantBinding, UpdateGroup,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, CollaborationDefinitionRef,
     CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    DefaultDelivery, DmActorSpec, FriendCoreService, Group as DomainGroup, GroupCoreService,
+    DefaultDelivery, DmCreateCommand, FriendCoreService, Group as DomainGroup, GroupCoreService,
     GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand, GroupKind,
     GroupManagementService, GroupMutableFieldsPatch, GroupStrategy, GroupUseCaseError,
     RelationCoreService, RoutingMode, RoutingPolicy, RuntimeParticipantBinding, ServiceError,
-    SessionManagementService, generated_group_id,
+    SessionManagementService,
 };
 
 #[derive(Debug, Clone)]
@@ -105,7 +105,7 @@ impl GroupServiceImpl {
                 }
                 let creator_edge = self
                     .relation
-                    .get_edge(&human.actor_id, bot_uuid, &self.config.relation_env)
+                    .get_edge(&principal.actor_id(), bot_uuid, &self.config.relation_env)
                     .await
                     .map_err(map_service_error)?;
                 if creator_edge.is_some_and(|edge| edge.is_creator) {
@@ -137,7 +137,8 @@ impl GroupServiceImpl {
                 "Bot '{bot_uuid}' is hidden and cannot collaborate"
             )));
         }
-        if principal.actor_id() == bot_uuid || bot.capabilities.visibility == "public" {
+        let principal_actor_id = principal.actor_id();
+        if principal_actor_id == bot_uuid || bot.capabilities.visibility == "public" {
             return Ok(());
         }
 
@@ -147,7 +148,7 @@ impl GroupServiceImpl {
             }
             let creator_edge = self
                 .relation
-                .get_edge(&human.actor_id, bot_uuid, &self.config.relation_env)
+                .get_edge(&principal_actor_id, bot_uuid, &self.config.relation_env)
                 .await
                 .map_err(map_service_error)?;
             if creator_edge.is_some_and(|edge| edge.is_creator) {
@@ -157,7 +158,7 @@ impl GroupServiceImpl {
 
         if self
             .friends
-            .are_friends(principal.actor_id(), bot_uuid)
+            .are_friends(&principal_actor_id, bot_uuid)
             .await
         {
             return Ok(());
@@ -173,27 +174,29 @@ impl GroupServiceImpl {
         principal: &Principal,
         group: &DomainGroup,
     ) -> Result<bool, ApplicationError> {
+        let principal_actor_id = principal.actor_id();
         if group
             .participants
             .iter()
-            .any(|participant| participant.bot_uuid == principal.actor_id())
+            .any(|participant| participant.bot_uuid == principal_actor_id)
         {
             return Ok(true);
         }
         let session_group_ids = self
             .sessions
-            .list_group_ids_by_session_participant(principal.actor_id())
+            .list_group_ids_by_session_participant(&principal_actor_id)
             .await
             .map_err(|error| ApplicationError::internal(error.to_string()))?;
         Ok(session_group_ids.iter().any(|id| id == &group.id))
     }
 
     fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
-        principal.actor_id() == group.driver_bot
-            || principal.actor_id() == group.originator()
+        let principal_actor_id = principal.actor_id();
+        principal_actor_id == group.driver_bot
+            || principal_actor_id == group.originator()
             || (group.group_strategy == GroupStrategy::ManagerWorker
                 && group.participants.iter().any(|participant| {
-                    participant.bot_uuid == principal.actor_id()
+                    participant.bot_uuid == principal_actor_id
                         && participant.role == bcs_service_api::ParticipantRole::Manager
                 }))
     }
@@ -421,13 +424,14 @@ impl GroupServiceImpl {
             ));
         }
 
+        let principal_actor_id = principal.actor_id();
         let principal_is_participant = request
             .participants
             .iter()
-            .any(|participant| participant.actor_id == principal.actor_id())
-            || request.driver_bot_uuid == principal.actor_id();
+            .any(|participant| participant.actor_id == principal_actor_id)
+            || request.driver_bot_uuid == principal_actor_id;
         let originator = if principal_is_participant {
-            principal.actor_id().to_string()
+            principal_actor_id
         } else {
             request.driver_bot_uuid.clone()
         };
@@ -593,72 +597,32 @@ impl GroupServiceImpl {
     ) -> Result<GroupDetail, ApplicationError> {
         self.ensure_collaboration_eligible(&principal, &request.target_actor_id)
             .await?;
-        let target = self
-            .registry
-            .get(&request.target_actor_id)
+        if let Principal::Human(human) = &principal {
+            self.registry
+                .ensure_human_actor(&human.subject.id, &human_display_name(human))
+                .await
+                .map_err(map_service_error)?;
+        }
+        let result = self
+            .management
+            .create_dm(DmCreateCommand {
+                group_id: None,
+                caller_actor_id: Some(principal.actor_id()),
+                driver_bot: None,
+                target_actor_id: request.target_actor_id,
+                label: request.name,
+                topic: None,
+                context: request.context,
+            })
+            .await
+            .map_err(map_group_error)?;
+        let group = self
+            .groups
+            .get(&result.group.group_id)
             .await
             .ok_or_else(|| {
-                ApplicationError::not_found(
-                    "bot_not_found",
-                    format!("Bot '{}' was not found", request.target_actor_id),
-                )
+                ApplicationError::internal("created DM Group disappeared before projection")
             })?;
-        let target_actor = DmActorSpec {
-            actor_id: target.bot_uuid.clone(),
-            actor_kind: ActorKind::Bot,
-            display_name: target.capabilities.name.clone(),
-        };
-        let (source_actor, legacy_driver_bot) = match &principal {
-            Principal::Human(human) => (
-                DmActorSpec {
-                    actor_id: human.actor_id.clone(),
-                    actor_kind: ActorKind::Human,
-                    display_name: human
-                        .subject
-                        .display_name
-                        .clone()
-                        .or_else(|| human.subject.full_name.clone())
-                        .or_else(|| Some(human.subject.username.clone())),
-                },
-                target.bot_uuid.clone(),
-            ),
-            Principal::Bot(bot) => {
-                let source = self.registry.get(&bot.bot_uuid).await.ok_or_else(|| {
-                    ApplicationError::not_found(
-                        "bot_not_found",
-                        format!("Bot '{}' was not found", bot.bot_uuid),
-                    )
-                })?;
-                (
-                    DmActorSpec {
-                        actor_id: source.bot_uuid.clone(),
-                        actor_kind: ActorKind::Bot,
-                        display_name: source.capabilities.name.clone(),
-                    },
-                    source.bot_uuid,
-                )
-            }
-        };
-        let label = request.name.or_else(|| {
-            Some(format!(
-                "DM: {} - {}",
-                principal.actor_id(),
-                request.target_actor_id
-            ))
-        });
-        let (group, _) = self
-            .groups
-            .create_or_reuse_actor_dm_group(
-                &generated_group_id(GroupKind::Dm),
-                source_actor,
-                target_actor,
-                &legacy_driver_bot,
-                principal.actor_id(),
-                label,
-                request.context,
-            )
-            .await
-            .map_err(map_service_error)?;
         self.project_detail(group).await
     }
 }
@@ -871,7 +835,7 @@ impl GroupService for GroupServiceImpl {
         let result = self
             .management
             .delete_group(GroupDeleteCommand {
-                caller_actor_id: command.principal.actor_id().to_string(),
+                caller_actor_id: command.principal.actor_id(),
                 group_id: command.group_id,
             })
             .await
@@ -983,6 +947,15 @@ fn role_name(role: bcs_service_api::ParticipantRole) -> &'static str {
         bcs_service_api::ParticipantRole::Worker => "worker",
         bcs_service_api::ParticipantRole::Observer => "observer",
     }
+}
+
+fn human_display_name(human: &HumanPrincipal) -> String {
+    human
+        .subject
+        .display_name
+        .clone()
+        .or_else(|| human.subject.full_name.clone())
+        .unwrap_or_else(|| human.subject.username.clone())
 }
 
 fn visibility_name(visibility: GroupVisibility) -> &'static str {
