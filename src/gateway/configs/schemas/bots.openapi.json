@@ -1,0 +1,5280 @@
+{
+  "components": {
+    "schemas": {
+      "Bot": {
+        "description": "An agent (bot) record.",
+        "properties": {
+          "bot_desc": {
+            "title": "Bot Desc",
+            "type": "string"
+          },
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_name": {
+            "title": "Bot Name",
+            "type": "string"
+          },
+          "bot_type": {
+            "title": "Bot Type",
+            "type": "string"
+          },
+          "cluster_name": {
+            "title": "Cluster Name",
+            "type": "string"
+          },
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "owner_entity_id": {
+            "title": "Owner Entity Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Lifecycle status: PENDING | ACTIVE | FAILED.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "bot_name",
+          "bot_desc",
+          "engine",
+          "cluster_name",
+          "bot_type",
+          "status",
+          "owner_entity_id"
+        ],
+        "title": "Bot",
+        "type": "object"
+      },
+      "BotAuthPending": {
+        "description": "Returned (202) when bot creation needs user authorization (Passport).",
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "iframe_url": {
+            "title": "Iframe Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "iframe_url"
+        ],
+        "title": "BotAuthPending",
+        "type": "object"
+      },
+      "BotAuthStatus": {
+        "description": "Passport authorization status; ``bot`` is present once ISSUED.",
+        "properties": {
+          "bot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "BotAuthStatus",
+        "type": "object"
+      },
+      "BotCreate": {
+        "description": "Create-a-bot request body.",
+        "properties": {
+          "bot_desc": {
+            "title": "Bot Desc",
+            "type": "string"
+          },
+          "bot_name": {
+            "title": "Bot Name",
+            "type": "string"
+          },
+          "bot_type": {
+            "title": "Bot Type",
+            "type": "string"
+          },
+          "cluster_name": {
+            "title": "Cluster Name",
+            "type": "string"
+          },
+          "engine": {
+            "title": "Engine",
+            "type": "string"
+          },
+          "engine_options": {
+            "additionalProperties": true,
+            "description": "Engine/vendor-specific inputs, kept nested rather than flattened into the request body.",
+            "title": "Engine Options",
+            "type": "object"
+          }
+        },
+        "required": [
+          "bot_name",
+          "bot_desc",
+          "engine",
+          "cluster_name",
+          "bot_type"
+        ],
+        "title": "BotCreate",
+        "type": "object"
+      },
+      "BotSkill": {
+        "description": "A skill installed on a bot.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_id",
+          "name",
+          "enabled"
+        ],
+        "title": "BotSkill",
+        "type": "object"
+      },
+      "BotStatus": {
+        "description": "Runtime / device readiness of a bot.",
+        "properties": {
+          "device_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
+          "is_ready": {
+            "title": "Is Ready",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "is_ready"
+        ],
+        "title": "BotStatus",
+        "type": "object"
+      },
+      "BotUpdate": {
+        "description": "Partial update; engine is fixed at creation and cannot change.",
+        "properties": {
+          "bot_desc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Desc"
+          },
+          "bot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Name"
+          },
+          "cluster_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Name"
+          },
+          "engine_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine Options"
+          }
+        },
+        "title": "BotUpdate",
+        "type": "object"
+      },
+      "Ceiling": {
+        "description": "Per-caller bot creation quota ceiling.",
+        "properties": {
+          "ceiling": {
+            "title": "Ceiling",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ceiling"
+        ],
+        "title": "Ceiling",
+        "type": "object"
+      },
+      "Channel": {
+        "description": "A channel binding a bot to an external channel.",
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "config": {
+            "$ref": "#/components/schemas/ChannelConfig-Output"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "gmt_create": {
+            "title": "Gmt Create",
+            "type": "string"
+          },
+          "gmt_modified": {
+            "title": "Gmt Modified",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "description",
+          "bot_id",
+          "config",
+          "status",
+          "gmt_create",
+          "gmt_modified"
+        ],
+        "title": "Channel",
+        "type": "object"
+      },
+      "ChannelConfig-Output": {
+        "description": "DingTalk config as returned (never includes ``client_secret``).",
+        "properties": {
+          "card_template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Template Id"
+          },
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "dm_policy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dm Policy"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "title": "ChannelConfig",
+        "type": "object"
+      },
+      "ChannelConfigWrite": {
+        "description": "DingTalk config on write; ``client_secret`` is write-only.",
+        "properties": {
+          "card_template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Template Id"
+          },
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret"
+          },
+          "dm_policy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dm Policy"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "title": "ChannelConfigWrite",
+        "type": "object"
+      },
+      "ChannelCreate": {
+        "description": "Create-a-channel request body (status starts inactive).",
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "config": {
+            "$ref": "#/components/schemas/ChannelConfigWrite"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "description",
+          "bot_id",
+          "config"
+        ],
+        "title": "ChannelCreate",
+        "type": "object"
+      },
+      "ChannelStatusUpdate": {
+        "description": "Toggle a channel active/inactive.",
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ChannelStatusUpdate",
+        "type": "object"
+      },
+      "ChannelUpdate": {
+        "description": "Full update of a channel; stored client_secret is kept if omitted.",
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/ChannelConfigWrite"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "description",
+          "config"
+        ],
+        "title": "ChannelUpdate",
+        "type": "object"
+      },
+      "Deleted": {
+        "description": "Payload returned by delete operations.",
+        "properties": {
+          "deleted": {
+            "default": true,
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "title": "Deleted",
+        "type": "object"
+      },
+      "Envelope_BotAuthPending_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotAuthPending"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotAuthPending]",
+        "type": "object"
+      },
+      "Envelope_BotAuthStatus_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotAuthStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotAuthStatus]",
+        "type": "object"
+      },
+      "Envelope_BotSkill_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotSkill"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotSkill]",
+        "type": "object"
+      },
+      "Envelope_BotStatus_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotStatus]",
+        "type": "object"
+      },
+      "Envelope_Bot_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Bot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Bot]",
+        "type": "object"
+      },
+      "Envelope_Ceiling_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ceiling"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Ceiling]",
+        "type": "object"
+      },
+      "Envelope_Channel_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Channel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Channel]",
+        "type": "object"
+      },
+      "Envelope_Deleted_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Deleted"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Deleted]",
+        "type": "object"
+      },
+      "Envelope_IdentityFileList_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IdentityFileList"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[IdentityFileList]",
+        "type": "object"
+      },
+      "Envelope_IdentityFileRef_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IdentityFileRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[IdentityFileRef]",
+        "type": "object"
+      },
+      "Envelope_IdentityFile_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IdentityFile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[IdentityFile]",
+        "type": "object"
+      },
+      "Envelope_McpConfig_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[McpConfig]",
+        "type": "object"
+      },
+      "Envelope_McpPermission_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpPermission"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[McpPermission]",
+        "type": "object"
+      },
+      "Envelope_McpServerDetail_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpServerDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[McpServerDetail]",
+        "type": "object"
+      },
+      "Envelope_NameCheck_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NameCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[NameCheck]",
+        "type": "object"
+      },
+      "Envelope_Page_Bot__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_Bot_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[Bot]]",
+        "type": "object"
+      },
+      "Envelope_Page_McpServer__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_McpServer_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[McpServer]]",
+        "type": "object"
+      },
+      "Envelope_Page_Resource__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_Resource_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[Resource]]",
+        "type": "object"
+      },
+      "Envelope_Page_RoutineRun__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_RoutineRun_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[RoutineRun]]",
+        "type": "object"
+      },
+      "Envelope_Page_Routine__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_Routine_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[Routine]]",
+        "type": "object"
+      },
+      "Envelope_Page_Skill__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_Skill_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[Skill]]",
+        "type": "object"
+      },
+      "Envelope_Passport_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Passport"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Passport]",
+        "type": "object"
+      },
+      "Envelope_Preview_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Preview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Preview]",
+        "type": "object"
+      },
+      "Envelope_Resource_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Resource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Resource]",
+        "type": "object"
+      },
+      "Envelope_RoutineRun_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoutineRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[RoutineRun]",
+        "type": "object"
+      },
+      "Envelope_Routine_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Routine"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Routine]",
+        "type": "object"
+      },
+      "Envelope_SkillDetail_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SkillDetail]",
+        "type": "object"
+      },
+      "Envelope_dict_str__Any__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results.",
+            "title": "Data"
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[dict[str, Any]]",
+        "type": "object"
+      },
+      "Envelope_list_BotSkill__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BotSkill"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results.",
+            "title": "Data"
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[list[BotSkill]]",
+        "type": "object"
+      },
+      "Envelope_list_Channel__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Channel"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results.",
+            "title": "Data"
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[list[Channel]]",
+        "type": "object"
+      },
+      "Envelope_list_McpTenant__": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/McpTenant"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results.",
+            "title": "Data"
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[list[McpTenant]]",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IdentityFile": {
+        "description": "A single identity file's content.",
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/IdentityFileType"
+          }
+        },
+        "required": [
+          "type",
+          "bot_id",
+          "content",
+          "file_path"
+        ],
+        "title": "IdentityFile",
+        "type": "object"
+      },
+      "IdentityFileInfo": {
+        "description": "One identity file's presence within a bot.",
+        "properties": {
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/IdentityFileType"
+          }
+        },
+        "required": [
+          "type",
+          "exists",
+          "file_path"
+        ],
+        "title": "IdentityFileInfo",
+        "type": "object"
+      },
+      "IdentityFileList": {
+        "description": "All possible identity files for a bot and whether each exists.",
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityFileInfo"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bot_id",
+          "files"
+        ],
+        "title": "IdentityFileList",
+        "type": "object"
+      },
+      "IdentityFileRef": {
+        "description": "Reference to an identity file (returned after a write).",
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/IdentityFileType"
+          }
+        },
+        "required": [
+          "type",
+          "bot_id",
+          "file_path"
+        ],
+        "title": "IdentityFileRef",
+        "type": "object"
+      },
+      "IdentityFileType": {
+        "description": "Whitelisted identity-file types (physical file is ``<type>.md``).",
+        "enum": [
+          "RULES",
+          "OKR",
+          "SAFETY",
+          "SOUL",
+          "OUTPUT",
+          "MEMORY",
+          "IDENTITY",
+          "AGENTS",
+          "USER",
+          "TOOLS",
+          "HEARTBEAT",
+          "BOOTSTRAP",
+          "KNOWLEDGE",
+          "CLAUDE",
+          "GREETING",
+          "README"
+        ],
+        "title": "IdentityFileType",
+        "type": "string"
+      },
+      "IdentityFileWrite": {
+        "description": "Write-an-identity-file request body.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "IdentityFileWrite",
+        "type": "object"
+      },
+      "McpConfig": {
+        "description": "The caller's unified config for an MCP server (``api_key`` is masked).",
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "endpoint_env": {
+            "title": "Endpoint Env",
+            "type": "string"
+          },
+          "has_config": {
+            "title": "Has Config",
+            "type": "boolean"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "object"
+          },
+          "server_code": {
+            "title": "Server Code",
+            "type": "string"
+          },
+          "transport_protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport Protocol"
+          }
+        },
+        "required": [
+          "server_code",
+          "endpoint_env",
+          "has_config"
+        ],
+        "title": "McpConfig",
+        "type": "object"
+      },
+      "McpConfigWrite": {
+        "description": "Write the unified config. A null field means \"leave unchanged\".",
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "endpoint_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint Env"
+          },
+          "headers": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers"
+          },
+          "sync_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Mode"
+          },
+          "transport_protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport Protocol"
+          }
+        },
+        "title": "McpConfigWrite",
+        "type": "object"
+      },
+      "McpPermission": {
+        "description": "The caller's permission for an MCP server.",
+        "properties": {
+          "access_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Level"
+          },
+          "has_access": {
+            "title": "Has Access",
+            "type": "boolean"
+          },
+          "tool_permissions": {
+            "additionalProperties": true,
+            "title": "Tool Permissions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "has_access"
+        ],
+        "title": "McpPermission",
+        "type": "object"
+      },
+      "McpServer": {
+        "description": "An MCP server in the marketplace.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "network_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Network Types",
+            "type": "array"
+          },
+          "server_code": {
+            "title": "Server Code",
+            "type": "string"
+          },
+          "transport_protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport Protocol"
+          }
+        },
+        "required": [
+          "server_code",
+          "name"
+        ],
+        "title": "McpServer",
+        "type": "object"
+      },
+      "McpServerDetail": {
+        "description": "An MCP server's detail, including its tools.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "network_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Network Types",
+            "type": "array"
+          },
+          "server_code": {
+            "title": "Server Code",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "transport_protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport Protocol"
+          }
+        },
+        "required": [
+          "server_code",
+          "name"
+        ],
+        "title": "McpServerDetail",
+        "type": "object"
+      },
+      "McpTenant": {
+        "description": "An MCP tenant.",
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "McpTenant",
+        "type": "object"
+      },
+      "NameCheck": {
+        "description": "Payload returned by name-availability checks.",
+        "properties": {
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "exists"
+        ],
+        "title": "NameCheck",
+        "type": "object"
+      },
+      "Page_Bot_": {
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/Bot"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[Bot]",
+        "type": "object"
+      },
+      "Page_McpServer_": {
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/McpServer"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[McpServer]",
+        "type": "object"
+      },
+      "Page_Resource_": {
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/Resource"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[Resource]",
+        "type": "object"
+      },
+      "Page_RoutineRun_": {
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/RoutineRun"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[RoutineRun]",
+        "type": "object"
+      },
+      "Page_Routine_": {
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/Routine"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[Routine]",
+        "type": "object"
+      },
+      "Page_Skill_": {
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/Skill"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[Skill]",
+        "type": "object"
+      },
+      "Passport": {
+        "description": "Agent Passport (identity credential) summary.",
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "passport_id": {
+            "title": "Passport Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "passport_id"
+        ],
+        "title": "Passport",
+        "type": "object"
+      },
+      "Preview": {
+        "description": "A resource preview.",
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "preview_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Url"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_id",
+          "content_type"
+        ],
+        "title": "Preview",
+        "type": "object"
+      },
+      "Resource": {
+        "description": "A resource record (storage location is not exposed).",
+        "properties": {
+          "gmt_create": {
+            "title": "Gmt Create",
+            "type": "string"
+          },
+          "gmt_modified": {
+            "title": "Gmt Modified",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ResourceType"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "resource_id",
+          "name",
+          "type",
+          "gmt_create",
+          "gmt_modified"
+        ],
+        "title": "Resource",
+        "type": "object"
+      },
+      "ResourceCreate": {
+        "description": "Create a resource. ``url`` is required for a link, ``parent_id`` optional.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ResourceType"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "ResourceCreate",
+        "type": "object"
+      },
+      "ResourceType": {
+        "description": "A resource is a file, an external link, or a folder.",
+        "enum": [
+          "file",
+          "link",
+          "folder"
+        ],
+        "title": "ResourceType",
+        "type": "string"
+      },
+      "ResourceUpdate": {
+        "description": "Partial update of a resource.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "title": "ResourceUpdate",
+        "type": "object"
+      },
+      "Routine": {
+        "description": "A scheduled/triggered task run by an agent.",
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "command": {
+            "title": "Command",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "gmt_create": {
+            "title": "Gmt Create",
+            "type": "string"
+          },
+          "gmt_modified": {
+            "title": "Gmt Modified",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "routine_id": {
+            "title": "Routine Id",
+            "type": "string"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ScheduleTrigger"
+          }
+        },
+        "required": [
+          "routine_id",
+          "bot_id",
+          "name",
+          "trigger",
+          "command",
+          "enabled",
+          "gmt_create",
+          "gmt_modified"
+        ],
+        "title": "Routine",
+        "type": "object"
+      },
+      "RoutineCreate": {
+        "description": "Create-a-routine request body.",
+        "properties": {
+          "bot_id": {
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "command": {
+            "title": "Command",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ScheduleTrigger"
+          }
+        },
+        "required": [
+          "bot_id",
+          "name",
+          "trigger",
+          "command"
+        ],
+        "title": "RoutineCreate",
+        "type": "object"
+      },
+      "RoutineRun": {
+        "description": "One execution of a routine.",
+        "properties": {
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "routine_id": {
+            "title": "Routine Id",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "routine_id",
+          "status"
+        ],
+        "title": "RoutineRun",
+        "type": "object"
+      },
+      "RoutineUpdate": {
+        "description": "Partial update of a routine.",
+        "properties": {
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleTrigger"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "RoutineUpdate",
+        "type": "object"
+      },
+      "ScheduleTrigger": {
+        "description": "A schedule trigger. Modeled as a typed nested object so other trigger\nkinds (event, webhook) can be added later without a breaking change.",
+        "properties": {
+          "cron": {
+            "title": "Cron",
+            "type": "string"
+          },
+          "type": {
+            "const": "schedule",
+            "default": "schedule",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cron"
+        ],
+        "title": "ScheduleTrigger",
+        "type": "object"
+      },
+      "Skill": {
+        "description": "A skill in the catalog.",
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_id",
+          "name"
+        ],
+        "title": "Skill",
+        "type": "object"
+      },
+      "SkillDetail": {
+        "description": "A skill's full detail.",
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "manifest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manifest"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_id",
+          "name"
+        ],
+        "title": "SkillDetail",
+        "type": "object"
+      },
+      "SkillInstall": {
+        "description": "Install-a-skill request body.",
+        "properties": {
+          "skill_id": {
+            "title": "Skill Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_id"
+        ],
+        "title": "SkillInstall",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "FastAPI",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/openapi/v1/bots": {
+      "get": {
+        "description": "List the caller's bots (filter + paginate).",
+        "operationId": "list_bots_openapi_v1_bots_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
+            "in": "query",
+            "name": "engine",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Engine"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "1-based page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page (max 100).",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page (max 100).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_Bot__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Bots",
+        "tags": [
+          "bots"
+        ]
+      },
+      "post": {
+        "description": "Create a bot (201), or return 202 + a Passport iframe when authorization is needed.",
+        "operationId": "create_bot_openapi_v1_bots_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Bot_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotAuthPending_"
+                }
+              }
+            },
+            "description": "Needs user authorization"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Bot",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/ceiling": {
+      "get": {
+        "description": "Get the caller's bot-creation quota ceiling.",
+        "operationId": "get_bots_ceiling_openapi_v1_bots_ceiling_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Ceiling_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Bots Ceiling",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/channels": {
+      "get": {
+        "description": "List channels (optionally filtered by bot).",
+        "operationId": "list_channels_openapi_v1_bots_channels_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "bot_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bot Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_list_Channel__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Channels",
+        "tags": [
+          "channels"
+        ]
+      },
+      "post": {
+        "description": "Create a channel (starts inactive).",
+        "operationId": "create_channel_openapi_v1_bots_channels_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Channel_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Channel",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/openapi/v1/bots/channels/{channel_id}": {
+      "delete": {
+        "description": "Delete a channel.",
+        "operationId": "delete_channel_openapi_v1_bots_channels__channel_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Deleted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Channel",
+        "tags": [
+          "channels"
+        ]
+      },
+      "get": {
+        "description": "Get a channel.",
+        "operationId": "get_channel_openapi_v1_bots_channels__channel_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Channel_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Channel",
+        "tags": [
+          "channels"
+        ]
+      },
+      "patch": {
+        "description": "Toggle a channel active/inactive.",
+        "operationId": "update_channel_status_openapi_v1_bots_channels__channel_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Channel_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Channel Status",
+        "tags": [
+          "channels"
+        ]
+      },
+      "put": {
+        "description": "Full update of a channel.",
+        "operationId": "update_channel_openapi_v1_bots_channels__channel_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Channel_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Channel",
+        "tags": [
+          "channels"
+        ]
+      }
+    },
+    "/openapi/v1/bots/check-name": {
+      "get": {
+        "description": "Check whether a bot name is available.",
+        "operationId": "check_bot_name_openapi_v1_bots_check_name_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NameCheck_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Bot Name",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/identity/bot/{bot_id}": {
+      "get": {
+        "description": "List a bot's identity files and whether each exists.",
+        "operationId": "list_bot_identity_files_openapi_v1_bots_identity_bot__bot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_IdentityFileList_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Bot Identity Files",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/openapi/v1/bots/identity/bot/{bot_id}/{file_type}": {
+      "get": {
+        "description": "Read one identity file of a bot.",
+        "operationId": "get_bot_identity_file_openapi_v1_bots_identity_bot__bot_id___file_type__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/IdentityFileType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_IdentityFile_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Bot Identity File",
+        "tags": [
+          "identity"
+        ]
+      },
+      "put": {
+        "description": "Overwrite one identity file of a bot.",
+        "operationId": "update_bot_identity_file_openapi_v1_bots_identity_bot__bot_id___file_type__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/IdentityFileType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityFileWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_IdentityFileRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Bot Identity File",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/openapi/v1/bots/mcp/servers": {
+      "get": {
+        "description": "List marketplace MCP servers (filter + paginate).",
+        "operationId": "list_mcp_servers_openapi_v1_bots_mcp_servers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
+            "description": "1-based page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page (max 100).",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page (max 100).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_McpServer__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mcp Servers",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/openapi/v1/bots/mcp/servers/{server_code}": {
+      "get": {
+        "description": "Get an MCP server's detail.",
+        "operationId": "get_mcp_server_openapi_v1_bots_mcp_servers__server_code__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_code",
+            "required": true,
+            "schema": {
+              "title": "Server Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_McpServerDetail_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mcp Server",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/openapi/v1/bots/mcp/servers/{server_code}/config": {
+      "get": {
+        "description": "Read the caller's unified config for an MCP server.",
+        "operationId": "get_mcp_config_openapi_v1_bots_mcp_servers__server_code__config_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_code",
+            "required": true,
+            "schema": {
+              "title": "Server Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_McpConfig_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mcp Config",
+        "tags": [
+          "mcp"
+        ]
+      },
+      "put": {
+        "description": "Write the caller's unified config for an MCP server (pushed to devices).",
+        "operationId": "update_mcp_config_openapi_v1_bots_mcp_servers__server_code__config_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_code",
+            "required": true,
+            "schema": {
+              "title": "Server Code",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConfigWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_McpConfig_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Mcp Config",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/openapi/v1/bots/mcp/servers/{server_code}/permissions": {
+      "get": {
+        "description": "Check the caller's permission for an MCP server.",
+        "operationId": "check_mcp_permission_openapi_v1_bots_mcp_servers__server_code__permissions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "server_code",
+            "required": true,
+            "schema": {
+              "title": "Server Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_McpPermission_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Mcp Permission",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/openapi/v1/bots/mcp/tenants": {
+      "get": {
+        "description": "List MCP tenants.",
+        "operationId": "list_mcp_tenants_openapi_v1_bots_mcp_tenants_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_list_McpTenant__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Mcp Tenants",
+        "tags": [
+          "mcp"
+        ]
+      }
+    },
+    "/openapi/v1/bots/resources": {
+      "get": {
+        "description": "List resources (filter + paginate).",
+        "operationId": "list_resources_openapi_v1_bots_resources_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "bot_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bot Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ResourceType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "description": "1-based page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page (max 100).",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page (max 100).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_Resource__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Resources",
+        "tags": [
+          "resources"
+        ]
+      },
+      "post": {
+        "description": "Create a resource (file placeholder, link, or folder).",
+        "operationId": "create_resource_openapi_v1_bots_resources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Resource_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Resource",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/resources/check-name": {
+      "get": {
+        "description": "Check whether a resource name is available.",
+        "operationId": "check_resource_name_openapi_v1_bots_resources_check_name_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NameCheck_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Resource Name",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/resources/upload": {
+      "post": {
+        "description": "Upload a file's raw bytes as a new resource.",
+        "operationId": "upload_resource_openapi_v1_bots_resources_upload_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "contentMediaType": "application/octet-stream",
+                "title": "Content",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Resource_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Resource",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/resources/{resource_id}": {
+      "delete": {
+        "description": "Delete a resource.",
+        "operationId": "delete_resource_openapi_v1_bots_resources__resource_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "title": "Resource Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Deleted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Resource",
+        "tags": [
+          "resources"
+        ]
+      },
+      "get": {
+        "description": "Get a resource.",
+        "operationId": "get_resource_openapi_v1_bots_resources__resource_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "title": "Resource Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Resource_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Resource",
+        "tags": [
+          "resources"
+        ]
+      },
+      "put": {
+        "description": "Update a resource.",
+        "operationId": "update_resource_openapi_v1_bots_resources__resource_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "title": "Resource Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Resource_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Resource",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/resources/{resource_id}/download": {
+      "get": {
+        "description": "Download a resource's bytes (raw, not enveloped).",
+        "operationId": "download_resource_openapi_v1_bots_resources__resource_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "title": "Resource Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/octet-stream": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Resource",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/resources/{resource_id}/preview": {
+      "get": {
+        "description": "Get a resource preview.",
+        "operationId": "preview_resource_openapi_v1_bots_resources__resource_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "title": "Resource Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Preview_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Resource",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/routines": {
+      "get": {
+        "description": "List routines (filter + paginate).",
+        "operationId": "list_routines_openapi_v1_bots_routines_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "bot_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bot Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "1-based page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page (max 100).",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page (max 100).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_Routine__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Routines",
+        "tags": [
+          "routines"
+        ]
+      },
+      "post": {
+        "description": "Create a routine.",
+        "operationId": "create_routine_openapi_v1_bots_routines_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Routine_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Routine",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/openapi/v1/bots/routines/{routine_id}": {
+      "delete": {
+        "description": "Delete a routine.",
+        "operationId": "delete_routine_openapi_v1_bots_routines__routine_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Deleted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Routine",
+        "tags": [
+          "routines"
+        ]
+      },
+      "get": {
+        "description": "Get a routine.",
+        "operationId": "get_routine_openapi_v1_bots_routines__routine_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Routine_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Routine",
+        "tags": [
+          "routines"
+        ]
+      },
+      "patch": {
+        "description": "Update a routine (partial).",
+        "operationId": "update_routine_openapi_v1_bots_routines__routine_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Routine_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Routine",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/openapi/v1/bots/routines/{routine_id}/run": {
+      "post": {
+        "description": "Run a routine now.",
+        "operationId": "run_routine_openapi_v1_bots_routines__routine_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_RoutineRun_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Routine",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/openapi/v1/bots/routines/{routine_id}/runs": {
+      "get": {
+        "description": "List a routine's execution history.",
+        "operationId": "list_routine_runs_openapi_v1_bots_routines__routine_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routine_id",
+            "required": true,
+            "schema": {
+              "title": "Routine Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "1-based page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page (max 100).",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page (max 100).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_RoutineRun__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Routine Runs",
+        "tags": [
+          "routines"
+        ]
+      }
+    },
+    "/openapi/v1/bots/skills": {
+      "get": {
+        "description": "List the skill catalog (filter + paginate).",
+        "operationId": "list_skills_openapi_v1_bots_skills_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
+            "description": "1-based page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "1-based page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page (max 100).",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page (max 100).",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_Skill__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Skills",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/openapi/v1/bots/skills/{skill_id}": {
+      "get": {
+        "description": "Get a skill's detail.",
+        "operationId": "get_skill_openapi_v1_bots_skills__skill_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillDetail_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}": {
+      "delete": {
+        "description": "Delete a bot.",
+        "operationId": "delete_bot_openapi_v1_bots__bot_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Deleted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Bot",
+        "tags": [
+          "bots"
+        ]
+      },
+      "get": {
+        "description": "Get a bot's details.",
+        "operationId": "get_bot_openapi_v1_bots__bot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Bot_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Bot",
+        "tags": [
+          "bots"
+        ]
+      },
+      "put": {
+        "description": "Update a bot (engine is immutable).",
+        "operationId": "update_bot_openapi_v1_bots__bot_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Bot_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Bot",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/auth-status": {
+      "get": {
+        "description": "Poll Passport authorization; completes creation when ISSUED.",
+        "operationId": "get_bot_auth_status_openapi_v1_bots__bot_id__auth_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotAuthStatus_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Bot Auth Status",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/engine-config": {
+      "get": {
+        "description": "Read a bot's engine configuration (free-form JSON).",
+        "operationId": "get_bot_engine_config_openapi_v1_bots__bot_id__engine_config_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_str__Any__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Bot Engine Config",
+        "tags": [
+          "bots"
+        ]
+      },
+      "put": {
+        "description": "Write a bot's engine configuration (free-form JSON).",
+        "operationId": "update_bot_engine_config_openapi_v1_bots__bot_id__engine_config_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_str__Any__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Bot Engine Config",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/passport": {
+      "get": {
+        "description": "Get a bot's Agent Passport.",
+        "operationId": "get_bot_passport_openapi_v1_bots__bot_id__passport_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Passport_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Bot Passport",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/restart": {
+      "post": {
+        "description": "Restart a bot (re-provision its device).",
+        "operationId": "restart_bot_openapi_v1_bots__bot_id__restart_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Bot_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restart Bot",
+        "tags": [
+          "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/skills": {
+      "get": {
+        "description": "List the skills installed on a bot.",
+        "operationId": "list_bot_skills_openapi_v1_bots__bot_id__skills_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_list_BotSkill__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Bot Skills",
+        "tags": [
+          "skills"
+        ]
+      },
+      "post": {
+        "description": "Install a skill on a bot.",
+        "operationId": "install_bot_skill_openapi_v1_bots__bot_id__skills_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillInstall"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotSkill_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Install Bot Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/skills/{skill_id}": {
+      "delete": {
+        "description": "Remove a skill from a bot.",
+        "operationId": "remove_bot_skill_openapi_v1_bots__bot_id__skills__skill_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Deleted_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Bot Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/status": {
+      "get": {
+        "description": "Get a bot's runtime / device readiness.",
+        "operationId": "get_bot_status_openapi_v1_bots__bot_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotStatus_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Bot Status",
+        "tags": [
+          "bots"
+        ]
+      }
+    }
+  }
+}
