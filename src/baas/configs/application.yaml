@@ -67,6 +67,7 @@ user_config:
     acquire_timeout: 0               # acquire 等待槽位超时秒数（0=不限）
     task_timeout: 660.0              # 单任务最大执行秒数（0=不限，默认660=10分钟+1分钟缓冲）
     default_timeout: 30.0            # 请求默认超时秒数（metadata 未指定 timeout 时使用）
+    origin: "https://teamclaw.example.com"
 
   # BotRun 队列 Worker 配置
   bot_run_queue:
@@ -160,6 +161,7 @@ user_config:
 # File transfer OSS storage backend configuration (enterprise/prod deployments only)
   file_transfer_oss:
     endpoint: ""
+    external_endpoint: ""
     bucket_name: ""
     staging_root_path: "baas-file-transfer"
     secret_name: ""
@@ -178,6 +180,7 @@ user_config:
       - "operator-001"
       - "operator-002"
       - "operator-003"
+      - "000001"
 
   # 部署环境探测配置
   env:

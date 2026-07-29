@@ -218,6 +218,7 @@ class FileTransferOssConfigSchema(ConfigSchema):
 
     config_section = "file_transfer_oss"
     endpoint: str = Field(default="")
+    external_endpoint: str = Field(default="")
     bucket_name: str = Field(default="")
     staging_root_path: str = Field(default="baas-file-transfer")
     secret_name: str = Field(default="")
@@ -299,6 +300,7 @@ class BotRunnerConfig(ConfigSchema):
         gt=0,
         description="请求默认超时秒数，metadata 未指定 timeout 时使用",
     )
+    origin: str = Field(default="", description="设置请求的origin header")
 
 
 class BcnUplinkConfigSchema(BaseModel):

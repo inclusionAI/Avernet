@@ -31,3 +31,6 @@ test-full:
 
 serve-docs port='8910':
     @./docs/openapi/serve-docs.sh {{port}}
+
+dump-openapi *args='':
+    ./scripts/dump_and_publish.sh {{args}}

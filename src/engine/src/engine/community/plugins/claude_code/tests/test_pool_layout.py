@@ -134,7 +134,7 @@ def test_claude_code_probe_rejects_non_file_marker(tmp_path: Path) -> None:
     assert result.evidence["reason"] == "marker_not_regular_file"
 
 
-def test_claude_code_activation_atomically_switches_physical_local(
+def test_claude_code_activation_retires_physical_legacy_local(
     tmp_path: Path,
 ) -> None:
     (
@@ -166,11 +166,12 @@ def test_claude_code_activation_atomically_switches_physical_local(
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
-    assert legacy_local.is_symlink()
-    assert legacy_local.resolve() == pool_local.resolve()
-    assert local_bridge.readlink() == legacy_local
-    assert local_bridge.resolve() == pool_local.resolve()
-    assert repo_bridge.resolve() == pool_repo.resolve()
+    assert not legacy_local.exists()
+    assert not legacy_local.is_symlink()
+    assert not local_bridge.exists()
+    assert not local_bridge.is_symlink()
+    assert not repo_bridge.exists()
+    assert not repo_bridge.is_symlink()
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
 
 

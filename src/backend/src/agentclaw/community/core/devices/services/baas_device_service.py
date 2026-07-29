@@ -804,6 +804,7 @@ class BaasDeviceService(DeviceService):
             target=ws_info.target,
             token=ws_info.token,
             engine_type=engine_type,
+            url=ws_info.ws_url if ws_conn_mode == "relay" else "",
             baas_base_url=ws_info.baas_base_url,
             bot_uuid=ws_info.bot_uuid,
             tenant=ws_info.tenant,

@@ -187,7 +187,7 @@ class DeviceConnectionResponse(BaseModel):
     engine_type: str = Field(..., description="Engine type")
     available: bool = Field(True, description="Whether the device is reachable")
     message: str = Field("", description="Human-readable status message when unavailable")
-    url: str = Field("", description="HTTP base URL (plan-01 added; e.g. http://10.0.0.1:20010)")
+    url: str = Field("", description="Connection URL (HTTP or WebSocket, depending on connection mode)")
 
 
 class DeviceProps(BaseModel):

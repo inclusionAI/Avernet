@@ -35,7 +35,7 @@ impl StoragePlugin for FakeStoragePlugin {
     fn backend_name(&self) -> &'static str { "fake" }
     fn capabilities(&self) -> StorageCapabilities { self.caps }
 
-    async fn prepare_upload(&self, req: UploadPrepareRequest) -> Result<PreparedUpload, StorageError> {
+    async fn prepare_upload(&self, req: UploadPrepareRequest, _caller: Option<&crate::ActorRef>) -> Result<PreparedUpload, StorageError> {
         let handle = UploadHandle {
             backend: "fake".into(),
             key: req.key.clone(),
@@ -94,7 +94,7 @@ impl StoragePlugin for FakeStoragePlugin {
         Ok(make_stream(bytes))
     }
 
-    async fn presign_get(&self, handle: &StorageHandle, ttl_secs: u64) -> Result<PresignGetTicket, StorageError> {
+    async fn presign_get(&self, handle: &StorageHandle, ttl_secs: u64, _caller: Option<&crate::ActorRef>) -> Result<PresignGetTicket, StorageError> {
         Ok(PresignGetTicket {
             download_url: format!("fake://{}", handle.key),
             expires_at: ttl_secs,
@@ -130,7 +130,7 @@ mod tests {
     #[tokio::test]
     async fn single_roundtrip() {
         let p = FakeStoragePlugin::new(caps());
-        let prep = p.prepare_upload(req("k1", 3)).await.unwrap();
+        let prep = p.prepare_upload(req("k1", 3), None).await.unwrap();
         let payload = Bytes::from_static(b"abc");
         p.stream_upload(&prep.handle, None, make_stream(payload.clone())).await.unwrap();
         let meta = p.complete_upload(&prep.handle).await.unwrap();
@@ -145,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn multipart_roundtrip() {
         let p = FakeStoragePlugin::new(caps());
-        let prep = p.prepare_upload(req("k2", 6)).await.unwrap();
+        let prep = p.prepare_upload(req("k2", 6), None).await.unwrap();
         p.stream_upload(&prep.handle, Some(1), make_stream(Bytes::from_static(b"aaa"))).await.unwrap();
         p.stream_upload(&prep.handle, Some(2), make_stream(Bytes::from_static(b"bbb"))).await.unwrap();
         let meta = p.complete_upload(&prep.handle).await.unwrap();
@@ -160,7 +160,7 @@ mod tests {
     #[tokio::test]
     async fn abort_makes_object_not_found() {
         let p = FakeStoragePlugin::new(caps());
-        let prep = p.prepare_upload(req("k3", 3)).await.unwrap();
+        let prep = p.prepare_upload(req("k3", 3), None).await.unwrap();
         p.stream_upload(&prep.handle, None, make_stream(Bytes::from_static(b"abc"))).await.unwrap();
         p.abort_upload(&prep.handle).await.unwrap();
         let h = StorageHandle { backend: "fake".into(), key: "k3".into(), backend_handle: serde_json::Value::Null };
@@ -170,7 +170,7 @@ mod tests {
     #[tokio::test]
     async fn delete_is_idempotent_and_makes_not_found() {
         let p = FakeStoragePlugin::new(caps());
-        let prep = p.prepare_upload(req("k4", 3)).await.unwrap();
+        let prep = p.prepare_upload(req("k4", 3), None).await.unwrap();
         p.stream_upload(&prep.handle, None, make_stream(Bytes::from_static(b"abc"))).await.unwrap();
         p.complete_upload(&prep.handle).await.unwrap();
         let h = StorageHandle { backend: "fake".into(), key: "k4".into(), backend_handle: serde_json::Value::Null };

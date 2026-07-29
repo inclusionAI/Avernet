@@ -22,6 +22,7 @@ from secbaas.community.core.service.bot_run._bot_concurrency import (
     BotConcurrencyManager,
     FixedMachineCountProvider,
 )
+from secbaas.community.core.service.bot_run._executor import ResultGuardExecutor
 from secbaas.community.core.service.bot_run._worker import (
     BotRequestWorker,
     BotRequestWorkerConfig,
@@ -154,9 +155,9 @@ def _insert(
 def _worker(queue, repo, ex, **kw) -> BotRequestWorker:
     return BotRequestWorker(
         queue_repository=queue,
-        run_repository=repo,
         qpm_manager=_qpm(),
         executor=ex,
+        worker_id=kw.pop("worker_id", "worker-1"),
         **kw,
     )
 
@@ -228,7 +229,6 @@ async def test_qpm_gating_limits_dispatch(repo, queue):
     ex = _CompletingExecutor(repo)
     worker = BotRequestWorker(
         queue_repository=queue,
-        run_repository=repo,
         qpm_manager=_qpm(bot_qpm=1),
         executor=ex,
         machine_count_provider=FixedMachineCountProvider(1),
@@ -254,7 +254,6 @@ async def test_qpm_per_machine_division(repo, queue):
     ex = _CompletingExecutor(repo)
     worker = BotRequestWorker(
         queue_repository=queue,
-        run_repository=repo,
         qpm_manager=_qpm(),
         executor=ex,
         machine_count_provider=FixedMachineCountProvider(3),
@@ -267,7 +266,7 @@ async def test_qpm_per_machine_division(repo, queue):
 @pytest.mark.xfail(strict=False, reason="flaky in CI — resolve later")
 async def test_executor_exception_marks_failed(repo, queue):
     run_id = _insert(repo, queue, "bot-1")
-    worker = _worker(queue, repo, _RaisingExecutor())
+    worker = _worker(queue, repo, ResultGuardExecutor(_RaisingExecutor(), repo))
 
     await worker._tick()
     await _drain()
@@ -384,7 +383,8 @@ def test_trace_context_from_meta_detaches_on_exception():
 async def test_run_one_executes_with_trace_context(repo, queue):
     """_run_one should restore trace context from meta before executing."""
     run_id = _insert(repo, queue, "bot-1")
-    ex = _CompletingExecutor(repo)
+    inner = _CompletingExecutor(repo)
+    ex = ResultGuardExecutor(inner, repo)
     worker = _worker(queue, repo, ex)
 
     mock_tracer = MagicMock()
@@ -397,7 +397,7 @@ async def test_run_one_executes_with_trace_context(repo, queue):
         record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
         await worker._run_one(record)
 
-    assert run_id in ex.executed
+    assert run_id in inner.executed
     assert repo.get_by_run_id(run_id).status == "COMPLETED"
     mock_tracer.extract_context.assert_called_once_with({})
     mock_tracer.start_span.assert_called_once_with(
@@ -408,7 +408,8 @@ async def test_run_one_executes_with_trace_context(repo, queue):
 async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
     """_run_one timeout path should still restore trace context."""
     _insert(repo, queue, "bot-1")
-    ex = _CompletingExecutor(repo)
+    inner = _CompletingExecutor(repo)
+    ex = ResultGuardExecutor(inner, repo)
     worker = _worker(queue, repo, ex)
 
     mock_tracer = MagicMock()
@@ -431,7 +432,7 @@ async def test_run_one_timeout_marks_failed_with_trace(repo, queue):
 async def test_run_one_executor_exception_with_trace(repo, queue):
     """_run_one exception path should still restore trace context."""
     _insert(repo, queue, "bot-1")
-    ex = _RaisingExecutor()
+    ex = ResultGuardExecutor(_RaisingExecutor(), repo)
     worker = _worker(queue, repo, ex)
 
     mock_tracer = MagicMock()
@@ -469,8 +470,12 @@ async def test_run_one_requeued_path(repo, queue):
 
         limiter = ConcurrencyLimiter(capacity=10)
         worker._buckets["bot-1"] = (limiter, (600, 1))
-        await worker._run_one(record)
+        mock_mark = MagicMock(wraps=worker._queue.mark_done)
+        with patch.object(worker._queue, "mark_done", mock_mark):
+            await worker._run_one(record)
 
+    mock_mark.assert_not_called()
+    assert queue.get_by_run_id(record.run_id).status == "PENDING"
     # baas_bot_run should NOT be marked FAILED (requeue is not a failure)
     assert repo.get_by_run_id(record.run_id).status == "PENDING"
     mock_tracer.start_span.assert_called_once_with(
@@ -492,12 +497,12 @@ async def test_run_one_mark_done_raises_warning(repo, queue):
         "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
         return_value=mock_tracer,
     ):
-        record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+        record = queue.claim_pending_by_bot("bot-1", worker.worker_id, candidates=5)
         mock_mark = MagicMock(side_effect=RuntimeError("db connection lost"))
         with patch.object(worker._queue, "mark_done", mock_mark):
             await worker._run_one(record)
 
-    mock_mark.assert_called_once_with(record.run_id)
+    mock_mark.assert_called_once_with(record.run_id, worker.worker_id)
     assert repo.get_by_run_id(record.run_id).status == "COMPLETED"
 
 
@@ -527,3 +532,125 @@ async def test_run_one_releases_bucket_slot(repo, queue):
         await worker._run_one(record)
 
     assert limiter.ref_count == 0
+
+
+async def test_timeout_scan_marks_failed_and_force_done(repo, queue):
+    run_id = uuid4().hex
+    repo.insert_run(
+        run_id=run_id,
+        bot_id="bot-1",
+        api_key_prefix="sk-",
+        message_long="m",
+        metadata=None,
+    )
+    queue.insert_queue(run_id=run_id, bot_id="bot-1", meta={"timeout": -1})
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex)
+
+    await worker._timeout_scan_once()
+
+    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_timeout_scan_requeue_keeps_queue_running(repo, queue):
+    _insert(repo, queue, "bot-1")
+    worker = _worker(queue, repo, _RequeuedExecutor())
+    record = queue.claim_pending_by_bot("bot-1", worker.worker_id, candidates=5)
+    assert record is not None
+
+    mock_scan = MagicMock(return_value=[record])
+    mock_force_done = MagicMock(wraps=queue.force_done)
+    with (
+        patch.object(worker._queue, "scan_timeout", mock_scan),
+        patch.object(worker._queue, "force_done", mock_force_done),
+    ):
+        await worker._timeout_scan_once()
+
+    mock_force_done.assert_not_called()
+    assert queue.get_by_run_id(record.run_id).status == "RUNNING"
+
+
+async def test_requeue_pending_release_error_is_swallowed(repo, queue):
+    _insert(repo, queue, "bot-1")
+    worker = _worker(queue, repo, _RequeuedExecutor())
+    record = queue.claim_pending_by_bot("bot-1", worker.worker_id, candidates=5)
+    assert record is not None
+
+    with patch.object(
+        worker._queue,
+        "release_to_pending",
+        MagicMock(side_effect=RuntimeError("db lost")),
+    ) as mock_release:
+        from secbaas.community.core.service.bot_run._executor import (
+            RequeuedToPendingError,
+        )
+
+        await worker._requeue_pending(
+            record, RequeuedToPendingError(record.run_id, "sess-1")
+        )
+
+    mock_release.assert_called_once_with(record.run_id, worker.worker_id)
+
+
+def test_mark_queue_done_noop_is_logged(repo, queue):
+    _insert(repo, queue, "bot-1")
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    record = queue.claim_pending_by_bot("bot-1", "other-worker", candidates=5)
+    assert record is not None
+
+    worker._mark_queue_done(record)
+
+    after = queue.get_by_run_id(record.run_id)
+    assert after.status == "RUNNING"
+    assert after.assigned_worker == "other-worker"
+
+
+async def test_heartbeat_loop_touches_with_worker_id(repo, queue):
+    _insert(repo, queue, "bot-1")
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        config=BotRequestWorkerConfig(heartbeat_interval_seconds=0.01),
+    )
+    touched = asyncio.Event()
+
+    def touch(run_id: str, worker_id: str) -> None:
+        assert worker_id == worker.worker_id
+        touched.set()
+
+    with patch.object(worker._queue, "touch_heartbeat", MagicMock(side_effect=touch)):
+        task = asyncio.create_task(worker._heartbeat_loop("run-1", worker.worker_id))
+        await asyncio.wait_for(touched.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+async def test_heartbeat_loop_logs_touch_error_and_continues(repo, queue):
+    _insert(repo, queue, "bot-1")
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        config=BotRequestWorkerConfig(heartbeat_interval_seconds=0.01),
+    )
+    second_call = asyncio.Event()
+    calls = 0
+
+    def touch(run_id: str, worker_id: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("heartbeat db lost")
+        second_call.set()
+
+    with patch.object(worker._queue, "touch_heartbeat", MagicMock(side_effect=touch)):
+        task = asyncio.create_task(worker._heartbeat_loop("run-1", worker.worker_id))
+        await asyncio.wait_for(second_call.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert calls >= 2

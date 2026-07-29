@@ -138,23 +138,26 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         return None
 
     @with_orm_session
-    def touch_heartbeat(self, run_id: str) -> None:
-        """刷新执行中工作项的心跳时间戳（供宕机恢复判活）。"""
+    def touch_heartbeat(self, run_id: str, worker_id: str) -> None:
+        """刷新当前 Worker 持有的 RUNNING 工作项心跳（供宕机恢复判活）。"""
         self._session.query(BotRunQueueModel).filter(
-            BotRunQueueModel.run_id == run_id
+            BotRunQueueModel.run_id == run_id,
+            BotRunQueueModel.status == "RUNNING",
+            BotRunQueueModel.assigned_worker == worker_id,
         ).update({"last_heartbeat": datetime.now()}, synchronize_session=False)
 
     @with_orm_session
-    def release_to_pending(self, run_id: str) -> int:
+    def release_to_pending(self, run_id: str, worker_id: str) -> int:
         """把已置 RUNNING 但未能开跑（抢锁/限流失败）的工作项放回 PENDING。
 
-        仅当当前仍为 RUNNING 时生效，返回受影响行数。
+        仅当当前 Worker 仍持有该 RUNNING 行时生效，返回受影响行数。
         """
         updated = (
             self._session.query(BotRunQueueModel)
             .filter(
                 BotRunQueueModel.run_id == run_id,
                 BotRunQueueModel.status == "RUNNING",
+                BotRunQueueModel.assigned_worker == worker_id,
             )
             .update(
                 {
@@ -175,18 +178,23 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
             )
             cur_status = row.status if row else "NOT_FOUND"
             log.warning(
-                "[bot-run-queue:release] run_id=%s updated=0 cur_status=%s "
-                "(expected RUNNING, may have been reset by recovery or already DONE)",
+                "[bot-run-queue:release] run_id=%s worker=%s updated=0 cur_status=%s "
+                "(expected RUNNING owned by worker, may have been reset/reclaimed/DONE)",
                 run_id,
+                worker_id,
                 cur_status,
             )
         else:
-            log.info("[bot-run-queue:release] run_id=%s RUNNING->PENDING", run_id)
+            log.info(
+                "[bot-run-queue:release] run_id=%s worker=%s RUNNING->PENDING",
+                run_id,
+                worker_id,
+            )
         return affected
 
     @with_orm_session
-    def mark_done(self, run_id: str) -> int:
-        """执行写入终态后标记工作项 DONE（仅当仍 RUNNING 时生效）。
+    def mark_done(self, run_id: str, worker_id: str) -> int:
+        """执行写入终态后标记工作项 DONE（仅当当前 Worker 仍持有 RUNNING 时生效）。
 
         DONE 行不再被发现/认领/恢复触碰，等待 TTL 清理。结果正文已落
         ``baas_bot_run``，本表只留工作轨迹。
@@ -196,6 +204,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
             .filter(
                 BotRunQueueModel.run_id == run_id,
                 BotRunQueueModel.status == "RUNNING",
+                BotRunQueueModel.assigned_worker == worker_id,
             )
             .update(
                 {"status": "DONE", "gmt_modified": func.now()},
@@ -211,13 +220,18 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
             )
             cur_status = row.status if row else "NOT_FOUND"
             log.warning(
-                "[bot-run-queue:mark_done] run_id=%s updated=0 cur_status=%s "
-                "(expected RUNNING, executor may have released to PENDING)",
+                "[bot-run-queue:mark_done] run_id=%s worker=%s updated=0 cur_status=%s "
+                "(expected RUNNING owned by worker, executor may have released/reclaimed)",
                 run_id,
+                worker_id,
                 cur_status,
             )
         else:
-            log.info("[bot-run-queue:mark_done] run_id=%s RUNNING->DONE", run_id)
+            log.info(
+                "[bot-run-queue:mark_done] run_id=%s worker=%s RUNNING->DONE",
+                run_id,
+                worker_id,
+            )
         return affected
 
     @with_orm_session

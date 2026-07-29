@@ -18,6 +18,7 @@ from injector import inject
 from agentclaw.community.core.bot_dormant.protocols import BotServiceProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 
 
 logger = get_logger()
@@ -85,7 +86,7 @@ class ActivateBotService:
 
         # Launch background task: unfreeze passport → start_bot; rollback on failure.
         thread = threading.Thread(
-            target=self._reactivate_async,
+            target=bind_current_avernet_tenant(self._reactivate_async),
             args=(bot_id, user_id, nick_name or user_id),
             daemon=True,
         )

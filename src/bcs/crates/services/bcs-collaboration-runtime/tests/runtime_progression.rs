@@ -31,6 +31,7 @@ use bcs_service_api::{
     StartStateMachineRunCommand, StateMachineDefinitionRepoPort, StateMachineNodeSubStatus,
     StateMachineRunAccessCommand, StateMachineRunRepoPort,
 };
+use bcs_service_api::{CreateOrReactivateCommand, NewSessionParams, SessionKind};
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use serde_json::{Value, json};
@@ -140,7 +141,7 @@ fn assert_inferred_default_requires(definition: &CollaborationDefinition) {
 }
 
 #[tokio::test]
-async fn human_input_requires_authenticated_human_before_persisting_run_state() {
+async fn human_input_without_authenticated_or_present_human_is_invalid_request() {
     let group = Arc::new(GroupStore::new());
     group
         .upsert(state_machine_test_group())
@@ -172,16 +173,187 @@ async fn human_input_requires_authenticated_human_before_persisting_run_state() 
             authenticated_human: None,
         })
         .await
-        .expect_err("HumanInput must require authenticated Human identity");
+        .expect_err("HumanInput must require a Present Human session participant");
 
-    assert!(matches!(error, CollaborationRuntimeError::Unauthenticated));
-    assert!(
-        StateMachineDefinitionRepoPort::get(&*store, "human_input_single", 1)
-            .await
-            .expect("query definition")
-            .is_none()
-    );
+    assert!(matches!(
+        error,
+        CollaborationRuntimeError::InvalidRequest(message)
+            if message.contains("Present Human session participant")
+    ));
     assert!(delivery.commands.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn human_input_can_start_without_authenticated_human_when_session_has_present_human() {
+    let group = Arc::new(GroupStore::new());
+    let seeded_group = state_machine_test_group();
+    group
+        .upsert(seeded_group.clone())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let mut reviewer = Participant::human("human_1001", ParticipantRole::Observer);
+    reviewer.mode = Some(ParticipantMode::Present);
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: seeded_group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::ServiceInvocation,
+                participants: vec![reviewer],
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    );
+
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: seeded_group.id,
+            session_id: Some(session.id),
+            definition_yaml: Some(human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "ship it"}),
+            caller_id: Some("bot_driver".to_string()),
+            authenticated_human: None,
+        })
+        .await
+        .expect("existing Present Human should allow service invocation");
+
+    assert_eq!(
+        started.view.nodes[0].status,
+        StateMachineNodeStatus::Running
+    );
+}
+
+#[tokio::test]
+async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
+    let group = Arc::new(GroupStore::new());
+    let seeded_group = state_machine_test_group();
+    group
+        .upsert(seeded_group.clone())
+        .await
+        .expect("seed group");
+    let sessions = test_sessions();
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: seeded_group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::ServiceInvocation,
+                participants: seeded_group.participants.clone(),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        sessions.clone(),
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    );
+
+    runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: seeded_group.id.clone(),
+            session_id: Some(session.id.clone()),
+            definition_yaml: Some(human_input_yaml()),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "ship it"}),
+            caller_id: Some("bot_driver".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_1001".to_string(),
+                display_name: Some("Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("authenticated Human should be materialized into session");
+
+    let updated = sessions
+        .get(&session.id)
+        .await
+        .expect("read session")
+        .expect("session exists");
+    let reviewer = updated
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_1001")
+        .expect("Human added");
+    assert!(reviewer.is_human());
+    assert_eq!(reviewer.role, ParticipantRole::Observer);
+    assert_eq!(reviewer.effective_mode(), ParticipantMode::Present);
+    assert_eq!(reviewer.bot_name.as_deref(), Some("Reviewer"));
+
+    let mut returning_reviewer =
+        Participant::human("human_2002", ParticipantRole::Observer);
+    returning_reviewer.mode = Some(ParticipantMode::Absent);
+    let returning_session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: seeded_group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::ServiceInvocation,
+                participants: vec![returning_reviewer],
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed session with absent Human")
+        .session;
+
+    runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: seeded_group.id,
+            session_id: Some(returning_session.id.clone()),
+            definition_yaml: Some(
+                human_input_yaml()
+                    .replace("human_input_single", "returning_human_input")
+                    .replace("human_1001", "human_2002"),
+            ),
+            definition: None,
+            definition_ref: None,
+            input: json!({"proposal": "ship it"}),
+            caller_id: Some("bot_driver".to_string()),
+            authenticated_human: Some(AuthenticatedHumanCaller {
+                actor_id: "human_2002".to_string(),
+                display_name: Some("Returning Reviewer".to_string()),
+            }),
+        })
+        .await
+        .expect("authenticated Human should be restored to Present");
+
+    let updated = sessions
+        .get(&returning_session.id)
+        .await
+        .expect("read returning session")
+        .expect("returning session exists");
+    let reviewer = updated
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_2002")
+        .expect("returning Human retained");
+    assert_eq!(reviewer.effective_mode(), ParticipantMode::Present);
 }
 
 #[tokio::test]
@@ -2834,10 +3006,20 @@ runtime:
   state_machine:
     version: 1
     graph_mode: acyclic
+    human_input_channel:
+      channel_type: dingtalk
+      fixed_group:
+        conversation_type: group
+        conversation_id: cid-review
     nodes:
       review:
         kind: human_input
         display_name: Review
+        assignee:
+          type: runtime_actor
+          actor: human_1001
+        notification:
+          mode: fixed_group
         instruction: 请用自然语言给出你的意见。
         node_timeout_ms: 60000
 "#
@@ -2856,10 +3038,20 @@ runtime:
   state_machine:
     version: 1
     graph_mode: acyclic
+    human_input_channel:
+      channel_type: dingtalk
+      fixed_group:
+        conversation_type: group
+        conversation_id: cid-review
     nodes:
       review:
         kind: human_input
         display_name: Review
+        assignee:
+          type: runtime_actor
+          actor: human_1001
+        notification:
+          mode: fixed_group
         instruction: 请用自然语言给出你的意见。
         node_timeout_ms: 60000
         transitions:

@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from typing import Any
 
 
 class NoopAICodingAdapter:
-    """No-op AICoding adapter:返回安全零值、不做任何 I/O。"""
+    """No-op AICoding adapter:返回安全零值、不做任何 I/O。
+
+    Env vars for E2E failure-path tests:
+    - ``BAAS_STUB_ENGINE_SESSION_ERROR=1`` — ``create_adapter_session()`` raises ``RuntimeError``
+    - ``BAAS_STUB_ENGINE_SESSION_SLOW=1`` — adds a 2s delay to ``create_adapter_session()``
+    """
 
     engine_type = "aicoding"
 
@@ -33,6 +40,10 @@ class NoopAICodingAdapter:
         bot_id: str,
         run_id: str | None,
     ) -> tuple[str, bool]:
+        if os.getenv("BAAS_STUB_ENGINE_SESSION_ERROR"):
+            raise RuntimeError("stub aicoding: simulated session creation failure")
+        if os.getenv("BAAS_STUB_ENGINE_SESSION_SLOW"):
+            await asyncio.sleep(2)
         return ("", True)
 
 

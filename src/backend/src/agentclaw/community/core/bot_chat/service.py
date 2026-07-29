@@ -6,7 +6,9 @@ import aiohttp
 from injector import inject
 
 from agentclaw.community.core.bot_chat.errors import LangfuseAPIError, SessionNotFoundError
+from agentclaw.community.core.bot_chat.open_service import OpenBotChatServiceMixin
 from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationDetail,
     ConversationObservation,
@@ -309,7 +311,7 @@ def _apply_client_side_filters(
 # BotChatService
 # ---------------------------------------------------------------------------
 
-class BotChatService:
+class BotChatService(OpenBotChatServiceMixin):
     """Service for querying bot conversation sessions."""
 
     @inject
@@ -483,7 +485,7 @@ class BotChatService:
 
     async def _list_sessions_db(
         self,
-        owner_id: str,
+        owner_id: str | None,
         from_date: datetime,
         to_date: datetime,
         page: int,
@@ -498,6 +500,7 @@ class BotChatService:
         group_id: str | None,
         match_mode: str,
         include_output_match: bool,
+        query_scope: QueryScope = QueryScope.OWNER,
     ) -> SessionListResponse:
         """List sessions using one DB source per request.
 
@@ -526,6 +529,7 @@ class BotChatService:
             group_id=group_id,
             match_mode=match_mode,
             include_output_match=include_output_match,
+            query_scope=query_scope,
         )
 
         if total == 0:
@@ -545,6 +549,7 @@ class BotChatService:
                 group_id=group_id,
                 match_mode=match_mode,
                 include_output_match=include_output_match,
+                query_scope=query_scope,
             )
 
         has_more = page * limit < total

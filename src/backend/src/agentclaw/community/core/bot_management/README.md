@@ -51,6 +51,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.auth_relationship
+  - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
   - agentclaw.community.utils.secret_utils
 ```

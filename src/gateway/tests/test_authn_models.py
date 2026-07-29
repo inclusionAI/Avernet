@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from datetime import datetime
+from typing import get_args
 
 import pytest
 from pydantic import ValidationError
 
 from gateway.community.spi.auth import AuthenticatedUser
 from gateway.community.spi.authn import (
+    AccessKey,
+    AccessKeyPrincipal,
+    AppPrincipal,
+    Bot,
+    BotPrincipal,
     CredentialBundle,
-    Delegation,
+    Presence,
     Principal,
     PrincipalType,
-    StrategyParams,
+    ThirdPartyApp,
     UserPrincipal,
 )
 
@@ -27,7 +34,6 @@ def test_user_principal_defaults() -> None:
     assert p.type is PrincipalType.USER
     assert p.type == "user"
     assert p.tenant == "t-1"
-    assert p.scopes == frozenset()
     assert p.subject.id == "u1"
 
 
@@ -39,11 +45,10 @@ def test_user_principal_requires_tenant_and_subject() -> None:
 
 
 def test_user_principal_serialization_tags_type() -> None:
-    p = UserPrincipal(tenant="t-1", scopes=frozenset({"bots:read"}), subject=_subject())
+    p = UserPrincipal(tenant="t-1", subject=_subject())
     dumped = p.model_dump()
     assert dumped["type"] == "user"
     assert dumped["tenant"] == "t-1"
-    assert "bots:read" in dumped["scopes"]
     assert dumped["subject"]["id"] == "u1"
 
 
@@ -53,20 +58,12 @@ def test_user_principal_is_immutable() -> None:
         p.tenant = "t-2"  # type: ignore[misc]
 
 
-def test_principal_alias_is_user_principal() -> None:
-    assert Principal is UserPrincipal
-
-
-def test_strategy_params_defaults() -> None:
-    params = StrategyParams()
-    assert params.scopes == frozenset()
-    assert params.delegation is Delegation.OPTIONAL
-
-
-def test_strategy_params_are_frozen() -> None:
-    params = StrategyParams(scopes=frozenset({"bots:read"}))
-    with pytest.raises(FrozenInstanceError):
-        params.delegation = Delegation.FORBIDDEN  # type: ignore[misc]
+def test_principal_union_includes_all_members() -> None:
+    members = get_args(get_args(Principal)[0])
+    assert UserPrincipal in members
+    assert BotPrincipal in members
+    assert AppPrincipal in members
+    assert AccessKeyPrincipal in members
 
 
 def test_credential_bundle_is_frozen() -> None:
@@ -74,3 +71,57 @@ def test_credential_bundle_is_frozen() -> None:
     assert creds.cookies["SSO_TOKEN"] == "x"
     with pytest.raises(FrozenInstanceError):
         creds.headers = {}  # type: ignore[misc]
+
+
+def test_presence_enum_values() -> None:
+    assert Presence.REQUIRED == "required"
+    assert Presence.OPTIONAL == "optional"
+
+
+def test_app_and_bot_principal_types() -> None:
+    app = AppPrincipal(
+        tenant="t-app",
+        app=ThirdPartyApp(
+            app_id="cid", app_name="Cid App", owners="org-1", app_type="assistant"
+        ),
+    )
+    assert app.type == "app"
+    assert app.tenant == "t-app"
+    assert app.app.app_id == "cid"
+    assert app.on_behalf_of_opaque is None
+
+    bot = BotPrincipal(
+        tenant="t-bot",
+        bot=Bot(bot_uuid="b-1", owner_id="org-1", token="tok"),
+    )
+    assert bot.type == "bot"
+    assert bot.bot.bot_uuid == "b-1"
+    assert bot.bot.token == "tok"
+
+
+def test_bot_requires_token() -> None:
+    with pytest.raises(ValidationError):
+        Bot(bot_uuid="b-1", owner_id="org-1")  # type: ignore[call-arg]
+
+
+def test_access_key_principal_type() -> None:
+    ak = AccessKeyPrincipal(
+        tenant="t-ak",
+        access_key=AccessKey(
+            access_key_id="ak-1",
+            access_key_token="tok",
+            expire_at=datetime(2027, 1, 1, 0, 0, 0),
+        ),
+    )
+    assert ak.type == "access_key"
+    assert ak.tenant == "t-ak"
+    assert ak.access_key.access_key_id == "ak-1"
+    assert ak.access_key.access_key_token == "tok"
+    assert ak.access_key.expire_at == datetime(2027, 1, 1, 0, 0, 0)
+
+
+def test_access_key_requires_all_fields() -> None:
+    with pytest.raises(ValidationError):
+        AccessKey(access_key_id="ak-1")  # type: ignore[call-arg]
+    with pytest.raises(ValidationError):
+        AccessKey()  # type: ignore[call-arg]

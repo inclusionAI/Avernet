@@ -407,7 +407,7 @@ JSON
     . "${SCRIPT_DIR}/modules/bcs.sh"
     . "${SCRIPT_DIR}/modules/bots.sh"
     bots_bcn_plugin_load_dir() { printf '%s\n' "$npm_plugin"; }
-    bots_dynamic_specs() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "CEO" "ceo" "30001" "ceo" "CEO summary" "strategy" "routing" "production"; }
+    bots_dynamic_specs() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "CEO" "ceo" "30001" "ceo" "CEO summary" "strategy" "routing" "production" "openclaw"; }
     bots_dynamic_copy_profile_files() { return 0; }
     bots_dynamic_setup_bcs_skill() { return 0; }
     bots_dynamic_model_source_has_fields() { return 1; }

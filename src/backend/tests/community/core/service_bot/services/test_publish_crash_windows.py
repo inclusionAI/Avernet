@@ -96,6 +96,12 @@ class FakeBaas:
         self._next = 900
         self.resolve_container_provider = Mock(return_value="arca")
 
+    def get_bot(self, bot_uuid):
+        # These crash-window tests model a live/ACTIVE online bot; the
+        # provider-aware restart decision reads this status to choose in-place
+        # upgrade (then crash/adopt/BOT_NOT_FOUND recreate is exercised below).
+        return {"status": "ACTIVE"}
+
     def list_bot_publishes(self, bot_uuid):
         return [dict(w) for w in self.workflows.get(bot_uuid, [])]
 

@@ -870,3 +870,20 @@ class TestStubBotServicePluginGetBinding:
         assert result.binding_id == 0
         assert result.device_provider == "stub"
         assert result.device_id == "stub-device"
+
+    @pytest.mark.asyncio
+    async def test_get_binding_error_env_var(self, monkeypatch):
+        monkeypatch.setenv("BAAS_STUB_BOT_BINDING_ERROR", "1")
+        plugin = StubBotServicePlugin()
+
+        with pytest.raises(AttributeError, match="PAAS_ERROR"):
+            await plugin.get_binding("bot_001", "owner_001", "online")
+
+    @pytest.mark.asyncio
+    async def test_get_binding_not_found_env_var(self, monkeypatch):
+        monkeypatch.setenv("BAAS_STUB_BOT_BINDING_NOT_FOUND", "1")
+        plugin = StubBotServicePlugin()
+
+        result = await plugin.get_binding("bot_001", "owner_001", "online")
+
+        assert result is None

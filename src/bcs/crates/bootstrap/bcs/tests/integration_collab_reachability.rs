@@ -661,8 +661,7 @@ async fn p4_target_private_friend_allows_all() {
 
     let group_id = create_base_group(s.addr, &s.caller.token, &s.caller.bot_id).await;
     let add = add_member_http(s.addr, &s.caller.token, &group_id, &s.target.bot_id).await;
-    // Private target is invisible (404) even to friends via add_member
-    assert!(add.is_err(), "P-4(iv) private target add_member should be rejected (invisible), got: {:?}", add.ok());
+    assert!(add.is_ok(), "P-4(iv) private target add_member should succeed for friends: {:?}", add.err());
 }
 
 // ============================================================================

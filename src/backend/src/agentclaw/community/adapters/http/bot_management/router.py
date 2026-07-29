@@ -1806,7 +1806,6 @@ async def search_bots(
 @router.get("/search/domain-bots", response_model=ApiResponse)
 async def list_domain_bots(
     request: Request,
-    user: AuthenticatedUser = Depends(require_operator),  # noqa: B008
     page: Optional[int] = Query(None, ge=1, description="Page number (1-based). Omit for all results"),
     page_size: Optional[int] = Query(None, ge=1, description="Items per page. Omit for all results"),
     keyword: Optional[str] = Query(None, description="Keyword to fuzzy-match on bot name"),
@@ -1828,6 +1827,14 @@ async def list_domain_bots(
             page_size=page_size,
             keyword=keyword,
         )
+
+        # iam_token 是调用方 IAM 凭据(由 cookie 写入 bot.ext,见
+        # update_bot_ext/trigger_data_init_api)。此端点不对调用方做 operator
+        # 鉴权,公开的域 Bot 列表不应回传该凭据,逐条剔除。
+        for item in result.get("items", []):
+            ext = item.get("ext") if isinstance(item, dict) else None
+            if isinstance(ext, dict):
+                ext.pop("iam_token", None)
 
         return ApiResponse(
             success=True,

@@ -388,11 +388,13 @@ class BotManagementModule(Module):
         registry: HandlerRegistry,
         baas_service: BaasService,
         device_binding_repo: DeviceBindingRepository,
+        passport_plugin: PassportPlugin,
     ) -> TeclawPublishTaskLifecycle:
         return TeclawPublishTaskLifecycle(
             registry=registry,
             baas_service=baas_service,
             device_binding_repo=device_binding_repo,
+            passport_plugin=passport_plugin,
         )
 
     @singleton

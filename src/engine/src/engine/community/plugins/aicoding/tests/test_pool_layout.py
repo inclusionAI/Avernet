@@ -14,7 +14,6 @@ from engine.community.plugins.aicoding.layout_pool import (
     verify_aicoding_pool_mappings,
 )
 
-
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
 
 
@@ -142,12 +141,20 @@ def test_aicoding_activation_switches_local_and_keeps_repo_namespace(
     )
 
     assert result.status is PoolActivationStatus.COMMITTED
-    assert legacy_local.is_symlink()
-    assert legacy_local.resolve() == pool_local.resolve()
-    assert local_bridge.readlink() == legacy_local
-    assert local_bridge.resolve() == pool_local.resolve()
+    assert not legacy_local.exists()
+    assert not legacy_local.is_symlink()
+    assert not local_bridge.exists()
+    assert not local_bridge.is_symlink()
+    assert repo_bridge.is_symlink()
     assert repo_bridge.resolve() == pool_repo.resolve()
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
+
+    ready = inspect_aicoding_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert ready.status is RuntimeLayoutInspectionStatus.READY
+    assert ready.evidence["checks"]["stable_repo_bridge_valid"] is True
 
 
 def test_aicoding_rollback_rebuilds_legacy_from_current_pool(

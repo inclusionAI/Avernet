@@ -549,8 +549,8 @@ async fn handle_response_frame(
             );
         }
 
-        // If this is a task dispatch ACK, delegate alias registration to master_slave strategy
-        handle_master_slave_response(state, run_id, res, registered_bot_id).await;
+        // Reconcile any accepted run id before processing streaming events.
+        handle_accepted_run_id_response(state, run_id, res, registered_bot_id).await;
         handle_state_machine_response(state, run_id, res).await;
     } else {
         // Error response - request was rejected
@@ -1146,8 +1146,8 @@ fn to_app_chat_event_state(state: &ChatEventState) -> AppChatEventState {
     }
 }
 
-/// master_slave mode: register sub bot's run_id as alias for the task_id.
-async fn handle_master_slave_response(
+/// Reconcile a bot-accepted run id with the request run id.
+async fn handle_accepted_run_id_response(
     state: &Arc<BotDispatchState>,
     run_id: &str,
     res: &ResponseFrame,
@@ -1160,6 +1160,22 @@ async fn handle_master_slave_response(
         .and_then(|v| v.as_str())
     {
         if sub_run_id != run_id {
+            let channel_source_message_rebound = match state
+                .message_flow
+                .rebind_channel_source_message(run_id, sub_run_id)
+                .await
+            {
+                Ok(rebound) => rebound,
+                Err(error) => {
+                    warn!(
+                        source_run_id = %run_id,
+                        accepted_run_id = %sub_run_id,
+                        error = %error,
+                        "failed to rebind channel source message to accepted run id"
+                    );
+                    false
+                }
+            };
             let task_alias_registration = match registered_bot_id.as_deref() {
                 Some(bot_id) => match state
                     .message_flow
@@ -1195,6 +1211,7 @@ async fn handle_master_slave_response(
                 task_id = %run_id,
                 sub_bot_run_id = %sub_run_id,
                 task_alias_registration = ?task_alias_registration,
+                channel_source_message_rebound = channel_source_message_rebound,
                 run_channel_alias_registered = run_channel_alias_registered,
                 trace_context_linked = trace_context_linked,
                 "master_slave: registered sub bot run_id alias"

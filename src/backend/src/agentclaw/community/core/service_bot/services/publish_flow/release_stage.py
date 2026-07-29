@@ -76,6 +76,10 @@ class ReleaseRecordOps(Protocol):
 
     def refresh_publish_handle(self, binding_id, publish_id) -> None: ...
 
+    def release_binding(
+        self, binding_id: int, *, destroy_publish_id: int | None
+    ) -> None: ...
+
 
 @dataclass(frozen=True)
 class StageSpec:
@@ -293,11 +297,27 @@ class ReleaseStageRunner:
                 bot_uuid=bot_uuid,
                 bot_gone_reason="BOT_NOT_FOUND -> first release",
             )
-        except TargetBotGoneError:
+        except TargetBotGoneError as e:
             logger.warning(
-                "[ReleaseStageRunner.upgrade_release] %s upgrade target bot not "
-                "found, fallback to first release: publish_id=%s, bot_uuid=%s",
-                spec.stage.value, publish_id, bot_uuid,
+                "[ReleaseStageRunner.upgrade_release] %s upgrade target bot gone "
+                "(%s), fallback to first release: publish_id=%s, bot_uuid=%s",
+                spec.stage.value, e.error_code, publish_id, bot_uuid,
+            )
+            # Secondary cleanup net (the primary decision is provider-aware and
+            # proactive). Either way the fallback first-release mints a fresh
+            # binding and rewrites ext.binding.<stage>, so the record's current
+            # binding must be released or it lingers ACTIVE pointing at the gone
+            # bot. A DEVICE_NOT_FOUND means the record still lingers with a gone
+            # container, so retire it first (and stash the destroy id); a
+            # BOT_NOT_FOUND means the bot is already fully gone (no destroy needed
+            # → destroy_publish_id=None).
+            destroy_publish_id = None
+            if e.error_code == "DEVICE_NOT_FOUND":
+                destroy_publish_id = self._build_service.retire_superseded_bot(
+                    bot_uuid, operator=operator
+                )
+            self._ops.release_binding(
+                existing_binding_id, destroy_publish_id=destroy_publish_id
             )
             return await fallback(
                 publish_record=publish_record,

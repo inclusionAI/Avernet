@@ -45,6 +45,7 @@ from agentclaw.community.core.devices.errors import (
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
@@ -736,7 +737,9 @@ class DeviceService:
                 logger.exception(f"[apply_device] start service failed for device {allocated.device_id}: {e}")
                 self._mark_service_start_failed(binding_id=binding_id, error=str(e))
 
-        thread = threading.Thread(target=start_service_async, daemon=True)
+        thread = threading.Thread(
+            target=bind_current_avernet_tenant(start_service_async), daemon=True
+        )
         thread.start()
 
         record = self._repo.get_by_id(binding_id)
@@ -1542,7 +1545,9 @@ class DeviceService:
                     record.device_id, sync_error,
                 )
 
-        threading.Thread(target=_run, daemon=True).start()
+        threading.Thread(
+            target=bind_current_avernet_tenant(_run), daemon=True
+        ).start()
 
     def _trigger_data_init_on_device_ready(self, *, device_id: str, record) -> None:
         """当设备自报 SUCCEEDED 时触发 data-init。
@@ -1639,7 +1644,11 @@ class DeviceService:
                         exc_info=True,
                     )
 
-            thread = threading.Thread(target=_run_init, daemon=True, name=f"data-init-{bot_id}")
+            thread = threading.Thread(
+                target=bind_current_avernet_tenant(_run_init),
+                daemon=True,
+                name=f"data-init-{bot_id}",
+            )
             thread.start()
 
             logger.info(f"bot_id={bot_id} data_init_trigger dispatched source=status_succeeded thread={thread.name}")

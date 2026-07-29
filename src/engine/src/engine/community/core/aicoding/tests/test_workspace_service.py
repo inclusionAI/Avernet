@@ -322,12 +322,72 @@ async def test_list_file_tree_prunes_mounts_and_returns_sorted_tree(
     command, cwd, timeout = bash_plugin.calls[0]
     assert cwd == str(workspace_dir)
     assert timeout == 30
+    assert "-mindepth 1" in command
+    assert "-maxdepth 3" in command
     assert "-name .git" in command
     assert "-name node_modules" in command
     assert "-path './skills'" in command
     assert "-path './.repos'" in command
     assert "%s" not in command
     assert file_plugin.calls == []
+
+
+@pytest.mark.parametrize("max_depth", [1, 2, 5])
+async def test_list_file_tree_applies_requested_max_depth(
+    workspace_dir: Path,
+    max_depth: int,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(stdout="", stderr="", exit_code=0),
+    )
+
+    await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID,
+        max_depth=max_depth,
+    )
+
+    command = bash_plugin.calls[0][0]
+    assert f"-maxdepth {max_depth}" in command
+
+
+async def test_list_file_tree_zero_depth_means_unlimited(
+    workspace_dir: Path,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(stdout="", stderr="", exit_code=0),
+    )
+
+    await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID,
+        max_depth=0,
+    )
+
+    command = bash_plugin.calls[0][0]
+    assert "-mindepth 1" in command
+    assert "-maxdepth" not in command
+
+
+async def test_list_file_tree_rejects_negative_max_depth(
+    workspace_dir: Path,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+
+    with pytest.raises(
+        ValueError,
+        match="max_depth must be greater than or equal to 0",
+    ):
+        await _make_service(bash_plugin=bash_plugin).list_file_tree(
+            SESSION_ID,
+            max_depth=-1,
+        )
+
+    assert bash_plugin.calls == []
 
 
 async def test_list_file_tree_leaves_size_unset(

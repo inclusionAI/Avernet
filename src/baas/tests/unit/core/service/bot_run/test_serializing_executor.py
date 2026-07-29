@@ -102,7 +102,8 @@ class _RecordingInner:
         self.executed.append(record.run_id)
         if self._raise:
             raise RuntimeError("inner boom")
-        self._queue.mark_done(record.run_id)
+        assert record.assigned_worker is not None
+        self._queue.mark_done(record.run_id, record.assigned_worker)
 
 
 def _claimed(
@@ -119,7 +120,7 @@ def _claimed(
 async def test_empty_session_runs_inner_without_lock(queue):
     lock = _FakeLockService()
     inner = _RecordingInner(queue)
-    ex = SerializingExecutor(inner, lock, queue)
+    ex = SerializingExecutor(inner, lock)
 
     rec = _claimed(queue, session_id=None)
     await ex.execute(rec)
@@ -132,7 +133,7 @@ async def test_empty_session_runs_inner_without_lock(queue):
 async def test_free_lock_runs_inner(queue):
     lock = _FakeLockService()
     inner = _RecordingInner(queue)
-    ex = SerializingExecutor(inner, lock, queue)
+    ex = SerializingExecutor(inner, lock)
 
     rec = _claimed(queue, session_id="s1")
     await ex.execute(rec)
@@ -146,26 +147,26 @@ async def test_busy_lock_requeues_and_skips_inner(queue):
     lock = _FakeLockService()
     lock.force_hold("botrun:session:bot-1:dev:s1")  # 模拟同 session 有请求在执行
     inner = _RecordingInner(queue)
-    ex = SerializingExecutor(inner, lock, queue)
+    ex = SerializingExecutor(inner, lock)
 
     rec = _claimed(queue, session_id="s1")
     assert queue.get_by_run_id(rec.run_id).status == "RUNNING"
 
-    # 抢不到锁 → 放回 PENDING 并抛 RequeuedToPending，由 Worker 捕获跳过 callback
+    # 抢不到锁 → 抛 RequeuedToPending，由 Worker 捕获后放回 PENDING 并跳过 callback
     with pytest.raises(RequeuedToPendingError, match="requeued"):
         await ex.execute(rec)
 
     assert inner.executed == []  # 内层未执行
-    # 放回 PENDING，等前序完成后重新认领
+    # Executor 只负责识别 session busy；队列放回由 Worker 使用自身 worker_id 完成。
     after = queue.get_by_run_id(rec.run_id)
-    assert after.status == "PENDING"
-    assert after.assigned_worker is None
+    assert after.status == "RUNNING"
+    assert after.assigned_worker == "w"
 
 
 async def test_lock_released_after_execute(queue):
     lock = _FakeLockService()
     inner = _RecordingInner(queue)
-    ex = SerializingExecutor(inner, lock, queue)
+    ex = SerializingExecutor(inner, lock)
 
     rec1 = _claimed(queue, session_id="s1")
     await ex.execute(rec1)
@@ -179,7 +180,7 @@ async def test_lock_released_after_execute(queue):
 async def test_inner_exception_releases_lock_and_propagates(queue):
     lock = _FakeLockService()
     inner = _RecordingInner(queue, raise_exc=True)
-    ex = SerializingExecutor(inner, lock, queue)
+    ex = SerializingExecutor(inner, lock)
 
     rec = _claimed(queue, session_id="s1")
     with pytest.raises(RuntimeError, match="inner boom"):

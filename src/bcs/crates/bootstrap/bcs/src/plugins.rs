@@ -688,6 +688,7 @@ mod tests {
         ) -> ServiceResult<ChannelDeliveryResult> {
             Ok(ChannelDeliveryResult {
                 delivered: true,
+                provider_message_ref: None,
                 error: None,
             })
         }

@@ -21,6 +21,20 @@ class FeatureToggleRequest(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class FullRolloutRequest(BaseModel):
+    enabled: bool
+    engine: str | None = None
+    reason: str = Field(min_length=1)
+
+
+class OwnerFullRolloutRequest(BaseModel):
+    owner_id: str = Field(min_length=1)
+    engine: str = Field(min_length=1)
+    enabled: bool
+    acceptance_batch_id: str | None = None
+    reason: str = Field(min_length=1)
+
+
 class EnginePromotionRequest(BaseModel):
     engine: str
     reason: str = Field(min_length=1)

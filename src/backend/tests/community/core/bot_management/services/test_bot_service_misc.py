@@ -674,3 +674,84 @@ class TestListBots:
         svc._repository.list_by_entity.assert_called_once_with(
             entity_id=None, entity_type=None, page=1, page_size=20,
         )
+
+
+class TestTemplateFactoryBranchCoverage:
+
+    def test_memory_initialization_update_compares_old_and_new_sources(self):
+        assert BotService._should_trigger_memory_initialization(
+            active_engine="claude_code",
+            template_type="normalCC",
+            template_config={
+                "template_key": "normalCC",
+                "business_wiki_spaces": [{"url": "https://yuque/new"}],
+            },
+            old_template_config={
+                "template_key": "normalCC",
+                "business_wiki_spaces": [{"url": "https://yuque/old"}],
+            },
+            on_create=False,
+        ) is True
+
+    def test_memory_initialization_detection_error_keeps_legacy_create_fallback(self):
+        with patch(
+            "agentclaw.community.core.bot_management.utils.memory_sources_changed",
+            side_effect=RuntimeError("boom"),
+        ):
+            assert BotService._should_trigger_memory_initialization(
+                active_engine="claude_code",
+                template_type="applicationCoding",
+                template_config={"yuque_kb_repos": [{"url": "https://yuque/a"}]},
+                on_create=True,
+            ) is True
+            assert BotService._should_trigger_memory_initialization(
+                active_engine="claude_code",
+                template_type="normalCC",
+                template_config={"template_key": "normalCC"},
+                on_create=True,
+            ) is False
+
+    def test_attach_template_configs_to_bots_attaches_ext_and_skips_missing_bot_id(self):
+        svc = _make_service()
+        items = [
+            {"bot_id": "b1", "template_type": "normalCC"},
+            {"bot_id": None, "template_type": "normalCC"},
+        ]
+        svc._template_service.list_templates_by_bot_ids.return_value = [
+            {"bot_id": "b1", "ext": {"template_key": "normalCC"}},
+        ]
+
+        svc._attach_template_configs_to_bots(items)
+
+        svc._template_service.list_templates_by_bot_ids.assert_called_once_with(["b1"])
+        assert items[0]["template_config"] == {"template_key": "normalCC"}
+        assert "template_config" not in items[1]
+
+    def test_attach_template_configs_to_bots_swallows_template_service_failure(self):
+        svc = _make_service()
+        items = [{"bot_id": "b1", "template_type": "normalCC"}]
+        svc._template_service.list_templates_by_bot_ids.side_effect = RuntimeError("boom")
+
+        svc._attach_template_configs_to_bots(items)
+
+        assert items == [{"bot_id": "b1", "template_type": "normalCC"}]
+
+    def test_list_bots_by_conditions_returns_items_after_template_enrichment(self):
+        svc = _make_service()
+        items = [{"bot_id": "b1", "template_type": "normalCC"}]
+        svc._repository.list_by_conditions.return_value = (1, items)
+        svc._template_service.list_templates_by_bot_ids.return_value = [
+            {"bot_id": "b1", "ext": {"template_key": "normalCC"}},
+        ]
+
+        result = svc.list_bots_by_conditions(page=1, page_size=10)
+
+        assert result == {"total": 1, "items": items}
+        assert result["items"][0]["template_config"] == {"template_key": "normalCC"}
+
+    def test_aicoding_personal_coding_uses_legacy_bcn_provider_fallback(self):
+        assert BotService._should_register_bcn_provider(
+            active_engine="aicoding",
+            bot_type="personal",
+            template_type="personalCoding",
+        ) is True

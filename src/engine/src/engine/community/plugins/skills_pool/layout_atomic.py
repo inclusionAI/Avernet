@@ -45,6 +45,7 @@ def atomic_exchange_paths(left: Path, right: Path) -> bool:
         return True
     current_errno = ctypes.get_errno()
     if current_errno in {
+        errno.EINVAL,
         errno.ENOSYS,
         errno.ENOTSUP,
         getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),

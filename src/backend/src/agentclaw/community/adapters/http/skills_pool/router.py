@@ -31,6 +31,8 @@ from agentclaw.community.adapters.http.skills_pool.schemas import (
     ControlBotRequest,
     EnginePromotionRequest,
     FeatureToggleRequest,
+    FullRolloutRequest,
+    OwnerFullRolloutRequest,
     RepairRequest,
     RollbackRequest,
     WhitelistAddRequest,
@@ -127,6 +129,28 @@ async def promote_engine(
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@router.post("/rollout/full", response_model=ApiResponse)
+async def set_full_rollout(
+    request: FullRolloutRequest,
+    user: AuthenticatedUser = Depends(require_operator),
+    service: SkillsPoolRolloutServiceProtocol = Injected(
+        SkillsPoolRolloutServiceProtocol
+    ),
+):
+    try:
+        return _response(
+            service.set_full_rollout(
+                env=get_current_env(),
+                enabled=request.enabled,
+                engine=request.engine,
+                operator=user.staffId,
+                reason=request.reason,
+            )
+        )
+    except RolloutOperationError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @router.post("/rollout/whitelist", response_model=ApiResponse)
 async def add_whitelist_bot(
     request: WhitelistAddRequest,
@@ -142,6 +166,30 @@ async def add_whitelist_bot(
                 owner_id=request.owner_id,
                 bot_id=request.bot_id,
                 batch_id=request.batch_id,
+                acceptance_batch_id=request.acceptance_batch_id,
+                operator=user.staffId,
+                reason=request.reason,
+            )
+        )
+    except RolloutOperationError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/rollout/owners", response_model=ApiResponse)
+async def set_owner_full_rollout(
+    request: OwnerFullRolloutRequest,
+    user: AuthenticatedUser = Depends(require_operator),
+    service: SkillsPoolRolloutServiceProtocol = Injected(
+        SkillsPoolRolloutServiceProtocol
+    ),
+):
+    try:
+        return _response(
+            service.set_owner_full_rollout(
+                env=get_current_env(),
+                owner_id=request.owner_id,
+                engine=request.engine,
+                enabled=request.enabled,
                 acceptance_batch_id=request.acceptance_batch_id,
                 operator=user.staffId,
                 reason=request.reason,

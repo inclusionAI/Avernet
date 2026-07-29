@@ -400,3 +400,86 @@ def test_upgrade_device_count_does_not_apply_to_teclaw_path():
     )
 
     assert baas.update_teclaw_bot.call_args.kwargs["device_count"] == 1
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_calls_destroy_idempotently():
+    svc, baas = _svc("baas")
+    baas.destroy_bot.return_value = {"publish_id": 321}
+
+    assert svc.retire_superseded_bot("BOT-old", operator="op1") == 321
+
+    baas.destroy_bot.assert_called_once()
+    ck = baas.destroy_bot.call_args
+    assert ck.kwargs["bot_uuid"] == "BOT-old"
+    assert ck.kwargs["operator"] == "op1"
+    # request_id is deterministic per bot_uuid (idempotent redelivery)
+    rid = ck.kwargs["request_id"]
+    assert isinstance(rid, str) and 32 <= len(rid) <= 64
+    baas.destroy_bot.reset_mock()
+    svc.retire_superseded_bot("BOT-old", operator="op1")
+    assert baas.destroy_bot.call_args.kwargs["request_id"] == rid
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_no_publish_id_propagates():
+    from agentclaw.community.core.service_bot.services.bot_build_service import (
+        BotBuildServiceError,
+    )
+
+    svc, baas = _svc("baas")
+    # A successful-but-empty destroy envelope (no workflow id) does NOT confirm the
+    # DESTROY was initiated — it must propagate, not be treated as already-gone
+    # success (None is reserved for the explicit already-gone recheck path).
+    baas.destroy_bot.return_value = {}
+
+    with pytest.raises(BotBuildServiceError, match="no publish_id"):
+        svc.retire_superseded_bot("BOT-old")
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_propagates_destroy_failure():
+    svc, baas = _svc("baas")
+    baas.destroy_bot.side_effect = RuntimeError("baas down")
+
+    # Failures must propagate (never swallow a failed lifecycle write and report
+    # success) so the caller does not create a replacement while the old bot is
+    # still live; the durable deploy retries.
+    with pytest.raises(RuntimeError, match="baas down"):
+        svc.retire_superseded_bot("BOT-old")
+    baas.destroy_bot.assert_called_once()
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_already_gone_is_success():
+    from agentclaw.community.core.service_bot.services.bot_build_service import (
+        BaasServiceError,
+    )
+
+    svc, baas = _svc("baas")
+    # The bot was deleted between the decision's status read and this destroy, so
+    # BaaS rejects the DESTROY. get_bot confirms it is gone (a real 404 is
+    # normalized to RELEASED) → the retirement goal is already satisfied, so this
+    # returns success (None) rather than aborting the replacement.
+    baas.destroy_bot.side_effect = BaasServiceError("BaaS API error: 404 - gone")
+    baas.get_bot.return_value = {"status": "RELEASED"}
+
+    assert svc.retire_superseded_bot("BOT-old") is None
+    baas.get_bot.assert_called_once()
+
+
+@pytest.mark.unit
+def test_retire_superseded_bot_propagates_when_bot_still_live():
+    from agentclaw.community.core.service_bot.services.bot_build_service import (
+        BaasServiceError,
+    )
+
+    svc, baas = _svc("baas")
+    # A destroy failure where the bot is still present (e.g. a timeout/5xx, or a
+    # conflict) is NOT an already-gone case — it must propagate so the caller does
+    # not create a replacement while the old bot may still be live.
+    baas.destroy_bot.side_effect = BaasServiceError("BaaS API error: 503 - busy")
+    baas.get_bot.return_value = {"status": "ACTIVE"}
+
+    with pytest.raises(BaasServiceError, match="503"):
+        svc.retire_superseded_bot("BOT-old")

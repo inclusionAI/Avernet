@@ -274,6 +274,59 @@ Key config fields:
 | `store_messages` | `false` | Persist chat messages to database |
 | `[cors].allowed_origins` | localhost origins | CORS allowed origins for frontend |
 
+### Test organization admin-run callbacks locally
+
+Start the dependency-free callback receiver:
+
+```bash
+python3 scripts/admin_run_callback_server.py
+```
+
+Configure the Provider's `admin_callback_url` as:
+
+```text
+http://127.0.0.1:28081/callback
+```
+
+Loopback callback targets are blocked by default. Enable them only in the local
+BCS configuration used for this test:
+
+```toml
+[security.outbound_url]
+block_private_networks = true
+allow_loopback = true
+```
+
+The receiver prints each callback with its Authorization value redacted and
+keeps callbacks in memory for inspection:
+
+```bash
+curl http://127.0.0.1:28081/health
+curl http://127.0.0.1:28081/callbacks
+curl http://127.0.0.1:28081/callbacks/run-example
+curl -X POST http://127.0.0.1:28081/reset
+```
+
+Validate the callback credential and Provider ID by supplying the
+`bcs_to_provider_token` returned during Provider registration:
+
+```bash
+python3 scripts/admin_run_callback_server.py \
+  --expected-token "$BCS_TO_PROVIDER_TOKEN" \
+  --expected-provider-id "$PROVIDER_ID"
+```
+
+To test receiver failures or slow acknowledgements, change only the callback
+endpoint response:
+
+```bash
+python3 scripts/admin_run_callback_server.py \
+  --response-status 500 \
+  --response-delay-ms 1000
+```
+
+Use `python3 scripts/admin_run_callback_server.py --help` for all options.
+
 ## Database Migrations
 
 BCS uses one `[database]` selector for all DB-backed stores, including bots,

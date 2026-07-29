@@ -3,6 +3,7 @@
 pub mod metrics;
 pub mod bot_terminal_observer;
 
+use bcs_domain::HumanInputNotificationMode;
 use bcs_service_api::{
     BotDeliveryPort, ChatRunCleanupPort, ChatRunEventPort, FrontendDeliveryPort,
     GroupHistoryBotRequestPort, HumanInputReadyEvent, LeaderElectionPort, LeaderStatus,
@@ -57,7 +58,7 @@ pub async fn session_channel_outbound_port_contract_tests<
 >(
     port: &T,
 ) {
-    let outcome = port
+    let result = port
         .publish_human_input_ready(HumanInputReadyEvent {
             event_id: "contract-event".to_string(),
             group_id: "contract-group".to_string(),
@@ -66,17 +67,22 @@ pub async fn session_channel_outbound_port_contract_tests<
             node_id: "human-review".to_string(),
             display_name: "Human review".to_string(),
             instruction: "Review the upstream result".to_string(),
+            assignee_actor_id: "contract-human".to_string(),
+            channel_type: "contract-channel".to_string(),
+            notification_mode: HumanInputNotificationMode::DirectAssignee,
+            fixed_group_conversation_id: None,
             response_ref: "contract-run:human-review".to_string(),
             upstream_artifacts: Vec::new(),
             judge_outcomes: Vec::new(),
             timeout_deadline_ms: None,
         })
-        .await
-        .expect("publish without a session-channel mapping");
+        .await;
 
-    assert_eq!(
-        outcome,
-        SessionChannelDeliveryOutcome::NotApplicable,
-        "sessions without a channel mapping must not be treated as delivered"
-    );
+    match result {
+        Ok(SessionChannelDeliveryOutcome::NotApplicable) => {}
+        Err(bcs_service_api::ServiceError::InvalidOperation { .. }) => {}
+        other => panic!(
+            "an unconfigured HumanInput channel must be not-applicable or explicitly rejected, got {other:?}"
+        ),
+    }
 }

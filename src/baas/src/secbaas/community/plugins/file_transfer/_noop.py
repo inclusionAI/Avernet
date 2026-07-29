@@ -33,7 +33,12 @@ class NoopFileTransferBackend(FileTransferBackend):
             "Set config.plugins.file_transfer to 'real' to enable."
         )
 
-    def generate_download_url(self, staging_path: str, expire_seconds: int) -> str:
+    def generate_download_url(
+        self,
+        staging_path: str,
+        expire_seconds: int,
+        response_params: dict | None = None,
+    ) -> str:
         raise NotImplementedError(
             "File transfer is not configured. "
             "Set config.plugins.file_transfer to 'real' to enable."
@@ -76,6 +81,19 @@ class NoopFileTransferBackend(FileTransferBackend):
     def build_staging_path(
         self,
         tenant: str,
+        transfer_id: str,
+        filename: str,
+        subdir: str | None = None,
+    ) -> str:
+        raise NotImplementedError(
+            "File transfer is not configured. "
+            "Set config.plugins.file_transfer to 'real' to enable."
+        )
+
+    def build_session_staging_path(
+        self,
+        tenant: str,
+        session_id: str,
         transfer_id: str,
         filename: str,
         subdir: str | None = None,

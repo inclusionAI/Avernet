@@ -11,6 +11,7 @@ runtime-keyed device dispatchers — which legitimately live in the DI
 layer because they bridge to ``plugins`` — so this module only
 needs the dispatcher *types* under ``TYPE_CHECKING``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,11 +29,16 @@ from agentclaw.community.core.skill_center.services.repositories import (
     SkillSetRepository,
 )
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
+from agentclaw.community.core.skill_center.path_resolution import (
+    build_pool_local_path_adapter,
+)
 from agentclaw.community.core.skill_center.services.skill_parameter_service import (
     SkillParameterService,
 )
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
-from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+from agentclaw.community.core.skill_center.services.skill_set_service import (
+    SkillSetService,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
@@ -52,7 +58,9 @@ if TYPE_CHECKING:
     from agentclaw.community.di.modules.skill_center_module import (
         DeviceFilesystemDispatcher,
     )
-    from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+    from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+        DeviceSyncDispatcher,
+    )
 
 
 logger = get_logger()
@@ -76,6 +84,10 @@ class SkillServiceFactory:
         device_fs_dispatcher: "DeviceFilesystemDispatcher",
         market_cache: MarketCache,
         git_sync_service_factory: Callable[[], GitSyncService],
+        pool_layout_paths: Callable[
+            [str, str, str],
+            tuple[str, str, str] | None,
+        ],
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_repo_sync = skill_repo_sync
@@ -83,6 +95,17 @@ class SkillServiceFactory:
         self._device_fs_dispatcher = device_fs_dispatcher
         self._market_cache = market_cache
         self._git_sync_service_factory = git_sync_service_factory
+        self._pool_layout_paths = pool_layout_paths
+
+    def resolve_pool_paths(
+        self,
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+    ) -> tuple[str, str, str] | None:
+        """Resolve canonical Pool paths for a Bot when its layout owns IO."""
+
+        return self._pool_layout_paths(entity_id, bot_id, engine_type)
 
     def create(
         self,
@@ -92,7 +115,30 @@ class SkillServiceFactory:
         global_repo_dir: Optional[Path] = None,
         device_fs_factory=None,
         local_skill_path_adapter: Optional[Callable[[str], str]] = None,
+        local_skill_locator_adapter: Optional[
+            Callable[[str], str]
+        ] = None,
+        entity_id: str | None = None,
+        bot_id: str | None = None,
+        engine_type: str | None = None,
     ) -> SkillService:
+        uses_pool_paths = False
+        if entity_id is not None and bot_id is not None:
+            pool_paths = self.resolve_pool_paths(
+                str(entity_id),
+                str(bot_id),
+                engine_type or "",
+            )
+            if pool_paths is not None:
+                uses_pool_paths = True
+                active_path, local_path, repo_path = pool_paths
+                active_dir = Path(active_path)
+                local_dir = Path(local_path)
+                repo_dir = Path(repo_path)
+                pool_local_adapter = build_pool_local_path_adapter(local_dir)
+                local_skill_path_adapter = pool_local_adapter
+                local_skill_locator_adapter = pool_local_adapter
+
         return SkillService(
             skill_repo=self._skill_repo,
             skill_repo_sync=self._skill_repo_sync,
@@ -105,6 +151,8 @@ class SkillServiceFactory:
             device_fs_factory=device_fs_factory or self._device_fs_dispatcher.for_bot,
             git_sync_service_factory=self._git_sync_service_factory,
             local_skill_path_adapter=local_skill_path_adapter,
+            local_skill_locator_adapter=local_skill_locator_adapter,
+            runtime_uses_pool_paths=uses_pool_paths,
         )
 
 
@@ -131,6 +179,10 @@ class SkillSetServiceFactory:
         bot_repo: BotRepository,
         device_plugin: DeviceAccessor,
         path_factory: "WorkspacePathFactory",
+        pool_layout_paths: Callable[
+            [str, str, str],
+            tuple[str, str, str] | None,
+        ],
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -143,6 +195,7 @@ class SkillSetServiceFactory:
         self._bot_repo = bot_repo
         self._device_plugin = device_plugin
         self._path_factory = path_factory
+        self._pool_layout_paths = pool_layout_paths
 
     def create(
         self,
@@ -182,11 +235,28 @@ class SkillSetServiceFactory:
             resolved_skills = skills_dir or SKILLS_DIR
             resolved_repo = repo_dir or SKILLS_REPO_DIR
             resolved_local = local_dir or SKILLS_LOCAL_DIR
+        effective_owner = entity_id or user_id
+        local_skill_path_adapter = None
+        if effective_owner is not None and bot_id is not None:
+            pool_paths = self._pool_layout_paths(
+                str(effective_owner),
+                str(bot_id),
+                engine_type or "",
+            )
+            if pool_paths is not None:
+                active_path, local_path, repo_path = pool_paths
+                resolved_skills = Path(active_path)
+                resolved_local = Path(local_path)
+                resolved_repo = Path(repo_path)
+                local_skill_path_adapter = build_pool_local_path_adapter(
+                    resolved_local
+                )
 
         skill_service = self._skill_service_factory.create(
             active_dir=resolved_skills,
             repo_dir=resolved_repo,
             local_dir=resolved_local,
+            local_skill_path_adapter=local_skill_path_adapter,
         )
 
         return SkillSetService(
@@ -209,6 +279,7 @@ class SkillSetServiceFactory:
             mcp_sync_service=self._mcp_sync_service,
             device_plugin=self._device_plugin,
             path_factory=self._path_factory,
+            pool_layout_paths=self._pool_layout_paths,
         )
 
 
@@ -243,7 +314,9 @@ class SkillParameterServiceFactory:
         # consumes it), so disable engine read/write for it — load/save become
         # no-ops. arca/baas/local keep reading/writing the engine-absolute default.
         engine_io_enabled = ctx.provider != "teclaw"
-        service = SkillParameterService(device_fs=device_fs, engine_io_enabled=engine_io_enabled)
+        service = SkillParameterService(
+            device_fs=device_fs, engine_io_enabled=engine_io_enabled
+        )
         if load_on_init:
             await service.async_load()
         return service

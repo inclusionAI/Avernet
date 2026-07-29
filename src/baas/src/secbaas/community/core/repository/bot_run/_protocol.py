@@ -82,6 +82,15 @@ class BotRunRepository(Protocol):
         """
         ...
 
+    def update_timeout(self, run_id: str, error: str) -> None:
+        """更新超时信息（标记为 TIME_OUT 状态）
+
+        Args:
+            run_id: 运行ID
+            error: 超时错误信息
+        """
+        ...
+
     def update_session_id(self, run_id: str, session_id: str) -> None:
         """更新运行记录的会话 ID
 

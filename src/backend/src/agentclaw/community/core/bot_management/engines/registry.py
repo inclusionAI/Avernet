@@ -39,11 +39,14 @@ class EngineProvisioningRegistry:
         """Resolve a strategy for legacy call sites with partial metadata.
 
         Prefer ``active_engine``.  If older call sites only pass
-        ``template_type``, route known coding templates to the coding strategy
-        so historical TemplateService signatures keep working while keeping the
-        rule in one place.  An explicit (non-empty) engine always wins over a
-        coding ``template_type``, so dirty data such as ``openclaw`` +
-        ``personalCoding`` does not accidentally get AICoding provisioning.
+        ``template_type``, route known legacy coding templates to the coding
+        strategy so historical TemplateService signatures keep working while
+        keeping the rule in one place.  Template-factory templates should be
+        detected from active_engine + template_config at the strategy layer; do
+        not infer them here from template keys or engine_config lists.  An
+        explicit (non-empty) engine always wins over a coding ``template_type``,
+        so dirty data such as ``openclaw`` + ``personalCoding`` does not
+        accidentally get AICoding provisioning.
         """
         if ctx.active_engine:
             return self.resolve(ctx.active_engine)
