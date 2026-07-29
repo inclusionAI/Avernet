@@ -39,6 +39,10 @@ from agentclaw.community.core.skills_pool.ports import (
     SkillsPoolRuntimeProtocol,
     SkillsPoolSkillRepositoryProtocol,
 )
+from agentclaw.community.log import get_logger
+
+
+logger = get_logger()
 
 
 class SkillsPoolReconcileOutcome(StrEnum):
@@ -146,8 +150,42 @@ class SkillsPoolReconcileService:
             user_id=user_id,
             engine=engine,
         )
+        logger.info(
+            "[skills_pool.reconcile] runtime probe bot_id=%s generation=%s "
+            "phase=%s committed=%s status=%s",
+            scope.bot_id,
+            generation,
+            state.phase.value,
+            state.data_plane_cutover_committed,
+            probe.status.value,
+        )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
             if probe.status is RuntimeLayoutProbeStatus.NOT_CAPABLE:
+                if state.data_plane_cutover_committed:
+                    recorded = self._layouts.record_post_cutover_failure(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code=probe.status.value,
+                        failure_stage="runtime_probe",
+                        retryable=False,
+                        evidence=probe.evidence,
+                    )
+                    if not recorded:
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                            evidence={
+                                **probe.evidence,
+                                "state_race_stage": (
+                                    "record_committed_not_capable_probe"
+                                ),
+                            },
+                        )
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.INVALID,
+                        evidence=probe.evidence,
+                        retryable=False,
+                    )
                 released = self._layouts.release_not_capable_claim(
                     scope=scope,
                     migration_generation=generation,
@@ -156,7 +194,11 @@ class SkillsPoolReconcileService:
                 )
                 if not released:
                     return SkillsPoolReconcileResult(
-                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                        evidence={
+                            **probe.evidence,
+                            "state_race_stage": "release_not_capable_claim",
+                        },
                     )
             elif probe.status in {
                 RuntimeLayoutProbeStatus.INVALID,
@@ -305,6 +347,16 @@ class SkillsPoolReconcileService:
         cutover_finalizing = state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
         repair_evidence_refresh = state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
         locator_evidence = self._persisted_cutover_evidence(state)
+        logger.info(
+            "[skills_pool.reconcile] mapping intent ready bot_id=%s generation=%s "
+            "phase=%s committed=%s local_count=%s mapping_count=%s",
+            scope.bot_id,
+            generation,
+            state.phase.value,
+            state.data_plane_cutover_committed,
+            len(local_names),
+            len(mappings),
+        )
         if (
             not state.data_plane_cutover_committed
             or cutover_finalizing
