@@ -273,3 +273,37 @@ async fn missing_principal_and_unknown_request_fields_use_the_common_error_envel
     let unknown_body = response_json(unknown_field).await;
     assert_eq!(unknown_body["data"]["error_code"], "invalid_request");
 }
+
+#[tokio::test]
+async fn state_machine_definition_version_must_be_positive_at_the_http_boundary() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/groups",
+            json!({
+                "group_kind": "normal",
+                "driver_bot_uuid": "bot-1",
+                "participants": [
+                    {"actor_id": "bot-1", "role": "driver"}
+                ],
+                "collaboration": {
+                    "strategy": "state_machine",
+                    "definition": {
+                        "definition_id": "review",
+                        "version": 0
+                    },
+                    "participant_bindings": []
+                }
+            }),
+        ))
+        .await
+        .expect("invalid version response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+    assert!(service.created.lock().expect("create lock").is_none());
+}

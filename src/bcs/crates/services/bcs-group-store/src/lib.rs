@@ -368,7 +368,7 @@ impl MySqlGroupStore {
     }
 
     /// Load session from MySQL.
-    async fn load_group_from_mysql(&self, group_id: &str) -> Option<Group> {
+    async fn load_group_from_mysql(&self, group_id: &str) -> ServiceResult<Option<Group>> {
         // Task G.2 / migration 005: read group_kind + dm_pair_key from DB so
         // dm groups round-trip through `get()` without losing their identity.
         let sql = format!(
@@ -389,13 +389,19 @@ impl MySqlGroupStore {
                 vec![Value::from(group_id), Value::from(self.env.as_str())],
             )
             .await
-            .ok()?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!("load Group '{group_id}': {error}"))
+            })?;
 
         if let Some(row) = rows.first() {
-            let id: String = db_get_column(row, "group_id").ok()?;
+            let id: String = db_get_column(row, "group_id").map_err(|error| {
+                ServiceError::InternalError(format!("load Group group_id: {error}"))
+            })?;
             let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
             let status_str: String = db_get_column(row, "status").unwrap_or_default();
-            let driver_bot: String = db_get_column(row, "driver_bot").ok()?;
+            let driver_bot: String = db_get_column(row, "driver_bot").map_err(|error| {
+                ServiceError::InternalError(format!("load Group driver_bot: {error}"))
+            })?;
             let originator: Option<String> = db_get_column_opt(row, "originator").ok().flatten();
             let routing_policy_json: Option<String> =
                 db_get_column_opt(row, "routing_policy_json").ok().flatten();
@@ -411,8 +417,10 @@ impl MySqlGroupStore {
                     Some(s) if !s.is_empty() => serde_json::from_str(s).ok(),
                     _ => None,
                 };
-            let version: i32 =
-                db_get_column_opt::<i64>(row, "version").ok().flatten().unwrap_or(1) as i32;
+            let version: i32 = db_get_column_opt::<i64>(row, "version")
+                .ok()
+                .flatten()
+                .unwrap_or(1) as i32;
             let record_status: String = db_get_column_opt(row, "record_status")
                 .ok()
                 .flatten()
@@ -430,9 +438,9 @@ impl MySqlGroupStore {
                 .flatten()
                 .unwrap_or_else(|| "private".to_string());
 
-            let participants = self.load_participants_from_mysql(group_id).await;
+            let participants = self.load_participants_from_mysql(group_id).await?;
 
-            return Some(Group {
+            return Ok(Some(Group {
                 id,
                 label,
                 status: Self::str_to_status(&status_str),
@@ -454,18 +462,21 @@ impl MySqlGroupStore {
                 version,
                 record_status,
                 visibility,
-            });
+            }));
         }
 
-        None
+        Ok(None)
     }
 
     /// Load participants from MySQL.
-    async fn load_participants_from_mysql(&self, group_id: &str) -> Vec<Participant> {
+    async fn load_participants_from_mysql(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Vec<Participant>> {
         let sql = "SELECT bot_uuid, role, actor_kind, mode FROM bcs_group_participants \
              WHERE group_id = ? AND env = ?";
 
-        let rows = match self
+        let rows = self
             .db
             .query_with(
                 &self.logical_db,
@@ -473,15 +484,14 @@ impl MySqlGroupStore {
                 vec![Value::from(group_id), Value::from(self.env.as_str())],
             )
             .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                warn!(group_id = %group_id, error = %e, "load_participants_from_mysql: query failed");
-                return Vec::new();
-            }
-        };
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "load participants for Group '{group_id}': {error}"
+                ))
+            })?;
 
-        rows.iter()
+        Ok(rows
+            .iter()
             .filter_map(|row| {
                 let bot_uuid: String = db_get_column(row, "bot_uuid").ok()?;
                 let role_str: String = db_get_column(row, "role").ok()?;
@@ -506,7 +516,7 @@ impl MySqlGroupStore {
                     mode: Some(mode),
                 })
             })
-            .collect()
+            .collect())
     }
 
     /// Load all sessions from MySQL.
@@ -528,11 +538,17 @@ impl MySqlGroupStore {
             self.flavor.unix_ts("gs.gmt_create"),
             self.flavor.unix_ts("gs.gmt_modified"),
         );
-        let rows = match self.db.query_with(
-            &self.logical_db,
-            &sql,
-            vec![Value::from(self.env.as_str()), Value::from(self.env.as_str())],
-        ).await
+        let rows = match self
+            .db
+            .query_with(
+                &self.logical_db,
+                &sql,
+                vec![
+                    Value::from(self.env.as_str()),
+                    Value::from(self.env.as_str()),
+                ],
+            )
+            .await
         {
             Ok(r) => {
                 let elapsed = _start.elapsed();
@@ -691,9 +707,11 @@ fn sql_metric_service_mode_to_option(raw: &str) -> Option<String> {
 #[async_trait]
 impl GroupMetricsSnapshotPort for MySqlGroupStore {
     async fn group_counts(&self) -> ServiceResult<Vec<GroupMetricCount>> {
-        let rows = self.db.query_with(
-            &self.logical_db,
-            "SELECT status, group_kind, group_strategy, service_mode, COUNT(*) AS group_count \
+        let rows = self
+            .db
+            .query_with(
+                &self.logical_db,
+                "SELECT status, group_kind, group_strategy, service_mode, COUNT(*) AS group_count \
              FROM ( \
                  SELECT status, \
                         COALESCE(group_kind, 'normal') AS group_kind, \
@@ -711,16 +729,21 @@ impl GroupMetricsSnapshotPort for MySqlGroupStore {
                  WHERE env = ? \
              ) metric_groups \
              GROUP BY status, group_kind, group_strategy, service_mode",
-            vec![Value::from(self.env.as_str())],
-        ).await.map_err(|e| {
-            warn!(env = %self.env, error = %e, "group metrics snapshot query failed");
-            ServiceError::InternalError(format!("group metrics snapshot query failed: {}", e))
-        })?;
+                vec![Value::from(self.env.as_str())],
+            )
+            .await
+            .map_err(|e| {
+                warn!(env = %self.env, error = %e, "group metrics snapshot query failed");
+                ServiceError::InternalError(format!("group metrics snapshot query failed: {}", e))
+            })?;
 
         let mut counts = Vec::with_capacity(rows.len());
         for row in rows {
             let status_raw: String = db_get_column(&row, "status").map_err(|e| {
-                ServiceError::InternalError(format!("group metrics status conversion failed: {}", e))
+                ServiceError::InternalError(format!(
+                    "group metrics status conversion failed: {}",
+                    e
+                ))
             })?;
             let group_kind_raw: String = db_get_column(&row, "group_kind").map_err(|e| {
                 ServiceError::InternalError(format!("group metrics kind conversion failed: {}", e))
@@ -731,12 +754,13 @@ impl GroupMetricsSnapshotPort for MySqlGroupStore {
                     e
                 ))
             })?;
-            let group_strategy_raw: String = db_get_column(&row, "group_strategy").map_err(|e| {
-                ServiceError::InternalError(format!(
-                    "group metrics group_strategy conversion failed: {}",
-                    e
-                ))
-            })?;
+            let group_strategy_raw: String =
+                db_get_column(&row, "group_strategy").map_err(|e| {
+                    ServiceError::InternalError(format!(
+                        "group metrics group_strategy conversion failed: {}",
+                        e
+                    ))
+                })?;
             let group_count: i64 = db_get_column(&row, "group_count").map_err(|e| {
                 ServiceError::InternalError(format!("group metrics count conversion failed: {}", e))
             })?;
@@ -824,8 +848,18 @@ impl GroupRepoPort for MySqlGroupStore {
 
         let upsert_clause = self.flavor.on_conflict_update(
             &["group_id", "env"],
-            &["label", "status", "driver_bot", "originator", "routing_policy_json",
-              "context", "service_spec", "version", "record_status", "visibility"],
+            &[
+                "label",
+                "status",
+                "driver_bot",
+                "originator",
+                "routing_policy_json",
+                "context",
+                "service_spec",
+                "version",
+                "record_status",
+                "visibility",
+            ],
             &[("gmt_modified", self.flavor.now())],
         );
         let upsert_sql = format!(
@@ -839,26 +873,26 @@ impl GroupRepoPort for MySqlGroupStore {
         let mut steps = Vec::with_capacity(2 + g_participants.len());
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
             // 1. Upsert session metadata
-                &upsert_sql,
-                vec![
-                    Value::from(g_id.as_str()),
-                    Value::from(g_label.as_deref()),
-                    Value::from(status_str),
-                    Value::from(g_driver_bot.as_str()),
-                    Value::from(g_originator.as_deref()),
-                    Value::from(env.as_str()),
-                    Value::from(routing_policy_json.as_deref()),
-                    Value::from(g_context.as_deref()),
-                    Value::from(group_kind_str),
-                    Value::from(g_dm_pair_key.as_deref()),
-                    Value::from(g_group_strategy_str),
-                    Value::from(g_service_group_uuid.as_deref()),
-                    Value::from(g_service_mode.as_deref()),
-                    Value::from(g_service_spec_json.as_deref()),
-                    Value::from(g_version),
-                    Value::from(g_record_status.as_str()),
-                    Value::from(g_visibility.as_str()),
-                ],
+            &upsert_sql,
+            vec![
+                Value::from(g_id.as_str()),
+                Value::from(g_label.as_deref()),
+                Value::from(status_str),
+                Value::from(g_driver_bot.as_str()),
+                Value::from(g_originator.as_deref()),
+                Value::from(env.as_str()),
+                Value::from(routing_policy_json.as_deref()),
+                Value::from(g_context.as_deref()),
+                Value::from(group_kind_str),
+                Value::from(g_dm_pair_key.as_deref()),
+                Value::from(g_group_strategy_str),
+                Value::from(g_service_group_uuid.as_deref()),
+                Value::from(g_service_mode.as_deref()),
+                Value::from(g_service_spec_json.as_deref()),
+                Value::from(g_version),
+                Value::from(g_record_status.as_str()),
+                Value::from(g_visibility.as_str()),
+            ],
         )));
 
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
@@ -951,7 +985,8 @@ impl GroupRepoPort for MySqlGroupStore {
             "UPDATE bcs_groups SET {} WHERE group_id = ? AND env = ?",
             assignments.join(", ")
         );
-        let affected_rows = self.db
+        let affected_rows = self
+            .db
             .execute_with(&self.logical_db, &sql, params)
             .await
             .map_err(|error| {
@@ -968,22 +1003,102 @@ impl GroupRepoPort for MySqlGroupStore {
         Ok(())
     }
 
+    async fn patch_mutable_fields_if_version(
+        &self,
+        id: &str,
+        expected_version: i32,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<Group> {
+        let mut assignments = Vec::new();
+        let mut params = Vec::new();
+        if let Some(label) = patch.label {
+            assignments.push("label = ?".to_string());
+            params.push(Value::from(label.as_str()));
+        }
+        if let Some(context) = patch.context {
+            assignments.push("context = ?".to_string());
+            params.push(Value::from(context.as_str()));
+        }
+        if let Some(visibility) = patch.visibility {
+            assignments.push("visibility = ?".to_string());
+            params.push(Value::from(visibility.as_str()));
+        }
+        if let Some(delivery) = patch.default_bot_final_delivery {
+            let expression = match self.flavor {
+                DbSqlFlavor::Mysql => {
+                    "routing_policy_json = JSON_SET(COALESCE(routing_policy_json, JSON_OBJECT()), '$.default_bot_final_delivery', ?)"
+                }
+                DbSqlFlavor::Sqlite => {
+                    "routing_policy_json = json_set(COALESCE(routing_policy_json, '{}'), '$.default_bot_final_delivery', ?)"
+                }
+            };
+            assignments.push(expression.to_string());
+            params.push(Value::from(match delivery {
+                DefaultDelivery::SendToDriver => "send_to_driver",
+                DefaultDelivery::InjectObservers => "inject_observers",
+            }));
+        }
+        assignments.push("version = version + 1".to_string());
+        assignments.push(self.flavor.set_modified_now().to_string());
+        params.push(Value::from(id));
+        params.push(Value::from(self.env.as_str()));
+        params.push(Value::from(expected_version));
+        let sql = format!(
+            "UPDATE bcs_groups SET {} WHERE group_id = ? AND env = ? AND version = ?",
+            assignments.join(", ")
+        );
+        let affected_rows = self
+            .db
+            .execute_with(&self.logical_db, &sql, params)
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "versioned mutable Group patch failed: {error}"
+                ))
+            })?;
+
+        self.cache.write().await.remove(id);
+        if affected_rows == 0 {
+            return match self.try_get(id).await? {
+                None => Err(ServiceError::GroupNotFound(id.to_string())),
+                Some(_) => Err(ServiceError::Conflict(format!(
+                    "Group '{id}' changed while applying the patch"
+                ))),
+            };
+        }
+        self.try_get(id)
+            .await?
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))
+    }
+
     /// Get a session by ID (cache-first, fallback to DB).
     async fn get(&self, id: &str) -> Option<Group> {
+        match self.try_get(id).await {
+            Ok(group) => group,
+            Err(error) => {
+                warn!(group_id = %id, error = %error, "Failed to load Group");
+                None
+            }
+        }
+    }
+
+    async fn try_get(&self, id: &str) -> ServiceResult<Option<Group>> {
         // Check cache first
         {
             let cache = self.cache.read().await;
             if let Some(group) = cache.get(id) {
-                return Some(group.clone());
+                return Ok(Some(group.clone()));
             }
         }
         // Cache miss — load from DB and populate cache
-        let group = self.load_group_from_mysql(id).await?;
+        let Some(group) = self.load_group_from_mysql(id).await? else {
+            return Ok(None);
+        };
         {
             let mut cache = self.cache.write().await;
             cache.insert(id.to_string(), group.clone());
         }
-        Some(group)
+        Ok(Some(group))
     }
 
     /// Add a message to a session - NOT PERSISTED (memory only, lost on restart).
@@ -1050,6 +1165,92 @@ impl GroupRepoPort for MySqlGroupStore {
         // Invalidate cache
         self.cache.write().await.remove(id);
         Ok(())
+    }
+
+    async fn add_participant_with_visibility_guard(
+        &self,
+        id: &str,
+        participant: Participant,
+        actor_is_public: bool,
+    ) -> ServiceResult<()> {
+        let role = Self::role_to_str(&participant.role);
+        let actor_kind = Self::actor_kind_to_str(participant.actor_kind);
+        let mode = Self::mode_to_str(participant.effective_mode());
+        let update_group = format!(
+            "UPDATE bcs_groups \
+             SET version = version + 1, {} \
+             WHERE group_id = ? AND env = ? AND (visibility <> 'public' OR ?)",
+            self.flavor.set_modified_now()
+        );
+        let insert_participant = format!(
+            "{} INTO bcs_group_participants \
+             (group_id, bot_uuid, role, env, actor_kind, mode) \
+             SELECT ?, ?, ?, ?, ?, ? \
+             FROM bcs_groups \
+             WHERE group_id = ? AND env = ? AND (visibility <> 'public' OR ?)",
+            self.flavor.insert_or_ignore()
+        );
+        let results = self
+            .db
+            .plugin()
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    update_group,
+                    vec![
+                        Value::from(id),
+                        Value::from(self.env.as_str()),
+                        Value::from(actor_is_public),
+                    ],
+                )),
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    insert_participant,
+                    vec![
+                        Value::from(id),
+                        Value::from(participant.bot_uuid.as_str()),
+                        Value::from(role),
+                        Value::from(self.env.as_str()),
+                        Value::from(actor_kind),
+                        Value::from(mode),
+                        Value::from(id),
+                        Value::from(self.env.as_str()),
+                        Value::from(actor_is_public),
+                    ],
+                )),
+            ])
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "visibility-guarded participant insert failed: {error}"
+                ))
+            })?;
+        let group_updated = matches!(
+            results.first(),
+            Some(DbTransactionStepResult::Executed(result)) if result.affected_rows > 0
+        );
+        self.cache.write().await.remove(id);
+        if group_updated {
+            return Ok(());
+        }
+
+        let group = self
+            .try_get(id)
+            .await?
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        if group
+            .participants
+            .iter()
+            .any(|existing| existing.bot_uuid == participant.bot_uuid)
+        {
+            return Ok(());
+        }
+        if group.visibility == "public" && !actor_is_public {
+            return Err(ServiceError::ExistNonPublicBots {
+                bots: vec![(participant.bot_uuid, participant.bot_name)],
+            });
+        }
+        Err(ServiceError::InternalError(format!(
+            "visibility-guarded participant insert made no progress for Group '{id}'"
+        )))
     }
 
     async fn remove_participant(&self, group_id: &str, bot_uuid: &str) -> ServiceResult<()> {
@@ -1234,8 +1435,9 @@ impl GroupRepoPort for MySqlGroupStore {
         }
 
         let spec_json = match service_spec.as_ref() {
-            Some(s) => serde_json::to_string(s)
-                .map_err(|e| ServiceError::InternalError(e.to_string()))?,
+            Some(s) => {
+                serde_json::to_string(s).map_err(|e| ServiceError::InternalError(e.to_string()))?
+            }
             None => String::new(),
         };
         let spec_value: Value = if service_spec.is_some() {
@@ -1248,11 +1450,7 @@ impl GroupRepoPort for MySqlGroupStore {
             .execute_with(
                 &self.logical_db,
                 "UPDATE bcs_groups SET service_spec = ? WHERE group_id = ? AND env = ?",
-                vec![
-                    spec_value,
-                    Value::from(id),
-                    Value::from(self.env.as_str()),
-                ],
+                vec![spec_value, Value::from(id), Value::from(self.env.as_str())],
             )
             .await
             .map_err(|e| {
@@ -1315,16 +1513,19 @@ impl GroupRepoPort for MySqlGroupStore {
             self.flavor.unix_ts("gmt_create"),
             self.flavor.unix_ts("gmt_modified"),
         );
-        let rows = match self.db.query_with(
-            &self.logical_db,
-            &paginated_sql,
-            vec![
-                Value::from(self.env.as_str()),
-                Value::from(limit as i64),
-                Value::from(offset as i64),
-                Value::from(self.env.as_str()),
-            ],
-        ).await
+        let rows = match self
+            .db
+            .query_with(
+                &self.logical_db,
+                &paginated_sql,
+                vec![
+                    Value::from(self.env.as_str()),
+                    Value::from(limit as i64),
+                    Value::from(offset as i64),
+                    Value::from(self.env.as_str()),
+                ],
+            )
+            .await
         {
             Ok(r) => {
                 let elapsed = _start.elapsed();
@@ -1621,6 +1822,36 @@ impl GroupRepoPort for MySqlGroupStore {
         result
     }
 
+    async fn try_find_by_participant(&self, bot_uuid: &str) -> ServiceResult<Vec<Group>> {
+        let rows = self
+            .db
+            .query_with(
+                &self.logical_db,
+                "SELECT DISTINCT group_id FROM bcs_group_participants \
+                 WHERE bot_uuid = ? AND env = ?",
+                vec![Value::from(bot_uuid), Value::from(self.env.as_str())],
+            )
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "find Groups for participant '{bot_uuid}': {error}"
+                ))
+            })?;
+        let mut groups = Vec::with_capacity(rows.len());
+        for row in rows {
+            let group_id: String = db_get_column(&row, "group_id").map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "find Groups for participant group_id: {error}"
+                ))
+            })?;
+            if let Some(group) = self.try_get(&group_id).await? {
+                groups.push(group);
+            }
+        }
+        Group::sort_by_updated_at_desc(&mut groups);
+        Ok(groups)
+    }
+
     async fn find_by_participant_filtered(
         &self,
         bot_uuid: &str,
@@ -1879,16 +2110,18 @@ impl GroupRepoPort for MySqlGroupStore {
                      LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
                     created_ts_expr, updated_ts_expr,
                 );
-                self.db.query_with(
-                    &self.logical_db,
-                    &sql,
-                    vec![
-                        Value::from(self.env.as_str()),
-                        Value::from(limit as i64),
-                        Value::from(offset as i64),
-                        Value::from(self.env.as_str()),
-                    ],
-                ).await
+                self.db
+                    .query_with(
+                        &self.logical_db,
+                        &sql,
+                        vec![
+                            Value::from(self.env.as_str()),
+                            Value::from(limit as i64),
+                            Value::from(offset as i64),
+                            Value::from(self.env.as_str()),
+                        ],
+                    )
+                    .await
             }
             Some(k) => {
                 let kind_str = Self::group_kind_to_str(k);
@@ -1906,17 +2139,19 @@ impl GroupRepoPort for MySqlGroupStore {
                      LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
                     created_ts_expr, updated_ts_expr,
                 );
-                self.db.query_with(
-                    &self.logical_db,
-                    &sql,
-                    vec![
-                        Value::from(self.env.as_str()),
-                        Value::from(kind_str),
-                        Value::from(limit as i64),
-                        Value::from(offset as i64),
-                        Value::from(self.env.as_str()),
-                    ],
-                ).await
+                self.db
+                    .query_with(
+                        &self.logical_db,
+                        &sql,
+                        vec![
+                            Value::from(self.env.as_str()),
+                            Value::from(kind_str),
+                            Value::from(limit as i64),
+                            Value::from(offset as i64),
+                            Value::from(self.env.as_str()),
+                        ],
+                    )
+                    .await
             }
         };
 
@@ -2089,22 +2324,28 @@ impl GroupRepoPort for MySqlGroupStore {
             self.flavor.unix_ts("g.gmt_create"),
             self.flavor.unix_ts("g.gmt_modified"),
         );
-        let detail_rows = match self.db.query_with(
-            &self.logical_db,
-            &participant_paginated_sql,
-            vec![
-                Value::from(self.env.as_str()),
-                Value::from(bot_uuid),
-                Value::from(self.env.as_str()),
-                Value::from(limit as i64),
-                Value::from(offset as i64),
-                Value::from(self.env.as_str()),
-            ],
-        ).await
+        let detail_rows = match self
+            .db
+            .query_with(
+                &self.logical_db,
+                &participant_paginated_sql,
+                vec![
+                    Value::from(self.env.as_str()),
+                    Value::from(bot_uuid),
+                    Value::from(self.env.as_str()),
+                    Value::from(limit as i64),
+                    Value::from(offset as i64),
+                    Value::from(self.env.as_str()),
+                ],
+            )
+            .await
         {
             Ok(r) => r,
             Err(e) => {
-                error!("find_by_participant_paginated: failed to load group details for bot_uuid={}: {:?}", bot_uuid, e);
+                error!(
+                    "find_by_participant_paginated: failed to load group details for bot_uuid={}: {:?}",
+                    bot_uuid, e
+                );
                 return Vec::new();
             }
         };
@@ -2538,14 +2779,19 @@ impl GroupRepoPort for MySqlGroupStore {
         }
         if let Some(l) = label.map(str::trim).filter(|l| !l.is_empty()) {
             sql.push_str(" AND LOWER(label) LIKE ?");
-            let escaped = l.to_lowercase()
+            let escaped = l
+                .to_lowercase()
                 .replace('\\', "\\\\")
                 .replace('%', "\\%")
                 .replace('_', "\\_");
             params.push(Value::from(format!("%{}%", escaped)));
         }
 
-        let rows = self.db.query_with(&self.logical_db, &sql, params).await.unwrap_or_default();
+        let rows = self
+            .db
+            .query_with(&self.logical_db, &sql, params)
+            .await
+            .unwrap_or_default();
         rows.first()
             .and_then(|row| db_get_column::<i64>(row, "cnt").ok())
             .unwrap_or(0) as u64
@@ -2580,7 +2826,8 @@ impl GroupRepoPort for MySqlGroupStore {
         }
         if let Some(l) = label.map(str::trim).filter(|l| !l.is_empty()) {
             inner_sql.push_str(" AND LOWER(label) LIKE ?");
-            let escaped = l.to_lowercase()
+            let escaped = l
+                .to_lowercase()
                 .replace('\\', "\\\\")
                 .replace('%', "\\%")
                 .replace('_', "\\_");
@@ -2726,6 +2973,7 @@ mod tests {
         transaction_sql: StdMutex<Vec<String>>,
         execute_statements: StdMutex<Vec<DbStatement>>,
         first_execute_affected_rows: u64,
+        fail_queries: bool,
     }
 
     impl RecordingDbPlugin {
@@ -2735,11 +2983,21 @@ mod tests {
                 ..Self::default()
             }
         }
+
+        fn failing_queries() -> Self {
+            Self {
+                fail_queries: true,
+                ..Self::default()
+            }
+        }
     }
 
     #[async_trait]
     impl DbPlugin for RecordingDbPlugin {
         async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+            if self.fail_queries {
+                return Err(DbError::Backend("database unavailable".to_string()));
+            }
             Ok(Vec::new())
         }
 
@@ -2802,6 +3060,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fallible_group_reads_propagate_database_failures() {
+        let db = Arc::new(RecordingDbPlugin::failing_queries());
+        let repo = MySqlGroupStore::new(db, "local".to_string());
+
+        let get_error = repo.try_get("group-1").await.expect_err("get must fail");
+        assert!(get_error.to_string().contains("database unavailable"));
+
+        let list_error = repo
+            .try_find_by_participant("bot-1")
+            .await
+            .expect_err("participant query must fail");
+        assert!(list_error.to_string().contains("database unavailable"));
+    }
+
+    #[tokio::test]
     async fn dm_insert_loser_participant_steps_are_guarded_by_group_row() {
         let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
         let repo = MySqlGroupStore::new(db.clone(), "race".to_string());
@@ -2854,10 +3127,7 @@ mod tests {
         let db = Arc::new(RecordingDbPlugin::default());
         let repo = MySqlGroupStore::new(db, "local".to_string());
         let group = Group::new("group-1", "driver", Vec::new());
-        repo.cache
-            .write()
-            .await
-            .insert(group.id.clone(), group);
+        repo.cache.write().await.insert(group.id.clone(), group);
         let workspace = Workspace {
             decisions: vec!["ship the hotfix".to_string()],
             notes: vec!["customer impact contained".to_string()],
@@ -2878,10 +3148,7 @@ mod tests {
         let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
         let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
         let group = Group::new("group-1", "driver", Vec::new());
-        repo.cache
-            .write()
-            .await
-            .insert(group.id.clone(), group);
+        repo.cache.write().await.insert(group.id.clone(), group);
 
         repo.patch_mutable_fields(
             "group-1",
@@ -2914,14 +3181,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn versioned_mutable_patch_uses_compare_and_swap_sql() {
+        let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
+        let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
+
+        let _ = repo
+            .patch_mutable_fields_if_version(
+                "group-1",
+                7,
+                GroupMutableFieldsPatch {
+                    label: Some("Renamed".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+        let statements = db.execute_statements.lock().expect("execute statements");
+        assert_eq!(statements.len(), 1);
+        let sql = statements[0].sql();
+        assert!(sql.contains("version = version + 1"));
+        assert!(sql.contains("WHERE group_id = ? AND env = ? AND version = ?"));
+        assert_eq!(
+            statements[0].params(),
+            &[
+                Value::from("Renamed"),
+                Value::from("group-1"),
+                Value::from("local"),
+                Value::from(7_i32),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn guarded_participant_insert_locks_visibility_with_the_group_version() {
+        let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
+        let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
+
+        repo.add_participant_with_visibility_guard(
+            "group-1",
+            Participant::bot("protected", ParticipantRole::Consultant),
+            false,
+        )
+        .await
+        .expect("guarded insert");
+
+        let sql = db.transaction_sql.lock().expect("transaction sql");
+        assert_eq!(sql.len(), 2);
+        assert!(sql[0].contains("version = version + 1"));
+        assert!(sql[0].contains("visibility <> 'public' OR ?"));
+        assert!(sql[1].contains("INSERT IGNORE"));
+        assert!(sql[1].contains("visibility <> 'public' OR ?"));
+    }
+
+    #[tokio::test]
     async fn delete_returns_none_when_the_group_row_lost_a_race() {
         let db = Arc::new(RecordingDbPlugin::default());
         let repo = MySqlGroupStore::new(db, "local".to_string());
         let group = Group::new("group-1", "driver", Vec::new());
-        repo.cache
-            .write()
-            .await
-            .insert(group.id.clone(), group);
+        repo.cache.write().await.insert(group.id.clone(), group);
 
         let deleted = repo.delete("group-1").await.expect("delete group");
 

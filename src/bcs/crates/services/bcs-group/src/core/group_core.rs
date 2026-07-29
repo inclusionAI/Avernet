@@ -51,8 +51,23 @@ impl GroupCoreService for GroupCore {
         self.repo.patch_mutable_fields(id, patch).await
     }
 
+    async fn patch_mutable_fields_if_version(
+        &self,
+        id: &str,
+        expected_version: i32,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<Group> {
+        self.repo
+            .patch_mutable_fields_if_version(id, expected_version, patch)
+            .await
+    }
+
     async fn get(&self, id: &str) -> Option<Group> {
         self.repo.get(id).await
+    }
+
+    async fn try_get(&self, id: &str) -> ServiceResult<Option<Group>> {
+        self.repo.try_get(id).await
     }
 
     async fn add_message(&self, id: &str, message: GroupMessage) -> ServiceResult<()> {
@@ -61,6 +76,17 @@ impl GroupCoreService for GroupCore {
 
     async fn add_participant(&self, id: &str, participant: Participant) -> ServiceResult<()> {
         self.repo.add_participant(id, participant).await
+    }
+
+    async fn add_participant_with_visibility_guard(
+        &self,
+        id: &str,
+        participant: Participant,
+        actor_is_public: bool,
+    ) -> ServiceResult<()> {
+        self.repo
+            .add_participant_with_visibility_guard(id, participant, actor_is_public)
+            .await
     }
 
     async fn remove_participant(&self, group_id: &str, bot_uuid: &str) -> ServiceResult<()> {
@@ -135,6 +161,10 @@ impl GroupCoreService for GroupCore {
 
     async fn find_by_participant(&self, bot_uuid: &str) -> Vec<Group> {
         self.repo.find_by_participant(bot_uuid).await
+    }
+
+    async fn try_find_by_participant(&self, bot_uuid: &str) -> ServiceResult<Vec<Group>> {
+        self.repo.try_find_by_participant(bot_uuid).await
     }
 
     async fn find_by_participant_filtered(

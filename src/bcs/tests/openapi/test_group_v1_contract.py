@@ -1,12 +1,18 @@
 import sys
 from pathlib import Path
 
+import yaml
+
 BCS_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = BCS_ROOT / "api-contracts" / "v1"
 sys.path.insert(0, str(BCS_ROOT))
 
 from scripts.bundle_openapi_contract import bundle_contract  # noqa: E402
-from scripts.validate_openapi_contract import load_contract, validate_contract  # noqa: E402
+from scripts.validate_openapi_contract import (  # noqa: E402
+    _json_pointer,
+    load_contract,
+    validate_contract,
+)
 
 EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/groups"),
@@ -78,6 +84,11 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         ]["application/json"]["schema"]["properties"]["code"]["const"]
         == 20_000
     )
+    assert set(
+        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["404"][
+            "x-error-codes"
+        ]
+    ) == {"bot_not_found", "collaboration_definition_not_found"}
 
 
 def test_contract_bundles_to_a_deterministic_document(
@@ -90,3 +101,27 @@ def test_contract_bundles_to_a_deterministic_document(
     assert first == second
     assert "$ref:" not in first
     assert "operationId: list_bot_groups" in first
+
+
+def test_bundled_discriminator_mappings_resolve_inside_the_document(
+    tmp_path: Path,
+) -> None:
+    output = bundle_contract(CONTRACT_ROOT, tmp_path)
+    contract = yaml.safe_load(output.read_text(encoding="utf-8"))
+
+    def visit(value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                visit(item)
+            return
+        if not isinstance(value, dict):
+            return
+        discriminator = value.get("discriminator")
+        if isinstance(discriminator, dict):
+            for target in discriminator.get("mapping", {}).values():
+                assert target.startswith("#/")
+                _json_pointer(contract, target[1:])
+        for item in value.values():
+            visit(item)
+
+    visit(contract)

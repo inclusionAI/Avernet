@@ -140,9 +140,10 @@ CreateGroupPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: A referenced Bot Actor is missing.
+        description: A referenced Bot Actor or collaboration definition is missing.
         x-error-codes:
           - bot_not_found
+          - collaboration_definition_not_found
         content:
           application/json:
             schema:

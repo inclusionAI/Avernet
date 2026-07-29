@@ -68,6 +68,8 @@ pub trait StateMachineDefinitionRepoPort: Send + Sync {
 pub trait GroupRuntimeBindingRepoPort: Send + Sync {
     async fn upsert(&self, binding: GroupRuntimeBinding) -> ServiceResult<()>;
     async fn get(&self, group_id: &str) -> ServiceResult<Option<GroupRuntimeBinding>>;
+    /// Delete all runtime binding state for a Group. Idempotent.
+    async fn delete(&self, group_id: &str) -> ServiceResult<bool>;
     async fn bind_default_definition(
         &self,
         group_id: &str,

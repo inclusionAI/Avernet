@@ -17,8 +17,10 @@ bcs-service-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 ulid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
 tower = { workspace = true, features = ["util"] }
+tracing-subscriber = { workspace = true }

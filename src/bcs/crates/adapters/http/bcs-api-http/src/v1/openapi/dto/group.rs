@@ -5,7 +5,7 @@ use bcs_service_api::application::v1::{
     MembershipFilter, ParticipantRole, StateMachineConfiguration, StateMachineDefinitionReference,
     StateMachineParticipantBinding,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, de::Error as _};
 
 fn default_limit() -> u64 {
     20
@@ -89,7 +89,22 @@ pub struct DeliveryPolicyRequest {
 #[serde(deny_unknown_fields)]
 pub struct DefinitionReferenceRequest {
     pub definition_id: String,
+    #[serde(deserialize_with = "deserialize_positive_version")]
     pub version: i32,
+}
+
+fn deserialize_positive_version<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let version = i32::deserialize(deserializer)?;
+    if version > 0 {
+        Ok(version)
+    } else {
+        Err(D::Error::custom(
+            "version must be greater than or equal to 1",
+        ))
+    }
 }
 
 #[derive(Debug, Deserialize)]

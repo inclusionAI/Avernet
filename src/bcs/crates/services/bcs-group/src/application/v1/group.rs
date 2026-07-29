@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
@@ -8,20 +7,21 @@ use bcs_service_api::application::v1::{
     CollaborationGroupDetail, CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup,
     CreateGroupSpec, CreateParticipant, DeleteGroup, DeleteResult, DirectMessageGroupDetail,
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter, GroupService, GroupStatus,
-    GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, ListBotGroups,
+    GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, HumanPrincipal, ListBotGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
-    Participant as V1Participant, HumanPrincipal, Principal, StateMachineConfiguration,
+    Participant as V1Participant, Principal, StateMachineConfiguration,
     StateMachineDefinitionReference, StateMachineParticipantBinding, UpdateGroup,
 };
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotRegistryCoreService, CollaborationDefinitionRef,
-    CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    DefaultDelivery, DmCreateCommand, FriendCoreService, Group as DomainGroup, GroupCoreService,
-    GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand, GroupKind,
-    GroupManagementService, GroupMutableFieldsPatch, GroupStrategy, GroupUseCaseError,
-    RelationCoreService, RoutingMode, RoutingPolicy, RuntimeParticipantBinding, ServiceError,
-    SessionManagementService,
+    ActorKind, ActorStatus, AuthenticatedHumanCaller, BotRegistryCoreService,
+    CollaborationDefinitionRef, CollaborationRuntimeError, CollaborationRuntimeService,
+    ConfigureGroupRuntimeCommand, DefaultDelivery, DmCreateCommand, FriendCoreService,
+    Group as DomainGroup, GroupCoreService, GroupCreateCommand, GroupCreateParticipantCommand,
+    GroupDeleteCommand, GroupKind, GroupManagementService, GroupMutableFieldsPatch, GroupStrategy,
+    GroupUseCaseError, RelationCoreService, RoutingMode, RoutingPolicy, RuntimeParticipantBinding,
+    ServiceError, SessionManagementService, StartStateMachineRunCommand,
 };
+use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub struct GroupServiceConfig {
@@ -206,12 +206,17 @@ impl GroupServiceImpl {
         principal: &Principal,
         group_id: &str,
     ) -> Result<DomainGroup, ApplicationError> {
-        let group = self.groups.get(group_id).await.ok_or_else(|| {
-            ApplicationError::not_found(
-                "group_not_found",
-                format!("Group '{group_id}' was not found"),
-            )
-        })?;
+        let group = self
+            .groups
+            .try_get(group_id)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "group_not_found",
+                    format!("Group '{group_id}' was not found"),
+                )
+            })?;
         if !self.can_read_group(principal, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Principal has no readable relation to this Group",
@@ -225,12 +230,17 @@ impl GroupServiceImpl {
         principal: &Principal,
         group_id: &str,
     ) -> Result<DomainGroup, ApplicationError> {
-        let group = self.groups.get(group_id).await.ok_or_else(|| {
-            ApplicationError::not_found(
-                "group_not_found",
-                format!("Group '{group_id}' was not found"),
-            )
-        })?;
+        let group = self
+            .groups
+            .try_get(group_id)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "group_not_found",
+                    format!("Group '{group_id}' was not found"),
+                )
+            })?;
         if !Self::can_manage_group(principal, &group) {
             return Err(ApplicationError::forbidden(
                 "Only the Group originator or driver may manage this Group",
@@ -239,9 +249,10 @@ impl GroupServiceImpl {
         Ok(group)
     }
 
-    async fn project_detail(
+    async fn project_detail_with_state_machine(
         &self,
         mut group: DomainGroup,
+        state_machine_override: Option<StateMachineConfiguration>,
     ) -> Result<GroupDetail, ApplicationError> {
         bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
         let participants = group
@@ -299,36 +310,11 @@ impl GroupServiceImpl {
                 CollaborationConfiguration::ManagerWorker(ManagerWorkerConfiguration::default())
             }
             GroupStrategy::StateMachine => {
-                let runtime = self.collaboration_runtime.as_ref().ok_or_else(|| {
-                    ApplicationError::internal(
-                        "StateMachine Group projection requires CollaborationRuntimeService",
-                    )
-                })?;
-                let view = runtime
-                    .get_group_collaboration_definition(&group.id)
-                    .await
-                    .map_err(map_runtime_error)?;
-                let definition = view.default_definition.ok_or_else(|| {
-                    ApplicationError::conflict(
-                        "state_machine_definition_missing",
-                        "StateMachine Group has no default definition",
-                    )
-                })?;
-                let participant_bindings = view
-                    .participant_bindings
-                    .into_iter()
-                    .map(|(binding, value)| StateMachineParticipantBinding {
-                        binding,
-                        actor_ids: value.bot_ids,
-                    })
-                    .collect();
-                CollaborationConfiguration::StateMachine(StateMachineConfiguration {
-                    definition: StateMachineDefinitionReference {
-                        definition_id: definition.id,
-                        version: definition.version,
-                    },
-                    participant_bindings,
-                })
+                let configuration = match state_machine_override {
+                    Some(configuration) => configuration,
+                    None => self.load_state_machine_configuration(&group.id).await?,
+                };
+                CollaborationConfiguration::StateMachine(configuration)
             }
         };
 
@@ -346,6 +332,46 @@ impl GroupServiceImpl {
             created_at: common.created_at,
             updated_at: common.updated_at,
         }))
+    }
+
+    async fn project_detail(&self, group: DomainGroup) -> Result<GroupDetail, ApplicationError> {
+        self.project_detail_with_state_machine(group, None).await
+    }
+
+    async fn load_state_machine_configuration(
+        &self,
+        group_id: &str,
+    ) -> Result<StateMachineConfiguration, ApplicationError> {
+        let runtime = self.collaboration_runtime.as_ref().ok_or_else(|| {
+            ApplicationError::internal(
+                "StateMachine Group projection requires CollaborationRuntimeService",
+            )
+        })?;
+        let view = runtime
+            .get_group_collaboration_definition(group_id)
+            .await
+            .map_err(map_runtime_error)?;
+        let definition = view.default_definition.ok_or_else(|| {
+            ApplicationError::conflict(
+                "state_machine_definition_missing",
+                "StateMachine Group has no default definition",
+            )
+        })?;
+        let participant_bindings = view
+            .participant_bindings
+            .into_iter()
+            .map(|(binding, value)| StateMachineParticipantBinding {
+                binding,
+                actor_ids: value.bot_ids,
+            })
+            .collect();
+        Ok(StateMachineConfiguration {
+            definition: StateMachineDefinitionReference {
+                definition_id: definition.id,
+                version: definition.version,
+            },
+            participant_bindings,
+        })
     }
 
     async fn project_summary(
@@ -425,13 +451,20 @@ impl GroupServiceImpl {
         }
 
         let principal_actor_id = principal.actor_id();
+        let authenticated_human = match &principal {
+            Principal::Human(human) => Some(AuthenticatedHumanCaller {
+                actor_id: principal_actor_id.clone(),
+                display_name: Some(human_display_name(human)),
+            }),
+            Principal::Bot(_) => None,
+        };
         let principal_is_participant = request
             .participants
             .iter()
             .any(|participant| participant.actor_id == principal_actor_id)
             || request.driver_bot_uuid == principal_actor_id;
         let originator = if principal_is_participant {
-            principal_actor_id
+            principal_actor_id.clone()
         } else {
             request.driver_bot_uuid.clone()
         };
@@ -479,6 +512,17 @@ impl GroupServiceImpl {
             ));
         }
         if let Some(state_machine) = &state_machine {
+            let mut binding_names = HashSet::new();
+            if state_machine
+                .participant_bindings
+                .iter()
+                .any(|binding| !binding_names.insert(binding.binding.as_str()))
+            {
+                return Err(ApplicationError::invalid(
+                    "invalid_participant_binding",
+                    "StateMachine participant binding names must be unique",
+                ));
+            }
             let canonical_actor_ids = request
                 .participants
                 .iter()
@@ -496,6 +540,25 @@ impl GroupServiceImpl {
                     "StateMachine participant bindings must reference Group participants",
                 ));
             }
+            let bound_actor_ids = state_machine
+                .participant_bindings
+                .iter()
+                .flat_map(|binding| binding.actor_ids.iter())
+                .collect::<HashSet<_>>();
+            for actor_id in bound_actor_ids {
+                let actor = self.registry.get(actor_id).await.ok_or_else(|| {
+                    ApplicationError::not_found(
+                        "bot_not_found",
+                        format!("Bot '{actor_id}' was not found"),
+                    )
+                })?;
+                if actor.actor_kind != ActorKind::Bot {
+                    return Err(ApplicationError::invalid(
+                        "invalid_participant_binding",
+                        "StateMachine participant bindings may reference only Bot actors",
+                    ));
+                }
+            }
         }
 
         let participants = request
@@ -510,7 +573,7 @@ impl GroupServiceImpl {
             .management
             .create_group(GroupCreateCommand {
                 group_id: None,
-                caller_actor_id: Some(originator.clone()),
+                caller_actor_id: Some(principal_actor_id.clone()),
                 driver_bot_id: request.driver_bot_uuid,
                 label: request.name,
                 topic: None,
@@ -528,6 +591,7 @@ impl GroupServiceImpl {
             .map_err(map_group_error)?;
 
         if let Some(state_machine) = state_machine {
+            let response_state_machine = state_machine.clone();
             let runtime = self
                 .collaboration_runtime
                 .as_ref()
@@ -560,34 +624,158 @@ impl GroupServiceImpl {
                 })
                 .await
             {
-                let session_cleanup_error =
-                    if let Some(session_id) = created.latest_running_session_id.as_deref() {
-                        self.sessions
-                            .delete(session_id)
-                            .await
-                            .err()
-                            .map(|cleanup| cleanup.to_string())
-                    } else {
-                        None
-                    };
-                let group_cleanup_error = self
-                    .groups
-                    .delete(&created.group_id)
-                    .await
-                    .err()
-                    .map(|cleanup| cleanup.to_string());
+                let (session_cleanup_error, group_cleanup_error) = self
+                    .rollback_state_machine_creation(
+                        runtime.as_ref(),
+                        &created.group_id,
+                        created.latest_running_session_id.as_deref(),
+                    )
+                    .await;
                 return Err(map_runtime_and_rollback_error(
                     error,
                     session_cleanup_error,
                     group_cleanup_error,
                 ));
             }
+
+            let session_id = match created.latest_running_session_id.clone() {
+                Some(session_id) => session_id,
+                None => {
+                    let error = CollaborationRuntimeError::Internal(
+                        ServiceError::InternalError(
+                            "StateMachine Group creation did not produce an initial ServiceInvocation session"
+                                .to_string(),
+                        ),
+                    );
+                    let (session_cleanup_error, group_cleanup_error) = self
+                        .rollback_state_machine_creation(runtime.as_ref(), &created.group_id, None)
+                        .await;
+                    return Err(map_runtime_and_rollback_error(
+                        error,
+                        session_cleanup_error,
+                        group_cleanup_error,
+                    ));
+                }
+            };
+            let session = match self.sessions.get(&session_id).await {
+                Ok(Some(session)) => session,
+                Ok(None) => {
+                    let error = CollaborationRuntimeError::Internal(ServiceError::InternalError(
+                        "StateMachine initial ServiceInvocation session disappeared before start"
+                            .to_string(),
+                    ));
+                    let (session_cleanup_error, group_cleanup_error) = self
+                        .rollback_state_machine_creation(
+                            runtime.as_ref(),
+                            &created.group_id,
+                            Some(&session_id),
+                        )
+                        .await;
+                    return Err(map_runtime_and_rollback_error(
+                        error,
+                        session_cleanup_error,
+                        group_cleanup_error,
+                    ));
+                }
+                Err(error) => {
+                    let error = CollaborationRuntimeError::Internal(ServiceError::InternalError(
+                        error.to_string(),
+                    ));
+                    let (session_cleanup_error, group_cleanup_error) = self
+                        .rollback_state_machine_creation(
+                            runtime.as_ref(),
+                            &created.group_id,
+                            Some(&session_id),
+                        )
+                        .await;
+                    return Err(map_runtime_and_rollback_error(
+                        error,
+                        session_cleanup_error,
+                        group_cleanup_error,
+                    ));
+                }
+            };
+            if let Err(error) = runtime
+                .start_state_machine_run(StartStateMachineRunCommand {
+                    group_id: created.group_id.clone(),
+                    session_id: Some(session.id),
+                    definition_yaml: None,
+                    definition: None,
+                    definition_ref: None,
+                    input: session.input.unwrap_or(Value::Null),
+                    caller_id: Some(principal_actor_id),
+                    authenticated_human,
+                })
+                .await
+            {
+                let (session_cleanup_error, group_cleanup_error) = self
+                    .rollback_state_machine_creation(
+                        runtime.as_ref(),
+                        &created.group_id,
+                        Some(&session_id),
+                    )
+                    .await;
+                return Err(map_runtime_and_rollback_error(
+                    error,
+                    session_cleanup_error,
+                    group_cleanup_error,
+                ));
+            }
+
+            let group = self
+                .groups
+                .try_get(&created.group_id)
+                .await
+                .map_err(map_service_error)?
+                .ok_or_else(|| {
+                    ApplicationError::internal("created Group disappeared before projection")
+                })?;
+            return self
+                .project_detail_with_state_machine(group, Some(response_state_machine))
+                .await;
         }
 
-        let group = self.groups.get(&created.group_id).await.ok_or_else(|| {
-            ApplicationError::internal("created Group disappeared before projection")
-        })?;
+        let group = self
+            .groups
+            .try_get(&created.group_id)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::internal("created Group disappeared before projection")
+            })?;
         self.project_detail(group).await
+    }
+
+    async fn rollback_state_machine_creation(
+        &self,
+        runtime: &dyn CollaborationRuntimeService,
+        group_id: &str,
+        session_id: Option<&str>,
+    ) -> (Option<String>, Option<String>) {
+        let mut runtime_cleanup_errors = Vec::new();
+        if let Err(error) = runtime
+            .cancel_group_runs(group_id, "state_machine_creation_failed")
+            .await
+        {
+            runtime_cleanup_errors.push(format!("run cancellation: {error}"));
+        }
+        if let Err(error) = runtime.delete_group_runtime_state(group_id).await {
+            runtime_cleanup_errors.push(format!("runtime state: {error}"));
+        }
+        if let Some(session_id) = session_id
+            && let Err(error) = self.sessions.delete(session_id).await
+        {
+            runtime_cleanup_errors.push(format!("initial session: {error}"));
+        }
+        let runtime_cleanup_error =
+            (!runtime_cleanup_errors.is_empty()).then(|| runtime_cleanup_errors.join("; "));
+        let group_cleanup_error = self
+            .groups
+            .delete(group_id)
+            .await
+            .err()
+            .map(|cleanup| cleanup.to_string());
+        (runtime_cleanup_error, group_cleanup_error)
     }
 
     async fn create_dm(
@@ -618,8 +806,9 @@ impl GroupServiceImpl {
             .map_err(map_group_error)?;
         let group = self
             .groups
-            .get(&result.group.group_id)
+            .try_get(&result.group.group_id)
             .await
+            .map_err(map_service_error)?
             .ok_or_else(|| {
                 ApplicationError::internal("created DM Group disappeared before projection")
             })?;
@@ -650,8 +839,9 @@ impl GroupService for GroupServiceImpl {
 
         let direct = self
             .groups
-            .find_by_participant(&command.bot_uuid)
+            .try_find_by_participant(&command.bot_uuid)
             .await
+            .map_err(map_service_error)?
             .into_iter()
             .map(|group| (group.id.clone(), (group, Membership::Direct)))
             .collect::<HashMap<_, _>>();
@@ -665,7 +855,12 @@ impl GroupService for GroupServiceImpl {
             if related.contains_key(&group_id) {
                 continue;
             }
-            if let Some(group) = self.groups.get(&group_id).await {
+            if let Some(group) = self
+                .groups
+                .try_get(&group_id)
+                .await
+                .map_err(map_service_error)?
+            {
                 related.insert(group_id, (group, Membership::SessionOnly));
             }
         }
@@ -755,6 +950,7 @@ impl GroupService for GroupServiceImpl {
         let mut group = self
             .load_manageable_group(&command.principal, &command.group_id)
             .await?;
+        let expected_version = group.version;
         if group.group_kind == GroupKind::Dm {
             if command.patch.delivery_policy.is_some()
                 || command.patch.visibility == Some(GroupVisibility::Public)
@@ -810,17 +1006,36 @@ impl GroupService for GroupServiceImpl {
                 persist_delivery(delivery_policy.bot_final_delivery);
             persistence_patch.default_bot_final_delivery = Some(policy.default_bot_final_delivery);
         }
-        group.updated_at = now_millis();
-        let detail = self.project_detail(group).await?;
-        self.groups
-            .patch_mutable_fields(&command.group_id, persistence_patch)
+        let state_machine_projection = if group.group_strategy == GroupStrategy::StateMachine {
+            Some(
+                self.load_state_machine_configuration(&command.group_id)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        let persisted = self
+            .groups
+            .patch_mutable_fields_if_version(&command.group_id, expected_version, persistence_patch)
             .await
             .map_err(map_service_error)?;
-        Ok(detail)
+        self.project_detail_with_state_machine(persisted, state_machine_projection)
+            .await
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        let Some(group) = self.groups.get(&command.group_id).await else {
+        let Some(group) = self
+            .groups
+            .try_get(&command.group_id)
+            .await
+            .map_err(map_service_error)?
+        else {
+            if let Some(runtime) = self.collaboration_runtime.as_ref() {
+                runtime
+                    .delete_group_runtime_state(&command.group_id)
+                    .await
+                    .map_err(map_runtime_error)?;
+            }
             return Ok(DeleteResult {
                 group_id: command.group_id,
                 deleted: false,
@@ -832,6 +1047,17 @@ impl GroupService for GroupServiceImpl {
                 deleted: false,
             });
         }
+        if group.group_strategy == GroupStrategy::StateMachine {
+            let runtime = self.collaboration_runtime.as_ref().ok_or_else(|| {
+                ApplicationError::internal(
+                    "StateMachine Group deletion requires CollaborationRuntimeService",
+                )
+            })?;
+            runtime
+                .cancel_group_runs(&command.group_id, "group_deleted")
+                .await
+                .map_err(map_runtime_error)?;
+        }
         let result = self
             .management
             .delete_group(GroupDeleteCommand {
@@ -839,7 +1065,16 @@ impl GroupService for GroupServiceImpl {
                 group_id: command.group_id,
             })
             .await
-            .map_err(map_group_error)?;
+            .map_err(map_delete_group_error)?;
+        if result.deleted
+            && group.group_strategy == GroupStrategy::StateMachine
+            && let Some(runtime) = self.collaboration_runtime.as_ref()
+        {
+            runtime
+                .delete_group_runtime_state(&result.group_id)
+                .await
+                .map_err(map_runtime_error)?;
+        }
         Ok(DeleteResult {
             group_id: result.group_id,
             deleted: result.deleted,
@@ -969,13 +1204,6 @@ fn saturating_usize(value: u64) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)
 }
 
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 fn map_group_error(error: GroupUseCaseError) -> ApplicationError {
     match error {
         GroupUseCaseError::Unauthorized(_) => ApplicationError::Unauthenticated,
@@ -1001,6 +1229,17 @@ fn map_group_error(error: GroupUseCaseError) -> ApplicationError {
         }
         GroupUseCaseError::Conflict(message) => ApplicationError::conflict("conflict", message),
         GroupUseCaseError::Service(error) => map_service_error(error),
+    }
+}
+
+fn map_delete_group_error(error: GroupUseCaseError) -> ApplicationError {
+    match error {
+        GroupUseCaseError::InvalidProposal(message)
+            if message == "DM groups cannot be deleted or left" =>
+        {
+            ApplicationError::conflict("conflict", message)
+        }
+        other => map_group_error(other),
     }
 }
 

@@ -1,6 +1,6 @@
 # Bot-Human-Bot three-node collaboration template.
 # participants declares only logical roles that must bind to actual bots. The Human is
-# addressed through the runtime_actor assignee and is not a participant binding.
+# addressed through the authenticated runtime Human and is not a participant binding.
 
 api_version: bcs.collaboration/v1
 name: Bot-Human-Bot Review
@@ -39,7 +39,7 @@ runtime:
         display_name: Human Review
         assignee:
           type: runtime_actor
-          actor: human_1001
+          actor: $authenticated_human
         notification:
           mode: direct_assignee
         instruction: Review the Bot draft. Approve it as-is or provide specific revision feedback.

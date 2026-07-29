@@ -82,12 +82,19 @@ pub fn application_error_response(
         ApplicationError::QuotaExceeded { code, message } => {
             (StatusCode::TOO_MANY_REQUESTS, 42_900, code, message)
         }
-        ApplicationError::Internal(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            50_000,
-            "internal_error".to_string(),
-            "Internal server error".to_string(),
-        ),
+        ApplicationError::Internal(detail) => {
+            tracing::error!(
+                request_id = %request_id.0,
+                error = %detail,
+                "OpenAPI V1 request failed"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                50_000,
+                "internal_error".to_string(),
+                "Internal server error".to_string(),
+            )
+        }
     };
     ErrorResponse {
         status,
@@ -100,7 +107,37 @@ pub fn application_error_response(
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, Write};
+    use std::sync::{Arc, Mutex};
+
     use super::*;
+
+    #[derive(Clone, Default)]
+    struct SharedLogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    struct SharedLogWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for SharedLogWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .expect("log buffer lock")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedLogBuffer {
+        type Writer = SharedLogWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            SharedLogWriter(self.0.clone())
+        }
+    }
 
     #[test]
     fn maps_application_errors_to_the_v1_http_contract() {
@@ -179,5 +216,31 @@ mod tests {
             assert_eq!(response.message, message);
             assert_eq!(response.request_id, request_id.0);
         }
+    }
+
+    #[test]
+    fn logs_internal_detail_with_request_id_before_redacting_the_response() {
+        let buffer = SharedLogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_level(false)
+            .with_target(false)
+            .with_writer(buffer.clone())
+            .finish();
+        let request_id = RequestId("request-sensitive-123".to_string());
+
+        let response = tracing::subscriber::with_default(subscriber, || {
+            application_error_response(
+                &request_id,
+                ApplicationError::internal("database connection reset"),
+            )
+        });
+        let logs = String::from_utf8(buffer.0.lock().expect("log buffer lock").clone())
+            .expect("UTF-8 logs");
+
+        assert!(logs.contains("database connection reset"));
+        assert!(logs.contains("request-sensitive-123"));
+        assert_eq!(response.message, "Internal server error");
+        assert!(!response.message.contains("database connection reset"));
     }
 }
