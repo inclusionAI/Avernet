@@ -218,6 +218,7 @@ def test_aicoding_command_output_end_converts_to_tool_result():
                     "stream": "command_output",
                     "data": {
                         "phase": "end",
+                        "toolName": "Bash",
                         "toolCallId": "tool-aicoding",
                         "output": "received",
                         "exitCode": 0,
@@ -235,6 +236,7 @@ def test_aicoding_command_output_end_converts_to_tool_result():
         "seq": 1,
         "stream": "tool",
         "phase": "result",
+        "name": "Bash",
         "toolCallId": "tool-aicoding",
         "result": {"content": [{"type": "text", "text": "received"}]},
         "isError": False,

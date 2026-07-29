@@ -191,6 +191,8 @@ def _transform_command_output(data: dict[str, Any]) -> dict[str, Any] | None:
     if data.get("phase") != "end":
         return None
     out: dict[str, Any] = {"stream": "tool", "phase": "result"}
+    if data.get("toolName"):
+        out["name"] = data["toolName"]
     _copy_present(data, out, ("toolCallId",))
     output = data.get("output")
     if output is not None:
