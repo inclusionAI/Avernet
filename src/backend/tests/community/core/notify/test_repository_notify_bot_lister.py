@@ -48,6 +48,10 @@ def _binding(
     )
 
 
+def _bot(bot_name: str | None, active_engine: str = "aicoding") -> dict:
+    return {"bot_name": bot_name, "active_engine": active_engine}
+
+
 def _collab(bot_id: str, owner_id: str, user_id: str = "u001") -> CollaboratorRecord:
     return CollaboratorRecord(
         bot_pk=0,
@@ -111,8 +115,8 @@ class TestRepositoryNotifyBotLister:
                 _binding(device_id="dev2", sandbox_id="sb2", bolt_id="bot2"),
             ],
             bot_lookup={
-                ("bot1", "u001"): {"bot_name": "Alpha"},
-                ("bot2", "u001"): {"bot_name": "Beta"},
+                ("bot1", "u001"): _bot("Alpha"),
+                ("bot2", "u001"): _bot("Beta", "claude_code"),
             },
             collaborator_records=None,  # collaborator repo not provided
         )
@@ -134,12 +138,43 @@ class TestRepositoryNotifyBotLister:
                 _binding(device_id="", sandbox_id=None, bolt_id="bot2"),
             ],
             bot_lookup={
-                ("bot1", "u001"): {"bot_name": "Alpha"},
+                ("bot1", "u001"): _bot("Alpha"),
             },
         )
         result = lister.list_bot_mappings("u001")
         # bot_id comes from device_props.bolt_id; sandbox falls back to device_id
         assert result == [NotifyTarget("bot1", "Alpha", "u001", "dev1")]
+
+    def test_owner_mappings_only_include_notify_supported_engines(self):
+        lister, _, _, _ = _make_lister(
+            bindings=[
+                _binding(device_id="dev1", sandbox_id="sb1", bolt_id="aicoding"),
+                _binding(device_id="dev2", sandbox_id="sb2", bolt_id="claude"),
+                _binding(device_id="dev3", sandbox_id="sb3", bolt_id="openclaw"),
+                _binding(device_id="dev4", sandbox_id="sb4", bolt_id="missing"),
+            ],
+            bot_lookup={
+                ("aicoding", "u001"): _bot("AI Coding", "aicoding"),
+                ("claude", "u001"): _bot("Claude", "claude_code"),
+                ("openclaw", "u001"): _bot("OpenClaw", "openclaw"),
+                ("missing", "u001"): {"bot_name": "Missing Engine"},
+            },
+        )
+
+        assert lister.list_bot_mappings("u001") == [
+            NotifyTarget("aicoding", "AI Coding", "u001", "sb1"),
+            NotifyTarget("claude", "Claude", "u001", "sb2"),
+        ]
+
+    def test_owner_bot_lookup_failure_is_skipped(self):
+        lister, _, bot_repo, _ = _make_lister(
+            bindings=[
+                _binding(device_id="dev1", sandbox_id="sb1", bolt_id="bot1"),
+            ],
+        )
+        bot_repo.get_by_id_and_owner.side_effect = RuntimeError("db down")
+
+        assert lister.list_bot_mappings("u001") == []
 
     # ------------------------------------------------------------------
     # Collaborator fold-in
@@ -151,8 +186,8 @@ class TestRepositoryNotifyBotLister:
                 _binding(device_id="dev1", sandbox_id="sb1", bolt_id="owned"),
             ],
             bot_lookup={
-                ("owned", "u001"): {"bot_name": "Mine"},
-                ("cobra", "ownerA"): {"bot_name": "Collab"},
+                ("owned", "u001"): _bot("Mine"),
+                ("cobra", "ownerA"): _bot("Collab", "claude_code"),
             },
             collaborator_records=[_collab("cobra", "ownerA")],
             binding_by_bot_owner={
@@ -176,6 +211,31 @@ class TestRepositoryNotifyBotLister:
         bot_repo.get_by_id_and_owner.assert_any_call("cobra", "ownerA")
         collab_repo.list_by_user.assert_called_once()
 
+    def test_collaborator_mappings_skip_unsupported_engines(self):
+        lister, _, _, _ = _make_lister(
+            bindings=[],
+            collaborator_records=[
+                _collab("coding", "ownerA"),
+                _collab("general", "ownerB"),
+            ],
+            bot_lookup={
+                ("coding", "ownerA"): _bot("Coding", "claude_code"),
+                ("general", "ownerB"): _bot("General", "openclaw"),
+            },
+            binding_by_bot_owner={
+                ("coding", "ownerA"): _binding(
+                    device_id="devA", sandbox_id="sbA", bolt_id="coding"
+                ),
+                ("general", "ownerB"): _binding(
+                    device_id="devB", sandbox_id="sbB", bolt_id="general"
+                ),
+            },
+        )
+
+        assert lister.list_bot_mappings("u001") == [
+            NotifyTarget("coding", "Coding", "ownerA", "sbA")
+        ]
+
     def test_collaborator_duplicate_with_owner_is_deduped(self):
         # bot "shared" is owned by u001 AND u001 is recorded as a collaborator →
         # must appear exactly once, coming from the owner path.
@@ -184,8 +244,8 @@ class TestRepositoryNotifyBotLister:
                 _binding(device_id="dev1", sandbox_id="sb1", bolt_id="shared"),
             ],
             bot_lookup={
-                ("shared", "u001"): {"bot_name": "Shared"},
-                ("shared", "ownerA"): {"bot_name": "SharedOwner"},
+                ("shared", "u001"): _bot("Shared"),
+                ("shared", "ownerA"): _bot("SharedOwner"),
             },
             collaborator_records=[_collab("shared", "ownerA")],
             binding_by_bot_owner={
@@ -209,6 +269,10 @@ class TestRepositoryNotifyBotLister:
                 _collab("cbot1", "ownerA"),
                 _collab("cbot2", "ownerB"),
             ],
+            bot_lookup={
+                ("cbot1", "ownerA"): _bot(None),
+                ("cbot2", "ownerB"): _bot(None),
+            },
             binding_by_bot_owner={
                 # cbot1 has an active binding, cbot2 does not
                 ("cbot1", "ownerA"): _binding(
@@ -232,6 +296,7 @@ class TestRepositoryNotifyBotLister:
                 _collab("cbot1", "ownerA"),
                 _collab("cbot_empty", ""),  # missing owner_id
             ],
+            bot_lookup={("cbot1", "ownerA"): _bot(None)},
             binding_by_bot_owner={
                 ("cbot1", "ownerA"): _binding(
                     device_id="devA", sandbox_id="sbA", bolt_id="cbot1"
@@ -252,7 +317,7 @@ class TestRepositoryNotifyBotLister:
         )
 
     def test_collaborator_bot_name_falls_back_to_bot_id(self):
-        # bot_repo raises / returns None → name falls back to bot_id
+        # Supported bot with an empty name falls back to bot_id.
         lister, binding_repo, bot_repo, _ = _make_lister(
             bindings=[],
             collaborator_records=[_collab("cbot1", "ownerA")],
@@ -262,7 +327,7 @@ class TestRepositoryNotifyBotLister:
                 ),
             },
         )
-        bot_repo.get_by_id_and_owner.return_value = None
+        bot_repo.get_by_id_and_owner.return_value = _bot(None)
 
         result = lister.list_bot_mappings("u001")
 
@@ -273,7 +338,7 @@ class TestRepositoryNotifyBotLister:
             bindings=[
                 _binding(device_id="dev1", sandbox_id="sb1", bolt_id="owned"),
             ],
-            bot_lookup={("owned", "u001"): {"bot_name": "Mine"}},
+            bot_lookup={("owned", "u001"): _bot("Mine")},
             collaborator_records=[],
         )
         collab_repo.list_by_user.side_effect = RuntimeError("db down")
@@ -290,6 +355,7 @@ class TestRepositoryNotifyBotLister:
                 _collab("cbot1", "ownerA"),
                 _collab("cbot2", "ownerB"),
             ],
+            bot_lookup={("cbot1", "ownerA"): _bot(None)},
             binding_by_bot_owner={
                 ("cbot1", "ownerA"): _binding(
                     device_id="devA", sandbox_id="sbA", bolt_id="cbot1"
