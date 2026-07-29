@@ -52,7 +52,7 @@ from agentclaw.community.core.bot_management.repository.protocol import (
 from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRole
 from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, SUPPORTED_ENGINE_TYPES, _get_engine_types
+from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bot_engine_dir,
@@ -1066,8 +1066,13 @@ class BotService:
         resolved_entity_id = entity_id or f"staff_{user_id}"
         resolved_entity_type = entity_type or "staff"
 
-        # Always use backend configured engine types, ignore frontend input
-        resolved_engine_types = SUPPORTED_ENGINE_TYPES
+        # Always use backend configured engine types, ignore frontend input.
+        # _get_engine_types() (ENGINE_TYPES env, falling back to the static list)
+        # is what validation and switch_engine both use; persisting the static
+        # list instead meant a bot created on a deployment-enabled engine (e.g.
+        # teclaw) stored an enabled-engine list that omitted its own active
+        # engine — so switch_engine would refuse to switch back to it.
+        resolved_engine_types = _get_engine_types()
 
         # Resolve active engine: use frontend specified, otherwise use default
         resolved_active_engine = engine_type or DEFAULT_ENGINE_TYPE

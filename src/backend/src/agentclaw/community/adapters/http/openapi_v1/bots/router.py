@@ -60,7 +60,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     generate_bot_id,
     validate_bot_name,
 )
-from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
     _get_engine_types,
@@ -575,7 +575,9 @@ async def get_bot_engine_config(
     request: Request,
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+    engine_config_service: EngineConfigServiceProtocol = Injected(
+        EngineConfigServiceProtocol
+    ),
 ) -> Envelope[dict[str, Any]]:
     """Read a bot's engine configuration (free-form JSON)."""
     owner_id = caller_owner_id(principal)
@@ -599,7 +601,9 @@ async def update_bot_engine_config(
     request: Request,
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+    engine_config_service: EngineConfigServiceProtocol = Injected(
+        EngineConfigServiceProtocol
+    ),
 ) -> Envelope[dict[str, Any]]:
     """Write a bot's engine configuration (free-form JSON)."""
     owner_id = caller_owner_id(principal)

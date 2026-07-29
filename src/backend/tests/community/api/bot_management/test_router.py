@@ -1831,7 +1831,9 @@ class TestListCodingBotsByArchitect:
 def _engine_config_app(mock_bot_service, mock_svc):
     """An app with the bot-management router + a mocked EngineConfigService bound."""
     from agentclaw.community.adapters.http.bot_management.router import router
-    from agentclaw.community.core.services.engine_config import EngineConfigService
+    from agentclaw.community.api.engine_config_service import (
+        EngineConfigServiceProtocol,
+    )
 
     app = FastAPI()
     app.include_router(router)
@@ -1839,7 +1841,7 @@ def _engine_config_app(mock_bot_service, mock_svc):
 
     class _Extra(Module):
         def configure(self, binder):
-            binder.bind(EngineConfigService, to=mock_svc)
+            binder.bind(EngineConfigServiceProtocol, to=mock_svc)
 
     attach_injector(app, Injector([
         _bind_bot_service(mock_bot_service, bot_repo=MagicMock(), auth=MagicMock()),

@@ -314,3 +314,48 @@ class TestCheckDeviceLimitUsesCeiling:
         svc._device_service_provider = lambda: _make_device_service(active_count=3)
         # must not raise despite active devices present
         svc._check_device_limit(entity_id="u1", entity_type="staff", owner_id="u1")
+
+
+# ---------------------------------------------------------------------------
+# create_bot persists the CONFIGURED engine set, not the static list (R11/F44)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateBotPersistsConfiguredEngines:
+    """A bot's enabled-engine list must be able to contain its own engine.
+
+    ``create_bot`` used to persist the static ``SUPPORTED_ENGINE_TYPES`` while
+    validation and ``switch_engine`` both consult ``_get_engine_types()`` (the
+    ``ENGINE_TYPES`` env). On a deployment that enables ``teclaw``, a teclaw bot
+    was stored with an ``engine_types`` list omitting teclaw — so switching away
+    and back was permanently rejected by ``switch_engine``'s per-bot check.
+    """
+
+    def test_engine_types_come_from_the_configured_registry(self, monkeypatch):
+        monkeypatch.setenv("ENGINE_TYPES", "openclaw,teclaw")
+        from agentclaw.community.core.workspace.constants import _get_engine_types
+
+        assert "teclaw" in _get_engine_types()
+
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.insert.return_value = {"id": 1, "bot_id": "b1", "ext": {}}
+        # No existing row and the name is free — otherwise create_bot returns
+        # or raises before reaching persistence.
+        svc._repository.get_by_id_and_owner.return_value = None
+        svc._repository.exists_by_bot_name.return_value = False
+        try:
+            svc.create_bot(
+                user_id="u1", nick_name="u1", bot_name="Bot",
+                engine_type="teclaw", bot_id="b1",
+            )
+        except Exception:
+            # Downstream provisioning is mocked out; the persisted payload is
+            # what this test is about, and insert() is reached before it.
+            pass
+
+        assert svc._repository.insert.called, "create never reached persistence"
+        persisted = svc._repository.insert.call_args[0][0]
+        assert "teclaw" in persisted["engine_types"], persisted["engine_types"]
+        # The active engine is always in its own enabled list — the invariant
+        # switch_engine depends on.
+        assert persisted["active_engine"] in persisted["engine_types"]

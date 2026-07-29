@@ -72,7 +72,7 @@ from agentclaw.community.core.bot_management.create_flow import (
 from agentclaw.community.core.bot_management.create_flow import (  # noqa: F401
     _get_bot_mcp_codes,
 )
-from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
 from agentclaw.community.di import Injected
@@ -2772,7 +2772,9 @@ async def get_engine_config(
     engine_type: Optional[str] = Query(None, description="Engine override; defaults to bot's active_engine"),
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+    engine_config_service: EngineConfigServiceProtocol = Injected(
+        EngineConfigServiceProtocol
+    ),
 ) -> ApiResponse:
     """
     Get engine configuration for a bot. Defaults to bot's active_engine.
@@ -2872,7 +2874,9 @@ async def update_engine_config(
     engine_type: Optional[str] = Query(None, description="Engine override; defaults to bot's active_engine"),
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+    engine_config_service: EngineConfigServiceProtocol = Injected(
+        EngineConfigServiceProtocol
+    ),
 ) -> ApiResponse:
     """
     Update (save) engine configuration for a bot. Defaults to bot's active_engine.

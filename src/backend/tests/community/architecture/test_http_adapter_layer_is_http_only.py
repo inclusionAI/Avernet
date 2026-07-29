@@ -139,8 +139,13 @@ def _collect_imported_modules(tree: ast.AST) -> set[str]:
 # allow-list below names a few legitimate non-service imports from
 # that namespace (exception classes, helper functions, engine
 # resolvers) that adapters need to catch / call directly.
+# The second alternative covers ``core.services.<file>`` — services that live
+# directly under ``core/services/`` rather than under a module. The first
+# alternative requires a module segment before ``.services.``, so those files
+# matched nothing and their imports skipped the check entirely.
 _CORE_SERVICE_IMPORT_RE = re.compile(
-    r"^agentclaw\.(?:community\.)?core\.[a-z_]+(?:\.[a-z_]+)*\.services\.[a-z_]+$"
+    r"^agentclaw\.(?:community\.)?core\."
+    r"(?:[a-z_]+(?:\.[a-z_]+)*\.services\.[a-z_]+|services\.[a-z_]+)$"
 )
 
 # ``services/repositories.py`` is a quirk of the skill_center layout —
@@ -221,6 +226,25 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "DeviceNotBoundError",
     "UnknownProviderError",
     "ConnInfoBuildError",
+    # ── Surfaced by widening the regex to cover ``core/services/<file>`` (R11/F43)
+    # Those imports previously matched nothing and skipped this check entirely.
+    #
+    # Domain types and helpers — the documented categories above:
+    "IdentityFileContent", "IdentityFileResponse", "IdentityFileUpdateResponse",
+    "IdentityFileListResponse", "BotIdentityFileResponse",
+    "BotIdentityFileUpdateResponse",
+    "VALID_ENTITY_TYPES",
+    "is_readonly",
+    "_HIDDEN_BASENAMES", "_HIDDEN_DIRNAMES",
+    "_POOL_SKILLS_LOCAL_RELPATH", "_SKILLS_LOCAL_RELPATH",
+    # Genuine pre-existing violations, NOT endorsements. Both are concrete
+    # service classes injected directly by routers that predate this guard
+    # covering their path; the engine-config service in the same directory was
+    # migrated to `api/engine_config_service.py` in R11/F43, and these two want
+    # the same treatment. Listed so the widened check reports the *new* ones
+    # instead of failing on day one — remove each as it is migrated.
+    "IdentityService",
+    "ResourceFileService",
     # aicoding data-proxy errors, caught by the app-level handler in app.py to
     # render the {"detail": {"error", "op"}} shape aixharness expects. Same
     # "errors an adapter translates" category as the entries above; surfaced
@@ -376,3 +400,31 @@ def test_core_service_import_check_covers_non_endpoint_files(monkeypatch) -> Non
             f"the import guard did not reach {rel} — it is being skipped as a "
             f"non-endpoint file, which is exactly the hole this pins shut"
         )
+
+
+@pytest.mark.unit
+def test_core_service_import_check_covers_flat_core_services(monkeypatch) -> None:
+    """Services under ``core/services/`` are in scope too (R11/F43).
+
+    The original regex required a module segment before ``.services.``
+    (``core.<module>.services.<file>``), so everything under ``core/services/``
+    — engine-config, identity, resource files — matched nothing and skipped the
+    layering check entirely. That is how a concrete ``EngineConfigService``
+    injection sat in three routers without CI noticing.
+
+    Proven the same way as the endpoint-scope test: drop a name from the
+    allow-list and assert the scan then reports the flat-path import.
+    """
+    assert _CORE_SERVICE_IMPORT_RE.match(
+        "agentclaw.community.core.services.engine_config"
+    ), "the flat core/services/ path is not matched — the hole is back"
+
+    monkeypatch.setattr(
+        "tests.community.architecture."
+        "test_http_adapter_layer_is_http_only._CORE_SERVICE_NAMES_OK",
+        _CORE_SERVICE_NAMES_OK - {"is_readonly"},
+    )
+    offenders = _core_service_import_offenders()
+    assert any("core.services.resource_file_service" in o for o in offenders), (
+        "imports from core/services/ are still invisible to the layering guard"
+    )

@@ -27,7 +27,7 @@ from agentclaw.community.api.skill_set_service_factory import (
 )
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
-from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -106,7 +106,7 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
             binder.bind(BotServiceProtocol, to=svc)
             binder.bind(PolicyServiceProtocol, to=policy)
             binder.bind(PassportPlugin, to=passport)
-            binder.bind(EngineConfigService, to=engine_config)
+            binder.bind(EngineConfigServiceProtocol, to=engine_config)
             binder.bind(BotRepository, to=bot_repo)
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
