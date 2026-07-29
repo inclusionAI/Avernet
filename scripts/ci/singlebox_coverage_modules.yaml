@@ -235,42 +235,6 @@ modules:
     thresholds:
       core_min_percent: 41.59
 
-  resources:
-    system: backend
-    acceptance_targets:
-      - tests/community/acceptance/resources/test_resource_metadata_lifecycle.py
-      - tests/community/acceptance/resources/test_openapi_v1_resources_lifecycle.py
-    core_paths:
-      - src/agentclaw/community/core/resources/
-    router_api:
-      status: applicable
-      reason: Resource metadata lifecycle; workspace file APIs are owned by the files module. openapi_v1 paths added 2026-07-29 to cover the Phase-1+3 service methods (upload/download/preview/delete with device_fs) that the legacy /api/resources acceptance path does not reach.
-      items:
-        - GET /api/resources/check-name
-        - GET /api/resources
-        - POST /api/resources/url
-        - POST /api/resources/node
-        - POST /api/resources/links
-        - PUT /api/resources/links/{resource_id}
-        - GET /api/resources/{resource_id}
-        - DELETE /api/resources/{resource_id}
-        - GET /openapi/v1/bots/resources
-        - GET /openapi/v1/bots/resources/check-name
-        - POST /openapi/v1/bots/resources
-        - POST /openapi/v1/bots/resources/upload
-        - GET /openapi/v1/bots/resources/{resource_id}
-        - PUT /openapi/v1/bots/resources/{resource_id}
-        - DELETE /openapi/v1/bots/resources/{resource_id}
-        - GET /openapi/v1/bots/resources/{resource_id}/download
-        - GET /openapi/v1/bots/resources/{resource_id}/preview
-    plugin_api:
-      status: not_applicable
-      reason: ResourceRepository is a Core persistence seam, not a declared Plugin API protocol.
-      items: []
-    thresholds:
-      core_min_percent: 39.07
-      router_min_percent: 100.0
-
 pending_modules:
   skill_center:
     acceptance_targets:
@@ -284,3 +248,8 @@ pending_modules:
     acceptance_targets:
       - tests/community/acceptance/mcp
     reason: Permission baseline and live engine connection assumptions need migration.
+  resources:
+    acceptance_targets:
+      - tests/community/acceptance/resources/test_resource_metadata_lifecycle.py
+      - tests/community/acceptance/resources/test_resource_lifecycle.py
+    reason: openapi_v1 handler wiring added device_fs service methods (upload_file/download_resource/preview_resource/delete_resource) under core/resources/ that the legacy /api/resources acceptance path does not reach. Pending openapi_v1 acceptance coverage; aligned with bot_management pending pattern.

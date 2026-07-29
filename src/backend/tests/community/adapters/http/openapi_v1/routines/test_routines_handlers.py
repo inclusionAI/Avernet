@@ -15,7 +15,6 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.routines.router import (
     _map_routine,
     _map_run,
-    _owner_from_bot,
     create_routine,
     delete_routine,
     get_routine,
@@ -31,14 +30,6 @@ from agentclaw.community.adapters.http.openapi_v1.routines.schemas import (
     RoutineUpdate,
     ScheduleTrigger,
 )
-
-
-class _StubBotRepo:
-    def __init__(self, bot=None):
-        self._bot = bot
-
-    def get_by_id(self, bot_id):
-        return self._bot
 
 
 class _StubCronService:
@@ -67,29 +58,6 @@ def _adapter_dict(**overrides):
     }
     base.update(overrides)
     return base
-
-
-@pytest.mark.asyncio
-async def test_owner_from_bot_returns_owner_id_and_name():
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
-    oid, name = _owner_from_bot("bot-x", repo)
-    assert oid == "u1"
-    assert name == "Alice"
-
-
-@pytest.mark.asyncio
-async def test_owner_from_bot_falls_back_to_bot_id():
-    repo = _StubBotRepo({"owner_id": None, "owner_name": None})
-    oid, name = _owner_from_bot("bot-x", repo)
-    assert oid == "bot-x"
-    assert name == ""
-
-
-@pytest.mark.asyncio
-async def test_owner_from_bot_handles_missing_bot_record():
-    repo = _StubBotRepo(None)
-    oid, name = _owner_from_bot("bot-x", repo)
-    assert oid == "bot-x"
 
 
 # ── _map_routine: adapter dict → openapi Routine (Phase 1 Task 2) ───────
@@ -143,23 +111,21 @@ def test_map_routine_invalid_ms_returns_empty_string():
 # ── list_routines handler wiring (Phase 1 Task 2) ──────────────────────
 #
 # Direct handler invocation (退路 B per task spec): bypasses FastAPI's
-# dependency wiring and supplies a stub factory. `principal` is `Any`, so
-# `None` is an acceptable stand-in. `request=None` exercises the
-# "outside-a-request" branch of `_request_id_from`.
+# dependency wiring and supplies a stub factory. `principal` carries
+# `{"user_id": "u1"}` so `caller_owner_id` resolves the caller.
+# `request=None` exercises the "outside-a-request" branch of `_request_id_from`.
 
 
 @pytest.mark.asyncio
 async def test_list_routines_returns_envelope_page():
     service = _StubCronService([_adapter_dict()])
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_routines(
         page=PageParams(page=1, page_size=20),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         status=None,
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -178,7 +144,7 @@ async def test_list_routines_returns_envelope_page():
     assert item.command == "echo hi"
     # owner fallback threaded through to list_all_crons
     assert service.last_call_kwargs.get("user_id") == "u1"
-    assert service.last_call_kwargs.get("nick_name") == "Alice"
+    assert service.last_call_kwargs.get("nick_name") == "u1"
     assert service.last_call_kwargs.get("bot_id") == "bot-x"
 
 
@@ -190,15 +156,13 @@ async def test_list_routines_paginates_items():
         _adapter_dict(id="t3"),
     ]
     service = _StubCronService(items)
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_routines(
         page=PageParams(page=2, page_size=1),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         status=None,
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -209,15 +173,13 @@ async def test_list_routines_paginates_items():
 @pytest.mark.asyncio
 async def test_list_routines_handles_empty_data_list():
     service = _StubCronService([])
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_routines(
         page=PageParams(page=1, page_size=20),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         status=None,
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -234,15 +196,13 @@ async def test_list_routines_handles_dict_data_envelope():
             return {"success": True, "data": {"items": [_adapter_dict()]}}
 
     service = _DictWrapService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_routines(
         page=PageParams(page=1, page_size=20),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         status=None,
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -255,40 +215,18 @@ async def test_list_routines_handles_dict_data_envelope():
 @pytest.mark.asyncio
 async def test_list_routines_reads_x_trace_id_from_request():
     service = _StubCronService([])
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     request = SimpleNamespace(headers={"x-trace-id": "trace-abc"})
 
     env = await list_routines(
         page=PageParams(page=1, page_size=20),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         status=None,
         factory=service,
-        bot_repo=repo,
         request=request,
     )
 
     assert env.request_id == "trace-abc"
-
-
-@pytest.mark.asyncio
-async def test_list_routines_falls_back_to_bot_id_when_owner_missing():
-    service = _StubCronService([])
-    repo = _StubBotRepo(None)  # no bot record → fallback to bot_id, ""
-
-    env = await list_routines(
-        page=PageParams(page=1, page_size=20),
-        principal=None,
-        bot_id="bot-x",
-        status=None,
-        factory=service,
-        bot_repo=repo,
-        request=None,
-    )
-
-    assert env.code == CODE_OK
-    assert service.last_call_kwargs.get("user_id") == "bot-x"
-    assert service.last_call_kwargs.get("nick_name") == ""
 
 
 # ── create_routine handler wiring (Phase 1 Task 3) ──────────────────────
@@ -321,7 +259,6 @@ class _StubCronCreateService:
 @pytest.mark.asyncio
 async def test_create_routine_returns_201_envelope():
     service = _StubCronCreateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     body = RoutineCreate(
         bot_id="bot-x",
         name="cron1",
@@ -331,9 +268,8 @@ async def test_create_routine_returns_201_envelope():
 
     env = await create_routine(
         body=body,
-        principal=None,
+        principal={"user_id": "u1"},
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -352,7 +288,6 @@ async def test_create_routine_returns_201_envelope():
 @pytest.mark.asyncio
 async def test_create_routine_uses_body_bot_id_for_owner_and_call():
     service = _StubCronCreateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     body = RoutineCreate(
         bot_id="bot-x",
         name="cron1",
@@ -362,16 +297,15 @@ async def test_create_routine_uses_body_bot_id_for_owner_and_call():
 
     await create_routine(
         body=body,
-        principal=None,
+        principal={"user_id": "u1"},
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
-    # body.bot_id flows both to _owner_from_bot and to factory.create_cron
+    # body.bot_id flows to factory.create_cron; owner comes from principal
     assert service.last_call_kwargs["bot_id"] == "bot-x"
     assert service.last_call_kwargs["user_id"] == "u1"
-    assert service.last_call_kwargs["nick_name"] == "Alice"
+    assert service.last_call_kwargs["nick_name"] == "u1"
 
 
 @pytest.mark.asyncio
@@ -380,7 +314,6 @@ async def test_create_routine_passes_schedule_as_cron_string():
     # RoutineCreate carries it nested under trigger.cron. Verify the
     # translation does NOT forward a {kind,expr,tz} dict to the service.
     service = _StubCronCreateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     body = RoutineCreate(
         bot_id="bot-x",
         name="cron1",
@@ -392,9 +325,8 @@ async def test_create_routine_passes_schedule_as_cron_string():
 
     await create_routine(
         body=body,
-        principal=None,
+        principal={"user_id": "u1"},
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -409,7 +341,6 @@ async def test_create_routine_passes_schedule_as_cron_string():
 @pytest.mark.asyncio
 async def test_create_routine_defaults_timezone_when_null():
     service = _StubCronCreateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     body = RoutineCreate(
         bot_id="bot-x",
         name="cron1",
@@ -420,9 +351,8 @@ async def test_create_routine_defaults_timezone_when_null():
 
     await create_routine(
         body=body,
-        principal=None,
+        principal={"user_id": "u1"},
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -432,7 +362,6 @@ async def test_create_routine_defaults_timezone_when_null():
 @pytest.mark.asyncio
 async def test_create_routine_reads_x_trace_id_from_request():
     service = _StubCronCreateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     request = SimpleNamespace(headers={"x-trace-id": "trace-create-1"})
     body = RoutineCreate(
         bot_id="bot-x",
@@ -443,9 +372,8 @@ async def test_create_routine_reads_x_trace_id_from_request():
 
     env = await create_routine(
         body=body,
-        principal=None,
+        principal={"user_id": "u1"},
         factory=service,
-        bot_repo=repo,
         request=request,
     )
 
@@ -455,7 +383,6 @@ async def test_create_routine_reads_x_trace_id_from_request():
 @pytest.mark.asyncio
 async def test_create_routine_500_when_service_returns_no_data():
     service = _StubCronCreateService(None)  # data is None
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     body = RoutineCreate(
         bot_id="bot-x",
         name="cron1",
@@ -466,9 +393,8 @@ async def test_create_routine_500_when_service_returns_no_data():
     with pytest.raises(HTTPException) as exc:
         await create_routine(
             body=body,
-            principal=None,
+            principal={"user_id": "u1"},
             factory=service,
-            bot_repo=repo,
             request=None,
         )
     assert exc.value.status_code == 500
@@ -505,14 +431,12 @@ class _StubCronDetailService:
 @pytest.mark.asyncio
 async def test_get_routine_returns_envelope_routine():
     service = _StubCronDetailService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await get_routine(
         routine_id="t1",
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -528,22 +452,20 @@ async def test_get_routine_returns_envelope_routine():
     # owner fallback threaded through to get_cron_detail
     assert service.last_call_kwargs.get("bot_id") == "bot-x"
     assert service.last_call_kwargs.get("user_id") == "u1"
-    assert service.last_call_kwargs.get("nick_name") == "Alice"
+    assert service.last_call_kwargs.get("nick_name") == "u1"
     assert service.last_call_kwargs.get("task_id") == "t1"
 
 
 @pytest.mark.asyncio
 async def test_get_routine_404_when_data_missing():
     service = _StubCronDetailService(None)  # data is None → not a dict
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     with pytest.raises(HTTPException) as exc:
         await get_routine(
             routine_id="t1",
-            principal=None,
+            principal={"user_id": "u1"},
             bot_id="bot-x",
             factory=service,
-            bot_repo=repo,
             request=None,
         )
     assert exc.value.status_code == 404
@@ -555,15 +477,13 @@ async def test_get_routine_404_when_data_missing():
 @pytest.mark.asyncio
 async def test_get_routine_reads_x_trace_id_from_request():
     service = _StubCronDetailService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     request = SimpleNamespace(headers={"x-trace-id": "trace-get-1"})
 
     env = await get_routine(
         routine_id="t1",
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=request,
     )
 
@@ -602,16 +522,14 @@ class _StubCronUpdateService:
 @pytest.mark.asyncio
 async def test_update_routine_returns_envelope_routine():
     service = _StubCronUpdateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     body = RoutineUpdate(name="cron-renamed")
 
     env = await update_routine(
         routine_id="t1",
         body=body,
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -628,7 +546,6 @@ async def test_update_routine_passes_partial_body_and_schedule_string():
     # Only set fields flow to the adapter; trigger.cron becomes a raw
     # ``schedule`` string (NOT a {kind,expr,tz} dict — Task 3 contract).
     service = _StubCronUpdateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     body = RoutineUpdate(
         name="cron-renamed",
         trigger=ScheduleTrigger(cron="0 10 * * *"),
@@ -640,10 +557,9 @@ async def test_update_routine_passes_partial_body_and_schedule_string():
     await update_routine(
         routine_id="t1",
         body=body,
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -657,7 +573,7 @@ async def test_update_routine_passes_partial_body_and_schedule_string():
     assert service.last_call_kwargs["task_id"] == "t1"
     assert service.last_call_kwargs["bot_id"] == "bot-x"
     assert service.last_call_kwargs["user_id"] == "u1"
-    assert service.last_call_kwargs["nick_name"] == "Alice"
+    assert service.last_call_kwargs["nick_name"] == "u1"
 
 
 @pytest.mark.asyncio
@@ -665,16 +581,14 @@ async def test_update_routine_omits_unset_fields_from_body():
     # Partial update: fields left None must NOT appear in the adapter body
     # (the engine treats presence as "set this field").
     service = _StubCronUpdateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     body = RoutineUpdate(name="only-name")
 
     await update_routine(
         routine_id="t1",
         body=body,
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -692,17 +606,15 @@ async def test_update_routine_omits_unset_fields_from_body():
 @pytest.mark.asyncio
 async def test_update_routine_404_when_data_missing():
     service = _StubCronUpdateService(None)  # data is None
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     body = RoutineUpdate(name="cron-renamed")
 
     with pytest.raises(HTTPException) as exc:
         await update_routine(
             routine_id="t1",
             body=body,
-            principal=None,
+            principal={"user_id": "u1"},
             bot_id="bot-x",
             factory=service,
-            bot_repo=repo,
             request=None,
         )
     assert exc.value.status_code == 404
@@ -711,17 +623,15 @@ async def test_update_routine_404_when_data_missing():
 @pytest.mark.asyncio
 async def test_update_routine_reads_x_trace_id_from_request():
     service = _StubCronUpdateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     request = SimpleNamespace(headers={"x-trace-id": "trace-upd-1"})
     body = RoutineUpdate(name="cron-renamed")
 
     env = await update_routine(
         routine_id="t1",
         body=body,
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=request,
     )
 
@@ -802,14 +712,12 @@ class _StubCronDeleteService:
 @pytest.mark.asyncio
 async def test_delete_routine_returns_envelope_deleted_true():
     service = _StubCronDeleteService(success=True)
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await delete_routine(
         routine_id="t1",
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -822,7 +730,7 @@ async def test_delete_routine_returns_envelope_deleted_true():
     # owner fallback threaded through to delete_cron
     assert service.last_call_kwargs.get("bot_id") == "bot-x"
     assert service.last_call_kwargs.get("user_id") == "u1"
-    assert service.last_call_kwargs.get("nick_name") == "Alice"
+    assert service.last_call_kwargs.get("nick_name") == "u1"
     assert service.last_call_kwargs.get("task_id") == "t1"
 
 
@@ -830,14 +738,12 @@ async def test_delete_routine_returns_envelope_deleted_true():
 async def test_delete_routine_returns_deleted_false_when_success_false():
     # Engine signals failure without raising → surface as Deleted(deleted=False).
     service = _StubCronDeleteService(success=False, payload={})
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await delete_routine(
         routine_id="t1",
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -850,15 +756,13 @@ async def test_delete_routine_returns_deleted_false_when_success_false():
 @pytest.mark.asyncio
 async def test_delete_routine_reads_x_trace_id_from_request():
     service = _StubCronDeleteService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     request = SimpleNamespace(headers={"x-trace-id": "trace-del-1"})
 
     env = await delete_routine(
         routine_id="t1",
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=request,
     )
 
@@ -900,14 +804,12 @@ class _StubCronRunService:
 @pytest.mark.asyncio
 async def test_run_routine_returns_completed_status_when_ran():
     service = _StubCronRunService(ran=True, reason="")
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await run_routine(
         routine_id="t1",
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -926,21 +828,19 @@ async def test_run_routine_returns_completed_status_when_ran():
     # owner fallback threaded through
     assert service.last_call_kwargs.get("bot_id") == "bot-x"
     assert service.last_call_kwargs.get("user_id") == "u1"
-    assert service.last_call_kwargs.get("nick_name") == "Alice"
+    assert service.last_call_kwargs.get("nick_name") == "u1"
     assert service.last_call_kwargs.get("task_id") == "t1"
 
 
 @pytest.mark.asyncio
 async def test_run_routine_returns_failed_status_when_reason():
     service = _StubCronRunService(ran=False, reason="agent crashed")
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await run_routine(
         routine_id="t1",
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -951,14 +851,12 @@ async def test_run_routine_returns_failed_status_when_reason():
 async def test_run_routine_returns_unknown_status_when_no_reason():
     # ran=False and no reason → unknown (neither completed nor failed).
     service = _StubCronRunService(ran=False, reason="")
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await run_routine(
         routine_id="t1",
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -970,15 +868,13 @@ async def test_run_routine_returns_unknown_status_when_no_reason():
 @pytest.mark.asyncio
 async def test_run_routine_reads_x_trace_id_from_request():
     service = _StubCronRunService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     request = SimpleNamespace(headers={"x-trace-id": "trace-run-1"})
 
     env = await run_routine(
         routine_id="t1",
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=request,
     )
 
@@ -1032,15 +928,13 @@ async def test_list_routine_runs_returns_envelope_page_mapped_from_runs():
         _run_dict(job_id="r2", status="failed"),
     ]
     service = _StubCronRunsService(runs)
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=1, page_size=20),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -1061,7 +955,7 @@ async def test_list_routine_runs_returns_envelope_page_mapped_from_runs():
     # owner fallback threaded through
     assert service.last_call_kwargs.get("bot_id") == "bot-x"
     assert service.last_call_kwargs.get("user_id") == "u1"
-    assert service.last_call_kwargs.get("nick_name") == "Alice"
+    assert service.last_call_kwargs.get("nick_name") == "u1"
     assert service.last_call_kwargs.get("task_id") == "t1"
 
 
@@ -1069,15 +963,13 @@ async def test_list_routine_runs_returns_envelope_page_mapped_from_runs():
 async def test_list_routine_runs_paginates_items():
     runs = [_run_dict(job_id=f"r{i}", status="succeeded") for i in range(5)]
     service = _StubCronRunsService(runs)
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=2, page_size=2),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -1088,15 +980,13 @@ async def test_list_routine_runs_paginates_items():
 @pytest.mark.asyncio
 async def test_list_routine_runs_handles_empty_runs():
     service = _StubCronRunsService([])
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=1, page_size=20),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -1110,16 +1000,14 @@ async def test_list_routine_runs_handles_empty_runs():
 @pytest.mark.asyncio
 async def test_list_routine_runs_reads_x_trace_id_from_request():
     service = _StubCronRunsService([])
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     request = SimpleNamespace(headers={"x-trace-id": "trace-runs-1"})
 
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=1, page_size=20),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=request,
     )
 
@@ -1135,15 +1023,13 @@ async def test_list_routine_runs_handles_bare_data_list_defensively():
             return {"success": True, "data": [_run_dict(job_id="r1")]}
 
     service = _BareListService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=1, page_size=20),
-        principal=None,
+        principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        bot_repo=repo,
         request=None,
     )
 

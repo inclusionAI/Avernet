@@ -13,6 +13,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_CREATED,
     CODE_OK,
@@ -24,28 +25,12 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.di import Injected
-from agentclaw.community.plugins.bot_repository import BotRepository
 
 from .schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate, ScheduleTrigger
 
 router = APIRouter(prefix="/openapi/v1/bots/routines", tags=["routines"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
-
-
-def _owner_from_bot(bot_id: str, bot_repo: Any) -> tuple[str, str]:
-    """Resolve the caller's user_id / nick_name from the bot record.
-
-    Personal-bot scope: the bot's owner is the caller, so owner_id/owner_name
-    stand in for the gateway-forwarded caller identity until Direction A
-    lands — then swap to ``principal.subject`` (the seam). Fallback to bot_id
-    when owner_id is missing (single-box default bot).
-    """
-    bot = bot_repo.get_by_id(bot_id) if bot_repo is not None else None
-    bot = bot or {}
-    owner_id = bot.get("owner_id") or bot_id
-    owner_name = bot.get("owner_name") or ""
-    return owner_id, owner_name
 
 
 def _request_id_from(request: "Request | None") -> str:
@@ -123,7 +108,6 @@ async def list_routines(
     bot_id: str,
     status: str | None = None,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Page[Routine]]:
     """List routines (filter + paginate).
@@ -134,7 +118,9 @@ async def list_routines(
     set and let the client filter on ``enabled``. Wire a server-side filter
     here only if/when the engine surfaces a status dimension.
     """
-    user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
+    owner_id = caller_owner_id(principal)
+    user_id = owner_id
+    nick_name = owner_id
     result = await factory.list_all_crons(
         user_id=user_id, nick_name=nick_name, bot_id=bot_id
     )
@@ -162,7 +148,6 @@ async def create_routine(
     body: RoutineCreate,
     principal: PrincipalDep,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Routine]:
     """Create a routine.
@@ -174,7 +159,9 @@ async def create_routine(
     to ``Asia/Shanghai`` to match legacy ``cron/router.py``'s create path.
     """
     bot_id = body.bot_id
-    user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
+    owner_id = caller_owner_id(principal)
+    user_id = owner_id
+    nick_name = owner_id
     adapter_body = {
         "name": body.name,
         "schedule": body.trigger.cron,
@@ -206,17 +193,18 @@ async def get_routine(
     principal: PrincipalDep,
     bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Routine]:
     """Get a routine.
 
     C3: the path carries only ``routine_id`` (no routine table to
     reverse-map to a bot), so ``bot_id`` is a required query. Owner
-    identity comes from the bot record (Direction A will swap to
-    ``principal.subject``). Missing/non-dict ``data`` collapses to 404.
+    identity comes from the authenticated principal via
+    ``caller_owner_id``. Missing/non-dict ``data`` collapses to 404.
     """
-    user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
+    owner_id = caller_owner_id(principal)
+    user_id = owner_id
+    nick_name = owner_id
     result = await factory.get_cron_detail(
         bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
     )
@@ -238,7 +226,6 @@ async def update_routine(
     principal: PrincipalDep,
     bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Routine]:
     """Update a routine (partial).
@@ -249,7 +236,9 @@ async def update_routine(
     wraps it on read; Task 3 contract). Missing/non-dict ``data`` on the
     response collapses to 404.
     """
-    user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
+    owner_id = caller_owner_id(principal)
+    user_id = owner_id
+    nick_name = owner_id
     update_body: dict = {}
     if body.name is not None:
         update_body["name"] = body.name
@@ -285,7 +274,6 @@ async def delete_routine(
     principal: PrincipalDep,
     bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Deleted]:
     """Delete a routine.
@@ -295,7 +283,9 @@ async def delete_routine(
     published-stage deletes with CronRelayError (403). We surface the
     engine's ``success`` flag as ``Deleted(deleted=…)``.
     """
-    user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
+    owner_id = caller_owner_id(principal)
+    user_id = owner_id
+    nick_name = owner_id
     result = await factory.delete_cron(
         bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
     )
@@ -314,7 +304,6 @@ async def run_routine(
     principal: PrincipalDep,
     bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[RoutineRun]:
     """Run a routine now.
@@ -328,7 +317,9 @@ async def run_routine(
     ``finished_at`` are None because the adapter doesn't surface them on the
     run-trigger seam (use ``GET /{routine_id}/runs`` for actual timestamps).
     """
-    user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
+    owner_id = caller_owner_id(principal)
+    user_id = owner_id
+    nick_name = owner_id
     result = await factory.run_cron(
         bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
     )
@@ -366,7 +357,6 @@ async def list_routine_runs(
     principal: PrincipalDep,
     bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Page[RoutineRun]]:
     """List a routine's execution history.
@@ -378,7 +368,9 @@ async def list_routine_runs(
     ``data``, leaving ``runs`` intact). We map each entry via ``_map_run``
     and paginate client-side.
     """
-    user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
+    owner_id = caller_owner_id(principal)
+    user_id = owner_id
+    nick_name = owner_id
     result = await factory.get_cron_runs(
         bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
     )

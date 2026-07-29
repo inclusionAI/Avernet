@@ -14,10 +14,10 @@ until that lands (see ``openapi_v1/dependencies.py`` and the cross-team tenant
 isolation track in ``src/backend/docs/openapi-v1/README.zh-CN.md``).
 
 Gates / follow-ups (block public-readiness, NOT a silent deployment):
-- Owner/identity comes from ``bot_repo.get_by_id`` as a stand-in because
-  ``require_principal`` returns ``None`` (stub — gateway's signed-Principal seam
-  not yet landed). When Direction A lands, swap to ``principal.subject`` and
-  this group needs no handler change (the seam is the contract point).
+- Owner/identity comes from ``caller_owner_id(principal)`` (fail-closed: a
+  ``None`` principal raises ``MissingPrincipalError`` → 401), mirroring the
+  bots router. The gateway's signed-Principal seam is the single replaceable
+  point — when it lands, only ``principal.py``/``dependencies.py`` change.
 - Cross-tenant isolation rides on the ac_bots guard (Phase 0); a deployed DDL
   for ``ac_resource.avernet_tenant`` MUST precede this code reaching prod (see
   Phase 0 plan) — code first / DDL later breaks bot reads with a missing column.
@@ -43,6 +43,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
+from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -200,17 +201,17 @@ async def check_resource_name(
     # legacy handler's most common case — the openapi check-name call shape
     # has no FOLDER equivalent).
     legacy_type = _legacy_type_for(type) or _LegacyType.FILE
-    # parent_path / user_id are intentionally None placeholders: the openapi
-    # check-name contract has no parent_path concept (resources are bot-scoped
-    # only), and user_id rides on Direction A's principal seam (not yet
-    # landed). The slim service signature REQUIRES both keyword args (no
-    # defaults), so pass them explicitly as None — not because we have real
-    # values, but because the service contract demands them.
+    # owner_id from the verified principal (fail-closed via caller_owner_id);
+    # parent_path stays None — the openapi check-name contract has no
+    # parent_path concept (resources are bot-scoped only). The slim service
+    # signature REQUIRES both keyword args (no defaults), so pass them
+    # explicitly.
+    owner_id = caller_owner_id(principal)
     exists = await service.check_name_exists(
         name=name,
         resource_type=legacy_type,
         parent_path=None,
-        user_id=None,
+        user_id=owner_id,
     )
     return Envelope(
         code=CODE_OK,
@@ -288,15 +289,11 @@ async def upload_resource(
     device_fs is resolved per-bot (Task 2 paradigm); upload_file is async and
     raises ValueError on duplicate name → 409 Conflict (legacy parity with
     create). device_fs operations are delivered through the
-    dispatcher-resolved boundary directly.
+    dispatcher-resolved boundary directly. owner_id comes from the verified
+    principal (``caller_owner_id``), fail-closed — mirroring the bots router.
     """
     effective_bot_id = bot_id
-    bot = bot_repo.get_by_id(effective_bot_id)
-    if not bot:
-        raise HTTPException(
-            status_code=404, detail=f"Bot {effective_bot_id} not found"
-        )
-    owner_id = bot.get("owner_id") or effective_bot_id
+    owner_id = caller_owner_id(principal)
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)
@@ -396,19 +393,14 @@ async def delete_resource(
 ) -> Envelope[Deleted]:
     """Delete a resource (file → device FS, link/folder → DB soft-delete).
 
-    ``device_fs`` is resolved per-bot from ``ac_bots``. Until Direction A
-    lands, ``owner_id`` comes from the bot record rather than the principal
-    (which is currently a stub). The four injected deps (factory, bot_repo,
-    resolver, device_fs_dispatcher) stay out of the served OpenAPI schema —
-    see ``tests/community/contracts/gateway/test_public_namespace.py``.
+    ``device_fs`` is resolved per-bot from ``ac_bots``; ``owner_id`` comes from
+    the verified principal (``caller_owner_id``), fail-closed — mirroring the
+    bots router. The four injected deps (factory, bot_repo, resolver,
+    device_fs_dispatcher) stay out of the served OpenAPI schema — see
+    ``tests/community/contracts/gateway/test_public_namespace.py``.
     """
     effective_bot_id = bot_id
-    bot = bot_repo.get_by_id(effective_bot_id)
-    if not bot:
-        raise HTTPException(
-            status_code=404, detail=f"Bot {effective_bot_id} not found"
-        )
-    owner_id = bot.get("owner_id") or effective_bot_id
+    owner_id = caller_owner_id(principal)
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)
@@ -442,19 +434,14 @@ async def download_resource(
     """Download a resource's bytes (raw, not enveloped).
 
     device_fs is resolved per-bot from ``ac_bots`` (same chain as delete /
-    upload); owner_id comes from the bot record (Direction A will wire
-    principal → user_id). ``device_fs.read_file`` is delivered through the
-    dispatcher-resolved boundary directly (parallel to upload_file).
-    Service returns ``(bytes, mime)`` or ``None`` → 404 (not-found /
-    not-a-file / is-directory / read-failure all collapse to 404).
+    upload); owner_id comes from the verified principal (``caller_owner_id``),
+    fail-closed — mirroring the bots router. ``device_fs.read_file`` is
+    delivered through the dispatcher-resolved boundary directly (parallel to
+    upload_file). Service returns ``(bytes, mime)`` or ``None`` → 404
+    (not-found / not-a-file / is-directory / read-failure all collapse to 404).
     """
     effective_bot_id = bot_id
-    bot = bot_repo.get_by_id(effective_bot_id)
-    if not bot:
-        raise HTTPException(
-            status_code=404, detail=f"Bot {effective_bot_id} not found"
-        )
-    owner_id = bot.get("owner_id") or effective_bot_id
+    owner_id = caller_owner_id(principal)
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)
@@ -481,27 +468,23 @@ async def preview_resource(
     """Get a resource preview (text-ified content, enveloped).
 
     device_fs is resolved per-bot from ``ac_bots`` (same chain as delete /
-    upload / download); owner_id comes from the bot record (Direction A
-    will wire principal → user_id). ``device_fs.read_file`` is delivered
-    through the dispatcher-resolved boundary directly. Service returns a
-    dict ``{content, content_type, size}`` or ``None`` → 404 (not-found /
-    not-a-file / is-directory / read-failure all collapse to 404 — service
-    already filters non-file / directory / empty-bytes). ``ValueError``
-    from the service (content > 1 MB cap) → 413 (legacy parity). Unlike
-    download (raw ``Response``), preview returns an enveloped ``Preview``
-    schema so the caller gets a structured content_type + content pair.
+    upload / download); owner_id comes from the verified principal
+    (``caller_owner_id``), fail-closed — mirroring the bots router.
+    ``device_fs.read_file`` is delivered through the dispatcher-resolved
+    boundary directly. Service returns a dict ``{content, content_type,
+    size}`` or ``None`` → 404 (not-found / not-a-file / is-directory /
+    read-failure all collapse to 404 — service already filters non-file /
+    directory / empty-bytes). ``ValueError`` from the service (content > 1
+    MB cap) → 413 (legacy parity). Unlike download (raw ``Response``),
+    preview returns an enveloped ``Preview`` schema so the caller gets a
+    structured content_type + content pair.
 
     The four injected deps (factory, bot_repo, resolver, device_fs_dispatcher)
     stay out of the served OpenAPI schema — see
     ``tests/community/contracts/gateway/test_public_namespace.py``.
     """
     effective_bot_id = bot_id
-    bot = bot_repo.get_by_id(effective_bot_id)
-    if not bot:
-        raise HTTPException(
-            status_code=404, detail=f"Bot {effective_bot_id} not found"
-        )
-    owner_id = bot.get("owner_id") or effective_bot_id
+    owner_id = caller_owner_id(principal)
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)

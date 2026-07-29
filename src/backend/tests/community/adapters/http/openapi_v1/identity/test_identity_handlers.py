@@ -1,9 +1,10 @@
 """openapi_v1 identity handler unit tests.
 
 Direct handler invocation (退路 B per task spec): bypasses FastAPI's
-dependency wiring and supplies a stub service. ``principal`` is ``Any``,
-so ``None`` is an acceptable stand-in. ``request=None`` exercises the
-"outside-a-request" branch of ``_request_id_from``.
+dependency wiring and supplies a stub service. ``principal`` carries
+``{"user_id": "u1"}`` so ``caller_owner_id`` resolves the caller.
+``request=None`` exercises the "outside-a-request" branch of
+``_request_id_from``.
 """
 
 from types import SimpleNamespace
@@ -37,14 +38,6 @@ _ALL_IDENTITY_FILES = [
 ]
 
 
-class _StubBotRepo:
-    def __init__(self, bot=None):
-        self._bot = bot
-
-    def get_by_id(self, bot_id):
-        return self._bot
-
-
 class _StubIdentityService:
     """Minimal stub satisfying the IdentityService.list_bot_files seam."""
 
@@ -76,13 +69,11 @@ def _all_present() -> list[tuple[str, bool]]:
 @pytest.mark.asyncio
 async def test_list_bot_identity_files_returns_all_16_with_exists():
     service = _StubIdentityService(_all_present())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
-        principal=None,
+        principal={"user_id": "u1"},
         identity_service=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -106,53 +97,15 @@ async def test_list_bot_identity_files_returns_all_16_with_exists():
 
 
 @pytest.mark.asyncio
-async def test_list_bot_identity_files_falls_back_owner_when_missing():
-    service = _StubIdentityService(_all_present())
-    repo = _StubBotRepo({"owner_id": None, "owner_name": None})  # → fallback to bot_id
-
-    env = await list_bot_identity_files(
-        bot_id="bot-x",
-        principal=None,
-        identity_service=service,
-        bot_repo=repo,
-        request=None,
-    )
-
-    assert env.code == CODE_OK
-    # owner_id and entity_id both fall back to bot_id
-    assert service.last_call_kwargs["owner_id"] == "bot-x"
-    assert service.last_call_kwargs["entity_id"] == "bot-x"
-
-
-@pytest.mark.asyncio
-async def test_list_bot_identity_files_handles_missing_bot_record():
-    service = _StubIdentityService(_all_present())
-    repo = _StubBotRepo(None)  # no bot record at all
-
-    env = await list_bot_identity_files(
-        bot_id="bot-x",
-        principal=None,
-        identity_service=service,
-        bot_repo=repo,
-        request=None,
-    )
-
-    assert env.code == CODE_OK
-    assert service.last_call_kwargs["owner_id"] == "bot-x"
-
-
-@pytest.mark.asyncio
 async def test_list_bot_identity_files_marks_absent_files_false():
     # Half present, half absent — exists flag must reflect each probe.
     presence = [(ft, i % 2 == 0) for i, ft in enumerate(_ALL_IDENTITY_FILES)]
     service = _StubIdentityService(presence)
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
-        principal=None,
+        principal={"user_id": "u1"},
         identity_service=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -165,14 +118,12 @@ async def test_list_bot_identity_files_marks_absent_files_false():
 @pytest.mark.asyncio
 async def test_list_bot_identity_files_reads_x_trace_id_from_request():
     service = _StubIdentityService(_all_present())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     request = SimpleNamespace(headers={"x-trace-id": "trace-identity-1"})
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
-        principal=None,
+        principal={"user_id": "u1"},
         identity_service=service,
-        bot_repo=repo,
         request=request,
     )
 
@@ -189,14 +140,12 @@ async def test_list_bot_identity_files_400_when_entity_type_invalid():
             raise ValueError(f"Invalid entity_type: {entity_type}")
 
     service = _RaisingService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     with pytest.raises(HTTPException) as exc:
         await list_bot_identity_files(
             bot_id="bot-x",
-            principal=None,
+            principal={"user_id": "u1"},
             identity_service=service,
-            bot_repo=repo,
             request=None,
         )
     assert exc.value.status_code == 400
@@ -267,14 +216,12 @@ class _StubGetUpdateService:
 @pytest.mark.asyncio
 async def test_get_bot_identity_file_returns_content_and_path():
     service = _StubGetUpdateService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await get_bot_identity_file(
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
-        principal=None,
+        principal={"user_id": "u1"},
         identity_service=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -302,15 +249,13 @@ async def test_get_bot_identity_file_returns_content_and_path():
 @pytest.mark.asyncio
 async def test_get_bot_identity_file_400_on_value_error():
     service = _StubGetUpdateService(raise_on_get=ValueError("Invalid file_type: BOGUS.md"))
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     with pytest.raises(HTTPException) as exc:
         await get_bot_identity_file(
             bot_id="bot-x",
             file_type=IdentityFileType.RULES,
-            principal=None,
+            principal={"user_id": "u1"},
             identity_service=service,
-            bot_repo=repo,
             request=None,
         )
     assert exc.value.status_code == 400
@@ -320,15 +265,13 @@ async def test_get_bot_identity_file_400_on_value_error():
 @pytest.mark.asyncio
 async def test_update_bot_identity_file_returns_ref():
     service = _StubGetUpdateService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     env = await update_bot_identity_file(
         bot_id="bot-x",
         file_type=IdentityFileType.SOUL,
         body=IdentityFileWrite(content="# my soul"),
-        principal=None,
+        principal={"user_id": "u1"},
         identity_service=service,
-        bot_repo=repo,
         request=None,
     )
 
@@ -351,16 +294,14 @@ async def test_update_bot_identity_file_returns_ref():
 @pytest.mark.asyncio
 async def test_update_bot_identity_file_400_on_value_error():
     service = _StubGetUpdateService(raise_on_update=ValueError("Invalid entity_type: bogus"))
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
 
     with pytest.raises(HTTPException) as exc:
         await update_bot_identity_file(
             bot_id="bot-x",
             file_type=IdentityFileType.RULES,
             body=IdentityFileWrite(content="x"),
-            principal=None,
+            principal={"user_id": "u1"},
             identity_service=service,
-            bot_repo=repo,
             request=None,
         )
     assert exc.value.status_code == 400
@@ -370,18 +311,17 @@ async def test_update_bot_identity_file_400_on_value_error():
 @pytest.mark.asyncio
 async def test_get_and_update_thread_x_trace_id():
     service = _StubGetUpdateService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
     request = SimpleNamespace(headers={"x-trace-id": "trace-identity-2"})
 
     get_env = await get_bot_identity_file(
-        bot_id="bot-x", file_type=IdentityFileType.RULES, principal=None,
-        identity_service=service, bot_repo=repo, request=request,
+        bot_id="bot-x", file_type=IdentityFileType.RULES, principal={"user_id": "u1"},
+        identity_service=service, request=request,
     )
     assert get_env.request_id == "trace-identity-2"
 
     update_env = await update_bot_identity_file(
         bot_id="bot-x", file_type=IdentityFileType.RULES,
-        body=IdentityFileWrite(content="x"), principal=None,
-        identity_service=service, bot_repo=repo, request=request,
+        body=IdentityFileWrite(content="x"), principal={"user_id": "u1"},
+        identity_service=service, request=request,
     )
     assert update_env.request_id == "trace-identity-2"
