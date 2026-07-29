@@ -111,6 +111,7 @@ class SkillsPoolReconcileService:
         if state.lease_owner != lease_owner:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.LEASE_NOT_HELD)
 
+        generation = state.migration_generation
         bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
         if bot is None:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_NOT_FOUND)
@@ -121,7 +122,33 @@ class SkillsPoolReconcileService:
             state.rollout_evidence is not None
             and state.rollout_evidence.engine_type != engine
         ):
-            return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
+            evidence = {
+                "reason": "bot_engine_changed",
+                "claimed_engine": state.rollout_evidence.engine_type,
+                "current_engine": engine,
+            }
+            if (
+                state.phase
+                in {
+                    SkillLayoutPhase.POOL_PREPARING,
+                    SkillLayoutPhase.POOL_READY,
+                }
+                and not state.data_plane_cutover_committed
+            ):
+                if not self._layouts.release_changed_engine_claim(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    evidence=evidence,
+                ):
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                        evidence=evidence,
+                    )
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.BOT_CHANGED,
+                evidence=evidence,
+            )
         if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
 
@@ -129,7 +156,6 @@ class SkillsPoolReconcileService:
         if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         user_id = str(owner_id)
-        generation = state.migration_generation
         if not self._layouts.holds_lease(
             scope=scope,
             migration_generation=generation,
@@ -279,23 +305,31 @@ class SkillsPoolReconcileService:
             or repair_evidence_refresh
         ):
             if not state.data_plane_cutover_committed:
-                recorded = self._layouts.record_ready_probe(
-                    scope=scope,
-                    migration_generation=generation,
-                    lease_owner=lease_owner,
-                    preparation_id=probe.preparation_id,
-                    evidence=probe.evidence,
-                )
-                if not recorded:
-                    return SkillsPoolReconcileResult(
-                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                if state.phase in {
+                    SkillLayoutPhase.POOL_PREPARING,
+                    SkillLayoutPhase.POOL_READY,
+                }:
+                    recorded = self._layouts.record_ready_probe(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        preparation_id=probe.preparation_id,
+                        evidence=probe.evidence,
                     )
-                if not self._layouts.begin_cutover(
-                    scope=scope,
-                    migration_generation=generation,
-                    lease_owner=lease_owner,
-                    preparation_id=probe.preparation_id,
-                ):
+                    if not recorded:
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                        )
+                    if not self._layouts.begin_cutover(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        preparation_id=probe.preparation_id,
+                    ):
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                        )
+                elif state.phase is not SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER:
                     return SkillsPoolReconcileResult(
                         SkillsPoolReconcileOutcome.STATE_RACE_LOST
                     )
@@ -405,8 +439,54 @@ class SkillsPoolReconcileService:
                     preparation_id=probe.preparation_id,
                     evidence=cutover.to_dict(),
                 )
+            quarantine_path = cutover.evidence.get("quarantine")
+            if (
+                isinstance(quarantine_path, str)
+                and quarantine_path
+                and self._layouts.quarantine_identity_conflicts(
+                    scope=scope,
+                    migration_generation=generation,
+                    engine=engine,
+                    path=quarantine_path,
+                )
+            ):
+                conflict_evidence = {
+                    **cutover.to_dict(),
+                    "reason": "quarantine_identity_conflict",
+                }
+                if state.data_plane_cutover_committed:
+                    recorded = self._layouts.record_post_cutover_failure(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code="QUARANTINE_IDENTITY_CONFLICT",
+                        failure_stage="post_cutover_evidence",
+                        retryable=False,
+                        evidence=conflict_evidence,
+                    )
+                    outcome = SkillsPoolReconcileOutcome.INVALID
+                else:
+                    recorded = self._layouts.mark_repair_required(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code="QUARANTINE_IDENTITY_CONFLICT",
+                        failure_stage="cutover_identity",
+                        evidence=conflict_evidence,
+                    )
+                    outcome = SkillsPoolReconcileOutcome.MANUAL_REPAIR_REQUIRED
+                if not recorded:
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                        preparation_id=probe.preparation_id,
+                    )
+                return SkillsPoolReconcileResult(
+                    outcome,
+                    preparation_id=probe.preparation_id,
+                    evidence=conflict_evidence,
+                    retryable=False,
+                )
             if state.data_plane_cutover_committed:
-                quarantine_path = cutover.evidence.get("quarantine")
                 if (
                     not isinstance(quarantine_path, str) or not quarantine_path
                 ) and not self._layouts.has_quarantine_identity(
@@ -441,7 +521,6 @@ class SkillsPoolReconcileService:
                         preparation_id=probe.preparation_id,
                     )
             else:
-                quarantine_path = cutover.evidence.get("quarantine")
                 if (
                     not isinstance(quarantine_path, str) or not quarantine_path
                 ) and not self._layouts.has_quarantine_identity(

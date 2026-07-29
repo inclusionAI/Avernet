@@ -88,6 +88,8 @@ class FakeLayoutRepository:
         self.committed_locators: dict[int, str] | None = None
         self.lease_valid = True
         self.fail_once_at: str | None = None
+        self.quarantine_identity = True
+        self.quarantine_conflict = False
 
     def _should_fail(self, stage: str) -> bool:
         if self.fail_once_at != stage:
@@ -133,6 +135,25 @@ class FakeLayoutRepository:
         )
         return True
 
+    def release_changed_engine_claim(self, **kwargs: object) -> bool:
+        if self._should_fail("changed_engine_release"):
+            return False
+        if not self._owns(kwargs):
+            return False
+        self.events.append("changed_engine_release")
+        self.state = replace(
+            self.state,
+            target_layout=None,
+            phase=SkillLayoutPhase.LEGACY_ACTIVE,
+            migration_generation=None,
+            preparation_id=None,
+            last_probe_result="BOT_CHANGED",
+            last_probe_evidence=dict(kwargs["evidence"]),
+            lease_owner=None,
+            lease_expires_at=None,
+        )
+        return True
+
     def holds_lease(self, **kwargs: object) -> bool:
         return self.lease_valid and self._owns(kwargs)
 
@@ -153,6 +174,19 @@ class FakeLayoutRepository:
         )
         return True
 
+    def has_quarantine_identity(self, **kwargs: object) -> bool:
+        return (
+            kwargs["scope"] == SCOPE
+            and kwargs["migration_generation"] == GENERATION
+            and self.quarantine_identity
+        )
+
+    def quarantine_identity_conflicts(self, **kwargs: object) -> bool:
+        return (
+            kwargs["scope"] == SCOPE
+            and kwargs["migration_generation"] == GENERATION
+            and self.quarantine_conflict
+        )
     def record_post_cutover_evidence(self, **kwargs: object) -> bool:
         if self._should_fail("post_cutover_evidence"):
             return False
@@ -606,7 +640,7 @@ async def test_pre_upgrade_runtime_reconciles_activating_generation() -> None:
 
     assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
     assert runtime.events == ["probe", "cutover", "mapping", "verify"]
-    assert layouts.events == ["ready", "begin", "cutover", "database"]
+    assert layouts.events == ["cutover", "database"]
     assert "not_capable_release" not in layouts.events
 
 
@@ -638,7 +672,7 @@ async def test_activating_old_runtime_without_identity_waits_for_upgrade() -> No
     assert result.outcome is SkillsPoolReconcileOutcome.TRANSIENT_ERROR
     assert result.retryable is True
     assert runtime.events == ["probe", "cutover"]
-    assert layouts.events == ["ready", "begin", "finalizing"]
+    assert layouts.events == ["finalizing"]
     assert "not_capable_release" not in layouts.events
     assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
     assert layouts.state.data_plane_cutover_committed is True
@@ -671,7 +705,73 @@ async def test_changed_engine_is_rejected_before_runtime_access() -> None:
 
     assert result.outcome is SkillsPoolReconcileOutcome.BOT_CHANGED
     assert runtime.events == []
+    assert layouts.events == ["changed_engine_release"]
+    assert layouts.state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert layouts.state.migration_generation is None
+    assert layouts.state.last_probe_result == "BOT_CHANGED"
+
+
+@pytest.mark.asyncio
+async def test_changed_engine_keeps_activating_generation_fail_closed() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER,
+            rollout_evidence=RolloutEvidence(
+                env=SCOPE.env,
+                config_id=12,
+                config_version="revision-1",
+                batch_id="openclaw-batch",
+                engine_type="openclaw",
+                decision_reason="whitelist",
+            ),
+        )
+    )
+    runtime = FakeRuntime(engine="claude_code")
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine="claude_code",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.BOT_CHANGED
+    assert runtime.events == []
     assert layouts.events == []
+    assert layouts.state.phase is SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER
+    assert layouts.state.migration_generation == GENERATION
+
+
+@pytest.mark.asyncio
+async def test_committed_quarantine_identity_conflict_is_not_retried() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    layouts.quarantine_conflict = True
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"quarantine": "/runtime/quarantine/conflicting/skills-local"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.retryable is False
+    assert runtime.events == ["probe", "cutover"]
+    assert layouts.events == ["post_failure"]
+    assert layouts.state.last_failure_code == "QUARANTINE_IDENTITY_CONFLICT"
+    assert layouts.state.last_failure_retryable is False
 
 
 @pytest.mark.asyncio

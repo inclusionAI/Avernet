@@ -27,6 +27,32 @@ class SkillsPoolQuarantineRepositoryMixin:
 
     _database: object
 
+    def quarantine_identity_conflicts(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        engine: str,
+        path: str,
+    ) -> bool:
+        """Return whether a runtime identity contradicts durable evidence."""
+
+        with self._database.transactional_orm_session() as session:
+            existing = (
+                session.query(SkillMigrationQuarantineModel)
+                .filter(
+                    SkillMigrationQuarantineModel.env == scope.env,
+                    SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                    SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                    SkillMigrationQuarantineModel.migration_generation
+                    == migration_generation,
+                )
+                .one_or_none()
+            )
+            return existing is not None and (
+                existing.engine != engine or existing.path != path
+            )
+
     @staticmethod
     def _cleanup_lease_deadline(session, seconds: int):
         if session.bind.dialect.name == "sqlite":
