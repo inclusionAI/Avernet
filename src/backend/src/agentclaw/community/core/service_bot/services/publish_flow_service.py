@@ -83,6 +83,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.upgrade_resoluti
 from agentclaw.community.core.service_bot.services.publish_flow.retry_ops_mixin import (
     RetryOpsMixin,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.draft_restore_ops_mixin import (
+    DraftRestoreOpsMixin,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.release_stage import (
     ONLINE_SPEC,
     VERIFY_SPEC,
@@ -158,6 +161,7 @@ class PublishFlowService(
     EvalPublishMixin,
     UpgradeResolutionMixin,
     RetryOpsMixin,
+    DraftRestoreOpsMixin,
 ):
     """Bot publish flow processing service.
 
