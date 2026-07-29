@@ -8,6 +8,7 @@ from sqlalchemy import func
 
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
+    SkillMigrationQuarantineModel,
 )
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -24,6 +25,28 @@ class SkillsPoolPostCutoverRepositoryMixin:
 
     _database: object
 
+    def has_quarantine_identity(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+    ) -> bool:
+        """Check whether an older runtime may reuse persisted quarantine identity."""
+
+        with self._database.transactional_orm_session() as session:
+            return (
+                session.query(SkillMigrationQuarantineModel)
+                .filter(
+                    SkillMigrationQuarantineModel.env == scope.env,
+                    SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                    SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                    SkillMigrationQuarantineModel.migration_generation
+                    == migration_generation,
+                )
+                .one_or_none()
+                is not None
+            )
+
     def record_post_cutover_evidence(
         self,
         *,
@@ -35,7 +58,11 @@ class SkillsPoolPostCutoverRepositoryMixin:
     ) -> bool:
         """Reconcile runtime evidence without re-crossing the cutover boundary."""
 
-        evidence_json = json.dumps(evidence, ensure_ascii=False)
+        persisted_evidence = {
+            **evidence,
+            "post_cutover_evidence_recorded": True,
+        }
+        evidence_json = json.dumps(persisted_evidence, ensure_ascii=False)
         runtime_evidence = evidence.get("evidence")
         quarantine_path = (
             runtime_evidence.get("quarantine")
@@ -70,9 +97,6 @@ class SkillsPoolPostCutoverRepositoryMixin:
             engine = json.loads(row.rollout_evidence).get("engine_type")
             if not isinstance(engine, str) or not engine:
                 return False
-            if not isinstance(quarantine_path, str) or not quarantine_path:
-                log_missing_quarantine_path(scope, migration_generation)
-                return False
             if not self._upsert_quarantine(
                 session,
                 scope=scope,
@@ -81,6 +105,8 @@ class SkillsPoolPostCutoverRepositoryMixin:
                 path=quarantine_path,
                 evidence_json=evidence_json,
             ):
+                if not isinstance(quarantine_path, str) or not quarantine_path:
+                    log_missing_quarantine_path(scope, migration_generation)
                 return False
             row.phase = SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value
             row.last_probe_evidence = evidence_json
