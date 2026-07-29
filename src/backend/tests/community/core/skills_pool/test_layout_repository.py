@@ -314,6 +314,39 @@ def test_not_capable_probe_releases_preparing_claim_and_preserves_evidence() -> 
     assert state.data_plane_cutover_committed is False
 
 
+def test_not_capable_probe_releases_ready_claim_before_cutover() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+
+    assert repository.release_not_capable_claim(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        evidence={"reason": "runtime_contract_missing"},
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert state.target_layout is None
+    assert state.migration_generation is None
+    assert state.preparation_id is None
+
+
 def test_claim_updates_an_existing_unclaimed_legacy_row() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
@@ -868,6 +901,62 @@ def test_post_cutover_evidence_reuses_existing_quarantine_identity() -> None:
     with database.transactional_orm_session() as session:
         quarantine = session.query(SkillMigrationQuarantineModel).one()
         assert quarantine.path == quarantine_path
+
+
+def test_cutover_commit_reuses_quarantine_from_pending_response() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    quarantine_path = (
+        "/home/admin/.openclaw/workspace/skills-pool/"
+        ".migration-quarantine/generation-1/skills-local"
+    )
+    assert repository.record_cutover_finalizing(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "status": "POST_CUTOVER_SYNC_PENDING",
+            "evidence": {"quarantine": quarantine_path},
+        },
+    )
+
+    assert repository.record_cutover_committed(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "ALREADY_COMMITTED",
+            "evidence": {"active_marker": "same-generation"},
+        },
+    )
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert state.data_plane_cutover_committed is True
 
 
 def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
