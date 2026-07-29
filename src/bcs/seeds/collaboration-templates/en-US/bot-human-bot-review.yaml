@@ -1,6 +1,6 @@
 # Bot-Human-Bot three-node collaboration template.
 # participants declares only logical roles that must bind to actual bots. The Human is
-# the current group member, so the human_input node has no assignee or participant binding.
+# addressed through the runtime_actor assignee and is not a participant binding.
 
 api_version: bcs.collaboration/v1
 name: Bot-Human-Bot Review
@@ -19,6 +19,8 @@ runtime:
   state_machine:
     version: 1
     graph_mode: acyclic
+    human_input_channel:
+      channel_type: dingtalk
     nodes:
       generate_draft:
         kind: bot_task
@@ -35,6 +37,11 @@ runtime:
       human_review:
         kind: human_input
         display_name: Human Review
+        assignee:
+          type: runtime_actor
+          actor: human_1001
+        notification:
+          mode: direct_assignee
         instruction: Review the Bot draft. Approve it as-is or provide specific revision feedback.
         node_timeout_ms: 86400000
         judge:
