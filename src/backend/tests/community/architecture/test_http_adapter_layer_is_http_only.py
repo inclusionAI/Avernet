@@ -126,6 +126,7 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "FileTooLargeError",
     "BotServiceError", "BotInvalidLifecycleStateError", "BotNotFoundError", "BotPermissionError",
     "BotLimitExceededError", "BotNameExistsError", "BotNameInvalidError",
+    "DefaultBotTeclawNotAllowedError",
     "DeviceAllocationError", "DeviceLimitError",
     # Multi-instance entry-resolution errors raised by DeviceServiceRouter and
     # translated to HTTP by the devices router (§1/§2/§3):
