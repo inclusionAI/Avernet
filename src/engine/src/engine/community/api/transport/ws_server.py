@@ -75,6 +75,25 @@ from engine.community.api.transport.auth_gate import verify_chat_send  # noqa: E
 
 log = logging.getLogger("engine-ws-server")
 _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", "on"}
+_REDACTED_MATERIALIZED_FILE = "[materialized-file]"
+
+
+def _redact_materialized_paths(value: Any, paths: tuple[str, ...]) -> Any:
+    """Prevent internally resolved workspace paths from reaching WS clients."""
+    if not paths:
+        return value
+    if isinstance(value, str):
+        redacted = value
+        for path in paths:
+            redacted = redacted.replace(path, _REDACTED_MATERIALIZED_FILE)
+        return redacted
+    if isinstance(value, dict):
+        return {key: _redact_materialized_paths(item, paths) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_materialized_paths(item, paths) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_materialized_paths(item, paths) for item in value)
+    return value
 
 
 def _chat_plugin_supports_inject(chat_plugin: Any) -> bool:
@@ -633,18 +652,26 @@ class EngineWebSocketServer:
         return await self._forward_request(conn_id, request)
 
     async def _send_event(
-        self, websocket: WebSocket, event_name: str, payload: Dict[str, Any],
+        self,
+        websocket: WebSocket,
+        event_name: str,
+        payload: Dict[str, Any],
+        *,
+        materialized_paths: tuple[str, ...] = (),
     ) -> None:
         """Stamp seq/ts on an outgoing event and ship it."""
+        outbound_payload = _redact_materialized_paths(payload, materialized_paths)
+        if not isinstance(outbound_payload, dict):
+            outbound_payload = {}
         # 先检查键是否存在，避免 _next_seq() 被无条件调用导致序列号跳号
-        if "seq" not in payload:
-            payload["seq"] = self._next_seq()
-        if "ts" not in payload:
-            payload["ts"] = int(time.time() * 1000)
+        if "seq" not in outbound_payload:
+            outbound_payload["seq"] = self._next_seq()
+        if "ts" not in outbound_payload:
+            outbound_payload["ts"] = int(time.time() * 1000)
         event = EventFrame(
             event=event_name,
-            payload=payload,
-            seq=payload["seq"],
+            payload=outbound_payload,
+            seq=outbound_payload["seq"],
         )
         await websocket.send_text(event.to_json())
 
@@ -1004,6 +1031,7 @@ class EngineWebSocketServer:
             extraParams=extra_params or None,
         )
         auth = self._auth_for(conn_id)
+        materialized_paths: tuple[str, ...] = ()
 
         try:
             if (
@@ -1024,6 +1052,15 @@ class EngineWebSocketServer:
                 merged_extra = dict(chat_request.extraParams or {})
                 merged_extra["materializedFiles"] = resolved.materialized_files
                 chat_request.extraParams = merged_extra
+                materialized_paths = tuple(
+                    path
+                    for item in resolved.materialized_files
+                    if isinstance(item, dict)
+                    and isinstance(
+                        path := item.get("canonical_bot_absolute_path"), str
+                    )
+                    and path
+                )
                 log.info(
                     "engine.resource_reference.validate session_key_hash=%s reference_count=%s ok=true",
                     session_key_hash,
@@ -1055,7 +1092,12 @@ class EngineWebSocketServer:
                 ):
                     continue
 
-                await self._send_event(websocket, event_name, event_data)
+                await self._send_event(
+                    websocket,
+                    event_name,
+                    event_data,
+                    materialized_paths=materialized_paths,
+                )
 
                 if state in ("final", "error", "aborted"):
                     if isinstance(run_id, str) and run_id.startswith("inject-"):

@@ -43,7 +43,14 @@ async def test_stream_rewrites_resources_before_adapter(fake_engine):
     async def stream(request, auth):
         captured["request"] = request
         captured["auth"] = auth
-        yield EventFrame(event="chat", payload={"state": "final"})
+        yield EventFrame(
+            event="chat",
+            payload={
+                "state": "final",
+                "message": "read /bot/work/a.txt",
+                "nested": {"pathEcho": "/bot/work/a.txt"},
+            },
+        )
 
     fake_engine.chat.stream = stream
     refs = [{"resource_id": "r1", "insert_id": "i1"}]
@@ -74,6 +81,9 @@ async def test_stream_rewrites_resources_before_adapter(fake_engine):
     assert extra["materializedFiles"][0]["canonical_bot_absolute_path"] == "/bot/work/a.txt"
     reference_service.rewrite.assert_called_once()
     assert threaded_functions == [reference_service.rewrite]
+    outbound = websocket.send_text.await_args.args[0]
+    assert "/bot/work/a.txt" not in outbound
+    assert "[materialized-file]" in outbound
 
 
 @pytest.mark.asyncio
