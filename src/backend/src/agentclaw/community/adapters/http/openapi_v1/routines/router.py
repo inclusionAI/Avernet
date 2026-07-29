@@ -120,7 +120,7 @@ def _map_run(data: dict, routine_id: str) -> RoutineRun:
 async def list_routines(
     page: PageParamsDep,
     principal: PrincipalDep,
-    bot_id: str | None = None,
+    bot_id: str,
     status: str | None = None,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
@@ -134,8 +134,6 @@ async def list_routines(
     set and let the client filter on ``enabled``. Wire a server-side filter
     here only if/when the engine surfaces a status dimension.
     """
-    if not bot_id:
-        raise HTTPException(status_code=400, detail="bot_id is required")
     user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
     result = await factory.list_all_crons(
         user_id=user_id, nick_name=nick_name, bot_id=bot_id
@@ -206,7 +204,7 @@ async def create_routine(
 async def get_routine(
     routine_id: str,
     principal: PrincipalDep,
-    bot_id: str | None = None,
+    bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
@@ -218,8 +216,6 @@ async def get_routine(
     identity comes from the bot record (Direction A will swap to
     ``principal.subject``). Missing/non-dict ``data`` collapses to 404.
     """
-    if not bot_id:
-        raise HTTPException(status_code=400, detail="bot_id query is required")
     user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
     result = await factory.get_cron_detail(
         bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
@@ -240,7 +236,7 @@ async def update_routine(
     routine_id: str,
     body: RoutineUpdate,
     principal: PrincipalDep,
-    bot_id: str | None = None,
+    bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
@@ -253,8 +249,6 @@ async def update_routine(
     wraps it on read; Task 3 contract). Missing/non-dict ``data`` on the
     response collapses to 404.
     """
-    if not bot_id:
-        raise HTTPException(status_code=400, detail="bot_id query is required")
     user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
     update_body: dict = {}
     if body.name is not None:
@@ -289,7 +283,7 @@ async def update_routine(
 async def delete_routine(
     routine_id: str,
     principal: PrincipalDep,
-    bot_id: str | None = None,
+    bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
@@ -301,8 +295,6 @@ async def delete_routine(
     published-stage deletes with CronRelayError (403). We surface the
     engine's ``success`` flag as ``Deleted(deleted=…)``.
     """
-    if not bot_id:
-        raise HTTPException(status_code=400, detail="bot_id query is required")
     user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
     result = await factory.delete_cron(
         bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
@@ -320,7 +312,7 @@ async def delete_routine(
 async def run_routine(
     routine_id: str,
     principal: PrincipalDep,
-    bot_id: str | None = None,
+    bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
@@ -336,8 +328,6 @@ async def run_routine(
     ``finished_at`` are None because the adapter doesn't surface them on the
     run-trigger seam (use ``GET /{routine_id}/runs`` for actual timestamps).
     """
-    if not bot_id:
-        raise HTTPException(status_code=400, detail="bot_id query is required")
     user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
     result = await factory.run_cron(
         bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
@@ -374,7 +364,7 @@ async def list_routine_runs(
     routine_id: str,
     page: PageParamsDep,
     principal: PrincipalDep,
-    bot_id: str | None = None,
+    bot_id: str,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
@@ -388,8 +378,6 @@ async def list_routine_runs(
     ``data``, leaving ``runs`` intact). We map each entry via ``_map_run``
     and paginate client-side.
     """
-    if not bot_id:
-        raise HTTPException(status_code=400, detail="bot_id query is required")
     user_id, nick_name = _owner_from_bot(bot_id, bot_repo)
     result = await factory.get_cron_runs(
         bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id

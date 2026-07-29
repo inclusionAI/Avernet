@@ -488,6 +488,32 @@ class IdentityService:
             entity_id=entity_id, bot_id=bot_id, content=content, file_path=str(file_path),
         )
 
+    async def list_bot_files(
+        self,
+        entity_type: str,
+        entity_id: str,
+        bot_id: str,
+        owner_id: str,
+        *,
+        engine_type: str | None = None,
+    ) -> list[tuple[str, bool]]:
+        """Probe each whitelisted identity file_type's presence for a bot.
+
+        Returns ``(file_type, exists)`` pairs for every entry in
+        :data:`VALID_IDENTITY_FILES`; ``exists`` is ``True`` when the read
+        returned non-empty content. Provider-blind: ``read_identity_file``
+        addresses each file as ``identity/<file_type>`` and turns a device
+        404 into an empty string (absent → ``exists=False``).
+        """
+        self.validate_entity_type(entity_type)
+        results: list[tuple[str, bool]] = []
+        for ft in VALID_IDENTITY_FILES:
+            content = await self.read_identity_file(
+                entity_type, entity_id, bot_id, ft, owner_id, engine_type=engine_type,
+            )
+            results.append((ft, bool(content)))
+        return results
+
     async def _read_from_publish_device(
         self,
         *,

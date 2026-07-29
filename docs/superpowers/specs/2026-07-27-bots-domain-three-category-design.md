@@ -43,6 +43,7 @@ PR #456 已交付 `ac_bots` 单表隔离 + 全局 tenant ContextVar + middleware
 - **本期不接 mcp/bots/channels**(归 totalfrank)、**skills 共担暂不纳入**(P3,待 P1/P2 跑通后另起子计划)
 - **不重写已有 backend 业务逻辑**:legacy `/api/...` 路由和其认证原样保留,只在 `openapi_v1` 这套补对接
 - **本期不动 `ac_bot_publish` 表加列/guard**:该表只被 cron(verify/online 运行态)和 identity(带 publish_id)读取,而 openapi_v1 的 routines 走 DRAFT 运行态(`forward_request:601` 不经 `_publish_repo`)、identity 不暴露 publish_id——故本期三个板块的 handler **不会触发对 `ac_bot_publish` 的读取**。该表隔离留给其真正 owner(totalfrank / service_bot 工作线),或等 routines/identity 的 handler 真要支持 verify/online 运行态时再处理。**YAGNI**
+- **本期 openapi 只对「个人云端 bot」生效,不涉及桌面 bot(desktop)和服务 bot(service)**:`ac_bots.bot_type`(`plugin_api/models.py:57`)取值 `personal`/`service`/`desktop`(见 `core/system_config/device_config.py:66`)。这条约束在 **handler 层(Phase 1+)实现**——openapi_v1 handler 拿到 `bot_id` 后须校验 `bot_type == "personal"` 且非 desktop/service,拒绝处理其他类型。**tenant 级 ORM guard(Phase 0)天然满足此约束**:消金 tenant 名下只能存在个人云端 bot(他们不创建 desktop/service bot),guard 把消金挡在 `teamclaw` tenant 的 desktop/service 数据外(那些行全在 teamclaw)。legacy 内部 `/api/...` 用户访问自己 desktop/service bot 的 resource 仍走 `teamclaw` tenant,guard 不挡,行为不变(§6.5)。
 - 消金适配本设计理念,**所有产品契约按当前设计定,不向消金二次确认**
 
 ---
@@ -260,6 +261,7 @@ _install_avernet_tenant_guards()
 | I2 entity 参数来源 | identity | ✅ 已定(方案 b) | principal 解析(方向 A),本期 fallback `entity_type="staff"`+owner from bot |
 | I3 publish_id | identity | ✅ 已定 | openapi 不暴露 publish_id,只读 draft |
 | 漏点:ac_bot_publish | routines+identity 共用(仅 verify/online 运行态或带 publish_id 时读) | ⏸ **本期不做** | 本期 openapi_v1 handler 不触发该表读取(§1.4 YAGNI);留给 service_bot owner 或后续阶段 |
+| R4 bot_type 校验(仅个人云端) | resources/routines/identity(都经 bot_id) | ✅ 已定(Phase 1+ 实现) | handler 拿 bot_id 后校验 `ac_bots.bot_type=="personal"`,拒绝 desktop/service。tenant guard 在 Phase 0 天然挡跨租户,R4 是同租户内 bot_type 维度的业务校验 |
 
 **0 项待拍板。** 消金适配本设计理念,可直接进实现。
 

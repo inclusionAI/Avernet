@@ -58,6 +58,10 @@ ALTER TABLE ac_resource
 
 ## Task 2: Spike — 验证多 model 单 listener 链式 `.options()` 写法
 
+> **⚠️ 决策(2026-07-28):本 Task 跳过。** Session 0 Task 1 已验证"单 listener + `with_loader_criteria` + `Query.update()`/`DELETE`"对 BotModel 生效(SQLAlchemy 2.0.51);"链式多 `.options()`"是 SQLAlchemy 标准行为,非未知领域。更关键的:**本 spike 要求 `ResourceModel.avernet_tenant` 列已存在**(spike 代码引用 `m.avernet_tenant`),但该列要 Task 4 才加——spike 无法在 Task 4 之前独立跑。**"证明现状能漏"的语义由 Task 3 红测试承担**(此时 ResourceModel 无 avernet_tenant 列 → 红在"列不存在"),TDD 最小步进更优。**退路**:若 Task 5 装 guard 时链式多 criteria 真出问题,改"每 model 一条 listener"(成本可控)。
+>
+> **Files:** 无(spike 跳过,不创建文件)
+
 **Files:**
 - Create: `src/backend/tests/community/plugins/test_multi_model_guard_spike.py`
 
@@ -385,11 +389,9 @@ server_default='teamclaw' backfills existing rows; invisible in to_dict()
 
 **Files:**
 - Modify: `src/backend/src/agentclaw/community/plugin_api/models.py:101-186`(guard block 重构进工厂)
-- Modify: `src/backend/src/agentclaw/community/core/service_bot/repository/models.py`(末尾加 `BotPublishModel` insert guard 注册)
 - Create: `src/backend/tests/community/plugins/test_resource_tenant_guard.py`(对照 Session 0 `test_bot_tenant_guard.py`)
-- Create: `src/backend/tests/community/plugins/test_bot_publish_tenant_guard.py`
 
-**关键设计:** read guard 单 listener 遍历 `_GUARDED_MODELS`(Task 2 spike 已验)。insert guard 按 model 各注册(`BotModel` 复用 Session 0 的;`ResourceModel` 在 `plugin_api/models.py` 注册;`BotPublishModel` 在它自己的 model 文件注册)。
+**关键设计:** read guard 单 listener 遍历 `_GUARDED_MODELS`(Session 0 Task 1 已验等价行为 + SQLAlchemy 标准链式 `.options`;Task 2 spike 跳过,据此)。insert guard 按 model 各注册(`BotModel` + `ResourceModel` 都在 `plugin_api/models.py`,同一 `_install_avernet_tenant_guards` 内注册)。**不含 `ac_bot_publish`**(见 plan 开头"范围说明")。
 
 - [ ] **Step 1: 在 `plugin_api/models.py` 重构 guard block 为工厂**
 
@@ -399,9 +401,10 @@ server_default='teamclaw' backfills existing rows; invisible in to_dict()
 # ── Avernet tenant guards (multi-model) ────────────────────────────
 # Extended from Session 0 (PR #456, single BotModel) to a tuple of guarded
 # models. Read guard is ONE Session listener chaining with_loader_criteria
-# per model (Task 2 spike confirmed this works for SELECT/UPDATE/DELETE in
-# SQLAlchemy 2.0.51). Insert guard is per-mapper (before_insert has no
-# "multi-model" form), registered once per guarded class.
+# per model (Session 0 Task 1 verified the single-model form for SELECT/UPDATE/
+# DELETE in SQLAlchemy 2.0.51; chaining multiple .options is standard SQLAlchemy).
+# Insert guard is per-mapper (before_insert has no "multi-model" form),
+# registered once per guarded class.
 #
 # CRITICAL (spec §6.6): with_loader_criteria takes a DIRECT EXPRESSION, never
 # a lambda — the lambda form is cached and pins the first tenant (leak).
@@ -468,7 +471,7 @@ def _install_avernet_tenant_guards() -> None:
 _install_avernet_tenant_guards()
 ```
 
-> `BotModel`/`ResourceModel` 都在本文件,定义在 `_GUARDED_MODELS` 之前(`ResourceModel` 在 `:189`,guard block 在 `:101`)。**顺序问题**:`_GUARDED_MODELS` 引用 `ResourceModel`,但 guard block 在 `ResourceModel` 定义之前 —— 需把 guard block **移到 `ResourceModel` 定义之后**(`:230` 之后),或用 lazy lookup。**选移到 `ResourceModel` 之后**(符合 Session 0 评注"guards 焊在 model 旁")。
+> `BotModel`/`ResourceModel` 都在本文件。**顺序问题**:`_GUARDED_MODELS = (BotModel, ResourceModel)` 引用 `ResourceModel`,但原 guard block 在 `:101`(`ResourceModel` 定义在 `:189` 之前)。需把 guard block **移到 `ResourceModel` 定义之后**(`ResourceModel.to_dict()` 之后,约 `:230` 之后),或用 lazy lookup。**选移到 `ResourceModel` 之后**(符合 Session 0 评注"guards 焊在 model 旁")。`CrossTenantInsertError` 类 + 所有 `_GUARDED_MODELS` 引用都一起搬。
 
 - [ ] **Step 2: 写 `test_resource_tenant_guard.py`(对照 Session 0 `test_bot_tenant_guard.py`)**
 
@@ -512,9 +515,18 @@ def test_insert_under_scope_stamps_tenant(db):
         with db.orm_session() as s:
             r = ResourceModel(name="r", resource_type="file")
             s.add(r)
-    # No explicit tenant set; guard stamped tenant-a
+    # No explicit tenant set; guard stamped tenant-a. Read the raw row across
+    # tenants via the escape hatch to assert the value (matches the bot guard's
+    # test_insert_stamps_current_tenant in test_bot_tenant_guard.py — out of the
+    # scope, get_current_avernet_tenant() returns 'teamclaw', so the read guard
+    # would filter tenant-a's row without the skip option).
     with db.orm_session() as s:
-        assert s.query(ResourceModel).first().avernet_tenant == "tenant-a"
+        row = (
+            s.query(ResourceModel)
+            .execution_options(skip_avernet_tenant_guard=True)
+            .first()
+        )
+        assert row.avernet_tenant == "tenant-a"
 
 
 def test_insert_outside_request_gets_default(db):
@@ -526,11 +538,16 @@ def test_insert_outside_request_gets_default(db):
 
 
 def test_explicit_conflicting_tenant_insert_raises(db):
+    # Match the bot guard pattern (test_bot_tenant_guard.py): wrap the orm
+    # session in pytest.raises and call s.flush() inside, so the before_insert
+    # event (autoflush=False → add() alone won't trigger it) fires within the
+    # asserted block.
     with avernet_tenant_scope("tenant-a"):
-        with db.orm_session() as s:
-            with pytest.raises(CrossTenantInsertError):
+        with pytest.raises(CrossTenantInsertError):
+            with db.orm_session() as s:
                 s.add(ResourceModel(name="r3", resource_type="file",
                                     avernet_tenant="tenant-b"))
+                s.flush()
 
 
 def test_bare_query_filtered(db):

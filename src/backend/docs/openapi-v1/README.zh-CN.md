@@ -112,9 +112,9 @@ _按优先级分层排序。_
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE —— PR #494 已于 2026-07-29 合并**（13/13 端点） | ~~Track A 阶段 1~~ ✅ |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(桩)* | ⬜ TODO —— **已解除阻塞** | ~~Track A 阶段 5~~ ✅（PR #564） |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 9 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 9 端点接通 stub→service；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
-| routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(桩)* | ⬜ TODO | Track A routines（lucas-xzp） |
+| routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | channels | totalfrank | 🅳 **已降级** | `openapi_v1/channels/router.py` *(桩)* | ⏸️ 已搁置 —— 范围保持不变，并非取消 | Track A 阶段 3（同样搁置） |
-| identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(桩)* | ⬜ TODO | bots 隔离（Stage 1 ✅） |
+| identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(桩)* | ⬜ TODO | Track A skills（共担） |
 
 ### 横切事项（非按阶段划分）
@@ -126,8 +126,12 @@ _按优先级分层排序。_
 | **Agent 身份标识在租户之间会撞车**（[#556](https://github.com/inclusionAI/Avernet/issues/556)） | ⬜ TODO（totalfrank） | Passport、授权关系、BCN、策略行都只用 `bot_id`/`owner_id` 作键，没有租户维度，而每个 owner 的第一个 bot 的 id 就是字符串 `"default"`。**应当成为开启多租户的前置闸口。** #494 里以公共更新路径上的 `sync_to_bcn=False` 做了临时止血 |
 | 异步创建出的 bot 可能不是被授权的那个（[#559](https://github.com/inclusionAI/Avernet/issues/559)） | ⬜ TODO（totalfrank） | pending 状态的创建规格从未被持久化，完成时是用轮询请求重建的。`dev` 上既有问题；当前潜伏（社区版 Passport 总是直接签发） |
 | 外部身份写入失败被吞掉（[#560](https://github.com/inclusionAI/Avernet/issues/560)） | ⬜ TODO（totalfrank） | 创建时的 owner 授权写入、更新时的 Passport 元数据写入都是"记日志然后继续"，违反 `AGENTS.md:203-204`。一次决策同时覆盖两处；建议做法是*报告部分成功* |
+| resources/routines/identity principal/tenant 真正接入 | ⬜ TODO | 三组 handler 已接通但仍依赖 gateway principal verifier 与 `resolve_avernet_tenant` 真正落地；对外开放前必须统一从 `require_principal`/`caller_owner_id` 消费调用者身份 |
+| 资源所有权/权限边界 403/404 | ⬜ TODO | 当前跨租户靠 ORM guard（Phase 0） + bot_id 必填；ownership/permission mismatch 显式 403/404 待对外开放前补 |
+| 上游/storage/provider 错误统一映射 | ⬜ TODO | handler 现按点抛 HTTPException（400/404/409/500）；对外开放前统一错误码映射 |
+| public contract docs + conformance tests | ⬜ TODO | served OpenAPI 已有；契约 conformance 测试（参数/响应/错误码/兼容性）待对外开放前补 |
 
-> 上面三条来自 #494 的评审，都是 `dev` 上的**既有问题**而非本次引入的回归 —— 记在这里
+> 上面 #556/#559/#560 三条来自 #494 的评审，都是 `dev` 上的**既有问题**而非本次引入的回归 —— 记在这里
 > 是因为它们是整个工作都要继承的决策，而不是 bots 独有的 bug。其中 #556 尤其必须在
 > 第二个租户持有真实数据之前定下来。
 | **阶段 5 对 `ac_user_mcp_config` 的唯一键替换** | ⬜ TODO（DDL 见下文） | **在第二个租户写入 MCP 配置之前**完成 —— 不必赶在发布之前 |
@@ -184,6 +188,8 @@ ALTER TABLE ac_user_mcp_config
 
 本地与 singlebox 运行时无需执行 DDL —— `Base.metadata.create_all` 会直接依据模型
 建表。
+>
+> ⚠️ **NOT PUBLIC-READY 总标记**：resources/routines/identity 三组 handler 已全接通并绿，**但当前判断为 NOT PUBLIC-READY** —— gateway principal verifier 与 `resolve_avernet_tenant` 仍未真正落地。**可阶段性合入 dev/分支**，但**不可对外开放**，需先完成上表 principal/tenant 接入等横切项后才能转 PUBLIC-READY。
 
 > **排序决定 —— 已定（2026-07-27）：** 采用按类别的**纵向切片**。每位负责人先隔离一个类别
 > （Track A），紧接着就实现它的端点（Track B），而不是先把整个 Track A 全部做完再做

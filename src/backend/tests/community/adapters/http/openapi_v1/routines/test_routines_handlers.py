@@ -250,22 +250,6 @@ async def test_list_routines_handles_dict_data_envelope():
     assert env.data.items[0].routine_id == "t1"
 
 
-@pytest.mark.asyncio
-async def test_list_routines_400_when_bot_id_missing():
-    service = _StubCronService([])
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
-
-    with pytest.raises(HTTPException) as exc:
-        await list_routines(
-            page=PageParams(page=1, page_size=20),
-            principal=None,
-            bot_id=None,
-            status=None,
-            factory=service,
-            bot_repo=repo,
-            request=None,
-        )
-    assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -566,22 +550,6 @@ async def test_get_routine_404_when_data_missing():
     assert "not found" in exc.value.detail.lower()
 
 
-@pytest.mark.asyncio
-async def test_get_routine_400_when_bot_id_missing():
-    service = _StubCronDetailService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
-
-    with pytest.raises(HTTPException) as exc:
-        await get_routine(
-            routine_id="t1",
-            principal=None,
-            bot_id=None,
-            factory=service,
-            bot_repo=repo,
-            request=None,
-        )
-    assert exc.value.status_code == 400
-    assert "bot_id" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -719,24 +687,6 @@ async def test_update_routine_omits_unset_fields_from_body():
     assert "enabled" not in sent_body
 
 
-@pytest.mark.asyncio
-async def test_update_routine_400_when_bot_id_missing():
-    service = _StubCronUpdateService(_adapter_dict())
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
-    body = RoutineUpdate(name="cron-renamed")
-
-    with pytest.raises(HTTPException) as exc:
-        await update_routine(
-            routine_id="t1",
-            body=body,
-            principal=None,
-            bot_id=None,
-            factory=service,
-            bot_repo=repo,
-            request=None,
-        )
-    assert exc.value.status_code == 400
-    assert "bot_id" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -895,22 +845,6 @@ async def test_delete_routine_returns_deleted_false_when_success_false():
     assert env.data.deleted is False
 
 
-@pytest.mark.asyncio
-async def test_delete_routine_400_when_bot_id_missing():
-    service = _StubCronDeleteService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
-
-    with pytest.raises(HTTPException) as exc:
-        await delete_routine(
-            routine_id="t1",
-            principal=None,
-            bot_id=None,
-            factory=service,
-            bot_repo=repo,
-            request=None,
-        )
-    assert exc.value.status_code == 400
-    assert "bot_id" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -1031,22 +965,6 @@ async def test_run_routine_returns_unknown_status_when_no_reason():
     assert env.data.status == "unknown"
 
 
-@pytest.mark.asyncio
-async def test_run_routine_400_when_bot_id_missing():
-    service = _StubCronRunService()
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
-
-    with pytest.raises(HTTPException) as exc:
-        await run_routine(
-            routine_id="t1",
-            principal=None,
-            bot_id=None,
-            factory=service,
-            bot_repo=repo,
-            request=None,
-        )
-    assert exc.value.status_code == 400
-    assert "bot_id" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -1187,23 +1105,6 @@ async def test_list_routine_runs_handles_empty_runs():
     assert env.data.items == []
 
 
-@pytest.mark.asyncio
-async def test_list_routine_runs_400_when_bot_id_missing():
-    service = _StubCronRunsService([])
-    repo = _StubBotRepo({"owner_id": "u1", "owner_name": "Alice"})
-
-    with pytest.raises(HTTPException) as exc:
-        await list_routine_runs(
-            routine_id="t1",
-            page=PageParams(page=1, page_size=20),
-            principal=None,
-            bot_id=None,
-            factory=service,
-            bot_repo=repo,
-            request=None,
-        )
-    assert exc.value.status_code == 400
-    assert "bot_id" in exc.value.detail
 
 
 @pytest.mark.asyncio
