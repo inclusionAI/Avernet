@@ -234,6 +234,8 @@ class FakeLayoutRepository:
         return True
 
     def record_post_cutover_failure(self, **kwargs: object) -> bool:
+        if self._should_fail("post_failure"):
+            return False
         if not self._owns(kwargs):
             return False
         self.events.append("post_failure")
@@ -1326,6 +1328,70 @@ async def test_non_ready_runtime_keeps_legacy_without_data_plane_changes() -> No
 
 
 @pytest.mark.asyncio
+async def test_not_capable_after_committed_cutover_is_not_released() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
+        preparation_id=None,
+        evidence={"reason": "logical_mapping_contract_not_supported"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.retryable is False
+    assert layouts.events == ["post_failure"]
+    assert "not_capable_release" not in layouts.events
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert layouts.state.data_plane_cutover_committed is True
+    assert layouts.state.last_failure_code == "NOT_CAPABLE"
+    assert layouts.state.last_failure_stage == "runtime_probe"
+
+
+@pytest.mark.asyncio
+async def test_not_capable_after_committed_cutover_reports_cas_stage() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    layouts.fail_once_at = "post_failure"
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
+        preparation_id=None,
+        evidence={"reason": "logical_mapping_contract_not_supported"},
+    )
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.STATE_RACE_LOST
+    assert result.evidence == {
+        "reason": "logical_mapping_contract_not_supported",
+        "state_race_stage": "record_committed_not_capable_probe",
+    }
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert layouts.state.data_plane_cutover_committed is True
+
+
+@pytest.mark.asyncio
 async def test_not_capable_release_race_is_not_reported_as_complete() -> None:
     layouts = FakeLayoutRepository()
     layouts.fail_once_at = "not_capable_release"
@@ -1343,6 +1409,10 @@ async def test_not_capable_release_race_is_not_reported_as_complete() -> None:
     )
 
     assert result.outcome is SkillsPoolReconcileOutcome.STATE_RACE_LOST
+    assert result.evidence == {
+        "reason": "pool_marker_missing",
+        "state_race_stage": "release_not_capable_claim",
+    }
     assert layouts.state.phase is SkillLayoutPhase.POOL_PREPARING
     assert layouts.state.migration_generation == GENERATION
 
