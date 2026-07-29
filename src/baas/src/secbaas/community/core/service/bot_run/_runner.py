@@ -180,7 +180,9 @@ class BotRunner:
         )
 
         # 4. 委托 dispatcher 异步注入
-        await self._select_dispatcher(bot_id).dispatch_inject(
+        await self._select_dispatcher(
+            bot_id, metadata=metadata
+        ).dispatch_inject(
             bot_service=route.bot_service,
             run_id=message_id,
             session_id=actual_session_id,
@@ -275,7 +277,9 @@ class BotRunner:
         # 4. 委托 dispatcher 异步发送
         wait_result = parse_wait_result(metadata)
         chat_metadata = build_chat_metadata(metadata, run_id=message_id)
-        await self._select_dispatcher(bot_id).dispatch_send(
+        await self._select_dispatcher(
+            bot_id, metadata=metadata
+        ).dispatch_send(
             bot_service=route.bot_service,
             run_id=message_id,
             session_id=actual_session_id,
@@ -366,7 +370,7 @@ class BotRunner:
 
         # 委托 dispatcher 流式发送
         stream_iter = self._select_dispatcher(
-            bot_id, method="stream"
+            bot_id, method="stream", metadata=metadata
         ).dispatch_send_stream(
             bot_service=route.bot_service,
             run_id=message_id,
@@ -552,14 +556,35 @@ class BotRunner:
             )
 
     def _select_dispatcher(
-        self, bot_id: str, *, method: str | None = "chat"
+        self,
+        bot_id: str,
+        *,
+        method: str | None = "chat",
+        metadata: dict[str, Any] | None = None,
     ) -> MessageDispatcher:
         """根据 system_config 选择 dispatcher。
 
         查找顺序：``bot_run.dispatcher_route.{bot_id}:{method}`` → ``{bot_id}`` → ``default``。
-        值为 dispatcher 类名（如 ``"QueueTaskMessageDispatcher"``），未配置默认走 TaskMessageDispatcher。
+        值为 dispatcher 类名（如 ``"QueueTaskMessageDispatcher"``），未配置时：
+        - BCN 请求（metadata.bot_options.from_bcn == "true"）且
+          ``bot_run.bcn_queue_dispatcher_enabled == "true"`` 时默认走 QueueTaskMessageDispatcher
+        - 其他请求默认走 TaskMessageDispatcher
         """
         default_name = "TaskMessageDispatcher"
+        bot_options = (metadata or {}).get("bot_options")
+        if isinstance(bot_options, dict) and bot_options.get("from_bcn") == "true":
+            if self._system_config_service is not None:
+                try:
+                    flag = self._system_config_service.get_config(
+                        SystemConfigKey.BCN_QUEUE_DISPATCHER_ENABLED
+                    )
+                    if flag is not None and (flag.conf_value or "").strip().lower() == "true":
+                        default_name = "QueueTaskMessageDispatcher"
+                except Exception:
+                    logger.warning(
+                        "[runner] failed to read bcn_queue_dispatcher_enabled",
+                        exc_info=True,
+                    )
         name = default_name
         if self._system_config_service is not None:
             keys = []
