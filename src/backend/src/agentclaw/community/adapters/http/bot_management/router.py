@@ -2129,6 +2129,11 @@ async def update_bot(
         # Get cookie for potential memoryos API call (when yuque_kb_repos changes)
         cookie = request.headers.get("cookie", "")
 
+        # 兼容历史请求字段 name，统一走 bot_name 的校验和更新链路，避免旧客户端
+        # 传入空名称时被静默忽略并返回成功。
+        if "bot_name" not in data and "name" in data:
+            data["bot_name"] = data["name"]
+
         # bot_name 早校验（与 create_bot 对齐）：允许 None（本次不改名），非 None 时
         # 严格校验非法字符/长度，避免脏名落库及污染下游 passport / 同步链路。
         raw_bot_name = data.get("bot_name")
