@@ -42,7 +42,7 @@ class ConcurrencyLimiter:
         self._ref_count = 0
         self.last_used = time.monotonic()
         self._min_interval = min_interval_seconds
-        self._last_acquire_ts: float = 0.0
+        self._last_acquire_ts: float = -1.0
 
     @property
     def ref_count(self) -> int:
