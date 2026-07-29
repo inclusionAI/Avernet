@@ -77,25 +77,25 @@ runtime:
             targets: []
 ```
 
-YAML 不填写 `channel_binding_id`、robotCode 或机器人凭证。definition 绑定到具体
-BCS group 时，根据 `group_id + channel_type` 查询 Active ChannelBinding：
+YAML 不填写 `channel_binding_id`、robotCode 或机器人凭证。启动绑定了
+definition 的 BCS group 时，根据 `group_id + channel_type` 查询 Active
+ChannelBinding：
 
-1. 没有匹配 binding：拒绝绑定或启动；
+1. 没有匹配 binding：允许保存 definition，但拒绝启动；
 2. 恰好一个 binding：解析并保存 binding id 与 robot account；
 3. 多于一个 binding：拒绝为 ambiguous，不选择最新或任意一个。
 
 纯 `/collaboration/definitions/validate` 没有 group 上下文，只做 YAML schema 和
-静态语义校验。将 definition 配置到已有 group 时做 ChannelBinding 校验；每次
-创建 HumanInputRequest 时再次确认解析出的 binding 仍为 Active，并把 binding
-与 YAML conversation 快照到 request。
+静态语义校验。将 definition 配置到已有 group 时不做 ChannelBinding
+存在性校验；启动 run 和每次创建 HumanInputRequest 时确认解析出的 binding
+仍为 Active，并把 binding 与 YAML conversation 快照到 request。
 
 新建 group 时，ChannelBinding 只有在 group 存在后才能创建。因此 IM-enabled
 collaboration 必须按以下顺序编排：
 
 ```text
-创建 BCS group（不启动初始 run）
+创建 BCS group 并保存 collaboration YAML（不启动初始 run）
   -> 创建钉钉 ChannelBinding
-  -> 提交/绑定 collaboration YAML
   -> 校验唯一 Active ChannelBinding
   -> 启动 State Machine run
 ```

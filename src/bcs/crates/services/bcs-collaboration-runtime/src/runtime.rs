@@ -2940,8 +2940,6 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         })?;
         reject_explicit_participant_roles(&definition)?;
         let compiled = validate_definition(definition)?;
-        self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
-            .await?;
         let candidate_ref = CollaborationDefinitionRef {
             id: compiled.definition.id.clone(),
             version: compiled.definition.version,
@@ -3032,10 +3030,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     cmd.target_definition.id.clone(),
                     cmd.target_definition.version,
                 )
-            })?;
+        })?;
         let compiled = validate_definition(definition)?;
-        self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
-            .await?;
         let final_participant_bindings = cmd
             .participant_bindings
             .unwrap_or_else(|| binding.participant_bindings.clone());
@@ -3090,8 +3086,6 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 .map_err(|error| CollaborationRuntimeError::InvalidDefinition(error.to_string()))?;
             reject_explicit_participant_roles(&definition)?;
             let compiled = validate_definition(definition)?;
-            self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
-                .await?;
             let definition_ref = CollaborationDefinitionRef {
                 id: compiled.definition.id.clone(),
                 version: compiled.definition.version,
@@ -3106,8 +3100,6 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 .map_err(|error| CollaborationRuntimeError::InvalidDefinition(error.to_string()))?;
             reject_explicit_participant_roles(&definition)?;
             let compiled = validate_definition(definition)?;
-            self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
-                .await?;
             let definition_ref = CollaborationDefinitionRef {
                 id: compiled.definition.id.clone(),
                 version: compiled.definition.version,
@@ -3127,8 +3119,6 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     )
                 })?;
             let compiled = validate_definition(definition)?;
-            self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
-                .await?;
             definition_for_validation = Some(compiled.definition);
             Some(definition_ref)
         } else {

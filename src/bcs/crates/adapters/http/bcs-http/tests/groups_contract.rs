@@ -920,6 +920,65 @@ runtime:
 }
 
 #[tokio::test]
+async fn post_groups_can_defer_initial_state_machine_run() {
+    let (app, _recorder, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+    let definition_yaml = r#"
+api_version: bcs.collaboration/v1
+name: Deferred Initial Run
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      answer:
+        kind: bot_task
+        display_name: Answer
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Answer.
+        final_output: true
+"#;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups")
+                .header("authorization", "Bearer driver-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "id": "group-deferred-initial-run",
+                        "driver_bot": "driver-bot",
+                        "group_strategy": "state_machine",
+                        "start_initial_run": false,
+                        "participant_bindings": {
+                            "writer": {
+                                "source": "manual",
+                                "bot_ids": ["driver-bot"]
+                            }
+                        },
+                        "collaboration_definition_yaml": definition_yaml
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(collaboration_runtime.configure_calls.lock().await.len(), 1);
+    assert!(collaboration_runtime.start_commands.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn post_groups_with_state_machine_yaml_rejects_judge_when_llm_disabled() {
     let (app, recorder, collaboration_runtime, _temp_dir) =
         test_app_with_collaboration_runtime().await;

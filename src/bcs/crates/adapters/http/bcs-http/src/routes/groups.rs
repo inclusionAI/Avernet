@@ -168,6 +168,7 @@ pub async fn create_group(
     uri: Uri,
     Json(req): Json<CreateGroupRequest>,
 ) -> Result<Json<Value>, HttpAdapterError> {
+    let start_initial_run = req.start_initial_run.unwrap_or(true);
     let caller_actor_id = resolve_group_create_caller(&state, &headers, &uri).await?;
     let collaboration_definition_yaml = req.collaboration_definition_yaml.clone();
     let auto_start_on_service_invocation = req.auto_start_on_service_invocation.unwrap_or(false);
@@ -323,7 +324,9 @@ pub async fn create_group(
             })
             .await
             .map_err(collaboration_runtime_error_to_http)?;
-        if result.group_strategy == bcs_service_api::GroupStrategy::StateMachine {
+        if start_initial_run
+            && result.group_strategy == bcs_service_api::GroupStrategy::StateMachine
+        {
             let authenticated_human = optional_authenticated_human(&state, &headers, &uri).await;
             if let Some(run_id) = start_initial_state_machine_run_for_group(
                 &state,
