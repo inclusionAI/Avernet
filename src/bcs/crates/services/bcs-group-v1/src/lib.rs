@@ -77,6 +77,22 @@ impl GroupServiceImpl {
         self
     }
 
+    async fn load_bot(
+        &self,
+        bot_uuid: &str,
+    ) -> Result<bcs_service_api::RegisteredBot, ApplicationError> {
+        self.registry
+            .try_get(bot_uuid)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "bot_not_found",
+                    format!("Bot '{bot_uuid}' was not found"),
+                )
+            })
+    }
+
     async fn authorize_bot_resource(
         &self,
         principal: &Principal,
@@ -84,24 +100,14 @@ impl GroupServiceImpl {
     ) -> Result<(), ApplicationError> {
         match principal {
             Principal::Bot(bot) if bot.bot_uuid == bot_uuid => {
-                self.registry.get(bot_uuid).await.ok_or_else(|| {
-                    ApplicationError::not_found(
-                        "bot_not_found",
-                        format!("Bot '{bot_uuid}' was not found"),
-                    )
-                })?;
+                self.load_bot(bot_uuid).await?;
                 Ok(())
             }
             Principal::Bot(_) => Err(ApplicationError::forbidden(
                 "Bot Principal may query only its own bot_uuid",
             )),
             Principal::Human(human) => {
-                let bot = self.registry.get(bot_uuid).await.ok_or_else(|| {
-                    ApplicationError::not_found(
-                        "bot_not_found",
-                        format!("Bot '{bot_uuid}' was not found"),
-                    )
-                })?;
+                let bot = self.load_bot(bot_uuid).await?;
                 if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
                     return Ok(());
                 }
@@ -124,14 +130,13 @@ impl GroupServiceImpl {
         &self,
         principal: &Principal,
         bot_uuid: &str,
+        field_name: &str,
     ) -> Result<(), ApplicationError> {
-        let bot = self.registry.get(bot_uuid).await.ok_or_else(|| {
-            ApplicationError::not_found("bot_not_found", format!("Bot '{bot_uuid}' was not found"))
-        })?;
+        let bot = self.load_bot(bot_uuid).await?;
         if bot.actor_kind != ActorKind::Bot {
             return Err(ApplicationError::invalid(
-                "invalid_driver",
-                "driver_bot_uuid must identify a Bot Actor",
+                "invalid_participant",
+                format!("{field_name} must identify a Bot Actor"),
             ));
         }
         if bot.status == ActorStatus::Hidden {
@@ -440,8 +445,12 @@ impl GroupServiceImpl {
         principal: Principal,
         mut request: CreateCollaborationGroup,
     ) -> Result<GroupDetail, ApplicationError> {
-        self.ensure_collaboration_eligible(&principal, &request.driver_bot_uuid)
-            .await?;
+        self.ensure_collaboration_eligible(
+            &principal,
+            &request.driver_bot_uuid,
+            "driver_bot_uuid",
+        )
+        .await?;
         if request
             .participants
             .iter()
@@ -465,6 +474,17 @@ impl GroupServiceImpl {
         }
 
         let principal_actor_id = principal.actor_id();
+        if let Principal::Human(human) = &principal
+            && request
+                .participants
+                .iter()
+                .any(|participant| participant.actor_id == principal_actor_id)
+        {
+            self.registry
+                .ensure_human_actor(&human.subject.id, &human_display_name(human))
+                .await
+                .map_err(map_service_error)?;
+        }
         let authenticated_human = match &principal {
             Principal::Human(human) => Some(AuthenticatedHumanCaller {
                 actor_id: principal_actor_id.clone(),
@@ -560,12 +580,7 @@ impl GroupServiceImpl {
                 .flat_map(|binding| binding.actor_ids.iter())
                 .collect::<HashSet<_>>();
             for actor_id in bound_actor_ids {
-                let actor = self.registry.get(actor_id).await.ok_or_else(|| {
-                    ApplicationError::not_found(
-                        "bot_not_found",
-                        format!("Bot '{actor_id}' was not found"),
-                    )
-                })?;
+                let actor = self.load_bot(actor_id).await?;
                 if actor.actor_kind != ActorKind::Bot {
                     return Err(ApplicationError::invalid(
                         "invalid_participant_binding",
@@ -798,8 +813,12 @@ impl GroupServiceImpl {
         principal: Principal,
         request: CreateDirectMessageGroup,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
-        self.ensure_collaboration_eligible(&principal, &request.target_actor_id)
-            .await?;
+        self.ensure_collaboration_eligible(
+            &principal,
+            &request.target_actor_id,
+            "target_actor_id",
+        )
+        .await?;
         if let Principal::Human(human) = &principal {
             self.registry
                 .ensure_human_actor(&human.subject.id, &human_display_name(human))
@@ -989,6 +1008,14 @@ impl GroupService for GroupServiceImpl {
                 ));
             }
         }
+        if command.patch.delivery_policy.is_some()
+            && group.group_strategy != GroupStrategy::Chat
+        {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "delivery_policy may be updated only for Chat Groups",
+            ));
+        }
         let patch = command.patch;
         let mut persistence_patch = GroupMutableFieldsPatch::default();
         if let Some(name) = patch.name {
@@ -1005,16 +1032,7 @@ impl GroupService for GroupServiceImpl {
                     if participant.actor_kind != ActorKind::Bot {
                         continue;
                     }
-                    let bot = self
-                        .registry
-                        .get(&participant.bot_uuid)
-                        .await
-                        .ok_or_else(|| {
-                            ApplicationError::not_found(
-                                "bot_not_found",
-                                format!("Bot '{}' was not found", participant.bot_uuid),
-                            )
-                        })?;
+                    let bot = self.load_bot(&participant.bot_uuid).await?;
                     if bot.capabilities.visibility != "public" {
                         return Err(ApplicationError::conflict(
                             "non_public_participant",

@@ -107,6 +107,14 @@ where
     }
 }
 
+fn deserialize_present_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParticipantBindingRequest {
@@ -221,9 +229,13 @@ impl From<CreateGroupRequest> for CreateGroupSpec {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateGroupRequest {
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub context: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub visibility: Option<GroupVisibility>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub delivery_policy: Option<DeliveryPolicyRequest>,
 }
 

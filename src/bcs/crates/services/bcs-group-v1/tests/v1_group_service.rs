@@ -3,6 +3,12 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_bot::BotCore;
+use bcs_bot_store::PersistentBotRepo;
+use bcs_cache_local::InMemoryCachePlugin;
+use bcs_db_api::{
+    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
+    DbTransactionStepResult,
+};
 use bcs_friend::FriendCore;
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
 use bcs_relation::RelationCore;
@@ -40,24 +46,29 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
-        Self::build(None, None).await
+        Self::build(None, None, None).await
     }
 
     async fn new_with_runtime(runtime: Arc<dyn CollaborationRuntimeService>) -> Self {
-        Self::build(Some(runtime), None).await
+        Self::build(Some(runtime), None, None).await
     }
 
     async fn new_with_friends(friends: Arc<FriendCore>) -> Self {
-        Self::build(None, Some(friends)).await
+        Self::build(None, Some(friends), None).await
+    }
+
+    async fn new_with_bots(bots: Arc<BotCore>) -> Self {
+        Self::build(None, None, Some(bots)).await
     }
 
     async fn build(
         runtime: Option<Arc<dyn CollaborationRuntimeService>>,
         friends: Option<Arc<FriendCore>>,
+        bots: Option<Arc<BotCore>>,
     ) -> Self {
         let group_repo = Arc::new(MemoryGroupRepo::new());
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-        let bots = Arc::new(BotCore::memory());
+        let bots = bots.unwrap_or_else(|| Arc::new(BotCore::memory()));
         let relation = Arc::new(RelationCore::memory());
         let friends = friends
             .unwrap_or_else(|| Arc::new(FriendCore::memory().with_relation(relation.clone())));
@@ -123,6 +134,30 @@ impl Fixture {
             .register(bot_uuid.to_string(), capabilities)
             .await
             .expect("register bot");
+    }
+}
+
+struct FailingDb;
+
+#[async_trait]
+impl DbPlugin for FailingDb {
+    async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        Err(DbError::Backend("bot database unavailable".into()))
+    }
+
+    async fn execute(&self, _statement: DbStatement) -> DbResult<DbExecuteResult> {
+        Err(DbError::Backend("bot database unavailable".into()))
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        Err(DbError::Backend("bot database unavailable".into()))
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Ok(DbHealth::unhealthy("bot database unavailable"))
     }
 }
 
@@ -334,10 +369,6 @@ fn bot_principal_in_tenant(bot_uuid: &str, tenant: &str) -> Principal {
     Principal::bot(bot_uuid, tenant, BTreeSet::new())
 }
 
-fn human_principal(subject_id: &str) -> Principal {
-    human_principal_with_profile(subject_id, subject_id, None, None)
-}
-
 fn human_principal_with_profile(
     subject_id: &str,
     username: &str,
@@ -534,11 +565,6 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
     fixture.add_public_bot("driver").await;
     fixture.add_protected_bot("helper").await;
     fixture
-        .bots
-        .ensure_human_actor("staff-1", "Alice")
-        .await
-        .expect("register human actor");
-    fixture
         .friends
         .add_friendship("driver", "helper")
         .await
@@ -547,7 +573,12 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: human_principal("staff-1"),
+            principal: human_principal_with_profile(
+                "staff-1",
+                "alice-login",
+                Some("Alice"),
+                None,
+            ),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("Protected collaboration".into()),
                 context: None,
@@ -579,6 +610,12 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
         panic!("expected collaboration detail");
     };
     assert_eq!(detail.originator_actor_id, "human_staff-1");
+    let human = fixture
+        .bots
+        .get("human_staff-1")
+        .await
+        .expect("V1 normal Group creation must materialize the Human participant");
+    assert_eq!(human.capabilities.name.as_deref(), Some("Alice"));
 }
 
 #[tokio::test]
@@ -658,6 +695,91 @@ async fn bot_principal_list_requires_the_target_bot_to_exist() {
     assert!(matches!(
         result,
         Err(ApplicationError::NotFound { code, .. }) if code == "bot_not_found"
+    ));
+}
+
+#[tokio::test]
+async fn bot_principal_list_propagates_registry_database_failure() {
+    let bots = Arc::new(BotCore::with_repo(Arc::new(
+        PersistentBotRepo::with_plugins(
+            Arc::new(InMemoryCachePlugin::new()),
+            Arc::new(FailingDb),
+        ),
+    )));
+    let fixture = Fixture::new_with_bots(bots).await;
+
+    let result = fixture
+        .service
+        .list_bot_groups(ListBotGroups {
+            principal: bot_principal("stored-bot"),
+            bot_uuid: "stored-bot".into(),
+            offset: 0,
+            limit: 20,
+            q: None,
+            membership: MembershipFilter::All,
+            kind: GroupKindFilter::Normal,
+            strategy: None,
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::Internal(message))
+            if message.contains("bot database unavailable")
+    ));
+}
+
+#[tokio::test]
+async fn create_rejects_non_bot_driver_and_dm_target_with_declared_code() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("requester").await;
+    fixture
+        .bots
+        .ensure_human_actor("staff-1", "Alice")
+        .await
+        .expect("register Human actor");
+
+    let driver = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("requester"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: None,
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "human_staff-1".into(),
+                participants: Vec::new(),
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+            }),
+        })
+        .await;
+    assert!(matches!(
+        driver,
+        Err(ApplicationError::InvalidInput { code, message })
+            if code == "invalid_participant"
+                && message.contains("driver_bot_uuid")
+    ));
+
+    let target = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("requester"),
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                name: None,
+                context: None,
+                target_actor_id: "human_staff-1".into(),
+            }),
+        })
+        .await;
+    assert!(matches!(
+        target,
+        Err(ApplicationError::InvalidInput { code, message })
+            if code == "invalid_participant"
+                && message.contains("target_actor_id")
     ));
 }
 
@@ -1500,6 +1622,83 @@ async fn create_propagates_friendship_lookup_failure() {
     assert!(matches!(
         result,
         Err(ApplicationError::Internal(message)) if message.contains("friend store unavailable")
+    ));
+}
+
+#[tokio::test]
+async fn create_propagates_protected_participant_friendship_lookup_failure() {
+    let friends = Arc::new(FriendCore::with_repo(Arc::new(FailingFriendRepo)));
+    let fixture = Fixture::new_with_friends(friends).await;
+    fixture.add_public_bot("driver").await;
+    fixture.add_protected_bot("helper").await;
+
+    let result = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: None,
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "helper".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+            }),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::Internal(message))
+            if message.contains("friend store unavailable")
+    ));
+}
+
+#[tokio::test]
+async fn update_rejects_delivery_policy_for_non_chat_strategy() {
+    let fixture = Fixture::new().await;
+    for bot in ["manager", "worker"] {
+        fixture.add_public_bot(bot).await;
+    }
+    fixture
+        .groups
+        .upsert(normal_group(
+            "manager-worker",
+            "manager",
+            vec![
+                Participant::bot("manager", ParticipantRole::Manager),
+                Participant::bot("worker", ParticipantRole::Worker),
+            ],
+            GroupStrategy::ManagerWorker,
+            1,
+        ))
+        .await
+        .expect("store ManagerWorker Group");
+
+    let result = fixture
+        .service
+        .update(UpdateGroup {
+            principal: bot_principal("manager"),
+            group_id: "manager-worker".into(),
+            patch: GroupPatch {
+                delivery_policy: Some(GroupDeliveryPolicy {
+                    bot_final_delivery: BotFinalDelivery::InjectObservers,
+                }),
+                ..Default::default()
+            },
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::InvalidInput { code, .. }) if code == "invalid_request"
     ));
 }
 

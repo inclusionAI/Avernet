@@ -490,14 +490,21 @@ impl MySqlGroupStore {
                 ))
             })?;
 
-        Ok(rows
-            .iter()
-            .filter_map(|row| {
-                let bot_uuid: String = db_get_column(row, "bot_uuid").ok()?;
-                let role_str: String = db_get_column(row, "role").ok()?;
-                let actor_kind_str: Option<String> =
-                    db_get_column_opt(row, "actor_kind").ok().flatten();
-                let mode_str: Option<String> = db_get_column_opt(row, "mode").ok().flatten();
+        rows.iter()
+            .map(|row| {
+                let decode = |column: &str, error: DbError| {
+                    ServiceError::InternalError(format!(
+                        "decode participant column '{column}' for Group '{group_id}': {error}"
+                    ))
+                };
+                let bot_uuid: String =
+                    db_get_column(row, "bot_uuid").map_err(|error| decode("bot_uuid", error))?;
+                let role_str: String =
+                    db_get_column(row, "role").map_err(|error| decode("role", error))?;
+                let actor_kind_str: Option<String> = db_get_column_opt(row, "actor_kind")
+                    .map_err(|error| decode("actor_kind", error))?;
+                let mode_str: Option<String> =
+                    db_get_column_opt(row, "mode").map_err(|error| decode("mode", error))?;
 
                 let (actor_kind, mode) = Self::normalize_kind_mode(
                     group_id,
@@ -507,7 +514,7 @@ impl MySqlGroupStore {
                     mode_str.as_deref(),
                 );
 
-                Some(Participant {
+                Ok(Participant {
                     bot_uuid,
                     bot_name: None,
                     kind: Some(ParticipantKind::Bot),
@@ -516,7 +523,7 @@ impl MySqlGroupStore {
                     mode: Some(mode),
                 })
             })
-            .collect())
+            .collect()
     }
 
     /// Load all sessions from MySQL.
@@ -2713,6 +2720,15 @@ impl GroupRepoPort for MySqlGroupStore {
                 Ok(false)
             }
             Err(e) => {
+                if e.is_duplicate_key() {
+                    warn!(
+                        pair_key = %pair_key,
+                        requested_id = %group.id,
+                        error = %e,
+                        "insert_dm_group_if_absent: lost race on unique key"
+                    );
+                    return Ok(false);
+                }
                 // Genuine transaction failure.
                 warn!(
                     pair_key = %pair_key,
@@ -2968,6 +2984,7 @@ impl GroupRepoPort for MySqlGroupStore {
 mod tests {
     use super::*;
     use bcs_db_api::{DbExecuteResult, DbHealth};
+    use std::collections::BTreeMap;
     use std::sync::Mutex as StdMutex;
 
     #[derive(Default)]
@@ -2977,6 +2994,8 @@ mod tests {
         execute_statements: StdMutex<Vec<DbStatement>>,
         first_execute_affected_rows: u64,
         fail_queries: bool,
+        query_rows: Vec<DbRow>,
+        transaction_error: Option<String>,
     }
 
     impl RecordingDbPlugin {
@@ -2993,6 +3012,22 @@ mod tests {
                 ..Self::default()
             }
         }
+
+        fn with_query_rows(query_rows: Vec<DbRow>) -> Self {
+            Self {
+                query_rows,
+                ..Self::default()
+            }
+        }
+
+        fn with_duplicate_transaction_error() -> Self {
+            Self {
+                transaction_error: Some(
+                    "UNIQUE constraint failed: bcs_groups.env, bcs_groups.dm_pair_key".into(),
+                ),
+                ..Self::default()
+            }
+        }
     }
 
     #[async_trait]
@@ -3001,7 +3036,7 @@ mod tests {
             if self.fail_queries {
                 return Err(DbError::Backend("database unavailable".to_string()));
             }
-            Ok(Vec::new())
+            Ok(self.query_rows.clone())
         }
 
         async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
@@ -3019,6 +3054,9 @@ mod tests {
             &self,
             steps: Vec<DbTransactionStep>,
         ) -> DbResult<Vec<DbTransactionStepResult>> {
+            if let Some(error) = &self.transaction_error {
+                return Err(DbError::Backend(error.clone()));
+            }
             let mut results = Vec::with_capacity(steps.len());
             let mut sql = self.transaction_sql.lock().expect("transaction sql");
             let mut execute_index = 0;
@@ -3083,6 +3121,46 @@ mod tests {
             .await
             .expect_err("participant query must fail");
         assert!(list_error.to_string().contains("database unavailable"));
+    }
+
+    #[tokio::test]
+    async fn participant_row_decode_failures_are_not_silently_dropped() {
+        let malformed = DbRow::new(BTreeMap::from([(
+            "role".to_string(),
+            Value::from("consultant"),
+        )]));
+        let db = Arc::new(RecordingDbPlugin::with_query_rows(vec![malformed]));
+        let repo = MySqlGroupStore::new(db, "local".to_string());
+
+        let error = repo
+            .load_participants_from_mysql("group-1")
+            .await
+            .expect_err("missing bot_uuid must fail the Group read");
+
+        assert!(error.to_string().contains("bot_uuid"));
+    }
+
+    #[tokio::test]
+    async fn sqlite_dm_pair_unique_conflict_is_treated_as_a_lost_race() {
+        let db = Arc::new(RecordingDbPlugin::with_duplicate_transaction_error());
+        let repo = MySqlGroupStore::sqlite(db, "local".to_string());
+        let mut group = Group::new(
+            "loser",
+            "alice",
+            vec![
+                Participant::bot("alice", ParticipantRole::Driver),
+                Participant::bot("bob", ParticipantRole::Consultant),
+            ],
+        );
+        group.group_kind = bcs_domain::GroupKind::Dm;
+        group.dm_pair_key = Some(Group::compute_dm_pair_key("alice", "bob"));
+
+        let created = repo
+            .insert_dm_group_if_absent(group)
+            .await
+            .expect("duplicate pair key must be handled as a lost race");
+
+        assert!(!created);
     }
 
     #[tokio::test]

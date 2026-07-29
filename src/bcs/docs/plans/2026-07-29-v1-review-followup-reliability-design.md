@@ -71,6 +71,24 @@ The POST `/openapi/v1/groups` 409 response declares both `conflict` and
 `non_public_participant`, matching the existing V1 error mapping. Contract
 tests pin this stable code.
 
+### Second review hardening
+
+The later review pass extends the same compatibility approach:
+
+- Bot registry reads gain a fallible companion used by V1 authorization and
+  validation, while Legacy `get` continues returning `Option`.
+- Only the V1 creation policy propagates protected-participant friendship
+  lookup failures; Legacy reachability keeps its previous behavior.
+- First-time Human Principals are materialized with the existing
+  `ensure_human_actor` path only when their canonical Actor ID participates in
+  a normal Group.
+- Participant row decoding and SQLite DM pair-key races fail or retry
+  explicitly instead of returning partial Groups or a spurious 500.
+- PATCH rejects explicit JSON nulls and delivery-policy updates for non-Chat
+  strategies.
+- Path extraction failures use the common error envelope, and GET/PATCH
+  conflict/error-code declarations cover every stable application error.
+
 ## Error behavior
 
 - Storage query failures become V1 `internal_error` responses.

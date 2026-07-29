@@ -288,6 +288,66 @@ async fn missing_principal_and_unknown_request_fields_use_the_common_error_envel
 }
 
 #[tokio::test]
+async fn patch_rejects_explicit_null_for_every_mutable_field() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    for body in [
+        json!({"name": null}),
+        json!({"context": null}),
+        json!({"visibility": null}),
+        json!({"delivery_policy": null}),
+        json!({"name": "Renamed", "context": null}),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authenticated_request(
+                "PATCH",
+                "/openapi/v1/groups/group-1",
+                body,
+            ))
+            .await
+            .expect("null patch response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(response).await;
+        assert_eq!(body["data"]["error_code"], "invalid_request");
+    }
+
+    assert!(service.updated.lock().expect("update lock").is_none());
+}
+
+#[tokio::test]
+async fn malformed_percent_encoded_paths_use_the_common_error_envelope() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service);
+
+    for (method, uri, body) in [
+        (
+            "GET",
+            "/openapi/v1/bots/collaboration/%FF/groups",
+            Value::Null,
+        ),
+        ("GET", "/openapi/v1/groups/%FF", Value::Null),
+        (
+            "PATCH",
+            "/openapi/v1/groups/%FF",
+            json!({"name": "Renamed"}),
+        ),
+        ("DELETE", "/openapi/v1/groups/%FF", Value::Null),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authenticated_request(method, uri, body))
+            .await
+            .expect("malformed path response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(response).await;
+        assert_eq!(body["data"]["error_code"], "invalid_request");
+        assert_eq!(body["request_id"], "request-123");
+    }
+}
+
+#[tokio::test]
 async fn state_machine_definition_version_must_be_positive_at_the_http_boundary() {
     let service = Arc::new(FakeGroupService::default());
     let app = test_router(service.clone());

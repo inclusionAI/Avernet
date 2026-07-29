@@ -103,6 +103,32 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "invalid_participant",
         "invalid_participant_binding",
     }
+    assert set(
+        contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]["responses"]["409"][
+            "x-error-codes"
+        ]
+    ) == {"state_machine_definition_missing"}
+    assert (
+        contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]["responses"]["400"][
+            "x-error-codes"
+        ]
+        == ["invalid_request"]
+    )
+    assert set(
+        contract["paths"]["/openapi/v1/groups/{group_id}"]["patch"]["responses"][
+            "409"
+        ]["x-error-codes"]
+    ) == {
+        "conflict",
+        "non_public_participant",
+        "state_machine_definition_missing",
+    }
+    assert (
+        contract["paths"]["/openapi/v1/groups/{group_id}"]["delete"]["responses"][
+            "400"
+        ]["x-error-codes"]
+        == ["invalid_request"]
+    )
     assert (
         contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["200"]["content"][
             "application/json"

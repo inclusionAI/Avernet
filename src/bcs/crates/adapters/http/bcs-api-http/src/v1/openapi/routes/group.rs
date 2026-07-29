@@ -1,5 +1,5 @@
 use axum::Router;
-use axum::extract::rejection::{JsonRejection, QueryRejection};
+use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Extension, Json, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -30,9 +30,10 @@ async fn list_bot_groups(
     State(state): State<ApiState>,
     Extension(principal): Extension<Principal>,
     Extension(request_id): Extension<RequestId>,
-    Path(bot_uuid): Path<String>,
+    path: Result<Path<String>, PathRejection>,
     query: Result<Query<ListGroupsQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
+    let Path(bot_uuid) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let membership = query.membership_filter();
     let kind = query.kind_filter();
@@ -88,8 +89,9 @@ async fn get_group(
     State(state): State<ApiState>,
     Extension(principal): Extension<Principal>,
     Extension(request_id): Extension<RequestId>,
-    Path(group_id): Path<String>,
+    path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
+    let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .group_service
         .get(GetGroup {
@@ -109,9 +111,10 @@ async fn update_group(
     State(state): State<ApiState>,
     Extension(principal): Extension<Principal>,
     Extension(request_id): Extension<RequestId>,
-    Path(group_id): Path<String>,
+    path: Result<Path<String>, PathRejection>,
     body: Result<Json<UpdateGroupRequest>, JsonRejection>,
 ) -> Result<Response, ErrorResponse> {
+    let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .group_service
@@ -133,8 +136,9 @@ async fn delete_group(
     State(state): State<ApiState>,
     Extension(principal): Extension<Principal>,
     Extension(request_id): Extension<RequestId>,
-    Path(group_id): Path<String>,
+    path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
+    let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .group_service
         .delete(DeleteGroup {

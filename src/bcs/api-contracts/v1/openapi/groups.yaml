@@ -182,6 +182,14 @@ GroupPath:
           application/json:
             schema:
               $ref: ../domain-models.yaml#/GroupDetailEnvelope
+      "400":
+        description: Invalid group identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
       "401":
         description: Gateway Principal is missing or invalid.
         x-error-codes:
@@ -202,6 +210,14 @@ GroupPath:
         description: Group is missing or intentionally hidden.
         x-error-codes:
           - group_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Persisted state-machine configuration is incomplete.
+        x-error-codes:
+          - state_machine_definition_missing
         content:
           application/json:
             schema:
@@ -264,6 +280,8 @@ GroupPath:
         description: Patch conflicts with current group state.
         x-error-codes:
           - conflict
+          - non_public_participant
+          - state_machine_definition_missing
         content:
           application/json:
             schema:
@@ -284,6 +302,14 @@ GroupPath:
           application/json:
             schema:
               $ref: ../domain-models.yaml#/DeleteResultEnvelope
+      "400":
+        description: Invalid group identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
       "401":
         description: Gateway Principal is missing or invalid.
         x-error-codes:

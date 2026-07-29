@@ -445,18 +445,20 @@ impl PersistentBotRepo {
     /// (`status == 'hidden'`). The legacy `bot_info.hidden` field is no longer
     /// authoritative — if the row was migrated but `bot_info.hidden=true` is
     /// still on disk, it is ignored in favor of `status`.
-    async fn load_from_db(
+    async fn try_load_from_db(
         &self,
         bot_uuid: &str,
         include_deleted: bool,
-    ) -> Option<(
-        BotCapabilities,
-        Option<String>,
-        bool,
-        Option<String>,
-        bcs_service_api::ActorKind,
-        bcs_service_api::ActorStatus,
-    )> {
+    ) -> ServiceResult<
+        Option<(
+            BotCapabilities,
+            Option<String>,
+            bool,
+            Option<String>,
+            bcs_service_api::ActorKind,
+            bcs_service_api::ActorStatus,
+        )>,
+    > {
         let env = resolve_env();
         // Code-Review fix #1: include `actor_kind` so the registry read path can
         // propagate it back to callers (O.5 / P.3 / F.3 all gate on actor_kind).
@@ -473,7 +475,11 @@ impl PersistentBotRepo {
         let rows = self
             .db_query(&sql, vec![Value::from(bot_uuid), Value::from(env.as_str())])
             .await
-            .ok()?;
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "load Bot '{bot_uuid}' from registry database: {error}"
+                ))
+            })?;
 
         if let Some(row) = rows.first() {
             let name: Option<String> = db_get_column_opt(row, "name").ok().flatten();
@@ -544,7 +550,7 @@ impl PersistentBotRepo {
                 }
             };
 
-            return Some((
+            return Ok(Some((
                 BotCapabilities {
                     name,
                     summary: bot_info.summary,
@@ -562,10 +568,28 @@ impl PersistentBotRepo {
                 created_by,
                 actor_kind,
                 actor_status,
-            ));
+            )));
         }
 
-        None
+        Ok(None)
+    }
+
+    async fn load_from_db(
+        &self,
+        bot_uuid: &str,
+        include_deleted: bool,
+    ) -> Option<(
+        BotCapabilities,
+        Option<String>,
+        bool,
+        Option<String>,
+        bcs_service_api::ActorKind,
+        bcs_service_api::ActorStatus,
+    )> {
+        self.try_load_from_db(bot_uuid, include_deleted)
+            .await
+            .ok()
+            .flatten()
     }
 
     /// Save dynamic status to the configured cache.
@@ -1413,11 +1437,15 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {
+        self.try_get(bot_id).await.ok().flatten()
+    }
+
+    async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
         let bots = self.bots.read().await;
 
         if let Some(bot) = bots.get(bot_id) {
             if !bot.is_expired() {
-                return Some(bot.to_registered_bot());
+                return Ok(Some(bot.to_registered_bot()));
             }
         }
 
@@ -1427,14 +1455,17 @@ impl BotRepoPort for PersistentBotRepo {
         // Code-Review fix #1: take actor_kind/status from the database instead of
         // returning defaults; otherwise O.5/P.3/F.3 will misclassify any actor
         // whose row is no longer cached in process memory.
-        let (mut capabilities, env, _hidden, created_by, actor_kind, status) =
-            self.load_from_db(bot_id, false).await?;
+        let Some((mut capabilities, env, _hidden, created_by, actor_kind, status)) =
+            self.try_load_from_db(bot_id, false).await?
+        else {
+            return Ok(None);
+        };
         let dynamic_status = self.load_status_from_cache(bot_id).await;
 
         // 清除敏感字段，防止通过常规接口泄露
         capabilities.agent_token = None;
 
-        Some(RegisteredBot {
+        Ok(Some(RegisteredBot {
             bot_uuid: bot_id.to_string(),
             capabilities,
             dynamic_status,
@@ -1442,7 +1473,7 @@ impl BotRepoPort for PersistentBotRepo {
             created_by,
             actor_kind,
             status,
-        })
+        }))
     }
 
     /// Like [`get`](Self::get) but also returns soft-deleted bots (rows with

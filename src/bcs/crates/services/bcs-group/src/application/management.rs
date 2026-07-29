@@ -253,6 +253,36 @@ impl GroupManagement {
         }
     }
 
+    async fn ensure_v1_reachable(
+        &self,
+        driver_bot_id: &str,
+        target: &RegisteredBot,
+    ) -> Result<(), GroupUseCaseError> {
+        if target.status == ActorStatus::Hidden {
+            return Err(GroupUseCaseError::Forbidden(format!(
+                "Bot '{}' is hidden (offline) and cannot be invited into a group",
+                target.bot_uuid
+            )));
+        }
+
+        match target.capabilities.visibility.as_str() {
+            "public" => Ok(()),
+            "protected"
+                if self
+                    .friend
+                    .try_are_friends(driver_bot_id, &target.bot_uuid)
+                    .await? =>
+            {
+                Ok(())
+            }
+            "protected" => Err(GroupUseCaseError::Forbidden(format!(
+                "Bot '{}' is not friends with '{}'",
+                driver_bot_id, target.bot_uuid
+            ))),
+            _ => Err(ServiceError::BotNotFound(target.bot_uuid.clone()).into()),
+        }
+    }
+
     async fn try_write_subscription_edge(&self, requester_bot_id: &str, target: &RegisteredBot) {
         if target.capabilities.visibility != "public" {
             return;
@@ -784,7 +814,7 @@ impl GroupManagementService for GroupManagement {
             if bot.actor_kind == ActorKind::Bot {
                 if self.v1_openapi_create_policy {
                     if bot_id != cmd.driver_bot_id {
-                        self.ensure_reachable(&cmd.driver_bot_id, &bot_id).await?;
+                        self.ensure_v1_reachable(&cmd.driver_bot_id, &bot).await?;
                     }
                     if bot_id != cmd.driver_bot_id && bot.capabilities.visibility == "public" {
                         subscription_targets.push(bot.clone());
