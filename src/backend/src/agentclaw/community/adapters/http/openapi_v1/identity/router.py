@@ -21,7 +21,6 @@ from agentclaw.community.core.config_compose.teclaw_paths import IDENTITY_NS
 # class, not a Protocol — legacy identity router already does the same. A
 # Protocol would be speculative abstraction today (Rule 19: abstract after two
 # examples; only one IdentityService impl exists).
-# IdentityServiceProtocol once a second impl or per-profile flavor appears.
 from agentclaw.community.core.services.identity import IdentityService
 from agentclaw.community.di import Injected
 from agentclaw.community.plugins.bot_repository import BotRepository
