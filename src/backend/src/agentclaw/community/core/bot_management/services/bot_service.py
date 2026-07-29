@@ -829,6 +829,7 @@ class BotService:
     def check_create_bot_preflight(
         self,
         user_id: str,
+        bot_name: Optional[str] = None,
     ) -> None:
         """Validate whether a bot creation request can start external auth.
 
@@ -836,8 +837,18 @@ class BotService:
         the bot is persisted later from /auth-status. Quota checks that can be
         evaluated before Passport should run here so users are not sent through
         authorization only to fail during the second phase.
+
+        ``bot_name`` (when known) is checked for uniqueness here for the same
+        reason: ``create_bot`` rejects a duplicate, but only *after* the Passport
+        application has already happened, leaving an identity behind with no bot
+        and repeating that external side effect on every retry. The service-level
+        check stays where it is — this one narrows the window, it does not close
+        it, since another create can take the name in between.
         """
         self._check_bot_count_limit(user_id)
+        if bot_name and bot_name.strip():
+            if self._repository.get_by_bot_name(bot_name.strip()):
+                raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
 
     def _check_device_limit(self, entity_id: str, entity_type: str, owner_id: str) -> None:
         """

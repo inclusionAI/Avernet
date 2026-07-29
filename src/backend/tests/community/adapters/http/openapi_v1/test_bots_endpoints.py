@@ -777,3 +777,32 @@ def test_ceiling_uses_the_limit_creation_enforces(client, svc):
     svc.get_bots_ceiling_for_owner.return_value = 12
     assert _ok(client.get("/openapi/v1/bots/ceiling"))["ceiling"] == 12
     svc.get_bots_ceiling_for_owner.assert_called_once_with("u1")
+
+
+# ----- round-13 review regressions ------------------------------------------
+
+
+def test_auth_status_validates_the_defaulted_engine(client, svc, passport):
+    """R13/F46: omitting `engine` still means an engine — validate that one.
+
+    On a registry that excludes openclaw, completion would otherwise create a
+    bot on the default engine anyway, and F44 now persists the configured
+    registry — so the bot's own active_engine would be missing from its
+    enabled-engine list.
+    """
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    with patch.object(bots_router, "_get_engine_types", return_value=["teclaw"]):
+        resp = client.get("/openapi/v1/bots/b1/auth-status")
+    assert resp.status_code == 400
+    assert resp.json()["code"] == 400000
+    # Rejected before Passport is consulted or anything is created.
+    passport.query_auth_status.assert_not_called()
+    svc.create_bot.assert_not_called()
+
+
+def test_auth_status_defaulted_engine_passes_when_configured(client, svc, passport):
+    """The check binds to the registry, not to "engine was omitted"."""
+    passport.query_auth_status.return_value = {"status": "ISSUED"}
+    passport.query_agent_passport.return_value = {"agent_code": "ac"}
+    _ok(client.get("/openapi/v1/bots/b1/auth-status"))
+    svc.create_bot.assert_called_once()

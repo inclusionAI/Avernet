@@ -15,6 +15,7 @@ import pytest
 
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotService,
+    BotNameExistsError,
     BotNameInvalidError,
     BotLimitExceededError,
     DeviceLimitError,
@@ -359,3 +360,45 @@ class TestCreateBotPersistsConfiguredEngines:
         # The active engine is always in its own enabled list — the invariant
         # switch_engine depends on.
         assert persisted["active_engine"] in persisted["engine_types"]
+
+
+# ---------------------------------------------------------------------------
+# preflight rejects a taken name BEFORE Passport is applied for (R13/F48)
+# ---------------------------------------------------------------------------
+
+
+class TestPreflightChecksNameUniqueness:
+    """A duplicate name must not cost an external Passport identity.
+
+    ``create_bot`` rejects the duplicate, but only after the Passport
+    application has happened — leaving an identity behind with no bot, and
+    repeating that side effect on every retry. The preflight hook exists
+    precisely for checks that can run before authorization.
+    """
+
+    def test_taken_name_is_rejected_in_preflight(self):
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.get_by_bot_name.return_value = {"id": 9, "bot_id": "other"}
+
+        with pytest.raises(BotNameExistsError):
+            svc.check_create_bot_preflight("u1", bot_name="Taken")
+
+    def test_free_name_passes_preflight(self):
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.get_by_bot_name.return_value = None
+
+        svc.check_create_bot_preflight("u1", bot_name="Free")
+
+    def test_preflight_without_a_name_is_unchanged(self):
+        """The name is optional — callers that don't know it yet still work."""
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc.check_create_bot_preflight("u1")
+        svc._repository.get_by_bot_name.assert_not_called()
+
+    def test_count_limit_still_takes_precedence(self):
+        """A quota failure is still reported even when the name is free."""
+        svc = _make_service(max_bots=1, current_bots=1)
+        svc._repository.get_by_bot_name.return_value = None
+
+        with pytest.raises(BotLimitExceededError):
+            svc.check_create_bot_preflight("u1", bot_name="Free")

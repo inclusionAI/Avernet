@@ -328,9 +328,10 @@ def create_bot_with_authorization(
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
     is_first_bot = bot_id == "default"
 
-    # Pre-flight before Passport, so a limit is reported before the user is sent
-    # through authorization (raises BotLimitExceededError).
-    bot_service.check_create_bot_preflight(user_id=user_id)
+    # Pre-flight before Passport, so a limit or a taken name is reported before
+    # the user is sent through authorization and before an external Passport
+    # identity is minted (raises BotLimitExceededError / BotNameExistsError).
+    bot_service.check_create_bot_preflight(user_id=user_id, bot_name=bot_name)
 
     passport_result = _apply_passport(
         passport_plugin,

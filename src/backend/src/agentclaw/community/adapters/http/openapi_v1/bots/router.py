@@ -475,8 +475,14 @@ async def get_bot_auth_status(
     # ``?cluster_name=ANDC`` alone through, and the bot was then provisioned on
     # the ACRA default — a success response contradicting the request.
     effective_engine = engine if engine is not None else DEFAULT_ENGINE_TYPE
-    if engine is not None and engine not in _get_engine_types():
-        raise UnsupportedEngineError(engine)
+    # Check the engine completion will actually use, supplied or defaulted. A
+    # deployment whose ENGINE_TYPES excludes openclaw would otherwise create a
+    # bot on the default engine anyway — and since creation now persists the
+    # configured registry, that bot's active_engine would be absent from its own
+    # enabled-engine list. Runs before Passport is queried, so nothing external
+    # happens for a request that cannot succeed.
+    if effective_engine not in _get_engine_types():
+        raise UnsupportedEngineError(effective_engine)
     if cluster_name is not None:
         validate_engine_cluster(effective_engine, cluster_name)
     result = complete_bot_authorization(
