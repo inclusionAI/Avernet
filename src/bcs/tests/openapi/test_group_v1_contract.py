@@ -89,6 +89,21 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
             "x-error-codes"
         ]
     ) == {"bot_not_found", "collaboration_definition_not_found"}
+    assert set(
+        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["400"][
+            "x-error-codes"
+        ]
+    ) == {
+        "invalid_request",
+        "invalid_participant",
+        "invalid_participant_binding",
+    }
+    assert (
+        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["properties"]["code"]["const"]
+        == 20_000
+    )
 
 
 def test_contract_bundles_to_a_deterministic_document(

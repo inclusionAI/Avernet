@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -7,7 +8,7 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
     ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
-    CollaborationGroupDetail, CreateGroup, DeleteGroup, DeleteResult, GetGroup,
+    CollaborationGroupDetail, CreateGroup, CreateGroupOutcome, DeleteGroup, DeleteResult, GetGroup,
     GroupDeliveryPolicy, GroupDetail, GroupService, GroupStatus, GroupStrategy, GroupVisibility,
     ListBotGroups, Page, Participant, Principal, UpdateGroup,
 };
@@ -38,6 +39,7 @@ impl PrincipalVerifier for HeaderVerifier {
 struct FakeGroupService {
     list: Mutex<Option<ListBotGroups>>,
     created: Mutex<Option<CreateGroup>>,
+    reuse_dm: AtomicBool,
     get: Mutex<Option<GetGroup>>,
     updated: Mutex<Option<UpdateGroup>>,
     deleted: Mutex<Option<DeleteGroup>>,
@@ -56,6 +58,17 @@ impl GroupService for FakeGroupService {
     async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError> {
         *self.created.lock().expect("create lock") = Some(command);
         Ok(group_detail())
+    }
+
+    async fn create_with_outcome(
+        &self,
+        command: CreateGroup,
+    ) -> Result<CreateGroupOutcome, ApplicationError> {
+        let group = self.create(command).await?;
+        Ok(CreateGroupOutcome {
+            group,
+            created: !self.reuse_dm.load(Ordering::Relaxed),
+        })
     }
 
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError> {
@@ -306,4 +319,28 @@ async fn state_machine_definition_version_must_be_positive_at_the_http_boundary(
     let body = response_json(response).await;
     assert_eq!(body["data"]["error_code"], "invalid_request");
     assert!(service.created.lock().expect("create lock").is_none());
+}
+
+#[tokio::test]
+async fn reused_dm_returns_ok_instead_of_created() {
+    let service = Arc::new(FakeGroupService::default());
+    service.reuse_dm.store(true, Ordering::Relaxed);
+    let app = test_router(service);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/groups",
+            json!({
+                "group_kind": "dm",
+                "target_actor_id": "bot-2"
+            }),
+        ))
+        .await
+        .expect("reused DM response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_000);
+    assert_eq!(body["message"], "OK");
 }

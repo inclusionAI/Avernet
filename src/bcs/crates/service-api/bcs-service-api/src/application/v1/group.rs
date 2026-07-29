@@ -278,6 +278,12 @@ pub struct CreateGroup {
     pub group: CreateGroupSpec,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateGroupOutcome {
+    pub group: GroupDetail,
+    pub created: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct GetGroup {
     pub principal: Principal,
@@ -328,6 +334,16 @@ pub trait GroupService: Send + Sync {
     ) -> Result<Page<GroupSummary>, ApplicationError>;
 
     async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError>;
+
+    async fn create_with_outcome(
+        &self,
+        command: CreateGroup,
+    ) -> Result<CreateGroupOutcome, ApplicationError> {
+        Ok(CreateGroupOutcome {
+            group: self.create(command).await?,
+            created: true,
+        })
+    }
 
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError>;
 

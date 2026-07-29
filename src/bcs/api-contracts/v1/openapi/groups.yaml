@@ -108,6 +108,12 @@ CreateGroupPath:
             discriminator:
               propertyName: group_kind
     responses:
+      "200":
+        description: Existing direct-message group detail when the actor pair is reused.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/GroupDetailEnvelope
       "201":
         description: Created group detail.
         content:
@@ -119,6 +125,7 @@ CreateGroupPath:
         x-error-codes:
           - invalid_request
           - invalid_participant
+          - invalid_participant_binding
         content:
           application/json:
             schema:

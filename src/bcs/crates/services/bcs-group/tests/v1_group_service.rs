@@ -1597,6 +1597,42 @@ async fn human_principal_preserves_existing_legacy_actor_display_name() {
 }
 
 #[tokio::test]
+async fn dm_create_outcome_reports_when_the_existing_pair_is_reused() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("bot-a").await;
+    fixture.add_public_bot("bot-b").await;
+    let command = || CreateGroup {
+        principal: bot_principal("bot-a"),
+        group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+            name: Some("A and B".into()),
+            context: Some("original context".into()),
+            target_actor_id: "bot-b".into(),
+        }),
+    };
+
+    let first = fixture
+        .service
+        .create_with_outcome(command())
+        .await
+        .expect("create first DM");
+    let reused = fixture
+        .service
+        .create_with_outcome(command())
+        .await
+        .expect("reuse existing DM");
+
+    assert!(first.created);
+    assert!(!reused.created);
+    let GroupDetail::DirectMessage(first) = first.group else {
+        panic!("expected first DM detail");
+    };
+    let GroupDetail::DirectMessage(reused) = reused.group else {
+        panic!("expected reused DM detail");
+    };
+    assert_eq!(reused.group_id, first.group_id);
+}
+
+#[tokio::test]
 async fn client_caused_group_errors_map_to_documented_4xx_classes() {
     let fixture = Fixture::new().await;
     fixture.add_public_bot("driver").await;

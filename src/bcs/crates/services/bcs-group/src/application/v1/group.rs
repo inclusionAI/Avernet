@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     Actor, ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
     CollaborationGroupDetail, CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup,
-    CreateGroupSpec, CreateParticipant, DeleteGroup, DeleteResult, DirectMessageGroupDetail,
-    DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter, GroupService, GroupStatus,
-    GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, HumanPrincipal, ListBotGroups,
-    ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
-    Participant as V1Participant, Principal, StateMachineConfiguration,
+    CreateGroupOutcome, CreateGroupSpec, CreateParticipant, DeleteGroup, DeleteResult,
+    DirectMessageGroupDetail, DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter,
+    GroupService, GroupStatus, GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility,
+    HumanPrincipal, ListBotGroups, ManagerWorkerConfiguration, Membership, MembershipFilter,
+    NormalGroupSummary, Page, Participant as V1Participant, Principal, StateMachineConfiguration,
     StateMachineDefinitionReference, StateMachineParticipantBinding, UpdateGroup,
 };
 use bcs_service_api::{
@@ -782,7 +782,7 @@ impl GroupServiceImpl {
         &self,
         principal: Principal,
         request: CreateDirectMessageGroup,
-    ) -> Result<GroupDetail, ApplicationError> {
+    ) -> Result<CreateGroupOutcome, ApplicationError> {
         self.ensure_collaboration_eligible(&principal, &request.target_actor_id)
             .await?;
         if let Principal::Human(human) = &principal {
@@ -812,7 +812,10 @@ impl GroupServiceImpl {
             .ok_or_else(|| {
                 ApplicationError::internal("created DM Group disappeared before projection")
             })?;
-        self.project_detail(group).await
+        Ok(CreateGroupOutcome {
+            group: self.project_detail(group).await?,
+            created: result.created,
+        })
     }
 }
 
@@ -923,10 +926,20 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError> {
+        Ok(self.create_with_outcome(command).await?.group)
+    }
+
+    async fn create_with_outcome(
+        &self,
+        command: CreateGroup,
+    ) -> Result<CreateGroupOutcome, ApplicationError> {
         match command.group {
-            CreateGroupSpec::Collaboration(request) => {
-                self.create_collaboration(command.principal, request).await
-            }
+            CreateGroupSpec::Collaboration(request) => Ok(CreateGroupOutcome {
+                group: self
+                    .create_collaboration(command.principal, request)
+                    .await?,
+                created: true,
+            }),
             CreateGroupSpec::DirectMessage(request) => {
                 self.create_dm(command.principal, request).await
             }

@@ -66,15 +66,20 @@ async fn create_group(
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .group_service
-        .create(CreateGroup {
+        .create_with_outcome(CreateGroup {
             principal,
             group: body.into(),
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
+    let (status, code, message) = if result.created {
+        (StatusCode::CREATED, 20_100, "Created")
+    } else {
+        (StatusCode::OK, 20_000, "OK")
+    };
     Ok((
-        StatusCode::CREATED,
-        Json(Envelope::success(20_100, "Created", result, request_id.0)),
+        status,
+        Json(Envelope::success(code, message, result.group, request_id.0)),
     )
         .into_response())
 }

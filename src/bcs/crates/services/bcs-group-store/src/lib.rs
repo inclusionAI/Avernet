@@ -2566,6 +2566,7 @@ impl GroupRepoPort for MySqlGroupStore {
         let g_label = group.label.clone();
         let g_driver_bot = group.driver_bot.clone();
         let g_originator: Option<String> = group.originator.clone();
+        let g_context = group.context.clone();
         let g_dm_pair_key = group.dm_pair_key.clone();
         let g_group_strategy_str = Self::group_strategy_to_str(group.group_strategy);
         // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str)
@@ -2588,7 +2589,7 @@ impl GroupRepoPort for MySqlGroupStore {
                      (group_id, label, status, driver_bot, originator, env, \
                       routing_policy_json, context, group_kind, dm_pair_key, group_strategy, \
                       gmt_create, gmt_modified) \
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, {now}, {now}) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, {now}, {now}) \
                  {on_conflict}",
             now = self.flavor.now(),
             on_conflict = on_conflict_nothing,
@@ -2609,6 +2610,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 Value::from(g_driver_bot.as_str()),
                 Value::from(g_originator.as_deref()),
                 Value::from(env.as_str()),
+                Value::from(g_context.as_deref()),
                 Value::from(group_kind_str),
                 Value::from(g_dm_pair_key.as_deref()),
                 Value::from(g_group_strategy_str),
@@ -2971,6 +2973,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingDbPlugin {
         transaction_sql: StdMutex<Vec<String>>,
+        transaction_statements: StdMutex<Vec<DbStatement>>,
         execute_statements: StdMutex<Vec<DbStatement>>,
         first_execute_affected_rows: u64,
         fail_queries: bool,
@@ -3023,10 +3026,18 @@ mod tests {
             for step in steps {
                 match step {
                     DbTransactionStep::Query(statement) => {
+                        self.transaction_statements
+                            .lock()
+                            .expect("transaction statements")
+                            .push(statement.clone());
                         sql.push(statement.sql().to_string());
                         results.push(DbTransactionStepResult::Rows(Vec::new()));
                     }
                     DbTransactionStep::Execute(statement) => {
+                        self.transaction_statements
+                            .lock()
+                            .expect("transaction statements")
+                            .push(statement.clone());
                         sql.push(statement.sql().to_string());
                         let affected_rows = if execute_index == 0 {
                             self.first_execute_affected_rows
@@ -3120,6 +3131,32 @@ mod tests {
                 && statement.contains("group_id = ?")
                 && statement.contains("dm_pair_key = ?")
         }));
+    }
+
+    #[tokio::test]
+    async fn dm_insert_persists_the_requested_context() {
+        let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
+        let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
+        let mut group = Group::new(
+            "dm-context",
+            "alice",
+            vec![
+                Participant::bot("alice", ParticipantRole::Driver),
+                Participant::bot("bob", ParticipantRole::Consultant),
+            ],
+        );
+        group.group_kind = bcs_domain::GroupKind::Dm;
+        group.dm_pair_key = Some(Group::compute_dm_pair_key("alice", "bob"));
+        group.context = Some("review release".to_string());
+
+        repo.insert_dm_group_if_absent(group)
+            .await
+            .expect("insert DM with context");
+
+        let statements = db.transaction_statements.lock().expect("transaction steps");
+        let insert = statements.first().expect("group insert");
+        assert!(insert.sql().contains("NULL, ?, ?, ?, ?"));
+        assert_eq!(insert.params()[6], Value::from("review release"));
     }
 
     #[tokio::test]
