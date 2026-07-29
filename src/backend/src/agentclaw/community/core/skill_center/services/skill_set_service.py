@@ -237,7 +237,7 @@ class SkillSetService:
             lambda _owner_id, _bot_id, _engine: None
         )
         effective_owner = entity_id or user_id
-        if not self.is_desktop and effective_owner is not None:
+        if effective_owner is not None:
             pool_paths = self._pool_layout_paths(
                 str(effective_owner),
                 str(self.bot_id),
@@ -1212,7 +1212,7 @@ class SkillSetService:
             ENGINE_SKILLS_REPO_DIR_MAP.get(self.engine_type, str(base_skills_dir / "skills-repo"))
         )
         pool_layout_paths = None
-        if not self.is_desktop and self.entity_id is not None:
+        if self.entity_id is not None:
             pool_layout_paths = self._pool_layout_paths(
                 str(self.entity_id),
                 str(self.bot_id),

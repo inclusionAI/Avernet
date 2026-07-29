@@ -59,13 +59,19 @@ def claimed_state(**changes: object) -> BotSkillLayoutState:
 
 
 class FakeBotRepository:
-    def __init__(self, engine: str = "openclaw") -> None:
+    def __init__(
+        self,
+        engine: str = "openclaw",
+        *,
+        bot_type: str = "personal",
+    ) -> None:
         self.bot: dict[str, object] | None = {
             "bot_id": SCOPE.bot_id,
             "entity_id": SCOPE.entity_id,
             "owner_id": "owner-1",
             "env": SCOPE.env,
             "active_engine": engine,
+            "bot_type": bot_type,
         }
 
     def get_by_id_and_entity(
@@ -438,9 +444,10 @@ def build_service(
     *,
     engine: str = "openclaw",
     skills: FakeSkillRepository | None = None,
+    bot_type: str = "personal",
 ) -> SkillsPoolReconcileService:
     return SkillsPoolReconcileService(
-        bot_repository=FakeBotRepository(engine),
+        bot_repository=FakeBotRepository(engine, bot_type=bot_type),
         layout_repository=layouts,
         skill_repository=skills or FakeSkillRepository(engine),
         runtime=runtime,
@@ -1288,6 +1295,118 @@ async def test_pool_active_reconciliation_probes_current_runtime() -> None:
         "/home/admin/.openclaw/workspace/skills-pool/skills-local"
     )
     assert runtime.events == ["probe"]
+
+
+@pytest.mark.asyncio
+async def test_pool_active_desktop_restart_republishes_pool_mappings() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+        )
+    )
+    runtime = FakeRuntime()
+
+    result = await build_service(
+        layouts,
+        runtime,
+        bot_type="desktop",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
+    assert runtime.events == ["probe", "mapping", "verify"]
+
+
+@pytest.mark.asyncio
+async def test_pool_active_desktop_rejects_invalid_logical_mapping() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+        )
+    )
+    runtime = FakeRuntime()
+    skills = FakeSkillRepository()
+    skills.active.append(
+        RegisteredSkillAsset(
+            skill_id=22,
+            name="local-a",
+            git_path="git://business/local-a",
+        )
+    )
+
+    result = await build_service(
+        layouts,
+        runtime,
+        skills=skills,
+        bot_type="desktop",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.evidence == {"reason": "duplicate managed target: local-a"}
+    assert runtime.events == ["probe"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failed_stage", "expected_outcome", "expected_events"),
+    [
+        (
+            "publish",
+            SkillsPoolReconcileOutcome.MAPPING_FAILED,
+            ["probe", "mapping"],
+        ),
+        (
+            "verify",
+            SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
+            ["probe", "mapping", "verify"],
+        ),
+    ],
+)
+async def test_pool_active_desktop_mapping_recovery_failure_is_retryable(
+    failed_stage: str,
+    expected_outcome: SkillsPoolReconcileOutcome,
+    expected_events: list[str],
+) -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+        )
+    )
+    runtime = FakeRuntime()
+    if failed_stage == "publish":
+        runtime.publish_success = False
+    else:
+        runtime.verify_success = False
+
+    result = await build_service(
+        layouts,
+        runtime,
+        bot_type="desktop",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is expected_outcome
+    assert result.retryable is True
+    assert runtime.events == expected_events
 
 
 @pytest.mark.asyncio
