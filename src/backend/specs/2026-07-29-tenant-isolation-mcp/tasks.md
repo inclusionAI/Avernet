@@ -58,35 +58,40 @@
     no tenant column — a guard against silently registering the wrong class.
 - **Depends on:** Task 1
 
-## Task 3: Isolate `ac_user_mcp_config`
+## Task 3: [x] Isolate `ac_user_mcp_config`
 - **Goal:** Put MCP per-user configuration behind the tenant guard, including the
   unique-key change that lets two tenants hold the same `(user, server)`.
 - **Files:** `src/agentclaw/community/core/models/mcp.py`,
   `tests/community/plugins/test_user_mcp_config_tenant_isolation.py` (new)
 - **Done when:**
-  - [ ] `UserMCPConfig` gains
+  - [x] `UserMCPConfig` gains
         `avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")`.
-  - [ ] Its `UniqueConstraint` becomes
+  - [x] Its `UniqueConstraint` becomes
         `("avernet_tenant", "user_id", "server_code", "env")`, named
         `uix_user_mcp_config_tenant`.
-  - [ ] `register_avernet_tenant_guard(UserMCPConfig)` after the class.
-  - [ ] `avernet_tenant` is **absent** from `to_dict()`; a test asserts the
+  - [x] `register_avernet_tenant_guard(UserMCPConfig)` after the class.
+  - [x] `avernet_tenant` is **absent** from `to_dict()`; a test asserts the
         returned key set is unchanged.
-  - [ ] Cross-tenant reads return nothing, for each protocol method:
+  - [x] Cross-tenant reads return nothing, for each protocol method:
         `get_by_id`, `get_by_user_and_server_code`, `list_by_user`. (`list_by_user`
         has no production caller today — guard and test it anyway; the spec names
         it.)
-  - [ ] `update` and `delete` against another tenant's row return `None` /
+  - [x] `update` and `delete` against another tenant's row return `None` /
         `False` — indistinguishable from a missing row — and leave the row
         untouched.
-  - [ ] `create` stamps the current tenant with no explicit stamp at the call
+  - [x] `create` stamps the current tenant with no explicit stamp at the call
         site; an explicit conflicting tenant raises `CrossTenantInsertError`.
-  - [ ] **Two tenants each hold a config for the same `(user_id, server_code, env)`**
+  - [x] **Two tenants each hold a config for the same `(user_id, server_code, env)`**
         and neither can see or displace the other's. This test fails without the
         unique-key change.
-  - [ ] `plugins/user_mcp_config_repository.py` is **unchanged** — the guards
+  - [x] `plugins/user_mcp_config_repository.py` is **unchanged** — the guards
         cover every method without a per-method filter.
-  - [ ] Each cross-tenant test's red run (before the change) is recorded.
+  - [x] Each cross-tenant test's red run (before the change) is recorded.
+        **Red run:** with the registration commented out and the old unique key
+        restored — 6 failed, 2 errored, 3 passed. The two errors are
+        `IntegrityError: UNIQUE constraint failed: ac_user_mcp_config.user_id,
+        ac_user_mcp_config.server_code, ac_user_mcp_config.env`, which is exactly
+        the failure the key change exists to prevent. Green after: 11 passed.
 - **Depends on:** Task 2
 
 ## Task 4: Isolate `ac_bot_mcp_call_config`
