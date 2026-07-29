@@ -1890,6 +1890,26 @@ class TestUpdateEngineConfig:
         assert body["success"] is False
         assert body["error_code"] == 500
 
+    def test_invalid_json_rejected(self, engine_cfg_client):
+        tc, svc = engine_cfg_client
+        resp = tc.put(
+            "/api/bots/default/engine-config",
+            content="this is not valid json {{{",
+            headers={"content-type": "application/json"},
+        )
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        svc.write_bot_config.assert_not_awaited()
+
+    def test_non_object_json_rejected(self, engine_cfg_client):
+        tc, svc = engine_cfg_client
+        resp = tc.put("/api/bots/default/engine-config", json=["not", "an", "object"])
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        svc.write_bot_config.assert_not_awaited()
+
 
 class TestGetEngineConfig:
     """get_engine_config delegates to EngineConfigService.read_bot_config (provider-blind)."""

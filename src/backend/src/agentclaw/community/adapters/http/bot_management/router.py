@@ -11,6 +11,7 @@ Provides CRUD operations for bots:
 Each bot is associated with an entity (staff, proj, team) and has its own device.
 """
 import asyncio
+import json
 from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
@@ -2940,8 +2941,24 @@ async def update_engine_config(
                 data=None,
             )
 
-        # Get request body
-        config_data = await request.json()
+        # 引擎配置必须是一个 JSON 对象。显式转换解析/类型错误，避免无效内容
+        # 被通用异常处理为 500，或将数组、字符串等顶层值写进配置文件。
+        try:
+            config_data = await request.json()
+        except json.JSONDecodeError:
+            return ApiResponse(
+                success=False,
+                message="请求体不是有效的 JSON",
+                error_code=400,
+                data=None,
+            )
+        if not isinstance(config_data, dict):
+            return ApiResponse(
+                success=False,
+                message="引擎配置必须是 JSON 对象",
+                error_code=400,
+                data=None,
+            )
 
         effective_engine = engine_type or bot.get("active_engine") or DEFAULT_ENGINE_TYPE
 
