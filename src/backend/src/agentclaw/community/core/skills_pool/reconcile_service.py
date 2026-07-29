@@ -228,6 +228,34 @@ class SkillsPoolReconcileService:
                 evidence=probe.evidence,
                 retryable=False,
             )
+        if (
+            state.phase is SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER
+            and state.preparation_id != probe.preparation_id
+        ):
+            identity_evidence = {
+                **probe.evidence,
+                "reason": "preparation_identity_changed_during_cutover",
+                "persisted_preparation_id": state.preparation_id,
+                "observed_preparation_id": probe.preparation_id,
+            }
+            if not self._layouts.mark_repair_required(
+                scope=scope,
+                migration_generation=generation,
+                lease_owner=lease_owner,
+                failure_code="PREPARATION_IDENTITY_CHANGED",
+                failure_stage="runtime_probe",
+                evidence=identity_evidence,
+            ):
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                    preparation_id=probe.preparation_id,
+                )
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.MANUAL_REPAIR_REQUIRED,
+                preparation_id=probe.preparation_id,
+                evidence=identity_evidence,
+                retryable=False,
+            )
 
         if (
             not state.data_plane_cutover_committed
