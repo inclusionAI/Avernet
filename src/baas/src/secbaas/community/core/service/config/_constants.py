@@ -63,3 +63,12 @@ class SystemConfigKey(StrEnum):
     """
 
     DISPATCHER_ROUTE = "bot_run.dispatcher_route"
+
+    BCN_QUEUE_DISPATCHER_ENABLED = "bot_run.bcn_queue_dispatcher_enabled"
+    """Whether BCN requests default to QueueTaskMessageDispatcher.
+
+    Value: "true" or "false" (default: "false")
+    Usage: When enabled, BCN requests (metadata.bot_options.from_bcn == "true")
+    use QueueTaskMessageDispatcher instead of TaskMessageDispatcher, unless
+    overridden by a more specific dispatcher_route config.
+    """
