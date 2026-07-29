@@ -21,8 +21,6 @@ from agentclaw.community.di.modules.infrastructure.community.task import (
 )
 from agentclaw.community.plugins.community.task import (
     NoopBcsCollaborationPort,
-    NoopBotDiscoverPort,
-    NoopDecomposerPort,
     NoopExecutionPort,
     NoopTaskDriverPort,
     NoopTaskService,
@@ -52,7 +50,12 @@ def test_task_service_bound_to_real_impl():
 
 
 def test_bot_discover_port_bound():
-    assert isinstance(_injector().get(BotDiscoverPort), NoopBotDiscoverPort)
+    # Phase 4.1: BotDiscoverPort now binds to the generalized搜推 BotDiscoverService.
+    from agentclaw.community.core.task.services.bot_discover_service import (
+        BotDiscoverService,
+    )
+
+    assert isinstance(_injector().get(BotDiscoverPort), BotDiscoverService)
 
 
 def test_decomposer_port_bound():

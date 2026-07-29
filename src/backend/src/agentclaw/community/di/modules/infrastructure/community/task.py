@@ -34,6 +34,7 @@ from agentclaw.community.core.task.domain.repository import (
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugins.community.task.panel_carrier import TaskPanelCarrier
+from agentclaw.community.core.task.services.bot_catalog import BotCatalogPort
 
 
 class CommunityTaskModule(Module):
@@ -115,9 +116,25 @@ class CommunityTaskModule(Module):
 
     @singleton
     @provider
-    def bot_discover_port(self) -> BotDiscoverPort:
-        from agentclaw.community.plugins.community.task import NoopBotDiscoverPort
-        return NoopBotDiscoverPort()
+    def bot_catalog(self) -> BotCatalogPort:
+        # Phase 4.1: generalized搜推 cover datasource. LocalBotCatalog defaults to
+        # empty; wire real/local bot profiles (e.g. singlebox bots) here or via a
+        # prod adapter wrapping BotServiceProtocol. Non-bcsfuse.
+        from agentclaw.community.core.task.services.bot_catalog import LocalBotCatalog
+        return LocalBotCatalog()
+
+    @singleton
+    @provider
+    def bot_discover_port(
+        self, task_repo: TaskRepo, bot_catalog: BotCatalogPort
+    ) -> BotDiscoverPort:
+        # Phase 4.1: generalized搜推 — 单 bot / 协作群 / 多 bot 拼合, 100% cover.
+        # NoopBotDiscoverPort kept as a fallback/test double; the community profile
+        # binds the real rule-based impl here.
+        from agentclaw.community.core.task.services.bot_discover_service import (
+            BotDiscoverService,
+        )
+        return BotDiscoverService(task_repo=task_repo, bot_catalog=bot_catalog)
 
     @singleton
     @provider
