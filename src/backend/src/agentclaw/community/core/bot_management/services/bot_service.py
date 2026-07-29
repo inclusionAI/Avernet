@@ -57,7 +57,7 @@ from agentclaw.community.core.bot_management.repository.protocol import (
 from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRole
 from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, SUPPORTED_ENGINE_TYPES, _get_engine_types
+from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bot_engine_dir,
@@ -121,6 +121,15 @@ class BotInvalidLifecycleStateError(BotServiceError):
         super().__init__(
             f"Bot {bot_id} cannot be restarted while status is {current_status}"
         )
+
+
+class BotOperationNotAllowedError(BotServiceError):
+    """The operation is not supported for this bot and never will be.
+
+    Distinct from a transient failure: retrying cannot help, so delivery
+    surfaces should report it as a client error rather than a server fault.
+    """
+    pass
 
 
 class BotNotFoundError(BotServiceError):
@@ -811,7 +820,7 @@ class BotService:
             BotLimitExceededError: 已达到该用户允许的最大 Bot 数量
         """
         # 1. 尝试从 policy 表读取用户专属上限
-        max_bots = self._get_bots_ceiling_for_owner(owner_id)
+        max_bots = self.get_bots_ceiling_for_owner(owner_id)
 
         if max_bots <= 0:
             return
@@ -836,8 +845,15 @@ class BotService:
                 f"已达到 Bot 数量上限 ({max_bots})，当前 {current} 个。请删除部分 Bot 后再创建新的。"
             )
 
-    def _get_bots_ceiling_for_owner(self, owner_id: str) -> int:
+    def get_bots_ceiling_for_owner(self, owner_id: str) -> int:
         """获取用户的 BOT 数量上限，优先从 policy 表读取。
+
+        Public because it is the single definition of the ceiling: creation
+        enforces it here, and a surface that *reports* the quota must resolve it
+        the same way. Reading ``PolicyService.get_bots_ceiling`` directly instead
+        picks up that method's own hardcoded default (5) rather than the
+        configured allocation limit, so the advertised and enforced ceilings can
+        disagree whenever ``max_devices_per_entity`` is not 5.
 
         Priority:
         1. PolicyService.get_bots_ceiling (per-user, from DB)
@@ -859,7 +875,7 @@ class BotService:
             )
         except Exception as e:
             logger.warning(
-                "[bot_service._get_bots_ceiling_for_owner] "
+                "[bot_service.get_bots_ceiling_for_owner] "
                 "policy_service.get_bots_ceiling failed for %s: %s",
                 owner_id, e,
             )
@@ -868,6 +884,7 @@ class BotService:
     def check_create_bot_preflight(
         self,
         user_id: str,
+        bot_name: Optional[str] = None,
     ) -> None:
         """Validate whether a bot creation request can start external auth.
 
@@ -875,8 +892,18 @@ class BotService:
         the bot is persisted later from /auth-status. Quota checks that can be
         evaluated before Passport should run here so users are not sent through
         authorization only to fail during the second phase.
+
+        ``bot_name`` (when known) is checked for uniqueness here for the same
+        reason: ``create_bot`` rejects a duplicate, but only *after* the Passport
+        application has already happened, leaving an identity behind with no bot
+        and repeating that external side effect on every retry. The service-level
+        check stays where it is — this one narrows the window, it does not close
+        it, since another create can take the name in between.
         """
         self._check_bot_count_limit(user_id)
+        if bot_name and bot_name.strip():
+            if self._repository.get_by_bot_name(bot_name.strip()):
+                raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
 
     def _check_device_limit(self, entity_id: str, entity_type: str, owner_id: str) -> None:
         """
@@ -885,7 +912,7 @@ class BotService:
         Counts devices that are actively bound to user's bots (ACTIVE/PENDING/FAILED),
         regardless of whether the bot is ACTIVE, PENDING, or FAILED.
 
-        上限来源为 per-user ceiling（``_get_bots_ceiling_for_owner``，优先读
+        上限来源为 per-user ceiling（``get_bots_ceiling_for_owner``，优先读
         ``ac_access_control_policy.policy.bots_ceiling``，fallback 到
         ``device_allocation.max_devices_per_entity``），与 ``_check_bot_count_limit``
         同源，确保动态上限对绑定了 device 的 bot 同样生效。
@@ -900,7 +927,7 @@ class BotService:
         """
         try:
             mode_str = self._allocation_config.mode
-            max_devices = self._get_bots_ceiling_for_owner(owner_id)
+            max_devices = self.get_bots_ceiling_for_owner(owner_id)
 
             # ceiling 无效（<=0）时放行，与 _check_bot_count_limit 语义一致，
             # 避免 active_device_count >= 0 恒真导致第一个 bot 就被拦。
@@ -1105,11 +1132,31 @@ class BotService:
         resolved_entity_id = entity_id or f"staff_{user_id}"
         resolved_entity_type = entity_type or "staff"
 
-        # Always use backend configured engine types, ignore frontend input
-        resolved_engine_types = SUPPORTED_ENGINE_TYPES
+        # Always use backend configured engine types, ignore frontend input.
+        # _get_engine_types() (ENGINE_TYPES env, falling back to the static list)
+        # is what validation and switch_engine both use; persisting the static
+        # list instead meant a bot created on a deployment-enabled engine (e.g.
+        # teclaw) stored an enabled-engine list that omitted its own active
+        # engine — so switch_engine would refuse to switch back to it.
+        resolved_engine_types = _get_engine_types()
 
         # Resolve active engine: use frontend specified, otherwise use default
         resolved_active_engine = engine_type or DEFAULT_ENGINE_TYPE
+        # A bot's active engine must be a member of its own enabled-engine list —
+        # switch_engine checks that list, so a row violating this can never
+        # return to the engine it was created on. The invariant held by accident
+        # while the static list was persisted (it contains DEFAULT_ENGINE_TYPE);
+        # persisting the configured registry broke it wherever the two differ.
+        #
+        # Guaranteed by construction rather than by rejecting: teclaw is a
+        # supported engine that is absent from the default registry, so
+        # rejecting would break teclaw creation on any deployment that does not
+        # set ENGINE_TYPES. Whether an engine outside the configured registry
+        # should be creatable at all is a separate question, decided by the
+        # callers that validate it — not something to enforce here by writing a
+        # row that contradicts itself.
+        if resolved_active_engine not in resolved_engine_types:
+            resolved_engine_types = [*resolved_engine_types, resolved_active_engine]
         resolved_bot_type = bot_type or "personal"
 
         # Resolve bot name according to naming rules
@@ -1870,6 +1917,9 @@ class BotService:
         bot_name: Optional[str] = None,
         owner_name: Optional[str] = None,
         bot_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        engine: Optional[str] = None,
+        status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Dict[str, Any]:
@@ -1881,6 +1931,9 @@ class BotService:
             bot_name: Filter by bot name (fuzzy search)
             owner_name: Filter by owner name
             bot_id: Filter by bot ID (exact match)
+            owner_id: Filter by owner id (exact match) — scopes to one owner
+            engine: Filter by active engine (exact match)
+            status: Filter by lifecycle status (exact match)
             page: Page number (1-based)
             page_size: Items per page
 
@@ -1892,6 +1945,9 @@ class BotService:
             bot_name=bot_name,
             owner_name=owner_name,
             bot_id=bot_id,
+            owner_id=owner_id,
+            engine=engine,
+            status=status,
             page=page,
             page_size=page_size,
         )
@@ -2223,7 +2279,15 @@ class BotService:
             # Check if new bot_name already exists (and it's not the current bot)
             if bot_name.strip():
                 existing_bot = self._repository.get_by_bot_name(bot_name.strip())
-                if existing_bot and existing_bot.get("bot_id") != bot_id:
+                # Identify the current record by owner AND bot_id. bot_id is only
+                # unique per owner — every owner's first bot is "default" — so
+                # comparing bot_id alone made another owner's "default" bot look
+                # like this one, letting its name be taken even though create and
+                # check-name enforce the name tenant-wide.
+                if existing_bot and not (
+                    existing_bot.get("bot_id") == bot_id
+                    and existing_bot.get("owner_id") == bot.get("owner_id")
+                ):
                     raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
             update_data["bot_name"] = bot_name
         if bot_desc is not None:
@@ -3089,8 +3153,12 @@ class BotService:
             # default bot 是用户的常驻默认 Bot,不允许删除(重启请走 restart_bot)。
             # 必须在 release_device / destroy_passport 之前拦截,否则会误销毁
             # agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
+            # 用 BotOperationNotAllowedError（BotServiceError 子类）表达"这是客户端
+            # 不支持的操作"，而不是服务端故障：重试永远不会成功。内部路由的 except 链没有
+            # 这一分支，仍落到 `except BotServiceError` → 500，行为不变；公共 API 则按
+            # 4xx 映射。
             if bot_id == "default":
-                raise BotServiceError("default bot 不允许删除")
+                raise BotOperationNotAllowedError("default bot 不允许删除")
 
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")
@@ -3152,6 +3220,10 @@ class BotService:
             logger.info(f"[bot_service.delete_bot] Bot {bot_id} deleted successfully")
             return True
         except BotNotFoundError:
+            raise
+        except BotOperationNotAllowedError:
+            # 必须在 catch-all 之前放行：否则"不允许删除 default bot"这类客户端错误
+            # 会被重新包成通用 BotServiceError，调用方看到 500 并可能无谓重试。
             raise
         except Exception as e:
             logger.error(f"[bot_service.delete_bot] Failed to delete bot {bot_id}: {e}")

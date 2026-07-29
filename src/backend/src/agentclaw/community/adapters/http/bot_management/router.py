@@ -56,16 +56,28 @@ from agentclaw.community.core.bot_management.utils import (
     clear_baas_publish_failure_ext as _clear_baas_publish_failure_ext,
     is_baas_publish_failure_message as _utils_is_baas_publish_failure_message,
 )
+from agentclaw.community.core.bot_management.readiness import (
+    has_stale_baas_publish_failure,
+    is_bot_ready,
+)
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
-from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
-from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
-from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.core.bot_management.create_flow import (
+    AuthPending,
+    AuthStatus,
+    BotCreateSpec,
+    complete_bot_authorization,
+    create_bot_with_authorization,
+)
+# Re-exported so ``test_bot_passport`` can keep importing it from this module.
+from agentclaw.community.core.bot_management.create_flow import (  # noqa: F401
+    _get_bot_mcp_codes,
+)
+from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin
-from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.passport import PassportError
@@ -93,36 +105,27 @@ def _sanitize_baas_status_ext_for_response(
     return dict(ext)
 
 
-def _get_bot_mcp_codes(
-    factory: SkillSetServiceFactory,
-    user_id: str,
-    bot_id: str,
-    entity_id: str,
-    entity_type: str,
-    engine_type: str | None = None,
-) -> list[str]:
-    """Resolve AgentPass MCP codes for a bot using the injected factory.
+def _bot_create_spec(data: dict[str, Any], user_id: str) -> BotCreateSpec:
+    """Map this surface's raw JSON body onto the shared create contract.
 
-    Pure helper — the factory is passed in by the calling route (which obtains
-    it via ``Injected(SkillSetServiceFactory)``), so this contains no service
-    locator calls.  ``engine_type`` scopes the skill set query to the bot's
-    active engine; when omitted the factory falls back to ``DEFAULT_ENGINE_TYPE``.
-    LOCAL/stdio MCPs are filtered because AgentPass does not own them.
+    The one place the internal API's request keys are read; the shared flow then
+    works off typed fields, so a spec field added later must be filled in here
+    explicitly rather than silently going missing. ``entity_id`` and
+    ``engine_type`` are resolved to concrete values here — the same defaults
+    ``create_bot`` would otherwise apply.
     """
-    skill_set_service = factory.create(
-        user_id=user_id,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        entity_type=entity_type,
-        engine_type=engine_type,
+    return BotCreateSpec(
+        entity_id=data.get("entity_id") or user_id,
+        entity_type=data.get("entity_type") or "staff",
+        engine_type=data.get("engine_type") or DEFAULT_ENGINE_TYPE,
+        bot_name=data.get("bot_name"),
+        bot_desc=data.get("bot_desc"),
+        bot_type=data.get("bot_type") or "personal",
+        avatar_url=data.get("avatar_url"),
+        share_policy=data.get("share_policy"),
+        template_type=data.get("template_type"),
+        template_config=data.get("template_config"),
     )
-    mcp_codes = skill_set_service.get_bot_mcp_codes(
-        entity_id=entity_id,
-        bot_id=bot_id,
-        user_id=user_id,
-        entity_type=entity_type,
-    )
-    return filter_passport_mcp_codes(mcp_codes)
 
 
 router = APIRouter(prefix="/api/bots", tags=["bots"])
@@ -913,174 +916,50 @@ async def create_bot(
         user_id = ctx.user_id
         nick_name = ctx.nick_name or user_id
 
-        avatar_url = data.get("avatar_url")
-        ext = {"avatar_url": avatar_url} if avatar_url else None
-
-        # ===== 0. 早校验：bot_name 合法性（避免占用 bot_id / 走 passport 流程） =====
-        # bot_name 允许 None（后续 _resolve_bot_name 用默认规则）；非 None 时严格校验。
-        raw_bot_name = data.get("bot_name")
-        if raw_bot_name is not None:
-            try:
-                data["bot_name"] = validate_bot_name(raw_bot_name)
-            except BotNameInvalidError as e:
-                logger.warning(f"[bot_router.create_bot] Invalid bot_name: {e}")
-                return ApiResponse(
-                    success=False,
-                    message=str(e),
-                    error_code=400,
-                    data=None,
-                )
-
-        # ===== 1. 分配 botId =====
+        # botId allocation stays in the router (callers own id allocation and the
+        # tests patch generate_bot_id here). The shared flow does the rest:
+        # name validation → preflight → passport → create.
         bot_id = generate_bot_id(user_id, bot_repo)
-        entity_id = data.get("entity_id") or user_id
-        entity_type = data.get("entity_type") or "staff"
-        is_first_bot = bot_id == "default"
-        # Passport 申请时透传 engine_type；未指定则落到 DEFAULT_ENGINE_TYPE
-        passport_engine_type = data.get("engine_type") or DEFAULT_ENGINE_TYPE
-        bot_type = data.get("bot_type")
+        cookie = request.headers.get("cookie", "")
 
-        logger.info(f"[bot_router.create_bot] Allocated bot_id={bot_id}, is_first_bot={is_first_bot}, engine_type={passport_engine_type}")
+        outcome = create_bot_with_authorization(
+            user_id=user_id,
+            nick_name=nick_name,
+            bot_id=bot_id,
+            spec=_bot_create_spec(data, user_id),
+            cookie=cookie,
+            bot_service=bot_service,
+            passport_plugin=passport_plugin,
+            auth_rel_plugin=auth_rel_plugin,
+            skill_set_factory=skill_set_factory,
+        )
 
-        # ===== 1.1 创建前置校验：避免两段式授权后才发现不可创建 =====
-        try:
-            bot_service.check_create_bot_preflight(
-                user_id=user_id,
+        # Passport not yet issued → guide the user through authorization.
+        if isinstance(outcome, AuthPending):
+            logger.info(
+                f"[bot_router.create_bot] Need authorization: bot_id={outcome.bot_id}, "
+                f"iframe_url={outcome.iframe_url}"
             )
-        except BotLimitExceededError as e:
-            logger.warning(f"[bot_router.create_bot] Bot limit exceeded before passport: {e}")
-            return ApiResponse(
-                success=False,
-                message=str(e),
-                error_code=429,
-                data=None,
-            )
-
-        # ===== 2. 获取 mcp_codes =====
-        mcp_codes = _get_bot_mcp_codes(skill_set_factory, user_id, bot_id, entity_id, entity_type, engine_type=passport_engine_type)
-        logger.info(f"[bot_router.create_bot] Got mcp_codes for bot {bot_id}: {mcp_codes}")
-
-        # ===== 3. 申请 Passport =====
-        passport_result = None
-        default_cli_items = get_default_cli_items(passport_engine_type, data.get("template_type"))
-
-        try:
-            if is_first_bot:
-                passport_result = passport_plugin.apply_first_agent_passport(
-                    bot_id=bot_id,
-                    owner_workno=user_id,
-                    mcp_codes=mcp_codes,
-                    cli_items=default_cli_items,
-                    bot_name=data.get("bot_name"),
-                    bot_desc=data.get("bot_desc"),
-                    engine_type=passport_engine_type,
-                    access_mode="RESTRICTED",
-                    workspace_path="/home/admin/.openclaw",
-                )
-            else:
-                passport_result = passport_plugin.apply_agent_passport(
-                    bot_id=bot_id,
-                    owner_workno=user_id,
-                    mcp_codes=mcp_codes,
-                    cli_items=default_cli_items,
-                    bot_name=data.get("bot_name"),
-                    bot_desc=data.get("bot_desc"),
-                    engine_type=passport_engine_type,
-                    access_mode="RESTRICTED",
-                    workspace_path="/home/admin/.openclaw",
-                )
-        except PassportError as e:
-            logger.error(f"[bot_router.create_bot] TCAuth error: {e}")
-            return ApiResponse(
-                success=False,
-                message=f"授权申请异常: {e}",
-                error_code=5400,
-                data=None,
-            )
-        except Exception as e:
-            logger.error(f"[bot_router.create_bot] Passport apply failed: {e}")
-            return ApiResponse(
-                success=False,
-                message=f"Passport申请失败: {str(e)}",
-                error_code=500,
-                data=None,
-            )
-
-        # ===== 4. 判断 token =====
-        passport_token = passport_result.get("token") if passport_result else None
-        agent_code = passport_result.get("agent_code") if passport_result else None
-        iframe_url = passport_result.get("iframe_url") if passport_result else None
-        redirect_url = passport_result.get("redirect_url") if passport_result else None
-
-        # token 为空：需要授权
-        if not passport_token:
-            logger.info(f"[bot_router.create_bot] Need authorization: bot_id={bot_id}, iframe_url={iframe_url}")
             return ApiResponse(
                 success=False,
                 message="需要授权",
                 error_code=401,
                 data={
                     "need_authorization": True,
-                    "bot_id": bot_id,
-                    "iframe_url": iframe_url,
-                    "redirect_url": redirect_url,
+                    "bot_id": outcome.bot_id,
+                    "iframe_url": outcome.iframe_url,
+                    "redirect_url": outcome.redirect_url,
                 },
             )
-
-        # ===== 5. token 非空，创建 Bot =====
-        ext: dict[str, Any] = {}
-        if avatar_url:
-            ext["avatar_url"] = avatar_url
-        if agent_code:
-            ext["passport"] = {"agent_code": agent_code}
-
-        # Get cookie from request for memoryos API authentication
-        cookie = request.headers.get("cookie", "")
-
-        result = bot_service.create_bot(
-            user_id=user_id,
-            nick_name=nick_name,
-            bot_name=data.get("bot_name"),
-            bot_desc=data.get("bot_desc"),
-            entity_id=entity_id,
-            entity_type=entity_type,
-            share_policy=data.get("share_policy"),
-            engine_type=data.get("engine_type"),
-            ext=ext if ext else None,
-            bot_id=bot_id,
-            bot_type=bot_type,
-            template_type=data.get("template_type"),
-            template_config=data.get("template_config"),
-            cookie=cookie,
-        )
-
-        # 创建 owner-bot 授权关系（默认 private → RESTRICTED）
-        if agent_code:
-            try:
-                auth_result = auth_rel_plugin.create_relationship(
-                    work_no=user_id,
-                    agent_code=agent_code,
-                    description="Bot owner default authorization",
-                    operator_work_no=user_id,
-                    operator_name=nick_name,
-                )
-                if auth_result:
-                    logger.info(f"[bot_router.create_bot] Created owner auth relationship: bot_id={bot_id}, owner={user_id}, agent_code={agent_code}, auth_id={auth_result.get('auth_id')}")
-                else:
-                    logger.warning(f"[bot_router.create_bot] AceAgent returned failure for create_relationship: bot_id={bot_id}, owner={user_id}, agent_code={agent_code}")
-            except AuthRelationshipError as e:
-                logger.warning(f"[bot_router.create_bot] Failed to create owner auth relationship: bot_id={bot_id}, error={e}")
-            except Exception as e:
-                logger.warning(f"[bot_router.create_bot] Unexpected error creating owner auth relationship: bot_id={bot_id}, error={e}")
 
         return ApiResponse(
             success=True,
             data={
-                "bot": result,
+                "bot": outcome.bot,
                 "passport": {
-                    "token": passport_token,
+                    "token": outcome.passport_token,
                     "status": "ISSUED",
-                    "is_first_bot": is_first_bot,
+                    "is_first_bot": outcome.is_first_bot,
                 },
             },
         )
@@ -1115,6 +994,16 @@ async def create_bot(
             success=False,
             message=f"{str(e)}",
             error_code=429,
+            data=None,
+        )
+    except PassportError as e:
+        # Preserves the internal contract: a Passport apply failure is 5400
+        # (the old inner try mapped it here, not via the generic branch).
+        logger.error(f"[bot_router.create_bot] TCAuth error: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"授权申请异常: {e}",
+            error_code=5400,
             data=None,
         )
     except DeviceAllocationError as e:
@@ -1194,105 +1083,34 @@ async def get_auth_status(
                 data=None,
             )
 
-        # 1. 查询授权状态
-        auth_status = passport_plugin.query_auth_status(
+        cookie = request.headers.get("cookie", "")
+        result = complete_bot_authorization(
+            user_id=user_id,
+            nick_name=nick_name,
             bot_id=bot_id,
-            owner_workno=user_id,
+            spec=_bot_create_spec(data, user_id),
+            cookie=cookie,
+            bot_service=bot_service,
+            passport_plugin=passport_plugin,
+            auth_rel_plugin=auth_rel_plugin,
         )
 
-        if not auth_status:
-            return ApiResponse(
-                success=False,
-                message="查询授权状态失败",
-                error_code=500,
-                data=None,
-            )
-
-        status = auth_status.get("status")
-
-        # 2. PENDING：返回处理中
-        if status == "PENDING":
+        if result.status == AuthStatus.PENDING:
             return ApiResponse(
                 success=True,
-                data={
-                    "status": "PENDING",
-                    "message": "授权处理中",
-                },
+                data={"status": "PENDING", "message": "授权处理中"},
             )
-
-        # 3. ISSUED：进行设备分配
-        if status == "ISSUED":
-            entity_id = data.get("entity_id") or user_id
-            entity_type = data.get("entity_type") or "staff"
-            avatar_url = data.get("avatar_url")
-
-            # query_auth_status 不返回 agent_code，需要额外查询
-            agent_code = None
-            try:
-                passport_info = passport_plugin.query_agent_passport(bot_id=bot_id, owner_workno=user_id)
-                if passport_info:
-                    agent_code = passport_info.get("agent_code")
-            except Exception as e:
-                logger.warning(f"[bot_router.query_auth_status] query_agent_passport failed: {e}")
-
-            # 调用 create_bot（幂等）
-            ext: dict[str, Any] = {}
-            if avatar_url:
-                ext["avatar_url"] = avatar_url
-            if agent_code:
-                ext["passport"] = {"agent_code": agent_code, "status": "ISSUED"}
-
-            cookie = request.headers.get("cookie", "")
-            result = bot_service.create_bot(
-                user_id=user_id,
-                nick_name=nick_name,
-                bot_id=bot_id,
-                bot_name=data.get("bot_name"),
-                bot_desc=data.get("bot_desc"),
-                entity_id=entity_id,
-                entity_type=entity_type,
-                share_policy=data.get("share_policy"),
-                engine_type=data.get("engine_type"),
-                ext=ext if ext else None,
-                bot_type=data.get("bot_type"),
-                template_type=data.get("template_type"),
-                template_config=data.get("template_config"),
-                cookie=cookie,
-            )
-
-            # 创建 owner-bot 授权关系（auth-status 流程补充）
-            if agent_code:
-                try:
-                    auth_result = auth_rel_plugin.create_relationship(
-                        work_no=user_id,
-                        agent_code=agent_code,
-                        description="Bot owner default authorization",
-                        operator_work_no=user_id,
-                        operator_name=nick_name,
-                    )
-                    if auth_result:
-                        logger.info(f"[bot_router.get_auth_status] Created owner auth relationship: bot_id={bot_id}, owner={user_id}, agent_code={agent_code}, auth_id={auth_result.get('auth_id')}")
-                    else:
-                        logger.warning(f"[bot_router.get_auth_status] AceAgent returned failure for create_relationship: bot_id={bot_id}, owner={user_id}, agent_code={agent_code}")
-                except AuthRelationshipError as e:
-                    logger.warning(f"[bot_router.get_auth_status] Failed to create owner auth relationship: bot_id={bot_id}, error={e}")
-                except Exception as e:
-                    logger.warning(f"[bot_router.get_auth_status] Unexpected error creating owner auth relationship: bot_id={bot_id}, error={e}")
-
+        if result.status == AuthStatus.ISSUED:
             return ApiResponse(
                 success=True,
-                data={
-                    "status": "ISSUED",
-                    "bot": result,
-                },
+                data={"status": "ISSUED", "bot": result.bot},
             )
-
         # 其他状态（如 REJECTED）
         return ApiResponse(
             success=False,
-            message=f"授权状态异常: {status}",
+            message=f"授权状态异常: {result.status}",
             error_code=400,
-            data={"status": status},
+            data={"status": result.status},
         )
 
     except BotNameInvalidError as e:
@@ -2544,11 +2362,8 @@ async def get_bot_status(
         binding_info = bot.get("device_binding", {})
         ext = bot.get("ext") or {}
         binding_status = binding_info.get("status", "UNKNOWN") if binding_info else "UNKNOWN"
-        is_active_baas_binding = (
-            bot_status == "ACTIVE"
-            and binding_status == "ACTIVE"
-            and (binding_info.get("device_provider") if binding_info else None) == "baas"
-        )
+        # 与 is_ready 共用同一份判定（core/bot_management/readiness.py）。
+        stale_baas_failure = has_stale_baas_publish_failure(bot)
 
         # 失败信息来源（按优先级）：
         # 1. binding.error_message — 设备层直接上报（DaaS 等）
@@ -2558,11 +2373,6 @@ async def get_bot_status(
         #    → starting_watchdog 上报 status=FAILED + tail 1 行 log
         # binding 层没有 error_message 字段时（如 DeviceBindingRecord）退到 ext
         error_message = binding_info.get("error_message") if binding_info else None
-        stale_baas_failure = (
-            is_active_baas_binding
-            and ext.get("start_status") == "FAILED"
-            and _is_baas_publish_failure_message(ext.get("start_message"))
-        )
         if not error_message and ext.get("start_status") == "FAILED" and not stale_baas_failure:
             error_message = ext.get("start_message")
         response_ext = _sanitize_baas_status_ext_for_response(
@@ -2575,22 +2385,7 @@ async def get_bot_status(
         )
 
         # aicoding 应用 bot：等 .repos/ 仓库克隆完成才算 ready。
-        # finalize.sh Step 5.4 会同步阻塞等 .repos/_meta.json 出现，
-        # marker 写 SUCCEEDED 后 starting_watchdog 才发 start_status=SUCCEEDED，
-        # 因此把 start_status==SUCCEEDED 纳入 is_ready 即可表达"代码已 clone 完"。
-        # 创建链路里 claude_code+applicationCoding 会被路由成 aicoding 引擎，
-        # 但 ac_bots.active_engine 写库时保留的是用户传入值，所以两种取值都要覆盖。
-        active_engine = bot.get("active_engine")
-        template_type = bot.get("template_type")
-        needs_repos = (
-            template_type == "applicationCoding"
-            and active_engine in ("aicoding", "claude_code")
-        )
-        start_status = ext.get("start_status")
-        # 非应用 bot：start_status 不参与判定，保持旧行为；
-        # 应用 bot：必须 start_status==SUCCEEDED。
-        repos_ready = (not needs_repos) or start_status == "SUCCEEDED" or stale_baas_failure
-
+        # 判定策略见 core/bot_management/readiness.py —— 内部与公共 API 共用同一实现。
         result = {
             "bot_id": bot_id,
             "bot_status": bot_status,
@@ -2598,7 +2393,7 @@ async def get_bot_status(
             "device_id": binding_info.get("device_id") if binding_info else None,
             "device_provider": binding_info.get("device_provider") if binding_info else None,
             "error_message": error_message,
-            "is_ready": bot_status == "ACTIVE" and repos_ready,
+            "is_ready": is_bot_ready(bot),
             "ext": response_ext,  # 添加扩展字段
         }
 
@@ -2984,7 +2779,9 @@ async def get_engine_config(
     engine_type: Optional[str] = Query(None, description="Engine override; defaults to bot's active_engine"),
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+    engine_config_service: EngineConfigServiceProtocol = Injected(
+        EngineConfigServiceProtocol
+    ),
 ) -> ApiResponse:
     """
     Get engine configuration for a bot. Defaults to bot's active_engine.
@@ -3084,7 +2881,9 @@ async def update_engine_config(
     engine_type: Optional[str] = Query(None, description="Engine override; defaults to bot's active_engine"),
     ctx: RequestContext = Depends(get_request_context),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+    engine_config_service: EngineConfigServiceProtocol = Injected(
+        EngineConfigServiceProtocol
+    ),
 ) -> ApiResponse:
     """
     Update (save) engine configuration for a bot. Defaults to bot's active_engine.

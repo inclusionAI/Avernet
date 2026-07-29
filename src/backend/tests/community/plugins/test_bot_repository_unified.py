@@ -253,6 +253,34 @@ def test_list_and_count(repo):
     assert t4 == 2
 
 
+def test_list_by_conditions_owner_engine_status_filters(repo):
+    """Additive owner_id / engine / status filters narrow with exact totals."""
+    repo.insert(_data(bot_id="b1", owner_id="alice", active_engine="teclaw",
+                      status="ACTIVE", bot_name="Alpha"))
+    repo.insert(_data(bot_id="b2", owner_id="alice", active_engine="openclaw",
+                      status="PENDING", bot_name="Beta"))
+    repo.insert(_data(bot_id="b3", owner_id="bob", active_engine="teclaw",
+                      status="ACTIVE", bot_name="Gamma"))
+
+    # No new filters → every row (backward-compatible default).
+    assert repo.list_by_conditions()[0] == 3
+    # owner_id scopes to a single owner.
+    total, rows = repo.list_by_conditions(owner_id="alice")
+    assert total == 2
+    assert {r["bot_id"] for r in rows} == {"b1", "b2"}
+    # engine / status filter independently.
+    assert repo.list_by_conditions(engine="teclaw")[0] == 2
+    assert repo.list_by_conditions(status="PENDING")[0] == 1
+    # Combined filters narrow to the exact row, with an exact total.
+    total, rows = repo.list_by_conditions(
+        owner_id="alice", engine="teclaw", status="ACTIVE"
+    )
+    assert total == 1
+    assert rows[0]["bot_id"] == "b1"
+    # Keyword (bot_name) still composes with the new filters.
+    assert repo.list_by_conditions(owner_id="alice", bot_name="Alpha")[0] == 1
+
+
 def test_count_by_owner_excludes_desktop(repo):
     repo.insert(_data(bot_id="b1", bot_type="personal"))
     repo.insert(_data(bot_id="b2", bot_type="desktop"))
@@ -606,3 +634,32 @@ def test_search_bots_filter_provider_cross_env_binding_no_match(repo, db):
     total, items = repo.search_bots(provider="arca", page=1, page_size=10)
     assert total == 0
     assert items == []
+
+
+def test_list_by_conditions_treats_like_wildcards_literally(repo):
+    """R9/F39: a `%` in the keyword narrowed nothing — it matched everything.
+
+    The keyword goes into a LIKE pattern, so an unescaped `%` or `_` is a
+    wildcard rather than the character the caller typed: searching for a name
+    containing `%` returned every bot and an inflated total.
+    """
+    repo.insert(_data(bot_id="b1", bot_name="100% Bot"))
+    repo.insert(_data(bot_id="b2", bot_name="Plain Bot"))
+    repo.insert(_data(bot_id="b3", bot_name="a_b Bot"))
+    repo.insert(_data(bot_id="b4", bot_name="axb Bot"))
+
+    # `%` is the literal character, not "match anything".
+    total, rows = repo.list_by_conditions(bot_name="100%")
+    assert total == 1, [r["bot_name"] for r in rows]
+    assert rows[0]["bot_id"] == "b1"
+
+    # `_` is the literal character, not "match one".
+    total, rows = repo.list_by_conditions(bot_name="a_b")
+    assert total == 1, [r["bot_name"] for r in rows]
+    assert rows[0]["bot_id"] == "b3"
+
+    # A bare wildcard matches only names actually containing it.
+    assert repo.list_by_conditions(bot_name="%")[0] == 1
+
+    # Ordinary substring search is unchanged.
+    assert repo.list_by_conditions(bot_name="Bot")[0] == 4

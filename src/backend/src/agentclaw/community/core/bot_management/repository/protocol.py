@@ -92,10 +92,19 @@ class BotRepository(Protocol):
         bot_name: Optional[str] = None,
         owner_name: Optional[str] = None,
         bot_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        engine: Optional[str] = None,
+        status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
-        """List bots by conditions with pagination."""
+        """List bots by conditions with pagination.
+
+        ``owner_id`` scopes to a single owner (exact), ``engine`` filters on the
+        active engine (exact), ``status`` filters on lifecycle status (exact).
+        All are optional and additive — omitting them reproduces the prior
+        result set and count exactly.
+        """
         ...
 
     def list_by_search(

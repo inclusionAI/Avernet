@@ -349,6 +349,9 @@ class BotRepository:
         bot_name: Optional[str] = None,
         owner_name: Optional[str] = None,
         bot_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        engine: Optional[str] = None,
+        status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
@@ -359,8 +362,12 @@ class BotRepository:
             if public:
                 query = query.filter(self.Model.public == public)
             if bot_name:
+                # autoescape=True escapes the caller's % and _ and emits the
+                # matching ESCAPE clause. Interpolating into LIKE directly makes
+                # those characters wildcards, so searching for a name containing
+                # a literal "%" matched everything and inflated the total.
                 query = query.filter(
-                    self.Model.bot_name.like(f"%{bot_name}%")
+                    self.Model.bot_name.contains(bot_name, autoescape=True)
                 )
             if owner_name:
                 query = query.filter(
@@ -368,6 +375,12 @@ class BotRepository:
                 )
             if bot_id:
                 query = query.filter(self.Model.bot_id == bot_id)
+            if owner_id:
+                query = query.filter(self.Model.owner_id == owner_id)
+            if engine:
+                query = query.filter(self.Model.active_engine == engine)
+            if status:
+                query = query.filter(self.Model.status == status)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc())

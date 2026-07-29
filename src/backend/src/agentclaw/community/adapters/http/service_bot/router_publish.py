@@ -43,7 +43,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError as BotManagementNotFoundError,
 )
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
-from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
@@ -274,7 +274,9 @@ async def get_publish_engine_config(
     user: AuthenticatedUser = Depends(get_current_user),
     publish_repo: BotPublishRepositoryProtocol = Injected(BotPublishRepositoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
-    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+    engine_config_service: EngineConfigServiceProtocol = Injected(
+        EngineConfigServiceProtocol
+    ),
 ) -> ApiResponse:
     """根据服务 Bot 发布单读取发布阶段引擎配置.
 
