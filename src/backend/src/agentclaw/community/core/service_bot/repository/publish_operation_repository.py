@@ -101,6 +101,17 @@ class PublishOperationRepository(ABC):
         """CAS ``ID_RECORDED`` -> ``COMPLETED``. ``None`` if not ``ID_RECORDED``."""
 
     @abstractmethod
+    def complete_without_workflow(
+        self, op_id: int
+    ) -> Optional[PublishOperationRecord]:
+        """CAS ``PENDING`` -> ``COMPLETED`` for a non-BaaS operation.
+
+        Local operations such as an ARCA draft restore have no external workflow
+        id to record, but still need a terminal ledger row with full attempt and
+        timing history.
+        """
+
+    @abstractmethod
     def fail(self, op_id: int, error: str) -> Optional[PublishOperationRecord]:
         """Mark a non-terminal operation ``FAILED`` with ``error``. ``None`` if
         already terminal."""

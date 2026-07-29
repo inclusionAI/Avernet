@@ -86,6 +86,67 @@ class PublishOperationError(Exception):
     """A publish operation step failed (surfaced to the caller / task)."""
 
 
+class OperationAlreadyInFlightError(PublishOperationError):
+    """A caller requested a fresh operation while one is still in flight."""
+
+
+def open_publish_operation(
+    ledger: PublishOperationRepository,
+    *,
+    publish_id: int,
+    kind: PublishOperationKind,
+    stage: PublishStage,
+    params: Optional[Dict[str, Any]] = None,
+    bot_uuid: Optional[str] = None,
+    operator: str = "system",
+    reject_if_in_flight: bool = False,
+) -> PublishOperationRecord:
+    """Find the in-flight ledger operation or create its next attempt.
+
+    ``reject_if_in_flight`` is for user-triggered entry points that must reject a
+    duplicate request instead of enqueueing another task for the same operation.
+    The insert-race read-back gives both entry points the same concurrent-create
+    behavior while keeping attempt and request-id generation in one place.
+    """
+    latest = ledger.get_latest_by_kind(publish_id, kind, stage.value)
+    if latest is not None and latest.state not in {
+        state.value for state in PublishOperationState.terminal()
+    }:
+        if reject_if_in_flight:
+            raise OperationAlreadyInFlightError(
+                f"operation already in flight: publish_id={publish_id} "
+                f"kind={kind} stage={stage.value}"
+            )
+        return latest
+
+    attempt = (latest.attempt + 1) if latest is not None else 1
+    data: Dict[str, Any] = {
+        "publish_id": publish_id,
+        "operation_kind": str(kind),
+        "stage": stage.value,
+        "attempt": attempt,
+        "request_id": operation_request_id(publish_id, kind, stage.value, attempt),
+        "bot_uuid": bot_uuid,
+        "operator": operator,
+        "params": params,
+        "env": get_current_env(),
+    }
+    try:
+        return ledger.insert(data)
+    except Exception:
+        concurrent = ledger.get_latest_by_kind(publish_id, kind, stage.value)
+        if concurrent is not None and concurrent.state not in {
+            state.value for state in PublishOperationState.terminal()
+        }:
+            if reject_if_in_flight:
+                raise OperationAlreadyInFlightError(
+                    f"operation already in flight: publish_id={publish_id} "
+                    f"kind={kind} stage={stage.value}"
+                )
+            return concurrent
+        raise
+
+
 # Error codes for which BaaS is telling us the operation's target bot no longer
 # exists, so an in-place mutation (UPDATE/RESTART) can never succeed and the
 # caller must fall back to a fresh CREATE. BaaS reports ``BOT_NOT_FOUND`` when
@@ -239,25 +300,15 @@ class PublishOperationRunner:
         status-gated must guard that window themselves (e.g. the offline destroy
         short-circuits when the binding is already RELEASED).
         """
-        latest = self._ledger.get_latest_by_kind(publish_id, kind, stage.value)
-        if latest is not None and latest.state not in {
-            s.value for s in PublishOperationState.terminal()
-        }:
-            return latest
-
-        attempt = (latest.attempt + 1) if latest is not None else 1
-        data: Dict[str, Any] = {
-            "publish_id": publish_id,
-            "operation_kind": str(kind),
-            "stage": stage.value,
-            "attempt": attempt,
-            "request_id": operation_request_id(publish_id, kind, stage.value, attempt),
-            "bot_uuid": bot_uuid,
-            "operator": operator,
-            "params": params,
-            "env": get_current_env(),
-        }
-        return self._ledger.insert(data)
+        return open_publish_operation(
+            self._ledger,
+            publish_id=publish_id,
+            kind=kind,
+            stage=stage,
+            params=params,
+            bot_uuid=bot_uuid,
+            operator=operator,
+        )
 
     # ── acquire (get the workflow id: memory / adopt / issue) ────────────
     async def acquire_workflow(
