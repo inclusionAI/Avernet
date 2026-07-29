@@ -116,6 +116,7 @@ pub struct CapabilitiesView {
     pub storage: String,
     pub presign_upload: bool,
     pub presign_download: bool,
+    pub inline_view: bool,
     pub max_size: u64,
 }
 
@@ -163,6 +164,7 @@ pub trait SessionFileService: Send + Sync {
         session_id: &str,
         file_id: &str,
         ttl_secs: Option<u64>,
+        show: bool,
     ) -> Result<(SessionFile, DownloadRoute), SessionFileUseCaseError>;
 
     async fn share_mint(

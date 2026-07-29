@@ -14,6 +14,7 @@ async fn local_conforms() {
         supports_presign_download: false,
         supports_stream_put: true,
         supports_stream_get: true,
+        supports_inline_view: true,
         max_object_size: 1024 * 1024,
     };
     let plugin: Arc<dyn bcs_storage_api::StoragePlugin> = Arc::new(LocalStoragePlugin::new(

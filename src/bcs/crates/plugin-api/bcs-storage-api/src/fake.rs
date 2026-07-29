@@ -8,7 +8,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 
 use crate::{
-    ByteStream, ClientUploadTarget, PreparedUpload, PresignGetTicket,
+    ByteStream, ClientUploadTarget, PreparedUpload, PresignGetOptions, PresignGetTicket,
     StorageCapabilities, StorageError, StorageHandle, StorageHealth, StorageObjectMeta,
     StoragePlugin, UploadHandle, UploadPrepareRequest,
 };
@@ -18,11 +18,17 @@ pub struct FakeStoragePlugin {
     caps: StorageCapabilities,
     objects: Arc<Mutex<HashMap<String, Bytes>>>, // key -> final bytes
     staging: Arc<Mutex<HashMap<String, HashMap<Option<u16>, Bytes>>>>, // key -> {part_number: bytes}
+    last_presign_opts: Arc<Mutex<Option<PresignGetOptions>>>,
 }
 
 impl FakeStoragePlugin {
     pub fn new(caps: StorageCapabilities) -> Self {
         Self { caps, ..Default::default() }
+    }
+
+    /// Last `PresignGetOptions` passed to `presign_get`, if any.
+    pub fn last_presign_opts(&self) -> Option<PresignGetOptions> {
+        *self.last_presign_opts.lock().unwrap()
     }
 }
 
@@ -94,10 +100,11 @@ impl StoragePlugin for FakeStoragePlugin {
         Ok(make_stream(bytes))
     }
 
-    async fn presign_get(&self, handle: &StorageHandle, ttl_secs: u64, _caller: Option<&crate::ActorRef>) -> Result<PresignGetTicket, StorageError> {
+    async fn presign_get(&self, handle: &StorageHandle, opts: PresignGetOptions, _caller: Option<&crate::ActorRef>) -> Result<PresignGetTicket, StorageError> {
+        *self.last_presign_opts.lock().unwrap() = Some(opts);
         Ok(PresignGetTicket {
             download_url: format!("fake://{}", handle.key),
-            expires_at: ttl_secs,
+            expires_at: opts.ttl_secs,
         })
     }
 
@@ -120,6 +127,7 @@ mod tests {
         StorageCapabilities {
             supports_presign_put: false, supports_presign_download: false,
             supports_stream_put: true, supports_stream_get: true,
+            supports_inline_view: true,
             max_object_size: 1024 * 1024 * 1024,
         }
     }
