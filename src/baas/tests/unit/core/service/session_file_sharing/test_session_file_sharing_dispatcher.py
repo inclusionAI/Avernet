@@ -684,7 +684,9 @@ class TestGetShareLink:
         assert response_params_arg == {"response-content-disposition": "attachment"}
 
     @pytest.mark.asyncio
-    async def test_share_link_show_true_inline(self, dispatcher, file_backend, ticket_repo):
+    async def test_share_link_show_true_inline(
+        self, dispatcher, file_backend, ticket_repo
+    ):
         """show=True → generate_download_url called with response_params={'response-content-disposition': 'inline'}."""
         ticket = _make_ticket(status="DONE")
         ticket_repo.get_by_transfer_id.return_value = ticket
