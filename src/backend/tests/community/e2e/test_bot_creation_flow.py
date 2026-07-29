@@ -370,6 +370,8 @@ class TestRouterLogic:
         assert result.data["passport"]["is_first_bot"] is True
         mock_bot_service.check_create_bot_preflight.assert_called_once_with(
             user_id="user_001",
+            bot_id="default",
+            engine_type="openclaw",
         )
         mock_bot_service.create_bot.assert_called_once()
 
@@ -421,6 +423,8 @@ class TestRouterLogic:
         assert result.data["iframe_url"] == "https://auth.example.com/iframe"
         mock_bot_service.check_create_bot_preflight.assert_called_once_with(
             user_id="user_001",
+            bot_id="default",
+            engine_type="openclaw",
         )
         mock_bot_service.create_bot.assert_not_called()
 
