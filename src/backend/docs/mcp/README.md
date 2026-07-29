@@ -387,11 +387,96 @@ The GET counterpart never returns the stored key:
 
 ## 6. Walkthrough B — a bot's toolset changes
 
-Saving a credential is the small path. The bigger one runs when a skill set is
-activated/deactivated, i.e. when the *set* of servers a bot may use changes.
-That is `MCPSyncService.refresh_mcp_scope`, and it does two distinct things.
+Saving a credential (Walkthrough A) is the small path: one server, one
+credential. The complicated one runs when the **set of servers a bot may use**
+changes — a user activates a skill set, or adds a new MCP to one. This section
+takes that path apart.
 
-### 6.1 Declare the allow-list to the device
+### 6.0 First, two concepts: scope and detail
+
+The thing that makes this code hard to read is not noticing that the system
+syncs **two independent things**. By analogy with a building's access control:
+
+- **scope** = the door whitelist. Answers "which servers is this bot *allowed*
+  to use".
+- **detail** = each door's address and key. Answers "what is this server's URL,
+  and what credential and headers connect to it".
+
+You need both, and the symptoms of missing either are quite different. Whitelist
+without detail: the bot is allowed to use a server but has no idea where to
+connect. Detail without whitelist: the config sits on the device but is filtered
+out, and the tool never appears.
+
+Two different sets of methods own them, and they are **always called in pairs**:
+
+| Concept | Question it answers | Where it lands | Method |
+| --- | --- | --- | --- |
+| scope | Which servers may this bot use | Device `filter-servers` whitelist **+** passport | `refresh_mcp_scope` |
+| detail | A server's URL / credential / headers | Device `mcporter.json` entry | `sync_mcp_detail` (one) / `sync_mcp_details` (all) |
+
+The service-layer docstring states the split plainly:
+
+```python
+        """刷新MCP授权范围（异步方法）。
+
+        向设备声明filter-servers白名单，并更新passport的MCP codes列表。
+        不包含MCP详细配置的推送——那是 sync_mcp_details / sync_mcp_detail 的职责。
+        """
+```
+
+<sub>`src/backend/src/agentclaw/community/core/skill_center/services/skill_set_service.py:1844`
+— "declares the filter-servers whitelist to the device and updates passport's MCP
+code list. It does **not** push MCP detail config — that is
+`sync_mcp_details` / `sync_mcp_detail`'s job."</sub>
+
+### 6.1 What triggers it
+
+No single endpoint owns this path; four classes of event do. Note the pairing —
+and that two of them run the pair in the opposite order:
+
+| Scenario | Call order | Location |
+| --- | --- | --- |
+| Add an MCP to a skill set | push that one detail, then refresh scope | `skill_set_service.py:1360` → `:1378` |
+| Remove an MCP from a skill set | remove that one from the device, then refresh scope | `skill_set_service.py:1442` → `:1459` |
+| Switch / activate a skill set | refresh scope, then push the active set's details | `skill_set_service.py:2265` → `:2274` |
+| Device comes back online | refresh scope, then push every detail | `device_service.py:1502` → `:1513` |
+
+Why does the order flip? **Adding an MCP** pushes its config to the device
+first, then whitelists it — so by the time the whitelist opens, the config is
+already there. **A device coming online** has no "one" server to speak of; it
+has to rebuild the whole state, so it declares the whitelist first and returns
+early on failure, skipping an entire round of detail pushes:
+
+```python
+                async def _do_sync() -> tuple[dict, dict | None]:
+                    # 1. 先声明白名单（scope），失败则直接返回，不必继续推送详细配置
+                    scope_result = await self._mcp_sync.refresh_mcp_scope(...)
+                    if not scope_result.get("success"):
+                        return scope_result, None
+
+                    # 2. 再推送详细配置
+                    detail_result = await self._mcp_sync.sync_mcp_details(...)
+```
+
+<sub>`src/backend/src/agentclaw/community/core/devices/services/device_service.py:1500`
+(elided for length)</sub>
+
+One more detail in the "add" case — the association has just been written to the
+DB, and a failed push undoes it. Same hand-written compensation as Walkthrough A:
+
+```python
+        if not push_result.get("success"):
+            error = push_result.get("error", "Unknown error")
+            logger.error(f"[add_mcp_to_skill_set] Device sync failed: {error}")
+            self.skill_set_repo.remove_mcp_from_set(skill_set_id, server_code)
+```
+
+<sub>`src/backend/src/agentclaw/community/core/skill_center/services/skill_set_service.py:1366`</sub>
+
+### 6.2 Inside `refresh_mcp_scope` — two destinations
+
+Refreshing scope means writing "the currently allowed server list" to two places
+— device first, passport second:
 
 ```python
         # 先向设备声明白名单：即使 active_mcps 为空也会调用，防止设备残留旧白名单。
@@ -405,8 +490,30 @@ That is `MCPSyncService.refresh_mcp_scope`, and it does two distinct things.
 
 <sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:378`</sub>
 
-The list itself comes from `skill_center`, not from the `mcp` module — the `mcp`
-module only knows the `BotMCPProvider` protocol:
+The order is deliberate: **the device enforces, passport declares.** If the
+device write fails the method returns early and passport is never touched —
+better that both sides stay on the old state than have passport advertise a
+scope the device never took.
+
+### 6.3 Why an empty list must still be pushed
+
+The easiest phrase to skim past in that comment is "called even when
+`active_mcps` is empty". That isn't defensive coding, it's a security property:
+
+Suppose a user deactivates their last skill set. The allowed list becomes empty.
+If the call were skipped because "there's nothing to declare", the device's old
+whitelist would sit there untouched — and the bot would still be able to call
+tools it is no longer entitled to. **Revocation is exactly the empty-list case,
+and exactly the case most likely to be optimised away.**
+
+This is also why the engine side needs a sentinel for "allow nothing" — an empty
+string is indistinguishable from "no argument" on a command line (see
+`__EMPTY_FILTER_DISABLE_ALL__` in §7).
+
+### 6.4 Where the list comes from
+
+The `mcp` module does not know what a skill set is. It knows one Protocol, which
+`skill_center` implements:
 
 ```python
 @runtime_checkable
@@ -421,8 +528,94 @@ class BotMCPProvider(Protocol):
 
 <sub>`src/backend/src/agentclaw/community/core/mcp/services/repositories.py:11`</sub>
 
-Detail pushes are concurrent but throttled, because the target is a single
-container:
+Two of that Protocol's methods are easy to confuse; the difference is whether
+"active" filters:
+
+- `collect_bot_active_mcps` — only MCPs from **currently active** skill sets
+  (plus the engine defaults). Scope declaration uses this one
+  (`sync_service.py:588`): a whitelist should only ever contain what is live now.
+- `collect_bot_mcps` — **every** MCP associated with the bot, inactive included.
+
+Detail pushes switch between them with the `active_only` flag:
+
+```python
+            active_only: 为 True 时只推送当前**激活** skill sets 中的 MCP；
+                为 False 时推送该 bot 关联的**全部** MCP（含 inactive）。
+```
+
+<sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:177`
+— "True pushes only MCPs from currently **active** skill sets; False pushes
+**every** MCP associated with the bot, inactive included."</sub>
+
+Why would you ever push inactive ones? Because a detail is just config sitting in
+`mcporter.json` — the whitelist is what decides usability. Loading every detail
+when a device comes online means a later skill-set activation only has to change
+the whitelist, with no config push at all.
+
+### 6.5 Passport is an overwrite snapshot — hence the CLI read-back
+
+This is the least obvious part of the section, and the most worth understanding.
+Passport's `resourceManifest` is a **whole-object overwrite**: what you submit is
+what it becomes. And a bot's manifest carries CLI grants *as well as* MCP grants.
+
+The consequence: a sync that only cares about MCP would, by submitting only the
+MCP list, **silently erase that bot's CLI grants.** So the code reads the current
+CLI scope back, merges it with the engine defaults, and submits both together:
+
+```python
+        # MCP 同步触发 resourceManifest 更新时，要回填当前 CLI，避免覆盖式更新丢失 CLI 授权。
+        try:
+            current_cli_items = self.passport_update.query_passport_clis(
+                bot_id, user_id
+            )
+        ...
+        default_cli_items = get_default_cli_items(engine_type, template_type)
+        cli_items = _merge_cli_items(current_cli_items, default_cli_items)
+```
+
+<sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:888`</sub>
+
+```python
+            # resource_scope 是完整快照：MCP 来自同步结果，CLI 来自当前许可证 + 引擎默认 CLI。
+            self.passport_update.update_passport(
+                bot_id=bot_id,
+                user_id=user_id,
+                resource_scope={
+                    "mcp_codes": synced_server_codes,
+                    "cli_items": cli_items,
+                },
+```
+
+<sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:913`</sub>
+
+Existing values win on merge, and there's a timing trap to guard against too — a
+freshly created bot may momentarily read back an empty CLI list, and taking that
+at face value would let one MCP sync flatten the defaults:
+
+```python
+    """Merge passport CLI scope with default CLI items, de-duped by cli_code.
+
+    The passport update API treats resourceManifest as an overwrite. During MCP
+    sync we must send the complete CLI scope as well as MCPs. If the passport
+    service returns a temporarily-empty CLI list right after bot creation,
+    preserving the engine defaults here prevents a later MCP sync from clearing
+    them. Existing passport values win on duplicate cli_code so user/provider
+    metadata is not overwritten by static defaults.
+    """
+```
+
+<sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:46`</sub>
+
+Same reasoning: if reading the bot's metadata fails, the passport update aborts
+outright rather than write a partial snapshot (`sync_service.py:884`).
+
+**The rule to carry away: anything writing passport must submit a complete
+snapshot, never a delta.**
+
+### 6.6 Detail pushes — concurrent, but throttled
+
+Scope is one call; details are N. They go out concurrently, with a deliberate cap,
+because the target is a single container:
 
 ```python
         # 3. 并发推送，但限制并发数为 5，防止一次性向设备发太多 HTTP 请求把引擎压垮。
@@ -431,7 +624,11 @@ container:
 
 <sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:681`</sub>
 
-### 6.2 Two delivery shapes, one plugin boundary
+One failure doesn't abort the rest (`asyncio.gather(..., return_exceptions=True)`),
+and results come back split into successes and failures — but `CancelledError` is
+re-raised rather than swallowed as an ordinary failure.
+
+### 6.7 One plugin boundary, two delivery shapes
 
 The backend does not branch on container type. It resolves a per-bot
 `DeviceSyncPlugin` and calls four methods; each implementation decides *how*:
@@ -455,17 +652,26 @@ The backend does not branch on container type. It resolves a per-bot
 
 <sub>`src/backend/src/agentclaw/community/plugin_api/device_sync.py:89`</sub>
 
-The comment above those methods names the two delivery styles:
+Those four methods (declare whitelist / push one / remove one / probe presence)
+are exactly the actions in §6.1's table. The comment above them names the two
+delivery styles:
 
 > Per impl: arca/baas push per-MCP over `/api/mcp`; teclaw delivers the whole
 > composed artifact; local is no-op.
 
 <sub>`src/backend/src/agentclaw/community/plugin_api/device_sync.py:81`</sub>
 
+The difference is more than transport. For a whole-artifact container like teclaw,
+*any* change means recomposing and delivering the entire manifest — so
+`sync_single_mcp` and `sync_all_mcp_servers` do the same work there, just
+idempotently repeated.
+
 In this (community) repository the local implementation is a no-op —
 `LocalDeviceSyncPlugin.sync_single_mcp` simply returns `True`
 (`plugins/local/device_sync.py:338`). The corp/arca implementations that do the
 real HTTP push are not part of this repo.
+
+### 6.8 Credentials are inlined in plaintext at compose time
 
 For the whole-artifact style, the manifest is composed **in the backend** and the
 credential is inlined into it — this is the clearest statement of the credential
@@ -509,11 +715,12 @@ TECLAW_MCP_NETWORK_PRIORITY = ("OFFICE", "INTERNET", "INTRANET")
 
 <sub>`src/backend/src/agentclaw/community/core/config_compose/services/mcporter_composer.py:53`</sub>
 
-### 6.3 Passport — the declared scope, minus local servers
+### 6.9 The passport scope excludes LOCAL servers
 
-Alongside the device push, the bot's scope is declared to the passport / Agent
-Principal service. `stdio`/LOCAL servers are deliberately excluded, because
-they're runtime-local capabilities nobody grants permission for:
+Back to §6.2's second destination. The list sent to passport is not the list sent
+to the device: `stdio`/LOCAL servers are stripped out, because they're
+runtime-local capabilities no permission system grants — but the device still
+needs their config:
 
 ```python
 def passport_mcp_items_from_entries(
@@ -536,8 +743,20 @@ def passport_mcp_items_from_entries(
 That `owner`/`caller` value is the `ac_bot_mcp_call_config` decision from §3.3,
 surfacing at the point where scope is published.
 
----
+### Recap
 
+One toolset change lands in three places:
+
+1. **The device whitelist** — what's allowed (pushed even when empty).
+2. **The device's `mcporter.json` entries** — how to reach each server, with what
+   credential.
+3. **The passport snapshot** — the declared scope, LOCAL excluded, identity mode
+   attached, and CLI grants read back in.
+
+The first two decide what the bot *can actually do*; the third is the *declaration*
+of that authority to the rest of the system.
+
+---
 ## 7. What happens on the device
 
 The engine exposes its own `/api/mcp` and dispatches everything to an
@@ -727,8 +946,10 @@ If you want to trace one thread end to end, read in this order:
 2. `adapters/http/mcp/router.py:237` — the write endpoint, all five steps.
 3. `core/mcp/services/config_service.py` — the merge rules.
 4. `core/mcp/services/sync_service.py:439` — the fan-out.
-5. `plugin_api/device_sync.py:81` — the delivery boundary.
-6. `src/engine/.../plugins/openclaw/_mcp.py` — what a device actually does.
+5. `core/mcp/services/sync_service.py:324` — `refresh_mcp_scope`, the scope path
+   (§6), and `:849` for the passport snapshot it writes.
+6. `plugin_api/device_sync.py:81` — the delivery boundary.
+7. `src/engine/.../plugins/openclaw/_mcp.py` — what a device actually does.
 
 Tests worth reading as executable documentation:
 

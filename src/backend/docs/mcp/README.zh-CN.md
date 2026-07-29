@@ -370,11 +370,85 @@ docstring 点名了这个环：`MCPSyncService → DeviceContextResolver → Arc
 
 ## 6. 走查 B —— 一个 bot 的工具集发生变化
 
-保存凭据是小路径。更大的那条路径在 skill set 被激活/取消激活时触发，也就是当一个 bot
-可用的 server *集合*发生变化时。这条路径是 `MCPSyncService.refresh_mcp_scope`，
-它做了两件互相独立的事。
+保存凭据（走查 A）是小路径：一个 server、一份凭据。真正复杂的是当一个 bot **可用的
+server 集合本身**发生变化时 —— 用户激活了一个 skill set，或者往 skill set 里加了一个
+新的 MCP。这一节把这条路径拆开讲。
 
-### 6.1 向设备声明白名单
+### 6.0 先分清两个概念：scope（范围）与 detail（详情）
+
+读这段代码最容易卡住的地方，是没有意识到系统在同步**两种彼此独立的东西**。用一个门禁的
+比方：
+
+- **scope（范围）** = 门禁白名单。回答"这个 bot *被允许*使用哪些 server"。
+- **detail（详情）** = 每扇门的地址和钥匙。回答"某个 server 的 URL 是什么、用什么凭据和
+  header 连上去"。
+
+两者缺一不可，而且缺失时的症状完全不同：只有白名单没有详情，bot 知道自己被允许用某个
+server，却不知道往哪连；只有详情没有白名单，配置躺在设备上，但会被过滤掉，工具根本不出现。
+
+它们由两组不同的方法负责，**总是成对被调用**：
+
+| 概念 | 回答的问题 | 落到哪里 | 负责的方法 |
+| --- | --- | --- | --- |
+| scope | 这个 bot 允许用哪些 server | 设备的 `filter-servers` 白名单 **+** passport | `refresh_mcp_scope` |
+| detail | 某个 server 的 URL / 凭据 / header | 设备的 `mcporter.json` 条目 | `sync_mcp_detail`（单条）/ `sync_mcp_details`（全量） |
+
+服务层的 docstring 把这条分工写得很直白：
+
+```python
+        """刷新MCP授权范围（异步方法）。
+
+        向设备声明filter-servers白名单，并更新passport的MCP codes列表。
+        不包含MCP详细配置的推送——那是 sync_mcp_details / sync_mcp_detail 的职责。
+        """
+```
+
+<sub>`src/backend/src/agentclaw/community/core/skill_center/services/skill_set_service.py:1844`</sub>
+
+### 6.1 什么时候会触发
+
+这条路径不是由某一个端点触发的，而是由四类事件触发。注意**成对调用**的模式，以及两种事件
+下顺序是相反的：
+
+| 场景 | 调用顺序 | 代码位置 |
+| --- | --- | --- |
+| 往 skill set 里加一个 MCP | 先推该条 detail，再刷新 scope | `skill_set_service.py:1360` → `:1378` |
+| 从 skill set 移除一个 MCP | 先从设备移除该条，再刷新 scope | `skill_set_service.py:1442` → `:1459` |
+| 切换 / 激活 skill set | 先刷新 scope，再推激活集合的 details | `skill_set_service.py:2265` → `:2274` |
+| 设备重新上线 | 先刷新 scope，再推全部 details | `device_service.py:1502` → `:1513` |
+
+顺序为什么会反过来？**加一个 MCP 时**，先把它的配置推到设备上，再把它放进白名单 —— 这样
+白名单一放行，配置就已经在那儿了。**设备上线时**没有"某一条"可言，需要重建整个状态，于是
+先声明白名单，失败就直接返回，省掉后面一整轮详情推送：
+
+```python
+                async def _do_sync() -> tuple[dict, dict | None]:
+                    # 1. 先声明白名单（scope），失败则直接返回，不必继续推送详细配置
+                    scope_result = await self._mcp_sync.refresh_mcp_scope(...)
+                    if not scope_result.get("success"):
+                        return scope_result, None
+
+                    # 2. 再推送详细配置
+                    detail_result = await self._mcp_sync.sync_mcp_details(...)
+```
+
+<sub>`src/backend/src/agentclaw/community/core/devices/services/device_service.py:1500`（为篇幅做了省略）</sub>
+
+另外注意"加 MCP"这个场景里的一个细节 —— 关联刚写进库，如果推送失败会被撤销，和走查 A
+里的回滚是同一种手写补偿：
+
+```python
+        if not push_result.get("success"):
+            error = push_result.get("error", "Unknown error")
+            logger.error(f"[add_mcp_to_skill_set] Device sync failed: {error}")
+            self.skill_set_repo.remove_mcp_from_set(skill_set_id, server_code)
+```
+
+<sub>`src/backend/src/agentclaw/community/core/skill_center/services/skill_set_service.py:1366`</sub>
+
+### 6.2 `refresh_mcp_scope` 内部：两个目的地
+
+刷新 scope 就是把"当前允许的 server 列表"同时写到两个地方 —— 先设备，后 passport：
 
 ```python
         # 先向设备声明白名单：即使 active_mcps 为空也会调用，防止设备残留旧白名单。
@@ -388,8 +462,24 @@ docstring 点名了这个环：`MCPSyncService → DeviceContextResolver → Arc
 
 <sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:378`</sub>
 
-这份列表来自 `skill_center`，而不是 `mcp` 模块 —— `mcp` 模块只认识 `BotMCPProvider`
-这个 Protocol：
+顺序是有意的：**设备是执行方，passport 是对外的声明。** 设备没改成功就提前返回，
+passport 完全不动 —— 宁可两边都停在旧状态，也不要 passport 宣称一份设备并未生效的范围。
+
+### 6.3 为什么"空列表也必须推"
+
+上面那句注释里最容易被读过去的，是"即使 `active_mcps` 为空也会调用"。这不是防御性编程，
+而是一条安全属性：
+
+设想用户取消激活了最后一个 skill set。此时允许列表变成空。如果因为"没什么可声明的"就跳过
+这次调用，设备上的旧白名单会原封不动地留着 —— bot 依然能调用它已经不该拥有的工具。**收回
+权限恰恰是列表为空的那一刻，也正是最容易被跳过的那一刻。**
+
+引擎侧因此需要一个"什么都不允许"的哨兵值，因为空字符串在命令行上无法与"没传参数"区分
+（见 §7 的 `__EMPTY_FILTER_DISABLE_ALL__`）。
+
+### 6.4 这份名单从哪来
+
+`mcp` 模块并不知道 skill set 是什么。它只认识一个 Protocol，实现方在 `skill_center`：
 
 ```python
 @runtime_checkable
@@ -404,7 +494,84 @@ class BotMCPProvider(Protocol):
 
 <sub>`src/backend/src/agentclaw/community/core/mcp/services/repositories.py:11`</sub>
 
-详情推送是并发的，但做了限流，因为目标是同一个容器：
+这个 Protocol 上有两个容易混淆的方法，区别在于是否只要"激活的"：
+
+- `collect_bot_active_mcps` —— 只取**当前激活**的 skill set 里的 MCP（外加引擎默认值）。
+  scope 声明用的就是它（`sync_service.py:588`）：白名单当然只该包含此刻生效的。
+- `collect_bot_mcps` —— 取该 bot 关联的**全部** MCP，包含未激活的。
+
+详情推送则用 `active_only` 参数在两者之间切换：
+
+```python
+            active_only: 为 True 时只推送当前**激活** skill sets 中的 MCP；
+                为 False 时推送该 bot 关联的**全部** MCP（含 inactive）。
+```
+
+<sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:177`</sub>
+
+为什么要有"把未激活的也推下去"这种模式？因为详情只是躺在 `mcporter.json` 里的配置，真正
+决定能不能用的是白名单。设备重新上线时把全部详情灌下去，之后再激活某个 skill set 就只需要
+改白名单，不必重新推配置。
+
+### 6.5 passport 是覆盖式快照 —— 所以必须回填 CLI
+
+这是本节里最不直观、也最值得理解的一段。passport 的 `resourceManifest` 是**整体覆盖**的：
+你提交什么，它就变成什么。而一个 bot 的 manifest 里同时装着 MCP 授权**和** CLI 授权。
+
+后果是：一次只关心 MCP 的同步，如果只提交 MCP 列表，会把这个 bot 的 CLI 授权**静默抹掉**。
+代码因此先把当前 CLI 读回来，与引擎默认值合并，再连同 MCP 一起提交：
+
+```python
+        # MCP 同步触发 resourceManifest 更新时，要回填当前 CLI，避免覆盖式更新丢失 CLI 授权。
+        try:
+            current_cli_items = self.passport_update.query_passport_clis(
+                bot_id, user_id
+            )
+        ...
+        default_cli_items = get_default_cli_items(engine_type, template_type)
+        cli_items = _merge_cli_items(current_cli_items, default_cli_items)
+```
+
+<sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:888`</sub>
+
+```python
+            # resource_scope 是完整快照：MCP 来自同步结果，CLI 来自当前许可证 + 引擎默认 CLI。
+            self.passport_update.update_passport(
+                bot_id=bot_id,
+                user_id=user_id,
+                resource_scope={
+                    "mcp_codes": synced_server_codes,
+                    "cli_items": cli_items,
+                },
+```
+
+<sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:913`</sub>
+
+合并时"已有值优先"，而且还要防住一个时序陷阱 —— bot 刚创建时 passport 可能暂时返回空
+CLI 列表，此时若直接采信，一次 MCP 同步就会把默认 CLI 抹平：
+
+```python
+    """Merge passport CLI scope with default CLI items, de-duped by cli_code.
+
+    The passport update API treats resourceManifest as an overwrite. During MCP
+    sync we must send the complete CLI scope as well as MCPs. If the passport
+    service returns a temporarily-empty CLI list right after bot creation,
+    preserving the engine defaults here prevents a later MCP sync from clearing
+    them. Existing passport values win on duplicate cli_code so user/provider
+    metadata is not overwritten by static defaults.
+    """
+```
+
+<sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:46`</sub>
+
+同样的道理，读 bot 元数据失败时这次 passport 更新会直接中止 —— 宁可不更新，也不要写进一份
+不完整的快照（`sync_service.py:884`）。
+
+**一句话记住：任何写 passport 的地方，都必须提交完整快照，而不是增量。**
+
+### 6.6 详情推送：并发，但限流
+
+scope 是一次调用；详情是 N 次。推送是并发的，但刻意限了并发数，因为目标是同一个容器：
 
 ```python
         # 3. 并发推送，但限制并发数为 5，防止一次性向设备发太多 HTTP 请求把引擎压垮。
@@ -413,7 +580,10 @@ class BotMCPProvider(Protocol):
 
 <sub>`src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:681`</sub>
 
-### 6.2 两种投递形态，同一个插件边界
+单条失败不会中断其余（`asyncio.gather(..., return_exceptions=True)`），最终按成功/失败
+两组返回；但 `CancelledError` 必须继续向上抛，不能被当成普通失败吞掉。
+
+### 6.7 一个插件边界，两种投递形态
 
 backend 不按容器类型做分支。它解析出 per-bot 的 `DeviceSyncPlugin` 并调用四个方法；
 *怎么投递*由各实现自己决定：
@@ -437,7 +607,8 @@ backend 不按容器类型做分支。它解析出 per-bot 的 `DeviceSyncPlugin
 
 <sub>`src/backend/src/agentclaw/community/plugin_api/device_sync.py:89`</sub>
 
-这些方法上方的注释点明了两种投递风格：
+这四个方法（声明白名单 / 推单条 / 移除单条 / 探测是否已装）正好覆盖了 §6.1 那张表里的所有
+动作。它们上方的注释点明了两种投递风格：
 
 > Per impl: arca/baas push per-MCP over `/api/mcp`; teclaw delivers the whole
 > composed artifact; local is no-op.
@@ -447,9 +618,15 @@ backend 不按容器类型做分支。它解析出 per-bot 的 `DeviceSyncPlugin
 
 <sub>`src/backend/src/agentclaw/community/plugin_api/device_sync.py:81`</sub>
 
+差别不只是传输方式。对 teclaw 这种"整份产物"的容器，*任何一次*改动都意味着重新组装并投递
+整个 manifest —— 所以对它而言 `sync_single_mcp` 和 `sync_all_mcp_servers` 实际做的是
+同一件事，只是幂等地重复投递。
+
 在本（community）仓库里，local 实现是 no-op —— `LocalDeviceSyncPlugin.sync_single_mcp`
 直接返回 `True`（`plugins/local/device_sync.py:338`）。真正做 HTTP 推送的 corp/arca
 实现不在本仓库内。
+
+### 6.8 凭据在组装时以明文内联
 
 对于"整份产物"这种形态，manifest 是在 **backend 侧**组装的，凭据被内联进去 ——
 这段代码是全仓对凭据格式说得最清楚的地方：
@@ -489,10 +666,11 @@ TECLAW_MCP_NETWORK_PRIORITY = ("OFFICE", "INTERNET", "INTRANET")
 
 <sub>`src/backend/src/agentclaw/community/core/config_compose/services/mcporter_composer.py:53`</sub>
 
-### 6.3 Passport —— 已声明的 scope，排除掉 local server
+### 6.9 passport scope 里排除 LOCAL server
 
-在推送设备的同时，bot 的 scope 也会被声明给 passport / Agent Principal 服务。
-`stdio`/LOCAL 类型的 server 被有意排除，因为它们是运行时本地能力，没人需要为它们授权：
+回到 §6.2 的第二个目的地。发给 passport 的列表并不等于发给设备的列表：`stdio`/LOCAL
+类型的 server 会被剔除，因为它们是运行时本地能力，没有哪个权限系统需要为它们授权 ——
+但设备仍然需要它们的配置：
 
 ```python
 def passport_mcp_items_from_entries(
@@ -515,8 +693,17 @@ def passport_mcp_items_from_entries(
 这里的 `owner`/`caller` 值，就是 §3.3 里 `ac_bot_mcp_call_config` 所做的决定，在
 scope 被发布出去的这一刻浮出水面。
 
----
+### 小结
 
+一次工具集变更，最终落在三个地方：
+
+1. **设备白名单** —— 允许哪些（空列表也必须推）。
+2. **设备 `mcporter.json` 条目** —— 每个 server 怎么连、用什么凭据。
+3. **passport 快照** —— 对外声明的范围，排除 LOCAL，带上身份模式，且必须回填 CLI。
+
+前两者决定 bot *实际能做什么*，第三个是这份权限对系统其余部分*的声明*。
+
+---
 ## 7. 设备上发生了什么
 
 engine 暴露了它自己的 `/api/mcp`，并把所有端点都转发给一个 engine 专属的插件：
@@ -696,8 +883,10 @@ class CommunityMCPCenter(MCPCenterPlugin):
 2. `adapters/http/mcp/router.py:237` —— 写入端点，完整五步。
 3. `core/mcp/services/config_service.py` —— 合并规则。
 4. `core/mcp/services/sync_service.py:439` —— 扇出。
-5. `plugin_api/device_sync.py:81` —— 投递边界。
-6. `src/engine/.../plugins/openclaw/_mcp.py` —— 设备实际做的事。
+5. `core/mcp/services/sync_service.py:324` —— `refresh_mcp_scope`，即 scope 路径
+   （§6）；以及 `:849`，它写出的 passport 快照。
+6. `plugin_api/device_sync.py:81` —— 投递边界。
+7. `src/engine/.../plugins/openclaw/_mcp.py` —— 设备实际做的事。
 
 值得当作可执行文档来读的测试：
 
