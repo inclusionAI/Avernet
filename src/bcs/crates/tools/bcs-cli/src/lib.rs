@@ -12,6 +12,7 @@ use tracing::{Level, debug, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod client;
+pub mod oauth;
 
 pub use client::{BcsClient, BotGroupListPage, CurrentActorGroupListPage, CreateCustomGroupOptions};
 

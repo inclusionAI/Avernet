@@ -46,8 +46,14 @@
 //! env=pre bcs-cli health
 //! ```
 
+// `agentpass` is a bin-local module (dead code here: `AUTH_VIA_AGENT_PASS = false`).
+// It stays as `src/agentpass.rs` so the internal `#[path]` reuse of this file
+// resolves it identically.
 mod agentpass;
-mod oauth;
+// `oauth` is now a `pub mod` on the `bcs_cli` library (public extension point,
+// resolved via `inventory`). Public builds link no provider and fall back to a
+// stub; internal builds link an Ant provider that performs the real flow.
+use bcs_cli::oauth;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -1886,8 +1892,22 @@ enum ServiceCommands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Binary entry. Delegates to [`run`] so the internal overlay can reuse this
+/// module (`#[path]`) and call `run()` directly under its own runtime.
+fn main() -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(run())
+}
+
+/// Run the CLI.
+///
+/// Kept `pub` so an internal build can reuse this whole module (via `#[path]`)
+/// and link an Ant-side OAuth provider — see the ocb overlay crate
+/// `crates/tools/bcs-cli-internal`. The body is identical to the legacy
+/// `#[tokio::main] async fn main`; only the entry is split out.
+pub async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // Setup logging
