@@ -59,36 +59,71 @@ them as the next thing to pick up.
 
 ### Isolation
 
-- [ ] An MCP configuration created during a request belongs to that request's
-      tenant.
-- [ ] MCP configuration reads — by identifier, by user and server, and listing a
+- [x] An MCP configuration created during a request belongs to that request's
+      tenant. — `test_create_stamps_the_current_tenant`
+- [x] MCP configuration reads — by identifier, by user and server, and listing a
       user's configurations — return only rows belonging to the request's
-      tenant.
-- [ ] MCP configuration updates and deletes affect only rows belonging to the
+      tenant. — `test_get_by_id_is_tenant_scoped`,
+      `test_get_by_user_and_server_code_is_tenant_scoped`,
+      `test_list_by_user_is_tenant_scoped`
+- [x] MCP configuration updates and deletes affect only rows belonging to the
       request's tenant. An attempt to modify another tenant's configuration
-      behaves as though that configuration does not exist.
-- [ ] A bot's per-server MCP call identity (owner/caller) is read and written
+      behaves as though that configuration does not exist. —
+      `test_update_cross_tenant_is_a_noop` (returns `None`),
+      `test_delete_cross_tenant_is_a_noop` (returns `False`)
+- [x] A bot's per-server MCP call identity (owner/caller) is read and written
       under the request's tenant, including the aggregate read that decides a
-      bot's overall call identity.
-- [ ] Two tenants can each hold a configuration for the same user identifier and
-      the same MCP server, and neither can see or displace the other's.
-- [ ] Every MCP configuration row that exists before this change belongs to the
-      default tenant, so every current internal API response is unchanged.
-- [ ] The tenant is never present in any API response body.
-- [ ] The existing internal API test suite passes without modification.
-- [ ] Cross-tenant isolation is demonstrated, for each isolated data set, by
-      tests that fail without this change and pass with it.
+      bot's overall call identity. —
+      `test_list_draft_call_types_is_tenant_scoped`,
+      `test_aggregate_rollup_is_tenant_scoped`, plus the three insert tests
+- [x] Two tenants can each hold a configuration for the same user identifier and
+      the same MCP server, and neither can see or displace the other's. —
+      `test_two_tenants_hold_the_same_user_and_server`. Required the unique key
+      to lead with the tenant; see `plan.md` → Data Model Changes.
+- [x] Every MCP configuration row that exists before this change belongs to the
+      default tenant, so every current internal API response is unchanged. —
+      `test_rows_written_without_the_column_default_to_teamclaw` (raw SQL insert
+      omitting the column, proving it is the `server_default` and not a Python
+      default), `test_create_outside_any_request_stamps_the_default_tenant`
+- [x] The tenant is never present in any API response body. —
+      `test_to_dict_key_set_is_unchanged`, plus
+      `assert "avernet_tenant" not in resp.text` on both config endpoints
+- [x] The existing internal API test suite passes without modification. — full
+      `tests/community/` suite green; not one existing test edited
+- [x] Cross-tenant isolation is demonstrated, for each isolated data set, by
+      tests that fail without this change and pass with it. — red runs recorded
+      in `tasks.md` Tasks 3 and 4: `ac_user_mcp_config` 6 failed + 2 errored,
+      `ac_bot_mcp_call_config` 5 failed
 
 ### Handoff board
 
-- [ ] The handoff README records Stage 5 as done, in both its English and
+- [x] The handoff README records Stage 5 as done, in both its English and
       Chinese editions.
-- [ ] The handoff README shows channels as deprioritized rather than P2, in both
+- [x] The handoff README shows channels as deprioritized rather than P2, in both
       editions, for both its Track A stage and its Track B endpoint group, with
       the reason recorded.
-- [ ] Any production schema change this stage requires is recorded where the
+- [x] Any production schema change this stage requires is recorded where the
       team will find it, including whether it must land before deploy or before
-      a second tenant writes.
+      a second tenant writes. — new "Schema changes applied out-of-band" section
+      in both editions, holding Stage 1's and Stage 5's DDL together, with the
+      two deadlines stated separately.
+
+### Open questions, resolved
+
+- **Is a bot's MCP call identity in this stage?** Yes, kept — but the spec's
+  original rationale overstated it. The aggregate reads are genuinely unguarded
+  at the SQL level, but `bot_pk` is `ac_bots.id`, a global primary key sourced
+  at every call site from a tenant-guarded bot lookup, so no cross-tenant
+  `bot_pk` is reachable today. It is defense in depth against a future careless
+  call site, and it needed no unique-key change.
+- **How should channels be marked?** Deprioritized, not cancelled — parked with
+  scope intact in both editions, with a note that cancellation would mean
+  deleting the rows.
+- **Does anything outside this repository write MCP configuration rows?**
+  Unresolved, and deliberately so. `server_default='teamclaw'` makes any such
+  writer land on the default tenant, which is correct while all data is
+  internal. It is carried forward as the reason that path could never write for
+  a second tenant.
 
 ## In Scope
 

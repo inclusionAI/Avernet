@@ -166,22 +166,22 @@
         `_AVERNET_TENANT_GUARDS_INSTALLED` in each.
 - **Depends on:** Tasks 3, 4
 
-## Task 7: Tests & Verification
+## Task 7: [x] Tests & Verification
 - **Goal:** Ensure the feature meets every spec acceptance criterion.
-- **Files:** —
+- **Files:** `specs/2026-07-29-tenant-isolation-mcp/spec.md` (criteria checked
+  off, each naming the test that covers it)
 - **Done when:**
-  - [ ] Every checkbox under **Isolation** in `spec.md` checks off, against the
-        tests from Tasks 3, 4 and 5.
-  - [ ] Every checkbox under **Handoff board** in `spec.md` checks off, against
+  - [x] Every checkbox under **Isolation** in `spec.md` checks off, against the
+        tests from Tasks 3, 4 and 5. Each is annotated with the test name.
+  - [x] Every checkbox under **Handoff board** in `spec.md` checks off, against
         Task 6.
-  - [ ] Cross-tenant isolation is demonstrated **for each isolated data set** by
+  - [x] Cross-tenant isolation is demonstrated **for each isolated data set** by
         a test that failed before the change and passes after — both red runs
-        recorded.
-  - [ ] Backend SAST, unit tests, changed-line coverage and singlebox coverage
-        are green. No coverage-manifest change should be needed: `mcp` sits in
-        `pending_modules` with no thresholds, and `utils/`, `plugin_api/` and
-        `core/models/` are outside the per-module Core denominators — if that
-        turns out to be wrong, flag it rather than silently editing the manifest.
+        recorded (Tasks 3 and 4).
+  - [x] Backend SAST, unit tests, changed-line coverage and singlebox coverage
+        are green. No coverage-manifest change was needed, as predicted.
+  - [x] The three spec Open Questions are resolved in writing, including the one
+        that stays open by design (a non-ORM writer outside this repo).
 - **Depends on:** Tasks 5, 6
 
 ---
