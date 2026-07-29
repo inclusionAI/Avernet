@@ -185,6 +185,32 @@ class DeviceBindingRepository(Protocol):
         """根据ID列表批量获取绑定记录."""
         ...
 
+    def get_active_bindings_by_entity(
+        self,
+        *,
+        entity_id: str,
+        entity_type: str,
+        env: str,
+    ) -> list[DeviceBindingRecord]:
+        """按 entity_id + entity_type 查询所有 ACTIVE 状态的绑定记录.
+
+        与 ``get_active_by_bot_and_owner`` 不同，本方法**不通过**
+        ``ac_bots.binding_id`` JOIN，而是直接查 ``ac_entity_device_binding``
+        表中该实体下所有 status='ACTIVE' 的记录。
+
+        用途：default 区评测沙箱的 binding 不被 ``ac_bots.binding_id``
+        引用，只能通过实体 + device_props 标记来查找。
+
+        Args:
+            entity_id: 实体 ID（与 ac_bots.owner_id 一致）
+            entity_type: 实体类型（如 "staff"）
+            env: 环境标识（dev/pre/prod）
+
+        Returns:
+            该实体下所有 ACTIVE 绑定记录列表（可能为空）
+        """
+        ...
+
     def update_bot_start_status(self, *, binding_id: int, status: str, message: str | None) -> None:
         """更新 ac_bots 表 ext 字段中的启动状态."""
         ...

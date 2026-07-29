@@ -124,7 +124,8 @@ _SEAM_ALLOWED_CORP_IMPORTS = {
         "agentclaw.corp.di.modules.infrastructure.corp.column",
     },
     # The profile selector names ZERO corp module in any branch: the corp column
-    # AND the test-column corp reuse both come via the modules_bootstrap registry.
+    # AND the test-column corp reuse AND the singlebox overlay all come via
+    # the modules_bootstrap registry.
     "profile_modules.py": set(),
 }
 

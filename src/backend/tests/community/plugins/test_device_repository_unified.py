@@ -1249,3 +1249,37 @@ def test_update_bot_status_on_device_active_env_isolation(repo, db):
             s.query(BotModel).filter_by(bot_id="bot-prod").one().status
             == "ACTIVE"
         )
+
+
+# ── get_active_bindings_by_entity ──────────────────────────────────────
+
+
+def test_get_active_bindings_by_entity_returns_active_only(repo):
+    """Only ACTIVE bindings for the given entity are returned."""
+    b1 = repo.insert_binding(**_binding(
+        entity_id="staff-x", entity_type="staff",
+        device_id="dev-active", status="ACTIVE",
+    ))
+    repo.insert_binding(**_binding(
+        entity_id="staff-x", entity_type="staff",
+        device_id="dev-released", status="RELEASED",
+    ))
+    b3 = repo.insert_binding(**_binding(
+        entity_id="staff-y", entity_type="staff",
+        device_id="dev-other-entity", status="ACTIVE",
+    ))
+
+    result = repo.get_active_bindings_by_entity(
+        entity_id="staff-x", entity_type="staff", env="dev",
+    )
+    ids = {r.id for r in result}
+    assert b1 in ids
+    assert b3 not in ids
+
+
+def test_get_active_bindings_by_entity_empty(repo):
+    """No matching entity → empty list."""
+    result = repo.get_active_bindings_by_entity(
+        entity_id="nonexistent", entity_type="staff", env="dev",
+    )
+    assert result == []

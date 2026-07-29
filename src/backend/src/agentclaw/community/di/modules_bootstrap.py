@@ -64,14 +64,15 @@ def register_corp_modules(profile: DeployProfile) -> None:
     - ``corp`` registers the full corp infrastructure column.
     - ``corp_test`` registers the corp-reuse subset the corp test column installs
       (it runs with corp deps present in the dev/CI venv).
-    - ``test`` / ``singlebox`` register **nothing** — B11 (3.2) made those columns
-      corp-free, so they no longer reach the corp reuse column.
+    - ``singlebox`` registers the corp overlay modules the singlebox column needs
+      (default-env-bot router + DI) so profile_modules.py stays corp-free.
+    - ``test`` registers **nothing** — B11 (3.2) made that column corp-free.
 
     The corp branches live in the corp-only ``di.corp_bootstrap`` module, loaded
-    here via ``importlib`` (a string import, corp/corp_test only) — so this shared
-    file names **no** ``infrastructure.corp`` / ``config_corp`` module and a
-    community boot (without ``corp`` present) imports it fine. The corp side calls
-    the setter registries below back on this module (corp → community).
+    here via ``importlib`` (a string import, corp/corp_test/singlebox only) — so
+    this shared file names **no** ``infrastructure.corp`` / ``config_corp`` module
+    and a community boot (without ``corp`` present) imports it fine. The corp side
+    calls the setter registries below back on this module (corp → community).
     """
     if profile is DeployProfile.CORP:
         from importlib import import_module
@@ -81,6 +82,10 @@ def register_corp_modules(profile: DeployProfile) -> None:
         from importlib import import_module
 
         import_module("agentclaw.corp.di.corp_bootstrap").install_test_corp_reuse_column()
+    elif profile is DeployProfile.SINGLEBOX:
+        from importlib import import_module
+
+        import_module("agentclaw.corp.di.corp_bootstrap").install_singlebox_overlay()
 
 
 def get_corp_modules() -> list[Module]:
@@ -131,3 +136,26 @@ def get_test_corp_modules() -> list[Module]:
             "before build_injector (see di/modules_bootstrap.py)."
         )
     return _test_corp_reuse_provider()
+
+
+# Singlebox overlay modules — the singlebox column may need a small set of corp
+# modules (default-env-bot router + DI). Supplied through this registry so
+# ``profile_modules.py`` names **no** corp module (B8).
+_singlebox_overlay_provider: Callable[[], list[Module]] | None = None
+
+
+def register_singlebox_overlay_provider(provider: Callable[[], list[Module]]) -> None:
+    """Register the thunk supplying the corp overlay modules for singlebox."""
+    global _singlebox_overlay_provider
+    _singlebox_overlay_provider = provider
+
+
+def get_singlebox_overlay_modules() -> list[Module]:
+    """Return the registered singlebox overlay modules (empty list if none).
+
+    A community build (without corp present) never registers a provider, so
+    this returns an empty list — the singlebox column stays corp-free.
+    """
+    if _singlebox_overlay_provider is None:
+        return []
+    return _singlebox_overlay_provider()
