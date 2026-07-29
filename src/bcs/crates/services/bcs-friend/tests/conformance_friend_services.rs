@@ -8,8 +8,8 @@ use bcs_friend::{
 use bcs_service_api::{
     ActorKind, ActorStatus, AgentCredentials, BotCapabilities, BotDynamicStatus,
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService, FriendRequestDirection,
-    FriendRepoPort, FriendRequestRepoPort, FriendRequestStatus, RegisteredBot, ServiceError,
-    ServiceResult,
+    FriendRepoPort, FriendRequestRepoPort, FriendRequestStatus, FriendService, ListFriendsCommand,
+    RegisteredBot, ServiceError, ServiceResult,
 };
 use bcs_test_support::{
     NoopBotRegistryCoreService, NoopFriendCoreService, NoopFriendRequestCoreService,
@@ -222,6 +222,55 @@ async fn friend_use_case_passes_application_contract() {
     );
 
     bcs_test_support::contract::application::friend_service_contract_tests(&svc).await;
+}
+
+#[tokio::test]
+async fn list_friends_excludes_deleted_or_unregistered_peers() {
+    // alice is friends with bob (live) and carol (deleted / no longer registered).
+    // `StaticRegistry` only knows alice and bob, so `get("carol")` returns `None`,
+    // which is exactly how the listing path observes a soft-deleted friend.
+    let friend_repo = Arc::new(MemoryFriendRepo::new());
+    let friend_core = Arc::new(FriendCore::with_repo(friend_repo));
+    friend_core
+        .add_friendship("alice", "bob")
+        .await
+        .expect("add alice-bob friendship");
+    friend_core
+        .add_friendship("alice", "carol")
+        .await
+        .expect("add alice-carol friendship");
+
+    let svc = Friend::new(
+        Arc::new(StaticRegistry::new(&[
+            ("alice", "protected", ActorKind::Bot),
+            ("bob", "protected", ActorKind::Bot),
+            // carol is intentionally omitted: it simulates a deleted friend.
+        ])),
+        friend_core,
+        Arc::new(NoopFriendRequestCoreService),
+        Arc::new(NoopRelationCoreService),
+    );
+
+    // Caller == target short-circuits the ownership check, so the only thing
+    // exercising the filter is the enrichment loop in `list_friends`.
+    let friends = svc
+        .list_friends(ListFriendsCommand {
+            caller_actor_id: "alice".to_string(),
+            target_actor_id: "alice".to_string(),
+        })
+        .await
+        .expect("list friends for alice");
+
+    assert_eq!(
+        friends.len(),
+        1,
+        "deleted/unregistered friends must be excluded from the list"
+    );
+    assert_eq!(friends[0].bot_uuid, "bob");
+    assert!(
+        friends.iter().all(|entry| entry.bot_uuid != "carol"),
+        "carol (deleted) must not appear in the friend list"
+    );
 }
 
 fn core_fixture(
