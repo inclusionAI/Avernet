@@ -61,7 +61,9 @@ use serde_json::json;
 use tracing::{Level, debug, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
-use bcs_cli::{BcsClient, CreateCustomGroupOptions};
+use bcs_cli::{
+    BcsClient, CreateCustomGroupOptions, RunSessionCollaborationOptions,
+};
 use bcs_protocol::{BCS_PROTOCOL_VERSION, BotConnectParams};
 
 // disable agentpass, agentpass token should be auto injected into the http headers
@@ -1120,7 +1122,8 @@ enum Commands {
         topic: Option<String>,
     },
 
-    /// Validate definitions and create custom collaboration groups
+    /// Validate, create, or run custom collaborations
+    #[command(visible_alias = "collaborate")]
     Collaboration {
         /// Authentication token (auto-discovered if not provided)
         #[arg(short, long)]
@@ -1343,6 +1346,31 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum CollaborationCommands {
+    /// Query whether the authenticated Bot may run a state machine in a session
+    Permission {
+        /// Current BCS session ID
+        #[arg(long)]
+        session: String,
+    },
+
+    /// Submit YAML and role bindings once, then run it in the current session
+    Run {
+        /// YAML file containing the one-shot state-machine definition
+        file: PathBuf,
+
+        /// Current BCS session ID
+        #[arg(long)]
+        session: String,
+
+        /// Logical participant binding in ROLE=BOT_UUID form; repeat for each role
+        #[arg(long = "binding", value_name = "ROLE=BOT_UUID", required = true)]
+        bindings: Vec<String>,
+
+        /// Runtime input JSON, or @path/to/input.json
+        #[arg(long, default_value = "{}")]
+        input: String,
+    },
+
     /// Validate a custom collaboration definition against the current BCS server
     Validate {
         /// YAML file to validate
@@ -2877,6 +2905,129 @@ async fn main() -> Result<()> {
         }
 
         Commands::Collaboration { token, command } => match command {
+            CollaborationCommands::Permission { session } => {
+                let token = get_token(token.as_deref())?;
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+                debug_request!(
+                    debug,
+                    "GET",
+                    &format!("/sessions/{session}/state-machine-permission"),
+                    json!({})
+                );
+                let permission = client
+                    .get_session_state_machine_permission(&session)
+                    .await?;
+                debug_response!(debug, "200", &permission);
+                if structured_mode {
+                    println!("{}", serde_json::to_string(&permission)?);
+                } else {
+                    println!(
+                        "State-machine permission: {}",
+                        if permission
+                            .get("allowed")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false)
+                        {
+                            "ALLOWED"
+                        } else {
+                            "DENIED"
+                        }
+                    );
+                    println!(
+                        "  Session: {}",
+                        permission
+                            .get("session_id")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(&session)
+                    );
+                    println!(
+                        "  Reason: {}",
+                        permission
+                            .get("reason_code")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown")
+                    );
+                    if let Some(message) =
+                        permission.get("message").and_then(serde_json::Value::as_str)
+                    {
+                        println!("  Message: {message}");
+                    }
+                }
+            }
+
+            CollaborationCommands::Run {
+                file,
+                session,
+                bindings,
+                input,
+            } => {
+                let definition_yaml = std::fs::read_to_string(&file).map_err(|error| {
+                    anyhow!("Failed to read YAML file {}: {error}", file.display())
+                })?;
+                let participant_bindings = parse_custom_group_bindings(&bindings)?;
+                let input = parse_json_arg(&input)?;
+                let token = get_token(token.as_deref())?;
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+                debug_request!(
+                    debug,
+                    "POST",
+                    &format!("/sessions/{session}/state-machine-runs"),
+                    json!({
+                        "definition_yaml": &definition_yaml,
+                        "participant_bindings": &participant_bindings,
+                        "input": &input,
+                    })
+                );
+                let result = client
+                    .run_session_collaboration(RunSessionCollaborationOptions {
+                        session_id: session,
+                        participant_bindings,
+                        definition_yaml,
+                        input,
+                    })
+                    .await?;
+                debug_response!(debug, "202", &result);
+                if structured_mode {
+                    println!("{}", serde_json::to_string(&result)?);
+                } else {
+                    println!("State-machine run started:");
+                    println!(
+                        "  Run: {}",
+                        result
+                            .get("run")
+                            .and_then(|run| run.get("run_id"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                    );
+                    println!(
+                        "  Session: {}",
+                        result
+                            .get("run")
+                            .and_then(|run| run.get("session_id"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                    );
+                    println!(
+                        "  Status: {}",
+                        result
+                            .get("run")
+                            .and_then(|run| run.get("status"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                    );
+                }
+            }
+
             CollaborationCommands::Validate { file } => {
                 let definition_yaml = std::fs::read_to_string(&file).map_err(|error| {
                     anyhow!("Failed to read YAML file {}: {error}", file.display())
@@ -4616,6 +4767,70 @@ mod tests {
                 command: CollaborationCommands::Validate { file },
             } => assert_eq!(file, PathBuf::from("/tmp/workflow.yaml")),
             _ => panic!("expected collaboration validate command"),
+        }
+    }
+
+    #[test]
+    fn collaborate_permission_alias_parses_current_session() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "collaborate",
+            "permission",
+            "--session",
+            "group-1:abc12345",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Collaboration {
+                token: None,
+                command: CollaborationCommands::Permission { session },
+            } => assert_eq!(session, "group-1:abc12345"),
+            _ => panic!("expected collaborate permission command"),
+        }
+    }
+
+    #[test]
+    fn collaborate_run_alias_parses_yaml_session_bindings_and_input() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "collaborate",
+            "--token",
+            "test-token",
+            "run",
+            "/tmp/workflow.yaml",
+            "--session",
+            "group-1:abc12345",
+            "--binding",
+            "planner=bot-driver",
+            "--binding",
+            "writer=20260412_abc:100005",
+            "--input",
+            r#"{"question":"resolve it"}"#,
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Collaboration {
+                token: Some(token),
+                command:
+                    CollaborationCommands::Run {
+                        file,
+                        session,
+                        bindings,
+                        input,
+                    },
+            } => {
+                assert_eq!(token, "test-token");
+                assert_eq!(file, PathBuf::from("/tmp/workflow.yaml"));
+                assert_eq!(session, "group-1:abc12345");
+                assert_eq!(
+                    bindings,
+                    vec!["planner=bot-driver", "writer=20260412_abc:100005"]
+                );
+                assert_eq!(input, r#"{"question":"resolve it"}"#);
+            }
+            _ => panic!("expected collaborate run command"),
         }
     }
 

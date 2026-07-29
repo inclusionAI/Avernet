@@ -6,10 +6,12 @@ use std::{
 
 use async_trait::async_trait;
 use bcs_domain::{
+    BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
     CollaborationDefinition, CollaborationDefinitionRef, CollaborationRuntimeDefinition, Group,
-    GroupMessage, GroupMessageType, GroupRuntimeBinding, GroupStrategy, MessageRole, Participant,
-    ParticipantMode, ParticipantRole, ResolvedParticipant, ResolvedParticipantBinding,
-    RuntimeParticipantBinding, StateMachineAssignee, StateMachineDeliveryCorrelation,
+    GroupKind, GroupMessage, GroupMessageType, GroupRuntimeBinding, GroupStatus, GroupStrategy,
+    MessageRole, NewMessage, Participant, ParticipantMode, ParticipantRole, ResolvedParticipant,
+    ResolvedParticipantBinding, RuntimeParticipantBinding, STATE_MACHINE_PANEL_MESSAGE_TYPE,
+    SenderType, Session, StateMachineAssignee, StateMachineDeliveryCorrelation,
     StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
     StateMachineRunStatus,
 };
@@ -18,6 +20,7 @@ use bcs_protocol::{
     build_chat_send_frame,
 };
 use bcs_route_security::OutboundUrlGuard;
+use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryTarget, BotRegistryCoreService, CancelStateMachineRunCommand, ChatEventState,
@@ -34,9 +37,12 @@ use bcs_service_api::{
     PatchGroupCollaborationDefinitionCommand, PendingHumanNodeView, RespondHumanNodeCommand,
     RespondHumanNodeOutcome, RunFallbackDelivery, ServiceError, SessionChannelDeliveryOutcome,
     SessionChannelOutboundPort, SessionHistoryResult, SessionKind, SessionManagementService,
-    StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDefinitionRepoPort,
+    SessionStateMachinePermissionCommand, SessionStateMachinePermissionView, SessionStatus,
+    StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
+    StartStateMachineRunOutcome, StateMachineDefinitionRepoPort,
     StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
     StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
+    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
     StateMachineRunAccessCommand, StateMachineRunGraphView, StateMachineRunRepoPort,
     StateMachineRunView, StateMachineTerminalEvent, StateMachineTerminalStatus,
     UpgradeGroupCollaborationDefinitionCommand, ValidateCollaborationDefinitionYamlCommand,
@@ -52,10 +58,9 @@ use crate::definition::{
 };
 use crate::validation::validate_authoring_definition_yaml;
 
-const BCS_STATE_MACHINE_BOT_ID: &str = "bcs_state_machine";
-const BCS_STATE_MACHINE_BOT_NAME: &str = "BCS State Machine";
 const DEFAULT_JUDGE_TIMEOUT_MS: u64 = 90_000;
 const MAX_HUMAN_RESPONSE_BYTES: usize = 64 * 1024;
+const SESSION_STATE_MACHINE_POLICY_VERSION: &str = "session_state_machine_v1";
 
 enum JudgeEvaluationResult {
     Outcome(String),
@@ -72,7 +77,9 @@ pub struct CollaborationRuntime {
     bot_delivery: Arc<dyn BotDeliveryPort>,
     bot_registry: Option<Arc<dyn BotRegistryCoreService>>,
     frontend_delivery: Option<Arc<dyn FrontendDeliveryPort>>,
+    message_repo: Option<Arc<dyn MessageRepoPort>>,
     session_channel_outbound: Option<Arc<dyn SessionChannelOutboundPort>>,
+    result_publisher: Option<Arc<dyn StateMachineResultPublisherPort>>,
     judge: Arc<dyn JudgeEvaluatorPort>,
     callback_url_guard: OutboundUrlGuard,
 }
@@ -110,7 +117,9 @@ impl CollaborationRuntime {
             bot_registry: None,
             judge,
             frontend_delivery: None,
+            message_repo: None,
             session_channel_outbound: None,
+            result_publisher: None,
             callback_url_guard: OutboundUrlGuard::strict(),
         }
     }
@@ -128,11 +137,24 @@ impl CollaborationRuntime {
         self
     }
 
+    pub fn with_message_repo(mut self, message_repo: Arc<dyn MessageRepoPort>) -> Self {
+        self.message_repo = Some(message_repo);
+        self
+    }
+
     pub fn with_session_channel_outbound(
         mut self,
         outbound: Arc<dyn SessionChannelOutboundPort>,
     ) -> Self {
         self.session_channel_outbound = Some(outbound);
+        self
+    }
+
+    pub fn with_result_publisher(
+        mut self,
+        publisher: Arc<dyn StateMachineResultPublisherPort>,
+    ) -> Self {
+        self.result_publisher = Some(publisher);
         self
     }
 
@@ -575,8 +597,8 @@ impl CollaborationRuntime {
             &group.id,
             &group_context,
             &prompt,
-            BCS_STATE_MACHINE_BOT_ID,
-            BCS_STATE_MACHINE_BOT_NAME,
+            BCS_STATE_MACHINE_MESSAGE_SENDER,
+            BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
             &[],
             &assignee_bot_id,
             &None,
@@ -736,10 +758,10 @@ impl CollaborationRuntime {
             "bcs_session_id": run.session_id.clone(),
             "state": "final",
             "role": "assistant",
-            "sender": BCS_STATE_MACHINE_BOT_ID,
+            "sender": BCS_STATE_MACHINE_MESSAGE_SENDER,
             "content": content.clone(),
             "message_type": "bot",
-            "bot_name": BCS_STATE_MACHINE_BOT_NAME,
+            "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
             "metadata": metadata,
             "message": {
                 "role": "assistant",
@@ -752,7 +774,7 @@ impl CollaborationRuntime {
             "event": "chat",
             "payload": payload.clone(),
             "group_id": group.id.clone(),
-            "bot_uuid": BCS_STATE_MACHINE_BOT_ID,
+            "bot_uuid": BCS_STATE_MACHINE_MESSAGE_SENDER,
         });
         let fallback = BcsFrame::Event(EventFrame::new("chat", Some(payload), None));
         let publish_result = tokio::time::timeout(
@@ -791,6 +813,48 @@ impl CollaborationRuntime {
                 );
             }
         }
+    }
+
+    async fn persist_state_machine_panel_message(
+        &self,
+        run: &StateMachineRun,
+        session_title: Option<&str>,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let Some(message_repo) = self.message_repo.as_ref() else {
+            return Err(CollaborationRuntimeError::Internal(
+                ServiceError::InvalidOperation {
+                    message: "state-machine panel message repository is not configured"
+                        .to_string(),
+                    request_id: None,
+                },
+            ));
+        };
+        let message_id = format!("{}:000-panel", run.run_id);
+        let content = format_state_machine_panel_message(&run.run_id, session_title);
+        message_repo
+            .append_message(NewMessage {
+                group_id: run.group_id.clone(),
+                session_id: run.session_id.clone(),
+                sender_id: BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
+                sender_type: SenderType::Bot,
+                message_type: STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string(),
+                content: serde_json::json!({
+                    "text": content,
+                    "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+                    "metadata": state_machine_panel_metadata(run),
+                }),
+                client_msg_id: Some(message_id),
+                owner_bot_id: None,
+                created_at: run.created_at,
+                run_id: run.run_id.clone(),
+            })
+            .await
+            .map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(format!(
+                    "state-machine panel history persistence failed: {error}"
+                )))
+            })?;
+        Ok(())
     }
 
     async fn publish_state_machine_bot_event(
@@ -979,10 +1043,10 @@ impl CollaborationRuntime {
         GroupMessage {
             id: format!("{}:000-panel", run.run_id),
             timestamp: run.created_at,
-            sender: BCS_STATE_MACHINE_BOT_ID.to_string(),
+            sender: BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
             content: format_state_machine_panel_message(&run.run_id, session_title.as_deref()),
             message_type: GroupMessageType::Bot,
-            bot_name: Some(BCS_STATE_MACHINE_BOT_NAME.to_string()),
+            bot_name: Some(BCS_STATE_MACHINE_MESSAGE_SENDER_NAME.to_string()),
             role: MessageRole::Assistant,
             history_meta: None,
             metadata: Some(state_machine_panel_metadata(run)),
@@ -1228,6 +1292,25 @@ impl CollaborationRuntime {
         });
         let output_len = output.as_ref().map_or(0, String::len);
         let now = bcs_protocol::now_ms();
+        let session = self.sessions.get(&run.session_id).await.map_err(|error| {
+            CollaborationRuntimeError::InvalidRequest(error.to_string())
+        })?;
+        let is_chat_session = session
+            .as_ref()
+            .is_some_and(|session| session.session_kind == SessionKind::Chat);
+        if let Some(session) = session.as_ref().filter(|_| is_chat_session) {
+            if let Err(error) = self
+                .publish_chat_session_result(run, session, output.as_deref())
+                .await
+            {
+                return self
+                    .fail_run(
+                        run,
+                        format!("state-machine result publication failed: {error}"),
+                    )
+                    .await;
+            }
+        }
         self.runs
             .update_run_status(
                 &run.run_id,
@@ -1238,30 +1321,38 @@ impl CollaborationRuntime {
                 Some(now),
             )
             .await?;
-        let (session_complete_result, session_transitioned) = match self
-            .sessions
-            .complete_if_running(&run.session_id, output.clone().map(Value::String), None)
-            .await
-        {
-            Ok(Some(session)) => {
-                bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-                    session,
-                    self.groups.clone(),
-                    self.sessions.clone(),
-                    self.callback_url_guard.clone(),
-                );
-                ("completed", true)
-            }
-            Ok(None) => ("not_running", false),
-            Err(error) => {
-                warn!(
-                    run_id = %run.run_id,
-                    group_id = %run.group_id,
-                    session_id = %run.session_id,
-                    error = %error,
-                    "state_machine: failed to complete session for completed run"
-                );
-                ("error", false)
+        let (session_complete_result, session_transitioned) = if is_chat_session {
+            ("chat_preserved", false)
+        } else {
+            match self
+                .sessions
+                .complete_if_running(
+                    &run.session_id,
+                    output.clone().map(Value::String),
+                    None,
+                )
+                .await
+            {
+                Ok(Some(session)) => {
+                    bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
+                        session,
+                        self.groups.clone(),
+                        self.sessions.clone(),
+                        self.callback_url_guard.clone(),
+                    );
+                    ("completed", true)
+                }
+                Ok(None) => ("not_running", false),
+                Err(error) => {
+                    warn!(
+                        run_id = %run.run_id,
+                        group_id = %run.group_id,
+                        session_id = %run.session_id,
+                        error = %error,
+                        "state_machine: failed to complete session for completed run"
+                    );
+                    ("error", false)
+                }
             }
         };
         if session_transitioned {
@@ -1300,6 +1391,69 @@ impl CollaborationRuntime {
         self.run_view(&run.run_id).await
     }
 
+    async fn publish_chat_session_result(
+        &self,
+        run: &StateMachineRun,
+        session: &Session,
+        output: Option<&str>,
+    ) -> Result<(), ServiceError> {
+        let (Some(sender_bot_id), Some(content)) = (run.created_by.as_ref(), output) else {
+            return Ok(());
+        };
+        if !session.participants.iter().any(|participant| {
+            participant.is_bot() && participant.bot_uuid == sender_bot_id.as_str()
+        }) {
+            warn!(
+                run_id = %run.run_id,
+                group_id = %run.group_id,
+                session_id = %run.session_id,
+                sender_actor_id = %sender_bot_id,
+                "state_machine: refusing to publish chat result under a non-Bot session identity"
+            );
+            return Ok(());
+        }
+        let Some(publisher) = self.result_publisher.as_ref() else {
+            return Err(ServiceError::InvalidOperation {
+                message: "state-machine chat result publisher is not configured".to_string(),
+                request_id: None,
+            });
+        };
+        if let Err(error) = publisher
+            .publish_state_machine_result(StateMachineResultPublishCommand {
+                run_id: run.run_id.clone(),
+                group_id: run.group_id.clone(),
+                session_id: run.session_id.clone(),
+                sender_bot_id: sender_bot_id.clone(),
+                content: content.to_string(),
+            })
+            .await
+        {
+            warn!(
+                run_id = %run.run_id,
+                group_id = %run.group_id,
+                session_id = %run.session_id,
+                sender_bot_id = %sender_bot_id,
+                error = %error,
+                "state_machine: failed to publish completed result into chat session"
+            );
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    async fn is_chat_session(
+        &self,
+        session_id: &str,
+    ) -> Result<bool, CollaborationRuntimeError> {
+        self.sessions
+            .get(session_id)
+            .await
+            .map(|session| {
+                session.is_some_and(|session| session.session_kind == SessionKind::Chat)
+            })
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))
+    }
+
     async fn fail_run(
         &self,
         run: &StateMachineRun,
@@ -1316,32 +1470,37 @@ impl CollaborationRuntime {
                 Some(now),
             )
             .await?;
-        let (session_complete_result, session_transitioned) = match self
-            .sessions
-            .complete_if_running(&run.session_id, None, Some(error.clone()))
-            .await
-        {
-            Ok(Some(session)) => {
-                bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-                    session,
-                    self.groups.clone(),
-                    self.sessions.clone(),
-                    self.callback_url_guard.clone(),
-                );
-                ("completed", true)
-            }
-            Ok(None) => ("not_running", false),
-            Err(error) => {
-                warn!(
-                    run_id = %run.run_id,
-                    group_id = %run.group_id,
-                    session_id = %run.session_id,
-                    error = %error,
-                    "state_machine: failed to complete session for failed run"
-                );
-                ("error", false)
-            }
-        };
+        let (session_complete_result, session_transitioned) =
+            if self.is_chat_session(&run.session_id).await? {
+                ("chat_preserved", false)
+            } else {
+                match self
+                    .sessions
+                    .complete_if_running(&run.session_id, None, Some(error.clone()))
+                    .await
+                {
+                    Ok(Some(session)) => {
+                        bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
+                            session,
+                            self.groups.clone(),
+                            self.sessions.clone(),
+                            self.callback_url_guard.clone(),
+                        );
+                        ("completed", true)
+                    }
+                    Ok(None) => ("not_running", false),
+                    Err(error) => {
+                        warn!(
+                            run_id = %run.run_id,
+                            group_id = %run.group_id,
+                            session_id = %run.session_id,
+                            error = %error,
+                            "state_machine: failed to complete session for failed run"
+                        );
+                        ("error", false)
+                    }
+                }
+            };
         if session_transitioned {
             let workflow_name = self
                 .definitions
@@ -1714,27 +1873,228 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         Ok(validate_authoring_definition_yaml(cmd))
     }
 
+    async fn get_session_state_machine_permission(
+        &self,
+        cmd: SessionStateMachinePermissionCommand,
+    ) -> Result<SessionStateMachinePermissionView, CollaborationRuntimeError> {
+        let session = self
+            .sessions
+            .get(&cmd.session_id)
+            .await
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+            .ok_or_else(|| {
+                CollaborationRuntimeError::InvalidRequest(format!(
+                    "session not found: {}",
+                    cmd.session_id
+                ))
+            })?;
+        let group = self.groups.get(&session.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!(
+                "group not found: {}",
+                session.group_id
+            ))
+        })?;
+        let active_run_id = self
+            .runs
+            .get_run_by_session_id(&session.id)
+            .await?
+            .filter(|run| {
+                matches!(
+                    run.status,
+                    StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+                )
+            })
+            .map(|run| run.run_id);
+        let denied = |reason_code: &str, message: &str| {
+            session_state_machine_permission_view(
+                &session.id,
+                &group,
+                &cmd.caller_bot_id,
+                false,
+                reason_code,
+                message,
+                active_run_id.clone(),
+            )
+        };
+
+        if group.group_kind != GroupKind::Normal {
+            return Ok(denied(
+                "unsupported_group_kind",
+                "state-machine runs are currently available only in normal groups",
+            ));
+        }
+        if !matches!(
+            group.group_strategy,
+            GroupStrategy::Chat | GroupStrategy::ManagerWorker
+        ) {
+            return Ok(denied(
+                "unsupported_group_strategy",
+                "state-machine runs are currently available only in chat and manager_worker groups",
+            ));
+        }
+        if group.status != GroupStatus::Active {
+            return Ok(denied(
+                "group_not_active",
+                "the group must be active to start a state-machine run",
+            ));
+        }
+        if session.session_kind != SessionKind::Chat {
+            return Ok(denied(
+                "unsupported_session_kind",
+                "one-shot state-machine runs require a chat session",
+            ));
+        }
+        if session.status != SessionStatus::Running {
+            return Ok(denied(
+                "session_not_running",
+                "the session must be running to start a state-machine run",
+            ));
+        }
+        if !session
+            .participants
+            .iter()
+            .any(|participant| {
+                participant.is_bot() && participant.bot_uuid == cmd.caller_bot_id
+            })
+        {
+            return Ok(denied(
+                "caller_not_session_member",
+                "the caller bot must be a member of the current session",
+            ));
+        }
+        if cmd.caller_bot_id != group.driver_bot {
+            return Ok(denied(
+                "caller_not_group_owner",
+                "only the current group owner bot may start a state-machine run",
+            ));
+        }
+        if active_run_id.is_some() {
+            return Ok(denied(
+                "state_machine_run_active",
+                "the current session already has an active state-machine run",
+            ));
+        }
+
+        Ok(session_state_machine_permission_view(
+            &session.id,
+            &group,
+            &cmd.caller_bot_id,
+            true,
+            "allowed",
+            "the caller may start a one-shot state-machine run in this session",
+            None,
+        ))
+    }
+
+    async fn start_session_state_machine_run(
+        &self,
+        cmd: StartSessionStateMachineRunCommand,
+    ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
+        let permission = self
+            .get_session_state_machine_permission(SessionStateMachinePermissionCommand {
+                session_id: cmd.session_id.clone(),
+                caller_bot_id: cmd.caller_bot_id.clone(),
+            })
+            .await?;
+        if !permission.allowed {
+            return Err(CollaborationRuntimeError::Forbidden(format!(
+                "{}: {}",
+                permission.reason_code, permission.message
+            )));
+        }
+
+        let validation =
+            validate_authoring_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
+                definition_yaml: cmd.definition_yaml.clone(),
+                judge_available: cmd.judge_available,
+            });
+        if !validation.valid {
+            let details = validation
+                .errors
+                .iter()
+                .map(|error| format!("{} {}: {}", error.code, error.path, error.message))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(CollaborationRuntimeError::InvalidDefinition(details));
+        }
+
+        self.start_state_machine_run(StartStateMachineRunCommand {
+            group_id: permission.group_id,
+            session_id: Some(cmd.session_id),
+            definition_yaml: Some(cmd.definition_yaml),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: Some(cmd.participant_bindings),
+            input: cmd.input,
+            caller_id: Some(cmd.caller_bot_id),
+            authenticated_human: None,
+        })
+        .await
+    }
+
     async fn start_state_machine_run(
         &self,
         cmd: StartStateMachineRunCommand,
     ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
-        let group = self.groups.get(&cmd.group_id).await.ok_or_else(|| {
+        // Session one-shot launches are the only path that supplies transient
+        // participant bindings. Keep their persistence and concurrency rules
+        // separate from configured group state-machine runs.
+        let is_one_shot_session_run =
+            cmd.session_id.is_some() && cmd.participant_bindings.is_some();
+        let mut group = self.groups.get(&cmd.group_id).await.ok_or_else(|| {
             CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", cmd.group_id))
         })?;
+        if cmd.participant_bindings.is_some() {
+            if let Some(session_id) = cmd.session_id.as_deref() {
+                let participant_scope = self
+                    .sessions
+                    .get(session_id)
+                    .await
+                    .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+                    .ok_or_else(|| {
+                        CollaborationRuntimeError::InvalidRequest(format!(
+                            "session not found: {session_id}"
+                        ))
+                    })?;
+                if participant_scope.group_id != group.id {
+                    return Err(CollaborationRuntimeError::InvalidRequest(
+                        "state-machine session does not belong to the target group".to_string(),
+                    ));
+                }
+                group.participants = participant_scope.participants;
+            }
+        }
         let group_binding = self.bindings.get(&cmd.group_id).await?;
         let resolved_definition = self
             .resolve_definition(&cmd, group_binding.as_ref())
             .await?;
-        let should_upsert_definition =
-            resolved_definition.source == ResolvedDefinitionSource::Inline;
+        let should_upsert_definition = resolved_definition.source
+            == ResolvedDefinitionSource::Inline
+            && !is_one_shot_session_run;
         let compiled = validate_definition(resolved_definition.definition)?;
         let definition = &compiled.definition;
         let authenticated_human = cmd.authenticated_human.clone();
         let has_human_input = compiled_has_human_input(&compiled);
         self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
             .await?;
+        let participant_binding_override =
+            cmd.participant_bindings
+                .as_ref()
+                .map(|participant_bindings| GroupRuntimeBinding {
+                    group_id: group.id.clone(),
+                    group_version: group.version,
+                    default_definition: None,
+                    participant_bindings: participant_bindings.clone(),
+                    auto_start_on_service_invocation: false,
+                });
         let resolved_participant_bindings =
-            resolve_participant_bindings(&group, &compiled, group_binding.as_ref())?;
+            resolve_participant_bindings(
+                &group,
+                &compiled,
+                participant_binding_override
+                    .as_ref()
+                    .or(group_binding.as_ref()),
+            )?;
         if should_upsert_definition {
             self.definitions.upsert(definition.clone()).await?;
         }
@@ -1785,12 +2145,12 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 (session.id.clone(), session.session_title.clone(), session)
             }
         };
+        if session.group_id != group.id {
+            return Err(CollaborationRuntimeError::InvalidRequest(
+                "state-machine session does not belong to the target group".to_string(),
+            ));
+        }
         if has_human_input {
-            if session.group_id != group.id {
-                return Err(CollaborationRuntimeError::InvalidRequest(
-                    "state-machine session does not belong to the target group".to_string(),
-                ));
-            }
             // COSEC: caller_id is not proof of Human identity. Only a Human
             // established by the server-side authentication port may be
             // materialized into the session.
@@ -1878,15 +2238,37 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         };
         let nodes = build_node_runs(&compiled, &run, &resolved_participant_bindings)?;
         let node_count = nodes.len();
-        self.runs.create_run(run.clone(), nodes).await?;
-        self.definitions
+        let created = if is_one_shot_session_run {
+            self.runs
+                .create_run_if_session_idle(run.clone(), nodes)
+                .await?
+        } else {
+            self.runs.create_run(run.clone(), nodes).await?;
+            true
+        };
+        if !created {
+            return Err(CollaborationRuntimeError::Conflict(
+                "state_machine_run_active: the current session already has an active state-machine run"
+                    .to_string(),
+            ));
+        }
+        if let Err(error) = self
+            .definitions
             .save_run_snapshot(
                 &run,
                 group.version,
                 definition,
                 Some(&resolved_participant_bindings),
             )
+            .await
+        {
+            self.fail_run(
+                &run,
+                format!("state-machine run snapshot persistence failed: {error}"),
+            )
             .await?;
+            return Err(error.into());
+        }
         info!(
             run_id = %run.run_id,
             group_id = %run.group_id,
@@ -1899,6 +2281,15 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             node_count = node_count,
             "state_machine: run started"
         );
+        if is_one_shot_session_run {
+            if let Err(error) = self
+                .persist_state_machine_panel_message(&run, session_title.as_deref())
+                .await
+            {
+                self.fail_run(&run, error.to_string()).await?;
+                return Err(error);
+            }
+        }
         self.publish_state_machine_panel_event(&group, &run, session_title.as_deref())
             .await;
         for node_id in &compiled.initial_nodes {
@@ -2428,12 +2819,18 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 Some(now),
             )
             .await?;
-        let completed_session = self
-            .sessions
-            .complete_if_running(&run.session_id, None, Some("aborted".to_string()))
-            .await
-            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?;
-        let session_complete_result = if completed_session.is_some() {
+        let is_chat_session = self.is_chat_session(&run.session_id).await?;
+        let completed_session = if is_chat_session {
+            None
+        } else {
+            self.sessions
+                .complete_if_running(&run.session_id, None, Some("aborted".to_string()))
+                .await
+                .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+        };
+        let session_complete_result = if is_chat_session {
+            "chat_preserved"
+        } else if completed_session.is_some() {
             "completed"
         } else {
             "not_running"
@@ -3342,6 +3739,37 @@ fn inferred_participant_role(group: &Group, bot_id: &str) -> ParticipantRole {
         ParticipantRole::Driver
     } else {
         ParticipantRole::Consultant
+    }
+}
+
+fn session_state_machine_permission_view(
+    session_id: &str,
+    group: &Group,
+    caller_bot_id: &str,
+    allowed: bool,
+    reason_code: &str,
+    message: &str,
+    active_run_id: Option<String>,
+) -> SessionStateMachinePermissionView {
+    SessionStateMachinePermissionView {
+        session_id: session_id.to_string(),
+        group_id: group.id.clone(),
+        caller_bot_id: caller_bot_id.to_string(),
+        allowed,
+        reason_code: reason_code.to_string(),
+        message: message.to_string(),
+        policy_version: SESSION_STATE_MACHINE_POLICY_VERSION.to_string(),
+        group_strategy: group_strategy_slug(group.group_strategy).to_string(),
+        group_owner_bot_id: group.driver_bot.clone(),
+        active_run_id,
+    }
+}
+
+fn group_strategy_slug(strategy: GroupStrategy) -> &'static str {
+    match strategy {
+        GroupStrategy::Chat => "chat",
+        GroupStrategy::ManagerWorker => "manager_worker",
+        GroupStrategy::StateMachine => "state_machine",
     }
 }
 

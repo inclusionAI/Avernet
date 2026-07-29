@@ -3,9 +3,16 @@ use bcs_service_api::{
     CollaborationDefinitionValidationOutcome, CollaborationDefinitionValidationSummary,
     CollaborationRuntimeError, CollaborationRuntimeService, HumanResponseSource,
     HumanRunAccessCommand, ListPendingHumanNodesCommand, RespondHumanNodeCommand,
+    ServiceResult, SessionStateMachinePermissionCommand, StartSessionStateMachineRunCommand,
+    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
     StateMachineRunAccessCommand, ValidateCollaborationDefinitionYamlCommand,
 };
-use bcs_test_support::NoopCollaborationRuntimeService;
+use bcs_test_support::{
+    NoopCollaborationRuntimeService,
+    contract::port::state_machine_result_publisher_port_contract_tests,
+};
+use serde_json::Value;
+use std::{collections::BTreeMap, sync::Mutex};
 
 #[tokio::test]
 async fn validation_contract_defaults_to_fail_closed() {
@@ -20,6 +27,39 @@ async fn validation_contract_defaults_to_fail_closed() {
 
     assert!(matches!(
         error,
+        CollaborationRuntimeError::InvalidRequest(_)
+    ));
+}
+
+#[tokio::test]
+async fn session_state_machine_contract_defaults_to_fail_closed() {
+    let service = NoopCollaborationRuntimeService;
+
+    let permission_error = service
+        .get_session_state_machine_permission(SessionStateMachinePermissionCommand {
+            session_id: "session-1".to_string(),
+            caller_bot_id: "bot-owner".to_string(),
+        })
+        .await
+        .expect_err("an unconfigured implementation must not grant run permission");
+    assert!(matches!(
+        permission_error,
+        CollaborationRuntimeError::InvalidRequest(_)
+    ));
+
+    let start_error = service
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: "session-1".to_string(),
+            caller_bot_id: "bot-owner".to_string(),
+            definition_yaml: "name: one-shot".to_string(),
+            participant_bindings: BTreeMap::new(),
+            input: Value::Null,
+            judge_available: false,
+        })
+        .await
+        .expect_err("an unconfigured implementation must not start a run");
+    assert!(matches!(
+        start_error,
         CollaborationRuntimeError::InvalidRequest(_)
     ));
 }
@@ -189,4 +229,35 @@ fn validation_outcome_serializes_without_internal_definition() {
     assert!(wire.get("definition").is_none());
     assert!(wire.get("errors").is_none());
     assert!(wire.get("warnings").is_none());
+}
+
+#[derive(Default)]
+struct RecordingResultPublisher {
+    commands: Mutex<Vec<StateMachineResultPublishCommand>>,
+}
+
+#[async_trait::async_trait]
+impl StateMachineResultPublisherPort for RecordingResultPublisher {
+    async fn publish_state_machine_result(
+        &self,
+        cmd: StateMachineResultPublishCommand,
+    ) -> ServiceResult<()> {
+        self.commands.lock().unwrap().push(cmd);
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn state_machine_result_publisher_preserves_chat_identity_and_scope() {
+    let publisher = RecordingResultPublisher::default();
+
+    state_machine_result_publisher_port_contract_tests(&publisher).await;
+
+    let commands = publisher.commands.lock().unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].run_id, "contract-run");
+    assert_eq!(commands[0].group_id, "contract-group");
+    assert_eq!(commands[0].session_id, "contract-group:00000001");
+    assert_eq!(commands[0].sender_bot_id, "contract-initiator");
+    assert_eq!(commands[0].content, "contract final result");
 }

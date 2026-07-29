@@ -8,7 +8,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::info;
 
-use bcs_domain::{MessageOwnerFilter, MessageQuery, Session};
+use bcs_domain::{
+    BCS_STATE_MACHINE_MESSAGE_SENDER_NAME, MessageOwnerFilter, MessageQuery,
+    STATE_MACHINE_PANEL_MESSAGE_TYPE, Session,
+};
 use bcs_service_api::{
     BotRegistryCoreService, GroupCoreService, GroupHistoryCommand, GroupHistoryResult,
     GroupMessageHistoryService, GroupUseCaseError, SessionHistoryCommand, SessionHistoryResult,
@@ -187,6 +190,21 @@ fn persisted_to_group_message(
     pm: bcs_domain::PersistedMessage,
     bot_name: Option<String>,
 ) -> GroupMessage {
+    let is_state_machine_panel = pm.message_type == STATE_MACHINE_PANEL_MESSAGE_TYPE;
+    let message_id = if is_state_machine_panel {
+        pm.client_msg_id
+            .clone()
+            .unwrap_or_else(|| pm.message_id.clone())
+    } else {
+        pm.message_id.clone()
+    };
+    let panel_bot_name = is_state_machine_panel.then(|| {
+        pm.content
+            .get("bot_name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(BCS_STATE_MACHINE_MESSAGE_SENDER_NAME)
+            .to_string()
+    });
     let (role, metadata, content_str) = match pm.message_type.as_str() {
         "chat" | "text" | "system" => {
             let role = match pm.sender_type {
@@ -196,6 +214,19 @@ fn persisted_to_group_message(
             };
             let text = pm.content.as_str().unwrap_or("").to_string();
             (role, None, text)
+        }
+        STATE_MACHINE_PANEL_MESSAGE_TYPE => {
+            // TODO(sm-history-node-expansion): expand this persisted panel anchor
+            // into node task/output messages after pagination and cursor semantics
+            // for expanded state-machine history are defined.
+            let text = pm
+                .content
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let metadata = pm.content.get("metadata").cloned();
+            (MessageRole::Assistant, metadata, text)
         }
         "tool_call" => {
             let metadata = build_tool_call_metadata(&pm.content);
@@ -217,12 +248,12 @@ fn persisted_to_group_message(
     };
 
     GroupMessage {
-        id: pm.message_id,
+        id: message_id,
         timestamp: pm.created_at,
         sender: pm.sender_id,
         content: content_str,
         message_type: GroupMessageType::Bot,
-        bot_name,
+        bot_name: panel_bot_name.or(bot_name),
         role,
         run_id: pm.run_id,
         history_meta: None,
@@ -422,9 +453,87 @@ impl GroupMessageHistoryService for MessageService {
         } else {
             info!(
                 session_id = %cmd.session_id,
-                "get_session_history: old session, falling back to legacy path"
+                "get_session_history: old session, merging legacy history with persisted panel anchors"
             );
-            self.fallback.get_session_history(cmd).await
+            let mut fallback_result = self.fallback.get_session_history(cmd.clone()).await?;
+            let (Some(group), Some(session)) = (group_opt.as_ref(), session.as_ref()) else {
+                return Ok(fallback_result);
+            };
+            let owner_filter = match group.group_strategy {
+                GroupStrategy::Chat => MessageOwnerFilter::Any,
+                GroupStrategy::ManagerWorker => {
+                    let Ok(view) = self.manager_worker_history_view(
+                        group,
+                        session,
+                        cmd.view_bot_id.as_deref(),
+                    ) else {
+                        return Ok(fallback_result);
+                    };
+                    match view {
+                        ManagerWorkerHistoryView::Public => MessageOwnerFilter::IsNull,
+                        ManagerWorkerHistoryView::Worker(worker_id) => {
+                            MessageOwnerFilter::Eq(worker_id)
+                        }
+                    }
+                }
+                _ => return Ok(fallback_result),
+            };
+            let limit = self.effective_limit(cmd.limit);
+            let panel_page = self
+                .message_repo
+                .query_messages(MessageQuery {
+                    group_id: cmd.group_id,
+                    session_id: session_id.clone(),
+                    cursor: cmd.before,
+                    limit,
+                    keyword: None,
+                    sender_id: None,
+                    message_type: Some(STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string()),
+                    owner_filter,
+                    time_range: None,
+                    visible_from_seq: None,
+                })
+                .await
+                .map_err(|error| {
+                    GroupUseCaseError::Service(ServiceError::InternalError(format!(
+                        "message repo panel-anchor error: {error}"
+                    )))
+                })?;
+            if panel_page.messages.is_empty() {
+                return Ok(fallback_result);
+            }
+
+            let source_has_more =
+                fallback_result.next_before.is_some() || panel_page.has_more;
+            let mut seen_ids = fallback_result
+                .messages
+                .iter()
+                .map(|message| message.id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            fallback_result.messages.extend(
+                panel_page
+                    .messages
+                    .into_iter()
+                    .map(|message| persisted_to_group_message(message, None))
+                    .filter(|message| seen_ids.insert(message.id.clone())),
+            );
+            fallback_result.messages.sort_by(|left, right| {
+                right
+                    .timestamp
+                    .cmp(&left.timestamp)
+                    .then_with(|| right.id.cmp(&left.id))
+            });
+            let combined_has_more = fallback_result.messages.len() > limit as usize;
+            fallback_result.messages.truncate(limit as usize);
+            fallback_result.next_before = if source_has_more || combined_has_more {
+                fallback_result
+                    .messages
+                    .last()
+                    .map(|message| message.timestamp)
+            } else {
+                None
+            };
+            Ok(fallback_result)
         }
     }
 }
@@ -684,6 +793,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn state_machine_panel_round_trips_through_chat_session_history() {
+        let (service, repo, _sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+        let run_id = "sm-run-1";
+        let stable_message_id = format!("{run_id}:000-panel");
+        let panel_content =
+            "<AixUI type=\"panel\" component=\"bcsPanel.StateMachineRunView\" />";
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: bcs_domain::BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
+            sender_type: SenderType::Bot,
+            message_type: STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string(),
+            content: serde_json::json!({
+                "text": panel_content,
+                "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+                "metadata": {
+                    "state_machine": {
+                        "event": "panel",
+                        "run_id": run_id,
+                        "component": "bcsPanel.StateMachineRunView",
+                    }
+                }
+            }),
+            client_msg_id: Some(stable_message_id.clone()),
+            created_at: 2,
+            run_id: run_id.to_string(),
+            owner_bot_id: None,
+        })
+        .await
+        .expect("append state-machine panel");
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, None))
+            .await
+            .expect("state-machine panel history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        assert_eq!(result.messages.len(), 1);
+        let panel = &result.messages[0];
+        assert_eq!(panel.id, stable_message_id);
+        assert_eq!(panel.content, panel_content);
+        assert_eq!(
+            panel.bot_name.as_deref(),
+            Some(BCS_STATE_MACHINE_MESSAGE_SENDER_NAME)
+        );
+        assert_eq!(panel.role, MessageRole::Assistant);
+        assert_eq!(panel.run_id, run_id);
+        assert_eq!(
+            panel
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata["state_machine"]["event"].as_str()),
+            Some("panel")
+        );
+    }
+
+    #[tokio::test]
+    async fn chat_session_history_interleaves_every_state_machine_panel() {
+        let (service, repo, _sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+
+        for (created_at, run_id) in [(2, "sm-run-1"), (4, "sm-run-2")] {
+            repo.append_message(NewMessage {
+                group_id: "group-1".to_string(),
+                session_id: session_id.clone(),
+                sender_id: bcs_domain::BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
+                sender_type: SenderType::Bot,
+                message_type: STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string(),
+                content: serde_json::json!({
+                    "text": format!(
+                        "<AixUI type=\"panel\" component=\"bcsPanel.StateMachineRunView\" params='{{\"runId\":\"{run_id}\"}}' />"
+                    ),
+                    "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+                    "metadata": {
+                        "state_machine": {
+                            "event": "panel",
+                            "run_id": run_id,
+                            "component": "bcsPanel.StateMachineRunView",
+                        }
+                    }
+                }),
+                client_msg_id: Some(format!("{run_id}:000-panel")),
+                created_at,
+                run_id: run_id.to_string(),
+                owner_bot_id: None,
+            })
+            .await
+            .expect("append state-machine panel");
+        }
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: "human-1".to_string(),
+            sender_type: SenderType::Human,
+            message_type: "chat".to_string(),
+            content: serde_json::Value::String("ordinary message".to_string()),
+            client_msg_id: None,
+            created_at: 3,
+            run_id: String::new(),
+            owner_bot_id: None,
+        })
+        .await
+        .expect("append ordinary message");
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, None))
+            .await
+            .expect("state-machine panel history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        assert_eq!(result.messages.len(), 3);
+        assert_eq!(result.messages[0].id, "sm-run-2:000-panel");
+        assert_eq!(result.messages[1].content, "ordinary message");
+        assert_eq!(result.messages[2].id, "sm-run-1:000-panel");
+    }
+
+    #[tokio::test]
     async fn pre_cutoff_manager_worker_falls_back_to_legacy_history() {
         let (service, _repo, _sessions, fallback, session_id) = service_fixture(
             GroupStrategy::ManagerWorker,
@@ -701,6 +928,54 @@ mod tests {
         assert_eq!(fallback.session_calls().await, 1);
         assert_eq!(result.messages.len(), 1);
         assert_eq!(result.messages[0].content, "legacy");
+    }
+
+    #[tokio::test]
+    async fn pre_cutoff_chat_history_merges_persisted_state_machine_panel_anchor() {
+        let (service, repo, _sessions, fallback, session_id) = service_fixture(
+            GroupStrategy::Chat,
+            u64::MAX,
+            u64::MAX,
+            vec![fallback_message("legacy")],
+        )
+        .await;
+        let run_id = "sm-old-session-run";
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: bcs_domain::BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
+            sender_type: SenderType::Bot,
+            message_type: STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string(),
+            content: serde_json::json!({
+                "text": format!(
+                    "<AixUI type=\"panel\" component=\"bcsPanel.StateMachineRunView\" params='{{\"runId\":\"{run_id}\"}}' />"
+                ),
+                "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+                "metadata": {
+                    "state_machine": {
+                        "event": "panel",
+                        "run_id": run_id,
+                        "component": "bcsPanel.StateMachineRunView",
+                    }
+                }
+            }),
+            client_msg_id: Some(format!("{run_id}:000-panel")),
+            created_at: 2,
+            run_id: run_id.to_string(),
+            owner_bot_id: None,
+        })
+        .await
+        .expect("append state-machine panel");
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, None))
+            .await
+            .expect("legacy history with state-machine panel");
+
+        assert_eq!(fallback.session_calls().await, 1);
+        assert_eq!(result.messages.len(), 2);
+        assert_eq!(result.messages[0].id, format!("{run_id}:000-panel"));
+        assert_eq!(result.messages[1].content, "legacy");
     }
 
     #[tokio::test]

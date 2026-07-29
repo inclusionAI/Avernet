@@ -685,6 +685,7 @@ dependencies = [
  "bcs-domain",
  "bcs-group",
  "bcs-group-store",
+ "bcs-message-store",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",

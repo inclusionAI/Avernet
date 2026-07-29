@@ -347,6 +347,38 @@ async fn mysql_runtime_create_run_writes_run_and_node_rows() {
 }
 
 #[tokio::test]
+async fn mysql_session_idle_create_locks_session_and_guards_run_and_nodes() {
+    let db = Arc::new(RecordingDb::default());
+    let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
+
+    assert!(
+        store
+            .create_run_if_session_idle(test_run(), vec![test_node()])
+            .await
+            .expect("create session-scoped run")
+    );
+
+    let transactions = db.transactions.lock().await;
+    let steps = &transactions[0];
+    assert_eq!(steps.len(), 3);
+    let DbTransactionStep::Query(lock) = &steps[0] else {
+        panic!("expected session lock query");
+    };
+    assert!(lock.sql().contains("bcs_group_sessions"));
+    assert!(lock.sql().contains("FOR UPDATE"));
+    let DbTransactionStep::Execute(run_insert) = &steps[1] else {
+        panic!("expected guarded run insert");
+    };
+    assert!(run_insert.sql().contains("NOT EXISTS"));
+    assert!(run_insert.sql().contains("status IN ('pending', 'running')"));
+    let DbTransactionStep::Execute(node_insert) = &steps[2] else {
+        panic!("expected guarded node insert");
+    };
+    assert!(node_insert.sql().contains("WHERE EXISTS"));
+    assert!(node_insert.sql().contains("bcs_state_machine_runs"));
+}
+
+#[tokio::test]
 async fn mysql_runtime_reads_run_and_node_rows() {
     let run = test_run();
     let node = test_node();

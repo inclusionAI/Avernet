@@ -27,10 +27,11 @@ use bcs_service_api::{
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanResponseSource,
     ListPendingHumanNodesCommand, Participant, ParticipantKind, ParticipantMode, ParticipantRole,
     PendingHumanNodeView, RespondHumanNodeCommand, RespondHumanNodeOutcome, RoutingMode,
-    RoutingPolicy, SessionHistoryResult, Skill, StartStateMachineRunCommand,
-    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineNodeRun,
-    StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, StateMachineRunView, Workspace,
-    ValidateCollaborationDefinitionYamlCommand,
+    RoutingPolicy, SessionHistoryResult, SessionStateMachinePermissionCommand,
+    SessionStateMachinePermissionView, Skill, StartSessionStateMachineRunCommand,
+    StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
+    StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
+    StateMachineRunView, Workspace, ValidateCollaborationDefinitionYamlCommand,
 };
 use bcs_service_api::{
     CreateOrReactivateCommand, NewSessionParams, SessionKind, SessionManagementService,
@@ -92,6 +93,8 @@ struct RecordingCollaborationRuntime {
     definitions: Mutex<Vec<CollaborationDefinition>>,
     configure_calls: Mutex<Vec<ConfigureGroupRuntimeCommand>>,
     start_commands: Mutex<Vec<StartStateMachineRunCommand>>,
+    permission_commands: Mutex<Vec<SessionStateMachinePermissionCommand>>,
+    session_start_commands: Mutex<Vec<StartSessionStateMachineRunCommand>>,
     validation_calls: Mutex<Vec<ValidateCollaborationDefinitionYamlCommand>>,
     pending_human_commands: Mutex<Vec<ListPendingHumanNodesCommand>>,
     respond_human_commands: Mutex<Vec<RespondHumanNodeCommand>>,
@@ -134,6 +137,54 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         Err(CollaborationRuntimeError::InvalidRequest(
             "unexpected start_state_machine_run call".to_string(),
         ))
+    }
+
+    async fn get_session_state_machine_permission(
+        &self,
+        cmd: SessionStateMachinePermissionCommand,
+    ) -> Result<SessionStateMachinePermissionView, CollaborationRuntimeError> {
+        self.permission_commands.lock().await.push(cmd.clone());
+        Ok(SessionStateMachinePermissionView {
+            session_id: cmd.session_id,
+            group_id: "group-1".to_string(),
+            caller_bot_id: cmd.caller_bot_id,
+            allowed: true,
+            reason_code: "allowed".to_string(),
+            message: "caller may run a state machine in this session".to_string(),
+            policy_version: "session_state_machine_v1".to_string(),
+            group_strategy: "chat".to_string(),
+            group_owner_bot_id: "driver-bot".to_string(),
+            active_run_id: None,
+        })
+    }
+
+    async fn start_session_state_machine_run(
+        &self,
+        cmd: StartSessionStateMachineRunCommand,
+    ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
+        self.session_start_commands.lock().await.push(cmd.clone());
+        Ok(StartStateMachineRunOutcome {
+            view: StateMachineRunView {
+                run: StateMachineRun {
+                    run_id: "run-one-shot".to_string(),
+                    definition_id: "definition-one-shot".to_string(),
+                    definition_version: 1,
+                    group_id: "group-1".to_string(),
+                    group_version: 1,
+                    session_id: cmd.session_id,
+                    created_by: Some(cmd.caller_bot_id),
+                    status: StateMachineRunStatus::Running,
+                    input: cmd.input,
+                    output: None,
+                    error: None,
+                    created_at: 1,
+                    updated_at: 1,
+                    completed_at: None,
+                },
+                nodes: Vec::new(),
+                judge_outputs: Vec::new(),
+            },
+        })
     }
 
     async fn get_state_machine_run(
@@ -631,6 +682,135 @@ async fn post_collaboration_definition_validate_delegates_to_runtime_service() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].definition_yaml, "name: test");
     assert!(!calls[0].judge_available);
+}
+
+#[tokio::test]
+async fn session_state_machine_permission_uses_authenticated_bot_identity() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/session-chat/state-machine-permission")
+                .header("authorization", "Bearer driver-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["allowed"], true);
+    assert_eq!(json["caller_bot_id"], "driver-bot");
+    assert_eq!(json["policy_version"], "session_state_machine_v1");
+
+    let commands = collaboration_runtime.permission_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].session_id, "session-chat");
+    assert_eq!(commands[0].caller_bot_id, "driver-bot");
+}
+
+#[tokio::test]
+async fn session_state_machine_start_forwards_yaml_and_transient_role_bindings() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+    let definition_yaml = r#"
+name: One Shot
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      write:
+        kind: bot_task
+        display_name: Write
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Write the final answer.
+        final_output: true
+"#;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/session-chat/state-machine-runs")
+                .header("authorization", "Bearer driver-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "definition_yaml": definition_yaml,
+                        "participant_bindings": {
+                            "writer": {
+                                "source": "manual",
+                                "bot_ids": ["target-bot"]
+                            }
+                        },
+                        "input": {"question": "draft it"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["run"]["run_id"], "run-one-shot");
+    assert_eq!(json["run"]["session_id"], "session-chat");
+    assert_eq!(json["run"]["created_by"], "driver-bot");
+
+    let commands = collaboration_runtime.session_start_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].session_id, "session-chat");
+    assert_eq!(commands[0].caller_bot_id, "driver-bot");
+    assert_eq!(commands[0].definition_yaml, definition_yaml);
+    assert_eq!(commands[0].input, serde_json::json!({"question": "draft it"}));
+    assert_eq!(
+        commands[0]
+            .participant_bindings
+            .get("writer")
+            .map(|binding| (binding.source.as_str(), binding.bot_ids.as_slice())),
+        Some(("manual", &["target-bot".to_string()][..]))
+    );
+    assert!(!commands[0].judge_available);
+}
+
+#[tokio::test]
+async fn session_state_machine_routes_require_bot_authentication() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/session-chat/state-machine-permission")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(
+        collaboration_runtime
+            .permission_commands
+            .lock()
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]
