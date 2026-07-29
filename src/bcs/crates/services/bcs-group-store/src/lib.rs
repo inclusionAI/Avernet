@@ -1186,7 +1186,11 @@ impl GroupRepoPort for MySqlGroupStore {
         let update_group = format!(
             "UPDATE bcs_groups \
              SET version = version + 1, {} \
-             WHERE group_id = ? AND env = ? AND (visibility <> 'public' OR ?)",
+             WHERE group_id = ? AND env = ? AND (visibility <> 'public' OR ?) \
+               AND NOT EXISTS ( \
+                 SELECT 1 FROM bcs_group_participants \
+                 WHERE group_id = ? AND bot_uuid = ? AND env = ? \
+               )",
             self.flavor.set_modified_now()
         );
         let insert_participant = format!(
@@ -1207,6 +1211,9 @@ impl GroupRepoPort for MySqlGroupStore {
                         Value::from(id),
                         Value::from(self.env.as_str()),
                         Value::from(actor_is_public),
+                        Value::from(id),
+                        Value::from(participant.bot_uuid.as_str()),
+                        Value::from(self.env.as_str()),
                     ],
                 )),
                 DbTransactionStep::Execute(DbStatement::with_params(
@@ -3344,6 +3351,8 @@ mod tests {
         assert_eq!(sql.len(), 2);
         assert!(sql[0].contains("version = version + 1"));
         assert!(sql[0].contains("visibility <> 'public' OR ?"));
+        assert!(sql[0].contains("NOT EXISTS"));
+        assert!(sql[0].contains("bcs_group_participants"));
         assert!(sql[1].contains("INSERT IGNORE"));
         assert!(sql[1].contains("visibility <> 'public' OR ?"));
     }

@@ -2544,7 +2544,7 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
     )
     .with_session_channel_outbound(channel_outbound.clone());
 
-    runtime
+    let configured = runtime
         .configure_group_runtime(ConfigureGroupRuntimeCommand {
             group_id: "group-1".to_string(),
             definition_yaml: Some(human_input_yaml()),
@@ -2555,6 +2555,7 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
         })
         .await
         .expect("configuration must not require a binding that needs the group id");
+    assert!(configured.requires_human_input_channel);
     assert!(channel_outbound.validation_calls.lock().await.is_empty());
 
     let error = runtime

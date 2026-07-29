@@ -639,7 +639,7 @@ impl GroupServiceImpl {
                     )
                 })
                 .collect::<BTreeMap<_, _>>();
-            if let Err(error) = runtime
+            let configured = match runtime
                 .configure_group_runtime(ConfigureGroupRuntimeCommand {
                     group_id: created.group_id.clone(),
                     definition_yaml: None,
@@ -653,18 +653,36 @@ impl GroupServiceImpl {
                 })
                 .await
             {
-                let (session_cleanup_error, group_cleanup_error) = self
-                    .rollback_state_machine_creation(
-                        runtime.as_ref(),
-                        &created.group_id,
-                        created.latest_running_session_id.as_deref(),
-                    )
+                Ok(configured) => configured,
+                Err(error) => {
+                    let (session_cleanup_error, group_cleanup_error) = self
+                        .rollback_state_machine_creation(
+                            runtime.as_ref(),
+                            &created.group_id,
+                            created.latest_running_session_id.as_deref(),
+                        )
+                        .await;
+                    return Err(map_runtime_and_rollback_error(
+                        error,
+                        session_cleanup_error,
+                        group_cleanup_error,
+                    ));
+                }
+            };
+            if configured.requires_human_input_channel {
+                let group = self
+                    .groups
+                    .try_get(&created.group_id)
+                    .await
+                    .map_err(map_service_error)?
+                    .ok_or_else(|| {
+                        ApplicationError::internal(
+                            "created Group disappeared before deferred-run projection",
+                        )
+                    })?;
+                return self
+                    .project_detail_with_state_machine(group, Some(response_state_machine))
                     .await;
-                return Err(map_runtime_and_rollback_error(
-                    error,
-                    session_cleanup_error,
-                    group_cleanup_error,
-                ));
             }
 
             let session_id = match created.latest_running_session_id.clone() {
@@ -1078,6 +1096,10 @@ impl GroupService for GroupServiceImpl {
         else {
             if let Some(runtime) = self.collaboration_runtime.as_ref() {
                 runtime
+                    .cancel_group_runs(&command.group_id, "group_deleted")
+                    .await
+                    .map_err(map_runtime_error)?;
+                runtime
                     .delete_group_runtime_state(&command.group_id)
                     .await
                     .map_err(map_runtime_error)?;
@@ -1093,17 +1115,15 @@ impl GroupService for GroupServiceImpl {
                 deleted: false,
             });
         }
-        if group.group_strategy == GroupStrategy::StateMachine {
-            let runtime = self.collaboration_runtime.as_ref().ok_or_else(|| {
+        let state_machine_runtime = if group.group_strategy == GroupStrategy::StateMachine {
+            Some(self.collaboration_runtime.as_ref().ok_or_else(|| {
                 ApplicationError::internal(
                     "StateMachine Group deletion requires CollaborationRuntimeService",
                 )
-            })?;
-            runtime
-                .cancel_group_runs(&command.group_id, "group_deleted")
-                .await
-                .map_err(map_runtime_error)?;
-        }
+            })?)
+        } else {
+            None
+        };
         let result = self
             .management
             .delete_group(GroupDeleteCommand {
@@ -1112,10 +1132,11 @@ impl GroupService for GroupServiceImpl {
             })
             .await
             .map_err(map_delete_group_error)?;
-        if result.deleted
-            && group.group_strategy == GroupStrategy::StateMachine
-            && let Some(runtime) = self.collaboration_runtime.as_ref()
-        {
+        if result.deleted && let Some(runtime) = state_machine_runtime {
+            runtime
+                .cancel_group_runs(&result.group_id, "group_deleted")
+                .await
+                .map_err(map_runtime_error)?;
             runtime
                 .delete_group_runtime_state(&result.group_id)
                 .await

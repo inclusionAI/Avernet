@@ -22,14 +22,15 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand, CollaborationDefinition,
-    CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, DefaultDelivery, DefinitionYamlSource,
-    FriendCoreService, FriendRepoPort, Group, GroupCollaborationDefinitionView, GroupCoreService,
-    GroupStrategy, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, NewSessionParams,
-    Participant, ParticipantRole, RoutingMode, RoutingPolicy, ServiceError, ServiceResult,
-    SessionHistoryResult, SessionManagementService, StartStateMachineRunCommand,
-    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
-    StateMachineRunStatus, StateMachineRunView, SystemMessageService,
+    ChannelBindingCleanupPort, CollaborationRuntimeError, CollaborationRuntimeService,
+    ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand,
+    DefaultDelivery, DefinitionYamlSource, FriendCoreService, FriendRepoPort, Group,
+    GroupCollaborationDefinitionView, GroupCoreService, GroupStrategy,
+    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, NewSessionParams, Participant,
+    ParticipantRole, RoutingMode, RoutingPolicy, ServiceError, ServiceResult, SessionHistoryResult,
+    SessionManagementService, StartStateMachineRunCommand, StartStateMachineRunOutcome,
+    StateMachineDeliveryCorrelation, StateMachineRun, StateMachineRunStatus, StateMachineRunView,
+    SystemMessageService,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -100,6 +101,53 @@ impl Fixture {
                 relation_env: "dev".to_string(),
             },
         );
+        Self {
+            service,
+            groups,
+            bots,
+            friends,
+            sessions,
+        }
+    }
+
+    async fn new_with_runtime_and_failing_channel_cleanup(
+        runtime: Arc<dyn CollaborationRuntimeService>,
+    ) -> Self {
+        let group_repo = Arc::new(MemoryGroupRepo::new());
+        let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
+        let bots = Arc::new(BotCore::memory());
+        let relation = Arc::new(RelationCore::memory());
+        let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
+        let sessions = Arc::new(SessionManagementServiceImpl::new(
+            Arc::new(MemorySessionRepo::new()),
+            group_repo,
+        ));
+        let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
+        let management = Arc::new(
+            GroupManagement::new(
+                groups.clone(),
+                bots.clone(),
+                friends.clone(),
+                relation.clone(),
+                GroupConfig::default(),
+                sessions.clone(),
+                system_message,
+            )
+            .for_v1_openapi()
+            .with_channel_binding_cleanup(Arc::new(FailingChannelBindingCleanup)),
+        );
+        let service = GroupServiceImpl::new(
+            groups.clone(),
+            bots.clone(),
+            friends.clone(),
+            relation,
+            sessions.clone(),
+            management,
+            GroupServiceConfig {
+                relation_env: "dev".to_string(),
+            },
+        )
+        .with_collaboration_runtime(runtime);
         Self {
             service,
             groups,
@@ -238,6 +286,17 @@ impl FriendRepoPort for FailingFriendRepo {
     }
 }
 
+struct FailingChannelBindingCleanup;
+
+#[async_trait]
+impl ChannelBindingCleanupPort for FailingChannelBindingCleanup {
+    async fn delete_bindings_for_group(&self, _group_id: &str) -> ServiceResult<u64> {
+        Err(ServiceError::InternalError(
+            "channel binding cleanup failed".to_string(),
+        ))
+    }
+}
+
 #[derive(Default)]
 struct RecordingRuntime {
     configured: Mutex<Option<ConfigureGroupRuntimeCommand>>,
@@ -247,6 +306,7 @@ struct RecordingRuntime {
     configure_error: Mutex<Option<String>>,
     start_error: Mutex<Option<String>>,
     projection_error: Mutex<Option<String>>,
+    requires_human_input_channel: bool,
 }
 
 #[async_trait]
@@ -349,6 +409,7 @@ impl CollaborationRuntimeService for RecordingRuntime {
             group_id: cmd.group_id.clone(),
             default_definition: cmd.definition_ref.clone(),
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
+            requires_human_input_channel: self.requires_human_input_channel,
         };
         *self.configured.lock().expect("runtime lock") = Some(cmd);
         Ok(outcome)
@@ -1097,6 +1158,50 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
 }
 
 #[tokio::test]
+async fn state_machine_create_defers_initial_run_until_required_channel_is_bound() {
+    let runtime = Arc::new(RecordingRuntime {
+        requires_human_input_channel: true,
+        ..Default::default()
+    });
+    let fixture = Fixture::new_with_runtime(runtime.clone()).await;
+    for bot in ["driver", "worker"] {
+        fixture.add_public_bot(bot).await;
+    }
+
+    let detail = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: Some("Human review".into()),
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "worker".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                definition_id: "bot-human-bot-review".into(),
+                                version: 1,
+                            },
+                        participant_bindings: Vec::new(),
+                    },
+                ),
+            }),
+        })
+        .await
+        .expect("create channel-backed StateMachine Group");
+
+    assert!(matches!(detail, GroupDetail::Collaboration(_)));
+    assert!(runtime.started.lock().expect("runtime lock").is_empty());
+    assert_eq!(fixture.groups.count().await, 1);
+}
+
+#[tokio::test]
 async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
     let runtime = Arc::new(RecordingRuntime::default());
     let fixture = Fixture::new_with_runtime(runtime.clone()).await;
@@ -1380,6 +1485,51 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
             .expect("runtime lock")
             .as_slice(),
         &[detail.group_id]
+    );
+}
+
+#[tokio::test]
+async fn failed_group_delete_does_not_cancel_runs_before_group_rollback() {
+    let runtime = Arc::new(RecordingRuntime::default());
+    let fixture =
+        Fixture::new_with_runtime_and_failing_channel_cleanup(runtime.clone()).await;
+    fixture.add_public_bot("driver").await;
+    fixture
+        .groups
+        .upsert(normal_group(
+            "group-1",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+            GroupStrategy::StateMachine,
+            1,
+        ))
+        .await
+        .expect("store StateMachine Group");
+
+    let error = fixture
+        .service
+        .delete(DeleteGroup {
+            principal: bot_principal("driver"),
+            group_id: "group-1".into(),
+        })
+        .await
+        .expect_err("binding cleanup failure must fail deletion");
+
+    assert!(matches!(error, ApplicationError::Internal(_)));
+    assert!(fixture.groups.get("group-1").await.is_some());
+    assert!(
+        runtime
+            .cancelled_groups
+            .lock()
+            .expect("runtime lock")
+            .is_empty()
+    );
+    assert!(
+        runtime
+            .deleted_group_state
+            .lock()
+            .expect("runtime lock")
+            .is_empty()
     );
 }
 

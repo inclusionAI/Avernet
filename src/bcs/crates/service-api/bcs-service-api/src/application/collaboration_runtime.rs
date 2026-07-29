@@ -247,6 +247,8 @@ pub struct ConfigureGroupRuntimeOutcome {
     pub group_id: String,
     pub default_definition: Option<CollaborationDefinitionRef>,
     pub auto_start_on_service_invocation: bool,
+    #[serde(default)]
+    pub requires_human_input_channel: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

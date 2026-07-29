@@ -3614,6 +3614,14 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             })?;
             validate_runtime_participant_bindings(definition, &group, &participant_bindings)?;
         }
+        let requires_human_input_channel =
+            definition_for_validation.as_ref().is_some_and(|definition| {
+                matches!(
+                    &definition.runtime,
+                    CollaborationRuntimeDefinition::StateMachine(state_machine)
+                        if state_machine.human_input_channel.is_some()
+                )
+            });
 
         self.bindings
             .bind_default_definition(
@@ -3629,6 +3637,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             group_id: cmd.group_id,
             default_definition,
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
+            requires_human_input_channel,
         })
     }
 }

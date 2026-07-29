@@ -89,6 +89,25 @@ The later review pass extends the same compatibility approach:
 - Path extraction failures use the common error envelope, and GET/PATCH
   conflict/error-code declarations cover every stable application error.
 
+### Final review hardening
+
+The final review passes keep the same V1-only compatibility boundary:
+
+- Runtime cleanup uses a SQLite-representable upper bound and enumerates every
+  run for each Group session before deleting runtime state.
+- HTTP deserialization enforces the OpenAPI `actor_ids.minItems = 1`
+  constraint, and V1 quota checks propagate persistent Group lookup failures.
+- Runtime configuration reports whether a definition requires a Human input
+  ChannelBinding. V1 creation defers the initial run for those definitions,
+  because the generated Group ID must exist before a ChannelBinding can be
+  provisioned; other StateMachine definitions retain immediate start.
+- StateMachine run cancellation happens only after Group deletion and channel
+  cleanup can no longer roll the Group back. An idempotent delete retry also
+  retries runtime cancellation and state cleanup for an already-missing Group.
+- Visibility-guarded participant insertion increments the persisted Group
+  version only when the actor is not already a participant, matching the
+  in-memory idempotency behavior.
+
 ## Error behavior
 
 - Storage query failures become V1 `internal_error` responses.
