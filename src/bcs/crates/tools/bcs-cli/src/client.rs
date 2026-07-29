@@ -2830,14 +2830,24 @@ impl BcsClient {
 
     /// PUT bytes to an upload_url. If the upload_url host != BCS base_url
     /// host, do NOT attach Authorization (backend presigned URL self-authenticates).
-    pub async fn put_session_file_bytes(&self, upload_url: &str, bytes: reqwest::Body) -> Result<()> {
+    /// `content_type` is the MIME type negotiated at prepare time so the blob is
+    /// stored with the same content type the backend reserved at `upload-url`.
+    pub async fn put_session_file_bytes(
+        &self,
+        upload_url: &str,
+        bytes: reqwest::Body,
+        content_type: &str,
+    ) -> Result<()> {
         let bcs_host = reqwest::Url::parse(&self.base_url).ok().and_then(|u| u.host_str().map(String::from));
         let target_host = reqwest::Url::parse(upload_url).ok().and_then(|u| u.host_str().map(String::from));
         let cross_host = match (bcs_host.as_deref(), target_host.as_deref()) {
             (Some(a), Some(b)) => a != b,
             _ => false,
         };
-        let mut req = self.http_client.put(upload_url).body(bytes);
+        let mut req = self.http_client
+            .put(upload_url)
+            .header(reqwest::header::CONTENT_TYPE, content_type)
+            .body(bytes);
         if !cross_host {
             req = self.add_auth(req);
         }
@@ -2870,7 +2880,7 @@ impl BcsClient {
             "single" => {
                 let url = prepared["upload_url"].as_str().context("missing upload_url")?.to_string();
                 let file = tokio::fs::File::open(path).await?;
-                self.put_session_file_bytes(&url, reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file))).await?;
+                self.put_session_file_bytes(&url, reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file)), &mime).await?;
             }
             "multipart" => {
                 let part_size = prepared["part_size"].as_u64().context("missing part_size")? as usize;
@@ -2881,7 +2891,7 @@ impl BcsClient {
                     use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
                     f.seek(std::io::SeekFrom::Start((i as u64) * part_size as u64)).await?;
                     let take = f.take(part_size as u64);
-                    self.put_session_file_bytes(&url, reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(take))).await?;
+                    self.put_session_file_bytes(&url, reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(take)), &mime).await?;
                 }
             }
             _ => return Err(anyhow!("unknown mode {}", mode)),
@@ -3748,7 +3758,7 @@ mod tests {
         );
         let upload_url = format!("http://127.0.0.1:{}/put", addr.port());
         let body = reqwest::Body::from("test-body");
-        let result = client.put_session_file_bytes(&upload_url, body).await;
+        let result = client.put_session_file_bytes(&upload_url, body, "application/octet-stream").await;
 
         server.join().unwrap();
         assert!(result.is_ok(), "PUT should succeed: {:?}", result.err());
@@ -3757,6 +3767,11 @@ mod tests {
         assert!(
             !request_lower.contains("authorization:"),
             "Authorization header MUST NOT be sent cross-host, but was:\n{}",
+            request
+        );
+        assert!(
+            request_lower.contains("content-type: application/octet-stream"),
+            "Content-Type must match the prepared upload content type, but the request was:\n{}",
             request
         );
     }
