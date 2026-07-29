@@ -62,6 +62,7 @@ _LEGACY_API_SUBDIR_ALLOWLIST: frozenset[str] = frozenset({
     "skill_center",
     "system",
     "system_config",
+    "task",
     "token_exchange",
 })
 

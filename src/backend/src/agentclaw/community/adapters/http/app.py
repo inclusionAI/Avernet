@@ -145,6 +145,7 @@ from agentclaw.community.adapters.http.cron import router as cron_router  # noqa
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding import notify_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.architect_rebind_router import router as architect_rebind_router  # noqa: E402
+from agentclaw.community.adapters.http.task.router import router as task_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_management import router as bot_management_router  # noqa: E402
 from agentclaw.community.adapters.http.caller_identity.router import router as caller_identity_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
@@ -469,6 +470,7 @@ app.include_router(identity_router)
 app.include_router(aicoding_router)
 app.include_router(aicoding_data_proxy_router)
 app.include_router(architect_rebind_router)
+app.include_router(task_router)
 app.include_router(bot_management_router.router)
 app.include_router(caller_identity_router)
 app.include_router(bot_dormant_router.router)

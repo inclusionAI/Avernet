@@ -126,6 +126,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.outbound_rules import (
             CommunityOutboundRulesModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.task import (
+            CommunityTaskModule,
+        )
 
         column = _common_test_doubles() + [
             # Token vault — empty-key (encrypt = passthrough); no SecretResolver dep.
@@ -136,6 +139,8 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # Outbound rules + device-sync — community (empty rules / no-op dispatch).
             CommunityOutboundRulesModule(),
             CommunityDeviceSyncModule(),
+            # Goal-driven task loop — Noop Protocols (Phase 0; real impl Phase 2-6).
+            CommunityTaskModule(),
             # App services — corp-free test module: real BotChatService, local_sql
             # router, dummy Dima config, community no-op code-platform (AntCode).
             TestAppServicesModule(),
@@ -249,6 +254,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.outbound_rules import (
             CommunityOutboundRulesModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.task import (
+            CommunityTaskModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.drm import (
             CommunityDRMModule,
         )
@@ -296,6 +304,8 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunityBotPublishApprovalModule(),
             # Notify sender — no-op (no DingTalk in community; B11 Phase A).
             CommunityNotifyModule(),
+            # Goal-driven task loop — Noop Protocols (Phase 0; real impl Phase 2-6).
+            CommunityTaskModule(),
         ]
         return column
 

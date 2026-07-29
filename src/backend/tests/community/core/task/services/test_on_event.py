@@ -1,0 +1,202 @@
+"""TDD for TaskService.on_event event-fold (Phase 2.3, plan §2.3).
+
+``on_event`` is the only state write path. Each kind is guarded + folded into
+the aggregate; the event log is appended (single writer). Goal verdict split:
+PASS → graph VERIFIED + DELIVERED;编排 FAIL → AWAITING_HUMAN_ACCEPT; BBS FAIL →
+HUNG. The fold never self-invokes check_node / check_goal (those are Scheduler
+/ owner-bot SKILL concerns, not TaskService's).
+"""
+from __future__ import annotations
+
+import pytest
+
+from agentclaw.community.core.task.domain.events import (
+    EventKind,
+    TaskEvent,
+    next_seq,
+)
+from agentclaw.community.core.task.domain.models import (
+    NodeStatus,
+    Plan,
+    SubTaskSpec,
+    TaskStatus,
+)
+from agentclaw.community.core.task.services import TaskService
+from agentclaw.community.plugins.community.task.in_memory_repos import (
+    InMemoryTaskEventRepo,
+    InMemoryTaskRepo,
+)
+from agentclaw.community.plugins.community.task.panel_publisher import (
+    RecordingPanelPublisher,
+)
+
+
+def _service() -> TaskService:
+    return TaskService(InMemoryTaskRepo(), InMemoryTaskEventRepo(), RecordingPanelPublisher())
+
+
+def _planned_with_dag(svc: TaskService, task_id: str) -> None:
+    svc.amend(task_id, {"summary": "s"})
+    svc.finalize_plan(
+        task_id,
+        Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="a")], confidence=0.7),
+    )
+    t = svc.get(task_id)
+    svc.spawn_build_dag(t)
+    svc._task_repo.save(t)  # noqa: SLF001
+
+
+def _ev(task_id: str, kind: EventKind, seq: int, **payload) -> TaskEvent:
+    return TaskEvent(task_id=task_id, seq=seq, kind=kind, payload=dict(payload))
+
+
+# --- node lifecycle fold ----------------------------------------------------
+
+
+def test_node_running_folds_pending_to_running():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    svc.on_event(_ev(t.id, EventKind.NODE_RUNNING, next_seq(svc._event_repo.latest_seq(t.id)), node_id="n1"))  # noqa: SLF001
+    node = svc._find_node(svc.get(t.id), "n1")  # noqa: SLF001
+    assert node.status is NodeStatus.RUNNING
+
+
+def test_node_accepted_folds_running_to_done_with_pass():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    svc.claim_node(t.id, "n1", "bot-a")  # PENDING → RUNNING
+    svc.on_event(_ev(t.id, EventKind.NODE_ACCEPTED, next_seq(svc._event_repo.latest_seq(t.id)), node_id="n1", verifier="bot-a"))  # noqa: SLF001
+    node = svc._find_node(svc.get(t.id), "n1")  # noqa: SLF001
+    assert node.status is NodeStatus.DONE
+    assert node.properties.get("acceptance_result") == "pass"
+
+
+def test_node_rejected_folds_running_to_partial_failed():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    svc.claim_node(t.id, "n1", "bot-a")
+    svc.on_event(_ev(t.id, EventKind.NODE_REJECTED, next_seq(svc._event_repo.latest_seq(t.id)), node_id="n1", verifier="bot-a", reason="nope"))  # noqa: SLF001
+    node = svc._find_node(svc.get(t.id), "n1")  # noqa: SLF001
+    assert node.status is NodeStatus.PARTIAL_FAILED
+    assert node.properties.get("acceptance_result") == "fail"
+
+
+def test_node_failed_folds_running_to_failed():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    svc.claim_node(t.id, "n1", "bot-a")
+    svc.on_event(_ev(t.id, EventKind.NODE_FAILED, next_seq(svc._event_repo.latest_seq(t.id)), node_id="n1", verifier="bot-a", reason="boom"))  # noqa: SLF001
+    assert svc._find_node(svc.get(t.id), "n1").status is NodeStatus.FAILED  # noqa: SLF001
+
+
+def test_execution_attempted_appends_record():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    svc.on_event(
+        _ev(
+            t.id,
+            EventKind.EXECUTION_ATTEMPTED,
+            next_seq(svc._event_repo.latest_seq(t.id)),  # noqa: SLF001
+            node_id="n1",
+            executor_id="bot-x",
+            round=2,
+            outcome="partial",
+        )
+    )
+    recs = svc._find_node(svc.get(t.id), "n1").attempted_executors  # noqa: SLF001
+    assert len(recs) == 1
+    assert recs[0].executor_id == "bot-x"
+    assert recs[0].round == 2
+
+
+def test_loop_rerouted_bumps_loop_round():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    base = t.loop_round
+    svc.on_event(_ev(t.id, EventKind.LOOP_REROUTED, next_seq(svc._event_repo.latest_seq(t.id)), node_id="n1", new_route="C5"))  # noqa: SLF001
+    after = svc.get(t.id)
+    assert after.loop_round == base + 1
+    assert after.execution_graph.loop_round == base + 1
+
+
+# --- goal verdict split -----------------------------------------------------
+
+
+def test_goal_verified_delivers_with_verified_graph():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    # Goal verdict fires from VALIDATING (VALIDATING → DELIVERED is the legal edge).
+    t2 = svc.get(t.id)
+    t2.status = TaskStatus.VALIDATING
+    t2.execution_graph.root_phase = TaskStatus.VALIDATING
+    svc._task_repo.save(t2)  # noqa: SLF001
+    svc.on_event(_ev(t.id, EventKind.GOAL_VERIFIED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bot", verdict="pass", summary="ok"))  # noqa: SLF001
+    final = svc.get(t.id)
+    assert final.status is TaskStatus.DELIVERED
+    from agentclaw.community.core.task.domain.models import GraphStatus
+
+    assert final.execution_graph.graph_status is GraphStatus.VERIFIED
+
+
+def test_goal_rejected_edition_parks_awaiting_human_accept():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    t2 = svc.get(t.id)
+    t2.status = TaskStatus.VALIDATING
+    t2.execution_graph.root_phase = TaskStatus.VALIDATING
+    svc._task_repo.save(t2)  # noqa: SLF001
+    svc.on_event(_ev(t.id, EventKind.GOAL_REJECTED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bot", verdict="fail", reason="nope", run_mode="single_bot"))  # noqa: SLF001
+    final = svc.get(t.id)
+    from agentclaw.community.core.task.domain.models import GraphStatus
+
+    assert final.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+
+
+def test_goal_rejected_bbs_hungs():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    t2 = svc.get(t.id)
+    t2.status = TaskStatus.VALIDATING
+    t2.execution_graph.root_phase = TaskStatus.VALIDATING
+    svc._task_repo.save(t2)  # noqa: SLF001
+    svc.on_event(_ev(t.id, EventKind.GOAL_REJECTED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bbs", verdict="fail", reason="plaza stuck", run_mode="bbs"))  # noqa: SLF001
+    assert svc.get(t.id).status is TaskStatus.HUNG
+
+
+# --- cancel / hung / envelope ---------------------------------------------
+
+
+def test_cancelled_event_folds_to_cancelled():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    svc.on_event(_ev(t.id, EventKind.CANCELLED, next_seq(svc._event_repo.latest_seq(t.id)), by="user", reason="abort"))  # noqa: SLF001
+    assert svc.get(t.id).status is TaskStatus.CANCELLED
+
+
+def test_on_event_accepts_dict_envelope():
+    svc = _service()
+    t = svc.create(title="t")
+    _planned_with_dag(svc, t.id)
+    envelope = {
+        "task_id": t.id,
+        "kind": EventKind.NODE_RUNNING.value,
+        "seq": next_seq(svc._event_repo.latest_seq(t.id)),  # noqa: SLF001
+        "payload": {"node_id": "n1"},
+    }
+    svc.on_event(envelope)
+    assert svc._find_node(svc.get(t.id), "n1").status is NodeStatus.RUNNING  # noqa: SLF001
+
+
+def test_on_event_unknown_task_returns_none():
+    svc = _service()
+    assert svc.on_event(_ev("ghost", EventKind.NODE_RUNNING, 1, node_id="n1")) is None

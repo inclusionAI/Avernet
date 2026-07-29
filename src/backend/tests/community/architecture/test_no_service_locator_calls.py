@@ -52,6 +52,11 @@ _ALLOWLIST: dict[str, str] = {
         "NasUsageService needs DatabasePlugin for cooldown checks and DB writes. "
         "Background task pattern requires service locator."
     ),
+    "adapters/http/task/router.py": (
+        "WS /api/tasks/{task_id}/graph/stream endpoint has no FastAPI request "
+        "scope, so Injected(T) is unavailable; resolves TaskService via the "
+        "app injector at connection time (canvas graph stream bootstrap)."
+    ),
 }
 
 
