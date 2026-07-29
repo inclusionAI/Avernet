@@ -192,6 +192,13 @@ class FakeLayoutRepository:
             self.state,
             phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
             data_plane_cutover_committed=True,
+            last_probe_evidence={
+                **(self.state.last_probe_evidence or {}),
+                "cutover": {
+                    **dict(kwargs["evidence"]),
+                    "post_cutover_evidence_recorded": True,
+                },
+            },
         )
         return True
 
@@ -224,7 +231,15 @@ class FakeLayoutRepository:
         if not self._owns(kwargs):
             return False
         self.events.append("post_failure")
-        refresh_pending = self.state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+        cutover_evidence = (self.state.last_probe_evidence or {}).get("cutover")
+        refresh_pending = (
+            self.state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+            and (
+                not isinstance(cutover_evidence, dict)
+                or cutover_evidence.get("post_cutover_evidence_recorded")
+                is not True
+            )
+        )
         self.state = replace(
             self.state,
             phase=(
@@ -1010,6 +1025,51 @@ async def test_resolved_pool_committed_repair_skips_duplicate_cutover_ledger_cas
     assert runtime.events == ["probe", "cutover", "mapping", "verify"]
     assert layouts.events == ["evidence", "database"]
     assert layouts.state.active_layout is SkillLayout.POOL
+
+
+@pytest.mark.asyncio
+async def test_repair_refresh_mapping_failure_reuses_persisted_locator_evidence() -> (
+    None
+):
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            last_failure_code="MANUAL_REPAIR_RESOLVED",
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"active_marker": "same-generation"},
+    )
+    runtime.publish_success = False
+
+    first = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+    assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert layouts.state.last_probe_evidence["cutover"]["evidence"][
+        "local_locators"
+    ]["local-a"].endswith("/local-a")
+
+    runtime.events.clear()
+    layouts.events.clear()
+    runtime.publish_success = True
+
+    retried = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert retried.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "mapping", "verify"]
+    assert layouts.events == ["database"]
 
 
 @pytest.mark.asyncio
