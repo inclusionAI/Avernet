@@ -24,7 +24,6 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishNotFoundError,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.utils.env_utils import get_current_env
 
 
 if TYPE_CHECKING:
@@ -244,59 +243,36 @@ class PublishDraftRestoreMixin:
         # Local import avoids BotPublishService -> mixin -> publish_flow package ->
         # ext_state -> BotPublishService during module initialization.
         from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
-            operation_request_id,
+            OperationAlreadyInFlightError,
+            open_publish_operation,
         )
 
-        latest = self._latest_draft_restore_operation(draft.id)
-        if latest is not None and latest.state not in PublishOperationState.terminal():
-            raise BotPublishServiceError("草稿正在恢复中，请勿重复操作")
-
-        attempt = self._publish_operation_repo.max_attempt(
-            draft.id,
-            str(PublishOperationKind.DRAFT_RESTORE),
-            PublishStage.DRAFT.value,
-        ) + 1
-        request_id = operation_request_id(
-            draft.id,
-            PublishOperationKind.DRAFT_RESTORE,
-            PublishStage.DRAFT.value,
-            attempt,
-        )
         try:
-            return self._publish_operation_repo.insert(
-                {
-                    "publish_id": draft.id,
-                    "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
-                    "stage": PublishStage.DRAFT.value,
-                    "attempt": attempt,
-                    "request_id": request_id,
-                    "operator": operator,
-                    "bot_uuid": bot_uuid,
-                    "params": {
-                        # The API does not accept this value. Freeze the source
-                        # derived from last_pub_id so retries and audit read the
-                        # exact input selected when this attempt was opened.
-                        "source_publish_id": target.id,
-                        "source_version": target.version,
-                        # Persist the business deadline with the operation. This
-                        # avoids relying on application-vs-DB clock alignment
-                        # when a worker resumes the operation after a restart.
-                        "deadline_at": (
-                            datetime.now()
-                            + timedelta(seconds=_DRAFT_RESTORE_TIMEOUT_SECONDS)
-                        ).isoformat(),
-                    },
-                    "env": get_current_env(),
-                }
+            return open_publish_operation(
+                self._publish_operation_repo,
+                publish_id=draft.id,
+                kind=PublishOperationKind.DRAFT_RESTORE,
+                stage=PublishStage.DRAFT,
+                operator=operator,
+                bot_uuid=bot_uuid,
+                params={
+                    # The API does not accept this value. Freeze the source
+                    # derived from last_pub_id so retries and audit read the
+                    # exact input selected when this attempt was opened.
+                    "source_publish_id": target.id,
+                    "source_version": target.version,
+                    # Persist the business deadline with the operation. This
+                    # avoids relying on application-vs-DB clock alignment
+                    # when a worker resumes the operation after a restart.
+                    "deadline_at": (
+                        datetime.now()
+                        + timedelta(seconds=_DRAFT_RESTORE_TIMEOUT_SECONDS)
+                    ).isoformat(),
+                },
+                reject_if_in_flight=True,
             )
-        except Exception:
-            # The unique operation key closes the check-then-insert race. If a
-            # concurrent request won, surface the business duplicate response;
-            # otherwise preserve the original repository failure.
-            concurrent = self._latest_draft_restore_operation(draft.id)
-            if concurrent is not None and concurrent.state not in PublishOperationState.terminal():
-                raise BotPublishServiceError("草稿正在恢复中，请勿重复操作")
-            raise
+        except OperationAlreadyInFlightError as exc:
+            raise BotPublishServiceError("草稿正在恢复中，请勿重复操作") from exc
 
     async def restore_draft(self, publish_id: int, operator: str) -> dict:
         """Start restoring the draft and return its persisted operation handle."""
