@@ -660,6 +660,18 @@ class ProgressSyncMixin:
                 # the in-place upgrade path too.
                 self._refresh_provider_mcp_after_success(publish_record, ext, stage)
 
+                # Clear the restart in-progress marker on success. The stable-state
+                # path bypasses _handle_sync_success (which normally clears this flag),
+                # so we must clear it here to prevent the marker from persisting.
+                # Use _mutate_and_update_ext to persist the ext change separately from
+                # status updates (the stable record must not change status).
+                def _clear_restarting_flag(latest_ext: dict) -> None:
+                    restart_ext = latest_ext.get("restart")
+                    if isinstance(restart_ext, dict):
+                        restart_ext.pop("restarting", None)
+
+                self._mutate_and_update_ext(publish_id=publish_id, mutator=_clear_restarting_flag)
+
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=current_status,
