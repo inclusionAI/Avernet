@@ -118,37 +118,15 @@ class SkillsPoolReconcileService:
         engine = bot.get("active_engine")
         if bot.get("env") != scope.env or not isinstance(engine, str):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
-        if (
-            state.rollout_evidence is not None
-            and state.rollout_evidence.engine_type != engine
-        ):
-            evidence = {
-                "reason": "bot_engine_changed",
-                "claimed_engine": state.rollout_evidence.engine_type,
-                "current_engine": engine,
-            }
-            if (
-                state.phase
-                in {
-                    SkillLayoutPhase.POOL_PREPARING,
-                    SkillLayoutPhase.POOL_READY,
-                }
-                and not state.data_plane_cutover_committed
-            ):
-                if not self._layouts.release_changed_engine_claim(
-                    scope=scope,
-                    migration_generation=generation,
-                    lease_owner=lease_owner,
-                    evidence=evidence,
-                ):
-                    return SkillsPoolReconcileResult(
-                        SkillsPoolReconcileOutcome.STATE_RACE_LOST,
-                        evidence=evidence,
-                    )
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.BOT_CHANGED,
-                evidence=evidence,
-            )
+        engine_drift = self._handle_engine_drift(
+            scope=scope,
+            state=state,
+            current_engine=engine,
+            generation=generation,
+            lease_owner=lease_owner,
+        )
+        if engine_drift is not None:
+            return engine_drift
         if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
 
@@ -900,6 +878,51 @@ class SkillsPoolReconcileService:
             return None
         evidence = cutover.get("evidence")
         return evidence if isinstance(evidence, dict) else None
+
+    def _handle_engine_drift(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        state: BotSkillLayoutState,
+        current_engine: str,
+        generation: str,
+        lease_owner: str,
+    ) -> SkillsPoolReconcileResult | None:
+        claimed_engine = (
+            state.rollout_evidence.engine_type
+            if state.rollout_evidence is not None
+            else None
+        )
+        if claimed_engine is None or claimed_engine == current_engine:
+            return None
+
+        evidence = {
+            "reason": "bot_engine_changed",
+            "claimed_engine": claimed_engine,
+            "current_engine": current_engine,
+        }
+        claim_is_releasable = (
+            state.phase
+            in {
+                SkillLayoutPhase.POOL_PREPARING,
+                SkillLayoutPhase.POOL_READY,
+            }
+            and not state.data_plane_cutover_committed
+        )
+        if claim_is_releasable and not self._layouts.release_changed_engine_claim(
+            scope=scope,
+            migration_generation=generation,
+            lease_owner=lease_owner,
+            evidence=evidence,
+        ):
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                evidence=evidence,
+            )
+        return SkillsPoolReconcileResult(
+            SkillsPoolReconcileOutcome.BOT_CHANGED,
+            evidence=evidence,
+        )
 
 
 __all__ = [
