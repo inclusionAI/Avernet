@@ -335,6 +335,26 @@ class TestRestartBaasEnvInjection:
         assert kwargs["extra_envs"] is None
         assert kwargs["template_config"] == sandbox_overrides
 
+    def test_template_uid_context_failure_keeps_template_config_overrides(self):
+        """template_uid 上下文解析异常不应阻断 BaaS 重启或丢失沙箱覆写。"""
+        sandbox_overrides = {
+            "envs": {"FOO": "bar"},
+            "image": "registry.example.com/custom:latest",
+            "resource_spec": {"cpu": 4, "memory": 8},
+        }
+        svc, baas, _ = _make_service(
+            active_engine="moltis",
+            template_config=sandbox_overrides,
+        )
+        svc._attach_template_uid_context = MagicMock(side_effect=RuntimeError("resolver down"))
+        bot = _make_bot(active_engine="moltis", template_type="applicationCoding")
+
+        svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
+
+        kwargs = baas.upgrade_bot.call_args.kwargs
+        assert kwargs["extra_envs"] is None
+        assert kwargs["template_config"] == sandbox_overrides
+
     def test_non_coding_template_type_no_envs(self):
         """非 applicationCoding/personalCoding 的 template_type 门控不命中。"""
         svc, baas, _ = _make_service(
