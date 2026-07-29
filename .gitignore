@@ -91,3 +91,6 @@ src/bcs/submodules/
 src/bcs/testresult/
 **/pytest_report/
 src/bcs/target
+
+# ignore openspec
+**/openspec/
