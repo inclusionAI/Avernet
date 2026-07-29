@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_management.repository.protocol import (
     BotRepository,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    CUTOVER_EVIDENCE_CONTRACT_VERSION,
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skills_pool.models import (
@@ -197,6 +198,44 @@ class SkillsPoolReconcileService:
                 retryable=False,
             )
 
+        if (
+            not state.data_plane_cutover_committed
+            and probe.evidence.get("cutover_evidence_contract_version")
+            != CUTOVER_EVIDENCE_CONTRACT_VERSION
+        ):
+            compatibility_evidence = {
+                **probe.evidence,
+                "reason": "cutover_evidence_contract_not_supported",
+                "required_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+            }
+            if state.phase is SkillLayoutPhase.POOL_PREPARING:
+                recorded = self._layouts.release_not_capable_claim(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    evidence=compatibility_evidence,
+                )
+            else:
+                recorded = self._layouts.record_pre_cutover_failure(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    failure_code="NOT_CAPABLE",
+                    failure_stage="runtime_contract",
+                    retryable=False,
+                    evidence=compatibility_evidence,
+                )
+            if not recorded:
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                )
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.NOT_CAPABLE,
+                preparation_id=probe.preparation_id,
+                evidence=compatibility_evidence,
+                retryable=False,
+            )
+
         local_assets = self._skills.list_bot_local_assets(
             env=scope.env,
             bot_id=scope.bot_id,
@@ -368,6 +407,29 @@ class SkillsPoolReconcileService:
                     evidence=cutover.to_dict(),
                 )
             if state.data_plane_cutover_committed:
+                quarantine_path = cutover.evidence.get("quarantine")
+                if (
+                    not isinstance(quarantine_path, str) or not quarantine_path
+                ) and not self._layouts.has_quarantine_identity(
+                    scope=scope,
+                    migration_generation=generation,
+                ):
+                    return self._record_post_cutover_failure(
+                        scope=scope,
+                        generation=generation,
+                        lease_owner=lease_owner,
+                        preparation_id=probe.preparation_id,
+                        outcome=SkillsPoolReconcileOutcome.TRANSIENT_ERROR,
+                        failure_code="RUNTIME_CONTRACT_UPGRADE_REQUIRED",
+                        failure_stage="post_cutover_evidence",
+                        evidence={
+                            **cutover.to_dict(),
+                            "reason": (
+                                "quarantine_identity_missing_from_runtime_and_db"
+                            ),
+                            "required_version": (CUTOVER_EVIDENCE_CONTRACT_VERSION),
+                        },
+                    )
                 if not self._layouts.record_post_cutover_evidence(
                     scope=scope,
                     migration_generation=generation,

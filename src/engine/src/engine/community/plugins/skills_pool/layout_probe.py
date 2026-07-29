@@ -63,6 +63,7 @@ def _ready_evidence(
     evidence: dict[str, Any] = {
         "marker": str(layout.marker),
         "prepared_at": marker["prepared_at"],
+        "cutover_evidence_contract_version": "quarantine-v1",
         "checks": checks,
     }
     if activation_state is not None:
