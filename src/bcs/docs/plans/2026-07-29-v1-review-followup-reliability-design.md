@@ -19,6 +19,16 @@ This follow-up covers:
 Production router mounting remains deferred. The existing unresolved thread
 stays open until bootstrap can inject the real signed Principal verifier.
 
+### Runtime linkage and coverage boundary
+
+The V1 Group facade lives in the dedicated `bcs-group-v1` service crate.
+Workspace unit and contract tests compile that crate, but the production
+`bcs` composition root does not depend on it while the V1 router is unmounted.
+This keeps runtime E2E coverage scoped to code that the deployed binary can
+actually execute. When the signed Principal verifier is available, the
+production mounting change must add both `bcs-group-v1` and `bcs-api-http` to
+the composition root and add live V1 Singlebox stories in the same change.
+
 ## Architecture
 
 ### Backward-compatible fallible companions
@@ -80,4 +90,3 @@ Each behavior follows a red-green TDD cycle:
 - Validate the OpenAPI response code set through the contract test.
 - Run the affected Session Store, Session, Friend, Group, Runtime, and OpenAPI
   test suites, then the PR CI gates.
-

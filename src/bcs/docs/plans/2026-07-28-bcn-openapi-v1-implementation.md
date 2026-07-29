@@ -619,9 +619,9 @@ git commit -m "feat(bcs): implement v1 resource authorization"
 
 **Files:**
 
-- Create: `src/bcs/crates/services/bcs-group/src/application/v1/group.rs`
-- Modify: `src/bcs/crates/services/bcs-group/src/application/v1/mod.rs`
-- Create: `src/bcs/crates/services/bcs-group/tests/v1_group_service.rs`
+- Create: `src/bcs/crates/services/bcs-group-v1/src/lib.rs`
+- Create: `src/bcs/crates/services/bcs-group-v1/Cargo.toml`
+- Create: `src/bcs/crates/services/bcs-group-v1/tests/v1_group_service.rs`
 
 **Step 1: Write failing use-case tests**
 

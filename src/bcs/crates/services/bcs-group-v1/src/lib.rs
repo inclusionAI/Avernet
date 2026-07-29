@@ -1,3 +1,5 @@
+//! Versioned Group application facade for the BCN V1 API.
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 

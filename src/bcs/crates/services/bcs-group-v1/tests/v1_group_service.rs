@@ -28,7 +28,7 @@ use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::NoopSystemMessageService;
 
-use bcs_group::application::v1::{GroupServiceConfig, GroupServiceImpl};
+use bcs_group_v1::{GroupServiceConfig, GroupServiceImpl};
 
 struct Fixture {
     service: GroupServiceImpl,
@@ -503,8 +503,8 @@ async fn create_derives_originator_after_driver_is_added_to_canonical_participan
                     actor_id: "helper".into(),
                     role: ParticipantRole::Consultant,
                 }],
-                collaboration: bcs_service_api::application::v1::CollaborationConfiguration::Chat(
-                    bcs_service_api::application::v1::ChatConfiguration {
+                collaboration: CollaborationConfiguration::Chat(
+                    ChatConfiguration {
                         delivery_policy: GroupDeliveryPolicy {
                             bot_final_delivery: BotFinalDelivery::SendToDriver,
                         },
@@ -563,8 +563,8 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
                         role: ParticipantRole::Consultant,
                     },
                 ],
-                collaboration: bcs_service_api::application::v1::CollaborationConfiguration::Chat(
-                    bcs_service_api::application::v1::ChatConfiguration {
+                collaboration: CollaborationConfiguration::Chat(
+                    ChatConfiguration {
                         delivery_policy: GroupDeliveryPolicy {
                             bot_final_delivery: BotFinalDelivery::SendToDriver,
                         },
@@ -681,7 +681,7 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
                     role: ParticipantRole::Consultant,
                 }],
                 collaboration:
-                    bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(
+                    CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
                                 bcs_service_api::application::v1::StateMachineDefinitionReference {
@@ -725,7 +725,7 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
                     role: ParticipantRole::Consultant,
                 }],
                 collaboration:
-                    bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(
+                    CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
                                 bcs_service_api::application::v1::StateMachineDefinitionReference {
@@ -780,7 +780,7 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
                     role: ParticipantRole::Consultant,
                 }],
                 collaboration:
-                    bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(
+                    CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
                                 bcs_service_api::application::v1::StateMachineDefinitionReference {
@@ -822,7 +822,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
                     role: ParticipantRole::Consultant,
                 }],
                 collaboration:
-                    bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(
+                    CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
                                 bcs_service_api::application::v1::StateMachineDefinitionReference {
@@ -845,7 +845,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
     let GroupDetail::Collaboration(detail) = detail else {
         panic!("expected collaboration detail");
     };
-    let bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(collaboration) =
+    let CollaborationConfiguration::StateMachine(collaboration) =
         detail.collaboration
     else {
         panic!("expected state-machine collaboration");
@@ -1266,7 +1266,7 @@ async fn get_requires_a_group_relation_and_delete_is_idempotent() {
         .await;
     assert!(matches!(
         denied,
-        Err(bcs_service_api::application::v1::ApplicationError::Forbidden(_))
+        Err(ApplicationError::Forbidden(_))
     ));
 
     let first = fixture
@@ -1420,7 +1420,7 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
                     role: ParticipantRole::Consultant,
                 }],
                 collaboration:
-                    bcs_service_api::application::v1::CollaborationConfiguration::StateMachine(
+                    CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
                                 bcs_service_api::application::v1::StateMachineDefinitionReference {
@@ -1564,8 +1564,8 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
                     actor_id: "manager".into(),
                     role: ParticipantRole::Manager,
                 }],
-                collaboration: bcs_service_api::application::v1::CollaborationConfiguration::Chat(
-                    bcs_service_api::application::v1::ChatConfiguration {
+                collaboration: CollaborationConfiguration::Chat(
+                    ChatConfiguration {
                         delivery_policy: GroupDeliveryPolicy {
                             bot_final_delivery: BotFinalDelivery::SendToDriver,
                         },
@@ -1599,7 +1599,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
                     },
                 ],
                 collaboration:
-                    bcs_service_api::application::v1::CollaborationConfiguration::ManagerWorker(
+                    CollaborationConfiguration::ManagerWorker(
                         Default::default(),
                     ),
             }),
@@ -1783,8 +1783,8 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
                     actor_id: "protected".into(),
                     role: ParticipantRole::Consultant,
                 }],
-                collaboration: bcs_service_api::application::v1::CollaborationConfiguration::Chat(
-                    bcs_service_api::application::v1::ChatConfiguration {
+                collaboration: CollaborationConfiguration::Chat(
+                    ChatConfiguration {
                         delivery_policy: GroupDeliveryPolicy {
                             bot_final_delivery: BotFinalDelivery::SendToDriver,
                         },

@@ -47,7 +47,7 @@ OpenAPI YAML.
 
 **Files:**
 
-- Modify: `src/bcs/crates/services/bcs-group/tests/v1_group_service.rs`
+- Modify: `src/bcs/crates/services/bcs-group-v1/tests/v1_group_service.rs`
 - Modify: `src/bcs/crates/services/bcs-group/src/application/group.rs`
 
 - [ ] Add a V1 service test that supplies the same non-driver `actor_id` twice
@@ -70,7 +70,7 @@ OpenAPI YAML.
 - Modify:
   `src/bcs/crates/services/bcs-friend/tests/conformance_friend_services.rs`
 - Modify:
-  `src/bcs/crates/services/bcs-group/tests/v1_group_service.rs`
+  `src/bcs/crates/services/bcs-group-v1/tests/v1_group_service.rs`
 - Modify:
   `src/bcs/crates/services/bcs-group/src/application/group.rs`
 

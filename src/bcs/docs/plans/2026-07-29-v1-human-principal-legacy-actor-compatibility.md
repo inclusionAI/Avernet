@@ -23,7 +23,7 @@
 **Files:**
 - Modify: `src/bcs/crates/service-api/bcs-service-api/tests/v1_group_application_contracts.rs`
 - Modify: `src/bcs/crates/service-api/bcs-service-api/src/application/v1/principal.rs`
-- Modify: `src/bcs/crates/services/bcs-group/tests/v1_group_service.rs`
+- Modify: `src/bcs/crates/services/bcs-group-v1/tests/v1_group_service.rs`
 
 **Interfaces:**
 - Consumes: Gateway-compatible `AuthenticatedUser`.
@@ -103,8 +103,8 @@ Expected: all tests pass.
 ### Task 2: Preserve Human Actor creation and legacy DM behavior
 
 **Files:**
-- Modify: `src/bcs/crates/services/bcs-group/tests/v1_group_service.rs`
-- Modify: `src/bcs/crates/services/bcs-group/src/application/v1/group.rs`
+- Modify: `src/bcs/crates/services/bcs-group-v1/tests/v1_group_service.rs`
+- Modify: `src/bcs/crates/services/bcs-group-v1/src/lib.rs`
 
 **Interfaces:**
 - Consumes: `Principal::actor_id() -> String`,
@@ -141,7 +141,7 @@ remains `"Original Name"`.
 Run:
 
 ```bash
-cargo test -p bcs-group --test v1_group_service human_principal
+cargo test -p bcs-group-v1 --test v1_group_service human_principal
 ```
 
 Expected: the missing Human Actor assertion fails because the current V1 path
@@ -201,7 +201,7 @@ Project the persisted Group returned by the existing management path.
 Run:
 
 ```bash
-cargo test -p bcs-group --test v1_group_service
+cargo test -p bcs-group-v1 --test v1_group_service
 ```
 
 Expected: all tests pass, including Human creation/name preservation, DM
@@ -234,8 +234,8 @@ Run:
 
 ```bash
 cargo test -p bcs-service-api --test v1_group_application_contracts
-cargo test -p bcs-group --test v1_group_service
-cargo test -p bcs-group
+cargo test -p bcs-group-v1 --test v1_group_service
+cargo test -p bcs-group-v1
 ```
 
 Expected: all commands pass.
@@ -251,4 +251,3 @@ git status --short
 
 Expected: no whitespace errors and only the planned Principal, V1 Group,
 tests, and documentation files are changed.
-
