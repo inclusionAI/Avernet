@@ -2,6 +2,9 @@
 
 MCP (Model Context Protocol) domain — config, auth, and sync for MCP servers bound to bots/devices.
 
+For an end-to-end walkthrough of how MCP works across backend, device, and
+engine, see [`src/backend/docs/mcp/README.md`](../../../../../docs/mcp/README.md).
+
 ## Context Boundary
 
 ```yaml
