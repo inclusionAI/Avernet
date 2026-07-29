@@ -313,7 +313,7 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
     bot_repo.get_by_id.return_value = {
         "bot_id": "b1",
         "owner_id": "owner-u",
-        "entity_id": "owner-u",
+        "entity_id": "team-entity",
         "active_engine": "openclaw",
         "bot_type": "personal",
         "status": "ACTIVE",
@@ -336,6 +336,12 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
         bot_id="b1",
         user_id="owner-u",
     )
+    if method == "post":
+        lookup_svc.parse_local_skill_config.assert_awaited_once_with(
+            "local://skills-local/x",
+            "b1",
+            "owner-u",
+        )
 
 
 def test_parameter_route_rejects_request_bot_mismatch_before_device_access():

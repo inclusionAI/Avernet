@@ -2229,7 +2229,9 @@ async def get_skill_parameters(
 @with_interceptors(CollaboratorPermissionInterceptor(
     bot_id="$bot_id",
     owner_id="$__trusted_owner_id",
-    persist_audit_log=True,
+    # Parameter values may contain credentials. Keep authorization, but do not
+    # persist or log the request body through the generic collaborator audit.
+    persist_audit_log=False,
 ))
 async def save_skill_parameters(
     skill_id: str,
@@ -2307,7 +2309,7 @@ async def save_skill_parameters(
         skill_info = await service.parse_local_skill_config(
             skill.get('git_path', ''),
             trusted_bot_id,
-            trusted_entity_id,
+            trusted_owner_id,
         )
     else:
         skill_info = service._parse_skill_from_git(skill.get('git_path', ''))
