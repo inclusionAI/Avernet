@@ -10,6 +10,7 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.session_resources.types import (
     SessionResourceRecord,
     SessionResourceStatus,
+    TransferApiVersion,
 )
 
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
@@ -34,6 +35,13 @@ class SessionResourceModel(Base):
     workspace_relative_path = Column(String(2048), nullable=False)
     transfer_id = Column(String(256), nullable=False)
     status = Column(String(32), nullable=False)
+    transfer_api_version = Column(
+        String(32),
+        nullable=False,
+        default=TransferApiVersion.BOT_DEVICE_V1.value,
+        server_default=TransferApiVersion.BOT_DEVICE_V1.value,
+    )
+    session_key_ciphertext = Column(Text, nullable=True)
     task_id = Column(String(128), nullable=True)
     task_version = Column(Integer, nullable=False, default=0)
     size_bytes = Column(BigInteger, nullable=True)
@@ -71,6 +79,8 @@ class SessionResourceModel(Base):
             workspace_relative_path=self.workspace_relative_path,
             transfer_id=self.transfer_id,
             status=SessionResourceStatus(self.status),
+            transfer_api_version=TransferApiVersion(self.transfer_api_version),
+            session_key_ciphertext=self.session_key_ciphertext,
             task_id=self.task_id,
             task_version=self.task_version,
             size_bytes=self.size_bytes,

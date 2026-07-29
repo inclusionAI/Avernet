@@ -17,9 +17,13 @@ Response shapes mirror the real adapter's envelopes. ``bot_id`` /
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any, Optional
 
-from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterStreamResponse,
+    DeviceAdapterTransport,
+)
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugins.local._mock_seam import MockSeam
 
@@ -215,3 +219,28 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
             }
 
         return {"success": False, "message": f"unhandled path {path}", "error_code": 404}
+
+    async def stream(
+        self,
+        conn_info: dict[str, Any],
+        method: str,
+        path: str,
+        body: Optional[dict[str, Any]] = None,
+        params: Optional[dict[str, Any]] = None,
+        *,
+        timeout: float | None = None,
+    ) -> DeviceAdapterStreamResponse:
+        """The local cron simulator deliberately has no materialized files."""
+
+        async def error_body() -> AsyncIterator[bytes]:
+            yield b'{"detail":"resource_not_materialized"}'
+
+        async def close() -> None:
+            return None
+
+        return DeviceAdapterStreamResponse(
+            status_code=409,
+            headers={"content-type": "application/json"},
+            body=error_body(),
+            close=close,
+        )

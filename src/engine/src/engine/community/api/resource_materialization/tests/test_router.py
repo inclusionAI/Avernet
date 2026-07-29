@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from fastapi import BackgroundTasks, HTTPException
 import pytest
+from fastapi import BackgroundTasks, HTTPException
 
 from engine.community.api.resource_materialization.router import (
     create_resource_materialization,
+    stream_resource_content,
 )
 from engine.community.core.resource_materialization.models import (
     MaterializationRequest,
+    MaterializedContent,
+)
+from engine.community.core.resource_materialization.service import (
+    ResourceNotMaterializedError,
 )
 from engine.community.plugin_api.auth_gate.models import VerifyResult
 
@@ -26,6 +31,17 @@ class _Service:
 
     async def materialize(self, request):
         self.requests.append(request)
+
+    def open_content(self, *, resource_id, disposition):
+        if resource_id == "missing":
+            raise ResourceNotMaterializedError("resource_not_materialized")
+        return MaterializedContent(
+            path=self.path,
+            filename="report.txt",
+            media_type="text/plain",
+            content_disposition=f"{disposition}; filename*=UTF-8''report.txt",
+            size_bytes=self.path.stat().st_size,
+        )
 
 
 def _request() -> MaterializationRequest:
@@ -90,3 +106,42 @@ async def test_rejects_denied_internal_identity():
         )
 
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_content_stream_requires_internal_auth_and_streams_manifest_file(tmp_path):
+    service = _Service()
+    service.path = tmp_path / "report.txt"
+    service.path.write_bytes(b"content")
+
+    response = await stream_resource_content(
+        "sr_001",
+        disposition="attachment",
+        x_iam_token="iam-token",
+        auth_gate_service=_AuthGate(),
+        service=service,
+    )
+
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.headers["content-length"] == "7"
+    assert response.headers["content-disposition"].startswith("attachment;")
+    assert [chunk async for chunk in response.body_iterator] == [b"content"]
+
+
+@pytest.mark.asyncio
+async def test_content_returns_materializing_when_manifest_file_is_missing(tmp_path):
+    service = _Service()
+    service.path = tmp_path / "report.txt"
+    service.path.write_bytes(b"content")
+
+    with pytest.raises(HTTPException) as exc:
+        await stream_resource_content(
+            "missing",
+            disposition="inline",
+            x_iam_token="iam-token",
+            auth_gate_service=_AuthGate(),
+            service=service,
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "resource_not_materialized"

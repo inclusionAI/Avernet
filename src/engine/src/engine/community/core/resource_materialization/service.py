@@ -5,20 +5,23 @@ import asyncio
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import re
 import uuid
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Callable
+from urllib.parse import quote
 
 from engine.community.core.resource_materialization.models import (
     ManifestEntry,
     MaterializationRequest,
     MaterializationResult,
+    MaterializedContent,
 )
 from engine.community.plugin_api.resource_materialization import (
-    BackendMaterializationCallbackClient,
     BaasMaterializationClient,
+    BackendMaterializationCallbackClient,
 )
 from engine.community.plugin_api.workspace_root import workspace_root_strict
 
@@ -28,6 +31,10 @@ _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 
 class MaterializationSecurityError(ValueError):
     """The requested workspace path escaped or violated the controlled root."""
+
+
+class ResourceNotMaterializedError(ValueError):
+    """The requested resource has no readable ready workspace file."""
 
 
 class ManifestStore:
@@ -86,6 +93,51 @@ class ResourceMaterializationService:
     @property
     def manifest_store(self) -> ManifestStore:
         return ManifestStore(self._workspace_root())
+
+    def open_content(
+        self,
+        *,
+        resource_id: str,
+        disposition: str,
+    ) -> MaterializedContent:
+        """Resolve a ready manifest entry to a controlled workspace file."""
+        if disposition not in {"inline", "attachment"}:
+            raise ValueError("invalid_disposition")
+        root = self._workspace_root()
+        entry = ManifestStore(root).get(resource_id)
+        if entry is None or entry.status != "ready":
+            raise ResourceNotMaterializedError("resource_not_materialized")
+        relative = Path(entry.relative_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ResourceNotMaterializedError("resource_not_materialized")
+        target = root / relative
+        try:
+            # COSEC: resolve symlinks before checking parents so a manifest file
+            # can never disclose a sibling or host path through the content API.
+            self._assert_contained(root, target)
+            canonical = target.resolve(strict=True)
+            if not canonical.is_file() or canonical.stat().st_size != entry.size_bytes:
+                raise ResourceNotMaterializedError("resource_not_materialized")
+        except (OSError, MaterializationSecurityError) as exc:
+            raise ResourceNotMaterializedError("resource_not_materialized") from exc
+        media_type = mimetypes.guess_type(entry.filename)[0] or "application/octet-stream"
+        content_disposition = "{}; filename*=UTF-8''{}".format(
+            disposition,
+            quote(entry.filename, safe=""),
+        )
+        log.info(
+            "engine.resource_content.open resource_id=%s disposition=%s size_bytes=%s",
+            resource_id,
+            disposition,
+            entry.size_bytes,
+        )
+        return MaterializedContent(
+            path=canonical,
+            filename=entry.filename,
+            media_type=media_type,
+            content_disposition=content_disposition,
+            size_bytes=entry.size_bytes,
+        )
 
     async def materialize(
         self,
@@ -213,7 +265,10 @@ class ResourceMaterializationService:
         )
         if any(not _SAFE_SEGMENT.fullmatch(segment) for segment in segments):
             raise MaterializationSecurityError("invalid controlled path segment")
-        supplied = PurePosixPath(request.device_path.replace("\\", "/"))
+        supplied_path = request.workspace_relative_path or request.device_path
+        if supplied_path is None:
+            raise MaterializationSecurityError("controlled path is missing")
+        supplied = PurePosixPath(supplied_path.replace("\\", "/"))
         if ".." in supplied.parts:
             raise MaterializationSecurityError("device_path traversal is forbidden")
         expected_suffix = (
@@ -224,7 +279,10 @@ class ResourceMaterializationService:
             request.resource_id,
             request.filename,
         )
-        if tuple(supplied.parts[-len(expected_suffix):]) != expected_suffix:
+        if request.transfer_api_version == "session_v2":
+            if tuple(supplied.parts) != expected_suffix:
+                raise MaterializationSecurityError("workspace path does not match resource scope")
+        elif tuple(supplied.parts[-len(expected_suffix):]) != expected_suffix:
             raise MaterializationSecurityError("device_path does not match resource scope")
         relative = Path(*expected_suffix)
         target = root / relative

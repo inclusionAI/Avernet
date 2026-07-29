@@ -12,7 +12,13 @@ from engine.community.core.resource_materialization.models import (
 
 @runtime_checkable
 class BaasMaterializationClient(Protocol):
-    """Pull one BaaS upload transfer into a caller-owned temporary file."""
+    """Pull one BaaS upload transfer into a caller-owned temporary file.
+
+    ``session_v2`` implementations first request the Session File Sharing
+    share-link for the request's tenant/session/transfer identity, then stream
+    that short-lived URL into ``destination``. The share-link is a transport
+    detail: implementations must not persist or expose it to callers.
+    """
 
     async def pull(
         self,

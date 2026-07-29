@@ -8,7 +8,6 @@ from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
 from agentclaw.community.core.session_resources.types import (
-    DownloadGrant,
     SessionResourceRecord,
     SessionResourceStatus,
     SessionUploadIntent,
@@ -62,6 +61,7 @@ def _service() -> MagicMock:
         grant=UploadGrant(
             upload_url="https://baas.example/upload",
             transfer_id=_TRANSFER_ID,
+            upload_type="SINGLE",
             expires_at="2026-07-21T12:00:00Z",
         ),
     )
@@ -70,12 +70,6 @@ def _service() -> MagicMock:
     )
     service.get_status.return_value = _record()
     service.list_resources.return_value = [_record()]
-    service.create_download_grant.return_value = DownloadGrant(
-        download_url="https://baas.example/download",
-        filename="notes.txt",
-        file_size=12,
-        expires_at="2026-07-21T12:00:00Z",
-    )
     service.reference.return_value = {
         "resource_id": _RESOURCE_ID,
         "display_name": "notes.txt",
@@ -103,7 +97,6 @@ def _seed_not_found(world) -> None:
     for method_name in (
         "complete_upload",
         "get_status",
-        "create_download_grant",
         "reference",
         "delete",
     ):
@@ -342,7 +335,7 @@ def create_reference_err():
     """Error path: reject a reference to an unknown resource."""
 
 
-def _download_input(resource_id: str = _RESOURCE_ID) -> CaseInput:
+def _resource_input(resource_id: str = _RESOURCE_ID) -> CaseInput:
     return CaseInput(
         path_params={"resource_id": resource_id},
         query_params=_QUERY,
@@ -351,64 +344,10 @@ def _download_input(resource_id: str = _RESOURCE_ID) -> CaseInput:
 
 
 @endpoint_test(
-    method="GET",
-    path="/api/session-resources/{resource_id}/download-url",
-    scenario="ok",
-    input=_download_input(),
-    seed=_seed_ok,
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"download_url": "https://baas.example/download"},
-    ),
-)
-def download_url_ok():
-    """Happy path: create a BaaS download grant."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/api/session-resources/{resource_id}/download-url",
-    scenario="err",
-    input=_download_input("missing"),
-    seed=_seed_not_found,
-    expect=ExpectError(status=404, json_contains={"detail": "resource_not_found"}),
-)
-def download_url_err():
-    """Error path: reject download for an unknown resource."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/api/session-resources/{resource_id}/preview",
-    scenario="ok",
-    input=_download_input(),
-    seed=_seed_ok,
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"filename": "notes.txt", "file_size": 12},
-    ),
-)
-def preview_ok():
-    """Happy path: create a BaaS preview grant."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/api/session-resources/{resource_id}/preview",
-    scenario="err",
-    input=_download_input("missing"),
-    seed=_seed_not_found,
-    expect=ExpectError(status=404, json_contains={"detail": "resource_not_found"}),
-)
-def preview_err():
-    """Error path: reject preview for an unknown resource."""
-
-
-@endpoint_test(
     method="DELETE",
     path="/api/session-resources/{resource_id}",
     scenario="ok",
-    input=_download_input(),
+    input=_resource_input(),
     seed=_seed_ok,
     expect=ExpectSuccess(
         status=200,
@@ -423,7 +362,7 @@ def delete_resource_ok():
     method="DELETE",
     path="/api/session-resources/{resource_id}",
     scenario="err",
-    input=_download_input("missing"),
+    input=_resource_input("missing"),
     seed=_seed_not_found,
     expect=ExpectError(status=404, json_contains={"detail": "resource_not_found"}),
 )
