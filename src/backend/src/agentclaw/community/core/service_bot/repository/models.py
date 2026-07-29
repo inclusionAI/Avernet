@@ -251,6 +251,7 @@ class PublishOperationKind(StrEnum):
     UPGRADE = "upgrade"
     RESTART = "restart"
     SCALE = "scale"
+    DRAFT_RESTORE = "draft_restore"
     ROLLBACK_DEPLOY = "rollback_deploy"
     EVAL_PUBLISH = "eval_publish"
     EVAL_TEARDOWN = "eval_teardown"
@@ -314,6 +315,7 @@ _KIND_BAAS_PUBLISH_TYPES: Dict[PublishOperationKind, frozenset[str]] = {
     PublishOperationKind.UPGRADE: frozenset({"UPDATE", "CREATE"}),
     PublishOperationKind.RESTART: frozenset({"UPDATE", "RESTART", "CREATE"}),
     PublishOperationKind.SCALE: frozenset({"SCALE_UP", "SCALE_DOWN", "SCALE"}),
+    PublishOperationKind.DRAFT_RESTORE: frozenset({"UPDATE"}),
     PublishOperationKind.ROLLBACK_DEPLOY: frozenset({"UPDATE", "CREATE"}),
     PublishOperationKind.EVAL_PUBLISH: frozenset({"CREATE"}),
     PublishOperationKind.EVAL_TEARDOWN: frozenset({"DESTROY", "STOP"}),
@@ -334,6 +336,7 @@ _KINDS_SET_DEPLOYED_VERSION: frozenset[PublishOperationKind] = frozenset({
 _KINDS_PRESERVE_DEPLOYED_VERSION: frozenset[PublishOperationKind] = frozenset({
     PublishOperationKind.RESTART,
     PublishOperationKind.SCALE,
+    PublishOperationKind.DRAFT_RESTORE,
     PublishOperationKind.EVAL_TEARDOWN,
 })
 
@@ -365,7 +368,9 @@ class PublishOperationRecord(BaseModel):
     id: Optional[int] = Field(default=None, description="Primary key id")
     publish_id: int = Field(..., description="agentclaw publish-record id (0 for a bot_uuid-only eval_teardown)")
     operation_kind: str = Field(..., description="PublishOperationKind value")
-    stage: str = Field(default="", description="verify / online / eval / '' (empty)")
+    stage: str = Field(
+        default="", description="draft / verify / online / eval / '' (empty)"
+    )
     attempt: int = Field(default=1, description="Retry generation; a fresh row (+1) is opened after abandon")
     state: str = Field(default=PublishOperationState.PENDING, description="PublishOperationState value")
     request_id: str = Field(..., description="Deterministic request id (correlation/audit only, not an idempotency key)")
@@ -397,7 +402,12 @@ class PublishOperationModel(Base):
 
     publish_id = Column(AutoIncrementBigInteger, nullable=False, comment="agentclaw publish-record id")
     operation_kind = Column(String(64), nullable=False, comment="PublishOperationKind value")
-    stage = Column(String(16), nullable=False, default="", comment="verify/online/eval/'' (empty)")
+    stage = Column(
+        String(16),
+        nullable=False,
+        default="",
+        comment="draft/verify/online/eval/'' (empty)",
+    )
     attempt = Column(Integer, nullable=False, default=1, comment="Retry generation")
     state = Column(
         String(32),

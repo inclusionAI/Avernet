@@ -44,7 +44,16 @@ from agentclaw.community.core.task_queue.services.registry import HandlerRegistr
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
-from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule, TaskOutcome
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    DraftRestoreRetryableError,
+)
+from agentclaw.community.core.task_queue.types import (
+    Complete,
+    Fail,
+    Reschedule,
+    Retry,
+    TaskOutcome,
+)
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
@@ -61,6 +70,7 @@ logger = get_logger()
 VERIFY_FLOW_TASK = "service_bot.publish.verify_flow"
 ONLINE_RELEASE_TASK = "service_bot.publish.online_release"
 PROGRESS_POLL_TASK = "service_bot.publish.progress_poll"
+DRAFT_RESTORE_TASK = "service_bot.publish.draft_restore"
 RESTART_TASK = "service_bot.publish.restart"
 DESTROY_TASK = "service_bot.publish.destroy"
 EVAL_TEARDOWN_TASK = "service_bot.publish.eval_teardown"
@@ -71,6 +81,11 @@ APPROVAL_TRIGGER_TASK = "service_bot.publish.approval_trigger"
 _STAGE_TASK_DEADLINE_SECONDS = 3600
 _POLL_TASK_DEADLINE_SECONDS = 86400
 _POLL_DELAY_SECONDS = 8.0
+_DRAFT_RESTORE_POLL_DELAY_SECONDS = 2.0
+# The operation itself expires at 30 minutes. Keep the queue alive one extra
+# minute so a final handler run can persist operation=FAILED before the task
+# queue retires the row at its own deadline.
+_DRAFT_RESTORE_DEADLINE_SECONDS = 1860
 
 # Eval environments are ephemeral: this is the TTL safety-net horizon after which
 # an orphaned eval bot (its quality task never reached to_env_released) is torn
@@ -136,6 +151,24 @@ def enqueue_progress_poll(
         PROGRESS_POLL_TASK,
         build_poll_payload(publish_id=publish_id),
         deadline_seconds=_POLL_TASK_DEADLINE_SECONDS,
+    )
+
+
+def enqueue_draft_restore(
+    task_queue_service: TaskQueueService,
+    *,
+    draft_publish_id: int,
+    operation_id: int,
+    operator: str,
+) -> None:
+    task_queue_service.enqueue(
+        DRAFT_RESTORE_TASK,
+        {
+            "draft_publish_id": draft_publish_id,
+            "operation_id": operation_id,
+            "operator": operator,
+        },
+        deadline_seconds=_DRAFT_RESTORE_DEADLINE_SECONDS,
     )
 
 
@@ -480,6 +513,55 @@ class PublishProgressPollHandler(_PublishTaskBase):
         return Complete()
 
 
+class PublishDraftRestoreHandler(_PublishTaskBase):
+    """Run or resume one draft restore attempt from its durable ledger row."""
+
+    def __init__(
+        self,
+        *,
+        flow: "PublishFlowService",
+        task_queue_service: TaskQueueService,
+        poll_delay_seconds: float = _DRAFT_RESTORE_POLL_DELAY_SECONDS,
+    ) -> None:
+        super().__init__(flow=flow, task_queue_service=task_queue_service)
+        self._poll_delay = poll_delay_seconds
+
+    @property
+    def task_type(self) -> str:
+        return DRAFT_RESTORE_TASK
+
+    def handle(self, payload: Optional[dict]) -> TaskOutcome:
+        draft_publish_id = _require_int(payload, "draft_publish_id")
+        operation_id = _require_int(payload, "operation_id")
+        operator = _require_str(payload, "operator")
+        return asyncio.run(
+            self._run(draft_publish_id, operation_id, operator)
+        )
+
+    async def _run(
+        self, draft_publish_id: int, operation_id: int, operator: str
+    ) -> TaskOutcome:
+        try:
+            result = await self._flow.execute_restore_draft(
+                draft_publish_id=draft_publish_id,
+                operation_id=operation_id,
+                operator=operator,
+            )
+        except DraftRestoreRetryableError as exc:
+            return Retry(
+                "draft restore temporarily unavailable; retrying the same operation: "
+                f"publish_id={draft_publish_id}, operation_id={operation_id}, {exc}"
+            )
+        except Exception as exc:
+            return Fail(
+                "draft restore failed: "
+                f"publish_id={draft_publish_id}, operation_id={operation_id}, {exc}"
+            )
+        if result.get("status") == "restoring":
+            return Reschedule(self._poll_delay)
+        return Complete()
+
+
 class PublishTaskLifecycle(LifecycleBase):
     """Register the durable publish handlers into the shared ``HandlerRegistry``.
 
@@ -534,6 +616,11 @@ class PublishTaskLifecycle(LifecycleBase):
         )
         self._registry.register(
             PublishProgressPollHandler(
+                flow=self._flow, task_queue_service=self._task_queue_service
+            )
+        )
+        self._registry.register(
+            PublishDraftRestoreHandler(
                 flow=self._flow, task_queue_service=self._task_queue_service
             )
         )

@@ -170,3 +170,67 @@ async def test_teclaw_stage_build_files_raises_without_config_artifact():
         await teclaw.stage_build_files(
             artifact=artifact, bot={}, bot_id="b", owner_id="u", publish_id=5
         )
+
+
+@pytest.mark.asyncio
+async def test_default_draft_restore_delegates_to_migration_restore():
+    default = DefaultProviderBehavior()
+    build_service = Mock()
+    build_service.restore_draft_async = AsyncMock(return_value={"restore_type": "migration_path"})
+    ext = {"migration_path": "/artifact/v1"}
+
+    assert default.validate_draft_restore_artifact(ext) is None
+    result = await default.restore_draft(
+        build_service=build_service,
+        bot={"bot_id": "b"},
+        bot_uuid="BOT-draft",
+        owner_id="u",
+        source_version=1,
+        artifact_ext=ext,
+    )
+
+    assert result["restore_type"] == "migration_path"
+    build_service.restore_draft_async.assert_awaited_once_with(
+        bot={"bot_id": "b"}, source_version=1, artifact_ext=ext
+    )
+
+
+@pytest.mark.asyncio
+async def test_teclaw_draft_restore_delegates_to_hot_update():
+    build_service = Mock()
+    build_service.restore_teclaw_draft_async = AsyncMock(
+        return_value={"restore_type": "config_artifact"}
+    )
+    teclaw = _teclaw_behavior(build_service=build_service)
+    ext = {"config_artifact": {"engine_type": "teclaw"}}
+
+    assert teclaw.validate_draft_restore_artifact(ext) is None
+    result = await teclaw.restore_draft(
+        build_service=build_service,
+        bot={"bot_id": "b"},
+        bot_uuid="BOT-current",
+        owner_id="u",
+        source_version=1,
+        artifact_ext=ext,
+    )
+
+    assert result["restore_type"] == "config_artifact"
+    build_service.restore_teclaw_draft_async.assert_awaited_once_with(
+        bot_uuid="BOT-current",
+        bot={"bot_id": "b"},
+        owner_id="u",
+        source_version=1,
+        artifact_ext=ext,
+        baas_publish_id=None,
+        request_id=None,
+    )
+
+
+def test_teclaw_draft_restore_rejects_non_teclaw_artifact():
+    teclaw = _teclaw_behavior(build_service=Mock())
+
+    reason = teclaw.validate_draft_restore_artifact(
+        {"config_artifact": {"engine_type": "openclaw"}}
+    )
+
+    assert reason == "上一版本的 config_artifact 不是 teclaw 构造物"
