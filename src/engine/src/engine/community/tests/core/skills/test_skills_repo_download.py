@@ -7,15 +7,14 @@ and deterministically.
 from __future__ import annotations
 
 import importlib
-import json
 import os
 import sys
 import tarfile
 import tempfile
 import time
 from pathlib import Path
-from tarfile import TarInfo
-from unittest.mock import MagicMock, call, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -413,7 +412,6 @@ class TestDownloadAndExtract:
         mock_resp.iter_content = MagicMock(return_value=[tar_bytes])
 
         call_count = 0
-        original_get = _req.get
 
         def _flaky_get(url, **kwargs):
             nonlocal call_count
@@ -519,8 +517,6 @@ class TestShouldDownload:
         assert mod._should_download("https://x.com/tar", '"same"') is False
 
     def test_true_when_etags_differ_and_head_200(self, mod, target_dir: Path, etag_file: Path):
-        import requests as _req
-
         target_dir.mkdir(parents=True)
         etag_file.parent.mkdir(parents=True, exist_ok=True)
         etag_file.write_text('"local"')
@@ -676,6 +672,66 @@ class TestGetDownloadInfo:
 
 
 # ===================================================================
+# prepare_pool_layout
+# ===================================================================
+
+
+class TestPreparePoolLayout:
+    def test_noop_when_not_agentbox(self, mod, tmp_root: Path):
+        with patch.object(mod, "_is_agentbox_env", return_value=False):
+            with patch.object(mod, "prepare_desktop_pool") as mock_prepare:
+                mod.prepare_pool_layout(home=tmp_root)
+
+        mock_prepare.assert_not_called()
+
+    def test_reuses_current_repo_for_configured_engine(
+        self,
+        mod,
+        target_dir: Path,
+        tmp_root: Path,
+    ):
+        target_dir.mkdir(parents=True)
+        expected = SimpleNamespace(
+            status=SimpleNamespace(value="PREPARED"),
+            preparation_id="P1",
+            reason=None,
+        )
+        with patch.object(mod, "_is_agentbox_env", return_value=True):
+            with patch.object(
+                mod,
+                "load_engine_config",
+                return_value=SimpleNamespace(default_engine="Hermes"),
+            ):
+                with patch.object(
+                    mod,
+                    "prepare_desktop_pool",
+                    return_value=expected,
+                ) as mock_prepare:
+                    mod.prepare_pool_layout(home=tmp_root)
+
+        mock_prepare.assert_called_once_with(
+            engine="hermes",
+            repo_source=target_dir,
+            home=tmp_root,
+        )
+
+    def test_preparation_failure_is_non_fatal(
+        self,
+        mod,
+        target_dir: Path,
+        tmp_root: Path,
+    ):
+        target_dir.mkdir(parents=True)
+        with patch.object(mod, "_is_agentbox_env", return_value=True):
+            with patch.object(
+                mod,
+                "load_engine_config",
+                side_effect=RuntimeError("broken config"),
+            ):
+                mod.prepare_pool_layout(home=tmp_root)
+
+
+# ===================================================================
 # _download_and_save
 # ===================================================================
 
@@ -690,9 +746,14 @@ class TestDownloadAndSave:
         mock_resp.iter_content = MagicMock(return_value=[tar_bytes])
 
         with patch("engine.community.core.skills.skills_repo_download.requests.get", return_value=mock_resp):
-            ok = mod._download_and_save("https://x.com/repo.tar.gz", '"etag1"')
+            with patch.object(mod, "prepare_pool_layout") as mock_prepare:
+                ok = mod._download_and_save(
+                    "https://x.com/repo.tar.gz",
+                    '"etag1"',
+                )
         assert ok is True
         assert etag_file.read_text() == '"etag1"'
+        mock_prepare.assert_called_once_with()
 
     def test_does_not_save_etag_on_failure(self, mod, etag_file: Path):
         import requests as _req
@@ -768,16 +829,64 @@ class TestBootstrapOnStartup:
                 with patch.object(mod, "_get_download_info", return_value=("https://x.com/tar", '"e1"')):
                     with patch.object(mod, "_should_download", return_value=False):
                         with patch.object(mod, "_download_and_save") as mock_ds:
-                            mod.bootstrap_on_startup()
-                            mock_ds.assert_not_called()
+                            with patch.object(mod, "prepare_pool_layout") as mock_prepare:
+                                mod.bootstrap_on_startup()
+                                mock_ds.assert_not_called()
+                                mock_prepare.assert_called_once_with()
 
     def test_skips_download_when_no_url(self, mod):
         with patch.dict(os.environ, {"MAC_CONTAINER": "true"}):
             with patch.object(mod, "_is_agentbox_env", return_value=True):
                 with patch.object(mod, "_get_download_info", return_value=(None, None)):
                     with patch.object(mod, "_download_and_save") as mock_ds:
-                        mod.bootstrap_on_startup()
-                        mock_ds.assert_not_called()
+                        with patch.object(mod, "prepare_pool_layout") as mock_prepare:
+                            mod.bootstrap_on_startup()
+                            mock_ds.assert_not_called()
+                            mock_prepare.assert_called_once_with()
+
+
+# ===================================================================
+# _sync_once
+# ===================================================================
+
+
+class TestSyncOnce:
+    def test_no_url_still_refreshes_preparation(self, mod):
+        with patch.object(mod, "_get_download_info", return_value=(None, None)):
+            with patch.object(mod, "prepare_pool_layout") as mock_prepare:
+                mod._sync_once()
+
+        mock_prepare.assert_called_once_with()
+
+    def test_unchanged_repo_still_refreshes_preparation(self, mod):
+        with patch.object(
+            mod,
+            "_get_download_info",
+            return_value=("https://x.com/tar", '"e1"'),
+        ):
+            with patch.object(mod, "_should_download", return_value=False):
+                with patch.object(mod, "_download_and_save") as mock_download:
+                    with patch.object(mod, "prepare_pool_layout") as mock_prepare:
+                        mod._sync_once()
+
+        mock_download.assert_not_called()
+        mock_prepare.assert_called_once_with()
+
+    def test_download_success_prepares_through_download_helper(self, mod):
+        with patch.object(
+            mod,
+            "_get_download_info",
+            return_value=("https://x.com/tar", '"e1"'),
+        ):
+            with patch.object(mod, "_should_download", return_value=True):
+                with patch.object(
+                    mod,
+                    "_download_and_save",
+                    return_value=True,
+                ) as mock_download:
+                    mod._sync_once()
+
+        mock_download.assert_called_once_with("https://x.com/tar", '"e1"')
 
 
 # ===================================================================

@@ -576,6 +576,42 @@ class SkillsPoolReconcileService:
                 },
                 retryable=False,
             )
+        if bot.get("bot_type") == "desktop":
+            try:
+                mappings = build_logical_skill_mappings(
+                    self._skills.list_bot_active_assets(
+                        env=scope.env,
+                        bot_id=scope.bot_id,
+                        user_id=str(owner_id),
+                        engine=engine,
+                    )
+                )
+            except ValueError as error:
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.INVALID,
+                    evidence={"reason": str(error)},
+                    retryable=False,
+                )
+            if not await self._runtime.publish_mappings(
+                bot_id=scope.bot_id,
+                user_id=str(owner_id),
+                mappings=mappings,
+            ):
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.MAPPING_FAILED,
+                    evidence={"mapping_count": len(mappings)},
+                    retryable=True,
+                )
+            if not await self._runtime.verify_mappings(
+                bot_id=scope.bot_id,
+                user_id=str(owner_id),
+                mappings=mappings,
+            ):
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
+                    evidence={"mapping_count": len(mappings)},
+                    retryable=True,
+                )
         return SkillsPoolReconcileResult(
             SkillsPoolReconcileOutcome.ALREADY_ACTIVE,
             preparation_id=probe.preparation_id,

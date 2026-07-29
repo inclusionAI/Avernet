@@ -27,6 +27,7 @@ class BotRuntimeForm(StrEnum):
     """迁移入口看到的 Bot 运行形态。"""
 
     PERSONAL = "personal"
+    DESKTOP = "desktop"
     SERVICE_DRAFT = "service_draft"
     PUBLISHED_SERVICE = "published_service"
 
@@ -87,6 +88,7 @@ class SkillsPoolRolloutGate:
             return self._reject(RolloutDecisionReason.ENGINE_NOT_SUPPORTED)
         if (
             runtime_form is not BotRuntimeForm.PERSONAL
+            and runtime_form is not BotRuntimeForm.DESKTOP
             and runtime_form is not BotRuntimeForm.SERVICE_DRAFT
         ):
             return self._reject(RolloutDecisionReason.RUNTIME_NOT_EDITABLE)
