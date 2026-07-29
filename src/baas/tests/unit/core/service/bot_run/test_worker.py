@@ -654,3 +654,120 @@ async def test_heartbeat_loop_logs_touch_error_and_continues(repo, queue):
             await task
 
     assert calls >= 2
+
+
+# ── _get_or_create_limiter: qpm < machines 亚单位并发 ──────────────
+
+
+def test_limiter_qpm_less_than_machines_uses_min_interval(repo, queue):
+    """qpm=3, machines=10 → capacity=1, min_interval=200s。"""
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm(bot_qpm=3),
+        executor=ex,
+        machine_count_provider=FixedMachineCountProvider(10),
+    )
+    limiter = worker._get_or_create_limiter("bot-1")
+    assert limiter is not None
+    assert limiter.capacity == 1
+    assert limiter._min_interval == pytest.approx(200.0)
+
+
+def test_limiter_qpm_less_than_machines_blocks_second_dispatch(repo, queue):
+    """qpm=1, machines=10: 第一次 acquire 成功，release 后间隔未到不能再次 acquire。"""
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm(bot_qpm=1),
+        executor=ex,
+        machine_count_provider=FixedMachineCountProvider(10),
+    )
+    limiter = worker._get_or_create_limiter("bot-1")
+    assert limiter.try_acquire() is True
+    limiter.release()
+    # 间隔 600s 远未到
+    assert limiter.has_slot() is False
+    assert limiter.try_acquire() is False
+
+
+def test_limiter_qpm_equals_machines_uses_normal_capacity(repo, queue):
+    """qpm=10, machines=10 → 走正常均分: capacity=1, min_interval=0。"""
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm(bot_qpm=10),
+        executor=ex,
+        machine_count_provider=FixedMachineCountProvider(10),
+    )
+    limiter = worker._get_or_create_limiter("bot-1")
+    assert limiter is not None
+    assert limiter.capacity == 1
+    assert limiter._min_interval == 0.0
+
+
+def test_limiter_qpm_greater_than_machines_uses_normal_capacity(repo, queue):
+    """qpm=60, machines=10 → capacity=6, min_interval=0。"""
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm(bot_qpm=60),
+        executor=ex,
+        machine_count_provider=FixedMachineCountProvider(10),
+    )
+    limiter = worker._get_or_create_limiter("bot-1")
+    assert limiter is not None
+    assert limiter.capacity == 6
+    assert limiter._min_interval == 0.0
+
+
+def test_limiter_qpm_equals_one_single_machine(repo, queue):
+    """qpm=1, machines=1 → capacity=1, min_interval=0（走正常分支）。"""
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm(bot_qpm=1),
+        executor=ex,
+        machine_count_provider=FixedMachineCountProvider(1),
+    )
+    limiter = worker._get_or_create_limiter("bot-1")
+    assert limiter is not None
+    assert limiter.capacity == 1
+    assert limiter._min_interval == 0.0
+
+
+def test_limiter_cached_when_params_unchanged(repo, queue):
+    """qpm/machines 不变时，复用缓存的 limiter。"""
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm(bot_qpm=3),
+        executor=ex,
+        machine_count_provider=FixedMachineCountProvider(10),
+    )
+    limiter1 = worker._get_or_create_limiter("bot-1")
+    limiter2 = worker._get_or_create_limiter("bot-1")
+    assert limiter1 is limiter2
+
+
+def test_limiter_rebuilt_when_qpm_changes(repo, queue):
+    """qpm 变化后，limiter 重建。"""
+    from tests.unit.core.service.bot_run.test_worker import _QpmRepo
+
+    qpm_mgr = BotConcurrencyManager(_QpmRepo(bot_qpm=3), refresh_interval_seconds=999)
+    ex = _CompletingExecutor(repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=qpm_mgr,
+        executor=ex,
+        machine_count_provider=FixedMachineCountProvider(10),
+    )
+    limiter1 = worker._get_or_create_limiter("bot-1")
+    assert limiter1._min_interval > 0
+
+    # 模拟 qpm 变为 100（>= machines，走正常分支）
+    qpm_mgr._configs["bot-1"] = 100
+    limiter2 = worker._get_or_create_limiter("bot-1")
+    assert limiter2 is not limiter1
+    assert limiter2._min_interval == 0.0
+    assert limiter2.capacity == 10

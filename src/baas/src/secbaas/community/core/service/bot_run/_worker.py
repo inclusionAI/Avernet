@@ -420,8 +420,19 @@ class BotRequestWorker:
         if cached is not None and cached[1] == params:
             return cached[0]
 
-        # 均分策略：本机并发上限 = qpm / 机器数（至少 1）
-        per_machine = max(1, qpm // max(1, machines))
-        limiter = ConcurrencyLimiter(capacity=per_machine)
+        machines = max(1, machines)
+        if qpm >= machines:
+            # 均分策略：本机并发上限 = qpm / 机器数（至少 1）
+            per_machine = max(1, qpm // machines)
+            limiter = ConcurrencyLimiter(capacity=per_machine)
+        else:
+            # 亚单位并发：QPM < 机器数，每台机器 capacity=1，
+            # 通过最小间隔限制使全局 TPM ≈ qpm。
+            # 间隔 = 机器数 * 60s / qpm，即每台机器平均每 (machines*60/qpm) 秒放行 1 个请求，
+            # machines 台机器合计每 60s 放行 qpm 个。
+            min_interval = machines * 60.0 / qpm
+            limiter = ConcurrencyLimiter(
+                capacity=1, min_interval_seconds=min_interval
+            )
         self._buckets[bot_id] = (limiter, params)
         return limiter
