@@ -115,3 +115,39 @@ def test_other_routes_keep_the_shared_error_envelope_for_400():
         if path.endswith("/auth-status"):
             continue
         assert _json_ref(op, "400") == _ERROR_REF, f"{method.upper()} {path}"
+
+
+# ----- R15/F51: query params are modelled as tightly as body fields ---------
+
+
+def test_auth_status_cluster_name_is_the_enum_not_a_bare_string():
+    """``validate_engine_cluster`` accepts only ACRA/ANDC — say so in the schema.
+
+    Advertising a plain string lets a generated client compile
+    ``cluster_name=foo`` that the server always rejects. Create already models
+    the same field as ``ClusterName``; the completion path has to agree.
+    """
+    op = _schema()["paths"]["/openapi/v1/bots/{bot_id}/auth-status"]["get"]
+    param = next(p for p in op["parameters"] if p["name"] == "cluster_name")
+    rendered = str(param["schema"])
+    assert "ACRA" in rendered and "ANDC" in rendered, param["schema"]
+
+
+def test_create_and_completion_agree_on_cluster_name():
+    """One field, one contract — whichever endpoint you reach it through."""
+    schema = _schema()
+    create = schema["components"]["schemas"]["BotCreate"]["properties"]["cluster_name"]
+    op = schema["paths"]["/openapi/v1/bots/{bot_id}/auth-status"]["get"]
+    completion = next(
+        p for p in op["parameters"] if p["name"] == "cluster_name"
+    )["schema"]
+
+    def _values(node: dict) -> set[str]:
+        # Create declares it required (a bare enum); completion is optional, so
+        # FastAPI wraps it as anyOf[enum, null].
+        if "enum" in node:
+            return set(node["enum"])
+        return {v for branch in node.get("anyOf", []) for v in branch.get("enum", [])}
+
+    assert _values(create) == {"ACRA", "ANDC"}, create
+    assert _values(completion) == _values(create), completion

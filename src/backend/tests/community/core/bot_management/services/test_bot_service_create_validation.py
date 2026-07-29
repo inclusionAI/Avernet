@@ -332,6 +332,56 @@ class TestCreateBotPersistsConfiguredEngines:
     and back was permanently rejected by ``switch_engine``'s per-bot check.
     """
 
+    def test_active_engine_is_always_in_its_own_enabled_list(self, monkeypatch):
+        """R15/F50: never persist a row whose active engine is not in its list.
+
+        ``switch_engine`` validates against the bot's persisted ``engine_types``,
+        so a row violating this can never return to the engine it was created
+        on. The invariant held by accident while the static list was persisted
+        (it contains ``DEFAULT_ENGINE_TYPE``); persisting the configured
+        registry broke it wherever the two differ.
+        """
+        monkeypatch.setenv("ENGINE_TYPES", "teclaw")
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.get_by_id_and_owner.return_value = None
+        svc._repository.exists_by_bot_name.return_value = False
+        svc._repository.insert.return_value = {"id": 1, "bot_id": "b1", "ext": {}}
+
+        try:
+            # No engine_type → defaults to openclaw, which this registry omits.
+            svc.create_bot(user_id="u1", nick_name="u1", bot_name="Bot", bot_id="b1")
+        except Exception:
+            pass  # downstream provisioning is mocked; persistence is the subject
+
+        assert svc._repository.insert.called, "create never reached persistence"
+        persisted = svc._repository.insert.call_args[0][0]
+        assert persisted["active_engine"] in persisted["engine_types"], persisted
+
+    def test_a_supported_engine_outside_the_registry_still_creates(self, monkeypatch):
+        """teclaw is absent from the default registry yet is a real engine.
+
+        Rejecting an engine missing from the registry would break teclaw
+        creation on every deployment that does not set ENGINE_TYPES — so the
+        invariant is preserved by widening the persisted list, not by refusing.
+        """
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.get_by_id_and_owner.return_value = None
+        svc._repository.exists_by_bot_name.return_value = False
+        svc._repository.insert.return_value = {"id": 1, "bot_id": "b1", "ext": {}}
+
+        try:
+            svc.create_bot(
+                user_id="u1", nick_name="u1", bot_name="Bot",
+                engine_type="teclaw", bot_id="b1",
+            )
+        except Exception:
+            pass
+
+        assert svc._repository.insert.called, "teclaw creation was rejected"
+        persisted = svc._repository.insert.call_args[0][0]
+        assert "teclaw" in persisted["engine_types"], persisted["engine_types"]
+        assert persisted["active_engine"] == "teclaw"
+
     def test_engine_types_come_from_the_configured_registry(self, monkeypatch):
         monkeypatch.setenv("ENGINE_TYPES", "openclaw,teclaw")
         from agentclaw.community.core.workspace.constants import _get_engine_types

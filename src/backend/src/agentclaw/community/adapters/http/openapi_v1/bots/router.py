@@ -24,6 +24,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.clusters import (
+    ClusterName,
     cluster_for_engine,
     validate_engine_cluster,
 )
@@ -457,7 +458,11 @@ async def get_bot_auth_status(
     request: Request,
     principal: PrincipalDep,
     engine: str | None = None,
-    cluster_name: str | None = None,
+    # Enum, not a bare str: validate_engine_cluster accepts only ACRA/ANDC,
+    # so a plain string would let a generated client compile
+    # ``cluster_name=foo`` that the server always rejects — the same
+    # contract/behaviour gap as F29/F35/F41. Create already models it this way.
+    cluster_name: ClusterName | None = None,
     bot_name: str | None = None,
     bot_desc: str | None = None,
     bot_type: BotType | None = None,

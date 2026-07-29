@@ -1087,6 +1087,21 @@ class BotService:
 
         # Resolve active engine: use frontend specified, otherwise use default
         resolved_active_engine = engine_type or DEFAULT_ENGINE_TYPE
+        # A bot's active engine must be a member of its own enabled-engine list —
+        # switch_engine checks that list, so a row violating this can never
+        # return to the engine it was created on. The invariant held by accident
+        # while the static list was persisted (it contains DEFAULT_ENGINE_TYPE);
+        # persisting the configured registry broke it wherever the two differ.
+        #
+        # Guaranteed by construction rather than by rejecting: teclaw is a
+        # supported engine that is absent from the default registry, so
+        # rejecting would break teclaw creation on any deployment that does not
+        # set ENGINE_TYPES. Whether an engine outside the configured registry
+        # should be creatable at all is a separate question, decided by the
+        # callers that validate it — not something to enforce here by writing a
+        # row that contradicts itself.
+        if resolved_active_engine not in resolved_engine_types:
+            resolved_engine_types = [*resolved_engine_types, resolved_active_engine]
         resolved_bot_type = bot_type or "personal"
 
         # Resolve bot name according to naming rules
