@@ -1583,6 +1583,41 @@ def test_cutover_reports_transient_filesystem_failure(tmp_path: Path) -> None:
     assert retry.status is PoolActivationStatus.COMMITTED
 
 
+def test_committed_cleanup_failure_keeps_quarantine_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import layout_activation
+
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+
+    def fail_after_compatibility_bridge(**_kwargs: object) -> None:
+        legacy_local.symlink_to(pool_local, target_is_directory=True)
+        raise OSError(5, "injected post-cutover cleanup failure")
+
+    monkeypatch.setattr(
+        layout_activation,
+        "_finalize_active_root",
+        fail_after_compatibility_bridge,
+    )
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    quarantine = (
+        pool_local.parent / ".migration-quarantine" / "generation-1" / "skills-local"
+    )
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert result.evidence["reason"] == "post_cutover_cleanup_failed"
+    assert result.evidence["quarantine"] == str(quarantine)
+    assert result.evidence["quarantine_cleanup_pending"] is True
+
+
 def test_mapping_verifier_reports_each_drift_class(tmp_path: Path) -> None:
     home, legacy_local, pool_local, _pool_repo = _prepared_home(tmp_path)
     valid_source = pool_local / "handmade"

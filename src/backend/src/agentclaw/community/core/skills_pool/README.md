@@ -62,9 +62,11 @@ Engine Layout Descriptor 仍不在本期范围内。
   只记录 forward-only failure。
 - runtime probe 通过 `cutover_evidence_contract_version=quarantine-v1`
   声明激活响应能够返回 generation-scoped quarantine 证据。新 Backend 遇到
-  未声明该能力的旧 runtime 时只释放尚未切换的 claim 并保持 Legacy；对于
-  已跨界重试，允许旧响应复用 DB 中既有 quarantine 身份。两边都缺少身份时
-  记录可重试的 runtime 升级要求，不由 Backend 推导引擎物理路径。
+  未声明该能力的旧 runtime 时，只释放 `POOL_PREPARING/POOL_READY` claim
+  并保持 Legacy；`POOL_ACTIVATING_PRE_CUTOVER` 已属于结果不确定区，必须继续
+  幂等调用 cutover 探明事实。对于已跨界重试，允许旧响应复用 DB 中既有
+  quarantine 身份。两边都缺少身份时记录可重试的 runtime 升级要求，不由
+  Backend 推导引擎物理路径。
 - 在递归版 OpenClaw 发布前的 Pool 独立 rollout 窗口，显式回滚先持久化
   `LEGACY_ROLLBACK_PREPARING` 作为 Bot 级编辑暂停状态，
   再从当前 Pool 全量重建新的 Legacy local 并提交切换。切换后即使 mapping

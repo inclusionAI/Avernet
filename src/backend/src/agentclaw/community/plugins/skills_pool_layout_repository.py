@@ -331,9 +331,6 @@ class SkillsPoolLayoutRepository(
             engine = json.loads(row.rollout_evidence).get("engine_type")
             if not isinstance(engine, str) or not engine:
                 return False
-            if not isinstance(quarantine_path, str) or not quarantine_path:
-                log_missing_quarantine_path(scope, migration_generation)
-                return False
             if not self._upsert_quarantine(
                 session,
                 scope=scope,
@@ -342,6 +339,8 @@ class SkillsPoolLayoutRepository(
                 path=quarantine_path,
                 evidence_json=evidence_json,
             ):
+                if not isinstance(quarantine_path, str) or not quarantine_path:
+                    log_missing_quarantine_path(scope, migration_generation)
                 return False
             row.phase = SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value
             row.data_plane_cutover_committed = 1
