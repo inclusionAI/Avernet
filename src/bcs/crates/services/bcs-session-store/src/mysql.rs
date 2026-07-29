@@ -746,6 +746,34 @@ impl SessionRepoPort for MySqlSessionStore {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> Vec<Session> {
+        match self
+            .try_list_by_group(
+                group_id,
+                status,
+                offset,
+                limit,
+                title_contains,
+                participant_id,
+            )
+            .await
+        {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                tracing::warn!(%error, "list_by_group query failed");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn try_list_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        offset: u64,
+        limit: u64,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<Session>> {
         let mut conditions: Vec<String> = vec![
             "s.env = ?".to_string(),
             "s.group_id = ?".to_string(),
@@ -791,14 +819,16 @@ impl SessionRepoPort for MySqlSessionStore {
             where_clause = conditions.join(" AND "),
         );
 
-        let rows = match self.db.query(DbStatement::with_params(&sql, params)).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "list_by_group query failed");
-                return Vec::new();
-            }
-        };
-        rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "list sessions for Group '{group_id}': {error}"
+                ))
+            })?;
+        rows.iter().map(row_to_session).collect()
     }
 
     async fn latest_running(&self, group_id: &str) -> Option<Session> {

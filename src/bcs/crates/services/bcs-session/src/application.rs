@@ -105,7 +105,17 @@ impl SessionManagementService for SessionManagementServiceImpl {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(self.repo.list_by_group(group_id, status, offset, limit, title_contains, participant_id).await)
+        Ok(self
+            .repo
+            .try_list_by_group(
+                group_id,
+                status,
+                offset,
+                limit,
+                title_contains,
+                participant_id,
+            )
+            .await?)
     }
 
     async fn count_running_service(

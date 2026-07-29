@@ -40,6 +40,26 @@ pub trait SessionRepoPort: Send + Sync {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> Vec<Session>;
+    async fn try_list_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        offset: u64,
+        limit: u64,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<Session>> {
+        Ok(self
+            .list_by_group(
+                group_id,
+                status,
+                offset,
+                limit,
+                title_contains,
+                participant_id,
+            )
+            .await)
+    }
     async fn latest_running(&self, group_id: &str) -> Option<Session>;
     async fn count_running_service(&self, group_id: &str) -> u64;
     async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session>;

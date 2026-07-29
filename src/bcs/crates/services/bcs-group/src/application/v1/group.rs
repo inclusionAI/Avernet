@@ -1233,10 +1233,9 @@ fn map_group_error(error: GroupUseCaseError) -> ApplicationError {
         GroupUseCaseError::InvalidHistoryLimit(limit) => {
             ApplicationError::invalid("invalid_request", format!("invalid history limit {limit}"))
         }
-        GroupUseCaseError::ActorNotFound(actor_id) => ApplicationError::not_found(
-            "actor_not_found",
-            format!("Actor '{actor_id}' was not found"),
-        ),
+        GroupUseCaseError::ActorNotFound(actor_id) => {
+            ApplicationError::not_found("bot_not_found", format!("Bot '{actor_id}' was not found"))
+        }
         GroupUseCaseError::InvalidParticipantMode { .. } => {
             ApplicationError::invalid("invalid_participant", error.to_string())
         }

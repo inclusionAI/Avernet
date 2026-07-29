@@ -1689,6 +1689,29 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
 }
 
 #[tokio::test]
+async fn missing_bot_caller_uses_the_documented_bot_not_found_code() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("target").await;
+
+    let result = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("missing-caller"),
+            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
+                name: None,
+                context: None,
+                target_actor_id: "target".into(),
+            }),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::NotFound { code, .. }) if code == "bot_not_found"
+    ));
+}
+
+#[tokio::test]
 async fn deleting_dm_maps_the_legacy_rejection_to_contract_conflict() {
     let fixture = Fixture::new().await;
     fixture.add_public_bot("driver").await;
