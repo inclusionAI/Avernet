@@ -833,3 +833,35 @@ def test_update_still_carries_the_bearer_token(client, svc):
     assert svc.update_bot.call_args.kwargs["request_headers"] == {
         "Authorization": "Bearer tok-1"
     }
+
+
+# ----- round-16 review regressions ------------------------------------------
+
+
+def test_delete_service_bot_is_rejected(client, svc):
+    """R16/F53: service bots are deleted through their publish lifecycle.
+
+    ``BotPublishService.delete_service_bot`` refuses unless the publication is a
+    deletable draft with no successful publish, and destroys the verification
+    histories first. Generic ``delete_bot`` does none of that, so it would
+    remove the source bot, Passport and device while successful publication
+    records and verification resources survive.
+    """
+    svc.get_bot.return_value = {**BOT, "bot_type": "service"}
+    resp = client.delete("/openapi/v1/bots/b1")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == 409000
+    svc.delete_bot.assert_not_called()
+
+
+def test_service_bot_restart_is_still_allowed(client, svc):
+    """Only deletion is refused — restart does not touch the publication."""
+    svc.get_bot.return_value = {**BOT, "bot_type": "service"}
+    _ok(client.post("/openapi/v1/bots/b1/restart"))
+    svc.restart_bot.assert_called_once()
+
+
+def test_personal_bot_delete_is_unaffected(client, svc):
+    """The guard must not widen to the type this surface does manage."""
+    _ok(client.delete("/openapi/v1/bots/b1"))
+    svc.delete_bot.assert_called_once_with("b1", "u1")

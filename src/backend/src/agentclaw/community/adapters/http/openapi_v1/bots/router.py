@@ -121,8 +121,8 @@ def _auth_status_error(status: str, request: Request) -> JSONResponse:
     return JSONResponse(status_code=400, content=body.model_dump())
 
 
-def _reject_desktop(bot: dict[str, Any]) -> None:
-    """Refuse destructive lifecycle operations on a desktop bot (→ 409).
+def _reject_unowned_lifecycle(bot: dict[str, Any], *, deleting: bool = False) -> None:
+    """Refuse lifecycle operations this surface does not own (→ 409).
 
     Desktop bots have a dedicated service and their own internal namespace
     (``/api/desktop/bots``): deletion there also destroys the BaaS container and
@@ -137,9 +137,22 @@ def _reject_desktop(bot: dict[str, Any]) -> None:
     desktop service as a public dependency — a wider change than this surface
     should make on its own.
     """
-    if (bot.get("bot_type") or "") == "desktop":
+    bot_type = bot.get("bot_type") or ""
+    if bot_type == "desktop":
         raise BotOperationNotAllowedError(
             "desktop bots are managed by the desktop service"
+        )
+    # Service bots additionally have a publish lifecycle. Deleting one goes
+    # through BotPublishService.delete_service_bot, which refuses unless the
+    # publication is a deletable draft with no successful publish, and destroys
+    # the verification histories first. Generic delete_bot does none of that, so
+    # it would remove the source bot, Passport and device while successful
+    # publication records and verification resources survive.
+    #
+    # Only deletion: reads and restart do not touch the publication.
+    if deleting and bot_type == "service":
+        raise BotOperationNotAllowedError(
+            "service bots are deleted through their publish lifecycle"
         )
 
 
@@ -414,9 +427,9 @@ async def delete_bot(
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Deleted]:
-    """Delete a bot. Desktop bots are rejected — see :func:`_reject_desktop`."""
+    """Delete a bot. See :func:`_reject_unowned_lifecycle` for what is refused."""
     owner_id = caller_owner_id(principal)
-    _reject_desktop(bot_service.get_bot(bot_id, owner_id))
+    _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id), deleting=True)
     bot_service.delete_bot(bot_id, owner_id)
     return deleted_envelope(request)
 
@@ -429,9 +442,9 @@ async def restart_bot(
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
-    """Restart a bot. Desktop bots are rejected — see :func:`_reject_desktop`."""
+    """Restart a bot. Desktop bots are rejected — see :func:`_reject_unowned_lifecycle`."""
     owner_id = caller_owner_id(principal)
-    _reject_desktop(bot_service.get_bot(bot_id, owner_id))
+    _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id))
     bot = bot_service.restart_bot(bot_id, owner_id)
     return envelope(_to_bot(bot), request)
 

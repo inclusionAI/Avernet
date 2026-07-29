@@ -18,9 +18,12 @@ Two checks per pair, because ``issubclass`` on a ``runtime_checkable`` Protocol
 verifies method **names only**:
 
 1. ``issubclass`` — catches a removed or renamed method (the README's contract).
-2. Signature equality — catches a *renamed parameter*, which the name check
-   cannot see. Without it, renaming ``entity_id`` on the implementation passes
-   both type checking and this gate while every request fails at runtime.
+2. Full signature equality — parameter names, **kinds** and defaults, plus
+   coroutine status. Comparing names alone still passes when a method turns
+   from ``async def`` into ``def`` (the adapter then awaits a non-awaitable) or
+   when a keyword-only parameter becomes positional-only (the adapter then
+   calls it by keyword). Both fail every affected request while the gate stays
+   green, so the comparison has to cover the whole shape.
 
 ``_PAIRS`` starts with the contract added in this PR. It is a registry, not a
 discovery walk: most Protocols in ``api/`` still declare
@@ -80,12 +83,29 @@ def test_protocol_signatures_match_the_implementation(protocol, concrete) -> Non
         impl = getattr(concrete, name, None)
         if impl is None:
             continue  # reported by the issubclass test
-        declared = inspect.signature(getattr(protocol, name))
+        declared_fn = getattr(protocol, name)
+        declared = inspect.signature(declared_fn)
         actual = inspect.signature(impl)
-        if list(declared.parameters) != list(actual.parameters):
+
+        # Awaitability: adapters `await` these, so async→sync breaks every call.
+        if inspect.iscoroutinefunction(declared_fn) != inspect.iscoroutinefunction(impl):
             mismatches.append(
-                f"{name}: protocol {list(declared.parameters)} "
-                f"!= impl {list(actual.parameters)}"
+                f"{name}: protocol "
+                f"{'async' if inspect.iscoroutinefunction(declared_fn) else 'sync'} "
+                f"!= impl {'async' if inspect.iscoroutinefunction(impl) else 'sync'}"
+            )
+
+        # Names, kinds AND defaults — a keyword-only parameter turning
+        # positional-only keeps the name but breaks every keyword call site.
+        def _shape(sig: inspect.Signature) -> list[tuple[str, int, object]]:
+            return [
+                (p.name, p.kind.value, p.default)
+                for p in sig.parameters.values()
+            ]
+
+        if _shape(declared) != _shape(actual):
+            mismatches.append(
+                f"{name}: protocol {_shape(declared)} != impl {_shape(actual)}"
             )
     assert not mismatches, (
         f"{concrete.__name__} drifted from {protocol.__name__}:\n  "
