@@ -4,10 +4,17 @@ from __future__ import annotations
 import logging
 from urllib.parse import quote
 
+import httpx
+
 from agentclaw.community.core.session_resources.types import UploadGrant
 from agentclaw.community.plugin_api.http_client import HttpClient
 
 log = logging.getLogger("session_resource.baas")
+
+
+class SessionFileUpstreamUnavailableError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("session_file_upstream_unavailable")
 
 
 class SessionResourceBaasClient:
@@ -29,9 +36,10 @@ class SessionResourceBaasClient:
             self._hash(tenant),
             self._hash(session_id),
         )
+        path = self._session_path(tenant, session_id, "files/upload-url")
         try:
             response = self._http.post(
-                self._session_path(tenant, session_id, "files/upload-url"),
+                path,
                 json={
                     "filename": filename,
                     "file_size": file_size or 0,
@@ -40,25 +48,25 @@ class SessionResourceBaasClient:
                 },
                 timeout=30.0,
             )
-        except Exception as exc:
-            log.warning(
-                "session_resource.baas.session_upload_url.fail tenant_hash=%s error_type=%s",
-                self._hash(tenant),
-                type(exc).__name__,
+            data = self._data(response)
+            grant = UploadGrant(
+                transfer_id=self._string(data, "transfer_id"),
+                upload_type=self._string(data, "type"),
+                upload_url=self._optional_string(data, "upload_url"),
+                http_method=self._optional_string(data, "http_method") or "PUT",
+                expires_at=self._optional_string(data, "expires_at"),
+                upload_session_id=self._optional_string(data, "upload_session_id"),
+                part_size=self._optional_int(data, "part_size"),
+                part_count=self._optional_int(data, "part_count"),
+                parts=self._optional_parts(data),
             )
-            raise
-        data = self._data(response)
-        grant = UploadGrant(
-            transfer_id=self._string(data, "transfer_id"),
-            upload_type=self._string(data, "type"),
-            upload_url=self._optional_string(data, "upload_url"),
-            http_method=self._optional_string(data, "http_method") or "PUT",
-            expires_at=self._optional_string(data, "expires_at"),
-            upload_session_id=self._optional_string(data, "upload_session_id"),
-            part_size=self._optional_int(data, "part_size"),
-            part_count=self._optional_int(data, "part_count"),
-            parts=self._optional_parts(data),
-        )
+        except (httpx.HTTPError, ValueError) as exc:
+            raise self._upstream_error(
+                operation="session_upload_url",
+                tenant=tenant,
+                reference=session_id,
+                exc=exc,
+            ) from exc
         log.info(
             "session_resource.baas.session_upload_url.success tenant_hash=%s transfer_hash=%s upload_type=%s",
             self._hash(tenant),
@@ -79,24 +87,25 @@ class SessionResourceBaasClient:
             self._hash(tenant),
             self._hash(transfer_id),
         )
+        path = self._session_path(
+            tenant,
+            session_id,
+            f"files/upload-url/{self._segment(transfer_id)}/complete",
+        )
         try:
             response = self._http.post(
-                self._session_path(
-                    tenant,
-                    session_id,
-                    f"files/upload-url/{self._segment(transfer_id)}/complete",
-                ),
+                path,
                 json=None,
                 timeout=30.0,
             )
-        except Exception as exc:
-            log.warning(
-                "session_resource.baas.session_upload_complete.fail tenant_hash=%s error_type=%s",
-                self._hash(tenant),
-                type(exc).__name__,
-            )
-            raise
-        status = self._string(self._data(response), "status")
+            status = self._string(self._data(response), "status")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise self._upstream_error(
+                operation="session_upload_complete",
+                tenant=tenant,
+                reference=transfer_id,
+                exc=exc,
+            ) from exc
         log.info(
             "session_resource.baas.session_upload_complete.success tenant_hash=%s transfer_hash=%s status=%s",
             self._hash(tenant),
@@ -118,24 +127,25 @@ class SessionResourceBaasClient:
             self._hash(tenant),
             self._hash(transfer_id),
         )
+        path = self._legacy_path(
+            tenant,
+            bot_uuid,
+            f"upload-url/{self._segment(transfer_id)}/complete",
+        )
         try:
             response = self._http.post(
-                self._legacy_path(
-                    tenant,
-                    bot_uuid,
-                    f"upload-url/{self._segment(transfer_id)}/complete",
-                ),
+                path,
                 json=None,
                 timeout=30.0,
             )
-        except Exception as exc:
-            log.warning(
-                "session_resource.baas.legacy_upload_complete.fail tenant_hash=%s error_type=%s",
-                self._hash(tenant),
-                type(exc).__name__,
-            )
-            raise
-        status = self._string(self._data(response), "status")
+            status = self._string(self._data(response), "status")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise self._upstream_error(
+                operation="legacy_upload_complete",
+                tenant=tenant,
+                reference=transfer_id,
+                exc=exc,
+            ) from exc
         log.info(
             "session_resource.baas.legacy_upload_complete.success tenant_hash=%s transfer_hash=%s status=%s",
             self._hash(tenant),
@@ -212,6 +222,27 @@ class SessionResourceBaasClient:
         if not isinstance(value, list) or not all(isinstance(part, dict) for part in value):
             raise ValueError("BaaS response has invalid parts")
         return value
+
+    @classmethod
+    def _upstream_error(
+        cls,
+        *,
+        operation: str,
+        tenant: str,
+        reference: str,
+        exc: BaseException,
+    ) -> SessionFileUpstreamUnavailableError:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        log.warning(
+            "session_resource.baas.%s.fail tenant_hash=%s reference_hash=%s error_type=%s upstream_status=%s",
+            operation,
+            cls._hash(tenant),
+            cls._hash(reference),
+            type(exc).__name__,
+            status_code if isinstance(status_code, int) else None,
+        )
+        return SessionFileUpstreamUnavailableError()
 
     @staticmethod
     def _hash(value: str) -> str:
