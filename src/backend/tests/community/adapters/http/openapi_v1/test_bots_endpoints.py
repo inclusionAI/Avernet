@@ -806,3 +806,30 @@ def test_auth_status_defaulted_engine_passes_when_configured(client, svc, passpo
     passport.query_agent_passport.return_value = {"agent_code": "ac"}
     _ok(client.get("/openapi/v1/bots/b1/auth-status"))
     svc.create_bot.assert_called_once()
+
+
+# ----- round-14 review regressions ------------------------------------------
+
+
+def test_update_does_not_sync_to_bcn(client, svc):
+    """R14/F49: the BCN identity has no tenant axis, so this surface stays out.
+
+    ``_sync_bot_to_bcn`` keys on ``f"{bot_id}:{owner_id}"``; ``bot_id`` is only
+    unique per owner, so two tenants sharing a principal resolve to one BCN
+    record and either can overwrite the other's. Stopgap until the BCN contract
+    carries a tenant — a stale name beats a cross-tenant write.
+    """
+    _ok(client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"}))
+    assert svc.update_bot.call_args.kwargs["sync_to_bcn"] is False
+
+
+def test_update_still_carries_the_bearer_token(client, svc):
+    """The F37 header stays, so re-enabling the sync can't silently regress it."""
+    client.put(
+        "/openapi/v1/bots/b1",
+        json={"bot_name": "Renamed"},
+        headers={"Authorization": "Bearer tok-1"},
+    )
+    assert svc.update_bot.call_args.kwargs["request_headers"] == {
+        "Authorization": "Bearer tok-1"
+    }

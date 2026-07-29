@@ -373,8 +373,20 @@ async def update_bot(
         owner_id,
         bot_name=bot_name,
         bot_desc=body.bot_desc,
-        # Bearer token only — see _bcn_auth_headers. Without it the downstream
-        # BCN sync runs unauthenticated and fails silently.
+        # BCN sync is OFF on this surface until the coordination-network
+        # identity carries a tenant. ``_sync_bot_to_bcn`` builds it as
+        # ``f"{bot_id}:{owner_id}"``, and ``bot_id`` is only unique per owner —
+        # every owner's first bot is "default" — so two tenants sharing a
+        # principal resolve to ONE BCN record and either can overwrite the
+        # other's name and summary. Local rows stay isolated by the tenant
+        # guard; this identifier escapes it.
+        #
+        # A stale BCN name is a much smaller problem than a cross-tenant write,
+        # so this stays off until the BCN contract gains a tenant axis. One line
+        # to re-enable then. See the F49 thread on PR #494.
+        sync_to_bcn=False,
+        # Bearer token only — see _bcn_auth_headers. Kept so re-enabling the
+        # sync does not silently reintroduce the unauthenticated call F37 fixed.
         request_headers=_bcn_auth_headers(request),
     )
     # Identity metadata lives in the Passport too; leaving it stale would make
