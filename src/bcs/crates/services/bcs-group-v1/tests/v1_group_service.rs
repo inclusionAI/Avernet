@@ -11,6 +11,7 @@ use bcs_db_api::{
 };
 use bcs_friend::FriendCore;
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
+use bcs_group_store::MySqlGroupStore;
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedUser, BotFinalDelivery, ChatConfiguration,
@@ -59,6 +60,53 @@ impl Fixture {
 
     async fn new_with_bots(bots: Arc<BotCore>) -> Self {
         Self::build(None, None, Some(bots)).await
+    }
+
+    async fn new_with_failing_group_store() -> Self {
+        let group_repo = Arc::new(MySqlGroupStore::new(
+            Arc::new(FailingDb),
+            "dev".to_string(),
+        ));
+        let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
+        let bots = Arc::new(BotCore::memory());
+        let relation = Arc::new(RelationCore::memory());
+        let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
+        let sessions = Arc::new(SessionManagementServiceImpl::new(
+            Arc::new(MemorySessionRepo::new()),
+            group_repo,
+        ));
+        let system_message: Arc<dyn SystemMessageService> =
+            Arc::new(NoopSystemMessageService);
+        let management = Arc::new(
+            GroupManagement::new(
+                groups.clone(),
+                bots.clone(),
+                friends.clone(),
+                relation.clone(),
+                GroupConfig::default(),
+                sessions.clone(),
+                system_message,
+            )
+            .for_v1_openapi(),
+        );
+        let service = GroupServiceImpl::new(
+            groups.clone(),
+            bots.clone(),
+            friends.clone(),
+            relation,
+            sessions.clone(),
+            management,
+            GroupServiceConfig {
+                relation_env: "dev".to_string(),
+            },
+        );
+        Self {
+            service,
+            groups,
+            bots,
+            friends,
+            sessions,
+        }
     }
 
     async fn build(
@@ -726,6 +774,37 @@ async fn bot_principal_list_propagates_registry_database_failure() {
         result,
         Err(ApplicationError::Internal(message))
             if message.contains("bot database unavailable")
+    ));
+}
+
+#[tokio::test]
+async fn create_group_propagates_quota_lookup_database_failure() {
+    let fixture = Fixture::new_with_failing_group_store().await;
+    fixture.add_public_bot("driver").await;
+
+    let result = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                driver_bot_uuid: "driver".into(),
+                name: Some("quota lookup failure".into()),
+                context: None,
+                visibility: GroupVisibility::Private,
+                participants: Vec::new(),
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+            }),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(ApplicationError::Internal(message))
+            if message.contains("find Groups for participant")
     ));
 }
 

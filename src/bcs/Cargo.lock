@@ -939,6 +939,7 @@ dependencies = [
  "bcs-db-api",
  "bcs-friend",
  "bcs-group",
+ "bcs-group-store",
  "bcs-relation",
  "bcs-service-api",
  "bcs-session",

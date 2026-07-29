@@ -189,9 +189,8 @@ impl GroupManagement {
         }
 
         let driver_active_count = self
-            .group
-            .find_by_participant(driver_bot_id)
-            .await
+            .groups_for_quota(driver_bot_id)
+            .await?
             .into_iter()
             .filter(|group| {
                 group.driver_bot == driver_bot_id && group.status == GroupStatus::Active
@@ -206,9 +205,8 @@ impl GroupManagement {
 
         for bot_id in participant_ids {
             let active_count = self
-                .group
-                .find_by_participant(bot_id)
-                .await
+                .groups_for_quota(bot_id)
+                .await?
                 .into_iter()
                 .filter(|group| group.status == GroupStatus::Active)
                 .count();
@@ -221,6 +219,16 @@ impl GroupManagement {
         }
 
         Ok(())
+    }
+
+    async fn groups_for_quota(
+        &self,
+        actor_id: &str,
+    ) -> Result<Vec<DomainGroup>, GroupUseCaseError> {
+        if self.v1_openapi_create_policy {
+            return Ok(self.group.try_find_by_participant(actor_id).await?);
+        }
+        Ok(self.group.find_by_participant(actor_id).await)
     }
 
     async fn ensure_reachable(

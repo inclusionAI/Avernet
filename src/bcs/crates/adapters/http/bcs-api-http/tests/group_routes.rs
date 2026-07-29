@@ -382,6 +382,43 @@ async fn state_machine_definition_version_must_be_positive_at_the_http_boundary(
 }
 
 #[tokio::test]
+async fn state_machine_binding_actor_ids_must_not_be_empty_at_the_http_boundary() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/groups",
+            json!({
+                "group_kind": "normal",
+                "driver_bot_uuid": "bot-1",
+                "participants": [
+                    {"actor_id": "bot-1", "role": "driver"}
+                ],
+                "collaboration": {
+                    "strategy": "state_machine",
+                    "definition": {
+                        "definition_id": "review",
+                        "version": 1
+                    },
+                    "participant_bindings": [{
+                        "binding": "reviewer",
+                        "actor_ids": []
+                    }]
+                }
+            }),
+        ))
+        .await
+        .expect("empty binding response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+    assert!(service.created.lock().expect("create lock").is_none());
+}
+
+#[tokio::test]
 async fn reused_dm_returns_ok_instead_of_created() {
     let service = Arc::new(FakeGroupService::default());
     service.reuse_dm.store(true, Ordering::Relaxed);

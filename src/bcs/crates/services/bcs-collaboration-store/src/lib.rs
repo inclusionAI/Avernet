@@ -352,6 +352,26 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             .cloned())
     }
 
+    async fn list_runs_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Vec<StateMachineRun>> {
+        let inner = self.inner.read().await;
+        let mut runs = inner
+            .runs
+            .values()
+            .filter(|run| run.session_id == session_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        runs.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.run_id.cmp(&left.run_id))
+        });
+        Ok(runs)
+    }
+
     async fn list_node_runs(&self, run_id: &str) -> ServiceResult<Vec<StateMachineNodeRun>> {
         let inner = self.inner.read().await;
         let mut nodes = inner
@@ -1586,6 +1606,29 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             .next()
             .map(row_to_state_machine_run)
             .transpose()
+    }
+
+    async fn list_runs_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Vec<StateMachineRun>> {
+        let sql = format!(
+            "SELECT {SM_RUN_SELECT_COLS} \
+             FROM bcs_state_machine_runs \
+             WHERE env = ? AND session_id = ? AND record_status = 'active' \
+             ORDER BY created_at_ms DESC, id DESC"
+        );
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                sql,
+                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine runs list by session: {error}"))
+            })?;
+        rows.into_iter().map(row_to_state_machine_run).collect()
     }
 
     async fn list_node_runs(&self, run_id: &str) -> ServiceResult<Vec<StateMachineNodeRun>> {

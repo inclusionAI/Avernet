@@ -2474,6 +2474,13 @@ async fn group_runtime_cleanup_aborts_runs_and_removes_sessions_and_binding() {
         })
         .await
         .expect("start run");
+    let mut second_run = started.view.run.clone();
+    second_run.run_id = "group-cleanup-second-run".to_string();
+    second_run.created_at = second_run.created_at.saturating_add(1);
+    second_run.updated_at = second_run.created_at;
+    StateMachineRunRepoPort::create_run(&*store, second_run.clone(), Vec::new())
+        .await
+        .expect("seed second active run for the same session");
 
     runtime
         .cancel_group_runs("group-1", "group_deleted")
@@ -2484,6 +2491,11 @@ async fn group_runtime_cleanup_aborts_runs_and_removes_sessions_and_binding() {
         .expect("read cancelled run")
         .expect("cancelled run remains for audit");
     assert_eq!(aborted.status, StateMachineRunStatus::Aborted);
+    let second_aborted = StateMachineRunRepoPort::get_run(&*store, &second_run.run_id)
+        .await
+        .expect("read second cancelled run")
+        .expect("second cancelled run remains for audit");
+    assert_eq!(second_aborted.status, StateMachineRunStatus::Aborted);
 
     runtime
         .delete_group_runtime_state("group-1")

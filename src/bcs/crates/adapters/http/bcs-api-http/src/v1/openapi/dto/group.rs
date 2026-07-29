@@ -115,10 +115,23 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
+fn deserialize_non_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let values = Vec::<T>::deserialize(deserializer)?;
+    if values.is_empty() {
+        return Err(D::Error::custom("must contain at least one item"));
+    }
+    Ok(values)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParticipantBindingRequest {
     pub binding: String,
+    #[serde(deserialize_with = "deserialize_non_empty_vec")]
     pub actor_ids: Vec<String>,
 }
 

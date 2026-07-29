@@ -53,6 +53,8 @@ use serde_json::Value;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+const RUNTIME_CLEANUP_SESSION_LIMIT: u64 = i64::MAX as u64;
+
 use crate::definition::{
     CompiledStateMachine, reject_explicit_participant_roles, validate_definition,
 };
@@ -3330,27 +3332,41 @@ impl CollaborationRuntimeService for CollaborationRuntime {
     ) -> Result<(), CollaborationRuntimeError> {
         let sessions = self
             .sessions
-            .list_by_group(group_id, None, 0, u64::MAX, None, None)
+            .list_by_group(
+                group_id,
+                None,
+                0,
+                RUNTIME_CLEANUP_SESSION_LIMIT,
+                None,
+                None,
+            )
             .await
             .map_err(|error| {
                 CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
             })?;
+        let mut first_error = None;
         for session in sessions {
-            let Some(run) = self.runs.get_run_by_session_id(&session.id).await? else {
-                continue;
-            };
-            if matches!(
-                run.status,
-                StateMachineRunStatus::Pending | StateMachineRunStatus::Running
-            ) {
-                self.cancel_state_machine_run(CancelStateMachineRunCommand {
-                    run_id: run.run_id,
-                    reason: Some(reason.to_string()),
-                })
-                .await?;
+            for run in self.runs.list_runs_by_session_id(&session.id).await? {
+                if !matches!(
+                    run.status,
+                    StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+                ) {
+                    continue;
+                }
+                if let Err(error) = self
+                    .cancel_state_machine_run(CancelStateMachineRunCommand {
+                        run_id: run.run_id,
+                        reason: Some(reason.to_string()),
+                    })
+                    .await
+                {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
             }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     async fn delete_group_runtime_state(
@@ -3359,7 +3375,14 @@ impl CollaborationRuntimeService for CollaborationRuntime {
     ) -> Result<(), CollaborationRuntimeError> {
         let sessions = self
             .sessions
-            .list_by_group(group_id, None, 0, u64::MAX, None, None)
+            .list_by_group(
+                group_id,
+                None,
+                0,
+                RUNTIME_CLEANUP_SESSION_LIMIT,
+                None,
+                None,
+            )
             .await
             .map_err(|error| {
                 CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
@@ -5026,5 +5049,10 @@ runtime:
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].node_timeout_ms, None);
         assert_eq!(nodes[0].attempt, 0);
+    }
+
+    #[test]
+    fn runtime_cleanup_session_limit_is_sqlite_representable() {
+        assert!(RUNTIME_CLEANUP_SESSION_LIMIT <= i64::MAX as u64);
     }
 }

@@ -143,6 +143,20 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         &self,
         session_id: &str,
     ) -> ServiceResult<Option<StateMachineRun>>;
+    /// List every run associated with a session.
+    ///
+    /// The compatibility default preserves existing external implementations;
+    /// production stores override it so cleanup can cancel all active runs.
+    async fn list_runs_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Vec<StateMachineRun>> {
+        Ok(self
+            .get_run_by_session_id(session_id)
+            .await?
+            .into_iter()
+            .collect())
+    }
     async fn list_node_runs(&self, run_id: &str) -> ServiceResult<Vec<StateMachineNodeRun>>;
     async fn get_node_run(
         &self,
