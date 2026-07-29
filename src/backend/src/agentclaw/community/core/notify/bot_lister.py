@@ -8,7 +8,9 @@
   - ``status="ACTIVE"`` —— 只取活绑定
   - ``sandbox_id`` 回退到 ``binding.device_id`` —— 老版本绑定没写 device_props
 
-bot 名字仍然从 ``BotRepository`` 解析 (device_props.bolt_id → bot_id)。
+bot 名字和 ``active_engine`` 从 ``BotRepository`` / ``ac_bots`` 解析。只有
+``aicoding`` / ``claude_code`` 引擎支持 Engine ``/api/notify``，其他引擎
+在生成 ``NotifyTarget`` 前跳过，避免无效探测。
 
 协作者机器人：除 owner 自己的活绑定外，再查 ``CollaboratorRepository``,
 把当前用户作为协作者参与的 Bot 一并纳入通知列表（对齐
@@ -24,6 +26,7 @@ from agentclaw.community.core.bot_collaborator.repository.protocol import (
 )
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.notify.constants import NOTIFY_SUPPORTED_ENGINES
 from agentclaw.community.core.notify.protocol import NotifyTarget
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -67,7 +70,9 @@ class RepositoryNotifyBotLister:
             if not sandbox_id:
                 continue
             bot_id = str(props.get("bolt_id") or b.device_id)
-            bot_name = self._resolve_bot_name(bot_id, user_id)
+            bot_name = self._resolve_supported_bot_name(bot_id, user_id)
+            if bot_name is None:
+                continue
             result.append(NotifyTarget(
                 bot_id=bot_id, bot_name=bot_name,
                 owner_id=user_id, sandbox_id=str(sandbox_id),
@@ -93,22 +98,41 @@ class RepositoryNotifyBotLister:
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
-    def _resolve_bot_name(self, bot_id: str, owner_id: str) -> str:
-        """Resolve display name; fall back to bot_id on failure.
+    def _resolve_supported_bot_name(
+        self, bot_id: str, owner_id: str
+    ) -> str | None:
+        """Return the display name when the bot supports notification polling.
 
-        镜像原始实现：bot 名字优先从 ``BotRepository`` 取，查不到/报错时
-        回退到 ``bot_id``。
+        ``active_engine`` comes from ``ac_bots`` via ``BotRepository``. Missing
+        bot metadata, lookup failures, and unsupported engines all fail closed:
+        without a confirmed notification-capable engine we must not call the
+        Engine ``/api/notify`` endpoint.
         """
-        bot_name = bot_id
         try:
             bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-            if bot:
-                bot_name = bot.get("bot_name") or bot_id
         except Exception as e:
             logger.warning(
-                f"[notify_bot_lister] bot lookup failed bot={bot_id}: {e}"
+                f"[notify_bot_lister] bot lookup failed bot={bot_id} "
+                f"owner={owner_id}: {e}"
             )
-        return bot_name
+            return None
+
+        if not bot:
+            logger.warning(
+                f"[notify_bot_lister] bot not found bot={bot_id} "
+                f"owner={owner_id}"
+            )
+            return None
+
+        active_engine = str(bot.get("active_engine") or "").strip().lower()
+        if active_engine not in NOTIFY_SUPPORTED_ENGINES:
+            logger.info(
+                f"[notify_bot_lister] skip unsupported engine bot={bot_id} "
+                f"owner={owner_id} active_engine={active_engine!r}"
+            )
+            return None
+
+        return str(bot.get("bot_name") or bot_id)
 
     def _list_collaborator_mappings(
         self,
@@ -139,7 +163,7 @@ class RepositoryNotifyBotLister:
             f"{len(collaborators)}"
         )
         # NOTE: each collaborator bot issues 2 DB calls (active binding +
-        # name lookup) → O(2N). Fine for typical collaborator counts; if
+        # bot metadata lookup) → O(2N). Fine for typical collaborator counts; if
         # /api/v1/notify polling load grows, add batch methods
         # (get_active_by_bots_and_owners / get_bots_by_ids_and_owners) to
         # DeviceBindingRepository / BotRepository and resolve in O(1).
@@ -167,7 +191,9 @@ class RepositoryNotifyBotLister:
             sandbox_id = props.get("sandbox_id") or binding.device_id
             if not sandbox_id:
                 continue
-            bot_name = self._resolve_bot_name(bot_id, owner_id)
+            bot_name = self._resolve_supported_bot_name(bot_id, owner_id)
+            if bot_name is None:
+                continue
             mappings.append(NotifyTarget(
                 bot_id=bot_id, bot_name=bot_name,
                 owner_id=owner_id, sandbox_id=str(sandbox_id),
