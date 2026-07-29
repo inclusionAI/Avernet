@@ -21,6 +21,8 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNameExistsError,
     BotNameInvalidError,
     BotLimitExceededError,
+    DefaultBotTeclawNotAllowedError,
+    DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
     DeviceLimitError,
 )
 from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
@@ -871,6 +873,22 @@ class TestSwitchEngine:
         resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default", "engine_type": "openclaw"})
         assert resp.json()["error_code"] == 400
 
+    def test_default_teclaw_error_preserves_business_message(self, client):
+        tc, svc, _ = client
+        svc.switch_engine.side_effect = DefaultBotTeclawNotAllowedError()
+
+        resp = tc.post(
+            "/api/bots/switch-engine",
+            json={"bot_id": "default", "engine_type": "teclaw"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
+            "error_code": 400,
+            "data": None,
+        }
+
 
 # ---------------------------------------------------------------------------
 # POST /api/bots/restart-scheduler
@@ -1436,6 +1454,23 @@ class TestCreateBot:
         resp = tc.post("/api/bots", json={"bot_name": "NewBot"})
         assert resp.json()["error_code"] == 5400
 
+    def test_default_teclaw_service_guard_preserves_business_message(self, client):
+        tc, svc, passport = client
+        passport.apply_first_agent_passport.return_value = {"token": "tok123"}
+        svc.create_bot.side_effect = DefaultBotTeclawNotAllowedError()
+
+        resp = tc.post(
+            "/api/bots",
+            json={"bot_name": "NewBot", "engine_type": "teclaw"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
+            "error_code": 400,
+            "data": None,
+        }
+
     def test_device_allocation_error(self, client):
         tc, svc, passport = client
         passport.apply_first_agent_passport.return_value = {"token": "tok123"}
@@ -1479,6 +1514,32 @@ class TestCreateBot:
         assert data["success"] is False
         assert data["error_code"] == 400
         passport.apply_first_agent_passport.assert_not_called()
+        svc.create_bot.assert_not_called()
+
+    def test_default_teclaw_is_rejected_before_passport(self, client):
+        tc, svc, passport = client
+        svc.check_create_bot_preflight.side_effect = (
+            DefaultBotTeclawNotAllowedError()
+        )
+
+        resp = tc.post(
+            "/api/bots",
+            json={"bot_name": "NewBot", "engine_type": "teclaw"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
+            "error_code": 400,
+            "data": None,
+        }
+        svc.check_create_bot_preflight.assert_called_once_with(
+            user_id="test_user",
+            bot_id="default",
+            engine_type="teclaw",
+        )
+        passport.apply_first_agent_passport.assert_not_called()
+        passport.apply_agent_passport.assert_not_called()
         svc.create_bot.assert_not_called()
 
     def test_bot_count_limit_returns_429(self, client):
@@ -1604,6 +1665,23 @@ class TestGetAuthStatus:
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 400
+
+    def test_issued_default_teclaw_returns_business_error(self, client):
+        tc, svc, passport = client
+        passport.query_auth_status.return_value = {"status": "ISSUED", "token": "tok"}
+        svc.create_bot.side_effect = DefaultBotTeclawNotAllowedError()
+
+        resp = tc.post(
+            "/api/bots/auth-status",
+            json={"bot_id": "default", "engine_type": "teclaw"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
+            "error_code": 400,
+            "data": None,
+        }
 
     def test_issued_bot_limit_exceeded_returns_429(self, client):
         tc, svc, passport = client

@@ -44,6 +44,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNameExistsError,
     BotNameInvalidError,
     BotLimitExceededError,
+    DefaultBotTeclawNotAllowedError,
     DeviceLimitError,
     generate_bot_id,
     validate_bot_name,
@@ -946,6 +947,18 @@ async def create_bot(
         try:
             bot_service.check_create_bot_preflight(
                 user_id=user_id,
+                bot_id=bot_id,
+                engine_type=passport_engine_type,
+            )
+        except DefaultBotTeclawNotAllowedError as e:
+            logger.warning(
+                f"[bot_router.create_bot] Default Bot cannot use Teclaw Cloud: {e}"
+            )
+            return ApiResponse(
+                success=False,
+                message=str(e),
+                error_code=400,
+                data=None,
             )
         except BotLimitExceededError as e:
             logger.warning(f"[bot_router.create_bot] Bot limit exceeded before passport: {e}")
@@ -1085,6 +1098,16 @@ async def create_bot(
             },
         )
 
+    except DefaultBotTeclawNotAllowedError as e:
+        logger.warning(
+            f"[bot_router.create_bot] Default Bot cannot use Teclaw Cloud: {e}"
+        )
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
+            data=None,
+        )
     except BotNameInvalidError as e:
         logger.warning(f"[bot_router.create_bot] Invalid bot_name: {e}")
         return ApiResponse(
@@ -1295,6 +1318,16 @@ async def get_auth_status(
             data={"status": status},
         )
 
+    except DefaultBotTeclawNotAllowedError as e:
+        logger.warning(
+            f"[bot_router.get_auth_status] Default Bot cannot use Teclaw Cloud: {e}"
+        )
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
+            data=None,
+        )
     except BotNameInvalidError as e:
         logger.warning(f"[bot_router.get_auth_status] Invalid bot_name: {e}")
         return ApiResponse(
@@ -2945,6 +2978,16 @@ async def switch_engine(
             data=result,
         )
 
+    except DefaultBotTeclawNotAllowedError as e:
+        logger.warning(
+            f"[bot_router.switch_engine] Default Bot cannot use Teclaw Cloud: {e}"
+        )
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
+            data=None,
+        )
     except BotNotFoundError:
         return ApiResponse(
             success=False,
