@@ -539,10 +539,14 @@ class SkillsPoolLayoutRepository(
             # "runtime evidence still missing" signal. Once refreshed,
             # last_probe_evidence carries an explicit durable success marker,
             # so downstream failures must not reopen runtime finalization.
+            cutover_evidence = last_probe_evidence.get("cutover")
             if (
                 row.last_failure_code == "MANUAL_REPAIR_RESOLVED"
-                and last_probe_evidence.get("post_cutover_evidence_recorded")
-                is not True
+                and (
+                    not isinstance(cutover_evidence, dict)
+                    or cutover_evidence.get("post_cutover_evidence_recorded")
+                    is not True
+                )
             ):
                 row.phase = SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value
             row.last_failure_code = failure_code

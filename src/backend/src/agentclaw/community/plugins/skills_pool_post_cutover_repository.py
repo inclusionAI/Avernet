@@ -18,6 +18,9 @@ from agentclaw.community.core.skills_pool.types import (
 from agentclaw.community.plugins.skills_pool_cutover_diagnostics import (
     log_missing_quarantine_path,
 )
+from agentclaw.community.plugins.skills_pool_layout_persistence import (
+    encode_stage_evidence,
+)
 
 
 class SkillsPoolPostCutoverRepositoryMixin:
@@ -109,5 +112,9 @@ class SkillsPoolPostCutoverRepositoryMixin:
                     log_missing_quarantine_path(scope, migration_generation)
                 return False
             row.phase = SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value
-            row.last_probe_evidence = evidence_json
+            row.last_probe_evidence = encode_stage_evidence(
+                row.last_probe_evidence,
+                stage="cutover",
+                evidence=persisted_evidence,
+            )
         return True

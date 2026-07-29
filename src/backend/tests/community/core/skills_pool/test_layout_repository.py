@@ -971,7 +971,14 @@ def test_post_cutover_evidence_reuses_existing_quarantine_identity() -> None:
 
     state = repository.get(scope)
     assert state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
-    assert state.last_probe_evidence["post_cutover_evidence_recorded"] is True
+    assert (
+        state.last_probe_evidence["cutover"]["post_cutover_evidence_recorded"]
+        is True
+    )
+    assert state.last_probe_evidence["cutover"]["evidence"] == {
+        "active_marker": "same-generation",
+        "quarantine": "",
+    }
     with database.transactional_orm_session() as session:
         quarantine = session.query(SkillMigrationQuarantineModel).one()
         assert quarantine.path == quarantine_path
