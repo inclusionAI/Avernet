@@ -8,6 +8,7 @@ import pytest
 
 from secbaas.community.api.bot_manage import BotStatus
 from secbaas.community.api.publish_manage import (
+    DEFAULT_CALLBACK_TIMEOUT_SECONDS,
     BatchStatus,
     DrainResult,
     ProgressSummary,
@@ -6891,7 +6892,7 @@ class TestCheckAndHandleTimeout:
 
             _publish_service_instance._publish_record_repo.list_stale_processing_records.assert_called_once_with(
                 publish_id=1,
-                timeout_seconds=600,
+                timeout_seconds=DEFAULT_CALLBACK_TIMEOUT_SECONDS,
                 tenant="test_tenant",
                 env=mock_env,
             )
