@@ -370,6 +370,70 @@ class TestSendMessage:
         assert content == ""
 
     @pytest.mark.asyncio
+    async def test_send_message_error_state_raises(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """When chat event terminates with state=error, send_message raises
+        ChatErrorMessageError carrying state.content as its message."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+            ChatErrorMessageError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        async def fire_chat_error(*args, **kwargs):
+            sk = kwargs["session_key"]
+            state = client._sessions.get(sk)
+            if state:
+                state.content = "connection error"
+                state.state = "error"
+                state.chat_complete.set()
+
+        mock_bot_ws_instance.chat_send.side_effect = fire_chat_error
+
+        with pytest.raises(ChatErrorMessageError, match="connection error"):
+            await client.send_message("Hi")
+
+    @pytest.mark.asyncio
+    async def test_send_message_error_state_empty_content_raises(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """When state=error and state.content is empty, send_message raises
+        ChatErrorMessageError with the fallback ``"chat error"`` message."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+            ChatErrorMessageError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        async def fire_chat_error_no_content(*args, **kwargs):
+            sk = kwargs["session_key"]
+            state = client._sessions.get(sk)
+            if state:
+                state.content = ""
+                state.state = "error"
+                state.chat_complete.set()
+
+        mock_bot_ws_instance.chat_send.side_effect = fire_chat_error_no_content
+
+        with pytest.raises(ChatErrorMessageError, match="chat error"):
+            await client.send_message("Hi")
+
+    @pytest.mark.asyncio
     async def test_send_message_resets_state(self, mock_bot_ws, mock_bot_ws_instance):
         from secbaas.community.core.service.bot_run._async_chat_client import (
             AsyncChatClient,

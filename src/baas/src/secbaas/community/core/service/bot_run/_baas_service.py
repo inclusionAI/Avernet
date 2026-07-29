@@ -397,7 +397,7 @@ class BaasBotService(BotService):
         try:
             auth_token = context.build_auth_token() if context else None
             app_id = context.app_id if context else None
-            content, state = await client.send_message(
+            content, _agent_events = await client.send_message(
                 message=message,
                 session_key=session_id,
                 wait_result=wait_result,
@@ -406,10 +406,6 @@ class BaasBotService(BotService):
                 app_id=app_id,
                 chat_metadata=chat_metadata,
             )
-
-            if state == "error":  # type: ignore[comparison-overlap]
-                self._mark_session_failed(baas_session_id, err_msg=content)
-                raise BotServiceError(content)
 
             self._mark_session_completed(baas_session_id, result={"content": content})
             return BotResponse(content=content)

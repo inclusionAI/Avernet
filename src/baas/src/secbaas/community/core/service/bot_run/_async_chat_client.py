@@ -101,6 +101,16 @@ class NotConnectedError(Exception):
     """连接未建立或已断开时抛出。"""
 
 
+class ChatErrorMessageError(Exception):
+    """Chat 事件以 ``state=error`` 终止时由 :meth:`AsyncChatClient.send_message` 抛出。
+
+    Raised when a chat event terminates with ``state=error`` (e.g. relay
+    ``CONNECTION_ERROR``). The exception carries ``state.content`` (or the
+    fallback ``"chat error"``) as its message so callers can surface the
+    upstream error instead of silently treating the run as completed.
+    """
+
+
 class AsyncChatClient:
     """WebSocket 聊天客户端封装类（纯异步版本）
 
@@ -394,6 +404,12 @@ class AsyncChatClient:
                     # 无超时等待
                     await state.chat_complete.wait()
 
+                # 6. chat 事件以 error 态终止时，抛出异常以触发上层错误路径
+                # （baas_bot_run / baas_bot_session 标记为 FAILED）。仅在
+                # chat_complete 被 set 后判定，纯 timeout（state.state 仍为 ""）
+                # 不抛异常，维持原有“return anyway”行为。
+                if state.state == "error":
+                    raise ChatErrorMessageError(state.content or "chat error")
                 return state.content, state.agent_payloads
 
             finally:
