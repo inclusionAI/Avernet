@@ -110,6 +110,18 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """记录不可逆的数据面切换已经完成。"""
         ...
 
+    def record_post_cutover_evidence(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        preparation_id: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """在边界已提交时补齐运行时证据，不重复提交数据面边界。"""
+        ...
+
     def record_cutover_finalizing(
         self,
         *,
