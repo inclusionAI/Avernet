@@ -2,13 +2,12 @@
 
 每台机器运行的 Worker：轮询 ``baas_bot_run_queue`` 里 PENDING 的工作项，按 bot
 维度做 QPM 限流后无锁认领（claim），再交给注入的 ``RequestExecutor`` 执行。
-Worker 只负责"发现 → 限流 → 认领 → 并发控制 → 心跳 → 终态标记"；真正的
-binding 解析 / 建会话 / 发消息 / 写结果（落 ``baas_bot_run``），以及 session
-串行锁，由 executor 负责（见增量 4/5/6）。
+Worker 只负责"发现 → 限流 → 认领 → 并发控制 → 心跳 → 队列终态标记"；
+真正的 binding 解析 / 建会话 / 发消息 / 写结果（落 ``baas_bot_run``），
+以及 session 串行锁，由 executor 负责（见增量 4/5/6）。
 
 双表：队列工作项在 ``baas_bot_run_queue``（瞬态、高频 churn），结果正文在
-``baas_bot_run``（持久、被 GET /runs 读）。Worker 主要操作队列仓库，仅在
-executor 异常的兜底路径写 ``baas_bot_run`` 的 FAILED 终态。
+``baas_bot_run``（持久、被 GET /runs 读）。Worker 不直接写结果表。
 
 并发互斥不依赖 ``SKIP LOCKED``：claim 用条件 UPDATE 的 affected-rows 实现行级
 出队互斥（见 OrmBotRunQueueRepository.claim_pending_by_bot），因此多机可同时
@@ -27,7 +26,6 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Any
 
-from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.repository.bot_run_queue import (
     BotRunQueueRecord,
     BotRunQueueRepository,
@@ -94,7 +92,6 @@ class BotRequestWorker:
     def __init__(
         self,
         queue_repository: BotRunQueueRepository,
-        run_repository: BotRunRepository,
         qpm_manager: BotConcurrencyManager,
         executor: RequestExecutor,
         *,
@@ -104,7 +101,6 @@ class BotRequestWorker:
         worker_id: str | None = None,
     ) -> None:
         self._queue = queue_repository
-        self._run = run_repository  # 仅兜底写 baas_bot_run 的 FAILED 终态
         self._qpm = qpm_manager
         self._executor = executor
         # callback 名称 -> 已构造的 PostRunCallback 实例（DI 注入）
@@ -196,40 +192,38 @@ class BotRequestWorker:
             await asyncio.sleep(interval)
 
     async def _timeout_scan_once(self) -> None:
-        """扫描一轮超时工作项并标记失败，触发 post_run_callback。
-
-        幂等：如果 baas_bot_run 已经是终态（executor 先超时或先完成），
-        则 _safety_mark_failed 是 no-op，且跳过 callback（已由 executor
-        路径触发过）。
-        """
+        """扫描一轮超时工作项：委托 executor 写结果终态后强制终结队列项。"""
         records = self._queue.scan_timeout()
         for record in records:
-            marked = self._safety_mark_failed(record.run_id, "time out")
+            try:
+                await self._executor.execute(record)
+            except RequeuedToPendingError:
+                # ResultGuardExecutor 会在进入 session lock 前处理 timeout；如果这里仍
+                # 透出 requeue，说明 executor 链未包含 timeout guard，保持队列原状。
+                logger.warning(
+                    "[BotRequestWorker] timeout scan requeued run_id=%s status=%s",
+                    record.run_id,
+                    record.status,
+                )
+                continue
             with contextlib.suppress(Exception):
                 self._queue.force_done(record.run_id)
-            if marked:
-                logger.warning(
-                    "[BotRequestWorker] timeout scan: run_id=%s marked failed",
-                    record.run_id,
-                )
-                callback = self._resolve_callback(record)
-                if callback is not None:
-                    try:
-                        await callback(record.run_id)
-                    except Exception as e:
-                        logger.error(
-                            "[BotRequestWorker] timeout scan callback failed "
-                            "run_id=%s: %s",
-                            record.run_id,
-                            e,
-                            exc_info=True,
-                        )
-            else:
-                logger.info(
-                    "[BotRequestWorker] timeout scan: run_id=%s already terminal, "
-                    "skip callback",
-                    record.run_id,
-                )
+            logger.warning(
+                "[BotRequestWorker] timeout scan: run_id=%s status=%s marked failed",
+                record.run_id,
+                record.status,
+            )
+            callback = self._resolve_callback(record)
+            if callback is not None:
+                try:
+                    await callback(record.run_id)
+                except Exception as e:
+                    logger.error(
+                        "[BotRequestWorker] timeout scan callback failed run_id=%s: %s",
+                        record.run_id,
+                        e,
+                        exc_info=True,
+                    )
 
     # ----------------------------- 主循环单步 -----------------------------
 
@@ -274,14 +268,6 @@ class BotRequestWorker:
         self._sweep_idle_buckets()
         return dispatched
 
-    @staticmethod
-    def _is_time_out(record: BotRunQueueRecord) -> bool:
-        timeout: int | None = record.meta.get("timeout")
-        if timeout is None or record.gmt_create is None:
-            return False
-        deadline = record.gmt_create.timestamp() + timeout
-        return time.time() > deadline
-
     def _resolve_callback(self, record: BotRunQueueRecord) -> PostRunCallback | None:
         """根据 ``record.meta["callback_function"]`` 从 DI 注入的 factories 查找回调实例。"""
         cb_name: str | None = record.meta.get("callback_function")
@@ -290,86 +276,79 @@ class BotRequestWorker:
         return self._callback_factories.get(cb_name)
 
     async def _run_one(self, record: BotRunQueueRecord) -> None:
-        """包裹单个工作项的执行：心跳续约 + 兜底异常处理 + 终态标记 + 并发计数。"""
+        """包裹单个工作项的执行：心跳续约 + 队列终态标记 + 并发计数。
+
+        ``finally`` 只做本地资源清理。``baas_bot_run`` 的业务终态由 executor
+        链负责；Worker 只根据 executor 结果推进 ``baas_bot_run_queue``。
+        """
         post_run_callback = self._resolve_callback(record)
 
-        heartbeat = asyncio.create_task(self._heartbeat_loop(record.run_id))
-        with _trace_context_from_meta(record.meta):
-            try:
-                if self._is_time_out(record):
-                    raise TimeoutError(
-                        f"[BotRequestWorker] time out, run_id={record.run_id}"
-                    )
-                await self._executor.execute(record)
-            except RequeuedToPendingError as e:
-                # session 锁被占用，工作项已放回 PENDING 等待重试。
-                # 跳过 post_run_callback；mark_done 在 finally 统一执行（此时是 no-op）。
-                logger.info(
-                    "[BotRequestWorker] run_id=%s requeued to pending, skip callback "
-                    "(session=%s busy)",
-                    record.run_id,
-                    e.session_id,
-                )
-            except TimeoutError:
-                logger.warning("[BotRequestWorker] time out, run_id=%s", record.run_id)
-                self._safety_mark_failed(record.run_id, "time out")
-                await self._post_run(record, post_run_callback)
-            except Exception as e:
-                # executor 不应让异常逃逸；逃逸即视为执行 bug。兜底把 baas_bot_run
-                # 标记 FAILED，避免该 run 永远停在非终态被客户端轮询（毒消息）。
-                logger.error(
-                    "[BotRequestWorker] executor raised for run_id=%s: %s",
-                    record.run_id,
-                    e,
-                    exc_info=True,
-                )
-                self._safety_mark_failed(record.run_id, str(e))
-                await self._post_run(record, post_run_callback)
-            else:
-                # 正常执行完成。但如果 timeout scan 已经在此期间把
-                # baas_bot_run 标记为终态（FAILED/TIME_OUT）并触发过 callback，
-                # 则跳过本次 callback（避免重复触发）。
-                current = self._run.get_by_run_id(record.run_id)
-                if current is not None and current.status in ("FAILED", "TIME_OUT"):
-                    logger.info(
-                        "[BotRequestWorker] run_id=%s already %s (timeout scan?), "
-                        "skip post_run callback",
-                        record.run_id,
-                        current.status,
-                    )
-                else:
-                    await self._post_run(record, post_run_callback)
-            finally:
-                # 统一标记队列工作项 DONE：仅当仍 RUNNING 时生效。
-                # RequeuedToPending 路径已放回 PENDING，此处是 no-op。
-                mark_done_exc: Exception | None = None
-                mark_done_result: int = -999
+        heartbeat = asyncio.create_task(
+            self._heartbeat_loop(record.run_id, self._worker_id)
+        )
+        try:
+            with _trace_context_from_meta(record.meta):
                 try:
-                    mark_done_result = self._queue.mark_done(record.run_id)
-                except Exception as e:
-                    mark_done_exc = e
-                if mark_done_exc is not None:
-                    logger.warning(
-                        "[BotRequestWorker] mark_done raised run_id=%s err=%s",
-                        record.run_id,
-                        mark_done_exc,
-                    )
-                elif mark_done_result == 0:
-                    logger.info(
-                        "[BotRequestWorker] mark_done no-op (already PENDING/DONE) "
-                        "run_id=%s result=%s",
-                        record.run_id,
-                        mark_done_result,
-                    )
+                    await self._executor.execute(record)
+                except RequeuedToPendingError as e:
+                    await self._requeue_pending(record, e)
+                    return
 
-                heartbeat.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await heartbeat
-                self._active -= 1
-                # 归还该 bot 的并发槽位
-                cached = self._buckets.get(record.bot_id)
-                if cached is not None:
-                    cached[0].release()
+                await self._post_run(record, post_run_callback)
+                self._mark_queue_done(record)
+        finally:
+            heartbeat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat
+            self._active -= 1
+            # 归还该 bot 的并发槽位
+            cached = self._buckets.get(record.bot_id)
+            if cached is not None:
+                cached[0].release()
+
+    async def _requeue_pending(
+        self,
+        record: BotRunQueueRecord,
+        error: RequeuedToPendingError,
+    ) -> None:
+        """session busy 分支：只放回 PENDING，不触发回调，不标 DONE。"""
+        release_result: int | None = None
+        try:
+            release_result = self._queue.release_to_pending(
+                record.run_id, self._worker_id
+            )
+        except Exception as release_error:
+            logger.warning(
+                "[BotRequestWorker] release_to_pending raised run_id=%s err=%s",
+                record.run_id,
+                release_error,
+            )
+        logger.info(
+            "[BotRequestWorker] run_id=%s requeued to pending, "
+            "release_result=%s skip callback (session=%s busy)",
+            record.run_id,
+            release_result,
+            error.session_id,
+        )
+
+    def _mark_queue_done(self, record: BotRunQueueRecord) -> None:
+        """非 requeue 分支完成后，按当前 Worker owner fencing 标记队列 DONE。"""
+        try:
+            result = self._queue.mark_done(record.run_id, self._worker_id)
+        except Exception as e:
+            logger.warning(
+                "[BotRequestWorker] mark_done raised run_id=%s err=%s",
+                record.run_id,
+                e,
+            )
+            return
+        if result == 0:
+            logger.info(
+                "[BotRequestWorker] mark_done no-op (already PENDING/DONE) "
+                "run_id=%s result=%s",
+                record.run_id,
+                result,
+            )
 
     async def _post_run(
         self,
@@ -394,33 +373,17 @@ class BotRequestWorker:
                 self._worker_id,
             )
 
-    async def _heartbeat_loop(self, run_id: str) -> None:
+    async def _heartbeat_loop(self, run_id: str, worker_id: str) -> None:
         """执行期间周期刷新队列工作项的 last_heartbeat，供宕机恢复判活。"""
         interval = self._config.heartbeat_interval_seconds
         while True:
             await asyncio.sleep(interval)
             try:
-                self._queue.touch_heartbeat(run_id)
+                self._queue.touch_heartbeat(run_id, worker_id)
             except Exception as e:
                 logger.warning(
                     "[BotRequestWorker] heartbeat failed run_id=%s: %s", run_id, e
                 )
-
-    def _safety_mark_failed(self, run_id: str, error: str) -> bool:
-        """将 baas_bot_run 标记为 FAILED（仅当仍 PENDING/RUNNING）。
-
-        返回 True 表示本次标记生效，False 表示已是终态（no-op）。
-        """
-        try:
-            current = self._run.get_by_run_id(run_id)
-            if current is not None and current.status in ("PENDING", "RUNNING"):
-                self._run.update_error(run_id, f"worker safety-net: {error}")
-                return True
-        except Exception as e:
-            logger.error(
-                "[BotRequestWorker] safety mark failed run_id=%s: %s", run_id, e
-            )
-        return False
 
     # ----------------------------- 并发限制器 -----------------------------
 

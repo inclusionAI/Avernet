@@ -31,7 +31,7 @@ from ._bot_service_selector import BotServiceSelector
 from ._bot_websocket_client import BotWebSocketClient
 from ._claw_service import BotServiceConfig, ClawBotService
 from ._engine_adapter_registry import BotEngineAdapterRegistry
-from ._executor import BotRunRequestExecutor, SerializingExecutor
+from ._executor import BotRunRequestExecutor, ResultGuardExecutor, SerializingExecutor
 from ._internal_protocols import (
     BotService,
     MessageDispatcher,
@@ -84,5 +84,6 @@ __all__ = [
     "BotRunQueueRecord",
     "PostRunCallback",
     "QueueStatus",
+    "ResultGuardExecutor",
     "SerializingExecutor",
 ]
