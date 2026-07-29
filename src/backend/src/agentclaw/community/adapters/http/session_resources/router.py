@@ -19,6 +19,9 @@ from agentclaw.community.adapters.http.session_resources.schemas import (
 from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
+from agentclaw.community.core.session_resources.baas_client import (
+    SessionFileUpstreamUnavailableError,
+)
 from agentclaw.community.core.session_resources.types import SessionResourceRecord
 from agentclaw.community.di import Injected
 
@@ -41,6 +44,8 @@ def _resource(record: SessionResourceRecord) -> dict:
 
 def _domain_error(exc: ValueError) -> HTTPException:
     code = str(exc)
+    if isinstance(exc, SessionFileUpstreamUnavailableError):
+        return HTTPException(status_code=502, detail=code)
     if code == "resource_not_found":
         return HTTPException(status_code=404, detail=code)
     if code in {"materialize_state_conflict", "transfer_id_mismatch"}:
