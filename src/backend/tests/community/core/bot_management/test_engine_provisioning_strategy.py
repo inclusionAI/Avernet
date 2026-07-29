@@ -221,7 +221,7 @@ def test_template_factory_normal_cc_consumes_model_runtime_repos_and_token():
         "https://code/repo1",
         "https://code/repo2",
     ]
-    assert "BOT_TYPE" not in envs
+    assert envs["BOT_TYPE"] == "normalCC"
     assert strategy.should_encrypt_template_token(ctx) is True
     assert strategy.extract_runtime_token(ctx) == "tok-normal"
 
@@ -275,9 +275,60 @@ def test_user_created_template_factory_config_consumed_without_backend_template_
     assert envs["RELAY_DEFAULT_MODEL"] == "custom-model"
     assert envs["RELAY_DEFAULT_RUNTIME"] == "codefuse-antcc"
     assert json.loads(envs["GIT_ADDRESSES"]) == ["https://code/custom-repo"]
-    assert "BOT_TYPE" not in envs
+    assert envs["BOT_TYPE"] == "userCustomTemplate"
     assert strategy.should_encrypt_template_token(ctx) is True
     assert strategy.extract_runtime_token(ctx) == "tok-custom"
+
+
+def test_claude_code_other_template_type_consumes_identified_template_config():
+    """claude_code + 非 legacy template_type 需有 template_key/template_uid 才消费。"""
+    strategy = AicodingProvisioningStrategy("claude_code")
+    ctx = BotProvisioningContext(
+        active_engine="claude_code",
+        template_type="customCC",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={
+            "template_key": "customCC",
+            "template_uid": "tpl-custom-cc",
+            "model": "  custom-model  ",
+            "runtime": "  codefuse-antcc  ",
+            "token": "tok-custom",
+            "repos": ["https://code/custom-repo"],
+        },
+    )
+
+    envs = strategy.build_extra_envs(ctx)
+    assert envs is not None
+    assert envs["BOT_TYPE"] == "customCC"
+    assert envs["RELAY_DEFAULT_MODEL"] == "custom-model"
+    assert envs["RELAY_DEFAULT_RUNTIME"] == "codefuse-antcc"
+    assert json.loads(envs["GIT_ADDRESSES"]) == ["https://code/custom-repo"]
+    assert strategy.should_encrypt_template_token(ctx) is True
+    assert strategy.extract_runtime_token(ctx) == "tok-custom"
+
+
+def test_claude_code_other_template_type_ignores_incomplete_template_identity():
+    """缺 template_key 或 template_uid 的普通 dict 不能触发非 legacy 模板消费。"""
+    strategy = AicodingProvisioningStrategy("claude_code")
+    for template_config in (
+        {"model": "custom-model", "runtime": "codefuse-antcc", "token": "tok-custom"},
+        {"template_key": "customCC", "model": "custom-model", "token": "tok-custom"},
+        {"template_uid": "tpl-custom-cc", "model": "custom-model", "token": "tok-custom"},
+    ):
+        ctx = BotProvisioningContext(
+            active_engine="claude_code",
+            template_type="customCC",
+            bot_id="b1",
+            owner_id="u1",
+            bot_type="personal",
+            template_config=template_config,
+        )
+
+        assert strategy.build_extra_envs(ctx) is None
+        assert strategy.should_encrypt_template_token(ctx) is False
+        assert strategy.extract_runtime_token(ctx) is None
 
 
 def test_non_coding_engine_does_not_consume_user_template_factory_config():
