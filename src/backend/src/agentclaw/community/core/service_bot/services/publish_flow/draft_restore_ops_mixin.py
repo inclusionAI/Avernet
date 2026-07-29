@@ -20,6 +20,8 @@ from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    TargetBotGoneError,
+    acquire_deploy_workflow,
     to_baas_request_id,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
@@ -27,8 +29,6 @@ from agentclaw.community.log import get_logger
 
 
 logger = get_logger()
-
-_DRAFT_RESTORE_TIMEOUT_SECONDS = 1800
 
 
 class DraftRestoreOpsMixin:
@@ -70,12 +70,9 @@ class DraftRestoreOpsMixin:
             raise PublishFlowServiceError(
                 operation.last_error or f"草稿恢复 operation 已废弃: {operation_id}"
             )
-        # Validation/local-file failures are deterministic and close the attempt.
-        # Once a BaaS workflow acquire begins, however, an exception can mean the
-        # mutation landed remotely but its response/workflow id was not persisted.
-        # Keep that operation non-terminal so the task retries the SAME attempt and
-        # acquire_workflow can resolve the in-doubt window via adopt-by-query.
-        preserve_nonterminal_on_error = False
+
+        # Validate all local/database preconditions before crossing the BaaS
+        # boundary. These failures are deterministic and close this attempt.
         try:
             if operation.state not in {
                 PublishOperationState.PENDING.value,
@@ -164,37 +161,56 @@ class DraftRestoreOpsMixin:
             invalid_reason = behavior.validate_draft_restore_artifact(source_ext)
             if invalid_reason:
                 raise PublishFlowServiceError(invalid_reason)
+            if (
+                behavior.draft_restore_uses_workflow
+                and operation.bot_uuid != binding.device_id
+            ):
+                raise PublishFlowServiceError(
+                    "草稿恢复 operation 的 bot_uuid 与当前绑定不一致: "
+                    f"operation_id={operation_id}"
+                )
+        except Exception as exc:
+            self._publish_operation_repo.fail(operation_id, str(exc))
+            raise
 
-            if behavior.draft_restore_uses_workflow:
-                if operation.state == PublishOperationState.PENDING.value:
-                    if operation.bot_uuid != binding.device_id:
-                        raise PublishFlowServiceError(
-                            "草稿恢复 operation 的 bot_uuid 与当前绑定不一致: "
-                            f"operation_id={operation_id}"
-                        )
+        if behavior.draft_restore_uses_workflow:
+            async def _issue() -> dict:
+                return await behavior.restore_draft(
+                    build_service=self._build_service,
+                    bot=bot,
+                    bot_uuid=binding.device_id,
+                    owner_id=owner_id,
+                    source_version=source_version,
+                    artifact_ext=source_ext,
+                    request_id=to_baas_request_id(operation.request_id),
+                )
 
-                    async def _issue() -> dict:
-                        return await behavior.restore_draft(
-                            build_service=self._build_service,
-                            bot=bot,
-                            bot_uuid=binding.device_id,
-                            owner_id=owner_id,
-                            source_version=source_version,
-                            artifact_ext=source_ext,
-                            request_id=to_baas_request_id(operation.request_id),
-                        )
+            # Reuse the shared deploy atom. It deliberately leaves transient or
+            # in-doubt failures non-terminal, allowing the durable task to retry
+            # the same operation and adopt an already-created BaaS workflow.
+            try:
+                operation = await acquire_deploy_workflow(
+                    self._operation_runner,
+                    publish_id=draft_publish_id,
+                    kind=PublishOperationKind.DRAFT_RESTORE,
+                    stage=PublishStage.DRAFT,
+                    operator=operator,
+                    issue=_issue,
+                    bot_uuid=binding.device_id,
+                    params=operation_params,
+                    bot_gone_reason="draft restore target bot gone",
+                )
+            except TargetBotGoneError as exc:
+                raise PublishFlowServiceError("草稿恢复目标容器不存在") from exc
+            except Exception as exc:
+                raise DraftRestoreRetryableError(str(exc)) from exc
 
-                    preserve_nonterminal_on_error = True
-                    operation = await self._operation_runner.acquire_workflow(
-                        operation, _issue
-                    )
-
-                if operation.baas_publish_id is None:
-                    preserve_nonterminal_on_error = False
-                    raise PublishFlowServiceError(
-                        f"草稿恢复 operation 缺少 BaaS publish_id: {operation_id}"
-                    )
-                preserve_nonterminal_on_error = True
+            if operation.id != operation_id:
+                raise DraftRestoreRetryableError(
+                    "草稿恢复获取到了不同的 operation: "
+                    f"expected={operation_id}, actual={operation.id}"
+                )
+            try:
                 result = await behavior.restore_draft(
                     build_service=self._build_service,
                     bot=bot,
@@ -204,12 +220,17 @@ class DraftRestoreOpsMixin:
                     artifact_ext=source_ext,
                     baas_publish_id=operation.baas_publish_id,
                 )
-            else:
-                if operation.state != PublishOperationState.PENDING.value:
-                    raise PublishFlowServiceError(
-                        "本地草稿恢复 operation 状态不可续跑: "
-                        f"operation_id={operation_id}, state={operation.state}"
-                    )
+            except Exception as exc:
+                raise DraftRestoreRetryableError(str(exc)) from exc
+        else:
+            if operation.state != PublishOperationState.PENDING.value:
+                error = (
+                    "本地草稿恢复 operation 状态不可续跑: "
+                    f"operation_id={operation_id}, state={operation.state}"
+                )
+                self._publish_operation_repo.fail(operation_id, error)
+                raise PublishFlowServiceError(error)
+            try:
                 result = await behavior.restore_draft(
                     build_service=self._build_service,
                     bot=bot,
@@ -218,27 +239,27 @@ class DraftRestoreOpsMixin:
                     source_version=source_version,
                     artifact_ext=source_ext,
                 )
+            except Exception as exc:
+                self._publish_operation_repo.fail(operation_id, str(exc))
+                raise
 
-            if result.get("status") == "failed":
-                # A terminal status returned by BaaS is a certain business
-                # failure, not an in-doubt transport error. Close the ledger row
-                # and let the task become terminally FAILED.
-                preserve_nonterminal_on_error = False
-                raise PublishFlowServiceError(
-                    str(result.get("error") or "恢复草稿失败")
-                )
+        if result.get("status") == "failed":
+            error = str(result.get("error") or "恢复草稿失败")
+            self._publish_operation_repo.fail(operation_id, error)
+            raise PublishFlowServiceError(error)
 
-            if result.get("status") == "restoring":
-                return {
-                    "draft_binding_id": binding_id,
-                    **result,
-                }
-
-            final_result = {
+        if result.get("status") == "restoring":
+            return {
                 "draft_binding_id": binding_id,
-                "status": "success",
                 **result,
             }
+
+        final_result = {
+            "draft_binding_id": binding_id,
+            "status": "success",
+            **result,
+        }
+        try:
             self._publish_operation_repo.update_result(operation_id, final_result)
             if operation.state == PublishOperationState.PENDING.value:
                 completed = self._publish_operation_repo.complete_without_workflow(
@@ -253,19 +274,15 @@ class DraftRestoreOpsMixin:
                         "草稿恢复 operation 无法完成: "
                         f"operation_id={operation_id}, state={getattr(current, 'state', None)}"
                     )
-            result = final_result
-
-            logger.info(
-                "[DraftRestoreOpsMixin.execute_restore_draft] restored: "
-                "draft_publish_id=%s source_publish_id=%s binding_id=%s type=%s",
-                draft_publish_id,
-                source_publish_id,
-                binding_id,
-                result.get("restore_type"),
-            )
-            return result
         except Exception as exc:
-            if preserve_nonterminal_on_error:
-                raise DraftRestoreRetryableError(str(exc)) from exc
-            self._publish_operation_repo.fail(operation_id, str(exc))
-            raise
+            raise DraftRestoreRetryableError(str(exc)) from exc
+
+        logger.info(
+            "[DraftRestoreOpsMixin.execute_restore_draft] restored: "
+            "draft_publish_id=%s source_publish_id=%s binding_id=%s type=%s",
+            draft_publish_id,
+            source_publish_id,
+            binding_id,
+            final_result.get("restore_type"),
+        )
+        return final_result

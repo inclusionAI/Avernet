@@ -23,9 +23,6 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     BotPublishServiceError,
     PublishNotFoundError,
 )
-from agentclaw.community.core.service_bot.services.publish_operation_ids import (
-    operation_request_id,
-)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -42,9 +39,6 @@ if TYPE_CHECKING:
         PublishFlowService,
     )
 
-_TERMINAL_OPERATION_STATES = {
-    state.value for state in PublishOperationState.terminal()
-}
 _DRAFT_RESTORE_TIMEOUT_SECONDS = 1800
 _DRAFT_RESTORE_TIMEOUT_ERROR = "恢复草稿超时（默认限制 30 分钟）"
 
@@ -84,7 +78,7 @@ class PublishDraftRestoreMixin:
         worker outage. The repository transition is CAS-protected and is therefore
         safe when a worker completes concurrently.
         """
-        if operation is None or operation.state in _TERMINAL_OPERATION_STATES:
+        if operation is None or operation.state in PublishOperationState.terminal():
             return operation
 
         deadline_at_raw = (operation.params or {}).get("deadline_at")
@@ -106,10 +100,6 @@ class PublishDraftRestoreMixin:
             or operation
         )
 
-    @staticmethod
-    def _operation_is_in_flight(op: PublishOperationRecord | None) -> bool:
-        return op is not None and op.state not in _TERMINAL_OPERATION_STATES
-
     def _resolve_draft_restore_target(
         self, publish_id: int
     ) -> tuple[BotPublishRecord | None, BotPublishRecord | None, str]:
@@ -120,7 +110,7 @@ class PublishDraftRestoreMixin:
             return draft, None, f"只有 DRAFT 状态可以恢复草稿，当前状态: {draft.status}"
 
         latest_op = self._latest_draft_restore_operation(publish_id)
-        if self._operation_is_in_flight(latest_op):
+        if latest_op is not None and latest_op.state not in PublishOperationState.terminal():
             return draft, None, "草稿正在恢复中，请勿重复操作"
 
         if not draft.last_pub_id or draft.last_pub_id <= 0:
@@ -221,7 +211,7 @@ class PublishDraftRestoreMixin:
 
         params = operation.params or {}
         result = operation.result or {}
-        is_terminal = operation_state in _TERMINAL_OPERATION_STATES
+        is_terminal = operation_state in PublishOperationState.terminal()
         return {
             "draft_publish_id": publish_id,
             "operation_id": operation.id,
@@ -251,8 +241,14 @@ class PublishDraftRestoreMixin:
         bot_uuid: str,
     ) -> PublishOperationRecord:
         """Insert one ledger attempt, rejecting a concurrent in-flight restore."""
+        # Local import avoids BotPublishService -> mixin -> publish_flow package ->
+        # ext_state -> BotPublishService during module initialization.
+        from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+            operation_request_id,
+        )
+
         latest = self._latest_draft_restore_operation(draft.id)
-        if self._operation_is_in_flight(latest):
+        if latest is not None and latest.state not in PublishOperationState.terminal():
             raise BotPublishServiceError("草稿正在恢复中，请勿重复操作")
 
         attempt = self._publish_operation_repo.max_attempt(
@@ -298,7 +294,7 @@ class PublishDraftRestoreMixin:
             # concurrent request won, surface the business duplicate response;
             # otherwise preserve the original repository failure.
             concurrent = self._latest_draft_restore_operation(draft.id)
-            if self._operation_is_in_flight(concurrent):
+            if concurrent is not None and concurrent.state not in PublishOperationState.terminal():
                 raise BotPublishServiceError("草稿正在恢复中，请勿重复操作")
             raise
 

@@ -22,6 +22,8 @@ See specs/2026-07-15-publish-service-idempotency/plan.md.
 """
 from __future__ import annotations
 
+import hashlib
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agentclaw.community.core.service_bot.repository.models import (
@@ -32,10 +34,6 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
     PublishOperationRepository,
 )
-from agentclaw.community.core.service_bot.services.publish_operation_ids import (
-    operation_request_id,
-    to_baas_request_id as to_baas_request_id,
-)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -43,6 +41,45 @@ from agentclaw.community.utils.env_utils import get_current_env
 logger = get_logger()
 
 _BASELINE_KEY = "_baseline_workflow_id"
+
+
+def to_baas_request_id(readable: str) -> str:
+    """Fold a readable correlation string into BaaS's ``request_id`` contract.
+
+    BaaS validates ``request_id`` against ``^[A-Za-z0-9_-]{32,64}$`` on its strict
+    endpoints (scale / update-devices / restart), so anything we send it must
+    comply. Invalid characters (e.g. ``.``) become ``_``; an id shorter than 32 is
+    padded with a deterministic md5 tail; the result is capped at 64. Deterministic
+    — the same input always yields the same id — so it stays a stable correlation
+    token across re-runs, and the readable prefix keeps it greppable.
+    """
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", readable)
+    if len(safe) < 32:
+        safe = f"{safe}_{hashlib.md5(readable.encode()).hexdigest()}"
+    return safe[:64]
+
+
+def operation_request_id(
+    publish_id: int,
+    operation_kind: PublishOperationKind,
+    stage: str,
+    attempt: int,
+) -> str:
+    """Deterministic, correlation-only request id for a logical operation.
+
+    Readable base ``pub_{publish_id}_{kind}[_{stage}]_a{attempt}`` (an empty
+    ``stage`` is omitted), folded through :func:`to_baas_request_id` so it satisfies
+    BaaS's ``request_id`` contract. Stable across re-runs of the same operation and
+    distinct across different operations/attempts, so a BaaS log line traces back
+    to the exact ledger step that issued it. BaaS treats it as an opaque string —
+    it is never a dedup/idempotency key (verified: request_id is correlation-only
+    server-side).
+    """
+    parts = [f"pub_{publish_id}", str(operation_kind)]
+    if stage:
+        parts.append(stage)
+    parts.append(f"a{attempt}")
+    return to_baas_request_id("_".join(parts))
 
 
 class PublishOperationError(Exception):
