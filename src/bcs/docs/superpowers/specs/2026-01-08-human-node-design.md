@@ -1,5 +1,11 @@
 # State Machine HumanInput 节点设计
 
+> 更新说明（2026-07-27）：本文描述的是第一版 Workbench/session 推断模型。
+> HumanInput 的固定 RuntimeActor assignee、IM notification mode、持久化 request、
+> 无短码精确回复路由和跨 session 排队，以
+> `docs/plans/2026-07-27-human-input-dingtalk-im.md` 为准；其中明确替代了本文
+> “assignee 为 None”和“按唯一 pending 节点猜测 IM 输入”的旧约束。
+
 **状态**：第一版设计已锁定
 **最后更新**：2026-07-22
 **范围**：DAG-only、一次性 Human 输入、Workbench + IM Channel

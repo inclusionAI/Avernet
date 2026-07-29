@@ -39,8 +39,9 @@ use bcs_bot_store::{DbProviderStore, MemoryBotRepo, MemoryProviderStore, Persist
 use bcs_channel::{BcsChannelService, ChannelServiceInboundSink};
 use bcs_channel_api::{ChannelHttpIngressRegistry, ChannelProvider, ChannelProviderRegistry};
 use bcs_channel_store::{
-    DbChannelBindingStore, DbConversationSessionStore, DbImParticipantStore,
-    MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryImParticipantRepo,
+    DbChannelBindingStore, DbConversationSessionStore, DbHumanInputRequestStore,
+    DbImParticipantStore, MemoryChannelBindingRepo, MemoryConversationSessionRepo,
+    MemoryHumanInputRequestRepo, MemoryImParticipantRepo,
 };
 use bcs_collaboration_runtime::CollaborationRuntime;
 use bcs_collaboration_store::{
@@ -92,11 +93,11 @@ use bcs_service_api::{
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderBotEventService, ProviderCoreService,
     ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort, ProviderStreamGrayList,
     ServiceResult, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
-    SessionManagementService, WsCloseReason, WsErrorKind, WsLifecycleInstrumentationHook, WsPeer,
-    RoutingCoreService,
+    SessionManagementService, StateMachineTerminalEvent, WsCloseReason, WsErrorKind,
+    WsLifecycleInstrumentationHook, WsPeer, RoutingCoreService,
     port::repo::{
-        ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort,
-        MessageRepoPort, SessionRepoPort,
+        ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputRequestRepoPort,
+        ImParticipantRepoPort, MessageRepoPort, SessionRepoPort,
     },
 };
 use bcs_services_container::{Services, ServicesBuilder};
@@ -333,6 +334,19 @@ struct DeferredSessionChannelOutbound {
 
 #[async_trait]
 impl SessionChannelOutboundPort for DeferredSessionChannelOutbound {
+    async fn validate_human_input_channel(
+        &self,
+        group_id: &str,
+        channel_type: &str,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        let Some(outbound) = self.slot.get() else {
+            return Ok(SessionChannelDeliveryOutcome::NotApplicable);
+        };
+        outbound
+            .validate_human_input_channel(group_id, channel_type)
+            .await
+    }
+
     async fn publish_human_input_ready(
         &self,
         event: HumanInputReadyEvent,
@@ -341,6 +355,16 @@ impl SessionChannelOutboundPort for DeferredSessionChannelOutbound {
             return Ok(SessionChannelDeliveryOutcome::NotApplicable);
         };
         outbound.publish_human_input_ready(event).await
+    }
+
+    async fn publish_state_machine_terminal(
+        &self,
+        event: StateMachineTerminalEvent,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        let Some(outbound) = self.slot.get() else {
+            return Ok(SessionChannelDeliveryOutcome::NotApplicable);
+        };
+        outbound.publish_state_machine_terminal(event).await
     }
 }
 
@@ -386,6 +410,7 @@ type ChannelRepos = (
     Arc<dyn ChannelBindingRepoPort>,
     Arc<dyn ConversationSessionRepoPort>,
     Arc<dyn ImParticipantRepoPort>,
+    Arc<dyn HumanInputRequestRepoPort>,
 );
 
 struct ChannelRuntime {
@@ -488,12 +513,14 @@ fn memory_channel_repos(data_dir: Option<PathBuf>) -> ChannelRepos {
         Some(dir) => (
             Arc::new(MemoryChannelBindingRepo::with_data_dir(dir.clone(), env)),
             Arc::new(MemoryConversationSessionRepo::with_data_dir(dir.clone())),
-            Arc::new(MemoryImParticipantRepo::with_data_dir(dir)),
+            Arc::new(MemoryImParticipantRepo::with_data_dir(dir.clone())),
+            Arc::new(MemoryHumanInputRequestRepo::with_data_dir(dir)),
         ),
         None => (
             Arc::new(MemoryChannelBindingRepo::new(env)),
             Arc::new(MemoryConversationSessionRepo::new()),
             Arc::new(MemoryImParticipantRepo::new()),
+            Arc::new(MemoryHumanInputRequestRepo::new()),
         ),
     }
 }
@@ -513,7 +540,8 @@ async fn channel_repos_with_storage(
             Ok((
                 Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone(), env)),
                 Arc::new(DbConversationSessionStore::sqlite(db_plugin.clone())),
-                Arc::new(DbImParticipantStore::sqlite(db_plugin)),
+                Arc::new(DbImParticipantStore::sqlite(db_plugin.clone())),
+                Arc::new(DbHumanInputRequestStore::sqlite(db_plugin)),
             ))
         }
         DbPluginKind::Mysql => {
@@ -521,7 +549,8 @@ async fn channel_repos_with_storage(
             Ok((
                 Arc::new(DbChannelBindingStore::mysql(db_plugin.clone(), env)),
                 Arc::new(DbConversationSessionStore::mysql(db_plugin.clone())),
-                Arc::new(DbImParticipantStore::mysql(db_plugin)),
+                Arc::new(DbImParticipantStore::mysql(db_plugin.clone())),
+                Arc::new(DbHumanInputRequestStore::mysql(db_plugin)),
             ))
         }
         DbPluginKind::External(provider) => Err(crate::BcsError::StorageInitError(format!(
@@ -556,7 +585,12 @@ fn build_channel_runtime(
         });
     }
 
-    let (channel_bindings, channel_conversations, channel_im_participants) = channel_repos;
+    let (
+        channel_bindings,
+        channel_conversations,
+        channel_im_participants,
+        human_input_requests,
+    ) = channel_repos;
     let providers = build_configured_channel_providers(config, channel_bindings.clone())?;
     let provider_registry = Arc::new(
         ChannelProviderRegistry::new(providers.clone())
@@ -566,6 +600,7 @@ fn build_channel_runtime(
         channel_bindings,
         channel_conversations,
         channel_im_participants,
+        human_input_requests,
         session_repo,
         message_flow,
         system_message,
@@ -3703,6 +3738,10 @@ mod tests {
             node_id: "review".to_string(),
             display_name: "Review".to_string(),
             instruction: "Review the draft".to_string(),
+            assignee_actor_id: "human-1".to_string(),
+            channel_type: "dingtalk".to_string(),
+            notification_mode: bcs_domain::HumanInputNotificationMode::DirectAssignee,
+            fixed_group_conversation_id: None,
             response_ref: "run-1/review".to_string(),
             upstream_artifacts: Vec::new(),
             judge_outcomes: vec!["approved".to_string()],

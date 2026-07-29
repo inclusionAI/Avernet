@@ -9,7 +9,7 @@ use bcs_service_api::application::channel::OutboundMessage;
 use bcs_service_api::{
     ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryResult, BotDeliveryTarget,
     BotEventCommand, BotEventOutcome, BotTerminalEvent, BotTerminalState,
-    ChannelOutboundEventKind, ChannelRenderHint,
+    ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
     ChatEventRouting, ChatEventState, ChatResponseMode,
     DefaultDelivery, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupKind, GroupStatus, GroupStrategy, MessageDeliveryResult,
@@ -253,6 +253,7 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
             sender_role,
             sender_label,
             kind,
+            purpose: ChannelOutboundPurpose::Conversation,
             text: (!text.is_empty()).then_some(text),
             raw_payload,
             render_hint,

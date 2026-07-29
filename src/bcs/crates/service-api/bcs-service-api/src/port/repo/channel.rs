@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 use bcs_domain::{
     BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap, ImParticipantMap,
-    SessionScope,
+    HumanInputRequest, SessionScope,
 };
 
 use crate::types::ServiceResult;
@@ -83,5 +83,59 @@ pub trait ImParticipantRepoPort: Send + Sync {
         account_ref: &str,
         im_user_id: &str,
     ) -> ServiceResult<Option<ImParticipantMap>>;
+    /// HumanInput outbound lookup. Callers must reject zero or multiple matches.
+    async fn find_by_actor(
+        &self,
+        channel_type: ChannelType,
+        account_ref: &str,
+        actor_id: &str,
+    ) -> ServiceResult<Vec<ImParticipantMap>>;
     async fn upsert(&self, map: ImParticipantMap) -> ServiceResult<()>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HumanInputEnqueueDisposition {
+    Notifying,
+    Queued,
+}
+
+#[async_trait]
+pub trait HumanInputRequestRepoPort: Send + Sync {
+    /// Persist a request and atomically occupy its active slot when available.
+    async fn enqueue(
+        &self,
+        request: HumanInputRequest,
+    ) -> ServiceResult<HumanInputEnqueueDisposition>;
+    async fn get(&self, request_id: &str) -> ServiceResult<Option<HumanInputRequest>>;
+    async fn list_by_run(&self, run_id: &str) -> ServiceResult<Vec<HumanInputRequest>>;
+    async fn find_active_by_scope(
+        &self,
+        reply_scope_key: &str,
+    ) -> ServiceResult<Option<HumanInputRequest>>;
+    async fn mark_active(
+        &self,
+        request_id: &str,
+        provider_message_ref: Option<&str>,
+        activated_at: u64,
+    ) -> ServiceResult<bool>;
+    async fn mark_delivery_failed(
+        &self,
+        request_id: &str,
+        error: &str,
+    ) -> ServiceResult<bool>;
+    async fn mark_responded(&self, request_id: &str, responded_at: u64)
+        -> ServiceResult<bool>;
+    /// Promote the next non-expired queued request for the exact reply scope.
+    async fn promote_next(
+        &self,
+        reply_scope_key: &str,
+        now_ms: u64,
+    ) -> ServiceResult<Option<HumanInputRequest>>;
+    async fn count_queued(&self, reply_scope_key: &str) -> ServiceResult<usize>;
+    async fn close_for_run_node(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        status: bcs_domain::HumanInputRequestStatus,
+    ) -> ServiceResult<u64>;
 }
