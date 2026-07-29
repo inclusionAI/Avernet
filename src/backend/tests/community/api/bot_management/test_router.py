@@ -655,6 +655,16 @@ class TestUpdateBot:
         assert "不能为空" in body["message"]
         svc.update_bot.assert_not_called()
 
+    def test_legacy_name_empty_rejected(self, client):
+        # 兼容旧字段 name，不能静默忽略空名称并返回成功。
+        tc, svc, _ = client
+        resp = tc.put("/api/bots/default", json={"name": ""})
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        assert "不能为空" in body["message"]
+        svc.update_bot.assert_not_called()
+
     def test_invalid_name_too_long_rejected(self, client):
         tc, svc, _ = client
         resp = tc.put("/api/bots/default", json={"bot_name": "x" * 33})
