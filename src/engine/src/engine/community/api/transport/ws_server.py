@@ -40,6 +40,7 @@ from engine.community.core.chat.models import ChatAbortRequest, ChatRequest
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.resource_references.service import ResourceReferenceService
 from engine.community.manager import EngineManager
+from engine.community.plugin_api.workspace_root import workspace_root_strict
 from engine.community.openclaw.protocol import (
     PROTOCOL_VERSION,
     ConnectParams,
@@ -1060,6 +1061,12 @@ class EngineWebSocketServer:
                         path := item.get("canonical_bot_absolute_path"), str
                     )
                     and path
+                )
+                workspace_root = workspace_root_strict()
+                if workspace_root is not None:
+                    materialized_paths = (*materialized_paths, str(workspace_root))
+                materialized_paths = tuple(
+                    sorted(set(materialized_paths), key=len, reverse=True)
                 )
                 log.info(
                     "engine.resource_reference.validate session_key_hash=%s reference_count=%s ok=true",
