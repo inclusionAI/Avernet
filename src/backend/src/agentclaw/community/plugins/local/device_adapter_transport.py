@@ -1,10 +1,10 @@
 """InMemoryDeviceAdapterTransport -- local impl of DeviceAdapterTransport.
 
-A stateful in-memory emulation of a bot's engine cron adapter. Used by
-injection tests (and local boots without a live adapter) so the *real*
-``CronRelayService`` runs end-to-end: device resolution, permission
-checks and response shaping all execute against production code, with
-only the HTTP boundary replaced by this fake.
+A stateful in-memory emulation of a bot's engine adapter. Used by injection
+tests (and local boots without a live adapter) so the *real*
+``CronRelayService`` and session-resource content proxy run end-to-end: device
+resolution, permission checks and response shaping all execute against
+production code, with only the HTTP boundary replaced by this local runtime.
 
 State is partitioned per device (keyed off ``conn_info``) so a relay
 fanning out across multiple bots sees an isolated cron store per bot,
@@ -15,6 +15,7 @@ test gets a fresh injector and therefore an empty store.
 Response shapes mirror the real adapter's envelopes. ``bot_id`` /
 ``bot_name`` are intentionally absent — the relay adds those.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -53,6 +54,7 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
     def __init__(self) -> None:
         # device_key -> {cron_id -> cron item}
         self._crons: dict[str, dict[str, dict[str, Any]]] = {}
+        self._materialized_contents: dict[str, tuple[bytes, str, str]] = {}
         self._seq = 0
 
     # ── helpers ──────────────────────────────────────────────────────────
@@ -63,6 +65,29 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
     def _new_id(self) -> str:
         self._seq += 1
         return f"cron_{self._seq:03d}"
+
+    def register_materialized_content(
+        self,
+        *,
+        resource_id: str,
+        content: bytes,
+        filename: str,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        """Register a ready resource exposed by the local Engine adapter.
+
+        Resource IDs are globally unique, so this mirrors the Engine's
+        resource-id-only content endpoint without accepting a caller path.
+        """
+        if not resource_id or not filename:
+            raise ValueError("resource_id and filename are required")
+        if not isinstance(content, bytes):
+            raise ValueError("content must be bytes")
+        self._materialized_contents[resource_id] = (
+            content,
+            filename,
+            content_type,
+        )
 
     @staticmethod
     def _default_state() -> dict[str, Any]:
@@ -218,7 +243,11 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
                 },
             }
 
-        return {"success": False, "message": f"unhandled path {path}", "error_code": 404}
+        return {
+            "success": False,
+            "message": f"unhandled path {path}",
+            "error_code": 404,
+        }
 
     async def stream(
         self,
@@ -230,7 +259,34 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         *,
         timeout: float | None = None,
     ) -> DeviceAdapterStreamResponse:
-        """The local cron simulator deliberately has no materialized files."""
+        prefix = "/api/resource-materializations/"
+        suffix = "/content"
+        resource_id = None
+        if method == "GET" and path.startswith(prefix) and path.endswith(suffix):
+            resource_id = path[len(prefix) : -len(suffix)]
+        registered = (
+            self._materialized_contents.get(resource_id) if resource_id else None
+        )
+        if registered is not None:
+            content, filename, content_type = registered
+
+            async def content_body() -> AsyncIterator[bytes]:
+                yield content
+
+            async def close() -> None:
+                return None
+
+            disposition = (params or {}).get("disposition", "inline")
+            return DeviceAdapterStreamResponse(
+                status_code=200,
+                headers={
+                    "content-type": content_type,
+                    "content-length": str(len(content)),
+                    "content-disposition": f'{disposition}; filename="{filename}"',
+                },
+                body=content_body(),
+                close=close,
+            )
 
         async def error_body() -> AsyncIterator[bytes]:
             yield b'{"detail":"resource_not_materialized"}'
