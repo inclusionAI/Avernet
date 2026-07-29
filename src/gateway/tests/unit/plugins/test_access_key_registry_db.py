@@ -1,4 +1,4 @@
-"""DB-backed tests for ``AccessKeyRepository`` (seeded ``access_keys`` table)."""
+"""DB-backed tests for ``AccessKeyRepository`` (seeded ``baas_access_key_token`` table)."""
 
 from __future__ import annotations
 

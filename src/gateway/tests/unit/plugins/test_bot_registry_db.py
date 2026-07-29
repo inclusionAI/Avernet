@@ -1,4 +1,4 @@
-"""DB-backed tests for ``BotRepository`` (queries the seeded ``bots`` table)."""
+"""DB-backed tests for ``BotRepository`` (queries the seeded ``bcs_bots`` table)."""
 
 from __future__ import annotations
 

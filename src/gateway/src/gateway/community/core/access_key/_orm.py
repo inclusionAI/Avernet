@@ -1,4 +1,4 @@
-"""ORM model for the access-key registry (``access_keys`` table) — canonical schema.
+"""ORM model for the access-key registry (``baas_access_key_token`` table) — canonical schema.
 
 The canonical :class:`AccessKeyRepository` resolves a presented token to an
 access-key row keyed by ``token``. Registered on the shared
@@ -18,9 +18,9 @@ from gateway.community.spi.database import Base
 
 
 class AccessKeyRow(Base):  # type: ignore[misc]
-    """An access key resolvable by token (the ``access_keys`` table)."""
+    """An access key resolvable by token (the ``baas_access_key_token`` table)."""
 
-    __tablename__ = "access_keys"
+    __tablename__ = "baas_access_key_token"
 
     token: Mapped[str] = mapped_column(primary_key=True)
     access_key_id: Mapped[str] = mapped_column()

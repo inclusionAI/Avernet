@@ -1,6 +1,6 @@
 """Integration tests for the catch-all forwarding entrypoint.
 
-Wires the real streaming ``HttpxForwarder`` against a stub upstream ASGI app, a
+Wires the real streaming ``BareForwarder`` against a stub upstream ASGI app, a
 ``DomainMap``, and a fake authenticator, then drives it through ``TestClient``.
 """
 
@@ -16,9 +16,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
-from gateway.community.core.forwarding import DomainMap, Forwarding
-from gateway.community.plugins.forwarder.httpx import HttpxForwarder
-from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
+from gateway.community.bootstrap._principal_signer import build_principal_signer
+from gateway.community.core.forwarding import DomainMap
+from gateway.community.plugins.forwarder.bare import BareForwarder
 from gateway.community.spi.auth import AuthError
 
 Scope = dict[str, Any]
@@ -95,21 +95,16 @@ def _build() -> tuple[FastAPI, _FakeAuth]:
         await client.aclose()
 
     app = FastAPI(lifespan=lifespan)
-    fw = Forwarding(
-        domain_map=DomainMap.from_config(
-            {
-                "domains": {"bots": {"server": "up"}},
-                "servers": {"up": {"base_url": "http://upstream"}},
-            },
-            variables={},
-        ),
-        forwarder=HttpxForwarder(client=client),
-        catalog=FileSchemaCatalog(),
+    app.state.domain_map = DomainMap.from_config(
+        {
+            "domains": {"bots": {"server": "up"}},
+            "servers": {"up": {"base_url": "http://upstream"}},
+        }
     )
-    app.state.domain_map = fw.domain_map
-    app.state.forwarder = fw.forwarder
+    app.state.forwarder = BareForwarder(client=client)
     auth = _FakeAuth()
     app.state.authenticator = auth
+    app.state.principal_signer = build_principal_signer()
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
     return app, auth
 
@@ -169,34 +164,20 @@ def test_auth_runs_for_known_domain(method: str) -> None:
 def test_real_authenticator_admits_google_token_then_forwards() -> None:
     """End-to-end sanity: Authenticator + GoogleUserStrategy (MockTransport) → forward 200."""
     from gateway.community.bootstrap._authn import build_authenticator
-    from gateway.community.bootstrap._configs import DatabasePluginConfig
     from gateway.community.core.authn import IdentityChain
-    from gateway.community.plugins.authn.app_token import (
-        StubAppTokenValidator,
-        StubTenantResolver,
-    )
     from gateway.community.plugins.authn.google_token import GoogleUserStrategy
-    from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
     from gateway.community.spi.authn import PrincipalType
-
-    db_plugin = SqliteDatabasePlugin()
-    db_plugin.init_database(DatabasePluginConfig(plugin_type="SQLITE_ORM", db_url=""))
-    from gateway.community.bootstrap._authn import _seed_authn
-
-    _seed_authn(db_plugin)
 
     def _userinfo_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"sub": "g-1", "email": "a@example.com"})
 
-    authenticator = build_authenticator(
-        db_plugin, StubAppTokenValidator(), StubTenantResolver()
-    )
+    authenticator = build_authenticator()
     # Swap the USER chain to a MockTransport google so no real network call.
     authenticator.strategies[PrincipalType.USER] = IdentityChain(
         PrincipalType.USER,
         (
             GoogleUserStrategy(
-                token_header="x-google-token",
+                token_header="x-avernet-google-token",
                 default_tenant="default",
                 transport=httpx.MockTransport(_userinfo_handler),
             ),
@@ -210,24 +191,21 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
         await client.aclose()
 
     app = FastAPI(lifespan=lifespan)
-    fw = Forwarding(
-        domain_map=DomainMap.from_config(
-            {
-                "domains": {"bots": {"server": "up"}},
-                "servers": {"up": {"base_url": "http://upstream"}},
-            },
-            variables={},
-        ),
-        forwarder=HttpxForwarder(client=client),
-        catalog=FileSchemaCatalog(),
+    app.state.domain_map = DomainMap.from_config(
+        {
+            "domains": {"bots": {"server": "up"}},
+            "servers": {"up": {"base_url": "http://upstream"}},
+        }
     )
-    app.state.domain_map = fw.domain_map
-    app.state.forwarder = fw.forwarder
+    app.state.forwarder = BareForwarder(client=client)
     app.state.authenticator = authenticator
+    app.state.principal_signer = build_principal_signer()
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
 
     with TestClient(app) as c:
-        resp = c.get("/openapi/v1/bots", headers={"x-google-token": "google-tok"})
+        resp = c.get(
+            "/openapi/v1/bots", headers={"x-avernet-google-token": "google-tok"}
+        )
     assert resp.status_code == 200
     assert resp.json() == {"code": 200000}
 
@@ -235,22 +213,8 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
 def test_real_authenticator_rejects_missing_required_identity() -> None:
     """No google token + required user → 401 before forwarding."""
     from gateway.community.bootstrap._authn import build_authenticator
-    from gateway.community.bootstrap._configs import DatabasePluginConfig
-    from gateway.community.plugins.authn.app_token import (
-        StubAppTokenValidator,
-        StubTenantResolver,
-    )
-    from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 
-    db_plugin = SqliteDatabasePlugin()
-    db_plugin.init_database(DatabasePluginConfig(plugin_type="SQLITE_ORM", db_url=""))
-    from gateway.community.bootstrap._authn import _seed_authn
-
-    _seed_authn(db_plugin)
-
-    authenticator = build_authenticator(
-        db_plugin, StubAppTokenValidator(), StubTenantResolver()
-    )
+    authenticator = build_authenticator()
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=_stub_upstream))  # type: ignore[arg-type]
 
     @asynccontextmanager
@@ -259,19 +223,13 @@ def test_real_authenticator_rejects_missing_required_identity() -> None:
         await client.aclose()
 
     app = FastAPI(lifespan=lifespan)
-    fw = Forwarding(
-        domain_map=DomainMap.from_config(
-            {
-                "domains": {"bots": {"server": "up"}},
-                "servers": {"up": {"base_url": "http://upstream"}},
-            },
-            variables={},
-        ),
-        forwarder=HttpxForwarder(client=client),
-        catalog=FileSchemaCatalog(),
+    app.state.domain_map = DomainMap.from_config(
+        {
+            "domains": {"bots": {"server": "up"}},
+            "servers": {"up": {"base_url": "http://upstream"}},
+        }
     )
-    app.state.domain_map = fw.domain_map
-    app.state.forwarder = fw.forwarder
+    app.state.forwarder = BareForwarder(client=client)
     app.state.authenticator = authenticator
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
 

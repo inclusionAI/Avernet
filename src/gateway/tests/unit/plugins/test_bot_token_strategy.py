@@ -32,7 +32,7 @@ def _creds(headers: dict[str, str]) -> CredentialBundle:
 
 
 async def test_dedicated_header_wins_over_authorization() -> None:
-    creds = _creds({"x-bot-token": "bot-key", "authorization": "Bearer other"})
+    creds = _creds({"x-avernet-bot-token": "bot-key", "authorization": "Bearer other"})
     result = await _strat().build(creds)
     assert isinstance(result, BotPrincipal)
     assert result.bot.token == "bot-key"
@@ -55,13 +55,13 @@ async def test_bearer_jwt_shaped_returns_none() -> None:
 
 async def test_dedicated_header_with_jwt_is_taken_as_is() -> None:
     # The dedicated header wins and bypasses the JWT-shape check.
-    result = await _strat().build(_creds({"x-bot-token": "a.b.c"}))
+    result = await _strat().build(_creds({"x-avernet-bot-token": "a.b.c"}))
     # The registry does not know this token → soft miss → None.
     assert result is None
 
 
 async def test_unknown_token_returns_none_soft_miss() -> None:
-    assert await _strat().build(_creds({"x-bot-token": "nope"})) is None
+    assert await _strat().build(_creds({"x-avernet-bot-token": "nope"})) is None
 
 
 async def test_absent_token_returns_none() -> None:

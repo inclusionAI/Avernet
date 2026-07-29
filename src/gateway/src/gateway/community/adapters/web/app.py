@@ -93,6 +93,7 @@ def create_app() -> FastAPI:
     app.state.authenticator = bs.authenticator
     app.state.domain_map = bs.forwarding.domain_map
     app.state.forwarder = bs.forwarding.forwarder
+    app.state.principal_signer = bs.principal_signer
 
     _default_openapi = app.openapi
 

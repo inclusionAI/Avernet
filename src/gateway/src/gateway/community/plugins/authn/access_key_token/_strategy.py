@@ -1,6 +1,6 @@
 """``access_key_token`` strategy — resolve an access-key token via the registry.
 
-The caller presents a token in a dedicated header (``x-access-key-token``); the
+The caller presents a token in a dedicated header (``x-avernet-access-key-token``); the
 strategy resolves it in **one** registry lookup:
 ``find_access_key_by_token(token) → RegisteredAccessKey | None``. There is no
 separate validator abstraction — the lookup lives here.
@@ -35,7 +35,9 @@ class AccessKeyTokenStrategy:
     principal_type = PrincipalType.ACCESS_KEY
 
     def __init__(
-        self, registry: AccessKeyRegistry, token_header: str = "x-access-key-token"
+        self,
+        registry: AccessKeyRegistry,
+        token_header: str = "x-avernet-access-key-token",
     ) -> None:
         self._registry = registry
         self._token_header = token_header

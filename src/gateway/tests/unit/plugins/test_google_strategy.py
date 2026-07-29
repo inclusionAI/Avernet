@@ -22,7 +22,7 @@ def _userinfo_handler(body: object, status: int = 200) -> httpx.MockTransport:
 
 
 def _creds(token: str | None) -> CredentialBundle:
-    headers = {"x-google-token": token} if token else {}
+    headers = {"x-avernet-google-token": token} if token else {}
     return CredentialBundle(headers=headers, cookies={}, query={})
 
 
@@ -36,7 +36,7 @@ _GOOGLE_BODY = {
 async def test_applicable_token_resolves_user_principal() -> None:
     transport = _userinfo_handler(_GOOGLE_BODY)
     strat = GoogleUserStrategy(
-        token_header="x-google-token",
+        token_header="x-avernet-google-token",
         default_tenant="t-default",
         transport=transport,
     )
@@ -50,7 +50,7 @@ async def test_applicable_token_resolves_user_principal() -> None:
 
 async def test_absent_token_returns_none() -> None:
     strat = GoogleUserStrategy(
-        token_header="x-google-token",
+        token_header="x-avernet-google-token",
         default_tenant="t-default",
         transport=_userinfo_handler(_GOOGLE_BODY),
     )
@@ -59,7 +59,7 @@ async def test_absent_token_returns_none() -> None:
 
 async def test_non_200_raises_auth_error() -> None:
     strat = GoogleUserStrategy(
-        token_header="x-google-token",
+        token_header="x-avernet-google-token",
         default_tenant="t-default",
         transport=_userinfo_handler({}, status=401),
     )
@@ -74,7 +74,7 @@ async def test_malformed_json_raises_auth_error() -> None:
         )
 
     strat = GoogleUserStrategy(
-        token_header="x-google-token",
+        token_header="x-avernet-google-token",
         default_tenant="t-default",
         transport=httpx.MockTransport(_handler),
     )
@@ -84,7 +84,7 @@ async def test_malformed_json_raises_auth_error() -> None:
 
 async def test_missing_sub_raises_auth_error() -> None:
     strat = GoogleUserStrategy(
-        token_header="x-google-token",
+        token_header="x-avernet-google-token",
         default_tenant="t-default",
         transport=_userinfo_handler({"email": "no-sub@example.com"}),
     )
@@ -100,7 +100,7 @@ async def test_request_to_userinfo_carries_bearer_authorization() -> None:
         return httpx.Response(200, json=_GOOGLE_BODY)
 
     strat = GoogleUserStrategy(
-        token_header="x-google-token",
+        token_header="x-avernet-google-token",
         default_tenant="t-default",
         transport=httpx.MockTransport(_handler),
     )
@@ -110,7 +110,7 @@ async def test_request_to_userinfo_carries_bearer_authorization() -> None:
 
 async def test_email_falls_back_to_sub_when_missing() -> None:
     strat = GoogleUserStrategy(
-        token_header="x-google-token",
+        token_header="x-avernet-google-token",
         default_tenant="t-default",
         transport=_userinfo_handler({"sub": "g-9"}),
     )

@@ -2,7 +2,7 @@
 
 Token extraction:
 
-- the dedicated bot-token header (``x-bot-token``) **wins** and is taken as-is
+- the dedicated bot-token header (``x-avernet-bot-token``) **wins** and is taken as-is
   when non-empty;
 - otherwise an ``Authorization: Bearer <token>`` (or a bare token) is used, but
   **only when it is NOT JWT-shaped** — a JWT is left for a (future) JWT-based
@@ -61,7 +61,7 @@ class BotTokenStrategy:
     principal_type = PrincipalType.BOT
 
     def __init__(
-        self, registry: BotRegistry, token_header: str = "x-bot-token"
+        self, registry: BotRegistry, token_header: str = "x-avernet-bot-token"
     ) -> None:
         self._registry = registry
         self._token_header = token_header

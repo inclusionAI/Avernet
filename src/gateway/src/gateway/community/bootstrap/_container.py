@@ -121,8 +121,6 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
         providers.Singleton(
             build_authenticator,
             db=plugins.providers["database"],
-            app_token_validator=plugins.providers["app_token_validator"],
-            tenant_resolver=plugins.providers["tenant_resolver"],
         )
     )
 

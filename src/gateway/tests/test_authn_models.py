@@ -82,13 +82,17 @@ def test_app_and_bot_principal_types() -> None:
     app = AppPrincipal(
         tenant="t-app",
         app=ThirdPartyApp(
-            app_id="cid", app_name="Cid App", owners="org-1", app_type="assistant"
+            app_id="cid",
+            app_name="Cid App",
+            owners="org-1",
+            tenant="t-app",
+            app_type="assistant",
         ),
     )
     assert app.type == "app"
     assert app.tenant == "t-app"
     assert app.app.app_id == "cid"
-    assert app.on_behalf_of_opaque is None
+    assert app.app.tenant == "t-app"
 
     bot = BotPrincipal(
         tenant="t-bot",

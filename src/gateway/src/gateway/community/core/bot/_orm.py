@@ -1,4 +1,4 @@
-"""ORM model for the bot registry (``bots`` table) — canonical schema.
+"""ORM model for the bot registry (``bcs_bots`` table) — canonical schema.
 
 The canonical :class:`BotRepository` resolves a presented token to a bot row
 keyed by ``token``. Registered on the shared
@@ -16,9 +16,9 @@ from gateway.community.spi.database import Base
 
 
 class BotRow(Base):  # type: ignore[misc]
-    """A bot resolvable by token (the ``bots`` table)."""
+    """A bot resolvable by token (the ``bcs_bots`` table)."""
 
-    __tablename__ = "bots"
+    __tablename__ = "bcs_bots"
 
     token: Mapped[str] = mapped_column(primary_key=True)
     bot_uuid: Mapped[str] = mapped_column()

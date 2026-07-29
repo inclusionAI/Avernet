@@ -1,90 +1,94 @@
-"""Unit tests for the ``app_token`` strategy (Bearer app token + tenant → AppPrincipal)."""
+"""Unit tests for the ``app_token`` strategy (``x-avernet-app-token`` / Bearer → AppPrincipal).
+
+Uses a tiny in-test fake registry (no DB) so the strategy's extraction /
+adjudication logic is exercised in isolation; the DB-backed registry has its
+own test (``test_app_registry_db.py``).
+"""
 
 from __future__ import annotations
 
-import pytest
-
-from gateway.community.plugins.authn.app_token import (
-    AppTokenStrategy,
-    StubAppTokenValidator,
-    StubTenantResolver,
-)
-from gateway.community.spi.auth import AuthError
+from gateway.community.plugins.authn.app_token import AppTokenStrategy
+from gateway.community.spi.app import RegisteredApp
 from gateway.community.spi.authn import AppPrincipal, CredentialBundle
+
+_APP_HEADER = "x-avernet-app-token"
+
+
+class _FakeAppRegistry:
+    """Resolves only ``app-key`` → a fixed RegisteredApp; else None (soft miss)."""
+
+    _APP = RegisteredApp(
+        app_id="app-1",
+        app_name="Demo App",
+        owners="org-1",
+        app_type="assistant",
+        tenant="t",
+    )
+
+    async def find_app_by_token(self, token: str) -> RegisteredApp | None:
+        return self._APP if token == "app-key" else None
 
 
 def _strat() -> AppTokenStrategy:
-    return AppTokenStrategy(keys=StubAppTokenValidator(), tenants=StubTenantResolver())
+    return AppTokenStrategy(registry=_FakeAppRegistry())
 
 
 def _creds(headers: dict[str, str]) -> CredentialBundle:
     return CredentialBundle(headers=headers, cookies={}, query={})
 
 
-async def test_absent_bearer_returns_none() -> None:
+async def test_absent_token_returns_none() -> None:
     assert await _strat().build(_creds({})) is None
 
 
-async def test_unrecognized_bearer_returns_none() -> None:
-    # An unrecognized Bearer is "not one of mine" → absent (US27).
-    result = await _strat().build(_creds({"authorization": "Bearer nope"}))
-    assert result is None
+async def test_dedicated_header_resolves() -> None:
+    result = await _strat().build(_creds({_APP_HEADER: "app-key"}))
+    assert isinstance(result, AppPrincipal)
+    assert result.tenant == "t"
+    assert result.app.app_id == "app-1"
+    assert result.app.tenant == "t"
 
 
-async def test_valid_token_and_tenant_builds_app_principal() -> None:
+async def test_bearer_fallback_resolves() -> None:
+    result = await _strat().build(_creds({"authorization": "Bearer app-key"}))
+    assert isinstance(result, AppPrincipal)
+    assert result.app.app_id == "app-1"
+
+
+async def test_dedicated_header_wins_over_bearer() -> None:
+    # The dedicated header wins; the Bearer is not consulted.
     result = await _strat().build(
-        _creds({"authorization": "Bearer stub-app-token", "x-tenant-token": "t"})
+        _creds({_APP_HEADER: "app-key", "authorization": "Bearer nope"})
     )
     assert isinstance(result, AppPrincipal)
-    assert result.tenant == "stub_tenant"
-    assert result.app.app_id == "stub-app"
-    assert result.app.app_name == "Stub App"
-    assert result.app.owners == "stub-org"
-    assert result.app.app_type == "stub"
-    assert result.on_behalf_of_opaque is None
+    assert result.app.app_id == "app-1"
 
 
-async def test_on_behalf_of_opaque_passed_through() -> None:
+async def test_empty_dedicated_header_falls_back_to_bearer() -> None:
     result = await _strat().build(
-        _creds(
-            {
-                "authorization": "Bearer stub-app-token",
-                "x-tenant-token": "t",
-                "x-end-user-id": "enduser-9",
-            }
-        )
+        _creds({_APP_HEADER: "   ", "authorization": "Bearer app-key"})
     )
     assert isinstance(result, AppPrincipal)
-    assert result.on_behalf_of_opaque == "enduser-9"
 
 
-async def test_tenant_mismatch_raises_auth_error() -> None:
-    # StubTenantResolver always maps to "stub_tenant"; force a mismatch by
-    # using a tenant resolver that returns a different tenant.
-    from gateway.community.spi.authn import TenantResolver
-
-    class _OtherTenant(TenantResolver):
-        async def resolve(self, tenant_token: str) -> str:
-            return "tenant-other"
-
-    strat = AppTokenStrategy(keys=StubAppTokenValidator(), tenants=_OtherTenant())
-    with pytest.raises(AuthError):
-        await strat.build(
-            _creds({"authorization": "Bearer stub-app-token", "x-tenant-token": "t"})
-        )
+async def test_unrecognized_token_returns_none() -> None:
+    # An unrecognized token is "not one of mine" → absent (US27).
+    assert await _strat().build(_creds({_APP_HEADER: "nope"})) is None
 
 
 async def test_bot_bearer_is_absent_for_app_chain_us27() -> None:
     # US27: a bot session token presented as a Bearer must NOT be treated as an
-    # invalid app token by the app chain — the app strategy returns None (absent),
-    # letting a bot chain resolve the same credential.
-    result = await _strat().build(_creds({"authorization": "Bearer bot-key"}))
-    assert result is None
+    # invalid app token by the app chain — the app strategy returns None
+    # (absent, registry miss), letting a bot chain resolve the same credential.
+    assert await _strat().build(_creds({"authorization": "Bearer bot-key"})) is None
 
 
 async def test_jwt_shaped_bearer_is_absent_for_app_chain() -> None:
-    # A JWT-shaped Bearer is neither an app token nor a bot session token here;
-    # the app strategy only recognises Bearer app tokens, so it returns None
-    # (the validator finds no match). US27 holds.
-    result = await _strat().build(_creds({"authorization": "Bearer a.b.c"}))
-    assert result is None
+    # A JWT-shaped Bearer is not a recognised app token; the registry finds no
+    # match → None (US27 holds).
+    assert await _strat().build(_creds({"authorization": "Bearer a.b.c"})) is None
+
+
+async def test_non_bearer_authorization_is_not_an_app_token() -> None:
+    # A bare (non-Bearer) Authorization value is not accepted by the app fallback.
+    assert await _strat().build(_creds({"authorization": "app-key"})) is None

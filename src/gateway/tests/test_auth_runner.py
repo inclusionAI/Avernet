@@ -26,7 +26,8 @@ def _user_p() -> UserPrincipal:
 
 def _app_p() -> AppPrincipal:
     return AppPrincipal(
-        tenant="t", app=ThirdPartyApp(app_id="c", app_name="C App", owners="o")
+        tenant="t",
+        app=ThirdPartyApp(app_id="c", app_name="C App", owners="o", tenant="t"),
     )
 
 

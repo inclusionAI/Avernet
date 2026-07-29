@@ -37,17 +37,17 @@ async def test_absent_token_returns_none() -> None:
 
 
 async def test_empty_token_returns_none() -> None:
-    assert await _strat().build(_creds({"x-access-key-token": "  "})) is None
+    assert await _strat().build(_creds({"x-avernet-access-key-token": "  "})) is None
 
 
 async def test_unknown_token_returns_none() -> None:
     # An unrecognized token is a soft miss → None (not applicable).
-    result = await _strat().build(_creds({"x-access-key-token": "nope"}))
+    result = await _strat().build(_creds({"x-avernet-access-key-token": "nope"}))
     assert result is None
 
 
 async def test_valid_token_builds_access_key_principal() -> None:
-    result = await _strat().build(_creds({"x-access-key-token": "ak-token"}))
+    result = await _strat().build(_creds({"x-avernet-access-key-token": "ak-token"}))
     assert isinstance(result, AccessKeyPrincipal)
     assert result.tenant == "t"
     assert result.access_key.access_key_id == "ak-1"

@@ -1,7 +1,7 @@
 """``BotRepository`` — canonical ORM bot registry.
 
 One ORM implementation behind the :class:`~gateway.community.spi.bot.BotRegistry`
-SPI port. Resolves a presented bot token via the ``bots`` table through the
+SPI port. Resolves a presented bot token via the ``bcs_bots`` table through the
 :data:`~gateway.community.spi.database.DataSourcePlugin`'s sync ``orm_session``,
 mapping the row to the SPI :class:`~gateway.community.spi.bot.RegisteredBot` via
 :meth:`BotRow.to_record`. Flavor-neutral — the ``DataSourcePlugin`` (bare
@@ -18,7 +18,7 @@ from ._orm import BotRow
 
 
 class BotRepository(BotRegistry):
-    """Resolve a bot token against the ``bots`` table (canonical ORM impl)."""
+    """Resolve a bot token against the ``bcs_bots`` table (canonical ORM impl)."""
 
     Model: type[BotRow] = BotRow
 

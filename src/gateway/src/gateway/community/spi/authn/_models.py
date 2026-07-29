@@ -40,6 +40,7 @@ class ThirdPartyApp(BaseModel):
     app_id: str  # app id issued at registration
     app_name: str  # human-facing app name
     owners: str  # owning developer/org; resource-ownership fallback subject
+    tenant: str  # tenant the app belongs to (from the resolved app record)
     app_type: str = "UNKNOWN"  # from the app-token record
 
 
@@ -89,15 +90,6 @@ class AppPrincipal(BaseModel):
     type: Literal[PrincipalType.APP] = PrincipalType.APP
     tenant: str = Field(description="Tenant id the caller belongs to (stable id).")
     app: ThirdPartyApp = Field(description="The authenticated third-party app.")
-    on_behalf_of_opaque: str | None = Field(
-        default=None,
-        description=(
-            "Opaque, unverified handle of the app's own end user. ``None`` is an "
-            "intentional default (the app calls on its own behalf). Used only for "
-            "ownership/quota/audit — never as an authenticated identity for "
-            "cross-resource decisions."
-        ),
-    )
 
 
 class AccessKey(BaseModel):

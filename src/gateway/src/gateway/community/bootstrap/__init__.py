@@ -17,6 +17,7 @@ from dependency_injector.wiring import Provide
 
 from gateway.community.core.authn import Authenticator as _Authn
 from gateway.community.core.forwarding import Forwarding as _Fwd
+from gateway.community.spi.principal_signer import PrincipalSigner
 
 from ._authn import build_authenticator, build_database
 from ._configs import DatabaseConfig, init_container_config, load_container_config
@@ -26,6 +27,7 @@ from ._container import (
     shutdown_services,
 )
 from ._forwarding import build_forwarding
+from ._principal_signer import build_principal_signer
 
 Authenticator = _Authn
 Forwarding = _Fwd
@@ -37,6 +39,7 @@ _container: ApplicationContainer | None = None
 class BootstrapResult:
     authenticator: Authenticator
     forwarding: Forwarding
+    principal_signer: PrincipalSigner
 
     _container: ApplicationContainer = field(repr=False)
 
@@ -85,9 +88,11 @@ def bootstrap_app() -> BootstrapResult:
 
     authenticator = container.authenticator()
     forwarding = container.forwarding()
+    principal_signer = build_principal_signer()
     return BootstrapResult(
         authenticator=authenticator,
         forwarding=forwarding,
+        principal_signer=principal_signer,
         _container=container,
     )
 
@@ -132,6 +137,7 @@ __all__ = [
     "build_authenticator",
     "build_database",
     "build_forwarding",
+    "build_principal_signer",
     "get_container",
     "init_container_config",
     "initialize_services",

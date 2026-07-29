@@ -2,7 +2,7 @@
 
 One ORM implementation behind the
 :class:`~gateway.community.spi.access_key.AccessKeyRegistry` SPI port. Resolves a
-presented access-key token via the ``access_keys`` table through the
+presented access-key token via the ``baas_access_key_token`` table through the
 :data:`~gateway.community.spi.database.DataSourcePlugin`'s sync ``orm_session``,
 mapping the row to the SPI
 :class:`~gateway.community.spi.access_key.RegisteredAccessKey` via
@@ -21,7 +21,7 @@ from ._orm import AccessKeyRow
 
 
 class AccessKeyRepository(AccessKeyRegistry):
-    """Resolve an access-key token against the ``access_keys`` table (canonical)."""
+    """Resolve an access-key token against the ``baas_access_key_token`` table (canonical)."""
 
     Model: type[AccessKeyRow] = AccessKeyRow
 
