@@ -880,6 +880,81 @@ def test_cutover_finalizing_accepts_pending_evidence_without_quarantine() -> Non
         assert session.query(SkillMigrationQuarantineModel).count() == 0
 
 
+def test_finalizing_without_quarantine_accepts_runtime_identity_and_commits() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    assert repository.record_cutover_finalizing(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": False,
+            "status": "POST_CUTOVER_SYNC_PENDING",
+            "evidence": {"reason": "transport_response_unavailable"},
+        },
+    )
+    with database.transactional_orm_session() as session:
+        assert session.query(SkillMigrationQuarantineModel).count() == 0
+
+    quarantine_path = (
+        "/home/admin/.aicoding/workspace/skills-pool/"
+        ".migration-quarantine/generation-1/skills-local"
+    )
+    assert repository.record_post_cutover_evidence(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "ALREADY_COMMITTED",
+            "evidence": {
+                "active_marker": "same-generation",
+                "quarantine": quarantine_path,
+                "quarantine_cleanup_pending": True,
+            },
+        },
+    )
+    assert repository.has_quarantine_identity(
+        scope=scope,
+        migration_generation="generation-1",
+    )
+    assert repository.commit_pool_active(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        local_locators={},
+    )
+
+    state = repository.get(scope)
+    assert state.active_layout is SkillLayout.POOL
+    assert state.phase is SkillLayoutPhase.POOL_ACTIVE
+
+
 def test_post_cutover_evidence_reuses_existing_quarantine_identity() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
