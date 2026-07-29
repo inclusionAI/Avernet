@@ -174,10 +174,15 @@ Principal
 
 约束如下：
 
-- Gateway BotPrincipal 中的 Bot UUID 必须与 BCN `bot_uuid` 属于同一标识空间。
+- Gateway BotPrincipal 中的 Bot UUID 必须与 BCN `bot_uuid` 属于同一全局唯一的
+  标识空间，不能因租户不同而复用同一个 Bot UUID。
 - 每个 Principal 都提供规范化的 `actor_id`，供 BCN 统一执行 Participant
   和 Group role 授权。Human `actor_id` 不能当作 `bot_uuid` 使用，也不代表
   Human 可以作为其管理的 Bot 发言。
+- `tenant` 是 Principal 的身份元数据，不是 BCN 协作隔离边界。Group 不绑定
+  tenant，也不要求 caller、driver 或 Participant 属于同一 tenant。跨租户 Bot
+  的发现、DM、群聊和建群协作与同租户行为一致，统一由 Bot visibility、
+  Friendship/Relation、Group Participant 和 role 规则授权。
 - Human Principal 参与 Bot 资源关系管理时，请求中的 `bot_uuid` 必须由 BCN
   根据权威 `created_by` 关系授权；该关系不改变 Human 的 `actor_id`。
 - BCN 不接触外部原始 Cookie、Bearer Token 或 AgentPass。

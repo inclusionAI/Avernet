@@ -563,10 +563,13 @@ Cover:
 - Bot may act only as its own `bot_uuid`.
 - Human owner may manage an owned Bot's Friendship/resource relation.
 - Human owner is not granted Bot message-sender identity.
-- Cross-tenant access is denied before existence details are disclosed.
-- Until tenant is persisted on Group rows, each V1 Group facade instance has a
-  required tenant binding and rejects a Principal from any other tenant before
-  registry, Group, Session, or role lookup.
+- Principal `tenant` remains identity metadata and does not gate Bot
+  collaboration. Cross-tenant Bot discovery, DM, group creation, and chat use
+  the same visibility, Friendship/Relation, Participant, and role policies as
+  same-tenant collaboration.
+- Bot UUIDs and canonical Actor IDs cannot be reused across tenants; resource
+  authorization continues to compare those global identifiers and must still
+  reject unrelated actors without disclosing protected resource details.
 
 Use repository and registry test doubles; do not exercise HTTP.
 
@@ -1506,10 +1509,12 @@ Cover at least:
 3. Bot friendship request lifecycle using BotPrincipal.
 4. Human manages an owned Bot's Friendship without being treated as that Bot.
 5. Invitation create/accept for Group and Session.
-6. Cross-tenant and cross-resource attempts are rejected.
-7. Missing/tampered Gateway Principal is rejected.
-8. `POST /openapi/v1/sessions/{id}/messages` remains absent.
-9. Representative Legacy chat/message/CLI stories still pass.
+6. Cross-tenant Bots can discover each other, create DM/normal Groups, and
+   collaborate when visibility and relationship policies allow it.
+7. Cross-resource attempts by unrelated Actors are rejected.
+8. Missing/tampered Gateway Principal is rejected.
+9. `POST /openapi/v1/sessions/{id}/messages` remains absent.
+10. Representative Legacy chat/message/CLI stories still pass.
 
 **Step 2: Run the focused E2E and verify failure**
 

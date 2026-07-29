@@ -26,8 +26,6 @@ use bcs_service_api::{
 #[derive(Debug, Clone)]
 pub struct GroupServiceConfig {
     pub relation_env: String,
-    /// The one tenant served by this BCN instance.
-    pub tenant: String,
 }
 
 /// OpenAPI v1 Group facade.
@@ -75,15 +73,6 @@ impl GroupServiceImpl {
     ) -> Self {
         self.collaboration_runtime = Some(collaboration_runtime);
         self
-    }
-
-    fn ensure_principal_tenant(&self, principal: &Principal) -> Result<(), ApplicationError> {
-        if principal.tenant() == self.config.tenant {
-            return Ok(());
-        }
-        Err(ApplicationError::forbidden(
-            "Principal tenant is not authorized for this BCN instance",
-        ))
     }
 
     async fn authorize_bot_resource(
@@ -680,7 +669,6 @@ impl GroupService for GroupServiceImpl {
         &self,
         command: ListBotGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
-        self.ensure_principal_tenant(&command.principal)?;
         self.authorize_bot_resource(&command.principal, &command.bot_uuid)
             .await?;
         if command.limit == 0 || command.limit > 100 {
@@ -776,7 +764,6 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError> {
-        self.ensure_principal_tenant(&command.principal)?;
         match command.group {
             CreateGroupSpec::Collaboration(request) => {
                 self.create_collaboration(command.principal, request).await
@@ -788,7 +775,6 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError> {
-        self.ensure_principal_tenant(&query.principal)?;
         let group = self
             .load_readable_group(&query.principal, &query.group_id)
             .await?;
@@ -796,7 +782,6 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
-        self.ensure_principal_tenant(&command.principal)?;
         if command.patch.is_empty() {
             return Err(ApplicationError::invalid(
                 "invalid_request",
@@ -871,7 +856,6 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        self.ensure_principal_tenant(&command.principal)?;
         let Some(group) = self.groups.get(&command.group_id).await else {
             return Ok(DeleteResult {
                 group_id: command.group_id,

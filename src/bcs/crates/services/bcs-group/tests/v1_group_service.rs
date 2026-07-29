@@ -7,11 +7,11 @@ use bcs_friend::FriendCore;
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedUser, BotFinalDelivery, CreateCollaborationGroup,
-    CreateDirectMessageGroup, CreateGroup, CreateGroupSpec, CreateParticipant, DeleteGroup,
-    GetGroup, GroupDeliveryPolicy, GroupDetail, GroupKindFilter, GroupPatch, GroupService,
-    GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, ListBotGroups, Membership,
-    MembershipFilter, Principal, UpdateGroup,
+    ApplicationError, AuthenticatedUser, BotFinalDelivery, ChatConfiguration,
+    CollaborationConfiguration, CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup,
+    CreateGroupSpec, CreateParticipant, DeleteGroup, GetGroup, GroupDeliveryPolicy, GroupDetail,
+    GroupKindFilter, GroupPatch, GroupService, GroupStrategy as V1GroupStrategy, GroupSummary,
+    GroupVisibility, ListBotGroups, Membership, MembershipFilter, Principal, UpdateGroup,
 };
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand, CollaborationDefinition,
@@ -78,7 +78,6 @@ impl Fixture {
             management,
             GroupServiceConfig {
                 relation_env: "dev".to_string(),
-                tenant: "tenant-a".to_string(),
             },
         );
         if let Some(runtime) = runtime {
@@ -843,31 +842,36 @@ async fn get_requires_a_group_relation_and_delete_is_idempotent() {
 }
 
 #[tokio::test]
-async fn tenant_mismatch_is_rejected_before_group_lookup() {
+async fn tenant_metadata_does_not_restrict_bot_collaboration() {
     let fixture = Fixture::new().await;
-    fixture.add_public_bot("driver").await;
-    fixture
-        .groups
-        .upsert(normal_group(
-            "group-1",
-            "driver",
-            vec![Participant::bot("driver", ParticipantRole::Driver)],
-            GroupStrategy::Chat,
-            1,
-        ))
-        .await
-        .expect("store group");
-
-    for group_id in ["group-1", "missing"] {
-        let result = fixture
-            .service
-            .get(GetGroup {
-                principal: bot_principal_in_tenant("driver", "tenant-b"),
-                group_id: group_id.into(),
-            })
-            .await;
-        assert!(matches!(result, Err(ApplicationError::Forbidden(_))));
+    for bot in ["driver", "worker"] {
+        fixture.add_public_bot(bot).await;
     }
+
+    let detail = fixture
+        .service
+        .create(CreateGroup {
+            principal: bot_principal_in_tenant("driver", "tenant-b"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: Some("Cross-tenant collaboration".into()),
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "worker".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+            }),
+        })
+        .await
+        .expect("tenant metadata must not block collaboration");
+
+    assert!(matches!(detail, GroupDetail::Collaboration(_)));
 }
 
 #[tokio::test]
