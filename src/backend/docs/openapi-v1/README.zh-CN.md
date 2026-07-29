@@ -133,14 +133,25 @@ _按优先级分层排序。_
   （设置 + 保证重置），`bind_current_avernet_tenant(fn)`（把租户带入裸的
   `threading.Thread`/`ThreadPoolExecutor` 目标 —— `asyncio.to_thread`/`create_task`
   已会复制上下文，因此无需处理）。
-- `plugin_api/models.py` —— `BotModel` 上的**守卫模式（guard pattern）**：
-  - 在 `Session` 类上的 `do_orm_execute` **读守卫** →
-    `with_loader_criteria(Model, avernet_tenant == get_current_avernet_tenant(),
-    include_aliases=True)`；会跳过列/关系加载，并提供一个 `skip_avernet_tenant_guard`
-    选项。同时也约束 `Query.update()`/`Query.delete()`，因此写操作无需再加过滤。
-  - `before_insert` **插入守卫** → 未设置时打上标记，遇到显式冲突的租户时抛出
-    `CrossTenantInsertError`。
-  - 只注册一次，通过 `_AVERNET_TENANT_GUARDS_INSTALLED` 保证幂等。
+- `utils/avernet_tenant_guard.py` —— **守卫模式（guard pattern）**，自阶段 5 起
+  与具体模型解耦。模型在类定义之后紧跟一行 `register_avernet_tenant_guard(Model)`
+  即可接入；该模型必须声明
+  `avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")`。
+  - 在 `Session` 类上的 `do_orm_execute` **读守卫**（只安装一次）→ 为**每个已注册
+    模型**追加一个 `with_loader_criteria(Model, avernet_tenant ==
+    get_current_avernet_tenant(), include_aliases=True)`；会跳过列/关系加载，并提供
+    一个 `skip_avernet_tenant_guard` 选项。同时也约束
+    `Query.update()`/`Query.delete()`，因此写操作无需再加过滤。若某个选项指向的模型
+    并未出现在该语句中，它就是空操作 —— 这正是"一个监听器服务 N 个模型"成立的前提。
+  - 每个模型各自的 `before_insert` **插入守卫** → 未设置时打上标记，遇到显式冲突的
+    租户时抛出 `CrossTenantInsertError`。
+  - `register_avernet_tenant_guard` 校验的是 **mapper 的列**，而不是 `hasattr`：
+    否则一个把 `avernet_tenant` 声明成普通值的模型也能注册成功，而守卫会生成
+    `WHERE 1 = 1` —— 一次静默且彻底的隔离失效。
+  - 每个模型的注册是幂等的；`guarded_models()` 把注册表暴露给测试与诊断使用。
+  - 阶段 1 时这套守卫是焊死在 `plugin_api/models.py` 里的 `BotModel` 上的；阶段 5
+    将其抽出，使 `core/` 下的模型无需让 `plugin_api` 反向导入它们即可注册。
+    `plugin_api/models.py` 仍会重新导出 `CrossTenantInsertError`。
 - `adapters/http/middleware.py` —— `AvernetTenantMiddleware`，一个**纯 ASGI**
   中间件（**不是** `BaseHTTPMiddleware` —— 出于 ContextVar 的健壮性考虑）。它为每个请求
   设置租户。**已覆盖所有请求；Track A 阶段 2 及以后无需改动它。**

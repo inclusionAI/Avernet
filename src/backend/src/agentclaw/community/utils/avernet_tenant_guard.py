@@ -149,8 +149,14 @@ def register_avernet_tenant_guard(model: type) -> None:
 
     if model in _GUARDED_MODELS:
         return
-    _GUARDED_MODELS[model] = None
+    # Attach the insert guard *before* the model enters the registry. The
+    # reverse order leaves a window in which the read guard is live but the
+    # stamp is not, so an insert landing inside it would fall to
+    # server_default. The window sits inside the model module's own import, so
+    # nothing can hold a reference to the class yet — but the ordering costs
+    # nothing and removes the need to reason about that.
     event.listen(model, "before_insert", _insert_guard)
+    _GUARDED_MODELS[model] = None
 
 
 def guarded_models() -> tuple[type, ...]:

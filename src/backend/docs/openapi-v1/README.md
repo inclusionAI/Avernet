@@ -148,15 +148,28 @@ Category-agnostic; reuse as-is. These files arrive with PR #456:
   `bind_current_avernet_tenant(fn)` (carry tenant into a raw
   `threading.Thread`/`ThreadPoolExecutor` target — `asyncio.to_thread`/
   `create_task` already copy context, so they need nothing).
-- `plugin_api/models.py` — the **guard pattern** on `BotModel`:
-  - `do_orm_execute` **read guard** on the `Session` class →
-    `with_loader_criteria(Model, avernet_tenant == get_current_avernet_tenant(),
-    include_aliases=True)`; skips column/relationship loads + a
-    `skip_avernet_tenant_guard` option. Also constrains
-    `Query.update()`/`Query.delete()`, so writes need no filter.
-  - `before_insert` **insert guard** → stamp when unset, raise
+- `utils/avernet_tenant_guard.py` — the **guard pattern**, model-agnostic since
+  Stage 5. A model opts in with `register_avernet_tenant_guard(Model)` placed
+  immediately after the class; the model must declare
+  `avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")`.
+  - `do_orm_execute` **read guard** on the `Session` class, installed once →
+    appends `with_loader_criteria(Model, avernet_tenant ==
+    get_current_avernet_tenant(), include_aliases=True)` **per registered
+    model**; skips column/relationship loads + a `skip_avernet_tenant_guard`
+    option. Also constrains `Query.update()`/`Query.delete()`, so writes need
+    no filter. An option naming a model the statement does not touch is a
+    no-op — that is what makes one listener safe for N models.
+  - `before_insert` **insert guard** per model → stamp when unset, raise
     `CrossTenantInsertError` on an explicit conflicting tenant.
-  - registered once, idempotent on `_AVERNET_TENANT_GUARDS_INSTALLED`.
+  - `register_avernet_tenant_guard` validates against the **mapper's columns**,
+    not `hasattr`: a model declaring `avernet_tenant` as a plain value would
+    otherwise register and the guard would emit `WHERE 1 = 1` — a silent, total
+    bypass.
+  - registration is idempotent per model; `guarded_models()` exposes the
+    registry for tests and diagnostics.
+  - Stage 1 built this welded to `BotModel` inside `plugin_api/models.py`;
+    Stage 5 lifted it out so `core/` models can register without `plugin_api`
+    importing them. `plugin_api/models.py` re-exports `CrossTenantInsertError`.
 - `adapters/http/middleware.py` — `AvernetTenantMiddleware`, a **pure ASGI**
   middleware (NOT `BaseHTTPMiddleware` — ContextVar robustness). Sets each
   request's tenant. **Covers every request already; Track A stage 2+ does not
