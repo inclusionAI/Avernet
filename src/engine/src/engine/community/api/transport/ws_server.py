@@ -77,6 +77,7 @@ from engine.community.api.transport.auth_gate import verify_chat_send  # noqa: E
 log = logging.getLogger("engine-ws-server")
 _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", "on"}
 _REDACTED_MATERIALIZED_FILE = "[materialized-file]"
+_SESSION_FILES_PATH_MARKER = "/.teamclaw/session-files/"
 
 
 def _redact_materialized_paths(value: Any, paths: tuple[str, ...]) -> Any:
@@ -95,6 +96,16 @@ def _redact_materialized_paths(value: Any, paths: tuple[str, ...]) -> Any:
     if isinstance(value, tuple):
         return tuple(_redact_materialized_paths(item, paths) for item in value)
     return value
+
+
+def _materialized_path_redaction_targets(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Include each controlled session-files workspace root in WS redaction."""
+    targets = set(paths)
+    for path in paths:
+        workspace_root, marker, _ = path.partition(_SESSION_FILES_PATH_MARKER)
+        if marker and workspace_root:
+            targets.add(workspace_root)
+    return tuple(sorted(targets, key=len, reverse=True))
 
 
 def _chat_plugin_supports_inject(chat_plugin: Any) -> bool:
@@ -1065,8 +1076,8 @@ class EngineWebSocketServer:
                 workspace_root = workspace_root_strict()
                 if workspace_root is not None:
                     materialized_paths = (*materialized_paths, str(workspace_root))
-                materialized_paths = tuple(
-                    sorted(set(materialized_paths), key=len, reverse=True)
+                materialized_paths = _materialized_path_redaction_targets(
+                    materialized_paths
                 )
                 log.info(
                     "engine.resource_reference.validate session_key_hash=%s reference_count=%s ok=true",

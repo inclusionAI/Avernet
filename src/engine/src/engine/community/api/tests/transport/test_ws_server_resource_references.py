@@ -7,6 +7,7 @@ import pytest
 
 from engine.community.api.transport.ws_server import (
     EngineWebSocketServer,
+    _materialized_path_redaction_targets,
     _redact_materialized_paths,
 )
 from engine.community.core.engine.context import AuthContext
@@ -45,15 +46,27 @@ def test_redact_materialized_paths_redacts_workspace_root_and_file():
     assert redacted["cwd"] == "[materialized-file]"
 
 
+def test_materialized_path_redaction_targets_include_workspace_root():
+    path = "/bot/work/.teamclaw/session-files/a.txt"
+
+    assert _materialized_path_redaction_targets((path,)) == (path, "/bot/work")
+
+
 @pytest.mark.asyncio
 async def test_stream_rewrites_resources_before_adapter(fake_engine, monkeypatch):
-    monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/bot/work")
+    monkeypatch.delenv("OPENCLAW_WORKSPACE_DIR", raising=False)
     reference_service = MagicMock()
     reference_service.rewrite.return_value = ResolvedResourceContext(
-        prompt='read <file-ref name="a.txt" path="/bot/work/a.txt"></file-ref>',
+        prompt=(
+            'read <file-ref name="a.txt" '
+            'path="/bot/work/.teamclaw/session-files/a.txt"></file-ref>'
+        ),
         resource_references=[{"resource_id": "r1", "insert_id": "i1"}],
         materialized_files=[
-            {"resource_id": "r1", "canonical_bot_absolute_path": "/bot/work/a.txt"}
+            {
+                "resource_id": "r1",
+                "canonical_bot_absolute_path": "/bot/work/.teamclaw/session-files/a.txt",
+            }
         ],
     )
     server = EngineWebSocketServer(resource_reference_service=reference_service)
@@ -68,8 +81,8 @@ async def test_stream_rewrites_resources_before_adapter(fake_engine, monkeypatch
             event="chat",
             payload={
                 "state": "final",
-                "message": "read /bot/work/a.txt",
-                "nested": {"pathEcho": "/bot/work/a.txt"},
+                "message": "read /bot/work/.teamclaw/session-files/a.txt",
+                "nested": {"pathEcho": "/bot/work/.teamclaw/session-files/a.txt"},
                 "cwd": "/bot/work",
             },
         )
@@ -100,7 +113,10 @@ async def test_stream_rewrites_resources_before_adapter(fake_engine, monkeypatch
     extra = captured["request"].extraParams
     assert extra["resourceReferences"] == refs
     assert extra["promptFileRefs"] == refs
-    assert extra["materializedFiles"][0]["canonical_bot_absolute_path"] == "/bot/work/a.txt"
+    assert (
+        extra["materializedFiles"][0]["canonical_bot_absolute_path"]
+        == "/bot/work/.teamclaw/session-files/a.txt"
+    )
     reference_service.rewrite.assert_called_once()
     assert threaded_functions == [reference_service.rewrite]
     outbound = websocket.send_text.await_args.args[0]
