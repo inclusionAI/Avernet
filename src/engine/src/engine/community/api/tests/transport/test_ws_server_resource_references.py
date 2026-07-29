@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from engine.community.api.transport.ws_server import EngineWebSocketServer
+from engine.community.api.transport.ws_server import (
+    EngineWebSocketServer,
+    _redact_materialized_paths,
+)
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.resource_references.models import ResolvedResourceContext
 from engine.community.core.resource_references.service import ResourceReferenceError
@@ -25,8 +28,26 @@ def fake_engine():
     EngineManager.reset_instance()
 
 
+def test_redact_materialized_paths_redacts_workspace_root_and_file():
+    payload = {
+        "cwd": "/bot/work",
+        "message": "read /bot/work/a.txt",
+        "nested": ["/bot/work/.teamclaw/session-files/a.txt"],
+    }
+
+    redacted = _redact_materialized_paths(
+        payload,
+        ("/bot/work/a.txt", "/bot/work"),
+    )
+
+    assert "/bot/work" not in str(redacted)
+    assert redacted["message"] == "read [materialized-file]"
+    assert redacted["cwd"] == "[materialized-file]"
+
+
 @pytest.mark.asyncio
-async def test_stream_rewrites_resources_before_adapter(fake_engine):
+async def test_stream_rewrites_resources_before_adapter(fake_engine, monkeypatch):
+    monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/bot/work")
     reference_service = MagicMock()
     reference_service.rewrite.return_value = ResolvedResourceContext(
         prompt='read <file-ref name="a.txt" path="/bot/work/a.txt"></file-ref>',
@@ -49,6 +70,7 @@ async def test_stream_rewrites_resources_before_adapter(fake_engine):
                 "state": "final",
                 "message": "read /bot/work/a.txt",
                 "nested": {"pathEcho": "/bot/work/a.txt"},
+                "cwd": "/bot/work",
             },
         )
 
@@ -82,7 +104,7 @@ async def test_stream_rewrites_resources_before_adapter(fake_engine):
     reference_service.rewrite.assert_called_once()
     assert threaded_functions == [reference_service.rewrite]
     outbound = websocket.send_text.await_args.args[0]
-    assert "/bot/work/a.txt" not in outbound
+    assert "/bot/work" not in outbound
     assert "[materialized-file]" in outbound
 
 
