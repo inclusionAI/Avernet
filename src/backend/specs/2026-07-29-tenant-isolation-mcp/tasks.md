@@ -117,20 +117,27 @@
         after: 7 passed.
 - **Depends on:** Task 2
 
-## Task 5: Prove the internal API is untouched
+## Task 5: [x] Prove the internal API is untouched
 - **Goal:** Demonstrate that adding isolation is invisible to every existing
   caller.
-- **Files:** `tests/community/api/mcp/routers/test_mcp.py` (extend) or a new
-  sibling; no production file should need editing here.
+- **Files:** `tests/community/api/mcp/routers/test_mcp_config_internal_unchanged.py`
+  (new sibling — `test_mcp.py` mocks the services, so it cannot see the layer
+  the guard acts on); no production file needed editing.
 - **Done when:**
-  - [ ] `GET /mcp/user/config` and `POST /mcp/user/config` return
+  - [x] `GET /mcp/user/config` and `POST /mcp/user/config` return
         byte-identical bodies to today under the default tenant, including the
-        `api_key` masking and the `has_config` flag.
-  - [ ] No response body anywhere carries `avernet_tenant`.
-  - [ ] The existing internal API suite runs **unmodified**. Any edit needed
-        there is a defect in Tasks 2–4, not a test to update.
-  - [ ] Rows that predate the change resolve to the default tenant — asserted
-        via `server_default`, not a Python default.
+        `api_key` masking and the `has_config` flag. Driven through the **real**
+        `MCPConfigService` over the **real** `UserMCPConfigRepository` against
+        SQLite; only MCP Center and the device fan-out are stubbed.
+  - [x] No response body anywhere carries `avernet_tenant`.
+  - [x] The existing internal API suite runs **unmodified**. 16 passed in
+        `tests/community/api/mcp/`.
+  - [x] Rows that predate the change resolve to the default tenant — asserted
+        via `server_default`, not a Python default: a raw SQL insert that omits
+        the column comes back `teamclaw`.
+  - **Found while writing this:** the write path returns `headers: null` while
+    the read path returns the stored headers. Pre-existing behavior, unrelated
+    to isolation — now pinned by the test so it cannot drift silently.
 - **Depends on:** Tasks 3, 4
 
 ## Task 6: Update the handoff board and record the schema change
