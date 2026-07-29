@@ -36,9 +36,12 @@ pending HumanInput”的启发式判断，无法覆盖以下场景：
 
 ### 2.1 节点通知模式
 
+- 不配置 `notification` 时沿用现有 Workbench HumanInput，不要求
+  `assignee` 或 `human_input_channel`；
 - `fixed_group`：发送到当前 collaboration YAML 声明的唯一固定钉钉群；
 - `direct_assignee`：发送给节点 assignee 对应的钉钉用户；
-- 两种模式都必须配置一个固定 BCS Human actor；
+- 选择任一 IM notification mode 时，必须同时配置
+  `human_input_channel` 和固定 BCS Human actor；
 - 一个节点只能选择一种模式，不同时向群和个人广播。
 
 ### 2.2 YAML 固定群与机器人解析
