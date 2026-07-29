@@ -760,6 +760,51 @@ def test_cutover_finalizing_persists_quarantine_at_irreversible_boundary() -> No
         assert quarantine.pool_activated_at is None
 
 
+def test_cutover_finalizing_accepts_pending_evidence_without_quarantine() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+
+    assert repository.record_cutover_finalizing(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": False,
+            "status": "POST_CUTOVER_SYNC_PENDING",
+            "evidence": {"reason": "post_cutover_sync_failed"},
+        },
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert state.data_plane_cutover_committed is True
+    with database.transactional_orm_session() as session:
+        assert session.query(SkillMigrationQuarantineModel).count() == 0
+
+
 def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
@@ -864,6 +909,68 @@ def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
     assert active.last_failure_evidence["previous_failure"] == {
         "reason": "response_lost"
     }
+
+
+def test_legacy_committed_repair_refresh_failure_keeps_refresh_phase() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    assert repository.mark_repair_required(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        failure_code="UNKNOWN",
+        failure_stage="cutover_outcome_unknown",
+        evidence={"reason": "response_lost"},
+    )
+    assert repository.resolve_repair(
+        scope=scope,
+        migration_generation="generation-1",
+        operator="oncall-1",
+        note="legacy backend resolved this row as committed",
+        cutover_committed=True,
+    )
+    assert repository.try_acquire_lease(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-2",
+        lease_seconds=60,
+    )
+    assert repository.record_post_cutover_failure(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-2",
+        failure_code="TRANSIENT_ERROR",
+        failure_stage="post_cutover_refresh",
+        retryable=True,
+        evidence={"reason": "adapter_temporarily_unreachable"},
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert state.data_plane_cutover_committed is True
+    assert state.last_failure_code == "TRANSIENT_ERROR"
 
 
 def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
