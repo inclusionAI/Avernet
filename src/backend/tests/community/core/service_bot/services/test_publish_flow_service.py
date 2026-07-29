@@ -3605,6 +3605,88 @@ def test_sync_restart_progress_stable_success_activates_recreated_binding():
     svc._refresh_provider_mcp_after_success.assert_called_once()
 
 
+def test_sync_restart_progress_stable_success_clears_restarting_flag():
+    # When a restart completes with SUCCESS for a stable record (VALIDATING/SUCCESS),
+    # the restarting in-progress marker must be cleared. This test verifies the fix
+    # for the bug where the marker persisted because the stable-state branch did not
+    # call _handle_sync_success (which normally clears this flag).
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        source_bot_id="bot-src",
+        ext={
+            "restart": {"online": 700, "restarting": True},
+            "binding": {"online": 88},
+        },
+    )
+    svc, mock_pub_service = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    svc._activate_binding = Mock()
+    svc.refresh_publish_handle = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+    # Mock _mutate_and_update_ext to capture the mutator and verify it clears restarting
+    original_mutate = svc._mutate_and_update_ext
+    captured_mutator = None
+
+    def capture_mutator(publish_id, mutator):
+        nonlocal captured_mutator
+        captured_mutator = mutator
+        return original_mutate(publish_id, mutator)
+
+    svc._mutate_and_update_ext = Mock(side_effect=capture_mutator)
+
+    result = svc.sync_restart_progress(publish_id=1)
+
+    # No status advance (still SUCCESS)
+    assert result.status == PublishStatus.SUCCESS
+
+    # Verify that _mutate_and_update_ext was called to clear the restarting flag
+    assert svc._mutate_and_update_ext.called, "Expected _mutate_and_update_ext to be called"
+    assert captured_mutator is not None, "Expected mutator to be captured"
+
+    # Verify the mutator function clears the restarting flag
+    test_ext = {"restart": {"online": 700, "restarting": True}}
+    captured_mutator(test_ext)
+    assert "restarting" not in test_ext.get("restart", {}), "restarting flag should be cleared"
+
+
+def test_sync_restart_progress_validating_success_clears_restarting_flag():
+    # Same as above but for VALIDATING status (the other stable state).
+    record = _make_publish_record(
+        status=PublishStatus.VALIDATING.value,
+        source_bot_id="bot-src",
+        ext={
+            "restart": {"verify": 600, "restarting": True},
+            "binding": {"verify": 77},
+        },
+    )
+    svc, mock_pub_service = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    svc._activate_binding = Mock()
+    svc.refresh_publish_handle = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+    original_mutate = svc._mutate_and_update_ext
+    captured_mutator = None
+
+    def capture_mutator(publish_id, mutator):
+        nonlocal captured_mutator
+        captured_mutator = mutator
+        return original_mutate(publish_id, mutator)
+
+    svc._mutate_and_update_ext = Mock(side_effect=capture_mutator)
+
+    result = svc.sync_restart_progress(publish_id=1)
+
+    # No status advance (still VALIDATING)
+    assert result.status == PublishStatus.VALIDATING
+    assert svc._mutate_and_update_ext.called, "Expected _mutate_and_update_ext to be called"
+    assert captured_mutator is not None, "Expected mutator to be captured"
+
+    # Verify the mutator clears restarting
+    test_ext = {"restart": {"verify": 600, "restarting": True}}
+    captured_mutator(test_ext)
+    assert "restarting" not in test_ext.get("restart", {}), "restarting flag should be cleared"
+
+
 # ---- restart_bot() submit path ---------------------------------------------
 
 def test_restart_bot_not_found_returns_failure():
