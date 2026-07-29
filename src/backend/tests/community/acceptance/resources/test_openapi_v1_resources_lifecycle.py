@@ -75,6 +75,15 @@ def test_openapi_v1_resources_link_lifecycle(live_backend):
         got = _assert_ok(client.get(f"/openapi/v1/bots/resources/{rid}?bot_id={bot_id}"))
         assert got["resource_id"] == rid
 
+        # --- update (PUT) ---
+        updated = _assert_ok(
+            client.put(
+                f"/openapi/v1/bots/resources/{rid}?bot_id={bot_id}",
+                json={"name": "openapi-link-renamed", "url": "https://example.com/updated"},
+            )
+        )
+        assert updated["resource_id"] == rid
+
         # --- check-name (endpoint reachable; exists value not asserted because
         #     openapi LINK is persisted as legacy URL by create_url_resource,
         #     and check-name's type-default (FILE) won't match — a known
