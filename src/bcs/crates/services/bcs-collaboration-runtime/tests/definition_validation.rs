@@ -26,6 +26,30 @@ runtime:
         final_output: true
 "#;
 
+const HUMAN_INPUT_AUTHORING_YAML: &str = r#"
+name: Human input over IM
+participants:
+  observer:
+    display_name: Observer
+    required: false
+runtime:
+  kind: state_machine
+  state_machine:
+    human_input_channel:
+      channel_type: dingtalk
+    nodes:
+      review:
+        kind: human_input
+        display_name: Human review
+        assignee:
+          type: runtime_actor
+          actor: human_1001
+        notification:
+          mode: direct_assignee
+        instruction: Review the result.
+        node_timeout_ms: 60000
+"#;
+
 fn validate_authoring(
     yaml: &str,
     judge_available: bool,
@@ -63,6 +87,41 @@ fn authoring_validation_rejects_unknown_keys() {
     assert!(!outcome.valid);
     assert_eq!(outcome.errors[0].code, "UNKNOWN_KEY");
     assert_eq!(outcome.errors[0].path, "$.verions");
+}
+
+#[test]
+fn authoring_validation_accepts_direct_human_input_channel_without_binding_id() {
+    let outcome = validate_authoring(HUMAN_INPUT_AUTHORING_YAML, false);
+
+    assert!(outcome.valid, "{:?}", outcome.errors);
+    let definition = outcome.definition.expect("validated definition");
+    let CollaborationRuntimeDefinition::StateMachine(machine) = definition.runtime else {
+        panic!("expected state machine");
+    };
+    assert_eq!(
+        machine
+            .human_input_channel
+            .as_ref()
+            .map(|channel| channel.channel_type.as_str()),
+        Some("dingtalk")
+    );
+}
+
+#[test]
+fn authoring_validation_rejects_channel_binding_id_in_human_input_yaml() {
+    let yaml = HUMAN_INPUT_AUTHORING_YAML.replace(
+        "      channel_type: dingtalk",
+        "      channel_type: dingtalk\n      channel_binding_id: binding-1",
+    );
+    let outcome = validate_authoring(&yaml, false);
+
+    assert!(!outcome.valid);
+    assert_eq!(outcome.errors[0].code, "UNKNOWN_KEY");
+    assert!(
+        outcome.errors[0]
+            .path
+            .contains("human_input_channel.channel_binding_id")
+    );
 }
 
 #[test]
@@ -526,10 +585,20 @@ participants:
 runtime:
   kind: state_machine
   state_machine:
+    human_input_channel:
+      channel_type: dingtalk
+      fixed_group:
+        conversation_type: group
+        conversation_id: cid-review
     nodes:
       first_review:
         kind: human_input
         display_name: 第一次评审
+        assignee:
+          type: runtime_actor
+          actor: human:reviewer
+        notification:
+          mode: fixed_group
         instruction: 请完成第一次评审。
         node_timeout_ms: 60000
         transitions:
@@ -537,6 +606,11 @@ runtime:
       second_review:
         kind: human_input
         display_name: 第二次评审
+        assignee:
+          type: runtime_actor
+          actor: human:reviewer
+        notification:
+          mode: fixed_group
         instruction: 请完成第二次评审。
         node_timeout_ms: 60000
         transitions:
@@ -568,6 +642,11 @@ participants:
 runtime:
   kind: state_machine
   state_machine:
+    human_input_channel:
+      channel_type: dingtalk
+      fixed_group:
+        conversation_type: group
+        conversation_id: cid-review
     nodes:
       prepare:
         kind: bot_task
@@ -581,6 +660,11 @@ runtime:
       review_a:
         kind: human_input
         display_name: A 评审
+        assignee:
+          type: runtime_actor
+          actor: human:reviewer
+        notification:
+          mode: fixed_group
         instruction: 完成 A 评审。
         node_timeout_ms: 60000
         transitions:
@@ -588,6 +672,11 @@ runtime:
       review_b:
         kind: human_input
         display_name: B 评审
+        assignee:
+          type: runtime_actor
+          actor: human:reviewer
+        notification:
+          mode: fixed_group
         instruction: 完成 B 评审。
         node_timeout_ms: 60000
         transitions:
@@ -617,7 +706,7 @@ fn rejects_human_input_bot_assignee() {
     });
 
     let error = validate_definition(definition).expect_err("human assignee must be rejected");
-    assert!(error.to_string().contains("must not define assignee"));
+    assert!(error.to_string().contains("assignee must be runtime_actor"));
 }
 
 #[test]
@@ -732,6 +821,11 @@ runtime:
   state_machine:
     version: 1
     graph_mode: acyclic
+    human_input_channel:
+      channel_type: dingtalk
+      fixed_group:
+        conversation_type: group
+        conversation_id: cid-review
     defaults:
       node_timeout_ms: 120000
       max_attempts: 3
@@ -739,6 +833,11 @@ runtime:
       review:
         kind: human_input
         display_name: 人工评审
+        assignee:
+          type: runtime_actor
+          actor: human:reviewer
+        notification:
+          mode: fixed_group
         instruction: 请直接回复自然语言评审意见。
         node_timeout_ms: 60000
         judge:
