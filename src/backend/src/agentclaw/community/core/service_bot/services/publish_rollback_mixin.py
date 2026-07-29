@@ -6,6 +6,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.service_bot.services.publish_exceptions import (
+    BotPublishServiceError,
+    PublishNotFoundError,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
@@ -125,11 +129,6 @@ class PublishRollbackMixin:
             PublishStatusInvalidError: 发布单状态不支持回滚
             BotPublishServiceError: 回滚失败
         """
-        from agentclaw.community.core.service_bot.services.bot_publish_service import (
-            BotPublishServiceError,
-            PublishNotFoundError,
-        )
-
         logger.info(
             f"[PublishRollbackMixin.rollback_publish] called: publish_id={publish_id}, "
             f"operator={operator}, reason={reason}"

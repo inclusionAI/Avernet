@@ -187,7 +187,12 @@ def enrich_group_labels(
             row.group_id, row.session_kind = label
 
 
-def enrich_task_labels(session: Any, rows: list[Any]) -> None:
+def enrich_task_labels(
+    session: Any,
+    rows: list[Any],
+    preferred_biz_scene: str | None = None,
+    preferred_biz_task_id: str | None = None,
+) -> None:
     """Batch-fill missing task labels using indexed runtime-ID relations."""
     candidate_rows: dict[tuple[str, str], list[Any]] = {}
     digests_by_type: dict[str, set[str]] = {}
@@ -198,6 +203,8 @@ def enrich_task_labels(session: Any, rows: list[Any]) -> None:
             ("session_key", "session_key"),
         ):
             ref_value = getattr(row, attribute, None)
+            if ref_type == "trace_id" and not ref_value:
+                ref_value = getattr(row, "id", None)
             if not ref_value:
                 continue
             candidate_rows.setdefault((ref_type, ref_value), []).append(row)
@@ -223,19 +230,38 @@ def enrich_task_labels(session: Any, rows: list[Any]) -> None:
         )
         .all()
     )
-    enriched_rows: set[int] = set()
+    relations_by_row: dict[int, list[Any]] = {}
     for relation in relations:
+        relation_type = getattr(relation, "ref_type", None)
+        relation_value = getattr(relation, "ref_value", None)
+        if not relation_type or not relation_value:
+            continue
         for row in candidate_rows.get(
-            (relation.ref_type, relation.ref_value), ()
+            (relation_type, relation_value), ()
         ):
-            row_identity = id(row)
-            if row_identity in enriched_rows:
+            relations_by_row.setdefault(id(row), []).append(relation)
+
+    for row in rows:
+        scene = getattr(row, "biz_scene", None)
+        task_id = getattr(row, "biz_task_id", None)
+        if scene and task_id:
+            continue
+        if (
+            preferred_biz_scene
+            and preferred_biz_task_id
+            and "biz_ref" in (getattr(row, "match_sources", None) or ())
+        ):
+            row.biz_scene = preferred_biz_scene
+            row.biz_task_id = preferred_biz_task_id
+            continue
+        for relation in relations_by_row.get(id(row), ()):
+            if scene and relation.biz_scene != scene:
                 continue
-            if not getattr(row, "biz_scene", None):
-                row.biz_scene = relation.biz_scene
-            if not getattr(row, "biz_task_id", None):
-                row.biz_task_id = relation.biz_task_id
-            enriched_rows.add(row_identity)
+            if task_id and relation.biz_task_id != task_id:
+                continue
+            row.biz_scene = relation.biz_scene
+            row.biz_task_id = relation.biz_task_id
+            break
 
 
 def load_bot_names(session: Any, bot_ids: set[str]) -> dict[str, str]:
@@ -270,9 +296,10 @@ def load_bot_names(session: Any, bot_ids: set[str]) -> dict[str, str]:
 
 
 def enrich_trace_labels(session: Any, row: Any) -> Any:
-    """Attach optional Bot and group labels to a detached trace row."""
+    """Attach optional Bot, group, and task labels to one detached trace row."""
     if row.bot_id:
         row.bot_name = load_bot_names(session, {row.bot_id}).get(row.bot_id)
+    enrich_task_labels(session, [row])
     session_key = row.session_key
     if not session_key:
         return row

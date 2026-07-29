@@ -714,6 +714,7 @@ impl GroupServiceImpl {
                     definition_yaml: None,
                     definition: None,
                     definition_ref: None,
+                    participant_bindings: None,
                     input: session.input.unwrap_or(Value::Null),
                     caller_id: Some(principal_actor_id),
                     authenticated_human,

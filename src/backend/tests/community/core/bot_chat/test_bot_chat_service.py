@@ -632,6 +632,35 @@ class TestBotChatServiceListSessions:
             assert exc_info.value.status_code == 500
 
     @pytest.mark.asyncio
+    async def test_list_sessions_langfuse_enriches_only_the_response_page(
+        self, service
+    ):
+        trace = {
+            "id": "trace-labels",
+            "name": "Session",
+            "timestamp": "2025-01-15T10:00:00Z",
+            "metadata": {"attributes": {}},
+        }
+        service._fetch_traces_from_langfuse = AsyncMock(return_value=([trace], 1))
+        service._db_repo = MagicMock()
+
+        def enrich(rows):
+            rows[0].group_id = "group_fixture"
+            rows[0].biz_scene = "scene_fixture"
+            rows[0].biz_task_id = "task_fixture"
+
+        service._db_repo.enrich_labels.side_effect = enrich
+
+        result = await service.list_sessions(
+            owner_id="user1", log_source="langfuse"
+        )
+
+        assert result.sessions[0].group_id == "group_fixture"
+        assert result.sessions[0].biz_scene == "scene_fixture"
+        assert result.sessions[0].biz_task_id == "task_fixture"
+        service._db_repo.enrich_labels.assert_called_once_with(result.sessions)
+
+    @pytest.mark.asyncio
     async def test_list_sessions_with_query_filter(self, service):
         mock_response = AsyncMock()
         mock_response.status = 200
@@ -1612,12 +1641,14 @@ class TestBotChatServiceGetSession:
         mock_aiohttp_session.get = mock_get
         mock_aiohttp_session.__aenter__ = AsyncMock(return_value=mock_aiohttp_session)
         mock_aiohttp_session.__aexit__ = AsyncMock(return_value=False)
+        service._db_repo = MagicMock()
 
         with patch("agentclaw.community.core.bot_chat.service.aiohttp.ClientSession", return_value=mock_aiohttp_session):
             result = await service.get_session(trace_id="trace-1", owner_id="user1", log_source="langfuse")
 
         assert result.id == "trace-1"
         assert result.user_id == "user1"
+        service._db_repo.enrich_labels.assert_called_once_with([result])
 
     @pytest.mark.asyncio
     async def test_get_session_langfuse_non_default_bot_unauthorized(self, service):

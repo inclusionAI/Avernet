@@ -505,6 +505,7 @@ impl BcsChannelService {
                 definition_yaml: None,
                 definition: None,
                 definition_ref: None,
+                participant_bindings: None,
                 input,
                 caller_id: Some(actor_id.to_string()),
                 authenticated_human: Some(AuthenticatedHumanCaller {

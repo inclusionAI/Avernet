@@ -271,6 +271,14 @@ fn build_api_routes() -> Router<HttpAppState> {
             post(routes::collaboration_runs::start_state_machine_run),
         )
         .route(
+            "/sessions/{sid}/state-machine-permission",
+            get(routes::collaboration_runs::get_session_state_machine_permission),
+        )
+        .route(
+            "/sessions/{sid}/state-machine-runs",
+            post(routes::collaboration_runs::start_session_state_machine_run),
+        )
+        .route(
             "/groups/{id}/callback",
             post(routes::group_messages::group_callback),
         )

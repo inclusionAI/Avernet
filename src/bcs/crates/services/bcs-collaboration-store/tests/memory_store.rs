@@ -102,6 +102,47 @@ async fn run_lookup_by_session_id_returns_latest_session_run() {
     assert_eq!(loaded.run_id, "sm-run-newer");
 }
 
+#[tokio::test]
+async fn session_idle_create_atomically_allows_only_one_active_run() {
+    let store = MemoryCollaborationStore::new();
+    let first = test_run("sm-run-first", "group-1:abcdef12", 1);
+    let second = test_run("sm-run-second", "group-1:abcdef12", 2);
+
+    let (first_created, second_created) = tokio::join!(
+        store.create_run_if_session_idle(first, Vec::new()),
+        store.create_run_if_session_idle(second, Vec::new()),
+    );
+    let first_created = first_created.expect("create first run");
+    let second_created = second_created.expect("create second run");
+
+    assert_ne!(first_created, second_created);
+    let active = store
+        .get_run_by_session_id("group-1:abcdef12")
+        .await
+        .expect("lookup active run")
+        .expect("active run");
+    store
+        .update_run_status(
+            &active.run_id,
+            StateMachineRunStatus::Completed,
+            None,
+            None,
+            3,
+            Some(3),
+        )
+        .await
+        .expect("complete active run");
+    assert!(
+        store
+            .create_run_if_session_idle(
+                test_run("sm-run-third", "group-1:abcdef12", 4),
+                Vec::new(),
+            )
+            .await
+            .expect("create run after completion")
+    );
+}
+
 fn test_run(run_id: &str, session_id: &str, created_at: u64) -> StateMachineRun {
     StateMachineRun {
         run_id: run_id.to_string(),

@@ -28,6 +28,7 @@ bcs-route-security = { workspace = true }
 bcs-collaboration-store = { workspace = true }
 bcs-group = { workspace = true }
 bcs-group-store = { workspace = true }
+bcs-message-store = { workspace = true }
 bcs-session = { workspace = true }
 bcs-session-store = { workspace = true }
 bcs-test-support = { workspace = true }

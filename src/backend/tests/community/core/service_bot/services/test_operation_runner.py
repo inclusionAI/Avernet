@@ -21,10 +21,12 @@ from agentclaw.community.plugins.publish_operation_repository import (
     OrmPublishOperationRepository as PublishOperationRepository,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    OperationAlreadyInFlightError,
     PublishOperationError,
     PublishOperationRunner,
     TargetBotGoneError,
     acquire_deploy_workflow,
+    open_publish_operation,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 
@@ -120,6 +122,33 @@ def test_open_after_terminal_opens_next_attempt(ledger, baas):
     op2 = r.open_operation(publish_id=1, kind=UPGRADE, stage=PublishStage.ONLINE, bot_uuid="b")
     assert op2.id != op1.id
     assert op2.attempt == 2
+
+
+def test_open_rejects_existing_in_flight_operation(ledger):
+    op = open_publish_operation(
+        ledger,
+        publish_id=1,
+        kind=PublishOperationKind.DRAFT_RESTORE,
+        stage=PublishStage.DRAFT,
+        bot_uuid="b",
+    )
+
+    with pytest.raises(OperationAlreadyInFlightError):
+        open_publish_operation(
+            ledger,
+            publish_id=1,
+            kind=PublishOperationKind.DRAFT_RESTORE,
+            stage=PublishStage.DRAFT,
+            bot_uuid="b",
+            reject_if_in_flight=True,
+        )
+
+    latest = ledger.get_latest_by_kind(
+        1,
+        PublishOperationKind.DRAFT_RESTORE,
+        PublishStage.DRAFT.value,
+    )
+    assert latest.id == op.id
 
 
 # ── acquire: already recorded ───────────────────────────────────────────────

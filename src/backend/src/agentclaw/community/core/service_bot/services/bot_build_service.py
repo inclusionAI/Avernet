@@ -12,10 +12,12 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -69,6 +71,10 @@ logger = get_logger()
 # duplicated locally to keep this lower-level service free of a dependency on
 # the publish-flow orchestration package.
 _BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
+
+# Draft restoration copies a potentially large historical workspace. Bound the
+# whole operation, rather than granting each individual command a fresh timeout.
+_DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
 
 
 class BotBuildServiceError(Exception):
@@ -652,6 +658,7 @@ class BotBuildService:
         cmd: list[str],
         command_name: str,
         error_message: str,
+        timeout_seconds: float | None = None,
     ) -> subprocess.CompletedProcess:
         """执行本地命令并统一处理日志和错误。
 
@@ -672,13 +679,15 @@ class BotBuildService:
         )
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+            run_kwargs = {
+                "capture_output": True,
+                "text": True,
+                "encoding": "utf-8",
+                "errors": "replace",
+            }
+            if timeout_seconds is not None:
+                run_kwargs["timeout"] = timeout_seconds
+            result = subprocess.run(cmd, **run_kwargs)
         except FileNotFoundError:
             logger.error(
                 f"[BotBuildService._run_local_command] "
@@ -687,6 +696,15 @@ class BotBuildService:
             raise BotBuildMigrationError(
                 f"{command_name} command not found"
             )
+        except subprocess.TimeoutExpired as exc:
+            logger.error(
+                f"[BotBuildService._run_local_command] "
+                f"{command_name} timed out after {timeout_seconds} seconds"
+            )
+            raise BotBuildMigrationError(
+                f"{error_message}: command timed out after "
+                f"{timeout_seconds:g} seconds"
+            ) from exc
 
         if result.returncode != 0:
             logger.error(
@@ -1146,6 +1164,227 @@ class BotBuildService:
             logger.error(f"[BotBuildService.upgrade] Upgrade failed: {e}")
             raise BotBuildServiceError(f"Bot upgrade failed: {e}")
 
+    def restore_draft(
+        self,
+        *,
+        bot: Dict[str, Any],
+        source_version: int,
+        artifact_ext: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Restore an ARCA/BAAS mounted draft from a historical artifact.
+
+        The historical version is restored host-side with ``rsync --delete``
+        into the draft NAS workspace; runtime/session exclusions are preserved.
+        Only versioned ``migration_path`` artifacts participate in this operation.
+        """
+        provider = self._resolve_sandbox_provider(bot)
+        build_plan = provider.get_build_plan()
+        deadline = time.monotonic() + _DRAFT_RESTORE_TIMEOUT_SECONDS
+
+        def remaining_timeout() -> float:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BotBuildMigrationError(
+                    "恢复草稿超时（默认限制 30 分钟）"
+                )
+            return remaining
+
+        if not artifact_ext.get("migration_path"):
+            raise BotBuildServiceError("历史版本缺少 migration_path")
+
+        bot_id = bot.get("bot_id")
+        entity_id = bot.get("entity_id", "")
+        entity_type = bot.get("entity_type", "staff")
+        if not bot_id or not entity_id:
+            raise BotBuildServiceError("恢复草稿缺少 bot_id/entity_id")
+
+        # Never trust a DB path as an arbitrary rsync source. Reconstruct the
+        # exact versioned artifact path from the Bot identity and version.
+        artifact_dir = get_bot_dir(entity_id, bot_id, entity_type) / str(source_version) / build_plan.migration_subpath
+        draft_nas_dir = get_bot_nas_dir(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=build_plan.engine_type,
+            entity_type=entity_type,
+        )
+        draft_dir = draft_nas_dir / build_plan.source_root_name
+        if not artifact_dir.exists():
+            raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
+
+        self._run_local_command(
+            cmd=["sudo", "chmod", "755", str(draft_nas_dir)],
+            command_name="sudo chmod",
+            error_message="chmod draft NAS directory failed",
+            timeout_seconds=remaining_timeout(),
+        )
+        draft_dir.mkdir(parents=True, exist_ok=True)
+
+        excludes = [f"--exclude={item}" for item in build_plan.rsync_excludes]
+        # Extra snapshots (for example target/claude -> draft/.claude) are not
+        # part of the primary engine root and must not leak into it.
+        if build_plan.extra_sync_target_relpath:
+            excludes.append(f"--exclude={build_plan.extra_sync_target_relpath}")
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "rsync",
+                "-av",
+                "--delete",
+                *excludes,
+                f"{artifact_dir}/",
+                f"{draft_dir}/",
+            ],
+            command_name="rsync draft restore",
+            error_message="restore draft workspace failed",
+            timeout_seconds=remaining_timeout(),
+        )
+
+        if build_plan.extra_sync_source_relpath and build_plan.extra_sync_target_relpath:
+            extra_artifact_dir = artifact_dir / build_plan.extra_sync_target_relpath
+            if not extra_artifact_dir.exists():
+                raise BotBuildMigrationError(f"历史附加构造物目录不存在: {extra_artifact_dir}")
+            extra_draft_dir = draft_dir.parent / build_plan.extra_sync_source_relpath
+            extra_draft_dir.mkdir(parents=True, exist_ok=True)
+            self._run_local_command(
+                cmd=[
+                    "sudo",
+                    "rsync",
+                    "-av",
+                    "--delete",
+                    *excludes,
+                    f"{extra_artifact_dir}/",
+                    f"{extra_draft_dir}/",
+                ],
+                command_name="rsync draft restore (extra)",
+                error_message="restore draft extra workspace failed",
+                timeout_seconds=remaining_timeout(),
+            )
+
+        return {
+            "restore_type": "migration_path",
+            "artifact_path": str(artifact_dir),
+            "draft_path": str(draft_dir),
+        }
+
+    async def restore_draft_async(
+        self,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Run :meth:`restore_draft` outside the event loop."""
+        return await asyncio.to_thread(self.restore_draft, **kwargs)
+
+    async def restore_teclaw_draft_async(
+        self,
+        *,
+        bot_uuid: str,
+        bot: Dict[str, Any],
+        owner_id: str,
+        source_version: int,
+        artifact_ext: Dict[str, Any],
+        baas_publish_id: int | None = None,
+        request_id: str | None = None,
+    ) -> Dict[str, Any]:
+        """Advance one Teclaw draft-restore workflow step.
+
+        The historical artifact is copied and composed for ``DRAFT`` before it
+        crosses the BaaS boundary. Draft delivery intentionally clears historical
+        stage channel overrides; DB-backed draft config remains resolved by the
+        teclaw draft runtime, while the artifact's workspace/identity refs restore
+        the historical file snapshot. The existing ``bot_uuid`` is updated in
+        place, so sessions/container identity are preserved.
+        """
+        config_artifact = copy.deepcopy(artifact_ext.get("config_artifact"))
+        if not isinstance(config_artifact, dict):
+            raise BotBuildServiceError("历史版本缺少 config_artifact")
+        if config_artifact.get("engine_type") != TECLAW_DEVICE_PROVIDER:
+            raise BotBuildServiceError(
+                "历史 config_artifact engine_type 不是 teclaw: "
+                f"{config_artifact.get('engine_type')!r}"
+            )
+
+        delivery = DeliveryArtifact.compose(
+            config_artifact,
+            PublishStage.DRAFT,
+            {},
+        )
+        if not delivery.config_artifact:
+            raise BotBuildServiceError("无法构造 teclaw 草稿恢复 artifact")
+
+        if baas_publish_id is None:
+            effective_request_id = request_id or self.generate_request_id(
+                bot=bot,
+                publish_stage=f"draft_restore_{source_version}_{uuid.uuid4().hex}",
+            )
+            update_result = await asyncio.to_thread(
+                self._baas_service.update_teclaw_bot,
+                bot_uuid=bot_uuid,
+                bot=bot,
+                owner_id=owner_id,
+                request_id=effective_request_id,
+                config_artifact=delivery.config_artifact,
+                template_uuid=self._teclaw_template_uuid,
+                device_count=1,
+            )
+            issued_publish_id = update_result.get("publish_id")
+            if not issued_publish_id:
+                raise BotBuildServiceError("teclaw 草稿热更新未返回 publish_id")
+            return {
+                "restore_type": "config_artifact",
+                "publish_id": int(issued_publish_id),
+                "bot_uuid": bot_uuid,
+                "baas_status": "SUBMITTED",
+                "status": "restoring",
+            }
+
+        try:
+            progress = await asyncio.to_thread(
+                self._baas_service.get_publish_progress,
+                baas_publish_id,
+                True,
+            )
+        except Exception as exc:
+            # The durable task will poll again. Do not turn a temporary query
+            # outage into a terminal restore failure after BaaS already accepted
+            # the hot update and its workflow id is safely recorded.
+            logger.warning(
+                "[BotBuildService.restore_teclaw_draft_async] progress query "
+                "failed, will retry: publish_id=%s error=%s",
+                baas_publish_id,
+                exc,
+            )
+            return {
+                "restore_type": "config_artifact",
+                "baas_publish_id": baas_publish_id,
+                "baas_status": "QUERY_ERROR",
+                "progress_error": str(exc),
+                "status": "restoring",
+            }
+        status = str(progress.get("status") or "").upper()
+        if status == "SUCCESS":
+            return {
+                "restore_type": "config_artifact",
+                "baas_publish_id": baas_publish_id,
+                "baas_status": status,
+                "status": "success",
+            }
+        if status in {"FAILED", "REJECTED", "REVOKED"}:
+            error = (
+                "teclaw 草稿热更新失败: "
+                f"publish_id={baas_publish_id}, status={status}"
+            )
+            return {
+                "restore_type": "config_artifact",
+                "baas_publish_id": baas_publish_id,
+                "baas_status": status,
+                "status": "failed",
+                "error": error,
+            }
+        return {
+            "restore_type": "config_artifact",
+            "baas_publish_id": baas_publish_id,
+            "baas_status": status or "UNKNOWN",
+            "status": "restoring",
+        }
     def retire_superseded_bot(
         self, bot_uuid: str, operator: str = "system"
     ) -> int | None:

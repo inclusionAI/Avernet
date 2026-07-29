@@ -272,6 +272,8 @@ class ServiceBotModule(Module):
         device_binding_repo: DeviceBindingRepository,
         bcn_service: BcnService,
         quality_task_service: QualityTaskServiceProtocol,
+        publish_operation_repo: PublishOperationRepository,
+        task_queue_service: TaskQueueService,
     ) -> BotPublishService:
         """Construct ``BotPublishService``.
 
@@ -288,6 +290,8 @@ class ServiceBotModule(Module):
             device_binding_repo=device_binding_repo,
             bcn_service=bcn_service,
             quality_task_service=quality_task_service,
+            publish_operation_repo=publish_operation_repo,
+            task_queue_service=task_queue_service,
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
         )
 

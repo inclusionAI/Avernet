@@ -1,10 +1,12 @@
 """Thin authenticated HTTP adapters for session resources."""
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 import hashlib
 import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -43,7 +45,29 @@ def _domain_error(exc: ValueError) -> HTTPException:
         return HTTPException(status_code=404, detail=code)
     if code in {"materialize_state_conflict", "transfer_id_mismatch"}:
         return HTTPException(status_code=409, detail=code)
+    if code in {"resource_not_ready", "resource_materializing"}:
+        return HTTPException(status_code=409, detail=code)
+    if code == "engine_content_unavailable":
+        return HTTPException(status_code=502, detail=code)
     return HTTPException(status_code=400, detail=code)
+
+
+def _safe_content_headers(headers: object) -> dict[str, str]:
+    if not hasattr(headers, "items"):
+        return {"Content-Type": "application/octet-stream"}
+    safe: dict[str, str] = {}
+    allowed = {"content-type", "content-length", "content-disposition"}
+    for key, value in headers.items():
+        normalized = str(key).lower()
+        if normalized not in allowed or not isinstance(value, str):
+            continue
+        if "\r" in value or "\n" in value:
+            continue
+        if normalized == "content-length" and not value.isdecimal():
+            continue
+        safe["-".join(part.capitalize() for part in normalized.split("-"))] = value
+    safe.setdefault("Content-Type", "application/octet-stream")
+    return safe
 
 
 @router.post("/upload-intents")
@@ -70,7 +94,13 @@ async def create_upload_intents(
                     **_resource(intent.resource),
                     "upload_url": intent.grant.upload_url,
                     "transfer_id": intent.grant.transfer_id,
+                    "upload_type": intent.grant.upload_type,
+                    "http_method": intent.grant.http_method,
                     "expires_at": intent.grant.expires_at,
+                    "upload_session_id": intent.grant.upload_session_id,
+                    "part_size": intent.grant.part_size,
+                    "part_count": intent.grant.part_count,
+                    "parts": intent.grant.parts,
                 }
             )
     except ValueError as exc:
@@ -170,25 +200,37 @@ async def create_reference(
     return {**reference, "insert_id": body.insert_id}
 
 
-@router.get("/{resource_id}/download-url")
-@router.get("/{resource_id}/preview")
-async def create_download_or_preview(
+@router.get("/{resource_id}/content")
+async def stream_content(
     resource_id: str,
     bot_id: str,
     session_key: str,
+    disposition: str = Query("inline", pattern="^(inline|attachment)$"),
     user: AuthenticatedUser = Depends(get_current_user),
     service: SessionResourceServiceProtocol = Injected(SessionResourceServiceProtocol),
-) -> dict:
+) -> StreamingResponse:
     try:
-        grant = service.create_download_grant(
+        record, upstream = await service.open_content(
             owner_id=user.staffId,
             bot_id=bot_id,
             session_key=session_key,
             resource_id=resource_id,
+            disposition=disposition,
         )
     except ValueError as exc:
         raise _domain_error(exc) from exc
-    return grant.__dict__
+
+    async def body() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in upstream.body:
+                if isinstance(chunk, bytes):
+                    yield chunk
+        finally:
+            await upstream.close()
+
+    headers = _safe_content_headers(upstream.headers)
+    headers.setdefault("Content-Disposition", f'{disposition}; filename="{record.filename}"')
+    return StreamingResponse(body(), headers=headers)
 
 
 @router.delete("/{resource_id}")

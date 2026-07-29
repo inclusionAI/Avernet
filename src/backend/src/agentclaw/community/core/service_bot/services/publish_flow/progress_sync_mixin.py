@@ -99,6 +99,10 @@ class ProgressSyncMixin:
         # together with ext under the optimistic lock (a separate status-then-ext
         # write would be a TOCTOU race against a concurrent transition).
         ext.pop("retry", None)
+        # Clear restart in-progress marker
+        restart_ext = ext.get("restart")
+        if isinstance(restart_ext, dict):
+            restart_ext.pop("restarting", None)
         self._update_publish_status(
             publish_id=publish_id,
             target_status=target_status,
@@ -310,6 +314,10 @@ class ProgressSyncMixin:
         )
 
         self._clear_retry_flag(ext)
+        # Clear restart in-progress marker
+        restart_ext = ext.get("restart")
+        if isinstance(restart_ext, dict):
+            restart_ext.pop("restarting", None)
         ext["error_message"] = error_message
         ext["source_status"] = current_status.value
         self._update_publish_status(
@@ -651,6 +659,18 @@ class ProgressSyncMixin:
                 # for ARCA/baas; idempotent (a re-push) for teclaw, so it is safe on
                 # the in-place upgrade path too.
                 self._refresh_provider_mcp_after_success(publish_record, ext, stage)
+
+                # Clear the restart in-progress marker on success. The stable-state
+                # path bypasses _handle_sync_success (which normally clears this flag),
+                # so we must clear it here to prevent the marker from persisting.
+                # Use _mutate_and_update_ext to persist the ext change separately from
+                # status updates (the stable record must not change status).
+                def _clear_restarting_flag(latest_ext: dict) -> None:
+                    restart_ext = latest_ext.get("restart")
+                    if isinstance(restart_ext, dict):
+                        restart_ext.pop("restarting", None)
+
+                self._mutate_and_update_ext(publish_id=publish_id, mutator=_clear_restarting_flag)
 
             return PublishFlowResult(
                 publish_id=publish_id,

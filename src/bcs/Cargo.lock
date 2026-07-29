@@ -670,6 +670,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "async-trait",
  "bcs-config",
  "bcs-config-api",
  "bcs-protocol",
@@ -677,6 +678,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures",
+ "inventory",
  "predicates",
  "reqwest",
  "serde",
@@ -702,6 +704,7 @@ dependencies = [
  "bcs-domain",
  "bcs-group",
  "bcs-group-store",
+ "bcs-message-store",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",

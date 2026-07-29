@@ -56,7 +56,8 @@ DEFAULT_FILE_TREE_MAX_DEPTH = 3
 # explicit size metadata lookup per file.
 _FILE_TREE_FIND_EXPRESSION = (
     r"\( -type d \( -name .git -o -name node_modules "
-    r"-o -path './skills' -o -path './.repos' \) -prune \) "
+    r"-o -path './skills' -o -path './skills-repo' "
+    r"-o -path './.repos' \) -prune \) "
     r"-o -printf '%y\0%P\0'"
 )
 

@@ -164,41 +164,46 @@ pub fn validate_definition(
                 None => return invalid(format!("node {node_id} assignee is required")),
             },
             StateMachineNodeKind::HumanInput => {
-                match &node.assignee {
-                    Some(StateMachineAssignee::RuntimeActor { actor })
-                        if !actor.trim().is_empty() => {}
-                    Some(StateMachineAssignee::RuntimeActor { .. }) => {
+                match (&node.notification, &node.assignee) {
+                    (None, None) => {}
+                    (None, Some(_)) => {
+                        return invalid(format!(
+                            "frontend human_input node {node_id} must not define assignee"
+                        ));
+                    }
+                    (
+                        Some(notification),
+                        Some(StateMachineAssignee::RuntimeActor { actor }),
+                    ) if !actor.trim().is_empty() => {
+                        let channel =
+                            state_machine.human_input_channel.as_ref().ok_or_else(|| {
+                                CollaborationRuntimeError::InvalidDefinition(format!(
+                                    "human_input node {node_id} with notification requires state_machine.human_input_channel"
+                                ))
+                            })?;
+                        if notification.mode == HumanInputNotificationMode::FixedGroup
+                            && channel.fixed_group.is_none()
+                        {
+                            return invalid(format!(
+                                "human_input node {node_id} fixed_group notification requires state_machine.human_input_channel.fixed_group"
+                            ));
+                        }
+                    }
+                    (Some(_), Some(StateMachineAssignee::RuntimeActor { .. })) => {
                         return invalid(format!(
                             "human_input node {node_id} assignee actor must not be empty"
                         ));
                     }
-                    Some(StateMachineAssignee::BotBinding { .. }) => {
+                    (Some(_), Some(StateMachineAssignee::BotBinding { .. })) => {
                         return invalid(format!(
                             "human_input node {node_id} assignee must be runtime_actor"
                         ));
                     }
-                    None => {
+                    (Some(_), None) => {
                         return invalid(format!(
-                            "human_input node {node_id} runtime_actor assignee is required"
+                            "human_input node {node_id} with notification requires runtime_actor assignee"
                         ));
                     }
-                }
-                let notification = node.notification.as_ref().ok_or_else(|| {
-                    CollaborationRuntimeError::InvalidDefinition(format!(
-                        "human_input node {node_id} notification is required"
-                    ))
-                })?;
-                let channel = state_machine.human_input_channel.as_ref().ok_or_else(|| {
-                    CollaborationRuntimeError::InvalidDefinition(format!(
-                        "human_input node {node_id} requires state_machine.human_input_channel"
-                    ))
-                })?;
-                if notification.mode == HumanInputNotificationMode::FixedGroup
-                    && channel.fixed_group.is_none()
-                {
-                    return invalid(format!(
-                        "human_input node {node_id} fixed_group notification requires state_machine.human_input_channel.fixed_group"
-                    ));
                 }
                 if node.max_attempts.is_some() {
                     return invalid(format!(

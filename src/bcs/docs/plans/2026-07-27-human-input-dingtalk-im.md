@@ -36,9 +36,12 @@ pending HumanInput”的启发式判断，无法覆盖以下场景：
 
 ### 2.1 节点通知模式
 
+- 不配置 `notification` 时沿用现有 Workbench HumanInput，不要求
+  `assignee` 或 `human_input_channel`；
 - `fixed_group`：发送到当前 collaboration YAML 声明的唯一固定钉钉群；
 - `direct_assignee`：发送给节点 assignee 对应的钉钉用户；
-- 两种模式都必须配置一个固定 BCS Human actor；
+- 选择任一 IM notification mode 时，必须同时配置
+  `human_input_channel` 和固定 BCS Human actor；
 - 一个节点只能选择一种模式，不同时向群和个人广播。
 
 ### 2.2 YAML 固定群与机器人解析
@@ -74,25 +77,25 @@ runtime:
             targets: []
 ```
 
-YAML 不填写 `channel_binding_id`、robotCode 或机器人凭证。definition 绑定到具体
-BCS group 时，根据 `group_id + channel_type` 查询 Active ChannelBinding：
+YAML 不填写 `channel_binding_id`、robotCode 或机器人凭证。启动绑定了
+definition 的 BCS group 时，根据 `group_id + channel_type` 查询 Active
+ChannelBinding：
 
-1. 没有匹配 binding：拒绝绑定或启动；
+1. 没有匹配 binding：允许保存 definition，但拒绝启动；
 2. 恰好一个 binding：解析并保存 binding id 与 robot account；
 3. 多于一个 binding：拒绝为 ambiguous，不选择最新或任意一个。
 
 纯 `/collaboration/definitions/validate` 没有 group 上下文，只做 YAML schema 和
-静态语义校验。将 definition 配置到已有 group 时做 ChannelBinding 校验；每次
-创建 HumanInputRequest 时再次确认解析出的 binding 仍为 Active，并把 binding
-与 YAML conversation 快照到 request。
+静态语义校验。将 definition 配置到已有 group 时不做 ChannelBinding
+存在性校验；启动 run 和每次创建 HumanInputRequest 时确认解析出的 binding
+仍为 Active，并把 binding 与 YAML conversation 快照到 request。
 
 新建 group 时，ChannelBinding 只有在 group 存在后才能创建。因此 IM-enabled
 collaboration 必须按以下顺序编排：
 
 ```text
-创建 BCS group（不启动初始 run）
+创建 BCS group 并保存 collaboration YAML（不启动初始 run）
   -> 创建钉钉 ChannelBinding
-  -> 提交/绑定 collaboration YAML
   -> 校验唯一 Active ChannelBinding
   -> 启动 State Machine run
 ```
