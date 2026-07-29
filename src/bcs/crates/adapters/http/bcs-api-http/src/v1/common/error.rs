@@ -97,3 +97,87 @@ pub fn application_error_response(
         request_id: request_id.0.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_application_errors_to_the_v1_http_contract() {
+        let cases = [
+            (
+                ApplicationError::invalid("invalid_group", "invalid group"),
+                StatusCode::BAD_REQUEST,
+                40_000,
+                "invalid_group",
+                "invalid group",
+            ),
+            (
+                ApplicationError::Unauthenticated,
+                StatusCode::UNAUTHORIZED,
+                40_100,
+                "unauthenticated",
+                "Authentication is required",
+            ),
+            (
+                ApplicationError::forbidden("access denied"),
+                StatusCode::FORBIDDEN,
+                40_300,
+                "forbidden",
+                "access denied",
+            ),
+            (
+                ApplicationError::not_found("group_not_found", "group not found"),
+                StatusCode::NOT_FOUND,
+                40_400,
+                "group_not_found",
+                "group not found",
+            ),
+            (
+                ApplicationError::conflict("group_exists", "group exists"),
+                StatusCode::CONFLICT,
+                40_900,
+                "group_exists",
+                "group exists",
+            ),
+            (
+                ApplicationError::Gone {
+                    code: "group_gone".to_string(),
+                    message: "group is gone".to_string(),
+                },
+                StatusCode::GONE,
+                41_000,
+                "group_gone",
+                "group is gone",
+            ),
+            (
+                ApplicationError::QuotaExceeded {
+                    code: "group_quota_exceeded".to_string(),
+                    message: "group quota exceeded".to_string(),
+                },
+                StatusCode::TOO_MANY_REQUESTS,
+                42_900,
+                "group_quota_exceeded",
+                "group quota exceeded",
+            ),
+            (
+                ApplicationError::internal("database credentials leaked"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                50_000,
+                "internal_error",
+                "Internal server error",
+            ),
+        ];
+        let request_id = RequestId("request-123".to_string());
+
+        for (error, status, code, error_code, message) in cases {
+            let response = application_error_response(&request_id, error);
+
+            assert_eq!(response.status, status);
+            assert_eq!(response.code, code);
+            assert_eq!(response.error_code, error_code);
+            assert_eq!(response.message, message);
+            assert_eq!(response.request_id, request_id.0);
+        }
+    }
+}
