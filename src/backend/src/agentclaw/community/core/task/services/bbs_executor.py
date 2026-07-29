@@ -27,7 +27,7 @@ from agentclaw.community.core.task.protocols import (
     TaskService,
 )
 from agentclaw.community.core.task.domain.events import TaskEvent
-from agentclaw.community.core.task.domain.models import NodeStatus, RunMode
+from agentclaw.community.core.task.domain.models import NodeStatus, RunMode, Task
 from agentclaw.community.core.task.domain.state_machine import (
     IllegalTransitionError,
 )
