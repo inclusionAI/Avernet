@@ -387,6 +387,42 @@ async def test_chat_stream_does_not_hold_final_with_message(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_uses_twenty_minute_default_timeout(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+    sent_params: Dict[str, Any] = {}
+    observed_timeouts: list[float] = []
+
+    async def fake_send_request(
+        method: str,
+        params: Optional[Dict[str, Any]] = None,
+        timeout: float = 30.0,
+    ) -> ResponseFrame:
+        sent_params.update(params or {})
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    async def fake_wait_for(awaitable, timeout):
+        awaitable.close()
+        observed_timeouts.append(timeout)
+        raise asyncio.TimeoutError
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    assert "timeoutMs" not in sent_params
+    assert observed_timeouts == [20 * 60]
+    assert events[0]["errorMessage"] == "Chat stream timeout"
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_timeout_no_event_received(monkeypatch):
     """timeout reason = no_event_received_from_upstream：
     openclaw ack 了但始终不推 event。"""
