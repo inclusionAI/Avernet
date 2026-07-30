@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.create_flow import (
     BotCreateSpec,
     create_bot_with_authorization,
@@ -40,7 +41,11 @@ def _run(*, bot_id: str, is_first_bot: bool):
     passport.apply_first_agent_passport.return_value = {"token": "tok"}
     passport.apply_agent_passport.return_value = {"token": "tok"}
 
-    bot_service = MagicMock()
+    # Spec'd to the *protocol*, not the concrete class: both routers inject
+    # BotServiceProtocol, so anything create_flow calls on it has to be declared
+    # there. A bare MagicMock would happily answer an undeclared method and hide
+    # the AttributeError a conforming implementation would raise at runtime.
+    bot_service = MagicMock(spec=BotServiceProtocol)
     bot_service.is_first_bot.return_value = is_first_bot
 
     skill_set_factory = MagicMock()
