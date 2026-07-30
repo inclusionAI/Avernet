@@ -38,6 +38,17 @@ pub trait ChannelProvider: Send + Sync {
 
     fn redact_config(&self, config: &serde_json::Value) -> serde_json::Value;
 
+    /// Resolve a BCS Human actor into a provider-native direct-message recipient.
+    ///
+    /// Providers that do not define a stable actor-to-recipient convention may
+    /// return `None`; direct HumanInput delivery will then be unavailable.
+    fn resolve_direct_recipient(
+        &self,
+        _actor_id: &str,
+    ) -> ChannelProviderResult<Option<String>> {
+        Ok(None)
+    }
+
     fn delivery(&self) -> Arc<dyn ChannelDeliveryPort>;
 
     fn http_ingress(&self) -> Option<Arc<dyn ChannelHttpIngressPort>>;
@@ -358,6 +369,14 @@ mod tests {
 
         assert!(registry.get("test").is_some());
         assert!(registry.get("missing").is_none());
+        assert_eq!(
+            registry
+                .get("test")
+                .expect("provider")
+                .resolve_direct_recipient("human_user-1")
+                .expect("default recipient resolution"),
+            None
+        );
     }
 
     #[test]

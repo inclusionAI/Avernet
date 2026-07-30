@@ -442,24 +442,6 @@ impl ImParticipantRepoPort for MemoryImParticipantRepo {
             .cloned())
     }
 
-    async fn find_by_actor(
-        &self,
-        channel_type: ChannelType,
-        account_ref: &str,
-        actor_id: &str,
-    ) -> ServiceResult<Vec<ImParticipantMap>> {
-        let maps = self.maps.read().await;
-        Ok(maps
-            .iter()
-            .filter(|map| {
-                map.channel_type == channel_type
-                    && map.account_ref == account_ref
-                    && map.actor_id == actor_id
-            })
-            .cloned()
-            .collect())
-    }
-
     async fn upsert(&self, map: ImParticipantMap) -> ServiceResult<()> {
         {
             let mut maps = self.maps.write().await;
@@ -998,12 +980,6 @@ mod tests {
                 .map(String::as_str),
             Some("New Name")
         );
-        let reverse = repo
-            .find_by_actor("dingtalk".to_string(), "robot_1", "actor_new")
-            .await?;
-        assert_eq!(reverse.len(), 1);
-        assert_eq!(reverse[0].im_user_id, "staff_1");
-
         Ok(())
     }
 
