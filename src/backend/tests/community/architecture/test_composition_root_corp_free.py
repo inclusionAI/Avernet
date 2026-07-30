@@ -125,7 +125,7 @@ _SEAM_ALLOWED_CORP_IMPORTS = {
     },
     # The profile selector names ZERO corp module in any branch: the corp column
     # AND the test-column corp reuse AND the singlebox overlay all come via
-    # the modules_bootstrap registry.
+    # the registries (modules_bootstrap / default_env_bot.singlebox_overlay).
     "profile_modules.py": set(),
 }
 

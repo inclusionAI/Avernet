@@ -107,7 +107,6 @@ user_config:
     api_key: "noop"
     default_ttl_minutes: 1440
     aicoding_template_id: "ARCA-TEMPLATE-SINGLEBOX-AICODING"
-    default_template_id: "ARCA-TEMPLATE-SINGLEBOX"
 
   skill_center:
     base_url: "http://127.0.0.1:9999"

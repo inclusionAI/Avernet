@@ -64,10 +64,10 @@ def register_corp_modules(profile: DeployProfile) -> None:
     - ``corp`` registers the full corp infrastructure column.
     - ``corp_test`` registers the corp-reuse subset the corp test column installs
       (it runs with corp deps present in the dev/CI venv).
-    - ``singlebox`` is a no-op in community builds — the singlebox overlay modules
-      are only needed when corp deps are present (OCB monorepo). In a community
-      CI the singlebox column stays corp-free; ``get_singlebox_overlay_modules``
-      returns an empty list.
+    - ``singlebox`` delegates to :mod:`default_env_bot.singlebox_overlay`,
+      which registers corp overlay modules when corp deps are present (OCB
+      monorepo). In a community CI the singlebox column stays corp-free;
+      ``get_singlebox_overlay_modules`` returns an empty list.
     - ``test`` registers **nothing** — B11 (3.2) made that column corp-free.
 
     The corp branches live in the corp-only ``di.corp_bootstrap`` module, loaded
@@ -84,11 +84,10 @@ def register_corp_modules(profile: DeployProfile) -> None:
         from importlib import import_module
 
         import_module("agentclaw.corp.di.corp_bootstrap").install_test_corp_reuse_column()
-    # SINGLEBOX: corp overlay (default-env-bot router + DI) is only needed when
-    # the corp package is present (OCB monorepo). In a community build
-    # (Avernet CI) agentclaw.corp is absent — the import is silently skipped
-    # and get_singlebox_overlay_modules() returns an empty list, keeping the
-    # singlebox column corp-free.
+    # SINGLEBOX: corp overlay (default-env-bot router + DI) is registered
+    # via the default_env_bot.singlebox_overlay registry (B8). The corp
+    # bootstrap call is guarded by ModuleNotFoundError so a community build
+    # (Avernet CI) stays corp-free.
     elif profile is DeployProfile.SINGLEBOX:
         from importlib import import_module
 
@@ -148,24 +147,12 @@ def get_test_corp_modules() -> list[Module]:
     return _test_corp_reuse_provider()
 
 
-# Singlebox overlay modules — the singlebox column may need a small set of corp
-# modules (default-env-bot router + DI). Supplied through this registry so
-# ``profile_modules.py`` names **no** corp module (B8).
-_singlebox_overlay_provider: Callable[[], list[Module]] | None = None
-
-
-def register_singlebox_overlay_provider(provider: Callable[[], list[Module]]) -> None:
-    """Register the thunk supplying the corp overlay modules for singlebox."""
-    global _singlebox_overlay_provider
-    _singlebox_overlay_provider = provider
-
-
-def get_singlebox_overlay_modules() -> list[Module]:
-    """Return the registered singlebox overlay modules (empty list if none).
-
-    A community build (without corp present) never registers a provider, so
-    this returns an empty list — the singlebox column stays corp-free.
-    """
-    if _singlebox_overlay_provider is None:
-        return []
-    return _singlebox_overlay_provider()
+# ── Singlebox overlay ────────────────────────────────────────────────
+# The singlebox overlay registry lives in the ``default_env_bot`` package,
+# isolated from the production DI wiring. Re-exported here for backward
+# compatibility during the migration; new code should import from
+# ``agentclaw.community.di.default_env_bot.singlebox_overlay`` directly.
+from agentclaw.community.di.default_env_bot.singlebox_overlay import (  # noqa: F401
+    get_singlebox_overlay_modules,
+    register_singlebox_overlay_provider,
+)
