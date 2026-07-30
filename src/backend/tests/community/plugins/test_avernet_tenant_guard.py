@@ -22,8 +22,8 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import Column, Integer, String, create_engine, event
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import Column, ForeignKey, Integer, String, create_engine, event
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.avernet_tenant_guard import (
@@ -54,6 +54,25 @@ class _Beta(_Base):
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
 
+class _Parent(_Base):
+    __tablename__ = "guard_parent"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(32), nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    children = relationship("_Child", back_populates="parent")
+
+
+class _Child(_Base):
+    __tablename__ = "guard_child"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    parent_id = Column(Integer, ForeignKey("guard_parent.id"), nullable=False)
+    name = Column(String(32), nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    parent = relationship("_Parent", back_populates="children")
+
+
 class _Unguarded(_Base):
     """Mapped, but declares no tenant column — must be refused registration."""
 
@@ -79,6 +98,8 @@ class _FakeTenantColumn(_Base):
 
 register_avernet_tenant_guard(_Alpha)
 register_avernet_tenant_guard(_Beta)
+register_avernet_tenant_guard(_Parent)
+register_avernet_tenant_guard(_Child)
 
 
 @pytest.fixture
@@ -223,6 +244,30 @@ def test_cross_tenant_write_is_a_noop_on_a_second_model(db):
     with avernet_tenant_scope("tenant-a"):
         with session() as s:
             assert [r.name for r in s.query(_Beta).all()] == ["b-own"]
+
+
+def test_lazy_loaded_relationship_is_tenant_filtered(db):
+    """A parent's relationship must not expose a child from another tenant."""
+    session, _ = db
+
+    with avernet_tenant_scope("tenant-a"):
+        with session() as s:
+            parent = _Parent(name="parent-a")
+            s.add(parent)
+            s.flush()
+            parent_id = parent.id
+            s.add(_Child(parent_id=parent_id, name="child-a"))
+
+    # This is a malformed cross-tenant association, but the ORM guard must
+    # still prevent it from becoming visible through a lazy relationship load.
+    with avernet_tenant_scope("tenant-b"):
+        with session() as s:
+            s.add(_Child(parent_id=parent_id, name="child-b"))
+
+    with avernet_tenant_scope("tenant-a"):
+        with session() as s:
+            parent = s.query(_Parent).filter_by(name="parent-a").one()
+            assert [child.name for child in parent.children] == ["child-a"]
 
 
 def test_unregistered_model_is_untouched(db):
