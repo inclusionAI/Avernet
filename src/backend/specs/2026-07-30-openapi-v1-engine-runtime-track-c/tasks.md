@@ -259,24 +259,28 @@ All paths are relative to `src/backend/`. Source package is
   served directly, here is another way"; the note is internal, and from a
   caller's side the capability is simply not available.
 
-## Task 9: Approvals group — 3 endpoints
+## Task 9: Approvals group — 3 endpoints  `[x]`
 - **Goal:** Wrap approvals, resolving the vocabulary mess the plan documented.
 - **Files:**
   - `…/adapters/http/openapi_v1/engine_runtime/approvals/{__init__,router,schemas}.py` (new)
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_approvals.py` (new)
 - **Done when:**
-  - [ ] `GET …/approvals/mode` (query `session_key`) and
+  - [x] `GET …/approvals/mode` (query `session_key`) and
         `PUT …/approvals/mode` (body) replace the engine's two POSTs.
-  - [ ] Request body uses the `ApprovalMode` enum; the value is forwarded
+  - [x] Request body uses the `ApprovalMode` enum; the value is forwarded
         **verbatim**, no translation.
-  - [ ] Response `mode` is typed `str`, and a test proves a stub returning
+  - [x] Response `mode` is typed `str`, and a test proves a stub returning
         `"auto"` does not raise.
-  - [ ] `GET …/approvals/modes` is gated on `APPROVAL_GET`, unlike the engine's
+  - [x] `GET …/approvals/modes` is gated on `APPROVAL_GET`, unlike the engine's
         ungated route, so all three approval routes agree per bot. The
         divergence is documented in the handler docstring.
-  - [ ] `501` covered on an engine declaring neither approval capability
+  - [x] `501` covered on an engine declaring neither approval capability
         (claude_code).
 - **Depends on:** Tasks 4, 5, 6
+- **Decided while implementing:** `…/approvals/modes` serves the list from the
+  **public enum**, not by relaying the engine's. The engine's descriptions are
+  Chinese ("每个操作都需要确认") and this surface promises English. The device
+  call it does make is to `/api/engine/capabilities`, purely to honour the gate.
 
 ## Task 10: Connection endpoint
 - **Goal:** Replace the `get_device_connection` hand-off with a sanitised

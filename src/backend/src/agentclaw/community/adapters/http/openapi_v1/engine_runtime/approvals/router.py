@@ -1,0 +1,146 @@
+"""Approvals group — ``/openapi/v1/bots/{bot_id}/approvals``."""
+
+from __future__ import annotations
+
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, Query, Request
+
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.approvals.schemas import (
+    ApprovalModeInfo,
+    ApprovalModeSet,
+    ApprovalState,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    ApprovalMode,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+)
+from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.core.engine_runtime.errors import (
+    EngineCapabilityUnsupportedError,
+)
+from agentclaw.community.di import Injected
+
+router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/approvals", tags=["approvals"])
+
+PrincipalDep = Annotated[Principal, Depends(require_principal)]
+
+#: Engine capability the approval reads/writes need.
+_APPROVAL_GET = "approval.get"
+
+#: The public meaning of each advertised mode. Sourced from the engine's own
+#: ``GET /api/approvals/modes`` labels, but written here in fixed English: the
+#: engine's descriptions are Chinese ("每个操作都需要确认"), and this surface
+#: promises English.
+_MODE_DESCRIPTIONS: dict[ApprovalMode, str] = {
+    ApprovalMode.APPROVE: "Ask before every action.",
+    ApprovalMode.ON_MISS: "Ask only when the bot's policy cannot decide on its own.",
+    ApprovalMode.NEVER: "Never ask; act autonomously.",
+}
+
+
+def _state(raw: Any, session_key: str) -> ApprovalState:
+    data = raw if isinstance(raw, dict) else {}
+    return ApprovalState(
+        session_key=str(data.get("sessionKey") or session_key),
+        mode=str(data.get("mode") or ""),
+    )
+
+
+@router.get("/mode", response_model=Envelope[ApprovalState])
+@envelope_errors
+async def get_approval_mode(
+    bot_id: str,
+    principal: PrincipalDep,
+    request: Request,
+    session_key: Annotated[str, Query(description="Session to read the mode for.")],
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[ApprovalState]:
+    """Read a session's approval mode.
+
+    Publicly a ``GET`` with a query parameter; the engine models the same read
+    as ``POST /api/approvals/mode/get``.
+    """
+    owner_id = caller_owner_id(principal)
+    result = await relay.call(
+        bot_id=bot_id, owner_id=owner_id, method="POST",
+        path="/api/approvals/mode/get",
+        # user_id is filled from the principal; the engine uses it to route.
+        body={"session_key": session_key, "user_id": owner_id},
+    )
+    return envelope(_state(result.data, session_key), request)
+
+
+@router.put("/mode", response_model=Envelope[ApprovalState])
+@envelope_errors
+async def set_approval_mode(
+    bot_id: str,
+    body: ApprovalModeSet,
+    principal: PrincipalDep,
+    request: Request,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[ApprovalState]:
+    """Set a session's approval mode.
+
+    The enum's value is forwarded **verbatim** — all three are already in the
+    engine's accept-set, so no translation is needed and none is applied.
+    """
+    owner_id = caller_owner_id(principal)
+    result = await relay.call(
+        bot_id=bot_id, owner_id=owner_id, method="POST",
+        path="/api/approvals/mode/set",
+        body={
+            "session_key": body.session_key,
+            "mode": body.mode.value,
+            "user_id": owner_id,
+        },
+    )
+    return envelope(_state(result.data, body.session_key), request)
+
+
+@router.get("/modes", response_model=Envelope[list[ApprovalModeInfo]])
+@envelope_errors
+async def list_approval_modes(
+    bot_id: str,
+    principal: PrincipalDep,
+    request: Request,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[list[ApprovalModeInfo]]:
+    """List the approval modes that can be set on this bot.
+
+    **Deliberate divergence from the engine.** The engine's ``/api/approvals/modes``
+    is its one route with no capability gate, so on an engine that declares
+    neither approval capability it cheerfully advertises three modes while
+    reading and setting them both answer 501. This route gates on the same
+    capability the other two need, so all three agree per bot.
+
+    The list itself is served from the public enum rather than relayed: the
+    engine's descriptions are Chinese, and this surface promises English.
+    """
+    owner_id = caller_owner_id(principal)
+    result = await relay.call(
+        bot_id=bot_id, owner_id=owner_id, method="GET",
+        path="/api/engine/capabilities",
+    )
+    caps = result.data if isinstance(result.data, dict) else {}
+    supported = set(caps.get("supported") or []) | set(caps.get("limited") or [])
+    if _APPROVAL_GET not in supported:
+        raise EngineCapabilityUnsupportedError(
+            f"engine does not declare {_APPROVAL_GET}"
+        )
+    return envelope(
+        [
+            ApprovalModeInfo(value=mode, description=text)
+            for mode, text in _MODE_DESCRIPTIONS.items()
+        ],
+        request,
+    )
