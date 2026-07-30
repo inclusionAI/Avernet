@@ -13,6 +13,13 @@ use bcs_service_api::application::v1::{
     GroupService, GroupStatus, GroupStrategy, GroupVisibility, ListBotGroups, Page, Participant,
     Principal, UpdateGroup, UpdateGroupParticipant,
 };
+use bcs_service_api::application::v1::{
+    AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome,
+    DeleteSession, DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
+    SessionCompletionResult, SessionDetail, SessionMessage, SessionMessageService,
+    SessionParticipant, SessionService, SessionSummary, UpdateSession,
+    UpdateSessionParticipant,
+};
 use bcs_service_api::{ActorKind, ParticipantMode, ParticipantRole};
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -135,6 +142,74 @@ impl GroupService for FakeGroupService {
     }
 }
 
+struct NoopSessionService;
+
+#[async_trait]
+impl SessionService for NoopSessionService {
+    async fn create(
+        &self,
+        _command: CreateSession,
+    ) -> Result<CreateSessionOutcome, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn list(&self, _command: ListSessions) -> Result<Page<SessionSummary>, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn get(&self, _query: GetSession) -> Result<SessionDetail, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn update(&self, _command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn delete(&self, _command: DeleteSession) -> Result<DeleteResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn complete(
+        &self,
+        _command: CompleteSession,
+    ) -> Result<SessionCompletionResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn add_participant(
+        &self,
+        _command: AddSessionParticipant,
+    ) -> Result<SessionParticipant, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn update_participant(
+        &self,
+        _command: UpdateSessionParticipant,
+    ) -> Result<SessionParticipant, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn delete_participant(
+        &self,
+        _command: DeleteSessionParticipant,
+    ) -> Result<DeleteResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+}
+
+struct NoopSessionMessageService;
+
+#[async_trait]
+impl SessionMessageService for NoopSessionMessageService {
+    async fn list(
+        &self,
+        _query: ListSessionMessages,
+    ) -> Result<Page<SessionMessage>, ApplicationError> {
+        Err(ApplicationError::internal("session messages not configured"))
+    }
+}
+
 fn principal() -> Principal {
     Principal::bot("bot-1", "tenant-a", BTreeSet::new())
 }
@@ -169,6 +244,8 @@ fn group_detail() -> GroupDetail {
 fn test_router(service: Arc<FakeGroupService>) -> axum::Router {
     router(ApiState::new(
         service,
+        Arc::new(NoopSessionService),
+        Arc::new(NoopSessionMessageService),
         Arc::new(HeaderVerifier {
             principal: principal(),
         }),

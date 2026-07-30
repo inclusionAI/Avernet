@@ -6,5 +6,5 @@ use axum::Router;
 use super::common::ApiState;
 
 pub fn router() -> Router<ApiState> {
-    routes::group::router()
+    routes::group::router().merge(routes::session::router())
 }
