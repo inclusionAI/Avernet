@@ -2425,6 +2425,7 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
             definition_yaml: None,
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: Value::Null,
             caller_id: None,
             authenticated_human: None,

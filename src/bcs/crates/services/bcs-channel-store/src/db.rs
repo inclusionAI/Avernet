@@ -43,7 +43,6 @@
 //!   actor_id     VARCHAR(256) NOT NULL,
 //!   display_name VARCHAR(256) DEFAULT NULL,
 //!   PRIMARY KEY (channel_type, account_ref, im_user_id),
-//!   INDEX idx_channel_im_participants_actor (channel_type, account_ref, actor_id)
 //! );
 //!
 //! CREATE TABLE bcs_human_input_requests (
@@ -70,7 +69,7 @@
 //!   provider_message_ref   VARCHAR(256) DEFAULT NULL,
 //!   delivery_attempts      BIGINT NOT NULL DEFAULT 0,
 //!   last_delivery_error    TEXT DEFAULT NULL,
-//!   created_at             BIGINT NOT NULL,
+//!   created_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 //!   activated_at           BIGINT DEFAULT NULL,
 //!   responded_at           BIGINT DEFAULT NULL,
 //!   UNIQUE KEY uk_human_input_active_slot (active_slot_key),
@@ -638,31 +637,6 @@ impl ImParticipantRepoPort for DbImParticipantStore {
         }
     }
 
-    async fn find_by_actor(
-        &self,
-        channel_type: ChannelType,
-        account_ref: &str,
-        actor_id: &str,
-    ) -> ServiceResult<Vec<ImParticipantMap>> {
-        let rows = self
-            .query(
-                "find_participants_by_actor",
-                DbStatement::with_params(
-                    "SELECT channel_type, account_ref, im_user_id, actor_id, display_name \
-                     FROM bcs_channel_im_participants \
-                     WHERE channel_type = ? AND account_ref = ? AND actor_id = ? \
-                     ORDER BY im_user_id",
-                    vec![
-                        DbValue::from(channel_type.as_str()),
-                        DbValue::from(account_ref),
-                        DbValue::from(actor_id),
-                    ],
-                ),
-            )
-            .await?;
-        rows.iter().map(row_to_participant).collect()
-    }
-
     async fn upsert(&self, map: ImParticipantMap) -> ServiceResult<()> {
         self.execute(
             "upsert_participant",
@@ -734,8 +708,8 @@ impl DbHumanInputRequestStore {
                     assignee_actor_id, im_conversation_id, im_conversation_type, im_user_id,
                     node_display_name, notification_text, deadline_ms, status,
                     provider_message_ref, delivery_attempts, last_delivery_error,
-                    created_at, activated_at, responded_at
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    activated_at, responded_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 vec![
                     DbValue::from(request.request_id.as_str()),
                     DbValue::from(request.session_id.as_str()),
@@ -760,7 +734,6 @@ impl DbHumanInputRequestStore {
                     DbValue::from(request.provider_message_ref.as_deref()),
                     DbValue::from(u64::from(request.delivery_attempts)),
                     DbValue::from(request.last_delivery_error.as_deref()),
-                    DbValue::from(request.created_at),
                     optional_u64_value(request.activated_at),
                     optional_u64_value(request.responded_at),
                 ],
@@ -837,6 +810,7 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
                 "get_human_input_request",
                 DbStatement::with_params(
                     human_input_request_select_sql(
+                        self.flavor,
                         "WHERE request_id = ? LIMIT 1",
                     ),
                     vec![DbValue::from(request_id)],
@@ -852,6 +826,7 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
                 "list_human_input_requests_by_run",
                 DbStatement::with_params(
                     human_input_request_select_sql(
+                        self.flavor,
                         "WHERE run_id = ? ORDER BY created_at, request_id",
                     ),
                     vec![DbValue::from(run_id)],
@@ -870,6 +845,7 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
                 "find_active_human_input_request",
                 DbStatement::with_params(
                     human_input_request_select_sql(
+                        self.flavor,
                         "WHERE reply_scope_key = ? AND status = 'active' LIMIT 1",
                     ),
                     vec![DbValue::from(reply_scope_key)],
@@ -1066,13 +1042,15 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
     }
 }
 
-fn human_input_request_select_sql(suffix: &str) -> String {
+fn human_input_request_select_sql(flavor: ChannelSqlFlavor, suffix: &str) -> String {
+    let created_at = flavor.unix_ts("created_at");
     format!(
         "SELECT request_id, session_id, run_id, node_id, binding_id, channel_type, \
          account_ref, notification_mode, reply_scope_key, active_slot_key, \
          assignee_actor_id, im_conversation_id, im_conversation_type, im_user_id, \
          node_display_name, notification_text, deadline_ms, status, provider_message_ref, \
-         delivery_attempts, last_delivery_error, created_at, activated_at, responded_at \
+         delivery_attempts, last_delivery_error, ({created_at} * 1000) AS created_at, \
+         activated_at, responded_at \
          FROM bcs_human_input_requests {suffix}"
     )
 }
@@ -1432,7 +1410,7 @@ mod tests {
                 provider_message_ref TEXT,
                 delivery_attempts INTEGER NOT NULL DEFAULT 0,
                 last_delivery_error TEXT,
-                created_at INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 activated_at INTEGER,
                 responded_at INTEGER
             )",

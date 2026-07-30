@@ -1622,39 +1622,40 @@ impl SessionChannelOutboundPort for BcsChannelService {
                     )
                 }
                 HumanInputNotificationMode::DirectAssignee => {
-                    let mappings = self
-                        .im_participants
-                        .find_by_actor(
-                            binding.channel_type.clone(),
-                            &binding.account_ref,
-                            &event.assignee_actor_id,
-                        )
-                        .await?;
-                    let mapping = match mappings.as_slice() {
-                        [mapping] => mapping,
-                        [] => {
-                            return Err(ServiceError::InvalidOperation {
-                                message: format!(
-                                    "no IM identity mapping for HumanInput assignee {}",
-                                    event.assignee_actor_id
-                                ),
-                                request_id: Some(event.event_id),
-                            });
+                    let provider = self.providers.get(&binding.channel_type).ok_or_else(|| {
+                        ServiceError::InvalidOperation {
+                            message: format!(
+                                "channel provider '{}' is not available",
+                                binding.channel_type
+                            ),
+                            request_id: Some(event.event_id.clone()),
                         }
-                        _ => {
-                            return Err(ServiceError::Conflict(format!(
-                                "multiple IM identity mappings for HumanInput assignee {}",
-                                event.assignee_actor_id
-                            )));
-                        }
-                    };
+                    })?;
+                    // COSEC: only provider-validated actor identities may become
+                    // external direct-message recipients.
+                    let im_user_id = provider
+                        .resolve_direct_recipient(&event.assignee_actor_id)
+                        .map_err(|error| ServiceError::InvalidOperation {
+                            message: error.to_string(),
+                            request_id: Some(event.event_id.clone()),
+                        })?
+                        .filter(|value| {
+                            !value.is_empty() && value.trim().len() == value.len()
+                        })
+                        .ok_or_else(|| ServiceError::InvalidOperation {
+                            message: format!(
+                                "channel provider '{}' cannot resolve HumanInput assignee {}",
+                                binding.channel_type, event.assignee_actor_id
+                            ),
+                            request_id: Some(event.event_id.clone()),
+                        })?;
                     (
-                        mapping.im_user_id.clone(),
+                        im_user_id.clone(),
                         "1".to_string(),
-                        Some(mapping.im_user_id.clone()),
+                        Some(im_user_id.clone()),
                         direct_reply_scope(
                             &binding.id,
-                            &mapping.im_user_id,
+                            &im_user_id,
                             &event.assignee_actor_id,
                         ),
                     )
@@ -2280,15 +2281,6 @@ mod tests {
             Err(ServiceError::InternalError(
                 "actor write failed".to_string(),
             ))
-        }
-
-        async fn find_by_actor(
-            &self,
-            _channel_type: ChannelType,
-            _account_ref: &str,
-            _actor_id: &str,
-        ) -> ServiceResult<Vec<bcs_domain::ImParticipantMap>> {
-            unreachable!("inbound actor test only writes the participant mapping")
         }
     }
 
@@ -4444,7 +4436,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_human_input_resolves_assignee_and_queues_same_scope() -> TestResult {
+    async fn direct_human_input_resolves_actor_without_mapping_and_queues_same_scope(
+    ) -> TestResult {
         let harness = TestHarness::new(state_machine_group("group_sm")).await?;
         harness
             .service
@@ -4462,29 +4455,20 @@ mod tests {
             })
             .await?;
 
-        let missing_mapping = SessionChannelOutboundPort::publish_human_input_ready(
+        let mut invalid_actor = human_input_ready_event(
+            "direct-invalid",
+            HumanInputNotificationMode::DirectAssignee,
+        );
+        invalid_actor.assignee_actor_id = "bot_u1".to_string();
+        let invalid_result = SessionChannelOutboundPort::publish_human_input_ready(
             &harness.service,
-            human_input_ready_event(
-                "direct-missing",
-                HumanInputNotificationMode::DirectAssignee,
-            ),
+            invalid_actor,
         )
         .await;
         assert!(matches!(
-            missing_mapping,
+            invalid_result,
             Err(ServiceError::InvalidOperation { .. })
         ));
-
-        harness
-            .participant_repo
-            .upsert(bcs_domain::ImParticipantMap {
-                channel_type: channel_type(),
-                account_ref: "robot_1".to_string(),
-                im_user_id: "u1".to_string(),
-                actor_id: "human_u1".to_string(),
-                display_name: Some("张三".to_string()),
-            })
-            .await?;
 
         for event_id in ["direct-first", "direct-second"] {
             assert_eq!(
@@ -5635,6 +5619,21 @@ mod tests {
                 object.insert("client_secret".to_string(), serde_json::json!("<redacted>"));
             }
             redacted
+        }
+
+        fn resolve_direct_recipient(
+            &self,
+            actor_id: &str,
+        ) -> ChannelProviderResult<Option<String>> {
+            let recipient = actor_id
+                .strip_prefix("human_")
+                .filter(|value| !value.is_empty() && value.trim().len() == value.len())
+                .ok_or_else(|| {
+                    ChannelProviderError::Provider(format!(
+                        "test provider cannot resolve direct recipient from actor {actor_id}"
+                    ))
+                })?;
+            Ok(Some(recipient.to_string()))
         }
 
         fn delivery(&self) -> Arc<dyn ChannelDeliveryPort> {

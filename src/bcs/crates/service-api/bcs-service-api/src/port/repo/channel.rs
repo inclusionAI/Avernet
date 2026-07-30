@@ -83,13 +83,6 @@ pub trait ImParticipantRepoPort: Send + Sync {
         account_ref: &str,
         im_user_id: &str,
     ) -> ServiceResult<Option<ImParticipantMap>>;
-    /// HumanInput outbound lookup. Callers must reject zero or multiple matches.
-    async fn find_by_actor(
-        &self,
-        channel_type: ChannelType,
-        account_ref: &str,
-        actor_id: &str,
-    ) -> ServiceResult<Vec<ImParticipantMap>>;
     async fn upsert(&self, map: ImParticipantMap) -> ServiceResult<()>;
 }
 
