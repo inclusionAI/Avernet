@@ -59,6 +59,15 @@ class MappingSourceLayout(StrEnum):
     LEGACY = "legacy"
 
 
+class ActiveRepoRetirementError(RuntimeError):
+    """A runtime-owned active-root corpus could not be safely retired."""
+
+    def __init__(self, reason: str, **evidence: object) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.evidence = evidence
+
+
 @dataclass(frozen=True, slots=True)
 class SkillMapping:
     source: str
@@ -133,6 +142,11 @@ def mapping_sources_use_pool(
             layout.repo_bridge,
         )
     )
+    stable_repo_root = (
+        Path(os.path.abspath(layout.repo_bridge))
+        if engine in {"aicoding", "hermes"}
+        else None
+    )
     has_pool = False
     has_legacy = False
     for raw_source in sources:
@@ -142,6 +156,13 @@ def mapping_sources_use_pool(
         normalized = Path(os.path.abspath(source))
         if any(normalized.is_relative_to(root) for root in pool_roots):
             has_pool = True
+        elif stable_repo_root is not None and normalized.is_relative_to(
+            stable_repo_root
+        ):
+            if _active_marker_selects_pool(layout=layout, engine=engine):
+                has_pool = True
+            else:
+                has_legacy = True
         elif any(normalized.is_relative_to(root) for root in legacy_roots):
             has_legacy = True
     if has_pool and has_legacy:
@@ -194,6 +215,8 @@ def _retired_storage_entries(
     """
 
     entries = [layout.legacy_local, layout.local_bridge]
+    if engine == "aicoding":
+        entries.append(layout.active_root / "skills-repo")
     if engine in {"openclaw", "claude_code"} and not (
         engine == "openclaw"
         and current_repo_delivery() is RepoDelivery.DOWNLOAD
@@ -384,6 +407,7 @@ def _finalize_active_root(
     mappings: list[SkillMapping],
     quarantine: Path,
     retire_path: Callable[[Path, Path], None],
+    retire_active_repo: Callable[[str, str], dict[str, object]] | None,
 ) -> PoolActivationResult | None:
     published = publish_pool_mappings(
         mappings=mappings,
@@ -419,6 +443,39 @@ def _finalize_active_root(
         mappings=mappings,
         activation_state="finalizing",
     )
+    active_repo = layout.active_root / "skills-repo"
+    if engine == "aicoding" and (active_repo.exists() or active_repo.is_symlink()):
+        if retire_active_repo is None:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_repo_retirement_required",
+                    "path": str(active_repo),
+                },
+            )
+        try:
+            retirement_evidence = retire_active_repo(
+                migration_generation,
+                preparation_id,
+            )
+        except ActiveRepoRetirementError as error:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_repo_retirement_failed",
+                    "retirement_reason": error.reason,
+                    **error.evidence,
+                },
+            )
+        if active_repo.exists() or active_repo.is_symlink():
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_repo_retirement_unverified",
+                    "path": str(active_repo),
+                    "retirement": retirement_evidence,
+                },
+            )
     _residue_evidence, residue_failure = _capture_recreated_legacy_local(
         layout=layout,
         quarantine=quarantine,
@@ -1077,6 +1134,7 @@ def _activate_pool(
     home: str | Path = "/home/admin",
     repo_is_mounted: Callable[[Path], bool] | None = None,
     retire_path: Callable[[Path, Path], None] = os.replace,
+    retire_active_repo: Callable[[str, str], dict[str, object]] | None = None,
     before_legacy_retire: Callable[[], None] | None = None,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
@@ -1107,16 +1165,35 @@ def _activate_pool(
             error=str(error),
         )
 
+    active_marker = _read_active_marker(layout.active_marker)
+    if active_marker is not None and (
+        active_marker.get("engine") != engine
+        or active_marker.get("layout_contract_version") != LAYOUT_CONTRACT_VERSION
+        or active_marker.get("preparation_id") != preparation_id
+        or active_marker.get("migration_generation") != migration_generation
+        or active_marker.get("activation_state") not in {"finalizing", "active"}
+    ):
+        return _invalid("active_marker_identity_mismatch")
+
     inspection = inspect_runtime_layout(
         engine=engine,
         expected_contract_version=LAYOUT_CONTRACT_VERSION,
         home=home_path,
         repo_is_mounted=repo_is_mounted or os.path.ismount,
     )
-    if (
-        inspection.status is not RuntimeLayoutInspectionStatus.READY
-        or inspection.preparation_id != preparation_id
-    ):
+    layout_ready = (
+        inspection.status is RuntimeLayoutInspectionStatus.READY
+        and inspection.preparation_id == preparation_id
+    )
+    trusted_finalizing_retirement_retry = (
+        engine == "aicoding"
+        and active_marker is not None
+        and active_marker.get("activation_state") == "finalizing"
+        and inspection.status is RuntimeLayoutInspectionStatus.INVALID
+        and inspection.preparation_id == preparation_id
+        and inspection.evidence.get("reason") == "active_repo_corpus_present"
+    )
+    if not layout_ready and not trusted_finalizing_retirement_retry:
         return _invalid(
             "runtime_layout_not_ready",
             probe_status=inspection.status.value,
@@ -1135,16 +1212,7 @@ def _activate_pool(
     baseline_path = layout.pool_root / (
         f".cutover-baseline-{migration_generation}.json"
     )
-    active_marker = _read_active_marker(layout.active_marker)
     if active_marker is not None:
-        if (
-            active_marker.get("engine") != engine
-            or active_marker.get("layout_contract_version") != LAYOUT_CONTRACT_VERSION
-            or active_marker.get("preparation_id") != preparation_id
-            or active_marker.get("migration_generation") != migration_generation
-            or active_marker.get("activation_state") not in {"finalizing", "active"}
-        ):
-            return _invalid("active_marker_identity_mismatch")
         if active_marker.get("activation_state") == "finalizing":
             ownership_failure = _ensure_quarantine_generation_owned(
                 quarantine=quarantine,
@@ -1164,6 +1232,7 @@ def _activate_pool(
                 mappings=mappings,
                 quarantine=quarantine,
                 retire_path=retire_path,
+                retire_active_repo=retire_active_repo,
             )
         except OSError as error:
             return PoolActivationResult(
@@ -1231,6 +1300,7 @@ def _activate_pool(
                 mappings=mappings,
                 quarantine=quarantine,
                 retire_path=retire_path,
+                retire_active_repo=retire_active_repo,
             )
             if completion_failure is not None:
                 return completion_failure
@@ -1299,6 +1369,7 @@ def _activate_pool(
                 mappings=mappings,
                 quarantine=quarantine,
                 retire_path=retire_path,
+                retire_active_repo=retire_active_repo,
             )
             if completion_failure is not None:
                 return completion_failure
@@ -1427,6 +1498,7 @@ def _activate_pool(
             mappings=mappings,
             quarantine=quarantine,
             retire_path=retire_path,
+            retire_active_repo=retire_active_repo,
         )
         if completion_failure is not None:
             return completion_failure
@@ -1568,6 +1640,7 @@ def activate_aicoding_pool(
     repo_is_mounted: Callable[[Path], bool] | None = None,
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
     retire_path: Callable[[Path, Path], None] = os.replace,
+    retire_active_repo: Callable[[str, str], dict[str, object]] | None = None,
     before_legacy_retire: Callable[[], None] | None = None,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
@@ -1582,6 +1655,7 @@ def activate_aicoding_pool(
             home=home,
             repo_is_mounted=repo_is_mounted,
             retire_path=retire_path,
+            retire_active_repo=retire_active_repo,
             before_legacy_retire=before_legacy_retire,
             before_post_sync=before_post_sync,
         ),
