@@ -92,5 +92,24 @@ class TestNetworkTypeVisibility:
         assert is_network_type_visible({"networkTypes": []}) is True
         assert is_network_type_visible({}) is True
 
+    def test_singular_disallowed_type_is_not_visible(self):
+        # The local registry filters its list on the singular networkType /
+        # network_type key; the detail check must honor the same shape or a
+        # server hidden from the list would still resolve by code.
+        assert is_network_type_visible({"networkType": "INTRANET"}) is False
+        assert is_network_type_visible({"network_type": "INTRANET"}) is False
+        assert is_network_type_visible({"networkType": ["INTRANET"]}) is False
+
+    def test_singular_allowed_type_is_visible(self):
+        assert is_network_type_visible({"networkType": "INTERNET"}) is True
+        assert is_network_type_visible({"network_type": "OFFICE"}) is True
+
+    def test_plural_takes_precedence_over_singular(self):
+        # A present plural list is authoritative — the singular fallback only
+        # fires when networkTypes is absent/empty, so existing behavior is intact.
+        assert is_network_type_visible(
+            {"networkTypes": ["OFFICE"], "networkType": "INTRANET"}
+        ) is True
+
     def test_allowlist_is_internet_and_office(self):
         assert ALLOWED_NETWORK_TYPES == ("INTERNET", "OFFICE")

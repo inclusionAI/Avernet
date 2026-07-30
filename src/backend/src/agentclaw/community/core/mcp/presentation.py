@@ -84,8 +84,19 @@ def is_network_type_visible(mcp_data: dict[str, Any]) -> bool:
     A server with no network types is visible (nothing restricts it); one that
     declares types is visible only if at least one is in
     :data:`ALLOWED_NETWORK_TYPES`. Mirrors the internal detail route's rule.
+
+    The plural ``networkTypes`` list is the primary shape; when it is absent the
+    check falls back to the singular ``networkType`` / ``network_type`` (scalar
+    or list) that the local registry declares and *filters its list on*
+    (``LocalMCPRegistry`` reads those keys). Without the fallback a server the
+    catalog hides from the list on its network type would still resolve by code
+    through the detail route — a visibility rule the two paths must not split on.
     """
-    network_types = mcp_data.get("networkTypes") or []
+    network_types = mcp_data.get("networkTypes")
+    if not network_types:
+        network_types = mcp_data.get("networkType") or mcp_data.get("network_type") or []
+    if isinstance(network_types, str):
+        network_types = [network_types]
     if not network_types:
         return True
     return any(nt in ALLOWED_NETWORK_TYPES for nt in network_types)
