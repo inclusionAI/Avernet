@@ -47,6 +47,10 @@ tokio-util = { workspace = true, features = ["io"] }
 # URL encoding
 urlencoding = "2"
 
+# Charset detection for text uploads (see guess_charset helper).
+chardetng = { workspace = true }
+encoding_rs = { workspace = true }
+
 # UUID
 uuid = { workspace = true }
 
