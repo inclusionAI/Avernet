@@ -261,14 +261,44 @@ engine 的每个 handler 都会调用 `check_capability()`
 
 动手写枚举前值得知道的两个坑：
 
-- **engine 的审批模式「可接受集合」与「对外公布集合」并不一致。**
-  `set_approval_mode` 接受六个值（`approve, always, on-miss, on_miss, never,
-  off` —— `approvals/router.py:75`），而 `GET /api/approvals/modes` 只公布三个
-  （`approvals/router.py:104-125`）。`on_miss` 是 `on-miss` 的下划线别名。
-  对外只发布公布的那三个；给同一个模式认可两种拼写是永久性的。
+- **审批模式不是一套词表，而是两套，并且哪套都没有被强制。**
+  `core/approval/models.py:15-19` 把规范三元组写作 **`always` / `on-miss` /
+  `never`**，紧接着又声明了一个六值 `Literal`，多出来的三个是别名
+  （`approve`≈`always`、`on_miss`≈`on-miss`、`off`≈`never`）。而
+  `GET /api/approvals/modes` 公布的是*第三种*组合 ——
+  **`approve` / `on-miss` / `never`**（`approvals/router.py:104-125`）。
+  没有任何地方做归一化：`plugins/openclaw/_approval.py:57` 把字符串原样转发给
+  上游，`core/adapters/openclaw/approval.py:76` 回显的是**请求里的** mode 而不是
+  真正提交的值 —— 与它自己的 docstring 相矛盾。本地 stub 返回 `"auto"`
+  （`local/openclaw/plugin_impl.py:93`），是 `Literal` 之外的第七个值。后端还
+  各自保留了两份同样的列表（`adapters/http/approvals/router.py:117,175-185`）。
+  **所以：请求上用枚举**（公布的那三个 —— 只发布一种拼写），
+  **响应上用 `str`**（响应端用严格枚举会在 local / singlebox stub 上直接 500）。
 - **枚举没有逐成员说明就没什么价值。** OpenAPI 没有原生的成员说明位，所以用
   `json_schema_extra={"x-enum-descriptions": {...}}` 再加字段描述里的散文说明，
   并让枚举继承 `str, Enum`，这样 schema 才会输出 `type: string` + `enum`。
+
+**被包装分组的能力矩阵**，来自 `engines/openclaw/engine.py:55-134` 与
+`engines/claude_code/engine.py:45-105`：
+
+| 组 | openclaw | claude_code |
+|---|---|---|
+| sessions（list/get/delete/messages/update） | ✅ | ✅ |
+| sessions **create** | ✅ | ⚠️ limited —— 会返回真实的 warning 文案 |
+| approvals get/set | ✅ | ❌ 501，且未声明 `fallback` |
+| models | ✅ | ✅ |
+| nodes | ✅ | ❌ 501 |
+| engine status/capabilities/available | ✅ 无门禁 | ✅ 无门禁 |
+
+`claude_code` 的 **limited** `SESSION_CREATE` 正是让 `Envelope.warning` 从"理论
+需要"变成"实际必需"的活例子。
+
+一处刻意的背离：`GET /api/approvals/modes` 是 engine 侧唯一**没有**能力门禁的
+路由（`approvals/router.py:104`），所以在 `claude_code` bot 上它照样公布三个模式，
+而 get 与 set 都返回 501。公共侧的 `…/approvals/modes` 以 `APPROVAL_GET` 为门禁，
+让三条审批路由在同一个 bot 上保持一致。（`Capability.APPROVAL_LIST` 定义在
+`core/engine/capability.py:84`，但**没有任何引擎声明它、也没有任何路由检查它**
+—— 是死代码。）
 
 ### 6. 传输层抛出的错误
 

@@ -158,12 +158,60 @@ The public surface currently types these as bare strings. Track C introduces
 `openapi_v1/engine_runtime/enums.py`, and **only** for value sets that are
 genuinely closed at the source:
 
-| Enum | Values | Source of truth |
-|---|---|---|
-| `SocketKind` | `chat`, `terminal` | ours — we compose the payload |
-| `ApprovalMode` | `approve`, `on-miss`, `never` | the set the engine *advertises* via `GET /api/approvals/modes` (`approvals/router.py:104-125`) |
-| `MessageRole` | `user`, `assistant`, `system`, `tool_use`, `tool_result` | a real `Literal` at `core/session/models.py:46` |
-| `EngineName` | as the bots category already defines it | `core/workspace/constants.py::_get_engine_types`, already imported by `openapi_v1/bots/router.py:65-68` — reuse, do not redefine |
+| Enum | Values | Used on | Source of truth |
+|---|---|---|---|
+| `SocketKind` | `chat`, `terminal` | response | ours — we compose the payload |
+| `ApprovalMode` | `approve`, `on-miss`, `never` | **request only** | the set the engine *advertises* via `GET /api/approvals/modes` (`approvals/router.py:104-125`) — see the investigation below for why it is not safe on responses |
+| `MessageRole` | `user`, `assistant`, `system`, `tool_use`, `tool_result` | response | a real `Literal` at `core/session/models.py:46` |
+| `EngineName` | as the bots category already defines it | response | `core/workspace/constants.py::_get_engine_types`, already imported by `openapi_v1/bots/router.py:65-68` — reuse, do not redefine |
+
+#### Investigation: the approval-mode vocabulary (2026-07-30)
+
+Reading the whole path changed the conclusion, so the findings are recorded
+here rather than left as a one-line caveat.
+
+1. **There are two competing three-value vocabularies, not one set of three
+   plus three undocumented extras.** `core/approval/models.py:15-19` states the
+   canonical trio as **`always` / `on-miss` / `never`** ("`always` = ask on every
+   action, `on-miss` = ask only when the policy can't auto-decide, `never` = full
+   auto"), then declares a six-value `Literal`. The extra three are aliases:
+   `approve`≈`always`, `on_miss`≈`on-miss`, `off`≈`never`. Meanwhile the HTTP
+   layer advertises **`approve` / `on-miss` / `never`** — the *alias* spelling for
+   "ask every time", mixed with the canonical spelling for the other two.
+2. **Nothing canonicalises, anywhere on the real path.**
+   `plugins/openclaw/_approval.py:57` forwards `mode` verbatim to the upstream
+   gateway as `exec.approvals.set`. So whatever spelling we send is what
+   upstream receives.
+3. **`set_mode` echoes the request, not the commit.**
+   `core/adapters/openclaw/approval.py:76` returns `mode=request.mode`. The
+   `ApprovalModeSetResult` docstring claims "`mode` echoes the value the engine
+   actually committed (engines may canonicalise hyphen / underscore variants)" —
+   that is **not true of the only real implementation**.
+4. **The local stub returns `"auto"`** (`local/openclaw/plugin_impl.py:93`) — a
+   seventh value outside the `Literal` entirely.
+5. **The backend keeps its own copy of both lists**
+   (`adapters/http/approvals/router.py:117` and `:175-185`), so the discrepancy
+   already exists in two repositories' worth of code.
+
+**Consequences for this plan — one decision reverses.**
+
+- `ApprovalMode` is an enum on the **request** body of
+  `PUT /openapi/v1/bots/{bot_id}/approvals/mode` only. We control what we accept,
+  the three advertised values are all in the engine's accept-set, and rejecting
+  the alias spellings at the edge is exactly right.
+- On **responses** (`ApprovalState.mode`), the field is typed **`str`**, not the
+  enum. Finding 4 is decisive: a strict response enum would raise on the local
+  and singlebox stubs, which return `"auto"` — turning a dev-environment quirk
+  into a public `500`. My earlier claim that this set is "closed at the source"
+  was wrong; the read path has no closed set at all.
+- `GET /openapi/v1/bots/{bot_id}/approvals/modes` returns the engine's advertised
+  list as data (`value` / `label` / `description`), so `ApprovalModeInfo.value`
+  is likewise `str`.
+
+Not ours to fix in this PR, but flag to the engine owner: the canonical-vs-
+advertised split (1), the echo-the-request bug (3), and the duplicated backend
+copy (5). Track C should not paper over any of them — it should publish one
+spelling and let the divergence stay visible upstream.
 
 **Deliberately left as strings**, because the source is an open vocabulary and a
 fabricated enum would be a lie that breaks on the first new value:
@@ -341,28 +389,53 @@ and matches how cron behaves today, but the tests must not assume a live device.
   **Mitigation:** that is why `/engine/capabilities` ships in v1 rather than
   being deferred. Document it as the discovery endpoint in every `501` message.
 
-- **Risk: the engine's approval-mode accept-set and advertise-set disagree.**
-  `set_approval_mode` accepts six values —
-  `approve, always, on-miss, on_miss, never, off`
-  (`src/engine/.../api/approvals/router.py:75`) — but `GET /api/approvals/modes`
-  advertises only three: `approve`, `on-miss`, `never`
-  (`approvals/router.py:104-125`). `on_miss` is a snake_case alias of `on-miss`;
-  `always` and `off` are undocumented.
-  **Mitigation:** `ApprovalMode` publishes the advertised three only. A public
-  enum that included the aliases would bless two spellings of one mode forever.
-  Forward the enum's value verbatim — it is already in the engine's accept-set,
-  so no translation is needed. Flag `always`/`off` to the engine owner as either
-  undocumented features or dead values; do not resolve that inside this PR.
+- **Risk: the approval-mode vocabulary is genuinely inconsistent** — two
+  competing three-value sets, no canonicalisation, and a stub that returns a
+  seventh value. Fully documented under *Investigation* above.
+  **Mitigation:** enum on the request, `str` on the response. Publish one
+  spelling; do not translate; do not paper over the upstream divergence.
 
 - **Risk: a strict enum on a response field is an availability risk.** If the
   engine adds a capability, a node status, or an approval mode and the public
   model validates strictly, serialization raises and the endpoint answers `500`
   for a change that was supposed to be additive.
   **Mitigation:** enums are used on **request** fields and on values we ourselves
-  compose (`SocketKind`, `EngineName`); genuinely open response vocabularies stay
-  `str`. `ApprovalMode` and `MessageRole` appear in responses and are enum-typed
-  because both sets are closed at the source — cover each with a test that an
-  unexpected engine value produces a clean mapped error, not an unhandled crash.
+  compose (`SocketKind`, `EngineName`). Open response vocabularies stay `str`.
+  `MessageRole` is the only engine-sourced enum kept on a response, because it is
+  a hard `Literal` in the engine's own model — and it still gets a test proving
+  an unexpected value produces a clean mapped error rather than an unhandled
+  crash.
+
+- **Risk: a third of the surface is unavailable on `claude_code`, and the
+  capability matrix is uneven in ways a caller cannot guess.** From the two OSS
+  engines' declarations (`engines/openclaw/engine.py:55-134`,
+  `engines/claude_code/engine.py:45-105`):
+
+  | Endpoint group | openclaw | claude_code |
+  |---|---|---|
+  | sessions (list/get/delete/messages/update) | ✅ | ✅ |
+  | sessions **create** | ✅ | ⚠️ **limited** — "OCB pre-allocates the sessionKey, first chat.send establishes it" |
+  | approvals mode get/set | ✅ | ❌ **501** — declares neither capability, and no `fallback` message |
+  | models | ✅ | ✅ |
+  | nodes | ✅ | ❌ **501** |
+  | engine status / capabilities / available | ✅ (ungated) | ✅ (ungated) |
+
+  **Mitigation:** this is exactly why `/engine/capabilities` ships in v1 and why
+  the `501` message must name it. It is also the concrete case that justifies
+  assumption 1: `SESSION_CREATE` on `claude_code` returns a **real, populated
+  warning string** today, so without `Envelope.warning` we would silently drop a
+  caveat the engine deliberately surfaces. Test both engines' matrices.
+
+- **Risk: `GET /approvals/modes` is the one engine route with no capability
+  gate** (`approvals/router.py:104`), so on a `claude_code` bot it advertises
+  three approval modes while get and set both answer `501`. `Capability.APPROVAL_LIST`
+  exists (`core/engine/capability.py:84`, `core/engine/base.py:106`) but **no
+  engine declares it** and no route checks it — it is dead.
+  **Mitigation:** gate the public `…/approvals/modes` on `APPROVAL_GET` rather
+  than mirroring the engine's ungated behaviour, so all three approval routes
+  agree per bot. This is a deliberate, documented divergence from the engine —
+  record it in `engine-surface.md` rather than letting it look like an
+  oversight.
 
 ## Alternatives Considered
 

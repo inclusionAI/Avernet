@@ -284,16 +284,48 @@ release into a public 500.
 
 Two traps worth knowing before you write the enums:
 
-- **The engine's approval accept-set and advertise-set disagree.**
-  `set_approval_mode` accepts six values (`approve, always, on-miss, on_miss,
-  never, off` — `approvals/router.py:75`) while `GET /api/approvals/modes`
-  advertises three (`approvals/router.py:104-125`). `on_miss` is a snake_case
-  alias of `on-miss`. Publish the advertised three; blessing two spellings of
-  one mode is forever.
+- **Approval mode is not one vocabulary — it is two, and neither is enforced.**
+  `core/approval/models.py:15-19` names the canonical trio **`always` /
+  `on-miss` / `never`**, then declares a six-value `Literal` whose extras are
+  aliases (`approve`≈`always`, `on_miss`≈`on-miss`, `off`≈`never`).
+  `GET /api/approvals/modes` advertises a *third* combination —
+  **`approve` / `on-miss` / `never`** (`approvals/router.py:104-125`). Nothing
+  canonicalises: `plugins/openclaw/_approval.py:57` forwards the string verbatim
+  upstream, and `core/adapters/openclaw/approval.py:76` echoes back the
+  **requested** mode rather than the committed one, contradicting its own
+  docstring. The local stub returns `"auto"`
+  (`local/openclaw/plugin_impl.py:93`) — a seventh value outside the `Literal`.
+  The backend keeps an independent copy of both lists
+  (`adapters/http/approvals/router.py:117,175-185`).
+  **So: enum on the request** (the advertised three — publish one spelling),
+  **`str` on the response** (a strict response enum would 500 against the local
+  and singlebox stubs).
 - **Enums need per-member docs to be worth anything.** OpenAPI has no native
   slot for them, so use `json_schema_extra={"x-enum-descriptions": {...}}` plus
   prose in the field description, and subclass `str, Enum` so the schema emits
   `type: string` + `enum`.
+
+**Capability matrix for the wrapped groups**, from
+`engines/openclaw/engine.py:55-134` and `engines/claude_code/engine.py:45-105`:
+
+| Group | openclaw | claude_code |
+|---|---|---|
+| sessions (list/get/delete/messages/update) | ✅ | ✅ |
+| sessions **create** | ✅ | ⚠️ limited — returns a real warning string |
+| approvals get/set | ✅ | ❌ 501, no `fallback` declared |
+| models | ✅ | ✅ |
+| nodes | ✅ | ❌ 501 |
+| engine status/capabilities/available | ✅ ungated | ✅ ungated |
+
+`claude_code`'s **limited** `SESSION_CREATE` is the live case that makes
+`Envelope.warning` load-bearing rather than theoretical.
+
+One deliberate divergence: `GET /api/approvals/modes` is the only engine route
+with **no** capability gate (`approvals/router.py:104`), so on a `claude_code`
+bot it advertises three modes while get and set both 501. The public
+`…/approvals/modes` gates on `APPROVAL_GET` so all three routes agree per bot.
+(`Capability.APPROVAL_LIST` exists at `core/engine/capability.py:84` but **no
+engine declares it and no route checks it** — dead.)
 
 ### 6. Errors from the transport
 
