@@ -58,6 +58,21 @@ def _legacy(**ov) -> Resource:
     return Resource(**base)
 
 
+def _request_without_trace() -> SimpleNamespace:
+    """A request whose tracer middleware did not run — ``state.trace_id`` unset.
+
+    ``responses._trace_id`` reads ``request.state.trace_id`` and falls back to
+    ``""`` when absent, so the envelope's ``request_id`` is empty (mirrors the
+    prod path before the tracer middleware stamps the id).
+    """
+    return SimpleNamespace(state=SimpleNamespace())
+
+
+def _request_with_trace(trace_id: str) -> SimpleNamespace:
+    """A request whose tracer middleware stamped ``trace_id`` on ``state``."""
+    return SimpleNamespace(state=SimpleNamespace(trace_id=trace_id))
+
+
 def test_to_openapi_resource_maps_basic_fields():
     o = _to_openapi_resource(_legacy())
     assert o.resource_id == "1"
@@ -84,23 +99,14 @@ def test_to_openapi_resource_iso_timestamps():
     assert o.gmt_modified == ts.isoformat()
 
 
-def test_request_id_returns_nonempty_string_in_request_context():
-    """_request_id() returns a string (possibly empty outside a request;
-    integration via X-Trace-Id header is tested at the handler level)."""
-    from agentclaw.community.adapters.http.openapi_v1.resources.router import (
-        _request_id,
-    )
-
-    val = _request_id()
-    assert isinstance(val, str)
-
-
 # ── list_resources handler wiring (Phase 1 Task 2) ──────────────────────
 #
 # Direct handler invocation (退路 B per task spec): bypasses FastAPI's
 # dependency wiring and supplies a stub factory. `principal` is `Any`, so
-# `None` is an acceptable stand-in. `request=None` exercises the
-# "outside-a-request" branch of `_request_id_from`.
+# `None` is an acceptable stand-in. Handlers take a required `request: Request`
+# (mirroring the bots router); tests pass a `SimpleNamespace` stub whose
+# `state.trace_id` is either unset (empty `request_id`) or set to a known
+# value (asserted into the envelope via `responses.envelope`).
 
 
 class _StubService:
@@ -158,8 +164,12 @@ class _StubService:
         raises ValueError for the reserved "taken" name (duplicate → 409 at the
         handler)."""
         self.last_call_kwargs = dict(
-            name=name, url=url, method=method, parent_path=parent_path,
-            user_id=user_id, created_by=created_by,
+            name=name,
+            url=url,
+            method=method,
+            parent_path=parent_path,
+            user_id=user_id,
+            created_by=created_by,
         )
         if name == "taken":
             raise ValueError(f"Resource '{name}' already exists")
@@ -187,7 +197,10 @@ class _StubService:
         URL conflict → 409 at the handler; otherwise returns a LINK Resource
         reflecting the requested rename/url change."""
         self.last_call_kwargs = dict(
-            resource_id=resource_id, link_type=link_type, url=url, name=name,
+            resource_id=resource_id,
+            link_type=link_type,
+            url=url,
+            name=name,
         )
         # resource_id == "0" simulates a missing record (service raises
         # ValueError → 409 Conflict per legacy + create parity).
@@ -237,7 +250,9 @@ class _StubService:
         path/size attributes that ``_to_openapi_resource`` flattens.
         """
         self.last_call_kwargs = dict(
-            data=data, filename=filename, parent_path=parent_path,
+            data=data,
+            filename=filename,
+            parent_path=parent_path,
             user_id=user_id,
         )
         self.last_call_device_fs = device_fs
@@ -296,9 +311,7 @@ class _StubService:
         if str(resource_id) == "0":
             return None
         if str(resource_id) == "too-large":
-            raise ValueError(
-                f"File too large for preview (max {max_size} bytes)"
-            )
+            raise ValueError(f"File too large for preview (max {max_size} bytes)")
         return {"content": "preview body", "content_type": "text/plain", "size": 12}
 
 
@@ -325,7 +338,7 @@ async def test_list_resources_returns_envelope_with_page():
         bot_id="bot-a",
         type=None,
         factory=factory,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -359,7 +372,7 @@ async def test_list_resources_paginates_items():
         bot_id="bot-a",
         type=None,
         factory=factory,
-        request=None,
+        request=_request_without_trace(),
     )
 
     # total reflects the full list; current page slice holds the 2nd item only
@@ -378,7 +391,7 @@ async def test_list_resources_passes_type_filter_value_to_service():
         bot_id="bot-a",
         type=OpenapiType.LINK,
         factory=factory,
-        request=None,
+        request=_request_without_trace(),
     )
 
     # Fix #1: the openapi enum is mapped to the legacy ResourceType enum at
@@ -392,7 +405,7 @@ async def test_list_resources_passes_type_filter_value_to_service():
 @pytest.mark.asyncio
 async def test_list_resources_reads_x_trace_id_from_request():
     factory = _StubFactory(_StubService([]))
-    request = SimpleNamespace(headers={"x-trace-id": "trace-abc"})
+    request = _request_with_trace("trace-abc")
 
     env = await list_resources(
         page=PageParams(),
@@ -416,7 +429,7 @@ async def test_list_resources_request_id_empty_when_no_request_context():
         bot_id="bot-a",
         type=None,
         factory=factory,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.request_id == ""
@@ -432,7 +445,7 @@ async def test_list_resources_empty_result_returns_empty_page():
         bot_id="bot-a",
         type=None,
         factory=factory,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.data.total == 0
@@ -457,7 +470,7 @@ async def test_check_name_returns_envelope_with_exists_false_for_available():
         type=None,
         bot_id="bot-x",
         factory=factory,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -480,7 +493,7 @@ async def test_check_name_returns_exists_true_for_taken():
         type=None,
         bot_id=None,
         factory=factory,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.data.exists is True
@@ -490,7 +503,7 @@ async def test_check_name_returns_exists_true_for_taken():
 @pytest.mark.asyncio
 async def test_check_name_reads_x_trace_id_from_request():
     factory = _StubFactory(_StubService([]))
-    request = SimpleNamespace(headers={"x-trace-id": "trace-xyz"})
+    request = _request_with_trace("trace-xyz")
 
     env = await check_resource_name(
         name="available",
@@ -515,7 +528,7 @@ async def test_check_name_passes_type_value_to_service_when_provided():
         type=OpenapiType.FILE,
         bot_id="bot-a",
         factory=factory,
-        request=None,
+        request=_request_without_trace(),
     )
 
     # Fix #1: passed value is the legacy ResourceType enum (str-subclass —
@@ -544,7 +557,7 @@ async def test_get_resource_returns_envelope_when_found():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -568,7 +581,7 @@ async def test_get_resource_raises_404_when_missing():
             principal={"user_id": "u1"},
             bot_id=None,
             factory=factory,
-            request=None,
+            request=_request_without_trace(),
         )
 
     assert exc.value.status_code == 404
@@ -578,7 +591,7 @@ async def test_get_resource_raises_404_when_missing():
 @pytest.mark.asyncio
 async def test_get_resource_reads_x_trace_id_from_request():
     factory = _StubFactory(_StubService([_legacy(id=1)]))
-    request = SimpleNamespace(headers={"x-trace-id": "trace-get-1"})
+    request = _request_with_trace("trace-get-1")
 
     env = await get_resource(
         resource_id="1",
@@ -601,7 +614,11 @@ async def test_create_link_returns_201_envelope():
     body = ResourceCreate(name="mylink", type=OpenapiType.LINK, url="https://x.com")
 
     env = await create_resource(
-        body=body, principal={"user_id": "u1"}, bot_id="bot-x", factory=factory, request=None,
+        body=body,
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        request=_request_without_trace(),
     )
 
     assert env.code == CODE_CREATED
@@ -620,7 +637,11 @@ async def test_create_file_points_to_upload_with_400():
 
     with pytest.raises(HTTPException) as exc:
         await create_resource(
-            body=body, principal={"user_id": "u1"}, bot_id=None, factory=factory, request=None,
+            body=body,
+            principal={"user_id": "u1"},
+            bot_id=None,
+            factory=factory,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 400
 
@@ -633,7 +654,11 @@ async def test_create_folder_is_not_yet_supported_501():
 
     with pytest.raises(HTTPException) as exc:
         await create_resource(
-            body=body, principal={"user_id": "u1"}, bot_id=None, factory=factory, request=None,
+            body=body,
+            principal={"user_id": "u1"},
+            bot_id=None,
+            factory=factory,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 501
 
@@ -646,20 +671,30 @@ async def test_create_link_without_url_is_400():
 
     with pytest.raises(HTTPException) as exc:
         await create_resource(
-            body=body, principal={"user_id": "u1"}, bot_id=None, factory=factory, request=None,
+            body=body,
+            principal={"user_id": "u1"},
+            bot_id=None,
+            factory=factory,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_create_link_duplicate_name_is_409():
-    service = _StubService([])  # create_url_resource raises ValueError for name=="taken"
+    service = _StubService(
+        []
+    )  # create_url_resource raises ValueError for name=="taken"
     factory = _StubFactory(service)
     body = ResourceCreate(name="taken", type=OpenapiType.LINK, url="https://x.com")
 
     with pytest.raises(HTTPException) as exc:
         await create_resource(
-            body=body, principal={"user_id": "u1"}, bot_id=None, factory=factory, request=None,
+            body=body,
+            principal={"user_id": "u1"},
+            bot_id=None,
+            factory=factory,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 409
 
@@ -681,8 +716,12 @@ async def test_update_link_returns_200_envelope():
     body = ResourceUpdate(name="renamed", url="https://new.com")
 
     env = await update_resource(
-        resource_id="1", body=body, principal={"user_id": "u1"},
-        bot_id="bot-x", factory=factory, request=None,
+        resource_id="1",
+        body=body,
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        request=_request_without_trace(),
     )
 
     assert env.code == CODE_OK
@@ -707,8 +746,12 @@ async def test_update_link_raises_409_when_not_found():
 
     with pytest.raises(HTTPException) as exc:
         await update_resource(
-            resource_id="0", body=body, principal={"user_id": "u1"},
-            bot_id=None, factory=factory, request=None,
+            resource_id="0",
+            body=body,
+            principal={"user_id": "u1"},
+            bot_id=None,
+            factory=factory,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 409
     # legacy "not found" message surfaces through ValueError → detail
@@ -723,8 +766,12 @@ async def test_update_link_raises_409_on_url_conflict():
 
     with pytest.raises(HTTPException) as exc:
         await update_resource(
-            resource_id="1", body=body, principal={"user_id": "u1"},
-            bot_id=None, factory=factory, request=None,
+            resource_id="1",
+            body=body,
+            principal={"user_id": "u1"},
+            bot_id=None,
+            factory=factory,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 409
 
@@ -732,12 +779,16 @@ async def test_update_link_raises_409_on_url_conflict():
 @pytest.mark.asyncio
 async def test_update_link_reads_x_trace_id_from_request():
     factory = _StubFactory(_StubService([]))
-    request = SimpleNamespace(headers={"x-trace-id": "trace-upd-1"})
+    request = _request_with_trace("trace-upd-1")
     body = ResourceUpdate(name="renamed")
 
     env = await update_resource(
-        resource_id="1", body=body, principal={"user_id": "u1"},
-        bot_id="bot-a", factory=factory, request=request,
+        resource_id="1",
+        body=body,
+        principal={"user_id": "u1"},
+        bot_id="bot-a",
+        factory=factory,
+        request=request,
     )
 
     assert env.request_id == "trace-upd-1"
@@ -861,10 +912,14 @@ async def test_delete_returns_200_envelope_with_deleted_true():
     factory, bot_repo, resolver, dispatcher, device_fs = _delete_deps(service=service)
 
     env = await delete_resource(
-        resource_id="1", principal={"user_id": "u1"},
-        bot_id="bot-x", factory=factory,
-        bot_repo=bot_repo, resolver=resolver,
-        device_fs_dispatcher=dispatcher, request=None,
+        resource_id="1",
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -890,10 +945,14 @@ async def test_delete_raises_missing_principal_when_no_authenticated_caller():
 
     with pytest.raises(MissingPrincipalError):
         await delete_resource(
-            resource_id="1", principal=None,
-            bot_id="ghost", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            resource_id="1",
+            principal=None,
+            bot_id="ghost",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
 
 
@@ -905,10 +964,14 @@ async def test_delete_raises_404_when_resource_missing():
 
     with pytest.raises(HTTPException) as exc:
         await delete_resource(
-            resource_id="0", principal={"user_id": "u1"},
-            bot_id="bot-a", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            resource_id="0",
+            principal={"user_id": "u1"},
+            bot_id="bot-a",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
 
     assert exc.value.status_code == 404
@@ -918,13 +981,17 @@ async def test_delete_raises_404_when_resource_missing():
 @pytest.mark.asyncio
 async def test_delete_reads_x_trace_id_from_request():
     factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
-    request = SimpleNamespace(headers={"x-trace-id": "trace-del-1"})
+    request = _request_with_trace("trace-del-1")
 
     env = await delete_resource(
-        resource_id="1", principal={"user_id": "u1"},
-        bot_id="bot-a", factory=factory,
-        bot_repo=bot_repo, resolver=resolver,
-        device_fs_dispatcher=dispatcher, request=request,
+        resource_id="1",
+        principal={"user_id": "u1"},
+        bot_id="bot-a",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=request,
     )
 
     assert env.request_id == "trace-del-1"
@@ -951,10 +1018,15 @@ async def test_upload_returns_201_envelope_and_threads_device_fs():
     factory, bot_repo, resolver, dispatcher, device_fs = _delete_deps(service=service)
 
     env = await upload_resource(
-        name="hello.txt", content=b"file bytes",
-        principal={"user_id": "u1"}, bot_id="bot-x", factory=factory,
-        bot_repo=bot_repo, resolver=resolver,
-        device_fs_dispatcher=dispatcher, request=None,
+        name="hello.txt",
+        content=b"file bytes",
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -986,10 +1058,15 @@ async def test_upload_raises_missing_principal_when_no_authenticated_caller():
 
     with pytest.raises(MissingPrincipalError):
         await upload_resource(
-            name="hello.txt", content=b"x",
-            principal=None, bot_id="ghost", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            name="hello.txt",
+            content=b"x",
+            principal=None,
+            bot_id="ghost",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
 
 
@@ -1001,10 +1078,15 @@ async def test_upload_raises_409_on_duplicate_name():
 
     with pytest.raises(HTTPException) as exc:
         await upload_resource(
-            name="taken", content=b"x",
-            principal={"user_id": "u1"}, bot_id="bot-a", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            name="taken",
+            content=b"x",
+            principal={"user_id": "u1"},
+            bot_id="bot-a",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
 
     assert exc.value.status_code == 409
@@ -1014,13 +1096,18 @@ async def test_upload_raises_409_on_duplicate_name():
 @pytest.mark.asyncio
 async def test_upload_reads_x_trace_id_from_request():
     factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
-    request = SimpleNamespace(headers={"x-trace-id": "trace-up-1"})
+    request = _request_with_trace("trace-up-1")
 
     env = await upload_resource(
-        name="hello.txt", content=b"x",
-        principal={"user_id": "u1"}, bot_id="bot-a", factory=factory,
-        bot_repo=bot_repo, resolver=resolver,
-        device_fs_dispatcher=dispatcher, request=request,
+        name="hello.txt",
+        content=b"x",
+        principal={"user_id": "u1"},
+        bot_id="bot-a",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=request,
     )
 
     assert env.request_id == "trace-up-1"
@@ -1046,9 +1133,12 @@ async def test_download_returns_raw_bytes_with_mime_type():
     factory, bot_repo, resolver, dispatcher, device_fs = _delete_deps(service=service)
 
     response = await download_resource(
-        resource_id="1", principal={"user_id": "u1"},
-        bot_id="bot-x", factory=factory,
-        bot_repo=bot_repo, resolver=resolver,
+        resource_id="1",
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
         device_fs_dispatcher=dispatcher,
     )
 
@@ -1070,9 +1160,12 @@ async def test_download_raises_missing_principal_when_no_authenticated_caller():
 
     with pytest.raises(MissingPrincipalError):
         await download_resource(
-            resource_id="1", principal=None,
-            bot_id="ghost", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
+            resource_id="1",
+            principal=None,
+            bot_id="ghost",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
             device_fs_dispatcher=dispatcher,
         )
 
@@ -1087,9 +1180,12 @@ async def test_download_raises_404_when_service_returns_none():
 
     with pytest.raises(HTTPException) as exc:
         await download_resource(
-            resource_id="0", principal={"user_id": "u1"},
-            bot_id="bot-a", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
+            resource_id="0",
+            principal={"user_id": "u1"},
+            bot_id="bot-a",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
             device_fs_dispatcher=dispatcher,
         )
 
@@ -1119,10 +1215,14 @@ async def test_preview_returns_envelope_with_content_and_type():
     factory, bot_repo, resolver, dispatcher, device_fs = _delete_deps(service=service)
 
     env = await preview_resource(
-        resource_id="1", principal={"user_id": "u1"},
-        bot_id="bot-x", factory=factory,
-        bot_repo=bot_repo, resolver=resolver,
-        device_fs_dispatcher=dispatcher, request=None,
+        resource_id="1",
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -1149,10 +1249,14 @@ async def test_preview_raises_missing_principal_when_no_authenticated_caller():
 
     with pytest.raises(MissingPrincipalError):
         await preview_resource(
-            resource_id="1", principal=None,
-            bot_id="ghost", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            resource_id="1",
+            principal=None,
+            bot_id="ghost",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
 
 
@@ -1166,10 +1270,14 @@ async def test_preview_raises_404_when_service_returns_none():
 
     with pytest.raises(HTTPException) as exc:
         await preview_resource(
-            resource_id="0", principal={"user_id": "u1"},
-            bot_id="bot-a", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            resource_id="0",
+            principal={"user_id": "u1"},
+            bot_id="bot-a",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
 
     assert exc.value.status_code == 404
@@ -1185,10 +1293,14 @@ async def test_preview_raises_413_when_too_large():
 
     with pytest.raises(HTTPException) as exc:
         await preview_resource(
-            resource_id="too-large", principal={"user_id": "u1"},
-            bot_id="bot-a", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            resource_id="too-large",
+            principal={"user_id": "u1"},
+            bot_id="bot-a",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
 
     assert exc.value.status_code == 413
@@ -1303,7 +1415,9 @@ class _InMemoryResourceRepo:
         )
 
 
-def _real_factory_with_inmemory_repo() -> tuple[ResourceServiceFactory, _InMemoryResourceRepo]:
+def _real_factory_with_inmemory_repo() -> tuple[
+    ResourceServiceFactory, _InMemoryResourceRepo
+]:
     """Construct the REAL factory backed by a real in-memory repository.
 
     ``ResourceServiceFactory.__init__`` is ``@inject``-decorated, but
@@ -1342,7 +1456,10 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     #    service.create_url_resource, already present on the slim service).
     env = await create_resource(
         body=ResourceCreate(name="doc", type=OpenapiType.LINK, url="https://x.com"),
-        principal={"user_id": "u1"}, bot_id="bot-x", factory=factory, request=None,
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        request=_request_without_trace(),
     )
     assert env.code == CODE_CREATED
     link_id = env.data.resource_id
@@ -1351,8 +1468,11 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     # 2. get it back (exercises factory.create → service.get_resource —
     #    the new slim method). The real repo round-trips the stored row.
     env = await get_resource(
-        resource_id=link_id, principal={"user_id": "u1"}, bot_id="bot-x",
-        factory=factory, request=None,
+        resource_id=link_id,
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        request=_request_without_trace(),
     )
     assert env.code == CODE_OK
     assert env.data.resource_id == link_id
@@ -1363,8 +1483,12 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     # 3. list (exercises factory.create → service.list_resources — confirms
     #    the persisted row is visible to the real repo).
     env = await list_resources(
-        page=PageParams(), principal={"user_id": "u1"}, bot_id="bot-x",
-        type=None, factory=factory, request=None,
+        page=PageParams(),
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        type=None,
+        factory=factory,
+        request=_request_without_trace(),
     )
     assert env.data.total >= 1
     assert any(item.resource_id == link_id for item in env.data.items)
@@ -1373,10 +1497,15 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     #    the new slim method; device_fs.write_file is called by real service
     #    logic, and the real repo stores the FILE record).
     env = await upload_resource(
-        name="hello.txt", content=b"file bytes",
-        principal={"user_id": "u1"}, bot_id="bot-x", factory=factory,
-        bot_repo=bot_repo, resolver=resolver,
-        device_fs_dispatcher=dispatcher, request=None,
+        name="hello.txt",
+        content=b"file bytes",
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
     )
     assert env.code == CODE_CREATED
     file_id = env.data.resource_id
@@ -1389,8 +1518,12 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     #    service.download_resource — new slim method; device_fs.read_file
     #    round-trips the bytes written in step 4).
     response = await download_resource(
-        resource_id=file_id, principal={"user_id": "u1"}, bot_id="bot-x",
-        factory=factory, bot_repo=bot_repo, resolver=resolver,
+        resource_id=file_id,
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
         device_fs_dispatcher=dispatcher,
     )
     assert response.body == b"file bytes"
@@ -1400,9 +1533,14 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     #    service.preview_resource — new slim method; real service decodes
     #    the bytes and returns the {content, content_type, size} dict).
     env = await preview_resource(
-        resource_id=file_id, principal={"user_id": "u1"}, bot_id="bot-x",
-        factory=factory, bot_repo=bot_repo, resolver=resolver,
-        device_fs_dispatcher=dispatcher, request=None,
+        resource_id=file_id,
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
     )
     assert env.code == CODE_OK
     assert env.data.content == "file bytes"
@@ -1412,9 +1550,14 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     #    — new slim method; real service awaits device_fs.delete_file for the
     #    FILE resource, then soft-deletes the repo row).
     env = await delete_resource(
-        resource_id=file_id, principal={"user_id": "u1"}, bot_id="bot-x",
-        factory=factory, bot_repo=bot_repo, resolver=resolver,
-        device_fs_dispatcher=dispatcher, request=None,
+        resource_id=file_id,
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
     )
     assert env.code == CODE_OK
     assert env.data.deleted is True
@@ -1425,9 +1568,14 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     # directly to exercise the not-found → 404 path.
     with pytest.raises(HTTPException) as exc:
         await delete_resource(
-            resource_id="999999", principal={"user_id": "u1"}, bot_id="bot-x",
-            factory=factory, bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            resource_id="999999",
+            principal={"user_id": "u1"},
+            bot_id="bot-x",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 404
 
@@ -1436,10 +1584,15 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     #    sees the prior FILE row).
     with pytest.raises(HTTPException) as exc:
         await upload_resource(
-            name="hello.txt", content=b"dup",
-            principal={"user_id": "u1"}, bot_id="bot-x", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            name="hello.txt",
+            content=b"dup",
+            principal={"user_id": "u1"},
+            bot_id="bot-x",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 409
     assert "already exists" in exc.value.detail
@@ -1462,8 +1615,12 @@ async def test_list_resources_passes_legacy_enum_to_service():
     factory = _StubFactory(service)
 
     await list_resources(
-        page=PageParams(), principal={"user_id": "u1"}, bot_id="bot-a",
-        type=OpenapiType.LINK, factory=factory, request=None,
+        page=PageParams(),
+        principal={"user_id": "u1"},
+        bot_id="bot-a",
+        type=OpenapiType.LINK,
+        factory=factory,
+        request=_request_without_trace(),
     )
 
     passed = service.last_call_kwargs.get("resource_type")
@@ -1477,8 +1634,12 @@ async def test_list_resources_passes_none_when_type_filter_absent():
     factory = _StubFactory(service)
 
     await list_resources(
-        page=PageParams(), principal={"user_id": "u1"}, bot_id="bot-a",
-        type=None, factory=factory, request=None,
+        page=PageParams(),
+        principal={"user_id": "u1"},
+        bot_id="bot-a",
+        type=None,
+        factory=factory,
+        request=_request_without_trace(),
     )
 
     # _legacy_type_for(None) returns None — no filter.
@@ -1495,27 +1656,45 @@ async def test_list_resources_openapi_folder_has_no_legacy_counterpart():
     # Real factory + repo seeded with FILE and LINK rows (NOT empty) — an
     # unfiltered list would return them; a correct FOLDER filter returns none.
     factory, repo = _real_factory_with_inmemory_repo()
-    file_id = repo.create(Resource(
-        id=1, name="f1", resource_type=LegacyType.FILE,
-        attributes={"path": "/f", "size": 5}, bolt_id="bot-a",
-    ).to_dict())
-    link_id = repo.create(create_link_resource(
-        name="l1", url="https://x.com", link_type="external", id=2,
-        bolt_id="bot-a",
-    ).to_dict())
+    repo.create(
+        Resource(
+            id=1,
+            name="f1",
+            resource_type=LegacyType.FILE,
+            attributes={"path": "/f", "size": 5},
+            bolt_id="bot-a",
+        ).to_dict()
+    )
+    repo.create(
+        create_link_resource(
+            name="l1",
+            url="https://x.com",
+            link_type="external",
+            id=2,
+            bolt_id="bot-a",
+        ).to_dict()
+    )
 
     # Sanity: an unfiltered list DOES see both rows (proves the repo is
     # non-empty and the leak would surface them without the FOLDER guard).
     unfiltered = await list_resources(
-        page=PageParams(), principal={"user_id": "u1"}, bot_id="bot-a",
-        type=None, factory=factory, request=None,
+        page=PageParams(),
+        principal={"user_id": "u1"},
+        bot_id="bot-a",
+        type=None,
+        factory=factory,
+        request=_request_without_trace(),
     )
     assert unfiltered.data.total >= 2
 
     # type=FOLDER must NOT leak those rows — empty page, not "all".
     env = await list_resources(
-        page=PageParams(), principal={"user_id": "u1"}, bot_id="bot-a",
-        type=OpenapiType.FOLDER, factory=factory, request=None,
+        page=PageParams(),
+        principal={"user_id": "u1"},
+        bot_id="bot-a",
+        type=OpenapiType.FOLDER,
+        factory=factory,
+        request=_request_without_trace(),
     )
     assert env.code == CODE_OK
     assert env.data.total == 0
@@ -1528,8 +1707,12 @@ async def test_check_name_passes_legacy_enum_to_service_when_provided():
     factory = _StubFactory(service)
 
     await check_resource_name(
-        name="available", principal={"user_id": "u1"}, type=OpenapiType.FILE,
-        bot_id="bot-a", factory=factory, request=None,
+        name="available",
+        principal={"user_id": "u1"},
+        type=OpenapiType.FILE,
+        bot_id="bot-a",
+        factory=factory,
+        request=_request_without_trace(),
     )
 
     passed = service.last_call_kwargs.get("resource_type")
@@ -1543,8 +1726,12 @@ async def test_check_name_defaults_to_legacy_file_enum_when_type_absent():
     factory = _StubFactory(service)
 
     await check_resource_name(
-        name="available", principal={"user_id": "u1"}, type=None,
-        bot_id="bot-a", factory=factory, request=None,
+        name="available",
+        principal={"user_id": "u1"},
+        type=None,
+        bot_id="bot-a",
+        factory=factory,
+        request=_request_without_trace(),
     )
 
     # ``or _LegacyType.FILE`` is the documented default for the no-type case.
@@ -1570,17 +1757,20 @@ def _seed_foreign_resource(repo, *, bolt_id="other-bot") -> str:
     Optional[Any] so int ids are fine; the store path uses str keys).
     """
     from datetime import datetime
+
     ts = datetime(2026, 7, 28, 10, 0).isoformat()
-    stored = repo.create({
-        "name": "foreign-link",
-        "resource_type": "link",
-        "status": "active",
-        "gmt_created": ts,
-        "gmt_modified": ts,
-        "attributes": {"url": "https://foreign.example", "link_type": "external"},
-        "user_id": "u-foreign",
-        "bolt_id": bolt_id,
-    })
+    stored = repo.create(
+        {
+            "name": "foreign-link",
+            "resource_type": "link",
+            "status": "active",
+            "gmt_created": ts,
+            "gmt_modified": ts,
+            "attributes": {"url": "https://foreign.example", "link_type": "external"},
+            "user_id": "u-foreign",
+            "bolt_id": bolt_id,
+        }
+    )
     return str(stored["id"])
 
 
@@ -1591,8 +1781,11 @@ async def test_get_resource_returns_404_for_cross_bot_resource_id():
 
     with pytest.raises(HTTPException) as exc:
         await get_resource(
-            resource_id=foreign_id, principal={"user_id": "u1"}, bot_id="bot-x",
-            factory=factory, request=None,
+            resource_id=foreign_id,
+            principal={"user_id": "u1"},
+            bot_id="bot-x",
+            factory=factory,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 404
     assert exc.value.detail == "Resource not found"
@@ -1608,9 +1801,14 @@ async def test_delete_resource_returns_404_for_cross_bot_resource_id():
 
     with pytest.raises(HTTPException) as exc:
         await delete_resource(
-            resource_id=foreign_id, principal={"user_id": "u1"}, bot_id="bot-x",
-            factory=factory, bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            resource_id=foreign_id,
+            principal={"user_id": "u1"},
+            bot_id="bot-x",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 404
     assert exc.value.detail == "Resource not found"
@@ -1629,8 +1827,12 @@ async def test_download_resource_returns_404_for_cross_bot_resource_id():
 
     with pytest.raises(HTTPException) as exc:
         await download_resource(
-            resource_id=foreign_id, principal={"user_id": "u1"}, bot_id="bot-x",
-            factory=factory, bot_repo=bot_repo, resolver=resolver,
+            resource_id=foreign_id,
+            principal={"user_id": "u1"},
+            bot_id="bot-x",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
             device_fs_dispatcher=dispatcher,
         )
     assert exc.value.status_code == 404
@@ -1647,9 +1849,14 @@ async def test_preview_resource_returns_404_for_cross_bot_resource_id():
 
     with pytest.raises(HTTPException) as exc:
         await preview_resource(
-            resource_id=foreign_id, principal={"user_id": "u1"}, bot_id="bot-x",
-            factory=factory, bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            resource_id=foreign_id,
+            principal={"user_id": "u1"},
+            bot_id="bot-x",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 404
     assert "not previewable" in exc.value.detail
@@ -1663,8 +1870,11 @@ async def test_same_bot_get_works_after_isolation_invariant():
     own_id = _seed_foreign_resource(repo, bolt_id="bot-x")
 
     env = await get_resource(
-        resource_id=own_id, principal={"user_id": "u1"}, bot_id="bot-x",
-        factory=factory, request=None,
+        resource_id=own_id,
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        request=_request_without_trace(),
     )
     assert env.code == CODE_OK
     assert env.data.resource_id == own_id
@@ -1704,10 +1914,15 @@ async def test_upload_returns_502_when_device_fs_write_fails():
 
     with pytest.raises(HTTPException) as exc:
         await upload_resource(
-            name="hello.txt", content=b"file bytes",
-            principal={"user_id": "u1"}, bot_id="bot-x", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            name="hello.txt",
+            content=b"file bytes",
+            principal={"user_id": "u1"},
+            bot_id="bot-x",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 502
     assert "Upload storage failed" in exc.value.detail
@@ -1721,6 +1936,7 @@ async def test_upload_409_takes_precedence_over_502_path():
     the slim service runs check_name_exists FIRST (before write_file), so
     the 409 surfaces — not the 502. Pins the service's ordering invariance."""
     from datetime import datetime
+
     factory, repo = _real_factory_with_inmemory_repo()
     bot_repo = _StubBotRepo(bot_dict=_DEFAULT_BOT)
     resolver = _StubResolver()
@@ -1730,23 +1946,30 @@ async def test_upload_409_takes_precedence_over_502_path():
     # check_name_exists filters by user_id, so a mismatch would miss the
     # collision and let the upload fall through to the 502 write path.
     ts = datetime(2026, 7, 28, 10, 0).isoformat()
-    repo.create({
-        "name": "hello.txt",
-        "resource_type": "file",
-        "status": "active",
-        "gmt_created": ts,
-        "gmt_modified": ts,
-        "attributes": {"path": "hello.txt", "size": 1},
-        "user_id": "u1",
-        "bolt_id": "bot-x",
-    })
+    repo.create(
+        {
+            "name": "hello.txt",
+            "resource_type": "file",
+            "status": "active",
+            "gmt_created": ts,
+            "gmt_modified": ts,
+            "attributes": {"path": "hello.txt", "size": 1},
+            "user_id": "u1",
+            "bolt_id": "bot-x",
+        }
+    )
 
     with pytest.raises(HTTPException) as exc:
         await upload_resource(
-            name="hello.txt", content=b"x",
-            principal={"user_id": "u1"}, bot_id="bot-x", factory=factory,
-            bot_repo=bot_repo, resolver=resolver,
-            device_fs_dispatcher=dispatcher, request=None,
+            name="hello.txt",
+            content=b"x",
+            principal={"user_id": "u1"},
+            bot_id="bot-x",
+            factory=factory,
+            bot_repo=bot_repo,
+            resolver=resolver,
+            device_fs_dispatcher=dispatcher,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 409
     assert "already exists" in exc.value.detail

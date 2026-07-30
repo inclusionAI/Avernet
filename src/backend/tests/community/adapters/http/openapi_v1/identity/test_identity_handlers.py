@@ -2,9 +2,11 @@
 
 Direct handler invocation (退路 B per task spec): bypasses FastAPI's
 dependency wiring and supplies a stub service. ``principal`` carries
-``{"user_id": "u1"}`` so ``caller_owner_id`` resolves the caller.
-``request=None`` exercises the "outside-a-request" branch of
-``_request_id_from``.
+``{"user_id": "u1"}`` so ``caller_owner_id`` resolves the caller. Handlers
+take a required ``request: Request`` (mirroring the bots router), so tests
+pass a ``SimpleNamespace`` stub: ``state.trace_id`` unset ⇒ empty
+``request_id`` (the tracer middleware did not run), or set to a known value
+to assert it is threaded into the envelope via ``responses.envelope``.
 """
 
 from types import SimpleNamespace
@@ -32,10 +34,38 @@ from agentclaw.community.adapters.http.openapi_v1.identity.schemas import (
 
 # The 16 whitelisted identity file types (physical names, with ``.md``).
 _ALL_IDENTITY_FILES = [
-    "RULES.md", "OKR.md", "SAFETY.md", "SOUL.md", "OUTPUT.md", "MEMORY.md",
-    "IDENTITY.md", "AGENTS.md", "USER.md", "TOOLS.md", "HEARTBEAT.md",
-    "BOOTSTRAP.md", "KNOWLEDGE.md", "CLAUDE.md", "GREETING.md", "README.md",
+    "RULES.md",
+    "OKR.md",
+    "SAFETY.md",
+    "SOUL.md",
+    "OUTPUT.md",
+    "MEMORY.md",
+    "IDENTITY.md",
+    "AGENTS.md",
+    "USER.md",
+    "TOOLS.md",
+    "HEARTBEAT.md",
+    "BOOTSTRAP.md",
+    "KNOWLEDGE.md",
+    "CLAUDE.md",
+    "GREETING.md",
+    "README.md",
 ]
+
+
+def _request_without_trace() -> SimpleNamespace:
+    """A request whose tracer middleware did not run — ``state.trace_id`` unset.
+
+    ``responses._trace_id`` reads ``request.state.trace_id`` and falls back to
+    ``""`` when absent, so the envelope's ``request_id`` is empty (mirrors the
+    prod path before the tracer middleware stamps the id).
+    """
+    return SimpleNamespace(state=SimpleNamespace())
+
+
+def _request_with_trace(trace_id: str) -> SimpleNamespace:
+    """A request whose tracer middleware stamped ``trace_id`` on ``state``."""
+    return SimpleNamespace(state=SimpleNamespace(trace_id=trace_id))
 
 
 class _StubIdentityService:
@@ -47,7 +77,13 @@ class _StubIdentityService:
         self.last_call_kwargs: dict = {}
 
     async def list_bot_files(
-        self, entity_type, entity_id, bot_id, owner_id, *, engine_type=None,
+        self,
+        entity_type,
+        entity_id,
+        bot_id,
+        owner_id,
+        *,
+        engine_type=None,
     ):
         self.last_call_kwargs = {
             "entity_type": entity_type,
@@ -74,7 +110,7 @@ async def test_list_bot_identity_files_returns_all_16_with_exists():
         bot_id="bot-x",
         principal={"user_id": "u1"},
         identity_service=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -106,7 +142,7 @@ async def test_list_bot_identity_files_marks_absent_files_false():
         bot_id="bot-x",
         principal={"user_id": "u1"},
         identity_service=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.code == CODE_OK
@@ -116,9 +152,9 @@ async def test_list_bot_identity_files_marks_absent_files_false():
 
 
 @pytest.mark.asyncio
-async def test_list_bot_identity_files_reads_x_trace_id_from_request():
+async def test_list_bot_identity_files_reads_trace_id_from_request_state():
     service = _StubIdentityService(_all_present())
-    request = SimpleNamespace(headers={"x-trace-id": "trace-identity-1"})
+    request = _request_with_trace("trace-identity-1")
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
@@ -136,7 +172,9 @@ async def test_list_bot_identity_files_400_when_entity_type_invalid():
     from fastapi import HTTPException
 
     class _RaisingService:
-        async def list_bot_files(self, entity_type, entity_id, bot_id, owner_id, *, engine_type=None):
+        async def list_bot_files(
+            self, entity_type, entity_id, bot_id, owner_id, *, engine_type=None
+        ):
             raise ValueError(f"Invalid entity_type: {entity_type}")
 
     service = _RaisingService()
@@ -146,7 +184,7 @@ async def test_list_bot_identity_files_400_when_entity_type_invalid():
             bot_id="bot-x",
             principal={"user_id": "u1"},
             identity_service=service,
-            request=None,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 400
 
@@ -169,26 +207,55 @@ class _StubGetUpdateService:
     threaded through (validate_file_type requires the physical form).
     """
 
-    def __init__(self, *, get_resp=None, update_resp=None, raise_on_get=None, raise_on_update=None):
+    def __init__(
+        self,
+        *,
+        get_resp=None,
+        update_resp=None,
+        raise_on_get=None,
+        raise_on_update=None,
+    ):
         self._get_resp = get_resp or _BotFileResponse(
-            success=True, file_type="RULES.md", entity_type="staff",
-            entity_id="u1", bot_id="bot-x", content="# rules", file_path="identity/RULES.md",
+            success=True,
+            file_type="RULES.md",
+            entity_type="staff",
+            entity_id="u1",
+            bot_id="bot-x",
+            content="# rules",
+            file_path="identity/RULES.md",
         )
         self._update_resp = update_resp or _BotFileUpdateResponse(
-            success=True, message="ok", file_type="RULES.md", entity_type="staff",
-            entity_id="u1", bot_id="bot-x", file_path="identity/RULES.md",
+            success=True,
+            message="ok",
+            file_type="RULES.md",
+            entity_type="staff",
+            entity_id="u1",
+            bot_id="bot-x",
+            file_path="identity/RULES.md",
         )
         self._raise_on_get = raise_on_get
         self._raise_on_update = raise_on_update
         self.last_get_call: dict = {}
         self.last_update_call: dict = {}
 
-    async def get_bot_file(self, entity_type, entity_id, bot_id, file_type, operator_id,
-                           publish_id=None, engine_type=None):
+    async def get_bot_file(
+        self,
+        entity_type,
+        entity_id,
+        bot_id,
+        file_type,
+        operator_id,
+        publish_id=None,
+        engine_type=None,
+    ):
         self.last_get_call = {
-            "entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id,
-            "file_type": file_type, "operator_id": operator_id,
-            "publish_id": publish_id, "engine_type": engine_type,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "bot_id": bot_id,
+            "file_type": file_type,
+            "operator_id": operator_id,
+            "publish_id": publish_id,
+            "engine_type": engine_type,
         }
         if self._raise_on_get:
             raise self._raise_on_get
@@ -199,11 +266,23 @@ class _StubGetUpdateService:
             **{**vars(self._get_resp), "file_path": f"identity/{file_type}"}
         )
 
-    async def update_bot_file(self, entity_type, entity_id, bot_id, file_type, content,
-                              operator_id, engine_type=None):
+    async def update_bot_file(
+        self,
+        entity_type,
+        entity_id,
+        bot_id,
+        file_type,
+        content,
+        operator_id,
+        engine_type=None,
+    ):
         self.last_update_call = {
-            "entity_type": entity_type, "entity_id": entity_id, "bot_id": bot_id,
-            "file_type": file_type, "content": content, "operator_id": operator_id,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "bot_id": bot_id,
+            "file_type": file_type,
+            "content": content,
+            "operator_id": operator_id,
             "engine_type": engine_type,
         }
         if self._raise_on_update:
@@ -222,7 +301,7 @@ async def test_get_bot_identity_file_returns_content_and_path():
         file_type=IdentityFileType.RULES,
         principal={"user_id": "u1"},
         identity_service=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -248,7 +327,9 @@ async def test_get_bot_identity_file_returns_content_and_path():
 
 @pytest.mark.asyncio
 async def test_get_bot_identity_file_400_on_value_error():
-    service = _StubGetUpdateService(raise_on_get=ValueError("Invalid file_type: BOGUS.md"))
+    service = _StubGetUpdateService(
+        raise_on_get=ValueError("Invalid file_type: BOGUS.md")
+    )
 
     with pytest.raises(HTTPException) as exc:
         await get_bot_identity_file(
@@ -256,7 +337,7 @@ async def test_get_bot_identity_file_400_on_value_error():
             file_type=IdentityFileType.RULES,
             principal={"user_id": "u1"},
             identity_service=service,
-            request=None,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 400
     assert "Invalid file_type" in exc.value.detail
@@ -272,7 +353,7 @@ async def test_update_bot_identity_file_returns_ref():
         body=IdentityFileWrite(content="# my soul"),
         principal={"user_id": "u1"},
         identity_service=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -293,7 +374,9 @@ async def test_update_bot_identity_file_returns_ref():
 
 @pytest.mark.asyncio
 async def test_update_bot_identity_file_400_on_value_error():
-    service = _StubGetUpdateService(raise_on_update=ValueError("Invalid entity_type: bogus"))
+    service = _StubGetUpdateService(
+        raise_on_update=ValueError("Invalid entity_type: bogus")
+    )
 
     with pytest.raises(HTTPException) as exc:
         await update_bot_identity_file(
@@ -302,26 +385,32 @@ async def test_update_bot_identity_file_400_on_value_error():
             body=IdentityFileWrite(content="x"),
             principal={"user_id": "u1"},
             identity_service=service,
-            request=None,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 400
     assert "Invalid entity_type" in exc.value.detail
 
 
 @pytest.mark.asyncio
-async def test_get_and_update_thread_x_trace_id():
+async def test_get_and_update_thread_trace_id():
     service = _StubGetUpdateService()
-    request = SimpleNamespace(headers={"x-trace-id": "trace-identity-2"})
+    request = _request_with_trace("trace-identity-2")
 
     get_env = await get_bot_identity_file(
-        bot_id="bot-x", file_type=IdentityFileType.RULES, principal={"user_id": "u1"},
-        identity_service=service, request=request,
+        bot_id="bot-x",
+        file_type=IdentityFileType.RULES,
+        principal={"user_id": "u1"},
+        identity_service=service,
+        request=request,
     )
     assert get_env.request_id == "trace-identity-2"
 
     update_env = await update_bot_identity_file(
-        bot_id="bot-x", file_type=IdentityFileType.RULES,
-        body=IdentityFileWrite(content="x"), principal={"user_id": "u1"},
-        identity_service=service, request=request,
+        bot_id="bot-x",
+        file_type=IdentityFileType.RULES,
+        body=IdentityFileWrite(content="x"),
+        principal={"user_id": "u1"},
+        identity_service=service,
+        request=request,
     )
     assert update_env.request_id == "trace-identity-2"

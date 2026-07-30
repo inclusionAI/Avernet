@@ -32,6 +32,20 @@ from agentclaw.community.adapters.http.openapi_v1.routines.schemas import (
 )
 
 
+def _request_without_trace() -> SimpleNamespace:
+    """A request whose tracer middleware did not run — ``state.trace_id`` unset.
+
+    ``responses._trace_id`` reads ``request.state.trace_id`` and falls back to
+    ``""`` when absent, so the envelope's ``request_id`` is empty.
+    """
+    return SimpleNamespace(state=SimpleNamespace())
+
+
+def _request_with_trace(trace_id: str) -> SimpleNamespace:
+    """A request whose tracer middleware stamped ``trace_id`` on ``state``."""
+    return SimpleNamespace(state=SimpleNamespace(trace_id=trace_id))
+
+
 class _StubCronService:
     """Minimal stub satisfying the CronRelayServiceProtocol list_all_crons seam."""
 
@@ -113,7 +127,9 @@ def test_map_routine_invalid_ms_returns_empty_string():
 # Direct handler invocation (退路 B per task spec): bypasses FastAPI's
 # dependency wiring and supplies a stub factory. `principal` carries
 # `{"user_id": "u1"}` so `caller_owner_id` resolves the caller.
-# `request=None` exercises the "outside-a-request" branch of `_request_id_from`.
+# Handlers take a required `request: Request` (mirroring the bots router);
+# tests pass a `SimpleNamespace` stub whose `state.trace_id` is unset (empty
+# `request_id`) or set to a known value (threaded via `responses.envelope`).
 
 
 @pytest.mark.asyncio
@@ -126,7 +142,7 @@ async def test_list_routines_returns_envelope_page():
         bot_id="bot-x",
         status=None,
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -163,7 +179,7 @@ async def test_list_routines_paginates_items():
         bot_id="bot-x",
         status=None,
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.data.total == 3
@@ -180,7 +196,7 @@ async def test_list_routines_handles_empty_data_list():
         bot_id="bot-x",
         status=None,
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.code == CODE_OK
@@ -203,19 +219,17 @@ async def test_list_routines_handles_dict_data_envelope():
         bot_id="bot-x",
         status=None,
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.data.total == 1
     assert env.data.items[0].routine_id == "t1"
 
 
-
-
 @pytest.mark.asyncio
 async def test_list_routines_reads_x_trace_id_from_request():
     service = _StubCronService([])
-    request = SimpleNamespace(headers={"x-trace-id": "trace-abc"})
+    request = _request_with_trace("trace-abc")
 
     env = await list_routines(
         page=PageParams(page=1, page_size=20),
@@ -270,7 +284,7 @@ async def test_create_routine_returns_201_envelope():
         body=body,
         principal={"user_id": "u1"},
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -299,7 +313,7 @@ async def test_create_routine_uses_body_bot_id_for_owner_and_call():
         body=body,
         principal={"user_id": "u1"},
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     # body.bot_id flows to factory.create_cron; owner comes from principal
@@ -327,7 +341,7 @@ async def test_create_routine_passes_schedule_as_cron_string():
         body=body,
         principal={"user_id": "u1"},
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     sent_body = service.last_call_kwargs["body"]
@@ -353,7 +367,7 @@ async def test_create_routine_defaults_timezone_when_null():
         body=body,
         principal={"user_id": "u1"},
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert service.last_call_kwargs["body"]["timezone"] == "Asia/Shanghai"
@@ -362,7 +376,7 @@ async def test_create_routine_defaults_timezone_when_null():
 @pytest.mark.asyncio
 async def test_create_routine_reads_x_trace_id_from_request():
     service = _StubCronCreateService(_adapter_dict())
-    request = SimpleNamespace(headers={"x-trace-id": "trace-create-1"})
+    request = _request_with_trace("trace-create-1")
     body = RoutineCreate(
         bot_id="bot-x",
         name="cron1",
@@ -395,7 +409,7 @@ async def test_create_routine_500_when_service_returns_no_data():
             body=body,
             principal={"user_id": "u1"},
             factory=service,
-            request=None,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 500
 
@@ -437,7 +451,7 @@ async def test_get_routine_returns_envelope_routine():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -466,18 +480,16 @@ async def test_get_routine_404_when_data_missing():
             principal={"user_id": "u1"},
             bot_id="bot-x",
             factory=service,
-            request=None,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 404
     assert "not found" in exc.value.detail.lower()
 
 
-
-
 @pytest.mark.asyncio
 async def test_get_routine_reads_x_trace_id_from_request():
     service = _StubCronDetailService(_adapter_dict())
-    request = SimpleNamespace(headers={"x-trace-id": "trace-get-1"})
+    request = _request_with_trace("trace-get-1")
 
     env = await get_routine(
         routine_id="t1",
@@ -530,7 +542,7 @@ async def test_update_routine_returns_envelope_routine():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -560,7 +572,7 @@ async def test_update_routine_passes_partial_body_and_schedule_string():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     sent_body = service.last_call_kwargs["body"]
@@ -589,7 +601,7 @@ async def test_update_routine_omits_unset_fields_from_body():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     sent_body = service.last_call_kwargs["body"]
@@ -599,8 +611,6 @@ async def test_update_routine_omits_unset_fields_from_body():
     assert "command" not in sent_body
     assert "timezone" not in sent_body
     assert "enabled" not in sent_body
-
-
 
 
 @pytest.mark.asyncio
@@ -615,7 +625,7 @@ async def test_update_routine_404_when_data_missing():
             principal={"user_id": "u1"},
             bot_id="bot-x",
             factory=service,
-            request=None,
+            request=_request_without_trace(),
         )
     assert exc.value.status_code == 404
 
@@ -623,7 +633,7 @@ async def test_update_routine_404_when_data_missing():
 @pytest.mark.asyncio
 async def test_update_routine_reads_x_trace_id_from_request():
     service = _StubCronUpdateService(_adapter_dict())
-    request = SimpleNamespace(headers={"x-trace-id": "trace-upd-1"})
+    request = _request_with_trace("trace-upd-1")
     body = RoutineUpdate(name="cron-renamed")
 
     env = await update_routine(
@@ -718,7 +728,7 @@ async def test_delete_routine_returns_envelope_deleted_true():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -744,19 +754,17 @@ async def test_delete_routine_returns_deleted_false_when_success_false():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.code == CODE_OK
     assert env.data.deleted is False
 
 
-
-
 @pytest.mark.asyncio
 async def test_delete_routine_reads_x_trace_id_from_request():
     service = _StubCronDeleteService()
-    request = SimpleNamespace(headers={"x-trace-id": "trace-del-1"})
+    request = _request_with_trace("trace-del-1")
 
     env = await delete_routine(
         routine_id="t1",
@@ -810,7 +818,7 @@ async def test_run_routine_returns_completed_status_when_ran():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -841,7 +849,7 @@ async def test_run_routine_returns_failed_status_when_reason():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.data.status == "failed"
@@ -857,18 +865,16 @@ async def test_run_routine_returns_unknown_status_when_no_reason():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.data.status == "unknown"
 
 
-
-
 @pytest.mark.asyncio
 async def test_run_routine_reads_x_trace_id_from_request():
     service = _StubCronRunService()
-    request = SimpleNamespace(headers={"x-trace-id": "trace-run-1"})
+    request = _request_with_trace("trace-run-1")
 
     env = await run_routine(
         routine_id="t1",
@@ -935,7 +941,7 @@ async def test_list_routine_runs_returns_envelope_page_mapped_from_runs():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert isinstance(env, Envelope)
@@ -970,7 +976,7 @@ async def test_list_routine_runs_paginates_items():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.data.total == 5
@@ -987,7 +993,7 @@ async def test_list_routine_runs_handles_empty_runs():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.code == CODE_OK
@@ -995,12 +1001,10 @@ async def test_list_routine_runs_handles_empty_runs():
     assert env.data.items == []
 
 
-
-
 @pytest.mark.asyncio
 async def test_list_routine_runs_reads_x_trace_id_from_request():
     service = _StubCronRunsService([])
-    request = SimpleNamespace(headers={"x-trace-id": "trace-runs-1"})
+    request = _request_with_trace("trace-runs-1")
 
     env = await list_routine_runs(
         routine_id="t1",
@@ -1030,7 +1034,7 @@ async def test_list_routine_runs_handles_bare_data_list_defensively():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=service,
-        request=None,
+        request=_request_without_trace(),
     )
 
     assert env.data.total == 1

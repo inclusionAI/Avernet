@@ -12,12 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
-from agentclaw.community.adapters.http.openapi_v1.contracts import (
-    CODE_OK,
-    Envelope,
-)
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
+from agentclaw.community.adapters.http.openapi_v1.responses import envelope
 from agentclaw.community.core.config_compose.teclaw_paths import IDENTITY_NS
+
 # Waiver (Rule 5 vs Rule 19): openapi_v1 injects the concrete IdentityService
 # class, not a Protocol — legacy identity router already does the same. A
 # Protocol would be speculative abstraction today (Rule 19: abstract after two
@@ -39,23 +38,12 @@ router = APIRouter(prefix="/openapi/v1/bots/identity", tags=["identity"])
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
-def _request_id_from(request: "Request | None") -> str:
-    """Read the X-Trace-Id off the incoming request.
-
-    Returns ``""`` when called outside a request (e.g. handler unit tests
-    passing ``request=None``) so the envelope field is always a string.
-    """
-    if request is None:
-        return ""
-    return request.headers.get("x-trace-id", "")
-
-
 @router.get("/bot/{bot_id}", response_model=Envelope[IdentityFileList])
 async def list_bot_identity_files(
     bot_id: str,
     principal: PrincipalDep,
+    request: Request,
     identity_service: IdentityService = Injected(IdentityService),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[IdentityFileList]:
     """List a bot's identity files and whether each exists.
 
@@ -67,7 +55,10 @@ async def list_bot_identity_files(
     entity_id = owner_id
     try:
         presence = await identity_service.list_bot_files(
-            entity_type, entity_id, bot_id, owner_id,
+            entity_type,
+            entity_id,
+            bot_id,
+            owner_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -79,12 +70,7 @@ async def list_bot_identity_files(
         )
         for ft, exists in presence
     ]
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=IdentityFileList(bot_id=bot_id, files=files),
-        request_id=_request_id_from(request),
-    )
+    return envelope(IdentityFileList(bot_id=bot_id, files=files), request)
 
 
 @router.get(
@@ -95,8 +81,8 @@ async def get_bot_identity_file(
     bot_id: str,
     file_type: IdentityFileType,
     principal: PrincipalDep,
+    request: Request,
     identity_service: IdentityService = Injected(IdentityService),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[IdentityFile]:
     """Read one identity file of a bot.
 
@@ -113,22 +99,24 @@ async def get_bot_identity_file(
     file_type_md = f"{file_type.value}.md"
     try:
         resp = await identity_service.get_bot_file(
-            entity_type, entity_id, bot_id, file_type_md, owner_id,
+            entity_type,
+            entity_id,
+            bot_id,
+            file_type_md,
+            owner_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # BotIdentityFileResponse → openapi IdentityFile. content/file_path are
     # guaranteed by the legacy response model; getattr is a defensive belt.
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=IdentityFile(
+    return envelope(
+        IdentityFile(
             type=file_type,
             bot_id=bot_id,
             content=getattr(resp, "content", "") or "",
             file_path=getattr(resp, "file_path", f"{IDENTITY_NS}/{file_type_md}"),
         ),
-        request_id=_request_id_from(request),
+        request,
     )
 
 
@@ -141,8 +129,8 @@ async def update_bot_identity_file(
     file_type: IdentityFileType,
     body: IdentityFileWrite,
     principal: PrincipalDep,
+    request: Request,
     identity_service: IdentityService = Injected(IdentityService),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[IdentityFileRef]:
     """Overwrite one identity file of a bot.
 
@@ -156,17 +144,20 @@ async def update_bot_identity_file(
     file_type_md = f"{file_type.value}.md"
     try:
         resp = await identity_service.update_bot_file(
-            entity_type, entity_id, bot_id, file_type_md, body.content, owner_id,
+            entity_type,
+            entity_id,
+            bot_id,
+            file_type_md,
+            body.content,
+            owner_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=IdentityFileRef(
+    return envelope(
+        IdentityFileRef(
             type=file_type,
             bot_id=bot_id,
             file_path=getattr(resp, "file_path", f"{IDENTITY_NS}/{file_type_md}"),
         ),
-        request_id=_request_id_from(request),
+        request,
     )

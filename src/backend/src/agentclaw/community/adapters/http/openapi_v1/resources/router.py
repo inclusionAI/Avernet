@@ -34,8 +34,6 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Res
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
-    CODE_CREATED,
-    CODE_OK,
     Deleted,
     Envelope,
     NameCheck,
@@ -44,6 +42,12 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    created,
+    deleted as deleted_envelope,
+    envelope,
+    page as page_envelope,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -98,27 +102,6 @@ def _legacy_type_for(openapi_type: ResourceType | None) -> _LegacyType | None:
     return _OPENAPI_TO_LEGACY_TYPE.get(openapi_type)
 
 
-def _request_id() -> str:
-    """The envelope's request_id mirrors the X-Trace-Id response header.
-
-    Outside a request (unit tests calling helpers directly) this returns "";
-    handlers that need the real value read it from ``Request.headers['x-trace-id']``
-    (to be wired in Task 2 handler bodies).
-    """
-    return ""
-
-
-def _request_id_from(request: "Request | None") -> str:
-    """Read the X-Trace-Id off the incoming request.
-
-    Returns ``""`` when called outside a request (e.g. handler unit tests
-    passing ``request=None``) so the envelope field is always a string.
-    """
-    if request is None:
-        return ""
-    return request.headers.get("x-trace-id", "")
-
-
 def _to_openapi_resource(legacy: _LegacyResource) -> Resource:
     """Map a legacy domain Resource → public openapi Resource schema.
 
@@ -146,10 +129,10 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 async def list_resources(
     page: PageParamsDep,
     principal: PrincipalDep,
+    request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     type: ResourceType | None = None,
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Page[Resource]]:
     """List resources (filter + paginate)."""
     effective_bot_id = bot_id
@@ -170,22 +153,17 @@ async def list_resources(
     start = (page.page - 1) * page.page_size
     end = start + page.page_size
     page_items = openapi_items[start:end]
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=Page(total=len(openapi_items), items=page_items),
-        request_id=_request_id_from(request),
-    )
+    return page_envelope(len(openapi_items), page_items, request)
 
 
 @router.get("/check-name", response_model=Envelope[NameCheck])
 async def check_resource_name(
     name: str,
     principal: PrincipalDep,
+    request: Request,
     type: ResourceType | None = None,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[NameCheck]:
     """Check whether a resource name is available.
 
@@ -213,21 +191,16 @@ async def check_resource_name(
         parent_path=None,
         user_id=owner_id,
     )
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=NameCheck(name=name, exists=exists),
-        request_id=_request_id_from(request),
-    )
+    return envelope(NameCheck(name=name, exists=exists), request)
 
 
 @router.post("", status_code=201, response_model=Envelope[Resource])
 async def create_resource(
     body: ResourceCreate,
     principal: PrincipalDep,
+    request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    request: Request = None,  # type: ignore[assignment]
 ) -> Envelope[Resource]:
     """Create a resource (file placeholder, link, or folder).
 
@@ -246,7 +219,9 @@ async def create_resource(
             detail="Create folder not supported yet (Phase 3)",
         )
     if not body.url:
-        raise HTTPException(status_code=400, detail="url is required for link resources")
+        raise HTTPException(
+            status_code=400, detail="url is required for link resources"
+        )
 
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
@@ -264,12 +239,7 @@ async def create_resource(
         # service raises ValueError on duplicate name → 409 Conflict (legacy
         # parity: adapters/http/resources/router.py create_url_resource).
         raise HTTPException(status_code=409, detail=str(e)) from e
-    return Envelope(
-        code=CODE_CREATED,
-        message="Created",
-        data=_to_openapi_resource(r),
-        request_id=_request_id_from(request),
-    )
+    return created(_to_openapi_resource(r), request)
 
 
 @router.post("/upload", status_code=201, response_model=Envelope[Resource])
@@ -277,12 +247,14 @@ async def upload_resource(
     principal: PrincipalDep,
     name: str,
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
+    request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(DeviceFilesystemDispatcher),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
+    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
+        DeviceFilesystemDispatcher
+    ),
 ) -> Envelope[Resource]:
     """Upload a file's raw bytes as a new resource.
 
@@ -315,21 +287,16 @@ async def upload_resource(
         raise HTTPException(
             status_code=502, detail=f"Upload storage failed: {e}"
         ) from e
-    return Envelope(
-        code=CODE_CREATED,
-        message="Created",
-        data=_to_openapi_resource(r),
-        request_id=_request_id_from(request),
-    )
+    return created(_to_openapi_resource(r), request)
 
 
 @router.get("/{resource_id}", response_model=Envelope[Resource])
 async def get_resource(
     resource_id: str,
     principal: PrincipalDep,
+    request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Resource]:
     """Get a resource."""
     effective_bot_id = bot_id
@@ -339,12 +306,7 @@ async def get_resource(
     r = service.get_resource(resource_id)
     if r is None:
         raise HTTPException(status_code=404, detail="Resource not found")
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=_to_openapi_resource(r),
-        request_id=_request_id_from(request),
-    )
+    return envelope(_to_openapi_resource(r), request)
 
 
 @router.put("/{resource_id}", response_model=Envelope[Resource])
@@ -352,9 +314,9 @@ async def update_resource(
     resource_id: str,
     body: ResourceUpdate,
     principal: PrincipalDep,
+    request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Resource]:
     """Update a resource (link rename / url change).
 
@@ -372,24 +334,21 @@ async def update_resource(
         )
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=_to_openapi_resource(r),
-        request_id=_request_id_from(request),
-    )
+    return envelope(_to_openapi_resource(r), request)
 
 
 @router.delete("/{resource_id}", response_model=Envelope[Deleted])
 async def delete_resource(
     resource_id: str,
     principal: PrincipalDep,
+    request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(DeviceFilesystemDispatcher),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
+    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
+        DeviceFilesystemDispatcher
+    ),
 ) -> Envelope[Deleted]:
     """Delete a resource (file → device FS, link/folder → DB soft-delete).
 
@@ -410,12 +369,7 @@ async def delete_resource(
     ok = await service.delete_resource(resource_id, device_fs=device_fs)
     if not ok:
         raise HTTPException(status_code=404, detail="Resource not found")
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=Deleted(deleted=True),
-        request_id=_request_id_from(request),
-    )
+    return deleted_envelope(request)
 
 
 @router.get(
@@ -429,7 +383,9 @@ async def download_resource(
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(DeviceFilesystemDispatcher),
+    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
+        DeviceFilesystemDispatcher
+    ),
 ) -> Response:
     """Download a resource's bytes (raw, not enveloped).
 
@@ -458,12 +414,14 @@ async def download_resource(
 async def preview_resource(
     resource_id: str,
     principal: PrincipalDep,
+    request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(DeviceFilesystemDispatcher),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
+    device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
+        DeviceFilesystemDispatcher
+    ),
 ) -> Envelope[Preview]:
     """Get a resource preview (text-ified content, enveloped).
 
@@ -489,9 +447,7 @@ async def preview_resource(
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)
     try:
-        result = await service.preview_resource(
-            resource_id, device_fs=device_fs
-        )
+        result = await service.preview_resource(resource_id, device_fs=device_fs)
     except ValueError as e:
         # too large → 413 (legacy parity: "File too large for preview").
         raise HTTPException(status_code=413, detail=str(e)) from e
@@ -500,13 +456,11 @@ async def preview_resource(
             status_code=404,
             detail="Resource not found or not previewable",
         )
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=Preview(
+    return envelope(
+        Preview(
             resource_id=resource_id,
             content_type=result["content_type"],
             content=result["content"],
         ),
-        request_id=_request_id_from(request),
+        request,
     )

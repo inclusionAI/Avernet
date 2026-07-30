@@ -15,14 +15,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
-    CODE_CREATED,
-    CODE_OK,
     Deleted,
     Envelope,
     Page,
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    created,
+    envelope,
+    page as page_envelope,
+)
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.di import Injected
 
@@ -31,17 +34,6 @@ from .schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate, Schedule
 router = APIRouter(prefix="/openapi/v1/bots/routines", tags=["routines"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
-
-
-def _request_id_from(request: "Request | None") -> str:
-    """Read the X-Trace-Id off the incoming request.
-
-    Returns ``""`` when called outside a request (e.g. handler unit tests
-    passing ``request=None``) so the envelope field is always a string.
-    """
-    if request is None:
-        return ""
-    return request.headers.get("x-trace-id", "")
 
 
 def _ms_to_iso(ms: Any) -> str:
@@ -106,9 +98,9 @@ async def list_routines(
     page: PageParamsDep,
     principal: PrincipalDep,
     bot_id: str,
+    request: Request,
     status: str | None = None,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Page[Routine]]:
     """List routines (filter + paginate).
 
@@ -135,20 +127,15 @@ async def list_routines(
     start = (page.page - 1) * page.page_size
     end = start + page.page_size
     page_items = mapped[start:end]
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=Page(total=len(mapped), items=page_items),
-        request_id=_request_id_from(request),
-    )
+    return page_envelope(len(mapped), page_items, request)
 
 
 @router.post("", status_code=201, response_model=Envelope[Routine])
 async def create_routine(
     body: RoutineCreate,
     principal: PrincipalDep,
+    request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Routine]:
     """Create a routine.
 
@@ -179,12 +166,7 @@ async def create_routine(
     data = result.get("data") if isinstance(result, dict) else None
     if not isinstance(data, dict):
         raise HTTPException(status_code=500, detail="cron service returned no data")
-    return Envelope(
-        code=CODE_CREATED,
-        message="Created",
-        data=_map_routine(data),
-        request_id=_request_id_from(request),
-    )
+    return created(_map_routine(data), request)
 
 
 @router.get("/{routine_id}", response_model=Envelope[Routine])
@@ -192,8 +174,8 @@ async def get_routine(
     routine_id: str,
     principal: PrincipalDep,
     bot_id: str,
+    request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Routine]:
     """Get a routine.
 
@@ -211,12 +193,7 @@ async def get_routine(
     data = result.get("data") if isinstance(result, dict) else None
     if not isinstance(data, dict):
         raise HTTPException(status_code=404, detail="Routine not found")
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=_map_routine(data),
-        request_id=_request_id_from(request),
-    )
+    return envelope(_map_routine(data), request)
 
 
 @router.patch("/{routine_id}", response_model=Envelope[Routine])
@@ -225,8 +202,8 @@ async def update_routine(
     body: RoutineUpdate,
     principal: PrincipalDep,
     bot_id: str,
+    request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Routine]:
     """Update a routine (partial).
 
@@ -260,12 +237,7 @@ async def update_routine(
     data = result.get("data") if isinstance(result, dict) else None
     if not isinstance(data, dict):
         raise HTTPException(status_code=404, detail="Routine not found")
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=_map_routine(data),
-        request_id=_request_id_from(request),
-    )
+    return envelope(_map_routine(data), request)
 
 
 @router.delete("/{routine_id}", response_model=Envelope[Deleted])
@@ -273,15 +245,17 @@ async def delete_routine(
     routine_id: str,
     principal: PrincipalDep,
     bot_id: str,
+    request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Deleted]:
     """Delete a routine.
 
     C3: ``bot_id`` is a required query (path carries only ``routine_id``).
     ``delete_cron`` only operates on the draft stage; the engine rejects
     published-stage deletes with CronRelayError (403). We surface the
-    engine's ``success`` flag as ``Deleted(deleted=…)``.
+    engine's ``success`` flag as ``Deleted(deleted=…)`` — NOT the
+    ``deleted()`` factory, which always stamps ``deleted=True``; a failed
+    delete must read ``deleted=False``.
     """
     owner_id = caller_owner_id(principal)
     user_id = owner_id
@@ -290,12 +264,7 @@ async def delete_routine(
         bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
     )
     success = bool(result.get("success")) if isinstance(result, dict) else False
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=Deleted(deleted=success),
-        request_id=_request_id_from(request),
-    )
+    return envelope(Deleted(deleted=success), request)
 
 
 @router.post("/{routine_id}/run", response_model=Envelope[RoutineRun])
@@ -303,8 +272,8 @@ async def run_routine(
     routine_id: str,
     principal: PrincipalDep,
     bot_id: str,
+    request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[RoutineRun]:
     """Run a routine now.
 
@@ -333,17 +302,15 @@ async def run_routine(
     else:
         status = "unknown"
     run_id = f"{routine_id}-{datetime.now(_tz.utc).isoformat()}"
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=RoutineRun(
+    return envelope(
+        RoutineRun(
             run_id=run_id,
             routine_id=routine_id,
             status=status,
             started_at=None,
             finished_at=None,
         ),
-        request_id=_request_id_from(request),
+        request,
     )
 
 
@@ -356,8 +323,8 @@ async def list_routine_runs(
     page: PageParamsDep,
     principal: PrincipalDep,
     bot_id: str,
+    request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-    request: Request = None,  # type: ignore[assignment]  # FastAPI auto-injects; default exists for direct unit-test calls
 ) -> Envelope[Page[RoutineRun]]:
     """List a routine's execution history.
 
@@ -389,9 +356,4 @@ async def list_routine_runs(
     start = (page.page - 1) * page.page_size
     end = start + page.page_size
     page_items = mapped[start:end]
-    return Envelope(
-        code=CODE_OK,
-        message="OK",
-        data=Page(total=len(mapped), items=page_items),
-        request_id=_request_id_from(request),
-    )
+    return page_envelope(len(mapped), page_items, request)
