@@ -395,6 +395,36 @@ def materialize_status_not_found():
 
 @endpoint_test(
     method="GET",
+    path="/api/session-resources/pending",
+    scenario="upload_pending_record",
+    input=CaseInput(query_params=_QUERY, headers=_AUTH_HEADERS),
+    seed=_seed_upload_pending_record,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "files": [
+                {"resource_id": _RESOURCE_ID, "status": "upload_url_issued"}
+            ]
+        },
+    ),
+)
+def list_pending_resources_ok():
+    """List non-ready resources for page reload recovery."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/session-resources/pending",
+    scenario="missing_session_key",
+    input=CaseInput(query_params={"bot_id": _BOT_ID}, headers=_AUTH_HEADERS),
+    expect=ExpectError(status=422),
+)
+def list_pending_resources_missing_session_key():
+    """Require the session key at the HTTP boundary."""
+
+
+@endpoint_test(
+    method="GET",
     path="/api/session-resources",
     scenario="ready_record",
     input=CaseInput(query_params=_QUERY, headers=_AUTH_HEADERS),
