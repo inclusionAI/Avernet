@@ -326,7 +326,7 @@ async def test_list_file_tree_prunes_mounts_and_returns_sorted_tree(
     assert "-maxdepth 3" in command
     assert "-name .git" in command
     assert "-name node_modules" in command
-    assert "-path './skills'" in command
+    assert "-path './skills-pool'" in command
     assert "-path './.repos'" in command
     assert "%s" not in command
     assert file_plugin.calls == []
