@@ -625,6 +625,7 @@ class BotChatService(OpenBotChatServiceMixin):
             match_mode=match_mode,
             include_output_match=include_output_match,
         )
+        self._db_repo.enrich_labels(sessions)
 
         filtered_total = len(sessions)
         has_more = (page * limit) < total
@@ -768,6 +769,7 @@ class BotChatService(OpenBotChatServiceMixin):
         start_idx = (page - 1) * limit
         end_idx = start_idx + limit
         paginated_sessions = matched_sessions[start_idx:end_idx]
+        self._db_repo.enrich_labels(paginated_sessions)
 
         has_more = (page * limit < len(matched_sessions)) or (scanned_count < total_items)
 
@@ -879,9 +881,7 @@ class BotChatService(OpenBotChatServiceMixin):
             or attributes.get("gen_ai.conversation.id")
         )
         bot_id = attributes.get("identity.bot_id")
-        group_id, session_kind = self._db_repo.get_group_labels(session_key)
-
-        return ConversationDetail(
+        detail = ConversationDetail(
             id=trace_data.get("id", ""),
             biz_task_id=(
                 trace_data.get("biz_task_id")
@@ -896,9 +896,9 @@ class BotChatService(OpenBotChatServiceMixin):
             session_id=session_id,
             session_key=session_key,
             bot_id=bot_id,
-            bot_name=self._db_repo.get_bot_name(bot_id),
-            group_id=group_id,
-            session_kind=session_kind,
+            bot_name=None,
+            group_id=None,
+            session_kind=None,
             name=trace_data.get("name") or "未命名会话",
             input=trace_data.get("input"),
             output=trace_data.get("output"),
@@ -911,6 +911,8 @@ class BotChatService(OpenBotChatServiceMixin):
             total_tokens=int(usage.get("totalTokens") or 0),
             observations=observations,
         )
+        self._db_repo.enrich_labels([detail])
+        return detail
 
     async def _fetch_observations_from_langfuse(
         self, trace_id: str
