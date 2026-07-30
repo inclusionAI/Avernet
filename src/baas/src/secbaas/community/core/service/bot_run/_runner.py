@@ -180,9 +180,7 @@ class BotRunner:
         )
 
         # 4. 委托 dispatcher 异步注入
-        await self._select_dispatcher(
-            bot_id, metadata=metadata
-        ).dispatch_inject(
+        await self._select_dispatcher(bot_id, metadata=metadata).dispatch_inject(
             bot_service=route.bot_service,
             run_id=message_id,
             session_id=actual_session_id,
@@ -277,9 +275,7 @@ class BotRunner:
         # 4. 委托 dispatcher 异步发送
         wait_result = parse_wait_result(metadata)
         chat_metadata = build_chat_metadata(metadata, run_id=message_id)
-        await self._select_dispatcher(
-            bot_id, metadata=metadata
-        ).dispatch_send(
+        await self._select_dispatcher(bot_id, metadata=metadata).dispatch_send(
             bot_service=route.bot_service,
             run_id=message_id,
             session_id=actual_session_id,
@@ -578,7 +574,10 @@ class BotRunner:
                     flag = self._system_config_service.get_config(
                         SystemConfigKey.BCN_QUEUE_DISPATCHER_ENABLED
                     )
-                    if flag is not None and (flag.conf_value or "").strip().lower() == "true":
+                    if (
+                        flag is not None
+                        and (flag.conf_value or "").strip().lower() == "true"
+                    ):
                         default_name = "QueueTaskMessageDispatcher"
                 except Exception:
                     logger.warning(

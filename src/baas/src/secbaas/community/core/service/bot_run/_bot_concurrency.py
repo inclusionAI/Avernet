@@ -34,9 +34,7 @@ class ConcurrencyLimiter:
     使全局 TPM 可精确控制到 1。
     """
 
-    def __init__(
-        self, capacity: int, min_interval_seconds: float = 0.0
-    ) -> None:
+    def __init__(self, capacity: int, min_interval_seconds: float = 0.0) -> None:
         self.capacity = capacity
         self._semaphore = threading.Semaphore(capacity)
         self._ref_count = 0
