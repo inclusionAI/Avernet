@@ -530,6 +530,73 @@ def test_pool_mapping_routes_reject_v2_physical_shape_via_real_adapter(
     ("method", "path", "payload"),
     [
         (
+            "activate_pool_layout",
+            "/api/skills/layout/activate",
+            {
+                "migration_generation": "generation-1",
+                "preparation_id": "preparation-1",
+                "registered_local_names": [],
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {
+                        "corpus": "unknown",
+                        "relative_path": "writer",
+                        "link_name": "writer",
+                    }
+                ],
+            },
+        ),
+        (
+            "publish_pool_mappings",
+            "/api/skills/layout/mappings/publish",
+            {
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {
+                        "corpus": "unknown",
+                        "relative_path": "writer",
+                        "link_name": "writer",
+                    }
+                ],
+            },
+        ),
+        (
+            "verify_pool_mappings",
+            "/api/skills/layout/mappings/verify",
+            {
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {
+                        "corpus": "unknown",
+                        "relative_path": "writer",
+                        "link_name": "writer",
+                    }
+                ],
+            },
+        ),
+    ],
+)
+def test_pool_mapping_routes_reject_unknown_corpus_at_schema_boundary(
+    client,
+    rich_manager,
+    method: str,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    plugin = MagicMock()
+    setattr(plugin, method, AsyncMock())
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 422
+    getattr(plugin, method).assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        (
             "probe_pool_layout",
             "/api/skills/layout/probe",
             {
