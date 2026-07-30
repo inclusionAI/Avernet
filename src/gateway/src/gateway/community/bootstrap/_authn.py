@@ -1,103 +1,60 @@
 """Composition of the auth subsystem (composition root, Rule 14).
 
-Builds the database-backed identity registries (bot token, access-key token)
-resolved via the ``database`` plugin, the identity-chain registry (a
-``dict[PrincipalType, IdentityChain]`` keyed by identity, each chain wrapping
-the ordered strategies declared in ``identity_strategies.yaml``), the
-route-security table, and exposes an :class:`Authenticator` that ties them to
-the core runner. Only the composition root wires concrete plugins; adapters
-receive the built ``Authenticator`` via ``app.state`` and never import plugins
-or core.
+All authn strategies (community + enterprise) are registered into
+the shared ``AuthnStrategyRegistry``. ``_strategy_chains()`` reads the
+full pool from the registry at bootstrap time — no split between
+hardcoded defaults and injected extras.
+
+Builds the database-backed identity registries (bot token, access-key token),
+the identity-chain registry, the route-security table, and assembles an
+:class:`Authenticator`. Only the composition root wires concrete plugins;
+adapters receive the built ``Authenticator`` via ``app.state`` and never
+import plugins or core.
 """
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
+import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any, cast
 
 import yaml
 
 from gateway.community.core.access_key import AccessKeyRepository, AccessKeyRow
-from gateway.community.core.authn import IdentityChain, RouteSecurity
-from gateway.community.core.authn import authenticate as run_auth
+from gateway.community.core.authn import Authenticator, IdentityChain, RouteSecurity
 from gateway.community.core.bot import BotRepository, BotRow
-from gateway.community.plugin_accessor import PluginAccessor
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
-from gateway.community.plugins.authn.app_token import (
-    AppTokenStrategy,
-    BareAppTokenValidator,
-    BareTenantResolver,
-)
+from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
-from gateway.community.plugins.database.bare import BareDatabasePlugin
-from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
     AppTokenValidator,
     AuthStrategy,
-    CredentialBundle,
-    Principal,
     PrincipalType,
     TenantResolver,
 )
 from gateway.community.spi.database import DataSourcePlugin
 
+from .plugins._registry import register_authn_strategy
+
+_logger = logging.getLogger("bootstrap")
+
 _DEFAULT_TENANT = "default"
 # Fail-closed default: every route requires an authenticated user.
 _DEFAULT_TABLE = {"/**": {"user": "required"}}
 
-_app_token_plugin = PluginAccessor[AppTokenValidator](
-    "gateway.auth.app_token", BareAppTokenValidator
-)
-_tenant_plugin = PluginAccessor[TenantResolver](
-    "gateway.auth.tenant", BareTenantResolver
-)
-_db_plugin = PluginAccessor[DataSourcePlugin]("gateway.database", BareDatabasePlugin)
 
-
-@dataclass(frozen=True)
-class _DbInitConfig:
-    """Minimal :class:`DatabasePluginConfig` for the bare SQLite plugin.
-
-    An empty ``db_url`` lets :class:`BareDatabasePlugin` default to
-    ``sqlite:///:memory:`` (or the ``DATABASE_URL`` env var).
-    """
-
-    plugin_type: str = "SQLITE_ORM"
-    db_url: str = ""
-
-
-@dataclass(frozen=True)
-class Authenticator:
-    """Resolves a route's identity requirement and runs its identity chains."""
-
-    strategies: dict[PrincipalType, IdentityChain]
-    route_security: RouteSecurity
-
-    async def authenticate(
-        self, method: str, path: str, creds: CredentialBundle
-    ) -> dict[PrincipalType, Principal]:
-        requirement = self.route_security.resolve(method, path)
-        if requirement is None:  # fail-closed: no policy → deny
-            raise AuthError("no auth policy for route")
-        return await run_auth(creds, requirement, self.strategies)  # type: ignore[no-any-return]
-
-
-def build_database() -> DataSourcePlugin:
+def build_database(db_plugin: DataSourcePlugin) -> DataSourcePlugin:
     """Init the database plugin (``create_all`` + seed demo authn rows). Idempotent.
 
-    Importing the ``_orm`` modules (top of this file) registers the ``bots`` /
-    ``access_keys`` tables on ``Base.metadata`` so ``init_database``'s
-    ``create_all`` creates them. The seeded rows persist for the plugin's
-    engine life (``_db_plugin.get()`` caches the one in-memory SQLite).
+    Args:
+        db_plugin: A container-resolved ``DataSourcePlugin``.
     """
-    db = _db_plugin.get()
-    db.init_database(_DbInitConfig())  # create_all (idempotent) + bare seed (no-op)
-    _seed_authn(db)  # idempotent demo rows for bot_token / access_key_token
-    return db
+    from gateway.community.bootstrap._configs import DatabasePluginConfig
+
+    db_plugin.init_database(DatabasePluginConfig(plugin_type="SQLITE_ORM", db_url=""))
+    _seed_authn(db_plugin)
+    return db_plugin
 
 
 def _seed_authn(db: DataSourcePlugin) -> None:
@@ -127,18 +84,35 @@ def _seed_authn(db: DataSourcePlugin) -> None:
             )
 
 
-def _default_strategy_pool(db: DataSourcePlugin) -> dict[str, AuthStrategy]:
-    """The built-in strategy instances, keyed by their short name."""
-    return {
-        "google": GoogleUserStrategy(
+def _register_community_strategies(
+    db: DataSourcePlugin,
+    app_token_validator: AppTokenValidator,
+    tenant_resolver: TenantResolver,
+) -> None:
+    """Register the 4 community built-in strategies into the shared registry.
+
+    Register replaces any existing entry by the same name, so repeated
+    calls (e.g. across test ``bootstrap_app()`` invocations) always wire
+    the current DI-provided dependencies.
+    """
+    register_authn_strategy(
+        "google",
+        GoogleUserStrategy(
             token_header="x-google-token", default_tenant=_DEFAULT_TENANT
         ),
-        "bot_token": BotTokenStrategy(registry=BotRepository(db)),
-        "app_token": AppTokenStrategy(
-            keys=_app_token_plugin.get(), tenants=_tenant_plugin.get()
-        ),
-        "access_key_token": AccessKeyTokenStrategy(registry=AccessKeyRepository(db)),
-    }
+    )
+    register_authn_strategy(
+        "bot_token",
+        BotTokenStrategy(registry=BotRepository(db)),
+    )
+    register_authn_strategy(
+        "app_token",
+        AppTokenStrategy(keys=app_token_validator, tenants=tenant_resolver),
+    )
+    register_authn_strategy(
+        "access_key_token",
+        AccessKeyTokenStrategy(registry=AccessKeyRepository(db)),
+    )
 
 
 def _default_chains(
@@ -154,31 +128,52 @@ def _default_chains(
     }
 
 
-def build_authenticator(db: DataSourcePlugin | None = None) -> Authenticator:
-    """Build the identity-chain registry + route table (once, from create_app)."""
-    if db is None:
-        db = build_database()
+def build_authenticator(
+    db: DataSourcePlugin,
+    app_token_validator: AppTokenValidator,
+    tenant_resolver: TenantResolver,
+) -> Authenticator:
+    """Build the identity-chain registry + route table (once, from create_app).
+
+    All parameters are required — the caller must resolve every dependency
+    through the DI container.
+    """
     return Authenticator(
-        strategies=_strategy_chains(db), route_security=_load_route_security()
+        strategies=_strategy_chains(
+            db,
+            app_token_validator,
+            tenant_resolver,
+        ),
+        route_security=_load_route_security(),
     )
 
 
 def _strategy_chains(
-    db: DataSourcePlugin | None = None,
+    db: DataSourcePlugin,
+    app_token_validator: AppTokenValidator,
+    tenant_resolver: TenantResolver,
 ) -> dict[PrincipalType, IdentityChain]:
     """Parse identity_strategies.yaml, wiring each declared strategy by name."""
-    if db is None:
-        # Chain construction does not query the DB, so the cached (possibly
-        # un-init'd) plugin is enough here; callers that actually resolve
-        # identities go through build_authenticator(), which inits+seeds first.
-        db = _db_plugin.get()
-    pool = _default_strategy_pool(db)
+    from .plugins._registry import get_authn_registry
+
+    # Only register once — the registry is a module-level singleton that
+    # persists across tests. Enterprise strategies were already registered at
+    # import time (by gateway.enterprise.__init__ → _register.py).
+    _register_community_strategies(db, app_token_validator, tenant_resolver)
+    pool = get_authn_registry().resolve_all()
+    _logger.info(
+        "authn strategy pool: [%s]",
+        ", ".join(f"{name}: {type(s).__name__}" for name, s in sorted(pool.items())),
+    )
     defaults = _default_chains(pool)
     configs_dir = _resolve_configs_dir()
-    path = configs_dir / "identity_strategies.yaml" if configs_dir else None
-    if path is None or not path.exists():
-        return defaults
+    if configs_dir is None:
+        raise FileNotFoundError("configs directory not found — set GATEWAY_CONFIG_PATH")
+    path = configs_dir / "identity_strategies.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"required config file not found: {path}")
 
+    _logger.info("loading identity strategies from %s", path)
     raw = cast(dict[str, Any], yaml.safe_load(path.read_text()) or {})
     declared = cast(dict[str, list[str]], raw.get("identity_strategies", {}) or {})
     chains: dict[PrincipalType, IdentityChain] = {}
@@ -198,24 +193,44 @@ def _strategy_chains(
                 )
             declared_chain.append(pool[name])
         chains[identity] = IdentityChain(identity, tuple(declared_chain))
-    # Fall back to defaults for any identity not declared in config.
     for identity, default_chain in defaults.items():
         chains.setdefault(identity, default_chain)
+
+    _logger.info(
+        "identity strategies (%s): %d chains\n%s",
+        path.name,
+        len(chains),
+        "\n".join(
+            f"  {idty.value}: [{', '.join(s.name for s in chain._strategies)}]"
+            for idty, chain in chains.items()
+        ),
+    )
     return chains
 
 
 def _load_route_security() -> RouteSecurity:
     configs_dir = _resolve_configs_dir()
-    path = configs_dir / "route_security.yaml" if configs_dir else None
-    if path is not None and path.exists():
-        return RouteSecurity.from_yaml(path)
-    return RouteSecurity.from_table(_DEFAULT_TABLE)
+    if configs_dir is None:
+        raise FileNotFoundError("configs directory not found — set GATEWAY_CONFIG_PATH")
+    path = configs_dir / "route_security.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"required config file not found: {path}")
+    _logger.info("loading route security from %s", path)
+    rules = RouteSecurity.from_yaml(path)
+    _logger.info(
+        "route security (%s): %d routes\n%s",
+        path.name,
+        len(rules._rules),
+        "\n".join(
+            f"  {rule.method or '*'} /{'/'.join(rule.segments)} → "
+            + str({idty.value: pres.value for idty, pres in rule.requirement.items()})
+            for rule in rules._rules
+        ),
+    )
+    return rules
 
 
-def _resolve_configs_dir() -> Path | None:
-    explicit = os.getenv("GATEWAY_CONFIG_PATH", "").strip()
-    if explicit:
-        p = Path(explicit)
-        return p if p.is_dir() else p.parent
-    cwd = Path.cwd() / "configs"
-    return cwd if cwd.exists() else None
+def _resolve_configs_dir():
+    from ._configs import resolve_configs_dir as _rcd
+
+    return _rcd()

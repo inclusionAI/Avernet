@@ -41,7 +41,7 @@ def _register_sqlite_json_functions(dbapi_connection, connection_record):
         dbapi_connection.create_function("JSON_UNQUOTE", 1, lambda v: v)
 
 
-class BareDatabasePlugin(DataSourcePlugin):
+class SqliteDatabasePlugin(DataSourcePlugin):
     """SQLite ORM plugin for bare mode.
 
     Uses SQLAlchemy with SQLite dialect (in-memory by default).
@@ -49,7 +49,7 @@ class BareDatabasePlugin(DataSourcePlugin):
     """
 
     def __init__(self, database_url: str = "sqlite:///:memory:") -> None:
-        logger.info("BareDatabasePlugin initializing, database_url=%s", database_url)
+        logger.info("SqliteDatabasePlugin initializing, database_url=%s", database_url)
 
         self._sync_engine: Engine = create_engine(
             database_url,
@@ -86,7 +86,7 @@ class BareDatabasePlugin(DataSourcePlugin):
                 "async session() will raise RuntimeError"
             )
 
-        logger.info("BareDatabasePlugin initialized successfully")
+        logger.info("SqliteDatabasePlugin initialized successfully")
 
     def create_all(self) -> None:
         """Create all ORM tables from ``Base.metadata``."""
@@ -100,7 +100,7 @@ class BareDatabasePlugin(DataSourcePlugin):
                     col.type = Integer()
 
         Base.metadata.create_all(self._sync_engine)
-        logger.info("BareDatabasePlugin: tables created")
+        logger.info("SqliteDatabasePlugin: tables created")
 
     def sync_connection(self, datasource_name: str) -> AbstractContextManager[Any]:
         raise NotImplementedError(
@@ -166,4 +166,4 @@ class BareDatabasePlugin(DataSourcePlugin):
             self._sync_engine.dispose()
         if self._async_engine:
             await self._async_engine.dispose()
-        logger.info("BareDatabasePlugin: both engines disposed")
+        logger.info("SqliteDatabasePlugin: both engines disposed")

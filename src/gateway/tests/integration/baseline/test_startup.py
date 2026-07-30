@@ -71,11 +71,25 @@ class TestApiDocsDisabled:
     def disabled_client(self) -> TestClient:
         from gateway.community.adapters.web.app import create_app
         from gateway.community.config import ConfigLoader
-        from gateway.community.config._models import Config, ModuleConfig, WebConfig
+        from gateway.community.config._models import (
+            Config,
+            ModuleConfig,
+            UserConfig,
+            WebConfig,
+        )
 
         disabled_config = Config(
             module_config=ModuleConfig(
                 web=WebConfig(enable_api_docs=False),
+            ),
+            user_config=UserConfig.model_validate(
+                {
+                    "plugins": {},
+                    "upstreams": {
+                        "backend_server_url": "http://backend:8080",
+                        "baas_server_url": "http://baas:9090",
+                    },
+                }
             ),
         )
         with patch.object(ConfigLoader, "load", return_value=disabled_config):

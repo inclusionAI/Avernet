@@ -110,9 +110,9 @@ it.
   `resolve(path) -> Server | None` off the leading segment.
 - `core/forwarding/_openapi.py` (new) — `generate_openapi(description, rules) ->
   dict`: keep `/openapi/v1/<domain>` paths, attach security, return the doc.
-- `spi/forwarder/…` + `plugins/forwarder/bare/…` (new) — `Forwarder.forward(request,
+- `spi/forwarder/…` + `plugins/forwarder/httpx/…` (new) — `Forwarder.forward(request,
   target) -> Response`, httpx streaming.
-- `spi/schema_catalog/…` + `plugins/schema_catalog/bare/…` (new) —
+- `spi/schema_catalog/…` + `plugins/schema_catalog/file/…` (new) —
   `SchemaCatalog.current(domain) -> dict`; bare = local file; background refresher
   holds last-known-good.
 - `adapters/web/_forward.py` (new) — catch-all route (depends on `require_principal`)

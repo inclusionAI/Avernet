@@ -19,7 +19,7 @@ base_path: /openapi/v1
 
 domains:
   bots:
-    server: agentclaw
+    server: backend
     # Single-box default. A deployed edition overrides this with an object store:
     #   schema:
     #     source: object_store
@@ -30,27 +30,26 @@ domains:
       path: schemas/bots.openapi.json
       refresh_seconds: 300
   sessions:
-    server: secbaas
+    server: baas
     schema:
       source: file
       path: schemas/baas.openapi.json
       refresh_seconds: 300
   messages:
-    server: secbaas
+    server: baas
     schema:
       source: file
       path: schemas/baas.openapi.json
       refresh_seconds: 300
   runs:
-    server: secbaas
+    server: baas
     schema:
       source: file
       path: schemas/baas.openapi.json
       refresh_seconds: 300
 
 servers:
-  # base_url supports ${ENV} expansion (see the transparent-forwarding doc §1).
-  agentclaw:
-    base_url: "${AGENTCLAW_URL}"
-  secbaas:
-    base_url: "${BAAS_URL}"
+  backend:
+    base_url: "${backend_server_url}"
+  baas:
+    base_url: "${baas_server_url}"

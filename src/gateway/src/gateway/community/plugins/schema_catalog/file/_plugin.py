@@ -22,7 +22,7 @@ from gateway.community.spi.schema_catalog import SchemaCatalog
 logger = logging.getLogger(__name__)
 
 
-class BareSchemaCatalog(SchemaCatalog):
+class FileSchemaCatalog(SchemaCatalog):
     """File-backed :class:`SchemaCatalog` with last-known-good semantics.
 
     Construct with ``sources`` mapping domain → file path. Call
@@ -35,6 +35,10 @@ class BareSchemaCatalog(SchemaCatalog):
             d: Path(p) for d, p in (sources or {}).items()
         }
         self._cache: dict[str, dict[str, Any]] = {}
+
+    def set_sources(self, sources: Mapping[str, str | Path]) -> None:
+        """Replace the source map (used by DI wiring to inject config-derived paths)."""
+        self._sources = {d: Path(p) for d, p in sources.items()}
 
     def current(self, domain: str) -> dict[str, Any]:
         return self._cache.get(domain, {})

@@ -1,6 +1,6 @@
 import pytest
 
-from gateway.community.plugins.auth.bare._plugin import BareAuthPlugin
+from gateway.community.plugins.auth.stub._plugin import StubAuthPlugin
 from gateway.community.spi.auth import AuthenticatedUser, AuthPlugin
 
 
@@ -37,9 +37,9 @@ class AuthPluginContract:
         assert isinstance(result, bool)
 
 
-class TestBareAuthPlugin(AuthPluginContract):
+class TestStubAuthPlugin(AuthPluginContract):
     def setup_method(self) -> None:
-        self.plugin = BareAuthPlugin()
+        self.plugin = StubAuthPlugin()
 
     def test_default_user_has_expected_fields(self) -> None:
         user = self.plugin._default_user
@@ -58,6 +58,6 @@ class TestBareAuthPlugin(AuthPluginContract):
     @pytest.mark.asyncio
     async def test_custom_default_user(self) -> None:
         custom_user = AuthenticatedUser(id="custom", username="custom")
-        plugin = BareAuthPlugin(default_user=custom_user)
+        plugin = StubAuthPlugin(default_user=custom_user)
         user = await plugin.get_login_user()
         assert user.id == "custom"

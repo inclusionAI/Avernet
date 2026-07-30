@@ -1,6 +1,6 @@
 import pytest
 
-from gateway.community.plugins.cache.bare._plugin import BareCachePlugin
+from gateway.community.plugins.cache.in_memory._plugin import InMemoryCachePlugin
 from gateway.community.spi.cache import CachePlugin
 
 
@@ -33,9 +33,9 @@ class CachePluginContract:
         assert self.plugin.get("k1") is None
 
 
-class TestBareCachePlugin(CachePluginContract):
+class TestInMemoryCachePlugin(CachePluginContract):
     def setup_method(self) -> None:
-        self.plugin = BareCachePlugin()
+        self.plugin = InMemoryCachePlugin()
 
     def test_ttl_expiry(self) -> None:
         import time

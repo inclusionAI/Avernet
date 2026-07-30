@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from gateway.community.plugins.forwarder.bare import BareForwarder
+from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.spi.forwarder import (
     Forwarder,
     ForwardRequest,
@@ -93,7 +93,7 @@ async def test_forward_streams_multichunk_body_and_status() -> None:
     seen: dict[str, str] = {}
     app = _app(seen, chunks=[b"data: a\n\n", b"data: b\n\n"])
     async with _client(app) as client:
-        forwarder: Forwarder = BareForwarder(client=client)
+        forwarder: Forwarder = HttpxForwarder(client=client)
         async with forwarder.forward(
             ForwardRequest(method="GET", url="http://up/openapi/v1/bots/1")
         ) as response:
@@ -108,7 +108,7 @@ async def test_request_hop_by_hop_headers_stripped_before_send() -> None:
     # its own hop, so we can observe that the caller's copy was dropped.
     seen: dict[str, str] = {}
     async with _client(_app(seen)) as client:
-        forwarder = BareForwarder(client=client)
+        forwarder = HttpxForwarder(client=client)
         req = ForwardRequest(
             method="POST",
             url="http://up/openapi/v1/bots",
@@ -131,7 +131,7 @@ async def test_response_hop_by_hop_headers_stripped() -> None:
         ],
     )
     async with _client(app) as client:
-        forwarder = BareForwarder(client=client)
+        forwarder = HttpxForwarder(client=client)
         async with forwarder.forward(
             ForwardRequest(method="GET", url="http://up/openapi/v1/bots")
         ) as response:
@@ -152,7 +152,7 @@ async def test_response_preserves_duplicate_set_cookie() -> None:
         ],
     )
     async with _client(app) as client:
-        forwarder = BareForwarder(client=client)
+        forwarder = HttpxForwarder(client=client)
         async with forwarder.forward(
             ForwardRequest(method="GET", url="http://up/openapi/v1/bots")
         ) as response:
@@ -162,7 +162,7 @@ async def test_response_preserves_duplicate_set_cookie() -> None:
 
 
 async def test_bare_forwarder_creates_and_closes_own_client() -> None:
-    forwarder = BareForwarder()
+    forwarder = HttpxForwarder()
     client = forwarder._get_client()
     assert client is forwarder._get_client()  # reused
     await forwarder.aclose()

@@ -9,7 +9,7 @@ class CachePlugin(Protocol):
     """Plugin protocol for key-value cache operations.
 
     Implementations:
-    - BareCachePlugin: in-memory dict with TTL support for tests.
+    - InMemoryCachePlugin: in-memory dict with TTL support for tests.
     - SofaCachePlugin (enterprise): wraps Layotto ZCache for production.
     """
 
