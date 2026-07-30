@@ -165,14 +165,14 @@ All paths are relative to `src/backend/`. Source package is
   Engine names stay `str`, validated at runtime exactly as bots does. That makes
   three enums, not four; a test asserts no `EngineName` is exported.
 
-## Task 6: Map the engine's error surface onto the public envelope
+## Task 6: Map the engine's error surface onto the public envelope  `[x]`
 - **Goal:** Every failure this track can produce answers as an `Envelope`, in
   the right order.
 - **Files:**
   - `…/adapters/http/openapi_v1/responses.py`
   - `tests/community/adapters/http/openapi_v1/test_responses.py`
 - **Done when:**
-  - [ ] `ENVELOPE_ERRORS` gains, all **before** the `BotServiceError` base entry
+  - [x] `ENVELOPE_ERRORS` gains, all **before** the `BotServiceError` base entry
         at `responses.py:171`:
         `EngineCapabilityUnsupportedError` → `(501, …)`,
         `EngineBotTypeNotSupportedError` → `(501, "Not supported for this bot type")`,
@@ -181,13 +181,24 @@ All paths are relative to `src/backend/`. Source package is
         `DeviceAdapterEndpointNotFoundError` → `(501, …)`,
         `EngineUpstreamError` → `(502, …)`,
         `DeviceAdapterHTTPStatusError` → `(502, …)` **last of this group**.
-  - [ ] Both `501` messages name the capabilities endpoint.
-  - [ ] Messages are fixed strings — never `str(exc)`.
-  - [ ] A test asserts ordering: the specific transport errors resolve before
+  - [x] Both `501` messages name the capabilities endpoint.
+  - [x] Messages are fixed strings — never `str(exc)`.
+  - [x] A test asserts ordering: the specific transport errors resolve before
         `DeviceAdapterHTTPStatusError`, and every new entry resolves before
         `BotServiceError`. This change adds two base/leaf pairs at once, which
         is exactly the "map the base class last" trap from the Track B gotchas.
 - **Depends on:** Task 2
+- **Corrected while implementing:** the plan treated
+  `DeviceAdapterEndpointNotFoundError` as a subclass of
+  `DeviceAdapterHTTPStatusError` and ordered them accordingly. They are
+  **siblings** — `TimeoutError` plus two independent `ValueError` subclasses
+  (`plugin_api/device_adapter_transport.py:28-38`). So there is one base/leaf
+  pair here (`EngineRuntimeError`), not two. A test now pins the sibling
+  relationship, so if the transport ever introduces a hierarchy the missing
+  ordering rule fails loudly instead of silently swallowing a leaf.
+- **Also:** `EngineResourceNotFoundError` maps to a message byte-identical to
+  `BotNotFoundError`'s, asserted by test — otherwise a caller could distinguish
+  "this session is gone" from "this bot is not yours".
 
 ## Task 7: Sessions group — 7 endpoints
 - **Goal:** Wrap the engine's session surface.

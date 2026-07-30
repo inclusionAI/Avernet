@@ -181,3 +181,144 @@ def test_error_body_matches_the_documented_error_model():
     resp = error_response(404, "Not found", _request())
     body = json.loads(bytes(resp.body))
     assert set(body) == set(ErrorEnvelope.model_fields)
+
+
+# ── Engine-runtime error mapping (Track C, Task 6) ────────────────────────────
+
+
+def _lookup(exc: Exception) -> tuple[int, str]:
+    """Resolve exactly as ``envelope_errors`` does: first isinstance wins."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import ENVELOPE_ERRORS
+
+    for error_type, mapped in ENVELOPE_ERRORS.items():
+        if isinstance(exc, error_type):
+            return mapped
+    raise AssertionError(f"{type(exc).__name__} is unmapped")
+
+
+@pytest.mark.parametrize(
+    ("exc_name", "expected_status"),
+    [
+        ("EngineBotTypeNotSupportedError", 501),
+        ("EngineCapabilityUnsupportedError", 501),
+        ("EngineDeviceNotReadyError", 409),
+        ("EngineResourceNotFoundError", 404),
+        ("EngineUpstreamError", 502),
+    ],
+)
+def test_engine_runtime_errors_map_to_their_own_status(exc_name, expected_status):
+    """Each leaf resolves to itself, not to a base listed later."""
+    import agentclaw.community.core.engine_runtime.errors as errs
+
+    status, _ = _lookup(getattr(errs, exc_name)("boom"))
+    assert status == expected_status
+
+
+def test_engine_runtime_base_does_not_swallow_its_leaves():
+    """``EngineRuntimeError`` is the base of all four; it must be listed last.
+
+    This is the "map the base class last" trap from the Track B gotchas, and
+    Track C introduces two base/leaf pairs at once — so it is asserted, not
+    trusted.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.responses import ENVELOPE_ERRORS
+    from agentclaw.community.core.engine_runtime.errors import (
+        EngineCapabilityUnsupportedError,
+        EngineDeviceNotReadyError,
+        EngineResourceNotFoundError,
+        EngineRuntimeError,
+        EngineUpstreamError,
+    )
+
+    order = list(ENVELOPE_ERRORS)
+    base = order.index(EngineRuntimeError)
+    for leaf in (
+        EngineCapabilityUnsupportedError,
+        EngineDeviceNotReadyError,
+        EngineResourceNotFoundError,
+        EngineUpstreamError,
+    ):
+        assert order.index(leaf) < base, f"{leaf.__name__} listed after its base"
+
+
+def test_transport_errors_are_siblings_and_map_independently():
+    """They are NOT a hierarchy, so each needs its own entry.
+
+    ``DeviceAdapterTimeoutError`` extends ``TimeoutError``; the other two are
+    independent ``ValueError`` subclasses. Asserted because assuming a
+    base/leaf relationship here would justify a wrong "fix" to the mapping
+    order — and because if the transport ever *did* introduce one, the missing
+    ordering rule would become a real bug this test would catch.
+    """
+    from agentclaw.community.plugin_api.device_adapter_transport import (
+        DeviceAdapterEndpointNotFoundError,
+        DeviceAdapterHTTPStatusError,
+        DeviceAdapterTimeoutError,
+    )
+
+    assert not issubclass(
+        DeviceAdapterEndpointNotFoundError, DeviceAdapterHTTPStatusError
+    )
+    assert not issubclass(
+        DeviceAdapterHTTPStatusError, DeviceAdapterEndpointNotFoundError
+    )
+    assert not issubclass(DeviceAdapterTimeoutError, ValueError)
+
+    assert _lookup(DeviceAdapterEndpointNotFoundError("gone"))[0] == 404
+    assert _lookup(DeviceAdapterHTTPStatusError(503, "busy"))[0] == 502
+
+
+def test_transport_timeout_maps_to_504():
+    from agentclaw.community.plugin_api.device_adapter_transport import (
+        DeviceAdapterTimeoutError,
+    )
+
+    assert _lookup(DeviceAdapterTimeoutError("slow"))[0] == 504
+
+
+def test_the_two_501s_say_different_things():
+    """They answer different questions and must not be merged.
+
+    One is "your bot's engine does not offer this", which the capabilities
+    endpoint can confirm; the other is "this operation is not offered for your
+    bot's type", which capabilities cannot tell you.
+    """
+    from agentclaw.community.core.engine_runtime.errors import (
+        EngineBotTypeNotSupportedError,
+        EngineCapabilityUnsupportedError,
+    )
+
+    _, capability_msg = _lookup(EngineCapabilityUnsupportedError("x"))
+    _, bot_type_msg = _lookup(EngineBotTypeNotSupportedError("x"))
+    assert capability_msg != bot_type_msg
+    assert "capabilities" in capability_msg
+    assert "bot type" in bot_type_msg
+
+
+def test_engine_not_found_is_byte_identical_to_the_other_404s():
+    """Otherwise a caller could distinguish "gone" from "not yours"."""
+    from agentclaw.community.core.bot_management.services.bot_service import (
+        BotNotFoundError,
+    )
+    from agentclaw.community.core.engine_runtime.errors import (
+        EngineResourceNotFoundError,
+    )
+
+    assert _lookup(EngineResourceNotFoundError("x")) == _lookup(BotNotFoundError("y"))
+
+
+def test_engine_runtime_messages_are_fixed_not_exception_text():
+    """No engine-side detail may reach an external caller."""
+    import agentclaw.community.core.engine_runtime.errors as errs
+
+    leak = "sandbox-7f3a at 10.0.0.4:20003 token=abc"
+    for name in (
+        "EngineBotTypeNotSupportedError",
+        "EngineCapabilityUnsupportedError",
+        "EngineDeviceNotReadyError",
+        "EngineResourceNotFoundError",
+        "EngineUpstreamError",
+    ):
+        _, message = _lookup(getattr(errs, name)(leak))
+        assert leak not in message
+        assert message.isascii(), f"{name}: public messages are always English"

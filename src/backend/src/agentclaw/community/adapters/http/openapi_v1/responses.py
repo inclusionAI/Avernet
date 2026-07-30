@@ -57,6 +57,14 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.engine_runtime.errors import (
+    EngineBotTypeNotSupportedError,
+    EngineCapabilityUnsupportedError,
+    EngineDeviceNotReadyError,
+    EngineResourceNotFoundError,
+    EngineRuntimeError,
+    EngineUpstreamError,
+)
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
@@ -65,6 +73,11 @@ from agentclaw.community.core.resources.service import (
 from agentclaw.community.core.services.identity import (
     InvalidIdentityEntityTypeError,
     InvalidIdentityFileTypeError,
+)
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
+    DeviceAdapterTimeoutError,
 )
 from agentclaw.community.plugin_api.passport import PassportError
 
@@ -159,6 +172,48 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
     InvalidIdentityFileTypeError: (400, "Invalid file type"),
+    # ── Engine-runtime (Track C) ──────────────────────────────────────────
+    # Ordering inside this block is load-bearing: ``EngineRuntimeError`` is the
+    # base of the four ``Engine*`` errors below it and is listed AFTER them.
+    # Lookup returns on the first isinstance match in insertion order, so a base
+    # placed first would swallow every leaf under it — the trap recorded in the
+    # Track B gotchas.
+    #
+    # The three ``DeviceAdapter*`` errors are *siblings*, not a hierarchy
+    # (``TimeoutError`` and two independent ``ValueError`` subclasses —
+    # ``plugin_api/device_adapter_transport.py``), so each needs its own entry
+    # and their relative order does not matter. Do not assume otherwise: a
+    # comment here previously claimed EndpointNotFound subclassed HTTPStatus,
+    # which is false and would have justified a wrong "fix" to the ordering.
+    #
+    # The two 501s are distinct answers to distinct questions and must not be
+    # merged: one is "your bot's engine does not offer this", answerable from
+    # the capabilities endpoint; the other is "this operation is not offered for
+    # your bot's type", which capabilities cannot tell you.
+    EngineBotTypeNotSupportedError: (
+        501,
+        "Not supported for this bot type",
+    ),
+    EngineCapabilityUnsupportedError: (
+        501,
+        "Not supported by this bot's engine; see the engine capabilities endpoint",
+    ),
+    # Retryable: cold, dormant or restarting. Distinct from 404 (the bot IS the
+    # caller's) and from 500 (nothing is broken).
+    EngineDeviceNotReadyError: (409, "Bot device is not ready"),
+    # Byte-identical to the other 404s above, so an engine-side missing resource
+    # cannot be distinguished from a bot that is not the caller's.
+    EngineResourceNotFoundError: (404, "Not found"),
+    EngineUpstreamError: (502, "Engine service error"),
+    # Base of the four above — LAST of its group.
+    EngineRuntimeError: (502, "Engine service error"),
+    # Transport errors that reach a handler without the relay translating them
+    # (e.g. a future caller using the transport directly). The relay already
+    # converts the first two; these are the backstop.
+    DeviceAdapterTimeoutError: (504, "Engine request timed out"),
+    DeviceAdapterEndpointNotFoundError: (404, "Not found"),
+    # Base of DeviceAdapterEndpointNotFoundError — LAST of its group.
+    DeviceAdapterHTTPStatusError: (502, "Engine service error"),
     # Base class LAST: every mapping above is a subclass of BotServiceError, and
     # the lookup returns on the first isinstance match in insertion order, so the
     # specific mappings still win. Services raise the bare base for device,
