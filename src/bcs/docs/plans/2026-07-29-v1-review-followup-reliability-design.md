@@ -119,6 +119,22 @@ The final review passes keep the same V1-only compatibility boundary:
   friendship checks through the Legacy-compatible management layer; the
   Legacy policy keeps its existing missing-or-unreachable fallback behavior.
 
+### Follow-up decision: no V1 Group optimistic lock
+
+The V1 Group update path does not introduce a new version-based optimistic
+locking contract. It continues to use the existing field-scoped
+`patch_mutable_fields` operation, then reloads the persisted Group for the
+response. Storage failures and missing Groups remain distinguishable.
+
+Accordingly:
+
+- V1 update does not capture or pass an `expected_version`.
+- Group persistence does not add a version-checked patch operation.
+- V1 field patches and visibility-guarded participant insertion do not
+  increment `bcs_groups.version`.
+- The existing `Group.version` field and pre-existing collaboration/runtime
+  concurrency controls remain unchanged.
+
 ## Error behavior
 
 - Storage query failures become V1 `internal_error` responses.
