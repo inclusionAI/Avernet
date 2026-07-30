@@ -6,12 +6,39 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use bcs_service_api::CollaborationRuntimeService;
+use bcs_service_api::{CollaborationRuntimeService, LeaderElectionPort, ServiceResult};
 use tracing::{debug, info, warn};
 
 pub const DEFAULT_SCAN_INTERVAL: Duration = Duration::from_millis(1_000);
 pub const DEFAULT_BATCH_SIZE: usize = 100;
 pub const DEFAULT_TIMEOUT_GRACE_MS: u64 = 500;
+
+pub async fn spawn_if_leader(
+    leader_election: &dyn LeaderElectionPort,
+    runtime: Arc<dyn CollaborationRuntimeService>,
+) -> ServiceResult<Option<tokio::task::JoinHandle<()>>> {
+    let is_leader = leader_election.is_leader().await?;
+    if !is_leader {
+        info!(
+            target: "state_machine_timeout_scanner",
+            event = "scanner.startup_skipped",
+            reason = "follower",
+            "state-machine timeout scanner skipped on follower"
+        );
+        return Ok(None);
+    }
+    info!(
+        target: "state_machine_timeout_scanner",
+        event = "scanner.startup_enabled",
+        "state-machine timeout scanner enabled on leader"
+    );
+    Ok(Some(spawn(
+        runtime,
+        DEFAULT_SCAN_INTERVAL,
+        DEFAULT_BATCH_SIZE,
+        DEFAULT_TIMEOUT_GRACE_MS,
+    )))
+}
 
 pub async fn scan_once(
     runtime: &Arc<dyn CollaborationRuntimeService>,
@@ -74,4 +101,77 @@ pub fn spawn(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+    use bcs_service_api::{LeaderInfo, LeaderStatus};
+    use bcs_test_support::NoopCollaborationRuntimeService;
+
+    use super::*;
+
+    struct FixedLeaderElection {
+        is_leader: bool,
+    }
+
+    #[async_trait]
+    impl LeaderElectionPort for FixedLeaderElection {
+        async fn campaign(&self) -> ServiceResult<LeaderStatus> {
+            Ok(if self.is_leader {
+                LeaderStatus::Leader
+            } else {
+                LeaderStatus::Follower
+            })
+        }
+
+        async fn is_leader(&self) -> ServiceResult<bool> {
+            Ok(self.is_leader)
+        }
+
+        async fn current_leader(&self) -> ServiceResult<Option<LeaderInfo>> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn leader_starts_scanner() {
+        let leader = FixedLeaderElection { is_leader: true };
+        assert_eq!(
+            leader.campaign().await.expect("campaign"),
+            LeaderStatus::Leader
+        );
+        assert!(leader
+            .current_leader()
+            .await
+            .expect("current leader")
+            .is_none());
+
+        let handle = spawn_if_leader(
+            &leader,
+            Arc::new(NoopCollaborationRuntimeService),
+        )
+        .await
+        .expect("leader check")
+        .expect("leader scanner");
+        handle.abort();
+        assert!(handle.await.expect_err("scanner aborted").is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn follower_skips_scanner() {
+        let follower = FixedLeaderElection { is_leader: false };
+        assert_eq!(
+            follower.campaign().await.expect("campaign"),
+            LeaderStatus::Follower
+        );
+
+        assert!(spawn_if_leader(
+            &follower,
+            Arc::new(NoopCollaborationRuntimeService),
+        )
+        .await
+        .expect("leader check")
+        .is_none());
+    }
 }

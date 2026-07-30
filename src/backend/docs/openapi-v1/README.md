@@ -111,7 +111,7 @@ must implement._
 | Stage | Scope (data) | Owner | Pri | State | Done-when |
 |---|---|---|---|---|---|
 | 1 | Bot records (`ac_bots` / `BotModel`) | totalfrank | P1 | ✅ **DONE — PR #456 merged 2026-07-27** | — |
-| 2 | Resources (`ac_resource`) | lucas-xzp | P1 | ⬜ TODO | column + guards + tests green; internal API unchanged |
+| 2 | Resources (`ac_resource`) | lucas-xzp | P1 | ✅ DONE — Phase 0 (branch `rongzhi_0727`) | column + guards + tests green; internal API unchanged — verified: `to_dict()` excludes tenant, guard uses direct expression not lambda |
 | 3 | Channels (`ac_channel_config`) | totalfrank | 🅳 **DEPRIORITIZED** | ⏸️ PARKED — scope intact, not cancelled | same, if picked back up |
 | 4 | Skills (skill tables) | totalfrank + lucas-xzp | P3 | ⬜ TODO | same |
 | 5 | MCP configuration (`ac_user_mcp_config` + `ac_bot_mcp_call_config`) | totalfrank | P1 | ✅ DONE — **PR #564** | PR #564 merges |
@@ -126,7 +126,7 @@ _Ordered by priority tier._
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(stub)* | ⬜ TODO — **unblocked** | ~~Track A stage 5~~ ✅ (PR #564) |
-| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` *(stub)* | ⬜ TODO | Track A resources (lucas-xzp) |
+| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 9 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 9 endpoints wired stub→service; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
 | channels | totalfrank | 🅳 **DEPRIORITIZED** | `openapi_v1/channels/router.py` *(stub)* | ⏸️ PARKED — scope intact, not cancelled | Track A stage 3 (also parked) |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
@@ -473,8 +473,9 @@ Unified file/link/folder abstraction; storage location never exposed.
 | GET | `/openapi/v1/bots/resources/{resource_id}/download` | Download bytes (**raw, not enveloped**) | `application/octet-stream` |
 | GET | `/openapi/v1/bots/resources/{resource_id}/preview` | Preview | `Envelope[Preview]` |
 
-_Note: the stub's upload is raw `octet-stream`; PR #363 described `multipart`.
-Pick one when wiring._
+_Note: upload is finalized as a raw `application/octet-stream` body (not
+multipart). This diverges from PR #363's multipart summary — implementation
+follows the route; switching to multipart would be a contract change._
 
 ### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (7 endpoints: 5 in stub + 2 proposed ★) · `openapi_v1/skills/router.py`
 Catalog at `/openapi/v1/bots/skills`; a bot's installed skills are a bot
@@ -647,6 +648,7 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 - **2026-07-27** — **Track A Stage 1 merged (PR #456).** Bots carry
   `avernet_tenant`; the reusable mechanism (carrier, guards, middleware,
   `resolve_avernet_tenant` seam) is on `dev`. The shared bots gate is lifted.
+- **2026-07-28** — **Track A Stage 2 (ac_resource) DONE** (lucas-xzp, branch `rongzhi_0727`, pending rebase/push). Factory-extended PR #456's BotModel guard to `(BotModel, ResourceModel)`: one Session read listener chaining `with_loader_criteria` (direct expression, not lambda) + per-mapper `before_insert`. Red→green: resource tenant isolation/guard and routines/identity indirect-isolation tests. `to_dict()` excludes tenant. **DDL (ac_resource ADD COLUMN) submitted by lucas-xzp on the platform; must land before deploy. `ac_bot_publish` verified not read by this round's openapi_v1 handlers — left to service_bot owner or a later verify/online stage.** Stage 6 (routines) stays ⬜ TODO — no table, indirect isolation already covered by Session 0's ac_bots guard; real DONE lands with Track B routines handlers.
 - **2026-07-29** — **Track B bots merged (PR #494) — first public category
   implemented.** All 13 `/openapi/v1/bots` endpoints wired to the internal
   services, owner-scoped via `caller_owner_id`, tenant-scoped by the Track A

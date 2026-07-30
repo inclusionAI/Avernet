@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.plugin_api.models import BotModel, ResourceModel
 
 
 class _TestDB:
@@ -38,6 +38,17 @@ def db(tmp_path):
         connect_args={"check_same_thread": False},
     )
     BotModel.__table__.create(engine)
+    return _TestDB(engine)
+
+
+@pytest.fixture
+def resource_db(tmp_path):
+    """Create a test database with ResourceModel table."""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'test_resources.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    ResourceModel.__table__.create(engine)
     return _TestDB(engine)
 
 
@@ -245,3 +256,51 @@ class TestBotModelToDict:
         assert result["share_policy"] == {"policy": "test"}
         assert isinstance(result["ext"], dict)
         assert result["ext"] == {"custom": "data"}
+
+
+class TestResourceModelToDict:
+    """Tests for ResourceModel.to_dict method."""
+
+    def test_resource_to_dict_excludes_tenant(self, resource_db):
+        """The avernet_tenant column must NOT surface in ResourceModel.to_dict().
+
+        Mirrors the BotModel key-set pin (test_to_dict_key_set_unchanged_by_avernet_tenant):
+        isolation adds a column to ac_resource but must not change any
+        current internal API response body — so to_dict()'s exact key set
+        stays what it was before this feature. Pinning the full set here
+        fails loudly if avernet_tenant (or anything else) ever leaks in.
+        """
+        expected_keys = {
+            "id",
+            "name",
+            "resource_type",
+            "status",
+            "gmt_created",
+            "gmt_modified",
+            "attributes",
+            "metadata",
+            "user_id",
+            "created_by",
+            "source",
+            "bolt_id",
+            "env",
+        }
+
+        resource = ResourceModel(
+            name="test-resource",
+            resource_type="file",
+        )
+
+        with resource_db.orm_session() as session:
+            session.add(resource)
+            session.flush()
+            session.refresh(resource)
+            # The column exists and is populated on the row (server_default
+            # backfill, same as BotModel)...
+            assert resource.avernet_tenant == "teamclaw"
+            result = resource.to_dict()
+
+        # ...but it is absent from the serialized form, and the full key set
+        # is exactly what it was before isolation.
+        assert "avernet_tenant" not in result
+        assert set(result.keys()) == expected_keys
