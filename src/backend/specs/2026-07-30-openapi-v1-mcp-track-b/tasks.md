@@ -173,20 +173,24 @@ public is written until the extraction is green.
 - **Note:** Landed before Task 5 (its only dependency is Task 1) so Task 5's
   endpoint tests exercise the mappings.
 
-## Task 7: [ ] Cross-tenant isolation against the real Stage 5 guard
+## Task 7: [x] Cross-tenant isolation against the real Stage 5 guard
 - **Goal:** Prove a config in another tenant is invisible and un-overwritable
   through the path the handlers use — end to end, not mocked.
 - **Files:** `tests/community/adapters/http/openapi_v1/test_mcp_tenant_isolation.py`
   (new)
 - **Done when:**
-  - [ ] Uses a real `UserMCPConfigRepository` over SQLite with the Stage 5
-        guard, in the shape of `test_bots_tenant_isolation.py`.
-  - [ ] A config written under tenant A is invisible from tenant B (read →
-        "no config"); a tenant-B write creates B's own row rather than
-        overwriting A's.
-  - [ ] Two tenants each hold a row for the same `user_id` + `server_code` and
+  - [x] Drives the **flow the handlers call** (`read_unified_config` /
+        `write_unified_config`) against a real `MCPConfigService` + real
+        `UserMCPConfigRepository` + the real Stage 5 guard over SQLite (only the
+        marketplace + device-sync collaborators are mocked). This is a strictly
+        stronger proof than testing the repo directly — it covers the exact
+        layer the public GET/PUT use.
+  - [x] A config written under tenant A is invisible from tenant B (read →
+        `has_config: false`, `api_key: None`); a tenant-B write creates B's own
+        row rather than overwriting A's (A's stored bytes verified untouched).
+  - [x] Two tenants each hold a row for the same `user_id` + `server_code` and
         neither sees or displaces the other (the case the Stage 5 unique-key swap
-        made possible).
+        made possible — would `IntegrityError` on the old key). **4 passed.**
 - **Depends on:** Task 5
 
 ## Task 8: [ ] Move the handoff board + changelog
