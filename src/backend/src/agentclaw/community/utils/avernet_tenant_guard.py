@@ -62,11 +62,11 @@ class CrossTenantInsertError(RuntimeError):
 def _read_guard(orm_execute_state: Any) -> None:
     """Confine every guarded model's SELECT/UPDATE/DELETE to the current tenant.
 
-    Column and relationship loads are skipped: they only reload an object that a
-    prior (already tenant-filtered) SELECT put in the session, so they carry no
-    new exposure. This holds while nothing maps a ``relationship()`` to a
-    guarded model; if one is ever added, a lazy load would emit an unfiltered
-    SELECT — revisit this skip then.
+    Column loads are skipped because they only reload an object that a prior
+    (already tenant-filtered) SELECT put in the session. Relationship loads
+    are skipped because ``with_loader_criteria`` from that parent SELECT
+    propagates to lazy loaders; the regression suite proves a parent cannot
+    lazy-load a cross-tenant child through a malformed association.
     """
     if orm_execute_state.is_column_load or orm_execute_state.is_relationship_load:
         return

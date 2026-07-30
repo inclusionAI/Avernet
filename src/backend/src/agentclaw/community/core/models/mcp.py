@@ -28,6 +28,9 @@ class SkillSetMCPServer(Base):
     icon = Column(String(500), nullable=True)  # MCP server icon URL
     user_id = Column(String(100), nullable=True, index=True)  # 用户工号
     env = Column(String(50), nullable=True)  # 环境标识: dev/pre/prod
+    # The association is tenant-owned alongside its Skill Set. Keep the field
+    # out of to_dict() so existing Skills API payloads do not change.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     # DB-owned timestamps: prod ac_user_mcp_config is `timestamp NULL
     # DEFAULT CURRENT_TIMESTAMP [ON UPDATE CURRENT_TIMESTAMP]`. The repo
     # does not set these in Python (matches the prior prod twin's NOW()).
@@ -52,6 +55,11 @@ class SkillSetMCPServer(Base):
             "gmt_created": self.gmt_created.isoformat() if self.gmt_created else None,
             "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
         }
+
+
+# Register where the model is defined so every direct ORM path has the shared
+# read/write boundary without per-repository predicates or Session listeners.
+register_avernet_tenant_guard(SkillSetMCPServer)
 
 
 class UserMCPConfig(Base):
