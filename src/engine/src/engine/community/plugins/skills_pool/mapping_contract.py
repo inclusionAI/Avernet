@@ -12,6 +12,7 @@ from engine.community.core.skills.layout_planner import (
     LogicalSkillMapping,
     RuntimeLayoutContext,
     SkillCorpus,
+    SkillLayoutResolutionError,
     resolve_filesystem_skill_layout,
     resolve_skill_mappings,
 )
@@ -78,7 +79,7 @@ def resolve_mapping_payload(
             physical.append(SkillMapping(source=source, target=target))
         return ResolvedMappingPayload(tuple(physical))
     if mapping_contract_version != MAPPING_CONTRACT_VERSION:
-        raise ValueError(
+        raise SkillLayoutResolutionError(
             f"unsupported mapping contract: {mapping_contract_version}"
         )
 
