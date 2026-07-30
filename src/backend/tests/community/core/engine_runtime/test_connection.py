@@ -58,9 +58,12 @@ class _Devices:
         )
         self.info = SimpleNamespace(**{**defaults, **overrides})
         self.kwargs = None
+        self.raises: Exception | None = None
 
     def get_device_connection(self, **kwargs):
         self.kwargs = kwargs
+        if self.raises is not None:
+            raise self.raises
         return self.info
 
 
@@ -124,6 +127,32 @@ def test_a_relayed_url_is_not_appended_to():
     devices = _Devices(url="wss://relay.example/wsrelay/s1/api/openclaw/ws")
     result = _build(_svc(devices=devices))
     assert result.sockets[0].url == "wss://relay.example/wsrelay/s1/api/openclaw/ws"
+
+
+def test_a_failing_provider_is_an_upstream_error_not_a_500():
+    """A ws-info call that times out reaches here as ``BaasDeviceServiceError``.
+    The bot's device may be healthy, so this is an upstream fault — and
+    uncaught it would be a 500 on a condition that has a name."""
+    from agentclaw.community.core.devices.services.baas_device_service import (
+        BaasDeviceServiceError,
+    )
+
+    devices = _Devices()
+    devices.raises = BaasDeviceServiceError("ws-info timed out")
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=devices))
+
+
+@pytest.mark.parametrize("error_name", ["DeviceNotFoundError", "InvalidDeviceStatusError"])
+def test_an_unusable_device_is_not_ready_rather_than_a_500(error_name):
+    """No binding, a failed one, or one the operator cannot reach — the same
+    class of answer as a device that will not resolve."""
+    import agentclaw.community.core.devices.errors as device_errors
+
+    devices = _Devices()
+    devices.raises = getattr(device_errors, error_name)("nope")
+    with pytest.raises(EngineDeviceNotReadyError):
+        _build(_svc(devices=devices))
 
 
 def test_a_deployment_without_a_proxy_gateway_is_an_upstream_error():

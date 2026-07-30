@@ -17,6 +17,10 @@ from datetime import datetime, timedelta, timezone
 from injector import inject
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.devices.errors import (
+    DeviceDomainError,
+    DeviceServiceError,
+)
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceNotBoundError,
@@ -103,8 +107,44 @@ class EngineConnectionService:
             operator_name=owner_id,
         )
         chat_path = self._chat_path(engine)
-        info = self._device_service.get_device_connection(
-            binding_id=ctx.binding_id,
+        try:
+            info = self._get_connection(ctx.binding_id, operator, chat_path)
+        except DeviceServiceError as exc:
+            # The provider itself failed — a BaaS ws-info call that timed out or
+            # answered an error. The bot's device may be perfectly healthy, so
+            # this is an upstream fault, not "your device is not ready".
+            raise EngineUpstreamError(
+                f"device provider failed for bot={bot_id}"
+            ) from exc
+        except DeviceDomainError as exc:
+            # The device is in no state to serve a connection: no binding, a
+            # failed one, or one the operator cannot reach. Same class of answer
+            # as an unresolvable device above — retry later.
+            raise EngineDeviceNotReadyError(
+                f"device not connectable for bot={bot_id}"
+            ) from exc
+
+        if not getattr(info, "available", True):
+            raise EngineDeviceNotReadyError(f"device unavailable for bot={bot_id}")
+
+        token = getattr(info, "token", "") or ""
+        headers = {_PROXY_TOKEN_HEADER: token} if token else {}
+
+        sockets = [
+            SocketInfo(
+                kind="chat", url=self._socket_url(info, chat_path), headers=headers
+            )
+        ]
+        return ConnectionResult(
+            engine=engine, expires_at=self._expires_at(info), sockets=sockets
+        )
+
+    def _get_connection(
+        self, binding_id: int, operator: OperatorContext, chat_path: str
+    ) -> object:
+        """Ask the provider for this device's connection."""
+        return self._device_service.get_device_connection(
+            binding_id=binding_id,
             operator=operator,
             ttl=CONNECTION_TTL_SECONDS,
             # Relay is the mode that yields a *finished* WebSocket URL, which is
@@ -121,20 +161,6 @@ class EngineConnectionService:
             # one (code 4001) — a claude_code bot handed the default would be
             # rejected on connect.
             path=chat_path,
-        )
-        if not getattr(info, "available", True):
-            raise EngineDeviceNotReadyError(f"device unavailable for bot={bot_id}")
-
-        token = getattr(info, "token", "") or ""
-        headers = {_PROXY_TOKEN_HEADER: token} if token else {}
-
-        sockets = [
-            SocketInfo(
-                kind="chat", url=self._socket_url(info, chat_path), headers=headers
-            )
-        ]
-        return ConnectionResult(
-            engine=engine, expires_at=self._expires_at(info), sockets=sockets
         )
 
     # ── composition ───────────────────────────────────────────────────────
