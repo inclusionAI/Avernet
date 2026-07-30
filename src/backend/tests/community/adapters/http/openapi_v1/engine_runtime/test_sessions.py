@@ -64,6 +64,22 @@ def test_list_sessions(client, relay):
     assert relay.paths == ["/api/sessions"]
 
 
+@pytest.mark.parametrize("filter_name", ["agent_id", "session_key"])
+def test_list_filters_are_forwarded_to_the_engine(client, relay, filter_name):
+    """Both filters are applied upstream *before* pagination, so they must
+    travel with the window — filtering the returned page instead would hand
+    back short pages that do not line up with the requested one."""
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+    ok(client.get(_base(), params={filter_name: "v"}))
+    assert relay.calls[0]["params"][filter_name] == "v"
+
+
+def test_list_omits_filters_the_caller_did_not_send(client, relay):
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+    ok(client.get(_base()))
+    assert set(relay.calls[0]["params"]) == {"offset", "limit"}
+
+
 def test_list_does_not_publish_engine_only_fields(client, relay):
     """``user_id`` is the caller and ``ext_info`` is an opaque engine bag."""
     relay.results = [EngineResult(data=[ENGINE_SESSION])]

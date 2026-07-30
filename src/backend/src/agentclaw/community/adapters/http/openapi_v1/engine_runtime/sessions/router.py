@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
@@ -176,7 +176,16 @@ async def list_sessions(
     page: PageParamsDep,
     principal: PrincipalDep,
     request: Request,
-    agent_id: str | None = None,
+    agent_id: Annotated[
+        str | None, Query(description="Only sessions belonging to this agent.")
+    ] = None,
+    session_key: Annotated[
+        str | None,
+        Query(
+            description="Only the session with this key. Pass the value "
+            "verbatim; no encoding is required."
+        ),
+    ] = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Page[Session]]:
     """List the bot's sessions."""
@@ -185,6 +194,11 @@ async def list_sessions(
     params: dict[str, Any] = _window(page)
     if agent_id:
         params["agent_id"] = agent_id
+    # Both filters are applied upstream, *before* the engine paginates — so
+    # they have to travel with the window rather than being applied to what
+    # came back, or the page boundaries would not line up with the filter.
+    if session_key:
+        params["session_key"] = session_key
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/sessions",
         params=params,

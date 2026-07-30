@@ -155,7 +155,14 @@ socket 也是干净的。
   `SocketKind` 仍保持为列表上的枚举，将来加第二个 socket 是增量的。
   _2026-07-30 更正。_
 - **URL 是不透明且完整的。** 调用方不拼接任何东西。`target`、`type` 和裸 `token`
-  **不是**字段 —— 它们正是我们要停止对外发布的东西。
+  **不是**字段 —— 它们正是我们要停止对外发布的东西。正因如此，获取设备连接时
+  显式请求 **`ws_conn_mode="relay"`**：relay 是 provider 会返回**完整** WebSocket
+  URL 的模式。不传这个模式，BaaS 只会给回一个裸路由 target，而它只有 proxy
+  gateway 才能补全 —— 没有 sandbox runtime 的构建（community 构建）根本没有
+  gateway，于是端点会直接失败，尽管 relay URL 本来就拿得到。只请求一种模式，
+  也保证了 URL 和 token 描述的是同一种模式。拿不到完整 URL 时仍回落到
+  `{base}/proxypass/{target}` 拼接；而没有 gateway 可拼的部署是一个有名字的
+  upstream 错误，不是 500。_2026-07-30 更正。_
 - **`expires_at` 必填**，让调用方知道该重新获取，而不是在 token 过期后静默失败。
   只要签发方给出了过期时间，就以**签发方自己的值**为准：BaaS 链路明确文档化了
   它**忽略**传入的 TTL、由服务端决定，所以在那条链路上本地算出来的过期时间描述的

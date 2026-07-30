@@ -32,7 +32,10 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
+from agentclaw.community.plugin_api.sandbox_runtime import (
+    SandboxRuntimeClient,
+    SandboxRuntimeUnavailableError,
+)
 
 logger = get_logger()
 
@@ -41,6 +44,9 @@ CONNECTION_TTL_SECONDS = 120 * 60
 
 #: Header the proxy gateway authenticates with.
 _PROXY_TOKEN_HEADER = "x-proxypass-token"
+
+#: Connection mode requested from the device provider. See ``build``.
+_RELAY_MODE = "relay"
 
 #: Engines with a dedicated chat socket. Anything else uses the engine-generic
 #: route the adapter also serves (``/api/{engine}/ws``).
@@ -100,6 +106,14 @@ class EngineConnectionService:
             binding_id=ctx.binding_id,
             operator=operator,
             ttl=CONNECTION_TTL_SECONDS,
+            # Relay is the mode that yields a *finished* WebSocket URL, which is
+            # this endpoint's whole contract — callers concatenate nothing. The
+            # BaaS provider fills `url` only when relay is asked for; leaving the
+            # mode unset makes it hand back a bare routing target instead, and
+            # the community build has no proxy gateway to turn that target into
+            # a URL. Asking once also keeps the URL and the token describing the
+            # same mode.
+            ws_conn_mode=_RELAY_MODE,
         )
         if not getattr(info, "available", True):
             raise EngineDeviceNotReadyError(f"device unavailable for bot={bot_id}")
@@ -149,7 +163,13 @@ class EngineConnectionService:
         if str(getattr(info, "type", "") or "") == "local":
             return f"ws://{target}"
 
-        base = self._sandbox_client.proxy_base_url() or ""
+        try:
+            base = self._sandbox_client.proxy_base_url() or ""
+        except SandboxRuntimeUnavailableError as exc:
+            # Deployments without a proxy gateway (the community build) raise
+            # here rather than returning "". Letting it out would be a 500 on a
+            # condition we can name: there is no way to reach this device.
+            raise EngineUpstreamError("no proxy gateway in this deployment") from exc
         if not base:
             raise EngineUpstreamError("no proxy base url configured")
         base = base.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")

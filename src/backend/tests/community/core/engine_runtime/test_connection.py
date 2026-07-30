@@ -100,6 +100,38 @@ def test_the_resolved_owner_is_passed_as_the_operator():
     assert devices.kwargs["ttl"] == CONNECTION_TTL_SECONDS
 
 
+def test_relay_mode_is_requested_so_the_provider_returns_a_finished_url():
+    """The BaaS provider fills ``url`` only for relay mode. Leaving the mode
+    unset gets a bare routing target back, which a deployment without a proxy
+    gateway cannot turn into a URL at all."""
+    devices = _Devices()
+    _build(_svc(devices=devices))
+    assert devices.kwargs["ws_conn_mode"] == "relay"
+
+
+def test_a_relayed_ws_url_is_used_verbatim():
+    devices = _Devices(url="wss://relay.example/wsrelay/session-1/")
+    result = _build(_svc(devices=devices))
+    assert result.sockets[0].url == (
+        "wss://relay.example/wsrelay/session-1/api/openclaw/ws"
+    )
+
+
+def test_a_deployment_without_a_proxy_gateway_is_an_upstream_error():
+    """``proxy_base_url`` raises in builds with no sandbox runtime. Letting it
+    out would 500 on a condition that has a name."""
+    from agentclaw.community.plugin_api.sandbox_runtime import (
+        SandboxRuntimeUnavailableError,
+    )
+
+    class _NoRuntime:
+        def proxy_base_url(self):
+            raise SandboxRuntimeUnavailableError("no ARCA runtime here")
+
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(sandbox=_NoRuntime()))
+
+
 def test_proxy_url_is_composed_and_scheme_swapped():
     result = _build(_svc())
     assert result.sockets[0].url == (

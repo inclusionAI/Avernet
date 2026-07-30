@@ -169,7 +169,16 @@ Rules this endpoint must hold:
   second socket is additive. _Corrected 2026-07-30._
 - **The URL is opaque and complete.** Callers concatenate nothing. `target`,
   `type` and the bare `token` are *not* fields — they are what we are trying to
-  stop publishing.
+  stop publishing. That is why the device connection is requested in
+  **`ws_conn_mode="relay"`**: relay is the mode where the provider returns a
+  finished WebSocket URL. Without it, BaaS hands back a bare routing target that
+  only a proxy gateway can complete — and a build with no sandbox runtime (the
+  community build) has none, so the endpoint would fail rather than return the
+  relay URL that was available all along. Asking for one mode also keeps the URL
+  and the token describing the same one. Where no finished URL comes back, the
+  `{base}/proxypass/{target}` composition remains the fallback, and a deployment
+  with no gateway to compose against is a named upstream error, not a 500.
+  _Corrected 2026-07-30._
 - **`expires_at` is mandatory** so a caller knows to re-fetch rather than
   silently failing on an expired token. It is **the issuer's own value** wherever
   the issuer states one: the BaaS path documents that it *ignores* the requested
