@@ -21,6 +21,15 @@ pub enum Action {
     AddSessionParticipant,
     UpdateSessionParticipant,
     RemoveSessionParticipant,
+    CreateGroupInvitation,
+    CreateSessionInvitation,
+    AcceptInvitation,
+    ListFriendships,
+    RemoveFriendship,
+    CreateFriendRequest,
+    ListFriendRequests,
+    AcceptFriendRequest,
+    RejectFriendRequest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
