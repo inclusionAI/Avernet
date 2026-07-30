@@ -5,11 +5,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from agentclaw.community.core.bot_collaborator.services.aicoding.utils.member_management import (
+from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
+    AICodingMemberManagementCapability,
+)
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
     get_template_ext,
-    has_member_management_enabled,
-    is_coding_app_bot,
-    is_member_management_enabled_bot,
+    has_template_member_management_enabled,
 )
 
 
@@ -17,16 +19,20 @@ def _enabled_template_ext() -> dict:
     return {"bot_template_config": {"advanced_config": {"member_management": True}}}
 
 
+def _capability_service() -> MemberManagementCapabilityService:
+    return MemberManagementCapabilityService(
+        engine_capabilities=(AICodingMemberManagementCapability(),),
+    )
+
+
 @pytest.mark.acceptance
 def test_member_management_acceptance_allows_coding_app_bot_or_template_switch():
     """Member-management semantics allow coding-app bots and template-ext switch bots."""
-    assert is_coding_app_bot(
+    service = _capability_service()
+    assert service.uses_member_management_semantics(
         {"active_engine": "claude_code", "template_type": "applicationCoding"}
     ) is True
-    assert is_member_management_enabled_bot(
-        {"active_engine": "claude_code", "template_type": "applicationCoding"}
-    ) is True
-    assert is_member_management_enabled_bot(
+    assert service.uses_member_management_semantics(
         {
             "active_engine": "openclaw",
             "template_type": "chat",
@@ -38,20 +44,20 @@ def test_member_management_acceptance_allows_coding_app_bot_or_template_switch()
 @pytest.mark.acceptance
 def test_member_management_acceptance_rejects_malformed_or_truthy_values():
     """Only ac_templates.ext boolean True enables collaborator member management."""
-    assert is_coding_app_bot(None) is False
-    assert is_member_management_enabled_bot(None) is False
-    assert is_coding_app_bot(
+    service = _capability_service()
+    assert service.uses_member_management_semantics(None) is False
+    assert service.uses_member_management_semantics(
         {"active_engine": "claude_code", "template_type": "chat"}
     ) is False
-    assert has_member_management_enabled(None) is False
-    assert has_member_management_enabled({"bot_template_config": None}) is False
-    assert has_member_management_enabled(
+    assert has_template_member_management_enabled(None) is False
+    assert has_template_member_management_enabled({"bot_template_config": None}) is False
+    assert has_template_member_management_enabled(
         {"bot_template_config": {"advanced_config": None}}
     ) is False
-    assert has_member_management_enabled(
+    assert has_template_member_management_enabled(
         {"bot_template_config": {"advanced_config": {"member_management": "true"}}}
     ) is False
-    assert is_member_management_enabled_bot(
+    assert service.uses_member_management_semantics(
         {
             "active_engine": "openclaw",
             "template_type": "chat",

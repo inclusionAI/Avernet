@@ -17,6 +17,12 @@ from agentclaw.community.core.bot_collaborator.models import (
     CollaboratorRecord,
     CollaboratorRole,
 )
+from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
+    AICodingMemberManagementCapability,
+)
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
 
 
 OWNER = "owner-001"
@@ -51,7 +57,10 @@ def service(collaborator_repo, bot_repo, template_service):
         passport_plugin=Mock(),
         resolver_provider=lambda: Mock(),
         device_fs_dispatcher_provider=lambda: Mock(),
-        template_service=template_service,
+        member_management_capability_service=MemberManagementCapabilityService(
+            template_service=template_service,
+            engine_capabilities=(AICodingMemberManagementCapability(),),
+        ),
     )
     # 隔离协作变更回调副作用（会反查协作者列表 / AgentPass），聚焦类型判断分支
     svc.on_collaboration_changed = Mock()
