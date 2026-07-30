@@ -7,8 +7,8 @@ CreateSessionRequest:
   properties:
     title:
       type: string
-    context:
-      type: string
+    input:
+      $ref: ../domain-models.yaml#/SessionInput
     driver_bot_uuid:
       type: string
     participants:
@@ -34,8 +34,6 @@ UpdateSessionRequest:
   minProperties: 1
   properties:
     title:
-      type: string
-    context:
       type: string
 
 UpdateSessionParticipantRequest:
@@ -139,7 +137,9 @@ GroupSessionsPath:
           $ref: ../domain-models.yaml#/SessionStatus
     responses:
       "200":
-        description: Matching sessions after authorization and pagination.
+        description: >-
+          Sessions ordered by created_at descending (session_id ascending
+          tie-breaker), then paginated with offset/limit.
         content:
           application/json:
             schema:
@@ -405,7 +405,9 @@ SessionMessagesPath:
           default: 50
     responses:
       "200":
-        description: Message history page.
+        description: >-
+          Messages ordered by session_seq ascending, paginated with
+          offset/limit.
         content:
           application/json:
             schema:

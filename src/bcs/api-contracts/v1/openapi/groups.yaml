@@ -51,7 +51,10 @@ ListBotGroupsPath:
             - state_machine
     responses:
       "200":
-        description: Matching groups after relation filtering and pagination.
+        description: >-
+          Groups ordered by created_at descending (group_id ascending
+          tie-breaker) after relation/strategy/kind filtering and
+          deduplication, then paginated with offset/limit.
         content:
           application/json:
             schema:

@@ -590,8 +590,8 @@ SessionDetail:
       $ref: "#/SessionStatus"
     title:
       type: string
-    context:
-      type: string
+    input:
+      $ref: "#/SessionInput"
     participants:
       type: array
       items:
@@ -602,6 +602,16 @@ SessionDetail:
     updated_at:
       type: integer
       minimum: 0
+
+SessionInput:
+  type: object
+  additionalProperties: false
+  description: >-
+    Optional task input for a session. If omitted on creation, the session
+    reuses the parent group's context as its task.
+  properties:
+    query:
+      type: string
 
 SessionPage:
   type: object
