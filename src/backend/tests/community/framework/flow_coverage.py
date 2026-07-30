@@ -63,8 +63,17 @@ _SESSION_RESOURCES_EXEMPT_REASON = (
     "covers the module with core and HTTP API tests."
 )
 
+_ENGINE_RUNTIME_EXEMPT_REASON = (
+    "Every path in this module ends in an HTTP call to a bot's engine adapter, "
+    "which singlebox has no container runtime to provide — the community "
+    "DeviceAdapterTransport is a no-op returning success:false. Covered instead "
+    "by relay unit tests over the in-memory transport plus endpoint and "
+    "cross-tenant isolation tests on the /openapi/v1 surface."
+)
+
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "aicoding": _EXEMPT_REASON,
+    "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
     "bot_dormant": _EXEMPT_REASON,
     "approval": _EXEMPT_REASON,

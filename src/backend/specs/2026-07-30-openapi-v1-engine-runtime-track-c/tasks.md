@@ -34,7 +34,7 @@ All paths are relative to `src/backend/`. Source package is
   and a regression guard asserts the emitted key set equals the documented
   model's fields.
 
-## Task 2: Create the `core/engine_runtime` module skeleton and error types
+## Task 2: Create the `core/engine_runtime` module skeleton and error types  `[x]`
 - **Goal:** Stand up the new core module with its models, errors and Context
   Boundary README, with no relay logic yet.
 - **Files:**
@@ -43,16 +43,21 @@ All paths are relative to `src/backend/`. Source package is
   - `…/core/engine_runtime/models.py` (new)
   - `…/core/engine_runtime/errors.py` (new)
 - **Done when:**
-  - [ ] `models.py` defines `EngineResult(data, total, warning)`,
+  - [x] `models.py` defines `EngineResult(data, total, warning)`,
         `ConnectionResult`, `SocketInfo`.
-  - [ ] `errors.py` defines `EngineCapabilityUnsupportedError`,
+  - [x] `errors.py` defines `EngineCapabilityUnsupportedError`,
         `EngineDeviceNotReadyError`, `EngineUpstreamError`,
         `EngineBotTypeNotSupportedError` — semantic state only, **no HTTP
         status** (Rule 7, `docs/arch/arch.rules.md:203`).
-  - [ ] `README.md` carries a `## Context Boundary` yaml block in the shape of
+  - [x] `README.md` carries a `## Context Boundary` yaml block in the shape of
         `…/core/cron/README.md:5-25`, declaring every cross-module import the
         relay will make.
-  - [ ] `tests/community/architecture/` passes.
+  - [x] **Also required:** a new core package must be declared in the E2E
+        coverage manifest (`tests/community/framework/flow_coverage.py`) or
+        `test_e2e_module_coverage.py` fails — there is no third state between
+        covered and exempt. Exempt, with a specific reason: every path ends in
+        an HTTP call to a device singlebox cannot provide.
+  - [x] `tests/community/architecture/` passes.
 - **Depends on:** —
 
 ## Task 3: Implement `EngineRuntimeRelay`
