@@ -66,12 +66,21 @@ criteria below are about handlers, contracts and tests, not reachability._
 - [x] Sixteen endpoints are served, all scoped to a single bot the caller
       owns: seven for sessions, three read-only for engine state, two for
       models, three for approvals, and one for connection.
-- [x] The seven session endpoints serve personal bots only; on a service bot
-      each answers the same explicit "not supported for this bot type" outcome,
-      never a partial result and never another caller's data. The other nine
-      endpoints serve both bot types.
+- [x] The seven session endpoints **and the connection endpoint** serve
+      personal bots only; on a service bot each answers the same explicit "not
+      supported for this bot type" outcome, never a partial result and never
+      another caller's data. Connection is gated for the same reason the
+      session routes are, not a separate one: the socket it publishes is an
+      operator channel that advertises the session and approval methods and
+      grants `operator.admin`, so serving it on a service bot would return by
+      socket exactly the data the session routes refuse by HTTP. The other
+      eight endpoints serve both bot types.
 - [x] Every response uses the public API's standard envelope, with list
-      endpoints returning the standard page shape and an accurate total.
+      endpoints returning the standard page shape. Totals are accurate where
+      the underlying runtime can produce one. The two paged session routes
+      cannot — neither yields a count without reading every record — so they
+      report a documented lower bound that becomes exact on the last page,
+      rather than an exact-looking number that would be wrong.
 - [x] Every endpoint resolves the caller's identity from the request principal
       and serves only bots belonging to that caller and tenant. A runtime call
       naming a bot owned by someone else, or belonging to another tenant, is

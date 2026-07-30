@@ -256,6 +256,38 @@ def test_paging_past_the_start_of_history_is_empty(client, relay):
     assert data["items"] == []
 
 
+def test_the_history_window_is_capped_so_a_page_number_cannot_amplify(client, relay):
+    """``page_size`` is capped at 100 but ``page`` is only ``ge=1``, and the
+    tail-limited window grows with the page number. Unclamped, this asked a
+    tenant's device for ~100M messages to answer with at most 100."""
+    relay.results = [EngineResult(data=_messages(1))]
+    ok(client.get(
+        f"{_base()}/{SESSION_ID}/messages",
+        params={"page": 1000000, "page_size": 100},
+    ))
+    assert relay.calls[0]["params"] == {"offset": 0, "limit": 5001}
+
+
+def test_the_cap_does_not_bite_within_the_served_depth(client, relay):
+    """A page inside the documented depth still asks for exactly its window."""
+    relay.results = [EngineResult(data=_messages(1))]
+    ok(client.get(
+        f"{_base()}/{SESSION_ID}/messages", params={"page": 10, "page_size": 100}
+    ))
+    assert relay.calls[0]["params"] == {"offset": 0, "limit": 1001}
+
+
+def test_a_page_past_the_capped_depth_reads_as_end_of_history(client, relay):
+    """The clamp means the deepest fetch is bounded, so a page beyond it falls
+    off the front of the tail — the same empty page a short history gives."""
+    relay.results = [EngineResult(data=_messages(5001))]
+    data = ok(client.get(
+        f"{_base()}/{SESSION_ID}/messages",
+        params={"page": 1000, "page_size": 100},
+    ))
+    assert data["items"] == []
+
+
 def test_the_session_window_stays_page_sized(client, relay):
     """The session list paginates a materialised list, so ``limit`` there really
     is a page size and must not grow with the offset."""

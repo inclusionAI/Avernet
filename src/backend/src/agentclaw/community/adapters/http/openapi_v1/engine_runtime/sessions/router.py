@@ -60,6 +60,15 @@ _SUPPORTED_BOT_TYPE = "personal"
 #: and both paged routes answer with :class:`BoundedPage` to say so.
 _LOOKAHEAD = 1
 
+#: How far back message history is served, in messages. The history fetch is
+#: tail-limited and its cost is the whole window, not the page — see
+#: :func:`_history_window` — so without a ceiling the page number alone
+#: multiplies into an arbitrarily large upstream request. Past this depth the
+#: endpoint returns an empty page, which is the documented end-of-history
+#: signal. Generous for a conversation; bounded enough that a page number
+#: cannot be turned into device load.
+_MAX_HISTORY_DEPTH = 5000
+
 
 def _require_personal_bot(
     relay: EngineRuntimeRelayProtocol, bot_id: str, owner_id: str
@@ -178,9 +187,18 @@ def _history_window(page_params: Any) -> dict[str, int]:
     ``offset + page_size + 1`` messages and cut the page out of that tail
     ourselves in :func:`_history_page`, which is the one shape the engine's
     "newest N" contract can serve exactly.
+
+    That request grows with the page number, and ``page`` has no upper bound —
+    ``page_size`` is capped at 100 but the page index is only ``ge=1``. Since
+    both bundled adapters forward ``limit`` upstream *before* slicing, an
+    unclamped window would let ``page=1000000`` ask a tenant's device for a
+    hundred million messages to answer with at most a hundred. The window is
+    therefore clamped to :data:`_MAX_HISTORY_DEPTH`, which is also the depth
+    the endpoint documents itself as serving.
     """
     offset = (page_params.page - 1) * page_params.page_size
-    return {"offset": 0, "limit": offset + page_params.page_size + _LOOKAHEAD}
+    want = offset + page_params.page_size + _LOOKAHEAD
+    return {"offset": 0, "limit": min(want, _MAX_HISTORY_DEPTH + _LOOKAHEAD)}
 
 
 def _page(
@@ -395,6 +413,9 @@ async def list_session_messages(
 
     Page 1 is the most recent messages; paging forward walks back through the
     history. Messages are chronological within a page.
+
+    History is served to a depth of 5000 messages. Pages past that depth come
+    back empty, the same signal as reaching the end of a shorter history.
     """
     owner_id = caller_owner_id(principal)
     _require_personal_bot(relay, bot_id, owner_id)

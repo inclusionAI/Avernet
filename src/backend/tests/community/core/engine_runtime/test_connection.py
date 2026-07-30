@@ -18,6 +18,7 @@ from agentclaw.community.core.engine_runtime.connection import (
     EngineConnectionService,
 )
 from agentclaw.community.core.engine_runtime.errors import (
+    EngineBotTypeNotSupportedError,
     EngineDeviceNotReadyError,
     EngineUpstreamError,
 )
@@ -27,15 +28,20 @@ BOT = "bot-1"
 
 
 class _Bots:
-    def __init__(self, engine="openclaw"):
+    def __init__(self, engine="openclaw", bot_type="personal"):
         self.engine = engine
+        self.bot_type = bot_type
         self.calls = []
 
     def get_bot(self, bot_id, user_id):
         self.calls.append((bot_id, user_id))
         if (bot_id, user_id) != (BOT, OWNER):
             raise BotNotFoundError(bot_id)
-        return {"bot_id": bot_id, "active_engine": self.engine}
+        return {
+            "bot_id": bot_id,
+            "bot_type": self.bot_type,
+            "active_engine": self.engine,
+        }
 
 
 class _Resolver:
@@ -298,3 +304,40 @@ def test_result_carries_no_target_type_or_bare_token():
     text = repr(_build(_svc()))
     assert "'tgt'" not in text  # the target appears only inside the URL
     assert "type=" not in text
+
+
+# ── bot-type gate ─────────────────────────────────────────────────────────
+
+
+def test_a_service_bot_is_refused_before_a_device_is_touched():
+    """The published socket is an operator channel, not a chat channel.
+
+    The engine's WebSocket server advertises the ``sessions.*`` and
+    ``exec.approvals.*`` methods and grants ``operator.admin``, and one service
+    bot's device holds every caller's sessions. Serving this endpoint there
+    would hand the owner over a socket precisely what the sessions group
+    answers 501 to refuse over HTTP.
+    """
+    resolver = _Resolver(raises=AssertionError("must not be reached"))
+    devices = _Devices()
+    svc = _svc(bots=_Bots(bot_type="service"), resolver=resolver, devices=devices)
+
+    with pytest.raises(EngineBotTypeNotSupportedError):
+        _build(svc)
+
+    # Refused at composition time — no device call was made on the way out.
+    assert devices.kwargs is None
+
+
+def test_an_unknown_bot_type_is_refused_rather_than_assumed_personal():
+    """The gate is an allowlist. A bot type this build has never heard of is
+    not silently treated as the permissive case."""
+    with pytest.raises(EngineBotTypeNotSupportedError):
+        _build(_svc(bots=_Bots(bot_type="")))
+    with pytest.raises(EngineBotTypeNotSupportedError):
+        _build(_svc(bots=_Bots(bot_type="something-new")))
+
+
+def test_a_personal_bot_still_gets_its_socket():
+    result = _build(_svc(bots=_Bots(bot_type="personal")))
+    assert [s.kind for s in result.sockets] == ["chat"]

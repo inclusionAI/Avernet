@@ -215,10 +215,18 @@ All paths are relative to `src/backend/`. Source package is
         Starlette. Percent-encoded `/` does *not* survive routing, so an id
         containing a slash would be unaddressable; no engine id format produces
         one. No encoding scheme was invented.
-  - [x] `Page.total` is exact, via fetch-then-slice as
-        `openapi_v1/routines/router.py` does, capped at 500 engine-side items.
-        When the cap bites, `total` is a floor and the truncation is **logged**
-        rather than silently presented as complete.
+  - [x] `total` is a documented **lower bound**, not an exact count. The
+        fetch-then-slice plan was abandoned once it was clear neither route can
+        produce an exact total without reading every record — a `chat.history`
+        RPC per session for the list, and nothing at all for history, which
+        tail-limits rather than paginating. Both routes answer with
+        `SessionPage` / `MessagePage` (subclasses of `BoundedPage`) whose
+        `total` becomes exact on a page shorter than `page_size`; the engine's
+        own total is preferred where it reports one. See plan.md "Risks".
+  - [x] History depth is capped at 5000 messages (`_MAX_HISTORY_DEPTH`). The
+        tail-limited window grows with the page number, and `page` is unbounded
+        above, so the cap keeps a page index from multiplying into a huge
+        upstream fetch. Pages past the cap return empty.
   - [x] `extra="forbid"`; `user_id`, `engine`, `agent_id` rejected → `422`.
   - [x] **Gated on `bot_type == "personal"`** (plan assumption 6). All seven
         routes raise `EngineBotTypeNotSupportedError` → `501` on a `service`

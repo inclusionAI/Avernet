@@ -482,10 +482,22 @@ it (rule C2), but the two must never be merged by a later reader.
 - **2026-07-30 — `session-favorites` and the `/api/openclaw` HTTP trio
   (+ default-config, zero-check) deferred**, not cancelled. Both are additive:
   adding them later breaks no published contract.
-- **2026-07-30 — the sessions group serves `personal` bots only**; `service`
-  gets `501`. `BotType` is `Literal["personal", "service"]` and PR #494 already
-  lets an external tenant create either, so this is live, not hypothetical. The
-  other four groups serve both types.
+- **2026-07-30 — the sessions group and the connection endpoint serve
+  `personal` bots only**; `service` gets `501`. `BotType` is
+  `Literal["personal", "service"]` and PR #494 already lets an external tenant
+  create either, so this is live, not hypothetical. The other three groups
+  serve both types.
+
+  Connection was added to this ruling during review, and for the sessions
+  group's reason rather than one of its own. The socket it publishes is not
+  chat-scoped however it is labelled: the engine's WebSocket server advertises
+  `sessions.list`, `sessions.patch`, `sessions.delete`, `sessions.reset` and
+  the `exec.approvals` methods in its `hello`, grants `operator.admin`, and
+  forwards unhandled methods to the active engine's relay plugin. Publishing
+  that for a `service` bot would return over a socket exactly the data the
+  sessions group answers `501` to withhold — a closed front door beside an open
+  window. Scoping the token itself would take an engine-side change; the gate
+  is the part this surface owns.
 - **2026-07-30 — chat stays a WebSocket.** No `POST /chat`, no SSE. The public
   API hands back a URL and headers; the caller owns the socket.
 

@@ -403,11 +403,22 @@ and matches how cron behaves today, but the tests must not assume a live device.
   list handlers return a flat list and never populate `ApiResponse.total`
   (`src/engine/.../api/session/router.py:132`), but `Page.total` is a required
   `int` (`contracts.py:88`).
-  **Mitigation:** follow the routines precedent
-  (`openapi_v1/routines/router.py:126-131`) — fetch the engine's list, slice in
-  the handler, report an exact `total`. Cap the engine-side request so a bot
-  with thousands of sessions cannot force an unbounded fetch, and record the cap
-  in the response docs. Revisit if/when the engine reports `total`.
+  **Mitigation (superseded during implementation).** The original plan was to
+  follow the routines precedent (`openapi_v1/routines/router.py:126-131`) —
+  fetch the engine's list, slice in the handler, report an exact `total`. That
+  does not survive contact with these two routes. An exact count means reading
+  every record, which for the session list costs a `chat.history` RPC *per
+  session* to enrich, and for message history is not obtainable at all: the
+  route tail-limits rather than paginating, so there is no prefix to count.
+  Reporting an exact-looking number would have meant reporting a wrong one.
+
+  **Shipped instead:** both paged routes answer with `SessionPage` /
+  `MessagePage`, subclasses of a `BoundedPage` whose `total` is documented as a
+  lower bound that becomes exact once a page shorter than `page_size` is
+  reached. The engine's own `total` is preferred whenever it fills one. The
+  engine-side cap survived in a different form — a 5000-message depth limit on
+  history (`_MAX_HISTORY_DEPTH`), since the tail-limited fetch grows with the
+  page number. Revisit if/when the engine reports `total` or offers a cursor.
 
 - **Risk: the connection endpoint needs two device calls** (capabilities, then
   connection), doubling its failure surface.

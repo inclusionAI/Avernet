@@ -31,6 +31,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.core.devices.models import OperatorContext
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.engine_runtime.errors import (
+    EngineBotTypeNotSupportedError,
     EngineDeviceNotReadyError,
     EngineUpstreamError,
 )
@@ -66,6 +67,39 @@ _CHAT_WS_PATHS = {
 # which a header-only connection does not supply.)
 
 
+#: The only bot type a socket is published for — the same rule, and the same
+#: reason, as the sessions group's gate.
+_SUPPORTED_BOT_TYPE = "personal"
+
+
+def _require_personal_bot(bot_type: str, bot_id: str) -> None:
+    """Reject non-personal bots before a socket is composed.
+
+    The socket this endpoint publishes is **not** chat-scoped, however it is
+    labelled. The engine's WebSocket server answers ``hello`` by advertising
+    ``sessions.list``, ``sessions.patch``, ``sessions.delete``,
+    ``sessions.reset`` and the ``exec.approvals`` methods, grants
+    ``operator.admin``, and forwards any method it does not handle itself to
+    the active engine's relay plugin. A caller holding the returned credential
+    therefore has an operator channel, not a chat channel.
+
+    On a ``service`` bot that is the same exposure the sessions group already
+    refuses. The engine has no tenant axis and its session list is not scoped
+    per caller, so one device holds every caller's sessions; the sessions group
+    answers 501 rather than let the bot's owner enumerate them. Publishing this
+    socket for the same bot would hand the same owner the same data over a
+    different transport — a 501 on the front door with the window left open.
+
+    Gated here rather than in the router because the rule is about what may be
+    *composed*, not about how it is served: any future caller of ``build`` is
+    covered without repeating the check.
+    """
+    if bot_type != _SUPPORTED_BOT_TYPE:
+        raise EngineBotTypeNotSupportedError(
+            f"connections are not served for bot_type={bot_type!r}"
+        )
+
+
 class EngineConnectionService:
     """Compose the sockets a caller may open against their bot."""
 
@@ -93,6 +127,7 @@ class EngineConnectionService:
         can never widen it.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
+        _require_personal_bot(str(bot.get("bot_type") or ""), bot_id)
         engine = str(bot.get("active_engine") or "")
 
         try:
