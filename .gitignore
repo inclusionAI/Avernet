@@ -76,6 +76,7 @@ src/bcs/.agent
 *.claude
 *.codex
 CLAUDE.local.md
+CODE_REVIEW.md
 .planning
 .dev
 .private_docs/
