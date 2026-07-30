@@ -250,6 +250,7 @@ class SkillsPoolRollbackService:
             )
 
         state = self._layouts.get(scope)
+        began_rollback = False
         if not state.persisted:
             return SkillsPoolRollbackResult(SkillsPoolRollbackOutcome.NOT_FOUND)
         if state.phase is SkillLayoutPhase.POOL_ACTIVE:
@@ -264,6 +265,7 @@ class SkillsPoolRollbackService:
                 return SkillsPoolRollbackResult(
                     SkillsPoolRollbackOutcome.STATE_RACE_LOST
                 )
+            began_rollback = True
             state = self._layouts.get(scope)
         elif state.phase not in {
             SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING,
@@ -277,7 +279,7 @@ class SkillsPoolRollbackService:
             return SkillsPoolRollbackResult(
                 SkillsPoolRollbackOutcome.STALE_GENERATION
             )
-        if not self._layouts.try_acquire_rollback_lease(
+        if not began_rollback and not self._layouts.try_acquire_rollback_lease(
             scope=scope,
             rollback_generation=rollback_generation,
             lease_owner=lease_owner,
@@ -381,15 +383,8 @@ class SkillsPoolRollbackService:
             state.last_probe_evidence
         )
         if state.phase is SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING:
-            pre_cutover_mapping = await self._publish_and_verify_mappings(
-                scope=scope,
-                user_id=user_id,
-                mappings=mappings,
-                rollback_generation=rollback_generation,
-                lease_owner=lease_owner,
-            )
-            if pre_cutover_mapping is not None:
-                return pre_cutover_mapping
+            # Pool cutover retires Legacy local storage, so Legacy mappings
+            # cannot be published until the runtime has rebuilt that corpus.
             cutover = await self._runtime.rollback_to_legacy(
                 bot_id=scope.bot_id,
                 user_id=user_id,
