@@ -84,9 +84,10 @@ criteria below are about handlers, contracts and tests, not reachability._
       together with an expiry the caller can act on. It never returns a routing
       target, a connection type, or a bare credential as a separate field, and
       the caller never has to assemble an address itself.
-- [x] The connection endpoint lists exactly the sockets the bot's current engine
-      supports — no more, no fewer — and never contradicts what the capabilities
-      endpoint reports.
+- [x] The connection endpoint lists exactly the sockets offered in v1 — chat
+      only. A terminal socket was implemented and removed, because this spec
+      excludes an interactive shell at any scope and the reference doc had
+      contradicted it.
 - [x] An operation the bot's engine does not support is answered as an explicit,
       documented "not supported by this bot" outcome that names the capabilities
       endpoint, not as a generic server error.
