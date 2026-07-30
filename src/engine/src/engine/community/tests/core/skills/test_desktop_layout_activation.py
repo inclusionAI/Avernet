@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from engine.community.config import RepoDelivery
 from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
@@ -136,6 +135,10 @@ def test_desktop_download_layout_uses_public_cutover_and_rollback(
         repo_delivery=RepoDelivery.DOWNLOAD,
     )
     assert active.status is RuntimeLayoutInspectionStatus.READY
+    if engine in {"aicoding", "hermes"}:
+        assert active.evidence["checks"]["stable_repo_bridge_valid"] is True
+    else:
+        assert "stable_repo_bridge_valid" not in active.evidence["checks"]
 
     (layout.pool_local / "handmade/SKILL.md").write_text("pool")
     rolled_back = ROLLBACK[engine](

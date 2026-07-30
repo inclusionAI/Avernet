@@ -768,6 +768,23 @@ def inspect_runtime_layout(
                     reason="active_managed_entry_invalid",
                     preparation_id=preparation_id,
                 )
+        active_checks = {
+            "marker_valid": True,
+            "active_marker_valid": True,
+            "pool_local_valid": True,
+            (
+                "pool_repo_mounted"
+                if effective_repo_delivery is RepoDelivery.MOUNT
+                else "pool_repo_downloaded"
+            ): True,
+            "pool_repo_readable": True,
+            "pool_mappings_valid": True,
+            "legacy_storage_entries_absent": (
+                active_marker["activation_state"] == "active"
+            ),
+        }
+        if engine in {"aicoding", "hermes"}:
+            active_checks["stable_repo_bridge_valid"] = True
         return RuntimeLayoutInspection(
             status=RuntimeLayoutInspectionStatus.READY,
             engine=engine,
@@ -778,22 +795,7 @@ def inspect_runtime_layout(
                 marker=marker,
                 activation_state=active_marker["activation_state"],
                 mapping_contract_version=mapping_contract_version,
-                checks={
-                    "marker_valid": True,
-                    "active_marker_valid": True,
-                    "pool_local_valid": True,
-                    (
-                        "pool_repo_mounted"
-                        if effective_repo_delivery is RepoDelivery.MOUNT
-                        else "pool_repo_downloaded"
-                    ): True,
-                    "pool_repo_readable": True,
-                    "pool_mappings_valid": True,
-                    "legacy_storage_entries_absent": (
-                        active_marker["activation_state"] == "active"
-                    ),
-                    "stable_repo_bridge_valid": (engine in {"aicoding", "hermes"}),
-                },
+                checks=active_checks,
             ),
         )
     if effective_repo_delivery is RepoDelivery.DOWNLOAD:

@@ -10,9 +10,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from engine.community.api.skills.router import router as skills_router
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
@@ -20,6 +17,9 @@ from engine.community.core.engine.exceptions import (
     CapabilityNotSupportedError,
 )
 from engine.community.core.engine.registry import EngineRegistry
+from engine.community.core.skills.layout_planner import (
+    SkillLayoutResolutionError,
+)
 from engine.community.core.skills.models import (
     CleanSymlinksResult,
     PoolLayoutActivationResult,
@@ -35,6 +35,8 @@ from engine.community.core.skills.models import (
     SyncSymlinksResult,
 )
 from engine.community.manager import EngineManager
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 class _EngineWithSkills(BaseEngine):
@@ -414,6 +416,58 @@ def test_pool_mapping_routes_propagate_logical_v2_contract(
     plugin.verify_pool_mappings.assert_awaited_once_with(
         [intent],
         mapping_contract_version=version,
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        (
+            "activate_pool_layout",
+            "/api/skills/layout/activate",
+            {
+                "migration_generation": "generation-1",
+                "preparation_id": "preparation-1",
+                "registered_local_names": [],
+                "mappings": [],
+            },
+        ),
+        (
+            "publish_pool_mappings",
+            "/api/skills/layout/mappings/publish",
+            {"mappings": []},
+        ),
+        (
+            "verify_pool_mappings",
+            "/api/skills/layout/mappings/verify",
+            {"mappings": []},
+        ),
+    ],
+)
+def test_pool_mapping_routes_map_layout_resolution_errors_to_400(
+    client,
+    rich_manager,
+    method: str,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    plugin = MagicMock()
+    setattr(
+        plugin,
+        method,
+        AsyncMock(
+            side_effect=SkillLayoutResolutionError(
+                "mapping_contract_version is unsupported"
+            )
+        ),
+    )
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "mapping_contract_version is unsupported"
     )
 
 

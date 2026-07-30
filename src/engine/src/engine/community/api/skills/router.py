@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
-
 from engine.community.api.caps import check_capability
 from engine.community.api.response import ApiResponse
 from engine.community.api.skills.schemas import (
@@ -36,6 +34,9 @@ from engine.community.api.skills.schemas import (
 )
 from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
+from engine.community.core.skills.layout_planner import (
+    SkillLayoutResolutionError,
+)
 from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
@@ -58,6 +59,7 @@ from engine.community.core.skills.models import (
 from engine.community.core.skills.models import (
     PoolQuarantineCleanupRequest as PoolQuarantineCleanupCommand,
 )
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 log = logging.getLogger("api-skills")
@@ -98,6 +100,8 @@ async def probe_runtime_skills_layout(
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    except SkillLayoutResolutionError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return RuntimeLayoutProbeApiResponse(
         success=True,
         data=RuntimeLayoutProbeResponse.model_validate(result.to_data()),
@@ -127,6 +131,8 @@ async def activate_runtime_skills_layout(
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    except SkillLayoutResolutionError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return PoolLayoutActivateApiResponse(
         success=result.committed,
         data=PoolLayoutActivateResponse.model_validate(result.to_data()),
@@ -157,6 +163,8 @@ async def rollback_runtime_skills_layout(
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    except SkillLayoutResolutionError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return PoolLayoutActivateApiResponse(
         success=result.committed,
         data=PoolLayoutActivateResponse.model_validate(result.to_data()),
@@ -212,6 +220,8 @@ async def verify_runtime_skill_mappings(
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    except SkillLayoutResolutionError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return ApiResponse(
         success=result.valid,
         data=result.to_data(),
@@ -242,6 +252,8 @@ async def publish_runtime_skill_mappings(
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    except SkillLayoutResolutionError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return ApiResponse(
         success=result.published,
         data=result.to_data(),
