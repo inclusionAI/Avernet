@@ -60,9 +60,15 @@ class SessionGetUploadUrlRequest(BaseModel):
     content_type: str | None = Field(
         default=None,
         min_length=1,
-        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9!#$&.+\-^_]*/[a-zA-Z0-9][a-zA-Z0-9!#$&.+\-^_]*$",
+        pattern=(
+            r"^[a-zA-Z0-9][a-zA-Z0-9!#$&.+\-^_]*/[a-zA-Z0-9][a-zA-Z0-9!#$&.+\-^_]*"
+            r"(\s*;\s*[a-zA-Z0-9][a-zA-Z0-9!#$&.+\-^_]*\s*=\s*"
+            r"([a-zA-Z0-9][a-zA-Z0-9!#$&.+\-^_]*|\"[^\"]*\"))*$"
+        ),
         description=(
-            "Optional MIME type for the uploaded file (e.g. image/png). "
+            "Optional MIME type for the uploaded file, per RFC 2045 / RFC 7231. "
+            "Supports both bare media type (e.g. image/png) and media type "
+            "with parameters (e.g. text/markdown; charset=utf-8). "
             "When set, the presigned PUT URL's signature includes Content-Type, "
             "and OSS will reject PUT requests with a mismatched Content-Type "
             "header (403). When None (default), no Content-Type constraint is applied."
