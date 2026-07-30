@@ -530,6 +530,40 @@ def test_aicoding_rollback_rebuilds_legacy_from_current_pool(
     assert active_repo.is_dir()
 
 
+def test_aicoding_rollback_restoration_io_failure_stays_pending(
+    tmp_path: Path,
+) -> None:
+    home, _, _, _, _, pool_repo = _prepared_home(tmp_path)
+    activated = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+
+    def restore_active_repo(_generation: str, _preparation_id: str):
+        raise OSError(5, "mount failed")
+
+    rolled_back = rollback_aicoding_pool(
+        rollback_generation="rollback-1",
+        registered_local_names=["handmade"],
+        home=home,
+        restore_active_repo=restore_active_repo,
+    )
+
+    assert rolled_back.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert rolled_back.evidence["reason"] == "active_repo_restoration_failed"
+    assert rolled_back.evidence["restoration_reason"] == (
+        "active_repo_restoration_io_error"
+    )
+    assert (
+        home / ".aicoding" / "workspace" / "skills-pool" / ".pool-active"
+    ).is_file()
+
+
 def test_aicoding_publishes_and_verifies_only_its_pool_sources(
     tmp_path: Path,
 ) -> None:
