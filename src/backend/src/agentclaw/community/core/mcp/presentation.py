@@ -115,3 +115,33 @@ def is_network_type_visible(mcp_data: dict[str, Any]) -> bool:
     if not network_types:
         return True
     return any(nt in ALLOWED_NETWORK_TYPES for nt in network_types)
+
+
+def primary_transport_protocol(mcp_data: dict[str, Any]) -> str | None:
+    """The transport protocol to advertise for a server in a flat projection.
+
+    MCP Center carries ``transportProtocol`` per ``endpoints`` entry, not at the
+    server top level (``config_compose``/``local_mcp_registry`` both read it from
+    there), so a flat projection reading only the top level always yields
+    ``None``. Prefer an endpoint on an allowed network type — the ones this
+    surface would actually use — then any endpoint that declares a protocol;
+    fall back to a top-level value for records that do carry one, else ``None``.
+    First-in-list order breaks ties deterministically.
+    """
+    endpoints = mcp_data.get("endpoints")
+    if isinstance(endpoints, list):
+        with_protocol = [
+            ep
+            for ep in endpoints
+            if isinstance(ep, dict) and isinstance(ep.get("transportProtocol"), str)
+        ]
+        allowed = [
+            ep
+            for ep in with_protocol
+            if ep.get("networkType") in ALLOWED_NETWORK_TYPES
+        ]
+        for pool in (allowed, with_protocol):
+            if pool:
+                return pool[0]["transportProtocol"]
+    top = mcp_data.get("transportProtocol")
+    return top if isinstance(top, str) else None

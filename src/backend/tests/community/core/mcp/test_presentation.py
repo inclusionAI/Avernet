@@ -12,6 +12,7 @@ from agentclaw.community.core.mcp.presentation import (
     is_network_type_visible,
     mask_api_key,
     normalize_network_types,
+    primary_transport_protocol,
     strip_ext_info,
     strip_ext_info_from_list,
 )
@@ -141,3 +142,35 @@ class TestNormalizeNetworkTypes:
 
     def test_non_string_members_dropped(self):
         assert normalize_network_types({"networkTypes": ["OFFICE", None, 3]}) == ["OFFICE"]
+
+
+class TestPrimaryTransportProtocol:
+    def test_read_from_endpoint_not_top_level(self):
+        # Real MCP Center records carry transportProtocol per endpoint.
+        data = {
+            "endpoints": [
+                {"env": "PRE", "networkType": "INTERNET",
+                 "transportProtocol": "STREAMABLE_HTTP", "url": "https://x"}
+            ]
+        }
+        assert primary_transport_protocol(data) == "STREAMABLE_HTTP"
+
+    def test_prefers_allowed_network_endpoint(self):
+        data = {
+            "endpoints": [
+                {"networkType": "INTRANET", "transportProtocol": "SSE"},
+                {"networkType": "INTERNET", "transportProtocol": "STREAMABLE_HTTP"},
+            ]
+        }
+        assert primary_transport_protocol(data) == "STREAMABLE_HTTP"
+
+    def test_falls_back_to_any_endpoint_with_protocol(self):
+        data = {"endpoints": [{"networkType": "INTRANET", "transportProtocol": "SSE"}]}
+        assert primary_transport_protocol(data) == "SSE"
+
+    def test_falls_back_to_top_level_when_no_endpoints(self):
+        assert primary_transport_protocol({"transportProtocol": "SSE"}) == "SSE"
+
+    def test_none_when_absent_everywhere(self):
+        assert primary_transport_protocol({}) is None
+        assert primary_transport_protocol({"endpoints": [{"url": "https://x"}]}) is None

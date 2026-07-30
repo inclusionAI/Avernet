@@ -52,6 +52,7 @@ from agentclaw.community.core.mcp.presentation import (
     ALLOWED_NETWORK_TYPES,
     is_network_type_visible,
     normalize_network_types,
+    primary_transport_protocol,
     strip_ext_info,
 )
 from agentclaw.community.di import Injected
@@ -85,7 +86,7 @@ def _to_server(data: dict[str, Any]) -> McpServer:
         name=data.get("name") or "",
         description=data.get("description"),
         network_types=normalize_network_types(data),
-        transport_protocol=data.get("transportProtocol"),
+        transport_protocol=primary_transport_protocol(data),
     )
 
 

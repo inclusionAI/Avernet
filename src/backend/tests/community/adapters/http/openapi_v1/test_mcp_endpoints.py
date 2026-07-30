@@ -190,6 +190,25 @@ def test_projection_reads_singular_network_type(client, market):
     assert listed["items"][0]["network_types"] == ["INTERNET"]
 
 
+def test_projection_reads_transport_protocol_from_endpoints(client, market):
+    # Real MCP Center records carry transportProtocol on endpoints, not the top
+    # level, so the flat projection must read it from there or it serializes null.
+    rec = _server()
+    rec.pop("transportProtocol")
+    rec["endpoints"] = [
+        {"env": "PRE", "networkType": "INTERNET",
+         "transportProtocol": "STREAMABLE_HTTP", "url": "https://x"}
+    ]
+    market.get_mcp_detail.return_value = rec
+    market.get_mcp_list.return_value = {"success": True, "data": [rec], "total": 1}
+
+    detail = _ok(client.get("/openapi/v1/bots/mcp/servers/mcp.weather"))
+    assert detail["transport_protocol"] == "STREAMABLE_HTTP"
+
+    listed = _ok(client.get("/openapi/v1/bots/mcp/servers"))
+    assert listed["items"][0]["transport_protocol"] == "STREAMABLE_HTTP"
+
+
 # ── permission ──────────────────────────────────────────────────────
 
 
