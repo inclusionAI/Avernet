@@ -36,7 +36,6 @@ impl GroupService for NoopGroupService {
 
     async fn delete(&self, _command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
         Ok(DeleteResult {
-            group_id: "group-1".into(),
             deleted: false,
         })
     }

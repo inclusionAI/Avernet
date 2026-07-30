@@ -82,10 +82,8 @@ impl GroupService for FakeGroupService {
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        let group_id = command.group_id.clone();
         *self.deleted.lock().expect("delete lock") = Some(command);
         Ok(DeleteResult {
-            group_id,
             deleted: true,
         })
     }

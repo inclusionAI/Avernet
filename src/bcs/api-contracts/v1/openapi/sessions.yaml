@@ -26,7 +26,7 @@ SessionParticipantInput:
     bot_uuid:
       type: string
     mode:
-      $ref: ../domain-models.yaml#/ParticipantMode
+      $ref: ../domain-models.yaml#/BotParticipantMode
 
 UpdateSessionRequest:
   type: object
@@ -44,7 +44,7 @@ UpdateSessionParticipantRequest:
   minProperties: 1
   properties:
     mode:
-      $ref: ../domain-models.yaml#/ParticipantMode
+      $ref: ../domain-models.yaml#/BotParticipantMode
 
 GroupSessionsPath:
   post:

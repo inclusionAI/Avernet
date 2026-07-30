@@ -322,7 +322,6 @@ pub struct DeleteGroup {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeleteResult {
-    pub group_id: String,
     pub deleted: bool,
 }
 

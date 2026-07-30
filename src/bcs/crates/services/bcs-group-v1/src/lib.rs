@@ -1111,13 +1111,11 @@ impl GroupService for GroupServiceImpl {
                     .map_err(map_runtime_error)?;
             }
             return Ok(DeleteResult {
-                group_id: command.group_id,
                 deleted: false,
             });
         };
         if !Self::can_manage_group(&command.principal, &group) {
             return Ok(DeleteResult {
-                group_id: command.group_id,
                 deleted: false,
             });
         }
@@ -1149,7 +1147,6 @@ impl GroupService for GroupServiceImpl {
                 .map_err(map_runtime_error)?;
         }
         Ok(DeleteResult {
-            group_id: result.group_id,
             deleted: result.deleted,
         })
     }

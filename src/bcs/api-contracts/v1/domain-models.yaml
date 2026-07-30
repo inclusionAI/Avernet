@@ -483,6 +483,12 @@ ParticipantMode:
     - present
     - absent
 
+BotParticipantMode:
+  type: string
+  enum:
+    - auto
+    - muted
+
 SessionStatus:
   type: string
   enum:
@@ -507,7 +513,7 @@ SessionParticipant:
     actor_id:
       type: string
     actor_kind:
-      $ref: "#/ActorKind"
+      const: bot
     name:
       type: string
     role:
@@ -519,7 +525,7 @@ SessionParticipant:
         - worker
         - observer
     mode:
-      $ref: "#/ParticipantMode"
+      $ref: "#/BotParticipantMode"
     joined_at:
       type: integer
       minimum: 0
