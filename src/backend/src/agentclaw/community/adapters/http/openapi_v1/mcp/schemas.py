@@ -68,7 +68,10 @@ class McpConfig(BaseModel):
     endpoint_env: str
     transport_protocol: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
-    has_config: bool
+    has_config: bool = Field(
+        description="True when a stored config row exists for this server; "
+        "false only when the caller has never configured it."
+    )
 
 
 class McpConfigWrite(BaseModel):

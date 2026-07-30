@@ -116,14 +116,24 @@ def _to_tenant(data: dict[str, Any]) -> McpTenant:
 
 
 def _to_config(cfg: Any) -> McpConfig:
-    """Map a :class:`~core.mcp.config_flow.UnifiedConfig` to :class:`McpConfig`."""
+    """Map a :class:`~core.mcp.config_flow.UnifiedConfig` to :class:`McpConfig`.
+
+    ``has_config`` keys off ``exists`` (a stored row is present), not the
+    internal ``has_config`` flag (api_key/headers/transport present). The
+    internal surface can use the narrower flag because it *also* returns a
+    message that keys off ``exists``; this surface exposes only ``has_config``,
+    so it must carry the present-vs-absent distinction itself. Otherwise a row
+    holding just ``endpoint_env`` — or the row a successful ``endpoint_env``-only
+    write just created — would report ``has_config: false``, indistinguishable
+    from a server the caller never configured (the documented false case).
+    """
     return McpConfig(
         server_code=cfg.server_code,
         api_key=cfg.api_key,
         endpoint_env=cfg.endpoint_env or "PROD",
         transport_protocol=cfg.transport_protocol,
         headers=cfg.headers or {},
-        has_config=cfg.has_config,
+        has_config=cfg.exists,
     )
 
 

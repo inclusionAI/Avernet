@@ -220,6 +220,18 @@ def test_get_config_absent_reports_no_config(client):
     assert data["api_key"] is None
 
 
+def test_get_config_existing_row_without_credentials_reports_has_config(client, config):
+    # A stored row carrying only endpoint_env (no api_key/headers/transport) is a
+    # configured server, not an absent one: has_config must be True so the caller
+    # can tell it apart from the never-configured case, which also defaults
+    # endpoint_env to PROD. Keys off row existence, not credential material.
+    config.get_user_unified_config.return_value = {"endpoint_env": "PRE"}
+    data = _ok(client.get("/openapi/v1/bots/mcp/servers/mcp.weather/config"))
+    assert data["has_config"] is True
+    assert data["endpoint_env"] == "PRE"
+    assert data["api_key"] is None
+
+
 def test_get_config_masks_long_key(client, config):
     config.get_user_unified_config.return_value = {
         "api_key": "sk-abcdefghijklmnop",
