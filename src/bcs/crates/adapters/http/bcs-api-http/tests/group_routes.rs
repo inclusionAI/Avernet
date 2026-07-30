@@ -20,6 +20,12 @@ use bcs_service_api::application::v1::{
     SessionParticipant, SessionService, SessionSummary, UpdateSession,
     UpdateSessionParticipant,
 };
+use bcs_service_api::application::v1::{
+    AcceptFriendRequest, AcceptInvitation, CreateFriendRequest, CreateGroupInvitation,
+    CreateSessionInvitation, Friendship, FriendshipService, FriendRequest, Invitation,
+    InvitationAcceptResult, InvitationService, ListFriendRequests, ListFriendships,
+    RejectFriendRequest, RemoveFriendship,
+};
 use bcs_service_api::{ActorKind, ParticipantMode, ParticipantRole};
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -210,6 +216,79 @@ impl SessionMessageService for NoopSessionMessageService {
     }
 }
 
+struct NoopInvitationService;
+
+#[async_trait]
+impl InvitationService for NoopInvitationService {
+    async fn create_group_invitation(
+        &self,
+        _command: CreateGroupInvitation,
+    ) -> Result<Invitation, ApplicationError> {
+        Err(ApplicationError::internal("invitation not configured"))
+    }
+
+    async fn create_session_invitation(
+        &self,
+        _command: CreateSessionInvitation,
+    ) -> Result<Invitation, ApplicationError> {
+        Err(ApplicationError::internal("invitation not configured"))
+    }
+
+    async fn accept_invitation(
+        &self,
+        _command: AcceptInvitation,
+    ) -> Result<InvitationAcceptResult, ApplicationError> {
+        Err(ApplicationError::internal("invitation not configured"))
+    }
+}
+
+struct NoopFriendshipService;
+
+#[async_trait]
+impl FriendshipService for NoopFriendshipService {
+    async fn list_friendships(
+        &self,
+        _command: ListFriendships,
+    ) -> Result<Page<Friendship>, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn remove_friendship(
+        &self,
+        _command: RemoveFriendship,
+    ) -> Result<DeleteResult, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn create_friend_request(
+        &self,
+        _command: CreateFriendRequest,
+    ) -> Result<FriendRequest, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn list_friend_requests(
+        &self,
+        _command: ListFriendRequests,
+    ) -> Result<Page<FriendRequest>, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn accept_friend_request(
+        &self,
+        _command: AcceptFriendRequest,
+    ) -> Result<FriendRequest, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn reject_friend_request(
+        &self,
+        _command: RejectFriendRequest,
+    ) -> Result<FriendRequest, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+}
+
 fn principal() -> Principal {
     Principal::bot("bot-1", "tenant-a", BTreeSet::new())
 }
@@ -246,6 +325,8 @@ fn test_router(service: Arc<FakeGroupService>) -> axum::Router {
         service,
         Arc::new(NoopSessionService),
         Arc::new(NoopSessionMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(NoopFriendshipService),
         Arc::new(HeaderVerifier {
             principal: principal(),
         }),
