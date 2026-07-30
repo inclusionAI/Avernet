@@ -184,10 +184,11 @@ class ResourceMaterializationService:
                 result = await self._materialize_locked(request)
             except MaterializationSecurityError as exc:
                 log.warning(
-                    "engine.resource_materialize.path.reject resource_id=%s task_version=%s error_type=%s",
+                    "engine.resource_materialize.path.reject resource_id=%s task_version=%s error_type=%s reason=%s",
                     request.resource_id,
                     request.task_version,
                     type(exc).__name__,
+                    str(exc),
                 )
                 result = self._failure_result(request, "invalid_device_path")
             except Exception as exc:
