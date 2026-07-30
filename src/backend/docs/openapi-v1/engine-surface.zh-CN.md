@@ -341,8 +341,11 @@ engine 的每个 handler 都会调用 `check_capability()`
 
 一处刻意的背离：`GET /api/approvals/modes` 是 engine 侧唯一**没有**能力门禁的
 路由（`approvals/router.py:104`），所以在 `claude_code` bot 上它照样公布三个模式，
-而 get 与 set 都返回 501。公共侧的 `…/approvals/modes` 以 `APPROVAL_GET` 为门禁，
-让三条审批路由在同一个 bot 上保持一致。（`Capability.APPROVAL_LIST` 定义在
+而 get 与 set 都返回 501。公共侧的 `…/approvals/modes` 以 `APPROVAL_SET` 为门禁，
+使它列出的每个模式都是写入端点真正接受的值。之所以取写能力而非读能力：engine
+把 `APPROVAL_GET` 与 `APPROVAL_SET` 定义为两个独立能力，并分别为两条路由各设一
+道门禁，因此引擎可能只声明读而不声明写；此时若以读为门禁，就会公布三个"可选"
+模式，而每一个 `PUT` 都返回 501。（`Capability.APPROVAL_LIST` 定义在
 `core/engine/capability.py:84`，但**没有任何引擎声明它、也没有任何路由检查它**
 —— 是死代码。）
 

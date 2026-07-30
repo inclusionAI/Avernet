@@ -536,9 +536,13 @@ and matches how cron behaves today, but the tests must not assume a live device.
   three approval modes while get and set both answer `501`. `Capability.APPROVAL_LIST`
   exists (`core/engine/capability.py:84`, `core/engine/base.py:106`) but **no
   engine declares it** and no route checks it — it is dead.
-  **Mitigation:** gate the public `…/approvals/modes` on `APPROVAL_GET` rather
-  than mirroring the engine's ungated behaviour, so all three approval routes
-  agree per bot. This is a deliberate, documented divergence from the engine —
+  **Mitigation:** gate the public `…/approvals/modes` on `APPROVAL_SET` rather
+  than mirroring the engine's ungated behaviour, so every listed mode is one the
+  write endpoint accepts. `APPROVAL_SET` rather than `APPROVAL_GET` because the
+  engine defines the two independently and gates one route on each: on an engine
+  declaring the read alone, keying off the read would advertise three selectable
+  modes while every `PUT` answers `501`. This is a deliberate, documented
+  divergence from the engine —
   record it in `engine-surface.md` rather than letting it look like an
   oversight.
 

@@ -282,9 +282,12 @@ All paths are relative to `src/backend/`. Source package is
         **verbatim**, no translation.
   - [x] Response `mode` is typed `str`, and a test proves a stub returning
         `"auto"` does not raise.
-  - [x] `GET …/approvals/modes` is gated on `APPROVAL_GET`, unlike the engine's
-        ungated route, so all three approval routes agree per bot. The
-        divergence is documented in the handler docstring.
+  - [x] `GET …/approvals/modes` is gated on `APPROVAL_SET`, unlike the engine's
+        ungated route, so every mode it lists is one the write endpoint
+        accepts. The write capability rather than the read: the engine defines
+        the two independently and gates one route on each, so a read-only
+        engine would otherwise advertise modes whose every `PUT` answers `501`.
+        The divergence is documented in the handler docstring.
   - [x] `501` covered on an engine declaring neither approval capability
         (claude_code).
 - **Depends on:** Tasks 4, 5, 6

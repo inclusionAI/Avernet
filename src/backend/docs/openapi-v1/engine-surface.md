@@ -409,7 +409,11 @@ the caveat is logged rather than carried in the response.
 One deliberate divergence: `GET /api/approvals/modes` is the only engine route
 with **no** capability gate (`approvals/router.py:104`), so on a `claude_code`
 bot it advertises three modes while get and set both 501. The public
-`…/approvals/modes` gates on `APPROVAL_GET` so all three routes agree per bot.
+`…/approvals/modes` gates on `APPROVAL_SET`, so every mode it lists is one the
+write endpoint accepts. The write capability rather than the read: the engine
+defines `APPROVAL_GET` and `APPROVAL_SET` independently and gates one route on
+each, so on an engine declaring only the read, keying this route off the read
+would advertise three selectable modes while every `PUT` answers 501.
 (`Capability.APPROVAL_LIST` exists at `core/engine/capability.py:84` but **no
 engine declares it and no route checks it** — dead.)
 

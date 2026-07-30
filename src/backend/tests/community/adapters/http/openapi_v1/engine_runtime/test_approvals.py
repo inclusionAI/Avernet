@@ -124,10 +124,26 @@ def test_modes_is_gated_where_the_engines_route_is_not(client, relay):
 
 
 def test_modes_accepts_a_limited_capability(client, relay):
-    relay.results = [EngineResult(data={"supported": [], "limited": ["approval.get"]})]
+    relay.results = [EngineResult(data={"supported": [], "limited": ["approval.set"]})]
+    assert len(ok(client.get(f"{BASE}/modes"))) == 3
+
+
+def test_modes_501s_on_a_read_only_engine(client, relay):
+    """approval.get and approval.set are independent engine capabilities, and
+    the engine gates its own two routes on one each. On an engine declaring the
+    read but not the write, nothing is selectable — listing the three modes
+    would advertise a write that answers 501 for every one of them."""
+    relay.results = [_caps("approval.get")]
+    assert fails(client.get(f"{BASE}/modes"), 501)
+
+
+def test_modes_serves_a_write_only_engine(client, relay):
+    """The mirror case: the write is what this route describes, so declaring it
+    without the read still leaves three genuinely settable values."""
+    relay.results = [_caps("approval.set")]
     assert len(ok(client.get(f"{BASE}/modes"))) == 3
 
 
 def test_foreign_bot_is_masked_404_without_a_device_call(client, relay):
-    assert fails(client.get(f"/openapi/v1/bots/other/approvals/modes"), 404)
+    assert fails(client.get("/openapi/v1/bots/other/approvals/modes"), 404)
     assert relay.calls == []
