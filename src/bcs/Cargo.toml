@@ -47,6 +47,7 @@ members = [
     "crates/services/bcs-secret",
     "crates/services/bcs-session",
     "crates/services/bcs-session-store",
+    "crates/services/bcs-session-v1",
     "crates/services/bcs-session-file",
     "crates/services/bcs-session-file-store",
     "crates/services/bcs-routing",
@@ -256,6 +257,7 @@ bcs-config                 = { path = "crates/services/bcs-config" }
 bcs-route-security         = { path = "crates/services/bcs-route-security" }
 bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }
+bcs-session-v1             = { path = "crates/services/bcs-session-v1" }
 bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
