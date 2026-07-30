@@ -4166,6 +4166,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inbound_state_machine_group_preserves_source_message_while_starting() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        harness
+            .session_repo
+            .create(
+                "group_sm",
+                NewSessionParams {
+                    id: Some("pending-session".to_string()),
+                    session_kind: SessionKind::ServiceInvocation,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "generated_id".to_string(),
+                im_conversation_id: "conv_sm".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::Conversation,
+                im_user_id: None,
+                bcs_session_id: "pending-session".to_string(),
+                last_active_at: 42,
+            })
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_sm",
+                "u1",
+                Some("张三"),
+                "msg_while_starting",
+                true,
+            ))
+            .await?;
+
+        assert!(harness.collaboration_runtime.starts.lock().await.is_empty());
+        let events = harness.delivery.events.lock().await;
+        let response = events.last().expect("state-machine starting response");
+        assert_eq!(response.purpose, ChannelOutboundPurpose::HumanInputAck);
+        assert_eq!(
+            response.source_im_message_id.as_deref(),
+            Some("msg_while_starting")
+        );
+        assert!(
+            response
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("流程正在启动"))
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn inbound_state_machine_group_reuses_active_run_and_routes_human_response() -> TestResult
     {
         let harness = TestHarness::new(state_machine_group("group_sm")).await?;
