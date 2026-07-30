@@ -38,7 +38,10 @@ class FakeRelay:
         #: queued results, consumed in order; a lone entry is reused
         self.results: list[Any] = [EngineResult(data={})]
         self.raises: Exception | None = None
+        #: forwards that reached the transport (bot resolution passed)
         self.calls: list[dict[str, Any]] = []
+        #: every forward the handler *attempted*, resolved or not
+        self.attempts: list[dict[str, Any]] = []
 
     # -- Protocol ----------------------------------------------------------
     def resolve_bot(self, bot_id: str, owner_id: str) -> BotFacts:
@@ -51,10 +54,14 @@ class FakeRelay:
         self, *, bot_id, owner_id, method, path,
         body=None, params=None, timeout=None, enveloped=True,
     ) -> EngineResult:
-        # Mirrors the real relay: bot resolution precedes the forward, so a
-        # foreign bot never reaches the transport. Modelling this matters — a
-        # fake that recorded the call anyway would make "no device was touched"
-        # assertions pass for handlers that genuinely leak.
+        # Record the ATTEMPT first, then resolve. Ordering it the other way
+        # made "no device was touched" tautological: a foreign bot raises in
+        # resolve_bot, so `calls` was empty regardless of what the handler did,
+        # and the sweep could only ever have caught a handler bypassing the
+        # relay entirely. Recording first means `attempts` reflects the
+        # handler's behaviour and `calls` reflects what would really reach a
+        # device.
+        self.attempts.append({"bot_id": bot_id, "owner_id": owner_id, "path": path})
         self.resolve_bot(bot_id, owner_id)
         self.calls.append(
             {

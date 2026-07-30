@@ -65,11 +65,9 @@ async def get_approval_mode(
     session_key: Annotated[str, Query(description="Session to read the mode for.")],
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[ApprovalState]:
-    """Read a session's approval mode.
-
-    Publicly a ``GET`` with a query parameter; the engine models the same read
-    as ``POST /api/approvals/mode/get``.
-    """
+    """Read the approval mode in force for a session."""
+    # Publicly a GET with a query parameter; the engine models the same read as
+    # a POST with a body.
     owner_id = caller_owner_id(principal)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="POST",
@@ -89,11 +87,9 @@ async def set_approval_mode(
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[ApprovalState]:
-    """Set a session's approval mode.
-
-    The enum's value is forwarded **verbatim** — all three are already in the
-    engine's accept-set, so no translation is needed and none is applied.
-    """
+    """Set the approval mode for a session."""
+    # The enum's value is forwarded verbatim: all three are already in the
+    # engine's accept-set, so no translation is needed and none is applied.
     owner_id = caller_owner_id(principal)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="POST",
@@ -117,15 +113,15 @@ async def list_approval_modes(
 ) -> Envelope[list[ApprovalModeInfo]]:
     """List the approval modes that can be set on this bot.
 
-    **Deliberate divergence from the engine.** The engine's ``/api/approvals/modes``
-    is its one route with no capability gate, so on an engine that declares
-    neither approval capability it cheerfully advertises three modes while
-    reading and setting them both answer 501. This route gates on the same
-    capability the other two need, so all three agree per bot.
-
-    The list itself is served from the public enum rather than relayed: the
-    engine's descriptions are Chinese, and this surface promises English.
+    Answers 501 when the bot does not support approvals, matching the read and
+    write endpoints.
     """
+    # Deliberate divergence: the engine's own modes route is its one route with
+    # no capability gate, so on an engine declaring neither approval capability
+    # it advertises three modes while get and set both answer 501. Gating here
+    # keeps all three consistent per bot. The list is served from the public
+    # enum rather than relayed, because the engine's descriptions are Chinese
+    # and this surface promises English.
     owner_id = caller_owner_id(principal)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="GET",

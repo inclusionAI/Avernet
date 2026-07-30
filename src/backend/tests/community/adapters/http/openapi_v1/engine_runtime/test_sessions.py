@@ -87,19 +87,34 @@ def test_get_session_uses_the_id_verbatim(client, relay):
     assert relay.paths == [f"/api/sessions/{SESSION_ID}"]
 
 
-def test_patch_maps_to_the_engines_update_subpath(client, relay):
+def test_patch_sends_query_params_not_a_body(client, relay):
+    """The engine's update route declares bare scalars, which FastAPI binds
+    from the **query string** — there is no Body(...) on it.
+
+    Sending a body is silently discarded: the engine builds its update request
+    with every field None and answers 200 with the unchanged session, a no-op
+    that looks like success. Asserting only that *a* body was passed could not
+    tell the two apart, which is how this shipped once already.
+    """
     relay.results = [EngineResult(data=ENGINE_SESSION)]
     ok(client.patch(f"{_base()}/{SESSION_ID}", json={"title": "New"}))
     assert relay.calls[0]["method"] == "POST"
     assert relay.calls[0]["path"] == f"/api/sessions/{SESSION_ID}/update"
-    assert relay.calls[0]["body"] == {"title": "New"}
+    assert relay.calls[0]["params"] == {"title": "New"}
+    assert relay.calls[0]["body"] is None
 
 
 def test_patch_omits_unset_fields(client, relay):
     """A partial update must not blank fields the caller did not send."""
     relay.results = [EngineResult(data=ENGINE_SESSION)]
     ok(client.patch(f"{_base()}/{SESSION_ID}", json={"model": "m"}))
-    assert relay.calls[0]["body"] == {"model": "m"}
+    assert relay.calls[0]["params"] == {"model": "m"}
+
+
+def test_message_total_prefers_the_engines_count(client, relay):
+    """Unlike the session list, the history route does report a total."""
+    relay.results = [EngineResult(data=[ENGINE_MESSAGE], total=1200)]
+    assert ok(client.get(f"{_base()}/{SESSION_ID}/messages"))["total"] == 1200
 
 
 def test_delete_session(client, relay):

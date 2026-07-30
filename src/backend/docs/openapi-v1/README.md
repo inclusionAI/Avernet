@@ -62,7 +62,7 @@ The work therefore splits into **three tracks**:
 - **Track C — Engine (runtime) surface.** _Added 2026-07-30._ Wrap the engine
   adapter's client-facing HTTP behind `/openapi/v1/bots/{bot_id}/…`, and replace
   the `get_device_connection` hand-off with one sanitised socket-info endpoint.
-  **16 endpoints. Not started.**
+  **16 endpoints — implemented, PR #630.**
 
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
@@ -149,18 +149,18 @@ _Ordered by priority tier._
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(stub)* | ⬜ TODO | Track A skills (shared) |
 
-### Track C — Engine (runtime) surface (0 of 5 groups done)
+### Track C — Engine (runtime) surface (5 of 5 groups implemented — PR #630)
 _All groups depend only on **bots isolation (Stage 1 ✅)** — no Track A stage, no
 DDL. Full ruling and per-endpoint mapping in
 **[`engine-surface.md`](engine-surface.md)**._
 
 | Group | Endpoints | Owner | Pri | Router | State |
 |---|---|---|---|---|---|
-| sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` *(not created)* | ⬜ TODO — **personal bots only**, `service` → 501 |
-| engine (read-only) | 3 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` *(not created)* | ⬜ TODO |
-| connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` *(not created)* | ⬜ TODO |
-| approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` *(not created)* | ⬜ TODO |
-| models | 2 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/models/` *(not created)* | ⬜ TODO |
+| sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **IMPLEMENTED — PR #630** (personal bots only; `service` → 501) |
+| engine (read-only) | 3 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630** |
+| connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **IMPLEMENTED — PR #630** |
+| approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **IMPLEMENTED — PR #630** |
+| models | 2 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/models/` | ✅ **IMPLEMENTED — PR #630** |
 
 > **Scope rule (why only these).** Wrap engine HTTP the frontend reaches
 > **directly** through proxypass (`src/frontend/src/requestConfig.ts:189-205`).
@@ -612,7 +612,8 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 8. **Track C:** the five engine-runtime groups (16 endpoints) implemented,
    owner-scoped and capability-aware, and `…/connection` returning socket URLs
    so no external caller ever sees a proxypass target or a raw device token.
-   — _⬜ 0 of 5 (added 2026-07-30)._
+   — _✅ 5 of 5 (PR #630). Like every other category it answers 401 until item 6
+   lands; the singlebox E2E flow is blocked on the same event._
 
 ---
 
@@ -758,6 +759,41 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
      `with_loader_criteria` applies to join clauses. Verified, not assumed.
 - **2026-07-29** — **Channels deprioritized (not cancelled)**, Track A stage 3
   and Track B endpoints both parked with scope intact.
+- **2026-07-30** — **Track C implemented (PR #630)** — all 16 engine-runtime
+  endpoints across five groups, plus `core/engine_runtime/` (the relay and the
+  connection service) and its Service API Protocols. Seven things worth knowing
+  before you touch this track or copy from it:
+  1. **Track C changes nothing outside its own prefix.** An `Envelope.warning`
+     field was added and then removed: across both OSS engines the only
+     *limited* capability this surface can reach is `SESSION_CREATE` on
+     `claude_code`, whose caveat describes how the session key is established
+     rather than a degraded result — so the field would have been permanently
+     empty on 15 of 16 endpoints and on all six other categories. `501`/`504`
+     live in a per-group dict for the same reason.
+  2. **The engine's own text never reaches a caller.** Capability caveats and
+     the `limited`/`fallback` explanations are internal engineering prose and
+     not always English; only capability *names* are published. Field
+     descriptions and docstrings are published verbatim into the OpenAPI
+     document, so rationale belongs in `#` comments — a gate now fails the build
+     on internal markers in published text.
+  3. **The sessions group serves `personal` bots only.** The engine accepts
+     `user_id` on session list, logs it, and **drops it**, so a device returns
+     every session it holds. On a `service` bot that is every caller's. Gated
+     before the forward, not filtered after.
+  4. **`GET /api/engine/status` is the one engine route with no envelope** — it
+     returns `EngineManager.status()` raw. Treating it as enveloped fails every
+     call against a healthy device.
+  5. **Any engine 404 is a resource, not a missing capability.** The transport
+     raises its not-found error for unknown session ids and model ids too;
+     mapping it to 501 would tell a caller its bot lost the sessions capability.
+  6. **Isolation is "don't undo it", not "build it".** No table, no DDL, no
+     Track A stage — but the guard cannot see a device call, so the isolation
+     sweep asserts the transport was *never invoked* across all 16 routes rather
+     than just checking for a 404.
+  7. **The singlebox E2E flow is blocked on the auth workstream**, not on this
+     module — every `/openapi/v1` route answers 401, so a flow could only assert
+     401s. `engine_runtime` stays on `SINGLEBOX_E2E_EXEMPT` until the gateway
+     verifier lands.
 - **2026-07-30** — **Track C added — the public API now wraps the engine too.**
   Previously the frontend got a connection from `get_device_connection` and
   called the bot's engine adapter itself through `/proxypass/{target}`; that

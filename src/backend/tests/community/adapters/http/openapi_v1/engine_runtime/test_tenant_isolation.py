@@ -69,19 +69,38 @@ ROUTES = [
 ]
 
 
-class _NeverCalled:
-    """A connection service that fails loudly if a foreign bot reaches it."""
+class _FakeConnections:
+    """Models ``EngineConnectionService``: resolve the bot, then build.
 
-    def build(self, *, bot_id, owner_id, include_terminal):
-        raise AssertionError(f"connection built for {bot_id!r} by {owner_id!r}")
+    Faithful rather than fail-loud. The real service resolves the caller's bot
+    before it touches ``DeviceService``, so the connection handler delegating to
+    it — with no pre-check of its own — is correct. A double that refused to be
+    called at all would fail that correct handler while proving nothing about
+    the device.
+    """
+
+    def __init__(self, relay: FakeRelay) -> None:
+        self._relay = relay
+        #: builds that got past bot resolution — i.e. would reach a device
+        self.built: list[str] = []
+
+    def build(self, *, bot_id, owner_id):
+        self._relay.resolve_bot(bot_id, owner_id)  # raises for a foreign bot
+        self.built.append(bot_id)
+        raise AssertionError("unreachable in these tests — resolution must fail")
 
 
 @pytest.fixture
-def client(relay: FakeRelay):
+def connections(relay: FakeRelay):
+    return _FakeConnections(relay)
+
+
+@pytest.fixture
+def client(relay: FakeRelay, connections: _FakeConnections):
     class _M(Module):
         def configure(self, binder):
             binder.bind(EngineRuntimeRelayProtocol, to=relay)
-            binder.bind(EngineConnectionServiceProtocol, to=_NeverCalled())
+            binder.bind(EngineConnectionServiceProtocol, to=connections)
 
     app = FastAPI()
     for group in _ENGINE_RUNTIME_GROUPS:
@@ -113,10 +132,52 @@ def test_a_bot_that_is_not_the_callers_is_a_masked_404(
 
 
 @pytest.mark.parametrize(("method", "suffix", "body"), ROUTES, ids=lambda v: str(v))
-def test_no_device_is_touched_for_a_foreign_bot(client, relay, method, suffix, body):
+def test_no_device_is_reached_for_a_foreign_bot(
+    client, relay, connections, method, suffix, body
+):
+    """Nothing reaches a device.
+
+    **This assertion is one half of the guarantee, not all of it.** The fake
+    models the real relay, which resolves the bot before forwarding — so
+    ``calls`` staying empty here partly reflects that modelling. The other half
+    is ``test_relay.py::test_foreign_bot_raises_before_touching_the_device``,
+    which proves the same ordering in the *real* relay against a transport
+    double. Together: handlers reach a device only through the relay (asserted
+    below and by ``_NeverCalled``), and the relay reaches a device only after
+    ownership is established.
+
+    A handler may legitimately *attempt* ``relay.call`` without pre-checking —
+    the relay is the ownership seam. Only the sessions group pre-checks, because
+    it must branch on ``bot_type`` before deciding to forward at all.
+    """
     kwargs = {"json": body} if body is not None else {}
     getattr(client, method)(f"/openapi/v1/bots/not-my-bot{suffix}", **kwargs)
-    assert relay.calls == [], f"{method.upper()} {suffix} forwarded to a device"
+    assert relay.calls == [], f"{method.upper()} {suffix} reached a device"
+    assert connections.built == [], (
+        f"{method.upper()} {suffix} built a connection for a foreign bot"
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "suffix", "body"),
+    [r for r in ROUTES if r[1].startswith("/sessions")],
+    ids=lambda v: str(v),
+)
+def test_sessions_does_not_even_attempt_a_forward_for_a_foreign_bot(
+    client, relay, method, suffix, body
+):
+    """The sessions group resolves the bot itself, before any relay call.
+
+    It has to: the personal-bots-only rule is decided from ``bot_type``, and
+    deciding it after forwarding would mean the device had already returned
+    every caller's sessions. ``attempts`` records intent, so this fails if the
+    gate is ever moved after the forward.
+    """
+    kwargs = {"json": body} if body is not None else {}
+    getattr(client, method)(f"/openapi/v1/bots/not-my-bot{suffix}", **kwargs)
+    assert relay.attempts == [], (
+        f"{method.upper()} {suffix} tried to forward before checking the bot"
+    )
 
 
 # ── the guard the endpoint layer relies on ───────────────────────────────────

@@ -59,10 +59,10 @@ async def get_engine_status(
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineStatus]:
-    """Runtime state of the bot's active engine."""
+    """Runtime state of the bot's engine."""
     owner_id = caller_owner_id(principal)
-    # enveloped=False: this engine route answers with EngineManager.status()
-    # raw — no `success`, no `data` wrapper. The only such route on this surface.
+    # enveloped=False: this engine route answers with its status payload raw —
+    # no `success` key and no `data` wrapper. The only such route wrapped here.
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/engine/status",
         enveloped=False,
@@ -89,11 +89,10 @@ async def get_engine_capabilities(
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineCapabilities]:
-    """What this bot's engine can do.
+    """What this bot can do.
 
-    The discovery endpoint for the whole engine-runtime surface: the supported
-    set differs per engine, so the same public path can succeed on one of a
-    caller's bots and answer 501 on another.
+    The discovery endpoint for these groups: capabilities differ per bot, so the
+    same request can succeed for one of your bots and be refused for another.
     """
     owner_id = caller_owner_id(principal)
     result = await relay.call(
@@ -123,11 +122,8 @@ async def list_available_engines(
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[list[EngineInfo]]:
-    """Engines registered on the bot's device, with the active one marked.
-
-    Publicly a noun (`available`); the engine models the same read as
-    ``/api/engine/list``.
-    """
+    """Engines available on this bot, with the active one marked."""
+    # Publicly a noun; the engine models the same read under a verb path.
     owner_id = caller_owner_id(principal)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/engine/list",

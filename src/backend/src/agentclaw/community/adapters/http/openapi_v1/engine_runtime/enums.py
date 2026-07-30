@@ -62,14 +62,15 @@ class _DocumentedEnum(str, Enum):
 class SocketKind(_DocumentedEnum):
     """Which WebSocket a connection entry describes."""
 
-    CHAT = "chat"
-    TERMINAL = "terminal"
+    # One member today. A terminal socket was implemented and then removed: the
+    # engine offers an interactive PTY and openclaw declares the capability, but
+    # the spec excludes "arbitrary command execution and interactive shell on a
+    # tenant's device ... at any scope" from v1. Kept as an enum over a list so
+    # a second socket is additive rather than a shape change.
 
-    __descriptions__ = {
-        "chat": "Converse with the bot.",
-        "terminal": "Interactive shell on the bot's device. Offered only when "
-        "the bot's engine supports it.",
-    }
+    CHAT = "chat"
+
+    __descriptions__ = {"chat": "Converse with the bot."}
 
 
 class ApprovalMode(_DocumentedEnum):

@@ -11,9 +11,7 @@ from agentclaw.community.core.engine_runtime.models import ConnectionResult
 class EngineConnectionServiceProtocol(Protocol):
     """Compose the sockets a caller may open against their bot."""
 
-    def build(
-        self, *, bot_id: str, owner_id: str, include_terminal: bool
-    ) -> ConnectionResult:
+    def build(self, *, bot_id: str, owner_id: str) -> ConnectionResult:
         """Return the bot's usable sockets, owner-scoped."""
         ...
 

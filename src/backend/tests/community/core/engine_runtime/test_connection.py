@@ -79,16 +79,14 @@ def _svc(bots=None, resolver=None, devices=None, sandbox=None):
     )
 
 
-def _build(svc, *, terminal=False):
-    return svc.build(bot_id=BOT, owner_id=OWNER, include_terminal=terminal)
+def _build(svc):
+    return svc.build(bot_id=BOT, owner_id=OWNER)
 
 
 def test_foreign_bot_raises_before_resolving_a_device():
     resolver = _Resolver(raises=AssertionError("must not be reached"))
     with pytest.raises(BotNotFoundError):
-        _svc(resolver=resolver).build(
-            bot_id=BOT, owner_id="someone-else", include_terminal=False
-        )
+        _svc(resolver=resolver).build(bot_id=BOT, owner_id="someone-else")
 
 
 def test_the_resolved_owner_is_passed_as_the_operator():
@@ -137,12 +135,10 @@ def test_chat_path_follows_the_engine(engine, path):
     assert _build(_svc(bots=_Bots(engine))).sockets[0].url.endswith(path)
 
 
-def test_terminal_socket_is_opt_in():
+def test_only_a_chat_socket_is_offered():
+    """A terminal socket was implemented and removed: the spec excludes an
+    interactive shell on a tenant's device from v1 at any scope."""
     assert [s.kind for s in _build(_svc()).sockets] == ["chat"]
-    assert [s.kind for s in _build(_svc(), terminal=True).sockets] == [
-        "chat",
-        "terminal",
-    ]
 
 
 def test_unbound_device_is_retryable_not_an_internal_error():
@@ -175,6 +171,6 @@ def test_expires_at_is_derived_from_the_requested_ttl():
 
 
 def test_result_carries_no_target_type_or_bare_token():
-    text = repr(_build(_svc(), terminal=True))
+    text = repr(_build(_svc()))
     assert "'tgt'" not in text  # the target appears only inside the URL
     assert "type=" not in text

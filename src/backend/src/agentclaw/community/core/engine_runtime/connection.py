@@ -49,7 +49,11 @@ _CHAT_WS_PATHS = {
     "claude_code": "/api/claude_code/ws",
 }
 
-_TERMINAL_WS_PATH = "/ws/terminal"
+# No terminal socket. The engine serves an interactive PTY and openclaw
+# declares the capability, but the spec excludes an interactive shell on a
+# tenant's device from v1 at any scope. (It would not have worked as published
+# either: the engine's terminal route authenticates a `token` *query* parameter,
+# which a header-only connection does not supply.)
 
 
 class EngineConnectionService:
@@ -68,9 +72,7 @@ class EngineConnectionService:
         self._device_service = device_service
         self._sandbox_client = sandbox_client
 
-    def build(
-        self, *, bot_id: str, owner_id: str, include_terminal: bool
-    ) -> ConnectionResult:
+    def build(self, *, bot_id: str, owner_id: str) -> ConnectionResult:
         """Return the bot's usable sockets.
 
         ``owner_id`` must be the authenticated principal: the bot is resolved
@@ -109,13 +111,6 @@ class EngineConnectionService:
         sockets = [
             SocketInfo(kind="chat", url=base + self._chat_path(engine), headers=headers)
         ]
-        if include_terminal:
-            sockets.append(
-                SocketInfo(
-                    kind="terminal", url=base + _TERMINAL_WS_PATH, headers=headers
-                )
-            )
-
         return ConnectionResult(
             engine=engine, expires_at=self._expires_at(), sockets=sockets
         )

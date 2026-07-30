@@ -372,17 +372,17 @@ All paths are relative to `src/backend/`. Source package is
   connection unit tests, endpoint tests per group, and the 16-route isolation
   sweep in Task 12.
 
-## Task 13: Tests & Verification
+## Task 13: Tests & Verification  `[x]`
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.
 - **Files:** `docs/openapi-v1/README.md`, `docs/openapi-v1/README.zh-CN.md`
 - **Done when:**
-  - [ ] Every acceptance criterion in `spec.md` checks off, including the two
+  - [x] Every acceptance criterion in `spec.md` checks off, including the two
         that no single earlier task owns: error responses expose no internal
         identifiers or credentials, and no new stored records or schema change
         were introduced.
-  - [ ] Full `tests/community` green with the internal suite **unmodified**.
-  - [ ] `tests/community/architecture/` green.
-  - [ ] Both READMEs' Track C board updated from ⬜ TODO to done with the PR
+  - [x] Full `tests/community` green with the internal suite **unmodified**.
+  - [x] `tests/community/architecture/` green.
+  - [x] Both READMEs' Track C board updated from ⬜ TODO to done with the PR
         number, plus a dated changelog line — the README's own standing rule.
 - **Depends on:** Task 12
 

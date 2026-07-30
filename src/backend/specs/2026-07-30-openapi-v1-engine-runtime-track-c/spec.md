@@ -59,44 +59,48 @@ proven path rather than inventing one.
 
 ## Acceptance Criteria
 
-- [ ] Sixteen endpoints are served, all scoped to a single bot the caller
+_All verified 2026-07-30 (PR #630). The surface answers 401 until the
+caller-authentication workstream lands, as every other public category does; the
+criteria below are about handlers, contracts and tests, not reachability._
+
+- [x] Sixteen endpoints are served, all scoped to a single bot the caller
       owns: seven for sessions, three read-only for engine state, two for
       models, three for approvals, and one for connection.
-- [ ] The seven session endpoints serve personal bots only; on a service bot
+- [x] The seven session endpoints serve personal bots only; on a service bot
       each answers the same explicit "not supported for this bot type" outcome,
       never a partial result and never another caller's data. The other nine
       endpoints serve both bot types.
-- [ ] Every response uses the public API's standard envelope, with list
+- [x] Every response uses the public API's standard envelope, with list
       endpoints returning the standard page shape and an accurate total.
-- [ ] Every endpoint resolves the caller's identity from the request principal
+- [x] Every endpoint resolves the caller's identity from the request principal
       and serves only bots belonging to that caller and tenant. A runtime call
       naming a bot owned by someone else, or belonging to another tenant, is
       answered identically to one naming a bot that does not exist.
-- [ ] No endpoint accepts a caller-supplied user identity, device identifier,
+- [x] No endpoint accepts a caller-supplied user identity, device identifier,
       binding identifier, or engine override. Where the underlying runtime
       expects a user identity, it is filled from the authenticated caller.
-- [ ] The connection endpoint returns, for each socket the bot's engine actually
+- [x] The connection endpoint returns, for each socket the bot's engine actually
       serves, a complete connection address and the headers required to use it,
       together with an expiry the caller can act on. It never returns a routing
       target, a connection type, or a bare credential as a separate field, and
       the caller never has to assemble an address itself.
-- [ ] The connection endpoint lists exactly the sockets the bot's current engine
+- [x] The connection endpoint lists exactly the sockets the bot's current engine
       supports — no more, no fewer — and never contradicts what the capabilities
       endpoint reports.
-- [ ] An operation the bot's engine does not support is answered as an explicit,
+- [x] An operation the bot's engine does not support is answered as an explicit,
       documented "not supported by this bot" outcome that names the capabilities
       endpoint, not as a generic server error.
-- [ ] An operation the bot's engine supports only partially still returns its
+- [x] An operation the bot's engine supports only partially still returns its
       result. The response carries no extra caveat field; the capabilities
       endpoint is where a caller discovers which operations its bot serves with
       a limitation.
-- [ ] A bot whose device is unreachable — cold, dormant, or restarting — is
+- [x] A bot whose device is unreachable — cold, dormant, or restarting — is
       answered with a single, consistent, retryable outcome across all sixteen
       endpoints, distinct from both "not found" and "server error".
-- [ ] Error responses never expose internal identifiers, internal-language text,
+- [x] Error responses never expose internal identifiers, internal-language text,
       device addresses, or credentials.
-- [ ] The internal API surface and the internal test suite are unchanged.
-- [ ] The feature introduces no new stored records and no schema change.
+- [x] The internal API surface and the internal test suite are unchanged.
+- [x] The feature introduces no new stored records and no schema change.
 
 ## In Scope
 

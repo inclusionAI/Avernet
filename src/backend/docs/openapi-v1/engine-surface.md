@@ -157,11 +157,16 @@ real typed enum everywhere and extends cleanly to a third socket.
 
 Rules this endpoint must hold:
 
-- **Only sockets the bot's active engine actually serves appear.** A `kind`
-  absent from the list = unsupported. `terminal` appears only when the engine
-  declares `WEB_SHELL_OPEN`; `chat` resolves to `/api/openclaw/ws` or
-  `/api/claude_code/ws` depending on the active engine (the engine also serves a
-  generic `/api/{engine}/ws`, `api/app.py:310`).
+- **`chat` is the only socket in v1.** It resolves to `/api/openclaw/ws` or
+  `/api/claude_code/ws` depending on the active engine, falling back to the
+  generic `/api/{engine}/ws` (`api/app.py:310`) so a newly-added engine stays
+  reachable. **No `terminal` socket** — it was implemented and then removed:
+  `spec.md` excludes "arbitrary command execution and interactive shell on a
+  tenant's device … at any scope" from v1, and this reference previously
+  contradicted it. (It would not have worked as published either — the engine's
+  terminal route authenticates a `token` *query* parameter, which a header-only
+  connection does not supply.) `SocketKind` stays an enum over a list so a
+  second socket is additive. _Corrected 2026-07-30._
 - **The URL is opaque and complete.** Callers concatenate nothing. `target`,
   `type` and the bare `token` are *not* fields — they are what we are trying to
   stop publishing.

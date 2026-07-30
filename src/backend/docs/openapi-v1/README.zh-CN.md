@@ -51,7 +51,7 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
   隔离。**七个里已完成一个：bots（PR #494）。**
 - **Track C —— Engine（运行时）面。** _2026-07-30 新增。_ 把 engine adapter 面向
   客户端的 HTTP 包装到 `/openapi/v1/bots/{bot_id}/…` 之下，并用一个净化过的
-  socket 信息端点取代 `get_device_connection` 的移交。**16 个端点，尚未开始。**
+  socket 信息端点取代 `get_device_connection` 的移交。**16 个端点 —— 已实现，PR #630。**
 
 > ⚠️ **唯一需要避免的误解：** "隔离 Stage N 已完成"**并不**意味着任何 API 端点被实现了。
 > Track A 的每个阶段都只是底层管道（可复用机制 + 该类别的记录）。API 端点落在
@@ -130,18 +130,18 @@ _按优先级分层排序。_
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(桩)* | ⬜ TODO | Track A skills（共担） |
 
-### Track C —— Engine（运行时）面（5 组里已完成 0 组）
+### Track C —— Engine（运行时）面（5 组已全部实现 —— PR #630）
 _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶段，没有 DDL。
 完整裁定与逐端点映射见
 **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**。_
 
 | 组 | 端点数 | 负责人 | 优先级 | 路由 | 状态 |
 |---|---|---|---|---|---|
-| sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` *(未创建)* | ⬜ TODO —— **仅 personal bot**，`service` 返回 501 |
-| engine（只读） | 3 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` *(未创建)* | ⬜ TODO |
-| connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` *(未创建)* | ⬜ TODO |
-| approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` *(未创建)* | ⬜ TODO |
-| models | 2 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/models/` *(未创建)* | ⬜ TODO |
+| sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **已实现 —— PR #630**（仅 personal bot；`service` 返回 501） |
+| engine（只读） | 3 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **已实现 —— PR #630** |
+| connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **已实现 —— PR #630** |
+| approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **已实现 —— PR #630** |
+| models | 2 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/models/` | ✅ **已实现 —— PR #630** |
 
 > **范围规则（为什么只有这些）。** 只包装前端经 proxypass **直连**的 engine HTTP
 > （`src/frontend/src/requestConfig.ts:189-205`）。前端**经由后端**触达的 engine
@@ -548,7 +548,8 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
    多租户的前置闸口）。_
 8. **Track C：** 五个 engine 运行时组（16 个端点）均已实现、按 owner 收敛且能力感知，
    并且 `…/connection` 返回 socket URL，使任何外部调用方都看不到 proxypass target
-   或裸设备 token。—— _⬜ 5 个里完成 0 个（2026-07-30 新增）。_
+   或裸设备 token。—— _✅ 5 组全部完成（PR #630）。与其它类别一样，在第 6 项落地
+   之前一律返回 401；singlebox E2E 流也阻塞在同一个事件上。_
 
 ---
 
@@ -665,6 +666,32 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
      子句同样生效。这是实测确认的，不是推断。
 - **2026-07-29** —— **渠道降级（并非取消）**，Track A 阶段 3 与 Track B 端点均已搁置，
   范围保持不变。
+- **2026-07-30** —— **Track C 已实现（PR #630）** —— 五个组共 16 个 engine 运行时
+  端点，外加 `core/engine_runtime/`（relay 与 connection service）及其 Service API
+  Protocol。动这条主线或参考它之前，有七点值得知道：
+  1. **Track C 不改动自己前缀之外的任何契约。** 曾经加过 `Envelope.warning` 又移除：
+     两个 OSS 引擎里，本面唯一能触达的 *limited* 能力只有 `claude_code` 的
+     `SESSION_CREATE`，而那条说明讲的是 session key 如何建立，并非结果不完整 ——
+     该字段会在 16 个端点里的 15 个、以及其余六个类别上永远为空。`501`/`504`
+     放进按组的字典，也是同一个道理。
+  2. **engine 自己的文案永远不会到达调用方。** 能力说明与 `limited`/`fallback` 的
+     解释是内部工程文案且不总是英文；只发布能力**名字**。字段描述与 docstring 会被
+     原样发布进 OpenAPI 文档，所以理由要写在 `#` 注释里 —— 现已有测试在发布文本里
+     出现内部标记时让构建失败。
+  3. **sessions 组只服务 `personal` bot。** engine 在会话列表上接受 `user_id`、
+     记日志、然后**丢弃**它，因此设备会返回它持有的全部会话。在 `service` bot 上
+     那就是所有 caller 的。门禁在转发**之前**判定，不是事后过滤。
+  4. **`GET /api/engine/status` 是唯一没有信封的 engine 路由** —— 它原样返回
+     `EngineManager.status()`。把它当作有信封处理，会让每一次对健康设备的调用都失败。
+  5. **engine 的任何 404 都是"资源不存在"，不是"能力缺失"。** 传输层对未知
+     session id、未知 model id 抛的是同一个 not-found 错误；映射成 501 会告诉调用方
+     它的 bot 失去了 sessions 能力。
+  6. **隔离是"别把它弄丢"，不是"把它建起来"。** 没有表、没有 DDL、没有 Track A
+     阶段 —— 但守卫看不见设备调用，所以隔离测试在全部 16 条路由上断言的是
+     **传输层从未被调用**，而不只是返回了 404。
+  7. **singlebox E2E 流阻塞在认证工作线上**，不在本模块 —— 所有 `/openapi/v1`
+     路由都返回 401，流只能断言 401。在网关校验器落地之前，`engine_runtime`
+     继续留在 `SINGLEBOX_E2E_EXEMPT` 里。
 - **2026-07-30** —— **新增 Track C —— 公共 API 现在也包装 engine。** 此前前端从
   `get_device_connection` 拿到连接，再经 `/proxypass/{target}` 自己去调 Bot 的
   engine adapter；那次移交会对外发布 proxypass 拓扑和裸设备 token，并且让

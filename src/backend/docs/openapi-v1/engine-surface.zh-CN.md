@@ -146,10 +146,14 @@ socket 也是干净的。
 
 这个端点必须守住的规则：
 
-- **只出现该 bot 当前引擎真正提供的 socket。** 列表中不存在某个 `kind` = 不支持。
-  `terminal` 只在引擎声明 `WEB_SHELL_OPEN` 时出现；`chat` 依当前引擎解析为
-  `/api/openclaw/ws` 或 `/api/claude_code/ws`（engine 还提供一个通用的
-  `/api/{engine}/ws`，`api/app.py:310`）。
+- **v1 只有 `chat` 一个 socket。** 它依当前引擎解析为 `/api/openclaw/ws` 或
+  `/api/claude_code/ws`，并回退到通用的 `/api/{engine}/ws`（`api/app.py:310`），
+  这样新增引擎也依然可达。**没有 `terminal` socket** —— 它曾被实现又被移除：
+  `spec.md` 把"在租户设备上执行任意命令与交互式 shell……在任何范围内"都排除在
+  v1 之外，而本参考文档此前与之矛盾。（按原样发布也不会work —— engine 的终端
+  路由校验的是 `token` **query** 参数，而只带 header 的连接并不会提供它。）
+  `SocketKind` 仍保持为列表上的枚举，将来加第二个 socket 是增量的。
+  _2026-07-30 更正。_
 - **URL 是不透明且完整的。** 调用方不拼接任何东西。`target`、`type` 和裸 `token`
   **不是**字段 —— 它们正是我们要停止对外发布的东西。
 - **`expires_at` 必填**，让调用方知道该重新获取，而不是在 token 过期后静默失败

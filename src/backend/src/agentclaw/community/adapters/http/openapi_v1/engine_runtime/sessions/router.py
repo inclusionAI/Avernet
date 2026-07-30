@@ -141,16 +141,24 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
     return [d for d in raw if isinstance(d, dict)]
 
 
-def _slice(items: list[Any], page_params: Any, *, what: str) -> tuple[int, list[Any]]:
-    """Exact total + the requested page, logging a truncated fetch."""
-    if len(items) >= _MAX_ENGINE_FETCH:
+def _slice(
+    items: list[Any], page_params: Any, *, what: str, reported: int | None = None
+) -> tuple[int, list[Any]]:
+    """The requested page plus the best total available.
+
+    ``reported`` is the engine's own count where it supplies one. Without it the
+    total is the number of items fetched, which the cap can understate — logged
+    when that happens rather than presented as complete.
+    """
+    if reported is None and len(items) >= _MAX_ENGINE_FETCH:
         logger.warning(
             "[engine_runtime] %s hit the %d-item fetch cap; total is a floor",
             what,
             _MAX_ENGINE_FETCH,
         )
+    total = reported if reported is not None else len(items)
     start = (page_params.page - 1) * page_params.page_size
-    return len(items), items[start : start + page_params.page_size]
+    return total, items[start : start + page_params.page_size]
 
 
 @router.get("", response_model=Envelope[Page[Session]])
@@ -216,11 +224,11 @@ async def get_session(
 ) -> Envelope[Session]:
     """Get one session.
 
-    ``session_id`` is the value the list endpoint returned, used **verbatim**.
-    Engine ids look like ``session:<uuid>:user:<id>``; a colon is legal in a URL
-    path segment (RFC 3986), so no encoding is needed and none is applied. An id
-    containing ``/`` would not be addressable — no engine id format produces one.
+    Pass the `session_id` exactly as the list endpoint returned it. The value
+    may contain colons; no encoding is required.
     """
+    # A colon is legal in a path segment (RFC 3986), so ids route as-is. An id
+    # containing "/" would not be addressable, but no engine id format has one.
     owner_id = caller_owner_id(principal)
     _require_personal_bot(relay, bot_id, owner_id)
     result = await relay.call(
@@ -242,17 +250,20 @@ async def update_session(
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Session]:
-    """Update a session (partial).
-
-    Publicly a ``PATCH`` on the resource; the engine models the same operation
-    as ``POST …/{id}/update``.
-    """
+    """Update a session. Omitted fields are left unchanged."""
+    # Publicly a PATCH on the resource; the engine models the same operation as
+    # a POST to an /update sub-path.
     owner_id = caller_owner_id(principal)
     _require_personal_bot(relay, bot_id, owner_id)
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="POST",
-        path=f"/api/sessions/{session_id}/update", body=payload,
+        # QUERY params, not a body. The engine declares this route's fields as
+        # bare scalar arguments, which FastAPI binds from the query string —
+        # there is no Body(...) on it. Sending a body is silently discarded and
+        # the endpoint answers 200 with the unchanged session: a no-op that
+        # looks like success.
+        path=f"/api/sessions/{session_id}/update", params=payload,
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError(f"no session {session_id}")
@@ -297,7 +308,10 @@ async def list_session_messages(
         params={"limit": _MAX_ENGINE_FETCH},
     )
     mapped = [_map_message(d, session_id) for d in _as_list(result.data)]
-    total, items = _slice(mapped, page, what="messages")
+    # Unlike the session list, the message history *does* report a total
+    # (``ApiResponse.total``). Prefer it: falling back to len(mapped) would
+    # understate a history longer than the fetch cap.
+    total, items = _slice(mapped, page, what="messages", reported=result.total)
     return page_envelope(total, items, request)
 
 

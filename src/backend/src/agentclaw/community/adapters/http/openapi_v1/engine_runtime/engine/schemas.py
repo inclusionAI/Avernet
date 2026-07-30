@@ -61,9 +61,15 @@ class EngineCapabilities(BaseModel):
         description="Capabilities the bot serves with a limitation; results for "
         "these may be incomplete."
     )
+    # Sourced from the engine's `fallback` map, which it populates only for
+    # capabilities that have a declared alternative route. A capability the
+    # engine simply does not declare appears in none of the three lists — hence
+    # the "not exhaustive" wording, which callers must not read past.
     unavailable: list[str] = Field(
-        description="Capabilities this bot does not offer. An endpoint needing "
-        "one of these answers 501."
+        description="Capabilities this bot explicitly reports as not offered. "
+        "**Not exhaustive** — treat `supported` and `limited` as the "
+        "authoritative test: a capability absent from all three lists is also "
+        "unavailable, and an endpoint needing it answers 501."
     )
 
 

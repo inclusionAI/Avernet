@@ -162,10 +162,11 @@ _FORBIDDEN_IN_PUBLISHED_TEXT = (
     "OCB",                 # internal component names
     "teamclaw",
     "mcporter",
-    "proxypass",
     "stub",                # test/deployment scaffolding
     "on_miss",             # unpublished alias spellings
-    "``",                  # RST markup renders literally in Swagger/Redoc
+    "/api/",               # the engine's private route paths
+    "EngineManager",       # internal class names
+    "``",                  # RST markup — Swagger/Redoc render markdown, not RST
     ":class:",
 )
 
@@ -187,6 +188,34 @@ def _published_strings(schema: dict) -> list[tuple[str, str]]:
 
     walk(schema, "")
     return out
+
+
+def test_the_generated_document_contains_nothing_internal():
+    """The whole document, not just model schemas.
+
+    FastAPI promotes every **handler docstring** to the operation description,
+    and the earlier version of this gate walked only Pydantic schemas — so five
+    handler docstrings shipped the engine's private route paths, internal
+    rationale and RST markup into the document external tenants read, with the
+    gate green.
+    """
+    from fastapi import FastAPI
+
+    from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS
+
+    app = FastAPI()
+    for group in _ENGINE_RUNTIME_GROUPS:
+        app.include_router(group)
+    document = app.openapi()
+
+    problems: list[str] = []
+    for where, text in _published_strings(document["paths"]):
+        for marker in _FORBIDDEN_IN_PUBLISHED_TEXT:
+            if marker.lower() in text.lower():
+                problems.append(f"paths{where}: contains {marker!r}")
+    assert not problems, "internal detail in the published document:\n  " + "\n  ".join(
+        problems
+    )
 
 
 def test_published_text_contains_nothing_internal():

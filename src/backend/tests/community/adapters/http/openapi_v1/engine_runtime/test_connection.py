@@ -33,10 +33,14 @@ class FakeConnections:
         self.calls: list[dict] = []
         self.raises: Exception | None = None
 
-    def build(self, *, bot_id, owner_id, include_terminal) -> ConnectionResult:
-        self.calls.append(
-            {"bot_id": bot_id, "owner_id": owner_id, "include_terminal": include_terminal}
-        )
+    def __set_relay(self, relay):  # wired by the fixture
+        self._relay = relay
+
+    def build(self, *, bot_id, owner_id) -> ConnectionResult:
+        # The real service resolves the caller's bot before touching the device
+        # service; model that, or a foreign bot appears to succeed here.
+        self._relay.resolve_bot(bot_id, owner_id)
+        self.calls.append({"bot_id": bot_id, "owner_id": owner_id})
         if self.raises is not None:
             raise self.raises
         sockets = [
@@ -46,22 +50,16 @@ class FakeConnections:
                 headers={"x-proxypass-token": "tok"},
             )
         ]
-        if include_terminal:
-            sockets.append(
-                SocketInfo(
-                    kind="terminal",
-                    url="wss://gw.example/proxypass/tgt/ws/terminal",
-                    headers={"x-proxypass-token": "tok"},
-                )
-            )
         return ConnectionResult(
             engine="openclaw", expires_at="2026-07-30T14:30:00+00:00", sockets=sockets
         )
 
 
 @pytest.fixture
-def connections():
-    return FakeConnections()
+def connections(relay):
+    fake = FakeConnections()
+    fake._FakeConnections__set_relay(relay)
+    return fake
 
 
 @pytest.fixture
@@ -82,8 +80,7 @@ def _caps(*supported: str) -> EngineResult:
     return EngineResult(data={"supported": list(supported)})
 
 
-def test_chat_socket_is_always_offered(client, relay):
-    relay.results = [_caps("session.list")]
+def test_chat_socket_is_offered(client, relay):
     data = ok(client.get(URL))
     assert [s["kind"] for s in data["sockets"]] == ["chat"]
     assert data["sockets"][0]["url"].startswith("wss://")
@@ -91,23 +88,22 @@ def test_chat_socket_is_always_offered(client, relay):
     assert data["expires_at"]
 
 
-def test_terminal_appears_only_when_the_engine_supports_it(client, relay, connections):
-    relay.results = [_caps("web_shell.open")]
-    data = ok(client.get(URL))
-    assert [s["kind"] for s in data["sockets"]] == ["chat", "terminal"]
-    assert connections.calls[0]["include_terminal"] is True
+def test_no_terminal_socket_is_offered(client, relay):
+    """Removed deliberately — the spec excludes an interactive shell on a
+    tenant's device from v1 at any scope."""
+    assert [s["kind"] for s in ok(client.get(URL))["sockets"]] == ["chat"]
 
 
-def test_terminal_absent_without_the_capability(client, relay, connections):
-    relay.results = [_caps("session.list")]
+def test_no_capability_probe_is_needed(client, relay):
+    """Chat is derived from the bot's active engine, a backend fact. Dropping
+    the terminal socket also dropped a device call from this endpoint."""
     ok(client.get(URL))
-    assert connections.calls[0]["include_terminal"] is False
+    assert relay.calls == []
 
 
 def test_payload_never_exposes_routing_internals(client, relay):
     """No target, type, or bare token field — that hand-off is what this
     endpoint exists to replace."""
-    relay.results = [_caps("web_shell.open")]
     data = ok(client.get(URL))
     assert set(data) == {"engine", "expires_at", "sockets"}
     for socket in data["sockets"]:
@@ -116,14 +112,7 @@ def test_payload_never_exposes_routing_internals(client, relay):
         assert "token" not in socket
 
 
-def test_capabilities_failure_fails_the_endpoint(client, relay):
-    """Rather than silently omitting a socket the bot may actually offer."""
-    relay.raises = EngineDeviceNotReadyError("cold")
-    assert fails(client.get(URL), 409)["message"] == "Bot device is not ready"
-
-
 def test_connection_build_failure_is_enveloped(client, relay, connections):
-    relay.results = [_caps()]
     connections.raises = EngineDeviceNotReadyError("no binding")
     fails(client.get(URL), 409)
 
@@ -136,13 +125,8 @@ def test_foreign_bot_is_masked_404_without_building_a_connection(
     assert connections.calls == []
 
 
-def test_the_service_is_called_with_the_principals_owner_id(client, relay, connections):
+def test_the_service_is_called_with_the_principals_owner_id(client, connections):
     """Never a caller-supplied identity: the wider permission model inside
     ``get_device_connection`` must not be reachable with someone else's id."""
-    relay.results = [_caps()]
     ok(client.get(URL))
-    assert connections.calls[0] == {
-        "bot_id": BOT,
-        "owner_id": OWNER,
-        "include_terminal": False,
-    }
+    assert connections.calls[0] == {"bot_id": BOT, "owner_id": OWNER}

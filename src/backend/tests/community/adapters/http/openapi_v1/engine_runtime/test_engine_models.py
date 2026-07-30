@@ -132,12 +132,52 @@ def test_switch_and_restart_are_not_exposed(engine_client):
 
 
 def test_list_models(models_client, relay):
+    """The engine wraps this one: ``{"models": [...], "total": n}``.
+
+    An earlier version of this test fed a bare list — a shape the engine never
+    returns — which let a handler that read ``result.data`` as a list ship while
+    returning an empty page against every real device.
+    """
     relay.results = [
-        EngineResult(data=[{"id": "openai/gpt-5.3", "name": "G", "provider": "openai"}])
+        EngineResult(
+            data={
+                "models": [
+                    {"id": "openai/gpt-5.3", "name": "G", "provider": "openai"}
+                ],
+                "total": 1,
+            }
+        )
     ]
     data = ok(models_client.get(f"/openapi/v1/bots/{BOT}/models"))
     assert data["total"] == 1
     assert data["items"][0]["model_id"] == "openai/gpt-5.3"
+
+
+def test_list_models_prefers_the_engines_total(models_client, relay):
+    relay.results = [
+        EngineResult(data={"models": [{"id": "a"}, {"id": "b"}], "total": 97})
+    ]
+    assert ok(models_client.get(f"/openapi/v1/bots/{BOT}/models"))["total"] == 97
+
+
+def test_a_bare_list_payload_yields_an_empty_page_not_a_crash(models_client, relay):
+    relay.results = [EngineResult(data=[{"id": "x"}])]
+    assert ok(models_client.get(f"/openapi/v1/bots/{BOT}/models"))["total"] == 0
+
+
+@pytest.mark.parametrize(
+    "bad", ["../../api/bash/exec", "..%2f..%2fapi%2fnodes", "a/../../b", "../nodes"]
+)
+def test_dot_segments_in_a_model_id_are_rejected(models_client, relay, bad):
+    """The id spans slashes and is concatenated into the engine path.
+
+    httpx normalises dot segments when building the request, so ".." would
+    reach engine routes this surface deliberately does not wrap — on the
+    caller's own bot, but outside the published scope all the same.
+    """
+    resp = models_client.get(f"/openapi/v1/bots/{BOT}/models/{bad}")
+    assert resp.status_code in (404, 400), resp.status_code
+    assert relay.calls == []
 
 
 def test_get_model_id_with_a_slash_survives_routing(models_client, relay):
