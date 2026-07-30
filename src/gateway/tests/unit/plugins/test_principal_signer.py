@@ -28,7 +28,7 @@ def _cfg(key: str = "k") -> PrincipalSignerConfig:
 def _app_principal() -> AppPrincipal:
     return AppPrincipal(
         tenant="t",
-        app=ThirdPartyApp(app_id="app-1", app_name="Demo", owners="org-1", tenant="t"),
+        app=ThirdPartyApp(app_id=1, app_name="Demo", owners="org-1", tenant="t"),
     )
 
 

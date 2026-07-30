@@ -54,7 +54,7 @@ class _FakeAppRegistry:
     """Resolves only ``app-key``; else None (soft miss). No DB."""
 
     _APP = RegisteredApp(
-        app_id="app-1",
+        id=1,
         app_name="Demo App",
         owners="org-1",
         app_type="assistant",

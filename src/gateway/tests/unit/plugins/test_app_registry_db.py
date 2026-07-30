@@ -1,4 +1,4 @@
-"""DB-backed tests for ``AppRepository`` (queries the seeded ``avernet_apps`` table)."""
+"""DB-backed tests for ``AppRepository`` (queries the seeded ``avernet_application`` table)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def registry() -> AppRepository:
 async def test_known_token_resolves_seeded_app(registry: AppRepository) -> None:
     app = await registry.find_app_by_token("app-key")
     assert app == RegisteredApp(
-        app_id="app-1",
+        id=1,
         app_name="Demo App",
         owners="org-1",
         app_type="assistant",

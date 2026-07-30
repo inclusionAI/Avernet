@@ -46,7 +46,6 @@ async def test_register_app_via_http() -> None:
         resp = await client.post(
             "/admin/apps",
             json={
-                "app_id": "app-http",
                 "app_name": "Http App",
                 "owners": "org-1",
                 "app_type": "assistant",
@@ -55,17 +54,21 @@ async def test_register_app_via_http() -> None:
         )
     assert resp.status_code == 201
     body = resp.json()
-    assert body["app_id"] == "app-http"
+    assert isinstance(body["id"], int)
+    assert body["app_name"] == "Http App"
+    assert body["tenant"] == "t"
+    assert body["status"] == "ACTIVE"
     token = body["token"]
 
     decoded = jwt.decode(token, _DEV_FALLBACK_KEY, algorithms=["HS256"])
     assert decoded["typ"] == "app"
-    assert decoded["sub"] == "app-http"
+    assert decoded["sub"] == "Http App"
     assert "exp" not in decoded
 
     rec = await AppRepository(build_database()).find_app_by_token(token)
     assert rec is not None
-    assert rec.app_id == "app-http"
+    assert rec.app_name == "Http App"
+    assert rec.id == body["id"]
 
 
 async def test_missing_field_returns_422() -> None:

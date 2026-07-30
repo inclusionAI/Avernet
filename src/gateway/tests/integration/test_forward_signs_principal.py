@@ -31,7 +31,7 @@ class _StubAuthenticator:
         return {
             PrincipalType.APP: AppPrincipal(
                 tenant="t",
-                app=ThirdPartyApp(app_id="a", app_name="A", owners="o", tenant="t"),
+                app=ThirdPartyApp(app_id=1, app_name="A", owners="o", tenant="t"),
             )
         }
 

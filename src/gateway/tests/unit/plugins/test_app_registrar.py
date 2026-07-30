@@ -28,9 +28,9 @@ def registrar() -> AppRegistrar:
 async def test_register_persists_row_and_returns_record(
     registrar: AppRegistrar,
 ) -> None:
-    issued = await registrar.register("app-x", "X App", "org-1", "assistant", "t1")
+    issued = await registrar.register("X App", "org-1", "assistant", "t1")
     assert isinstance(issued, IssuedApp)
-    assert issued.app_id == "app-x"
+    assert isinstance(issued.id, int) and issued.id >= 1
     assert issued.app_name == "X App"
     assert issued.owners == "org-1"
     assert issued.app_type == "assistant"
@@ -39,17 +39,18 @@ async def test_register_persists_row_and_returns_record(
 
     rec = await AppRepository(build_database()).find_app_by_token(issued.token)
     assert rec is not None
-    assert rec.app_id == "app-x"
+    assert rec.id == issued.id
+    assert rec.app_name == "X App"
     assert rec.tenant == "t1"
 
 
 async def test_register_token_has_expected_claims_and_no_exp(
     registrar: AppRegistrar,
 ) -> None:
-    issued = await registrar.register("app-x", "X App", "org-1", "assistant", "t1")
+    issued = await registrar.register("X App", "org-1", "assistant", "t1")
     decoded = jwt.decode(issued.token, "k", algorithms=["HS256"])
     assert decoded["typ"] == "app"
-    assert decoded["sub"] == "app-x"
+    assert decoded["sub"] == "X App"
     assert decoded["tenant"] == "t1"
     assert decoded["iat"] == _FIXED_NOW
     assert "exp" not in decoded

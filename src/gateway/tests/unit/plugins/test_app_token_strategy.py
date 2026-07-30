@@ -18,7 +18,7 @@ class _FakeAppRegistry:
     """Resolves only ``app-key`` → a fixed RegisteredApp; else None (soft miss)."""
 
     _APP = RegisteredApp(
-        app_id="app-1",
+        id=1,
         app_name="Demo App",
         owners="org-1",
         app_type="assistant",
@@ -45,14 +45,14 @@ async def test_dedicated_header_resolves() -> None:
     result = await _strat().build(_creds({_APP_HEADER: "app-key"}))
     assert isinstance(result, AppPrincipal)
     assert result.tenant == "t"
-    assert result.app.app_id == "app-1"
+    assert result.app.app_id == 1
     assert result.app.tenant == "t"
 
 
 async def test_bearer_fallback_resolves() -> None:
     result = await _strat().build(_creds({"authorization": "Bearer app-key"}))
     assert isinstance(result, AppPrincipal)
-    assert result.app.app_id == "app-1"
+    assert result.app.app_id == 1
 
 
 async def test_dedicated_header_wins_over_bearer() -> None:
@@ -61,7 +61,7 @@ async def test_dedicated_header_wins_over_bearer() -> None:
         _creds({_APP_HEADER: "app-key", "authorization": "Bearer nope"})
     )
     assert isinstance(result, AppPrincipal)
-    assert result.app.app_id == "app-1"
+    assert result.app.app_id == 1
 
 
 async def test_empty_dedicated_header_falls_back_to_bearer() -> None:

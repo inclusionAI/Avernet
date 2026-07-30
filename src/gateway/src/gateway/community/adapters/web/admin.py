@@ -8,10 +8,11 @@ convenience). A production deployment must gate them behind an admin credential
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from gateway.community.logger import get_logger
 
@@ -27,11 +28,13 @@ class AccessKeyRequest(BaseModel):
 
 
 class AppRequest(BaseModel):
-    app_id: str
     app_name: str
     owners: str
     app_type: str = "UNKNOWN"
     tenant: str
+    status: str = "ACTIVE"
+    env: str = ""
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 def _error(status: int, subcode: int, message: str) -> JSONResponse:
@@ -67,11 +70,13 @@ async def register_app(payload: AppRequest, request: Request) -> JSONResponse:
     registrar = request.app.state.app_registrar
     try:
         issued = await registrar.register(
-            payload.app_id,
             payload.app_name,
             payload.owners,
             payload.app_type,
             payload.tenant,
+            status=payload.status,
+            env=payload.env,
+            config=payload.config,
         )
     except Exception:
         logger.exception("app registration failed")
@@ -79,11 +84,13 @@ async def register_app(payload: AppRequest, request: Request) -> JSONResponse:
     return JSONResponse(
         status_code=201,
         content={
-            "app_id": issued.app_id,
+            "id": issued.id,
             "app_name": issued.app_name,
             "owners": issued.owners,
             "app_type": issued.app_type,
             "tenant": issued.tenant,
+            "status": payload.status,
+            "env": payload.env,
             "token": issued.token,
         },
     )

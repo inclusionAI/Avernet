@@ -62,7 +62,7 @@ class AppTokenStrategy:
         return AppPrincipal(
             tenant=record.tenant,
             app=ThirdPartyApp(
-                app_id=record.app_id,
+                app_id=record.id,
                 app_name=record.app_name,
                 owners=record.owners,
                 tenant=record.tenant,

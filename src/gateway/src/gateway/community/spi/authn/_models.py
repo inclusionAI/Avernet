@@ -37,7 +37,7 @@ class ThirdPartyApp(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    app_id: str  # app id issued at registration
+    app_id: int  # the app's surrogate bigint id (avernet_application.id)
     app_name: str  # human-facing app name
     owners: str  # owning developer/org; resource-ownership fallback subject
     tenant: str  # tenant the app belongs to (from the resolved app record)

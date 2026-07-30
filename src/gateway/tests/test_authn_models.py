@@ -82,7 +82,7 @@ def test_app_and_bot_principal_types() -> None:
     app = AppPrincipal(
         tenant="t-app",
         app=ThirdPartyApp(
-            app_id="cid",
+            app_id=1,
             app_name="Cid App",
             owners="org-1",
             tenant="t-app",
@@ -91,7 +91,7 @@ def test_app_and_bot_principal_types() -> None:
     )
     assert app.type == "app"
     assert app.tenant == "t-app"
-    assert app.app.app_id == "cid"
+    assert app.app.app_id == 1
     assert app.app.tenant == "t-app"
 
     bot = BotPrincipal(
