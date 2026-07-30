@@ -213,6 +213,7 @@ impl StoragePlugin for BaasStoragePlugin {
         let base = self.base_for_session(session_id);
         let body = serde_json::json!({
             "filename": req.file_name,
+            "content_type": req.mime_type,
             "file_size": req.size,
             "expire_seconds": req.ttl_secs,
             "staging_subdir": serde_json::Value::Null,
