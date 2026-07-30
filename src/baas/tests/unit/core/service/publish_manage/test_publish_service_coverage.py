@@ -982,6 +982,100 @@ class TestCreateDeviceRecordsForPublish:
                     operator="op",
                 )
 
+    def test_insert_record_includes_provider_device_id_in_extra_config(self):
+        """Verify extra_config captures device_uuid + provider_device_id on insert."""
+        import dataclasses
+
+        from secbaas.community.core.repository.publish_record import (
+            PublishRecordExtraConfig,
+        )
+
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(
+                id=1, device_uuid="uuid-abc", provider_device_id="provider-xyz"
+            ),
+        ]
+        batch = _make_batch_record(batch_capacity=1)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.CREATE,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+            )
+
+        svc._publish_record_repo.insert_record.assert_called_once()
+        call_kwargs = svc._publish_record_repo.insert_record.call_args.kwargs
+        assert "extra_config" in call_kwargs
+        assert call_kwargs["extra_config"] == {
+            "device_uuid": "uuid-abc",
+            "provider_device_id": "provider-xyz",
+        }
+
+    def test_insert_record_extra_config_with_provider_none(self):
+        """Verify extra_config still captures device_uuid when provider_device_id is None."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=1, device_uuid="uuid-abc", provider_device_id=None),
+        ]
+        batch = _make_batch_record(batch_capacity=1)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.CREATE,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+            )
+
+        call_kwargs = svc._publish_record_repo.insert_record.call_args.kwargs
+        assert call_kwargs["extra_config"] == {
+            "device_uuid": "uuid-abc",
+            "provider_device_id": None,
+        }
+
+    def test_insert_record_extra_config_both_none_is_omitted(self):
+        """Verify extra_config is None when both fields are None."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=1, device_uuid=None, provider_device_id=None),
+        ]
+        batch = _make_batch_record(batch_capacity=1)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.CREATE,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+            )
+
+        call_kwargs = svc._publish_record_repo.insert_record.call_args.kwargs
+        assert call_kwargs["extra_config"] is None
+
 
 # ====================================================================
 # _get_current_stage / _get_pending_batches / _check_all_batches_complete
