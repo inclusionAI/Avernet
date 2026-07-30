@@ -137,7 +137,7 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 
 | 组 | 端点数 | 负责人 | 优先级 | 路由 | 状态 |
 |---|---|---|---|---|---|
-| sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` *(未创建)* | ⬜ TODO |
+| sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` *(未创建)* | ⬜ TODO —— **仅 personal bot**，`service` 返回 501 |
 | engine（只读） | 3 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` *(未创建)* | ⬜ TODO |
 | connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` *(未创建)* | ⬜ TODO |
 | approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` *(未创建)* | ⬜ TODO |
@@ -523,7 +523,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 
 | 组 | 端点数 | 公共路径 |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` |
+| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` —— 仅 personal bot |
 | engine | 3 | `…/engine/{status,capabilities,available}` |
 | models | 2 | `…/models`、`…/models/{model_id}` |
 | approvals | 3 | `…/approvals/mode`（GET/PUT）、`…/approvals/modes` |

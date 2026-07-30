@@ -39,8 +39,9 @@ All paths are relative to `src/backend/`. Source package is
   - [ ] `models.py` defines `EngineResult(data, total, warning)`,
         `ConnectionResult`, `SocketInfo`.
   - [ ] `errors.py` defines `EngineCapabilityUnsupportedError`,
-        `EngineDeviceNotReadyError`, `EngineUpstreamError` — semantic state
-        only, **no HTTP status** (Rule 7, `docs/arch/arch.rules.md:203`).
+        `EngineDeviceNotReadyError`, `EngineUpstreamError`,
+        `EngineBotTypeNotSupportedError` — semantic state only, **no HTTP
+        status** (Rule 7, `docs/arch/arch.rules.md:203`).
   - [ ] `README.md` carries a `## Context Boundary` yaml block in the shape of
         `…/core/cron/README.md:5-25`, declaring every cross-module import the
         relay will make.
@@ -130,6 +131,7 @@ All paths are relative to `src/backend/`. Source package is
   - [ ] `ENVELOPE_ERRORS` gains, all **before** the `BotServiceError` base entry
         at `responses.py:171`:
         `EngineCapabilityUnsupportedError` → `(501, …)`,
+        `EngineBotTypeNotSupportedError` → `(501, "Not supported for this bot type")`,
         `EngineDeviceNotReadyError` → `(409, …)`,
         `DeviceAdapterTimeoutError` → `(504, …)`,
         `DeviceAdapterEndpointNotFoundError` → `(501, …)`,
@@ -159,12 +161,16 @@ All paths are relative to `src/backend/`. Source package is
         `openapi_v1/routines/router.py:126-131`, with a documented cap on the
         engine-side request.
   - [ ] `extra="forbid"`; `user_id`, `engine`, `agent_id` rejected → `422`.
-  - [ ] **Shared-device disclosure settled before this ships.** The engine drops
-        `user_id` and returns every session on the device
-        (`plugins/openclaw/_session.py:125-132`), so on a bot whose device serves
-        multiple callers the owner would see their sessions. Either gate the
-        group on `bot_type == "personal"` or confirm the bot type cannot be
-        shared. See the plan's *Isolation* §2 and the matching risk.
+  - [ ] **Gated on `bot_type == "personal"`** (plan assumption 6). All seven
+        routes raise `EngineBotTypeNotSupportedError` → `501` on a `service`
+        bot, checked **before** any device call. `DeviceContext.bot_type` is
+        already populated (`core/devices/services/device_context.py:41`).
+        Rationale: the engine drops `user_id` and returns every session on the
+        device (`plugins/openclaw/_session.py:125-132`), so on a service bot the
+        owner would see other callers' sessions and message history.
+  - [ ] A test asserts the `501` on a service bot **and** that the transport was
+        never invoked for it — the check must precede the forward, not filter
+        its result.
   - [ ] Success + each mapped error covered, using the in-memory transport.
 - **Depends on:** Tasks 4, 5, 6
 

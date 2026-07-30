@@ -156,7 +156,7 @@ DDL. Full ruling and per-endpoint mapping in
 
 | Group | Endpoints | Owner | Pri | Router | State |
 |---|---|---|---|---|---|
-| sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` *(not created)* | ⬜ TODO |
+| sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` *(not created)* | ⬜ TODO — **personal bots only**, `service` → 501 |
 | engine (read-only) | 3 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` *(not created)* | ⬜ TODO |
 | connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` *(not created)* | ⬜ TODO |
 | approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` *(not created)* | ⬜ TODO |
@@ -583,7 +583,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 | Group | Endpoints | Public paths |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` |
+| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` — personal bots only |
 | engine | 3 | `…/engine/{status,capabilities,available}` |
 | models | 2 | `…/models`, `…/models/{model_id}` |
 | approvals | 3 | `…/approvals/mode` (GET/PUT), `…/approvals/modes` |

@@ -32,6 +32,7 @@ assumptions — overturning any of them changes this plan:
 | 3 | Connection expiry mirrors the internal 120-minute WS token TTL; no caller override | `connection/router.py` |
 | 4 | Single owner; board row stays unassigned | docs only |
 | 5 | Owner-only; no collaborator access | relay resolves the bot via owner-scoped lookup |
+| 6 | **Sessions group serves `personal` bots only**; `service` → `501` | decided 2026-07-30, see *Isolation* §2 |
 
 ## Affected Components
 
@@ -103,10 +104,14 @@ automatically safe:
 For a personal bot this is contained: one owner, one device, so "every session
 on the device" and "the owner's sessions" are the same set. It stops being
 contained the moment a device serves more than one caller — which is exactly
-what service and public bots do, and why `expert_chat` provisions **per-caller
-containers** (`core/expert_chat/`, the `caller-connection` admin route). See the
-risk below; this needs a decision before the surface is enabled for those bot
-types.
+what service bots do, and why `expert_chat` provisions **per-caller containers**
+(`core/expert_chat/`, the `caller-connection` admin route).
+
+**Hence assumption 6, decided 2026-07-30: the sessions group serves `personal`
+bots only.** The other four groups are unaffected — engine state, models and
+connection are device-level facts with no per-caller content, and reaching
+another caller's approval mode requires knowing their `session_key`, which is
+precisely what the sessions list would have handed over.
 
 **3. The Track A guard cannot see any of this.** `with_loader_criteria` constrains
 SQLAlchemy statements. A leak that happens *on the device*, after a correctly
@@ -314,7 +319,8 @@ in `tests/community/architecture/test_service_api_conformance.py`.
 - `core/engine_runtime/models.py` — `EngineResult(data, total, warning)`,
   `ConnectionResult`, `SocketInfo`.
 - `core/engine_runtime/errors.py` — `EngineCapabilityUnsupportedError`,
-  `EngineDeviceNotReadyError`, `EngineUpstreamError`. Semantic state only, **no
+  `EngineDeviceNotReadyError`, `EngineUpstreamError`,
+  `EngineBotTypeNotSupportedError` (assumption 6). Semantic state only, **no
   HTTP status** (Rule 7 / `arch.rules.md:203`); the adapter maps them.
 - `core/engine_runtime/relay.py` — `EngineRuntimeRelay`:
   - `_resolve_bot(bot_id, owner_id)` → `BotService.get_bot(bot_id, owner_id)`;
@@ -355,6 +361,7 @@ in `tests/community/architecture/test_service_api_conformance.py`.
 - `openapi_v1/responses.py:113` — add to `ENVELOPE_ERRORS`, **before** the
   `BotServiceError` base entry at `responses.py:171`:
   - `EngineCapabilityUnsupportedError` → `(501, "Not supported by this bot's engine")`
+  - `EngineBotTypeNotSupportedError` → `(501, "Not supported for this bot type")`
   - `EngineDeviceNotReadyError` → `(409, "Bot device is not ready")`
   - `DeviceAdapterTimeoutError` → `(504, "Engine request timed out")`
   - `EngineUpstreamError` → `(502, "Engine service error")`
@@ -435,15 +442,21 @@ and matches how cron behaves today, but the tests must not assume a live device.
   coincide; on a bot whose device serves multiple callers — service bots, public
   bots — the bot's owner would see other callers' sessions and message history
   through the public API.
-  **Mitigation, and an open question for the owner:** v1 is owner-only, which
-  bounds the blast radius to "the owner of a shared bot sees its callers'
-  sessions" — not cross-tenant, but still a disclosure the caller did not
-  consent to. Two candidate answers: (a) restrict the sessions group to
-  `bot_type == "personal"` in v1 and 501 the rest, or (b) filter server-side on
-  the `user:<user_id>` suffix the session key already carries. **(a) is the
-  smaller, more honest v1**; (b) belongs in the engine, not in a backend filter
-  that could be bypassed. Do not ship the sessions group for shared bot types
-  until this is settled.
+  **DECIDED 2026-07-30 — the sessions group serves `personal` bots only.** A
+  `service` bot gets `501` from all seven session routes, with a fixed message
+  naming the bot type. `BotType` is `Literal["personal", "service"]`
+  (`openapi_v1/bots/schemas.py:24`) and PR #494 already lets an external tenant
+  create either, so this is a live case, not a hypothetical.
+
+  Rejected: filtering server-side on the `user:<user_id>` suffix the session key
+  carries. It is the correct fix but it belongs in the engine — a backend-side
+  filter over an unfiltered device response is bypassable the moment any other
+  caller reaches the device directly. Purely additive to lift later: widening
+  from `personal` to both breaks no published contract.
+
+  Implementation: `DeviceContext.bot_type` is already populated by the resolver
+  (`core/devices/services/device_context.py:41`), and `BotService.get_bot`
+  returns it too, so the check costs nothing extra.
 
 - **Risk: capability answers differ per engine**, so the same public path
   behaves differently across two of a tenant's own bots.

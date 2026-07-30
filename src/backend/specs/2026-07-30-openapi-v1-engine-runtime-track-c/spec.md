@@ -62,6 +62,10 @@ proven path rather than inventing one.
 - [ ] Sixteen endpoints are served, all scoped to a single bot the caller
       owns: seven for sessions, three read-only for engine state, two for
       models, three for approvals, and one for connection.
+- [ ] The seven session endpoints serve personal bots only; on a service bot
+      each answers the same explicit "not supported for this bot type" outcome,
+      never a partial result and never another caller's data. The other nine
+      endpoints serve both bot types.
 - [ ] Every response uses the public API's standard envelope, with list
       endpoints returning the standard page shape and an accurate total.
 - [ ] Every endpoint resolves the caller's identity from the request principal
@@ -95,7 +99,7 @@ proven path rather than inventing one.
 ## In Scope
 
 - Sessions: list, create, read, delete, read message history, clear message
-  history, and partial update.
+  history, and partial update — **for personal bots only** (see Out of Scope).
 - Engine state, read-only: runtime status, declared capabilities, and the list
   of engines available on the bot with the active one marked.
 - Models: list, and read one by identifier.
@@ -127,6 +131,12 @@ proven path rather than inventing one.
 - **Session favourites and the engine-specific gateway diagnostics** (connection
   test, disconnect, gateway config, default config, zero-check). Deferred, not
   cancelled — each is additive and breaks no published contract if added later.
+- **The sessions group on service bots.** A service bot is used by many callers
+  and its device holds all of their sessions, but the runtime does not separate
+  them by caller — so exposing the group there would show a bot's owner other
+  people's conversations and message history. The seven session endpoints answer
+  "not supported for this bot type" on a service bot. Every other endpoint in
+  this feature works on both bot types. Widening this later breaks nothing.
 - **Node inventory** (`GET /api/nodes`). The frontend does proxypass it, so the
   scope rule would wrap it, but the product does not need node inventory on the
   public surface. Dropped 2026-07-30 — additive later, breaks no contract.

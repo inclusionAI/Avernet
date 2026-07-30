@@ -77,6 +77,17 @@ All bot-scoped under `/openapi/v1/bots/{bot_id}/…`, all returning the
 
 ### sessions (7) — engine `/api/sessions`
 
+> **Personal bots only.** All seven routes answer `501 "Not supported for this
+> bot type"` on a `service` bot, checked before any device call. The engine
+> accepts `user_id`, logs it, and **drops it** — `sessions_list()` has no
+> `user_id` parameter (`plugins/openclaw/_session.py:125-132`), so the device
+> returns every session it holds. On a personal bot that set is the owner's; on
+> a service bot, whose device serves many callers, it is everyone's. Filtering
+> on the `user:<id>` suffix the session key already carries is the right fix but
+> belongs in the **engine** — a backend filter over an unfiltered device response
+> is bypassable. Widening to both bot types later breaks no contract.
+> _Decided 2026-07-30._
+
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
 | GET | `…/sessions` | `GET /api/sessions` | `agent_id`, `session_key`, paged → `Envelope[Page[Session]]` |
@@ -376,6 +387,10 @@ it (rule C2), but the two must never be merged by a later reader.
 - **2026-07-30 — `session-favorites` and the `/api/openclaw` HTTP trio
   (+ default-config, zero-check) deferred**, not cancelled. Both are additive:
   adding them later breaks no published contract.
+- **2026-07-30 — the sessions group serves `personal` bots only**; `service`
+  gets `501`. `BotType` is `Literal["personal", "service"]` and PR #494 already
+  lets an external tenant create either, so this is live, not hypothetical. The
+  other four groups serve both types.
 - **2026-07-30 — chat stays a WebSocket.** No `POST /chat`, no SSE. The public
   API hands back a URL and headers; the caller owns the socket.
 

@@ -70,6 +70,15 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 ### sessions（7）—— engine `/api/sessions`
 
+> **仅限 personal bot。** 在 `service` bot 上，七条路由全部返回
+> `501 "Not supported for this bot type"`，且在任何设备调用**之前**就判定。
+> engine 接受 `user_id`、记了日志、然后**丢弃**它 —— `sessions_list()` 根本没有
+> `user_id` 参数（`plugins/openclaw/_session.py:125-132`），因此设备会返回它持有的
+> 全部会话。在 personal bot 上这一集合就是 owner 自己的；而 service bot 的设备服务
+> 多个 caller，那就是所有人的。按 session key 里已带的 `user:<id>` 后缀过滤才是正解，
+> 但它属于 **engine** —— 在未过滤的设备响应之上再由后端过滤是可以被绕过的。
+> 以后放开到两种 bot 类型不会破坏任何契约。_2026-07-30 决定。_
+
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
 | GET | `…/sessions` | `GET /api/sessions` | `agent_id`、`session_key`、分页 → `Envelope[Page[Session]]` |
@@ -343,6 +352,9 @@ Track B 的坑：**基类放最后** —— `ENVELOPE_ERRORS` 按插入顺序第
 - **2026-07-30 —— `session-favorites` 与 `/api/openclaw` HTTP 三件套
   （外加 default-config、zero-check）延后**，不是取消。两者都是增量的：以后再加
   不会破坏任何已发布的契约。
+- **2026-07-30 —— sessions 组仅服务 `personal` bot**；`service` 返回 `501`。
+  `BotType` 是 `Literal["personal", "service"]`，而 PR #494 已经允许外部租户创建
+  两者之一，所以这是真实存在的情况，不是假设。其余四个组两种类型都服务。
 - **2026-07-30 —— 对话仍然是 WebSocket。** 不做 `POST /chat`，不做 SSE。公共 API
   交还 URL 与 headers，socket 由调用方自己持有。
 
