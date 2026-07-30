@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from agentclaw.community.api.task import PanelMessage
+from agentclaw.community.core.task.protocols import PanelMessage
 from agentclaw.community.core.events.bus import EventBus
 from agentclaw.community.plugins.community.task.panel_carrier import (
     RecordingPanelDelivery,

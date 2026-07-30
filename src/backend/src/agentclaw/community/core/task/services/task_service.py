@@ -188,7 +188,7 @@ class TaskService:
             raise IllegalTransitionError(
                 f"finalize_plan illegal from {task.status.value}"
             )
-        task.spec.plan = plan
+        task.plan = plan
         self._advance_phase(task, TaskStatus.PLANNED)
         self._emit(
             task,
@@ -562,7 +562,7 @@ class TaskService:
             task.spec.context.background = str(patch.get("background") or "")
         if "plan" in patch and patch["plan"] is not None:
             # plan payload is a dict-shaped Plan; best-effort merge.
-            task.spec.plan = self._plan_from_dict(patch["plan"])
+            task.plan = self._plan_from_dict(patch["plan"])
 
     def _find_node(self, task: Task, node_id: str) -> Optional[Node]:
         if task.execution_graph is None:
@@ -606,7 +606,7 @@ class TaskService:
         g = task.execution_graph
         g.nodes = []
         g.edges = []
-        p = plan or task.spec.plan
+        p = plan or task.plan
         if p is None:
             return
         for sub in p.sub_tasks:
@@ -686,7 +686,7 @@ class TaskService:
     # --- internal: wire projections ---------------------------------------
 
     def _definition_meta(self, task: Task) -> Optional[dict]:
-        p = task.spec.plan
+        p = task.plan
         if p is None:
             return None
         return {

@@ -150,7 +150,7 @@ def test_save_round_trips_full_aggregate_with_graph(task_repo):
         nodes=[Node(node_id="n1", spec="do x", run_mode=None, status=NodeStatus.RUNNING)],
         edges=[Edge(edge_id="e1", from_node="n1", to_node="n2", kind=EdgeKind.DEPENDENCY)],
     )
-    t.spec.plan = Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="do x")], confidence=0.8)
+    t.plan = Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="do x")], confidence=0.8)
     task_repo.save(t)
     fetched = task_repo.get_by_id("task-1")
     assert fetched.status is TaskStatus.EXECUTING
@@ -158,8 +158,9 @@ def test_save_round_trips_full_aggregate_with_graph(task_repo):
     assert fetched.execution_graph.nodes[0].node_id == "n1"
     assert fetched.execution_graph.nodes[0].status is NodeStatus.RUNNING
     assert fetched.execution_graph.edges[0].kind is EdgeKind.DEPENDENCY
-    assert fetched.spec.plan is not None
-    assert fetched.spec.plan.sub_tasks[0].node_id == "n1"
+    # Plan persists on the Task aggregate root (B), in its own plan_json column.
+    assert fetched.plan is not None
+    assert fetched.plan.sub_tasks[0].node_id == "n1"
 
 
 # --- TaskEventRepo append-only + single-writer seq -------------------------

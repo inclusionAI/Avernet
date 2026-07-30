@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.api.task import DispatchResult
+from agentclaw.community.core.task.protocols import DispatchResult
 from agentclaw.community.core.task.domain.models import RunMode
 from agentclaw.community.plugins.community.task.execution_port_client import (
     ExecutionPortClient,

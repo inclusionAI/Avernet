@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import List
 
-from agentclaw.community.api.task import BotCandidate, DispatchResult, RouteRecommendation
+from agentclaw.community.core.task.protocols import BotCandidate, DispatchResult, RouteRecommendation
 from agentclaw.community.core.task.domain.events import EventKind, TaskEvent
 from agentclaw.community.core.task.domain.models import (
     AttemptOutcome,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.api.task import PanelMessage
+from agentclaw.community.core.task.protocols import PanelMessage
 from agentclaw.community.core.task.domain.events import EventKind
 from agentclaw.community.core.task.domain.models import (
     Plan,
@@ -86,8 +86,8 @@ def test_finalize_plan_advances_discussing_to_planned():
     svc.amend(task.id, {"summary": "x"})
     planned = svc.finalize_plan(task.id, _plan())
     assert planned.status is TaskStatus.PLANNED
-    assert planned.spec.plan is not None
-    assert len(planned.spec.plan.sub_tasks) == 1
+    assert planned.plan is not None
+    assert len(planned.plan.sub_tasks) == 1
 
 
 def test_finalize_plan_illegal_before_any_amend():

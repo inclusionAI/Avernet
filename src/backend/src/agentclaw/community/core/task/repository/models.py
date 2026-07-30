@@ -57,6 +57,8 @@ class AcTaskModel(Base):
     latest_event_seq = Column(Integer, nullable=False, default=0)
     spec_json = Column(Text, nullable=True)
     execution_graph_json = Column(Text, nullable=True)
+    # Plan lives on the Task aggregate root (B), not inside TaskSpec — own column.
+    plan_json = Column(Text, nullable=True)
     gmt_create = Column(DateTime, nullable=False, default=func.now())
     gmt_modified = Column(
         DateTime, nullable=False, default=func.now(), onupdate=func.now()

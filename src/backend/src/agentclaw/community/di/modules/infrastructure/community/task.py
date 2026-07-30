@@ -17,6 +17,10 @@ from __future__ import annotations
 from injector import Module, provider, singleton
 
 from agentclaw.community.api.task import (
+    TaskSchedulerProtocol,
+    TaskServiceProtocol,
+)
+from agentclaw.community.core.task.protocols import (
     BbsExecutor,
     BcsCollaborationProtocol,
     BotDiscoverPort,
@@ -105,6 +109,25 @@ class CommunityTaskModule(Module):
     ) -> TaskScheduler:
         from agentclaw.community.core.task.services import TaskScheduler as RealScheduler
         return RealScheduler(task_service, discover, driver, decomposer)
+
+    # --- api-layer service-api bindings (adapters depend on these, not core) ---
+    # Mirror of bot_management_module: bind the api Protocol (router-facing) to
+    # the same core concrete singleton, so adapters → api instead of → core.
+    # Core-internal consumers keep injecting the core Protocols above.
+
+    @singleton
+    @provider
+    def task_service_api(
+        self, task_service: TaskService
+    ) -> TaskServiceProtocol:
+        return task_service  # type: ignore[return-value]  # structural conformance
+
+    @singleton
+    @provider
+    def task_scheduler_api(
+        self, task_scheduler: TaskScheduler
+    ) -> TaskSchedulerProtocol:
+        return task_scheduler  # type: ignore[return-value]  # structural conformance
 
     @singleton
     @provider

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from injector import Injector
 
-from agentclaw.community.api.task import (
+from agentclaw.community.core.task.protocols import (
     BcsCollaborationProtocol,
     BotDiscoverPort,
     DecomposerPort,
@@ -101,7 +101,7 @@ def test_profile_modules_imports_task_module():
 def test_panel_delivery_port_bound_to_noop():
     """Phase 4.5.3: community default delivery port is the Noop impl (no chat
     push bus — the frontend create-flow calls openTaskPanel directly)."""
-    from agentclaw.community.api.task import PanelDeliveryPort
+    from agentclaw.community.core.task.protocols import PanelDeliveryPort
     from agentclaw.community.plugins.community.task.panel_carrier import (
         NoopPanelDelivery,
     )

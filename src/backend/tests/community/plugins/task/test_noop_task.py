@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.api.task import (
+from agentclaw.community.core.task.protocols import (
     BcsCollaborationProtocol,
     BotDiscoverPort,
     DecomposerPort,

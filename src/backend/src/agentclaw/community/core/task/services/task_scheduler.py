@@ -45,6 +45,7 @@ from agentclaw.community.core.task.domain.models import (
     RunMode,
     Task,
     TaskStatus,
+    WatchdogAction,
 )
 from agentclaw.community.core.task.domain.state_machine import (
     IllegalTransitionError,
@@ -60,6 +61,16 @@ MAX_LOOP_ROUNDS = 5
 MAX_NO_PROGRESS_TICKS = 3
 MAX_RECOMPOSE = 3
 DEFAULT_MAX_ATTEMPTS = 2
+
+# --- watchdog ceilings (6.5) ------------------------------------------------
+# tick-based 超时(无 wall clock):一个 RUNNING node 撑过 PROBE_AFTER_TICKS 个 tick
+# 仍未自上报 → 探活;探活 MAX_PROBES 次仍无响应 → 重驱;重驱 MAX_REDRIVES 次仍
+# hang → 升级(FAILED → reroute/split)。每次 PROBE/REDRIVE 由 scheduler 重置
+# running_ticks(开新窗口);REDRIVE 还重置 probe_count。bot 会因指令遵从/LLM 服务
+# 不稳定 hang 住,故须主动探活 + 重驱(plan §3)。
+PROBE_AFTER_TICKS = 2
+MAX_PROBES = 2
+MAX_REDRIVES = 2
 
 
 # --- pure decisions (plan §3.1) --------------------------------------------

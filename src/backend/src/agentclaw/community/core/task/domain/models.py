@@ -98,6 +98,19 @@ class RouteClass(StrEnum):
     C5 = "C5"  # escalate to BBS
 
 
+class WatchdogAction(StrEnum):
+    """Scheduler tick 看门狗决策 (6.5). 对一个长期 RUNNING 的 node,按 tick 超时
+    决定下一步:让 bot 继续(WAIT)/ 探活 bot 上报状态(PROBE)/ 重驱 bot 执行
+    (REDRIVE)/ 升级(ESCALATE,标 FAILED 走 reroute/split)。bot 会因指令遵从或
+    LLM 服务不稳定 hang 住,故 scheduler 须主动探活 + 重驱。tick-based 超时(无
+    wall clock),状态在 ``node.properties`` (running_ticks/probe_count/redrive_count)。"""
+
+    WAIT = "wait"  # 仍在 bot 自上报窗口内,继续等
+    PROBE = "probe"  # tick 超时,探活 bot 上报状态
+    REDRIVE = "redrive"  # 探活耗尽,重驱 bot 执行(开新一轮窗口)
+    ESCALATE = "escalate"  # 重驱也耗尽,升级(FAILED → reroute/split)
+
+
 class AttemptTrigger(StrEnum):
     """How an executor attempt was kicked off — folded into AttemptedRecord (absorbs RouteHop)."""
 
@@ -218,14 +231,16 @@ class Plan:
 
 @dataclass
 class TaskSpec:
-    """The intake/plan face. Progressive: only metadata required at INTAKE."""
+    """The intake face (requirement / acceptance). Progressive: only metadata
+    required at INTAKE. The finalized decomposition (``Plan``) is NOT part of
+    the spec — it lives on the :class:`Task` aggregate root as the bridge
+    between spec (what's wanted) and ``execution_graph`` (runtime DAG)."""
 
     metadata: TaskSpecMetadata
     context: TaskContext = field(default_factory=TaskContext)
     goal: Optional[TaskGoal] = None
     deliverables: list[Deliverable] = field(default_factory=list)
     execution: Optional[ExecutionMeta] = None
-    plan: Optional[Plan] = None
 
 
 # --- runtime face (execution graph) -----------------------------------------
@@ -333,7 +348,9 @@ class ProgressNode:
 
 @dataclass
 class Task:
-    """Aggregate root. ``spec`` = intake/plan face; ``execution_graph`` = runtime face.
+    """Aggregate root. ``spec`` = intake face (requirement/acceptance);
+    ``plan`` = the finalized decomposition (bridge between spec and runtime);
+    ``execution_graph`` = runtime face (the live DAG).
     ``latest_event_seq`` is the TaskService event-log watermark (single writer guard).
     ``status`` is the canonical lifecycle phase (8 states); ``execution_graph.root_phase``
     mirrors it so a graph snapshot is self-describing. TaskService keeps the two in sync
@@ -345,5 +362,6 @@ class Task:
     spec: TaskSpec
     status: TaskStatus = TaskStatus.INTAKE
     execution_graph: Optional[TaskExecutionGraph] = None
+    plan: Optional[Plan] = None
     latest_event_seq: int = 0
     loop_round: int = 0

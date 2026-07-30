@@ -97,7 +97,7 @@ def test_task_construct_minimal_execution_graph_none():
     assert task.execution_graph is None
     assert task.latest_event_seq == 0
     assert task.loop_round == 0
-    assert task.spec.plan is None
+    assert task.plan is None
 
 
 def test_task_spec_progressive_defaults():
@@ -107,7 +107,8 @@ def test_task_spec_progressive_defaults():
     assert spec.goal is None
     assert spec.deliverables == []
     assert spec.execution is None
-    assert spec.plan is None
+    # Plan lives on the Task aggregate root, NOT on TaskSpec (B: plan moved).
+    assert not hasattr(spec, "plan")
 
 
 def test_plan_confidence_default_zero():

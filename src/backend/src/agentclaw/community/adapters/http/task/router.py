@@ -1,7 +1,9 @@
 """HTTP routes for the task module (Phase 0.6 骨架, 0.10 DI-wired).
 
-Handlers delegate to the :class:`TaskService` Protocol via ``Injected(TaskService)``;
-the DI container (``CommunityTaskModule`` Phase 0, real impl Phase 2/6) binds it.
+Handlers delegate to the api-layer service api ``TaskServiceProtocol`` via
+``Injected(TaskServiceProtocol)`` (mirrors ``api/bot_service.BotServiceProtocol``);
+the DI container (``CommunityTaskModule``) binds the api Protocol to the core
+concrete ``TaskService``. Core never imports this router or the api Protocols.
 
 Plan §2.1 — TaskService is the *only* write path (``on_event``). Scheduler
 orchestration (dispatch/reroute) and owner-bot SKILL verification both enter as
@@ -26,7 +28,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 
-from agentclaw.community.api.task import TaskScheduler, TaskService
+from agentclaw.community.api.task import TaskSchedulerProtocol, TaskServiceProtocol
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.schemas import (
     AmendTaskRequest,
@@ -101,7 +103,7 @@ def _execution_graph_dict(task: Any) -> Optional[dict]:
 # --- endpoints --------------------------------------------------------------
 
 @router.post("", response_model=TaskCreatedResponse)
-def create_task(req: CreateTaskRequest, service: TaskService = Injected(TaskService)) -> Any:
+def create_task(req: CreateTaskRequest, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
     task = service.create(title=req.title, source=req.source, background=req.background)
     return TaskCreatedResponse(
         task_id=_task_id_of(task),
@@ -114,7 +116,7 @@ def create_task(req: CreateTaskRequest, service: TaskService = Injected(TaskServ
 def list_tasks(
     user_id: str = Query(..., description="Owner user id."),
     limit: int = Query(50, ge=1, le=200),
-    service: TaskService = Injected(TaskService),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
 ) -> Any:
     tasks = service.list_by_user(user_id, limit=limit)
     items = [
@@ -130,7 +132,7 @@ def list_tasks(
 
 
 @router.get("/{task_id}", response_model=TaskDetailResponse)
-def get_task(task_id: str, service: TaskService = Injected(TaskService)) -> Any:
+def get_task(task_id: str, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
     task = service.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
@@ -146,7 +148,7 @@ def get_task(task_id: str, service: TaskService = Injected(TaskService)) -> Any:
 
 
 @router.get("/{task_id}/progress", response_model=TaskProgressResponse)
-def get_progress(task_id: str, service: TaskService = Injected(TaskService)) -> Any:
+def get_progress(task_id: str, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
     prog = service.progress(task_id)
     if not isinstance(prog, dict):
         raise HTTPException(status_code=404, detail="task not found")
@@ -164,7 +166,7 @@ def get_progress(task_id: str, service: TaskService = Injected(TaskService)) -> 
 def amend_task(
     task_id: str,
     req: AmendTaskRequest,
-    service: TaskService = Injected(TaskService),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
 ) -> Any:
     task = service.amend(task_id, req.patch)
     return TaskDetailResponse(
@@ -182,7 +184,7 @@ def amend_task(
 def finalize_plan(
     task_id: str,
     req: FinalizePlanRequest,
-    service: TaskService = Injected(TaskService),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
 ) -> Any:
     task = service.finalize_plan(task_id, req.plan_payload)
     return TaskDetailResponse(
@@ -200,7 +202,7 @@ def finalize_plan(
 def report_event(
     task_id: str,
     req: EventReportRequest,
-    service: TaskService = Injected(TaskService),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
 ) -> Any:
     """Owner-bot SKILL 回投 entrypoint — folds an event via ``on_event``.
 
@@ -223,8 +225,8 @@ def report_event(
 @router.post("/{task_id}/approve", response_model=TaskDetailResponse)
 def approve_plan(
     task_id: str,
-    scheduler: TaskScheduler = Injected(TaskScheduler),
-    service: TaskService = Injected(TaskService),
+    scheduler: TaskSchedulerProtocol = Injected(TaskSchedulerProtocol),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
 ) -> Any:
     """Approve a finalized plan → Scheduler.start (PLANNED → EXECUTING + build DAG)."""
     task = scheduler.start(task_id)
@@ -244,7 +246,7 @@ def approve_plan(
 @router.post("/{task_id}/tick")
 def tick_task(
     task_id: str,
-    scheduler: TaskScheduler = Injected(TaskScheduler),
+    scheduler: TaskSchedulerProtocol = Injected(TaskSchedulerProtocol),
 ) -> Any:
     """Drive one Scheduler tick (topo-unlock + dispatch + settle/terminate guard)."""
     return scheduler.tick(task_id)
@@ -281,19 +283,19 @@ def _node_detail_view_of(detail: Any) -> TaskNodeDetailView:
 
 
 @router.get("/{task_id}/graph", response_model=TaskGraphView)
-def get_task_graph(task_id: str, service: TaskService = Injected(TaskService)) -> Any:
+def get_task_graph(task_id: str, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
     """Top-level dynamic-workflow DAG snapshot (root_phase + nodes/edges)."""
     return _graph_view_of(service.get_task_graph(task_id))
 
 
 @router.get("/{task_id}/nodes/{node_id}", response_model=TaskNodeDetailView)
-def get_node_detail(task_id: str, node_id: str, service: TaskService = Injected(TaskService)) -> Any:
+def get_node_detail(task_id: str, node_id: str, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
     """Node execution detail (aligns SM canvas node-detail panel)."""
     return _node_detail_view_of(service.get_node_detail(task_id, node_id))
 
 
 @router.get("/{task_id}/nodes/{node_id}/sub-dag", response_model=TaskGraphView)
-def get_sub_dag(task_id: str, node_id: str, service: TaskService = Injected(TaskService)) -> Any:
+def get_sub_dag(task_id: str, node_id: str, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
     """Cooperative-group drill-down: live SM run graph mapped via SmGraphAdapter
     (路 A, plan §1.3a). Non-coop node or no ref → 404."""
     snapshot = service.get_sub_dag(task_id, node_id)
@@ -318,7 +320,7 @@ async def stream_task_graph(
         from agentclaw.community.di import get_app_injector
         try:
             injector = get_app_injector()
-            service: TaskService = injector.get(TaskService)  # type: ignore[assignment]
+            service: TaskServiceProtocol = injector.get(TaskServiceProtocol)  # type: ignore[assignment]
         except Exception:
             await websocket.close()
             return

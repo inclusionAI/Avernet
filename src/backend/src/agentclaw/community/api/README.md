@@ -69,7 +69,6 @@ internal_dependencies:
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
-  - agentclaw.community.core.task.protocols         # task Protocols + DTOs (TaskService/Ports/BbsExecutor/BcsCollaboration/PanelEventPublisher) — core owns the contracts; api re-exports as DI binding keys
 ```
 
 ### Change impact

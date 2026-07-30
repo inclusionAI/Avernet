@@ -16,7 +16,7 @@ from typing import List
 
 import pytest
 
-from agentclaw.community.api.task import (
+from agentclaw.community.core.task.protocols import (
     BotCandidate,
     DispatchResult,
     RouteRecommendation,

@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector
 
-from agentclaw.community.api.task import TaskService
+from agentclaw.community.core.task.protocols import TaskService
 from agentclaw.community.core.task.services import TaskService as RealTaskService
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.plugins.community.task import NoopTaskService

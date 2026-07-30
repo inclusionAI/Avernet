@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from agentclaw.community.api.task import (
+from agentclaw.community.core.task.protocols import (
     BcsCollaborationProtocol,
     BotCandidate,
     BotDiscoverPort,

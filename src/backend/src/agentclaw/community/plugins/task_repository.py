@@ -22,6 +22,7 @@ from sqlalchemy import and_
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.domain.models import (
+    Plan,
     Task,
     TaskExecutionGraph,
     TaskSource,
@@ -108,11 +109,13 @@ def _apply_task_to_model(task: Task, model: AcTaskModel) -> None:
     model.latest_event_seq = task.latest_event_seq
     model.spec_json = _json_dumps(task.spec)
     model.execution_graph_json = _json_dumps(task.execution_graph)
+    model.plan_json = _json_dumps(task.plan)
 
 
 def _model_to_task(model: AcTaskModel) -> Task:
     spec = _deserialize_spec(model.spec_json)
     graph = _deserialize_graph(model.execution_graph_json)
+    plan = _deserialize_plan(model.plan_json)
     return Task(
         id=model.task_id,
         user_id=model.user_id,
@@ -120,6 +123,7 @@ def _model_to_task(model: AcTaskModel) -> Task:
         spec=spec,
         status=TaskStatus(model.status),
         execution_graph=graph,
+        plan=plan,
         latest_event_seq=model.latest_event_seq,
         loop_round=model.loop_round,
     )
@@ -135,12 +139,8 @@ def _deserialize_spec(raw: Optional[str]) -> TaskSpec:
         ConstraintKind,
         Deliverable,
         DeliverableType,
-        EdgeKind,
-        EdgeSpec,
         ExecutionMeta,
-        Plan,
         RunMode,
-        SubTaskSpec,
         TaskContext,
         TaskGoal,
         TaskSpecMetadata,
@@ -179,30 +179,6 @@ def _deserialize_spec(raw: Optional[str]) -> TaskSpec:
                 for a in goal_data.get("acceptances", [])
             ],
         )
-    plan_data = data.get("plan")
-    plan = None
-    if plan_data:
-        plan = Plan(
-            sub_tasks=[
-                SubTaskSpec(
-                    node_id=s.get("node_id", ""),
-                    spec=s.get("spec", ""),
-                    run_mode=RunMode(s["run_mode"]) if s.get("run_mode") else None,
-                    depend_on=s.get("depend_on", []),
-                )
-                for s in plan_data.get("sub_tasks", [])
-            ],
-            edges=[
-                EdgeSpec(
-                    edge_id=e.get("edge_id", ""),
-                    from_node=e.get("from_node", ""),
-                    to_node=e.get("to_node", ""),
-                    kind=EdgeKind(e.get("kind", "dependency")),
-                )
-                for e in plan_data.get("edges", [])
-            ],
-            confidence=float(plan_data.get("confidence", 0.0)),
-        )
     execution = data.get("execution")
     exec_meta = None
     if execution:
@@ -223,7 +199,43 @@ def _deserialize_spec(raw: Optional[str]) -> TaskSpec:
         goal=goal,
         deliverables=deliverables,
         execution=exec_meta,
-        plan=plan,
+    )
+
+
+def _deserialize_plan(raw: Optional[str]) -> Optional[Plan]:
+    """Reconstruct the :class:`Plan` (lives on the :class:`Task` aggregate root,
+    persisted in its own ``plan_json`` column — not inside ``spec_json`` since
+    B moved it off :class:`TaskSpec`)."""
+    from agentclaw.community.core.task.domain.models import (
+        EdgeKind,
+        EdgeSpec,
+        RunMode,
+        SubTaskSpec,
+    )
+
+    if not raw:
+        return None
+    data = json.loads(raw)
+    return Plan(
+        sub_tasks=[
+            SubTaskSpec(
+                node_id=s.get("node_id", ""),
+                spec=s.get("spec", ""),
+                run_mode=RunMode(s["run_mode"]) if s.get("run_mode") else None,
+                depend_on=s.get("depend_on", []),
+            )
+            for s in data.get("sub_tasks", [])
+        ],
+        edges=[
+            EdgeSpec(
+                edge_id=e.get("edge_id", ""),
+                from_node=e.get("from_node", ""),
+                to_node=e.get("to_node", ""),
+                kind=EdgeKind(e.get("kind", "dependency")),
+            )
+            for e in data.get("edges", [])
+        ],
+        confidence=float(data.get("confidence", 0.0)),
     )
 
 

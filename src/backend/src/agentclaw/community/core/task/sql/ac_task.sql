@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS `ac_task` (
   `latest_event_seq` INT NOT NULL DEFAULT 0,
   `spec_json` TEXT NULL,
   `execution_graph_json` TEXT NULL,
+  `plan_json` TEXT NULL,
   `gmt_create` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `gmt_modified` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

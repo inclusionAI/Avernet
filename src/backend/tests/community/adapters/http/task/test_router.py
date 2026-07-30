@@ -163,12 +163,14 @@ class _StubTaskService:
 
 
 def _client_with_stub() -> TestClient:
-    from agentclaw.community.api.task import TaskService
+    from agentclaw.community.api.task import TaskServiceProtocol
     from agentclaw.community.adapters.http.task.router import router
     app = FastAPI()
     app.include_router(router)
     inj = Injector([])
-    inj.binder.bind(TaskService, to=_StubTaskService(), scope=singleton)
+    # Router resolves Injected(TaskServiceProtocol) — the api-layer service api
+    # (adapters → api, not → core). The stub structurally satisfies it.
+    inj.binder.bind(TaskServiceProtocol, to=_StubTaskService(), scope=singleton)
     attach_injector(app, inj)
     return TestClient(app)
 
