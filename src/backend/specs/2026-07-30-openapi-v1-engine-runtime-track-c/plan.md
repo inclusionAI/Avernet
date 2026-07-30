@@ -74,27 +74,37 @@ guarded (Stage 1, PR #456). A foreign or cross-tenant `bot_id` raises
 
 ## API / Interface Changes
 
-### New public routes — 17, all under `/openapi/v1/bots/{bot_id}`
+### New public routes — 17
 
-| Method | Path | Engine route forwarded to | Response |
+> **Path invariant: every route begins `/openapi/v1/bots/`.** Not shorthand —
+> the literal prefix. Two reasons, both binding: it keeps Track C consistent
+> with the six existing categories, and the gateway routes to agentclaw on that
+> prefix, so a route mounted anywhere else is simply unreachable in production.
+> Enforced by a test (see *Test Strategy*), not by convention.
+
+| Method | Full public path | Engine route forwarded to | Response |
 |---|---|---|---|
-| GET | `/sessions` | `GET /api/sessions` | `Envelope[Page[Session]]` |
-| POST | `/sessions` | `POST /api/sessions` | `201 Envelope[Session]` |
-| GET | `/sessions/{session_id}` | `GET /api/sessions/{id}` | `Envelope[Session]` |
-| DELETE | `/sessions/{session_id}` | `DELETE /api/sessions/{id}` | `Envelope[Deleted]` |
-| GET | `/sessions/{session_id}/messages` | `GET …/messages` | `Envelope[Page[Message]]` |
-| DELETE | `/sessions/{session_id}/messages` | `DELETE …/messages` | `Envelope[Deleted]` |
-| PATCH | `/sessions/{session_id}` | `POST …/{id}/update` | `Envelope[Session]` |
-| GET | `/engine/status` | `GET /api/engine/status` | `Envelope[EngineStatus]` |
-| GET | `/engine/capabilities` | `GET /api/engine/capabilities` | `Envelope[EngineCapabilities]` |
-| GET | `/engine/available` | `GET /api/engine/list` | `Envelope[list[EngineInfo]]` |
-| GET | `/models` | `GET /api/models` | `Envelope[Page[Model]]` |
-| GET | `/models/{model_id:path}` | `GET /api/models/{id:path}` | `Envelope[Model]` |
-| GET | `/approvals/mode` | `POST /api/approvals/mode/get` | `Envelope[ApprovalMode]` |
-| PUT | `/approvals/mode` | `POST /api/approvals/mode/set` | `Envelope[ApprovalMode]` |
-| GET | `/approvals/modes` | `GET /api/approvals/modes` | `Envelope[list[str]]` |
-| GET | `/nodes` | `GET /api/nodes` | `Envelope[Page[Node]]` |
-| GET | `/connection` | *(none — composed)* | `Envelope[Connection]` |
+| GET | `/openapi/v1/bots/{bot_id}/sessions` | `GET /api/sessions` | `Envelope[Page[Session]]` |
+| POST | `/openapi/v1/bots/{bot_id}/sessions` | `POST /api/sessions` | `201 Envelope[Session]` |
+| GET | `/openapi/v1/bots/{bot_id}/sessions/{session_id}` | `GET /api/sessions/{id}` | `Envelope[Session]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/sessions/{session_id}` | `DELETE /api/sessions/{id}` | `Envelope[Deleted]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/sessions/{session_id}` | `POST /api/sessions/{id}/update` | `Envelope[Session]` |
+| GET | `/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages` | `GET /api/sessions/{id}/messages` | `Envelope[Page[Message]]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages` | `DELETE /api/sessions/{id}/messages` | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/{bot_id}/engine/status` | `GET /api/engine/status` | `Envelope[EngineStatus]` |
+| GET | `/openapi/v1/bots/{bot_id}/engine/capabilities` | `GET /api/engine/capabilities` | `Envelope[EngineCapabilities]` |
+| GET | `/openapi/v1/bots/{bot_id}/engine/available` | `GET /api/engine/list` | `Envelope[list[EngineInfo]]` |
+| GET | `/openapi/v1/bots/{bot_id}/models` | `GET /api/models` | `Envelope[Page[Model]]` |
+| GET | `/openapi/v1/bots/{bot_id}/models/{model_id:path}` | `GET /api/models/{id:path}` | `Envelope[Model]` |
+| GET | `/openapi/v1/bots/{bot_id}/approvals/mode` | `POST /api/approvals/mode/get` | `Envelope[ApprovalState]` |
+| PUT | `/openapi/v1/bots/{bot_id}/approvals/mode` | `POST /api/approvals/mode/set` | `Envelope[ApprovalState]` |
+| GET | `/openapi/v1/bots/{bot_id}/approvals/modes` | `GET /api/approvals/modes` | `Envelope[list[ApprovalModeInfo]]` |
+| GET | `/openapi/v1/bots/{bot_id}/nodes` | `GET /api/nodes` | `Envelope[Page[Node]]` |
+| GET | `/openapi/v1/bots/{bot_id}/connection` | *(none — composed)* | `Envelope[Connection]` |
+
+Router prefixes are therefore `/openapi/v1/bots/{bot_id}/sessions`,
+`…/engine`, `…/models`, `…/approvals`, `…/nodes`, and
+`/openapi/v1/bots/{bot_id}` for the single connection route.
 
 Query/body models all carry `extra="forbid"`. `user_id`, `engine`,
 `binding_id`, `device_uuid` and `agent_id` are **not** accepted on any route —
@@ -115,16 +125,74 @@ simply serialize `"warning": ""`. `ErrorEnvelope` does **not** get it.
 
 ```python
 class Socket(BaseModel):
-    url: str        # complete wss:// URL, opaque; caller concatenates nothing
-    headers: dict[str, str]
+    """One WebSocket the caller may open against this bot."""
+    kind: SocketKind = Field(description="Which socket this is.")
+    url: str = Field(description=
+        "Complete wss:// URL. Opaque — open it verbatim; do not append to it.")
+    headers: dict[str, str] = Field(description=
+        "Headers that must be sent on the upgrade request.")
 
 class Connection(BaseModel):
-    engine: str
-    expires_at: str          # ISO 8601
-    sockets: dict[str, Socket]   # "chat", optionally "terminal"
+    """Ready-to-use socket connections for a bot."""
+    engine: EngineName = Field(description="The bot's active engine.")
+    expires_at: str = Field(description=
+        "ISO 8601 UTC instant after which every url/headers pair here stops "
+        "working. Re-request this endpoint before then.")
+    sockets: list[Socket] = Field(description=
+        "Exactly the sockets this bot's active engine serves. A kind absent "
+        "from this list is not supported by this bot.")
 ```
 
 No `target`, no `type`, no bare `token` field.
+
+**`sockets` is a list, not a map keyed by kind.** An enum-keyed object
+(`dict[SocketKind, Socket]`) generates as `additionalProperties` plus
+`propertyNames`, which most client generators either drop or render as an
+untyped map — the enum would be documentation only. A list of records whose
+`kind` is the enum generates a real typed enum in every generator, and extends
+cleanly when a third socket appears.
+
+### Enums and schema documentation
+
+The public surface currently types these as bare strings. Track C introduces
+`openapi_v1/engine_runtime/enums.py`, and **only** for value sets that are
+genuinely closed at the source:
+
+| Enum | Values | Source of truth |
+|---|---|---|
+| `SocketKind` | `chat`, `terminal` | ours — we compose the payload |
+| `ApprovalMode` | `approve`, `on-miss`, `never` | the set the engine *advertises* via `GET /api/approvals/modes` (`approvals/router.py:104-125`) |
+| `MessageRole` | `user`, `assistant`, `system`, `tool_use`, `tool_result` | a real `Literal` at `core/session/models.py:46` |
+| `EngineName` | as the bots category already defines it | `core/workspace/constants.py::_get_engine_types`, already imported by `openapi_v1/bots/router.py:65-68` — reuse, do not redefine |
+
+**Deliberately left as strings**, because the source is an open vocabulary and a
+fabricated enum would be a lie that breaks on the first new value:
+
+- `Node.status` (`str = "online"`, no closed set — `core/node/models.py:29`) and
+  `Node.platform` (`str | None`).
+- `Session.permission_mode`, `Session.runtime`, `Session.model`.
+- `EngineStatus.process` and `.transition` — open dicts assembled at
+  `manager.py:743-748`.
+- **Capability names.** The engine's `Capability` enum is closed
+  (`core/engine/capability.py:16`) but explicitly versioned as "adding new
+  entries is safe" — so typing a *response* field as a strict enum would turn an
+  additive engine release into a public `500` on serialization. Typed as
+  `list[str]`, with the known vocabulary spelled out in the field description.
+
+Conventions every public model in this track follows, so a generator produces a
+usable client:
+
+- Enums subclass `str, Enum`, so JSON carries the string and OpenAPI emits
+  `type: string` + `enum: [...]`.
+- Per-member meanings go in `json_schema_extra={"x-enum-descriptions": {...}}`
+  (the common codegen convention) **and** in prose in the field `description`,
+  since OpenAPI has no native per-member doc slot.
+- Every field has a non-empty `Field(description=...)`; every model has a
+  docstring (Pydantic promotes it to the schema `description`).
+- Every response model carries a `json_schema_extra` example.
+
+These are enforced by a schema test rather than left to reviewer diligence — see
+*Test Strategy*.
 
 ### New Service API Protocol
 
@@ -178,6 +246,8 @@ in `tests/community/architecture/test_service_api_conformance.py`.
 
 - `adapters/http/openapi_v1/engine_runtime/__init__.py` — exports the six
   routers.
+- `…/engine_runtime/enums.py` — the four `str, Enum` types above, each with
+  `x-enum-descriptions`. One module so no group redefines a shared enum.
 - `…/engine_runtime/{sessions,engine,models,approvals,nodes,connection}/router.py`
   + `schemas.py`. Each handler: `@envelope_errors`, takes `request: Request`,
   `principal: PrincipalDep`, Injects `EngineRuntimeRelayProtocol`, calls
@@ -271,6 +341,29 @@ and matches how cron behaves today, but the tests must not assume a live device.
   **Mitigation:** that is why `/engine/capabilities` ships in v1 rather than
   being deferred. Document it as the discovery endpoint in every `501` message.
 
+- **Risk: the engine's approval-mode accept-set and advertise-set disagree.**
+  `set_approval_mode` accepts six values —
+  `approve, always, on-miss, on_miss, never, off`
+  (`src/engine/.../api/approvals/router.py:75`) — but `GET /api/approvals/modes`
+  advertises only three: `approve`, `on-miss`, `never`
+  (`approvals/router.py:104-125`). `on_miss` is a snake_case alias of `on-miss`;
+  `always` and `off` are undocumented.
+  **Mitigation:** `ApprovalMode` publishes the advertised three only. A public
+  enum that included the aliases would bless two spellings of one mode forever.
+  Forward the enum's value verbatim — it is already in the engine's accept-set,
+  so no translation is needed. Flag `always`/`off` to the engine owner as either
+  undocumented features or dead values; do not resolve that inside this PR.
+
+- **Risk: a strict enum on a response field is an availability risk.** If the
+  engine adds a capability, a node status, or an approval mode and the public
+  model validates strictly, serialization raises and the endpoint answers `500`
+  for a change that was supposed to be additive.
+  **Mitigation:** enums are used on **request** fields and on values we ourselves
+  compose (`SocketKind`, `EngineName`); genuinely open response vocabularies stay
+  `str`. `ApprovalMode` and `MessageRole` appear in responses and are enum-typed
+  because both sets are closed at the source — cover each with a test that an
+  unexpected engine value produces a clean mapped error, not an unhandled crash.
+
 ## Alternatives Considered
 
 - **One relay method per engine group** (`list_sessions`, `get_model`, …) on the
@@ -319,8 +412,23 @@ and matches how cron behaves today, but the tests must not assume a live device.
   before `DeviceAdapterHTTPStatusError` and before `BotServiceError`. The
   README's Track B gotcha ("map the base class last") is a real regression risk
   here because this change adds two base/leaf pairs at once.
-- Connection composition: socket map per engine; `terminal` present only when
+- Connection composition: socket list per engine; `terminal` present only when
   the capability is declared; no `target`/`type`/`token` key in the payload.
+
+**Contract shape** (these make the two review points self-enforcing)
+- **Path prefix:** walk every route on the six new routers and assert the path
+  starts with `/openapi/v1/bots/`. This is the gateway-routing invariant — a
+  route mounted elsewhere is unreachable in production, and a prefix typo is
+  otherwise invisible until deploy.
+- **Schema documentation:** over every public model in `engine_runtime/`, assert
+  each field has a non-empty `description`, each model has a schema
+  `description`, each enum subclasses `str` and carries an
+  `x-enum-descriptions` entry for **every** member. This is what keeps the
+  generated OpenAPI usable by a client generator as the surface grows; without
+  it the convention decays on the first hurried PR.
+- Generate the OpenAPI document in-test and assert the four enums appear as
+  `type: string` with the expected `enum` lists — catching the case where a
+  model annotates an enum but Pydantic emits a bare string.
 
 **Endpoint** (per group, using the in-memory transport at
 `plugins/local/device_adapter_transport.py` so the relay runs end-to-end)

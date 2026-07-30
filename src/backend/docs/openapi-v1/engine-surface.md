@@ -69,6 +69,12 @@ frontend rewrites to the engine.
 All bot-scoped under `/openapi/v1/bots/{bot_id}/…`, all returning the
 `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 
+> **Every path begins with the literal `/openapi/v1/bots/` prefix.** The tables
+> below abbreviate it as `…` for width only. This is a hard invariant, not a
+> style: it keeps Track C consistent with the six existing categories, and **the
+> gateway forwards to agentclaw on that prefix**, so a route mounted anywhere
+> else is unreachable in production. A test asserts it.
+
 ### sessions (7) — engine `/api/sessions`
 
 | Method | Public path | Engine route | Notes |
@@ -128,20 +134,27 @@ sockets, never proxypass topology:
 {
   "engine": "openclaw",
   "expires_at": "2026-07-30T12:34:56Z",
-  "sockets": {
-    "chat": {
+  "sockets": [
+    {
+      "kind": "chat",
       "url": "wss://<host>/proxypass/<target>/api/openclaw/ws",
       "headers": { "x-proxypass-token": "<scoped token>" }
     }
-  }
+  ]
 }
 ```
 
+`sockets` is a **list whose `kind` is an enum** (`chat` | `terminal`), not an
+object keyed by kind. An enum-keyed object generates as `additionalProperties`
+plus `propertyNames`, which most client generators drop or flatten to an untyped
+map — the enum would then be documentation only. A list of records generates a
+real typed enum everywhere and extends cleanly to a third socket.
+
 Rules this endpoint must hold:
 
-- **Only sockets the bot's active engine actually serves appear.** Absent key =
-  unsupported. `terminal` appears only when the engine declares
-  `WEB_SHELL_OPEN`; `chat` resolves to `/api/openclaw/ws` or
+- **Only sockets the bot's active engine actually serves appear.** A `kind`
+  absent from the list = unsupported. `terminal` appears only when the engine
+  declares `WEB_SHELL_OPEN`; `chat` resolves to `/api/openclaw/ws` or
   `/api/claude_code/ws` depending on the active engine (the engine also serves a
   generic `/api/{engine}/ws`, `api/app.py:310`).
 - **The URL is opaque and complete.** Callers concatenate nothing. `target`,
@@ -252,7 +265,37 @@ endpoints: masked `409 device not ready` vs. auto-wake-then-retry. Whatever is
 chosen, `GET /openapi/v1/bots/{bot_id}/status` stays the endpoint that tells a
 caller *why*.
 
-### 5. Errors from the transport
+### 5. Closed value sets are enums; open ones stay strings
+
+This is a public, generated contract, so a value set that is genuinely closed
+should reach a client generator as a real enum rather than a bare `str`. Four
+qualify — `SocketKind` (`chat` | `terminal`, ours), `ApprovalMode`
+(`approve` | `on-miss` | `never`), `MessageRole` (a `Literal` at
+`src/engine/.../core/session/models.py:46`), and `EngineName` (reuse the bots
+category's, don't redefine).
+
+Equally important, these **stay strings** because the source is open and a
+fabricated enum would break on the first new value: `Node.status` / `.platform`,
+`Session.permission_mode` / `.runtime` / `.model`, the `process` and
+`transition` dicts in engine status, and **capability names** — the engine's
+`Capability` enum is closed but explicitly versioned as "adding new entries is
+safe", so a strict enum on a *response* field would turn an additive engine
+release into a public 500.
+
+Two traps worth knowing before you write the enums:
+
+- **The engine's approval accept-set and advertise-set disagree.**
+  `set_approval_mode` accepts six values (`approve, always, on-miss, on_miss,
+  never, off` — `approvals/router.py:75`) while `GET /api/approvals/modes`
+  advertises three (`approvals/router.py:104-125`). `on_miss` is a snake_case
+  alias of `on-miss`. Publish the advertised three; blessing two spellings of
+  one mode is forever.
+- **Enums need per-member docs to be worth anything.** OpenAPI has no native
+  slot for them, so use `json_schema_extra={"x-enum-descriptions": {...}}` plus
+  prose in the field description, and subclass `str, Enum` so the schema emits
+  `type: string` + `enum`.
+
+### 6. Errors from the transport
 
 `DeviceAdapterTransport` raises `DeviceAdapterEndpointNotFoundError` (404 from
 the device — an endpoint this runtime doesn't serve),

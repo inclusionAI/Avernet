@@ -63,6 +63,11 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 全部按 bot 收敛在 `/openapi/v1/bots/{bot_id}/…` 之下，全部返回
 `openapi_v1/contracts.py` 的 `Envelope[T]` / `Page[T]` 形状。
 
+> **每条路径都以字面量前缀 `/openapi/v1/bots/` 开头。** 下表中的 `…` 只是为了
+> 表格宽度而做的缩写。这是硬性约束，不是风格问题：它让 Track C 与既有六个类别
+> 保持一致，而且**网关正是按这个前缀转发到 agentclaw 的**，所以挂在别处的路由
+> 在生产上根本不可达。有测试对此做断言。
+
 ### sessions（7）—— engine `/api/sessions`
 
 | 方法 | 公共路径 | engine 路由 | 说明 |
@@ -120,19 +125,26 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 {
   "engine": "openclaw",
   "expires_at": "2026-07-30T12:34:56Z",
-  "sockets": {
-    "chat": {
+  "sockets": [
+    {
+      "kind": "chat",
       "url": "wss://<host>/proxypass/<target>/api/openclaw/ws",
       "headers": { "x-proxypass-token": "<scoped token>" }
     }
-  }
+  ]
 }
 ```
 
+`sockets` 是一个**以 `kind` 枚举为字段的列表**（`chat` | `terminal`），不是以
+kind 为键的对象。以枚举为键的对象会生成成 `additionalProperties` +
+`propertyNames`，而多数客户端生成器会直接丢弃它或摊平成无类型 map —— 那样枚举
+就只剩文档意义。列表形式在所有生成器里都能产出真正的类型化枚举，将来加第三个
+socket 也是干净的。
+
 这个端点必须守住的规则：
 
-- **只出现该 bot 当前引擎真正提供的 socket。** 键不存在 = 不支持。`terminal`
-  只在引擎声明 `WEB_SHELL_OPEN` 时出现；`chat` 依当前引擎解析为
+- **只出现该 bot 当前引擎真正提供的 socket。** 列表中不存在某个 `kind` = 不支持。
+  `terminal` 只在引擎声明 `WEB_SHELL_OPEN` 时出现；`chat` 依当前引擎解析为
   `/api/openclaw/ws` 或 `/api/claude_code/ws`（engine 还提供一个通用的
   `/api/{engine}/ws`，`api/app.py:310`）。
 - **URL 是不透明且完整的。** 调用方不拼接任何东西。`target`、`type` 和裸 `token`
@@ -233,7 +245,32 @@ engine 的每个 handler 都会调用 `check_capability()`
 17 个端点定下**同一种**行为：掩码 `409 device not ready`，还是自动唤醒后重试。
 无论选哪种，`GET /openapi/v1/bots/{bot_id}/status` 仍然是告诉调用方*原因*的端点。
 
-### 5. 传输层抛出的错误
+### 5. 封闭值集合用枚举，开放的保持字符串
+
+这是一份对外的、会被生成工具消费的契约，所以真正封闭的值集合应当以真枚举而不是
+裸 `str` 抵达客户端生成器。有四个符合条件 —— `SocketKind`（`chat` | `terminal`，
+我们自己定义）、`ApprovalMode`（`approve` | `on-miss` | `never`）、`MessageRole`
+（`src/engine/.../core/session/models.py:46` 处真实的 `Literal`），以及
+`EngineName`（复用 bots 类别已有的，不要另立一份）。
+
+同样重要的是，下面这些**保持字符串**，因为来源本身是开放的，硬造枚举会在出现第
+一个新值时炸掉：`Node.status` / `.platform`、`Session.permission_mode` /
+`.runtime` / `.model`、engine status 里的 `process` 与 `transition` 字典，以及
+**能力名**（engine 的 `Capability` 枚举虽然封闭，但明确声明"新增条目是安全的"，
+因此在*响应*字段上用严格枚举，会把一次本应向后兼容的 engine 发布变成对外 500）。
+
+动手写枚举前值得知道的两个坑：
+
+- **engine 的审批模式「可接受集合」与「对外公布集合」并不一致。**
+  `set_approval_mode` 接受六个值（`approve, always, on-miss, on_miss, never,
+  off` —— `approvals/router.py:75`），而 `GET /api/approvals/modes` 只公布三个
+  （`approvals/router.py:104-125`）。`on_miss` 是 `on-miss` 的下划线别名。
+  对外只发布公布的那三个；给同一个模式认可两种拼写是永久性的。
+- **枚举没有逐成员说明就没什么价值。** OpenAPI 没有原生的成员说明位，所以用
+  `json_schema_extra={"x-enum-descriptions": {...}}` 再加字段描述里的散文说明，
+  并让枚举继承 `str, Enum`，这样 schema 才会输出 `type: string` + `enum`。
+
+### 6. 传输层抛出的错误
 
 `DeviceAdapterTransport` 会抛 `DeviceAdapterEndpointNotFoundError`（设备返回 404
 —— 该运行时不提供此端点）、`DeviceAdapterHTTPStatusError`（其它非 2xx）和
