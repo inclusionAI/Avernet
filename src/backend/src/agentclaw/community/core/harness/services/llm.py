@@ -25,7 +25,7 @@ _MAX_CONCURRENT_LLM_CALLS = 10
 _SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_LLM_CALLS)
 
 # ── retry config ───────────────────────────────────────────
-_MAX_RETRIES = 3
+_MAX_RETRIES = 5
 _RETRY_DELAYS = [2.0, 5.0, 10.0]  # seconds between retries
 # Fraction of each delay added as random jitter (0.0–1.0). Diagnostics and patch
 # calls run up to ``_MAX_CONCURRENT_LLM_CALLS`` in parallel; without jitter a
