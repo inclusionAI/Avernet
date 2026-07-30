@@ -105,7 +105,17 @@ impl SessionManagementService for SessionManagementServiceImpl {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(self.repo.list_by_group(group_id, status, offset, limit, title_contains, participant_id).await)
+        Ok(self
+            .repo
+            .try_list_by_group(
+                group_id,
+                status,
+                offset,
+                limit,
+                title_contains,
+                participant_id,
+            )
+            .await?)
     }
 
     async fn count_running_service(
@@ -211,7 +221,10 @@ impl SessionManagementService for SessionManagementServiceImpl {
         &self,
         bot_uuid: &str,
     ) -> Result<Vec<String>, SessionUseCaseError> {
-        Ok(self.repo.list_group_ids_by_session_participant(bot_uuid).await)
+        Ok(self
+            .repo
+            .try_list_group_ids_by_session_participant(bot_uuid)
+            .await?)
     }
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {

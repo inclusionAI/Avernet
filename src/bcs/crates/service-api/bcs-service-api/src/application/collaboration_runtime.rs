@@ -247,6 +247,8 @@ pub struct ConfigureGroupRuntimeOutcome {
     pub group_id: String,
     pub default_definition: Option<CollaborationDefinitionRef>,
     pub auto_start_on_service_invocation: bool,
+    #[serde(default)]
+    pub requires_human_input_channel: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -662,6 +664,34 @@ pub trait CollaborationRuntimeService: Send + Sync {
         &self,
         cmd: ConfigureGroupRuntimeCommand,
     ) -> Result<ConfigureGroupRuntimeOutcome, CollaborationRuntimeError>;
+
+    /// Abort every active StateMachine run currently associated with a Group.
+    ///
+    /// This is the first phase of Group deletion: bindings and sessions remain
+    /// available if the Group persistence delete subsequently fails.
+    async fn cancel_group_runs(
+        &self,
+        group_id: &str,
+        reason: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let _ = (group_id, reason);
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "group run cancellation is not implemented".to_string(),
+        ))
+    }
+
+    /// Remove the Group runtime binding and its sessions after the Group row
+    /// has been deleted. Implementations must be idempotent so a DELETE retry
+    /// can finish cleanup after an earlier partial failure.
+    async fn delete_group_runtime_state(
+        &self,
+        group_id: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let _ = group_id;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "group runtime state deletion is not implemented".to_string(),
+        ))
+    }
 
     async fn get_group_collaboration_definition(
         &self,

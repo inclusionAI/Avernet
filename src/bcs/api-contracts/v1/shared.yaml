@@ -1,0 +1,59 @@
+RequestId:
+  type: string
+  minLength: 1
+
+Error:
+  type: object
+  additionalProperties: false
+  required:
+    - error_code
+  properties:
+    error_code:
+      type: string
+    details:
+      type: object
+      additionalProperties: true
+
+ErrorEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      type: integer
+      minimum: 1
+    message:
+      type: string
+    data:
+      $ref: "#/Error"
+    request_id:
+      $ref: "#/RequestId"
+
+InternalErrorResponse:
+  description: Unexpected BCN failure.
+  x-error-codes:
+    - internal_error
+  content:
+    application/json:
+      schema:
+        $ref: "#/ErrorEnvelope"
+
+BotUuidPath:
+  name: bot_uuid
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+GroupIdPath:
+  name: group_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1

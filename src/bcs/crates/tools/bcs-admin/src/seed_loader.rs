@@ -355,8 +355,18 @@ mod tests {
             "human_input"
         );
         assert!(
+            human_review.definition_json["runtime"]["state_machine"]
+                .get("human_input_channel")
+                .is_none()
+        );
+        assert!(
             human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
                 .get("assignee")
+                .is_none()
+        );
+        assert!(
+            human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
+                .get("notification")
                 .is_none()
         );
 

@@ -32,7 +32,8 @@ use bcs_service_api::{
     GroupRuntimeBindingRepoPort, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome,
     HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanInputReadyEvent,
     HumanRunAccessCommand, JudgeArtifact, JudgeEvaluatorPort, JudgeRequest,
-    ListPendingHumanNodesCommand, MarkHumanNodeRunningCommand, MessageLogContent,
+    ListPendingHumanNodesCommand, MAX_COLLABORATION_DEFINITION_YAML_BYTES,
+    MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET, MarkHumanNodeRunningCommand, MessageLogContent,
     MessageLogEventType, MessageLogMode, MessageLogStatus, NewSessionParams,
     PatchGroupCollaborationDefinitionCommand, PendingHumanNodeView, RespondHumanNodeCommand,
     RespondHumanNodeOutcome, RunFallbackDelivery, ServiceError, SessionChannelDeliveryOutcome,
@@ -46,12 +47,13 @@ use bcs_service_api::{
     StateMachineRunAccessCommand, StateMachineRunGraphView, StateMachineRunRepoPort,
     StateMachineRunView, StateMachineTerminalEvent, StateMachineTerminalStatus,
     UpgradeGroupCollaborationDefinitionCommand, ValidateCollaborationDefinitionYamlCommand,
-    MAX_COLLABORATION_DEFINITION_YAML_BYTES, MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET,
     message_log_json,
 };
 use serde_json::Value;
 use tracing::{info, warn};
 use uuid::Uuid;
+
+const RUNTIME_CLEANUP_SESSION_LIMIT: u64 = i64::MAX as u64;
 
 use crate::definition::{
     CompiledStateMachine, reject_explicit_participant_roles, validate_definition,
@@ -2071,9 +2073,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let should_upsert_definition = resolved_definition.source
             == ResolvedDefinitionSource::Inline
             && !is_one_shot_session_run;
+        let authenticated_human = cmd.authenticated_human.clone();
         let compiled = validate_definition(resolved_definition.definition)?;
         let definition = &compiled.definition;
-        let authenticated_human = cmd.authenticated_human.clone();
         let has_human_input = compiled_has_human_input(&compiled);
         self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
             .await?;
@@ -2087,14 +2089,13 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     participant_bindings: participant_bindings.clone(),
                     auto_start_on_service_invocation: false,
                 });
-        let resolved_participant_bindings =
-            resolve_participant_bindings(
-                &group,
-                &compiled,
-                participant_binding_override
-                    .as_ref()
-                    .or(group_binding.as_ref()),
-            )?;
+        let resolved_participant_bindings = resolve_participant_bindings(
+            &group,
+            &compiled,
+            participant_binding_override
+                .as_ref()
+                .or(group_binding.as_ref()),
+        )?;
         if should_upsert_definition {
             self.definitions.upsert(definition.clone()).await?;
         }
@@ -2174,7 +2175,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                         .sessions
                         .add_participant(&session_id, participant)
                         .await
-                        .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?;
+                        .map_err(|error| {
+                            CollaborationRuntimeError::InvalidRequest(error.to_string())
+                        })?;
                 } else if existing.is_some_and(|participant| {
                     participant.effective_mode() != ParticipantMode::Present
                 }) {
@@ -2186,7 +2189,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                             ParticipantMode::Present,
                         )
                         .await
-                        .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?;
+                        .map_err(|error| {
+                            CollaborationRuntimeError::InvalidRequest(error.to_string())
+                        })?;
                 }
             }
             let present_humans = session
@@ -2974,8 +2979,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", run.group_id))
         })?;
         let now = bcs_protocol::now_ms();
-        if matches!(cmd.state, ChatEventState::Final)
-            && extract_text(&cmd.event_payload).is_none()
+        if matches!(cmd.state, ChatEventState::Final) && extract_text(&cmd.event_payload).is_none()
         {
             // A message-less final completes the bot attempt without an
             // artifact. It must advance the node into the normal failure/retry
@@ -3311,6 +3315,77 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         self.group_collaboration_definition_view(group_id).await
     }
 
+    async fn cancel_group_runs(
+        &self,
+        group_id: &str,
+        reason: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let sessions = self
+            .sessions
+            .list_by_group(
+                group_id,
+                None,
+                0,
+                RUNTIME_CLEANUP_SESSION_LIMIT,
+                None,
+                None,
+            )
+            .await
+            .map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
+            })?;
+        let mut first_error = None;
+        for session in sessions {
+            for run in self.runs.list_runs_by_session_id(&session.id).await? {
+                if !matches!(
+                    run.status,
+                    StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+                ) {
+                    continue;
+                }
+                if let Err(error) = self
+                    .cancel_state_machine_run(CancelStateMachineRunCommand {
+                        run_id: run.run_id,
+                        reason: Some(reason.to_string()),
+                    })
+                    .await
+                {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    async fn delete_group_runtime_state(
+        &self,
+        group_id: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let sessions = self
+            .sessions
+            .list_by_group(
+                group_id,
+                None,
+                0,
+                RUNTIME_CLEANUP_SESSION_LIMIT,
+                None,
+                None,
+            )
+            .await
+            .map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
+            })?;
+        for session in sessions {
+            self.sessions.delete(&session.id).await.map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
+            })?;
+        }
+        self.bindings.delete(group_id).await?;
+        Ok(())
+    }
+
     async fn patch_group_collaboration_definition(
         &self,
         cmd: PatchGroupCollaborationDefinitionCommand,
@@ -3529,6 +3604,14 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             })?;
             validate_runtime_participant_bindings(definition, &group, &participant_bindings)?;
         }
+        let requires_human_input_channel =
+            definition_for_validation.as_ref().is_some_and(|definition| {
+                matches!(
+                    &definition.runtime,
+                    CollaborationRuntimeDefinition::StateMachine(state_machine)
+                        if state_machine.human_input_channel.is_some()
+                )
+            });
 
         self.bindings
             .bind_default_definition(
@@ -3544,6 +3627,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             group_id: cmd.group_id,
             default_definition,
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
+            requires_human_input_channel,
         })
     }
 }
@@ -4939,5 +5023,10 @@ runtime:
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].node_timeout_ms, None);
         assert_eq!(nodes[0].attempt, 0);
+    }
+
+    #[test]
+    fn runtime_cleanup_session_limit_is_sqlite_representable() {
+        assert!(RUNTIME_CLEANUP_SESSION_LIMIT <= i64::MAX as u64);
     }
 }

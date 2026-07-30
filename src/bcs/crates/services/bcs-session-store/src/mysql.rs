@@ -746,6 +746,34 @@ impl SessionRepoPort for MySqlSessionStore {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> Vec<Session> {
+        match self
+            .try_list_by_group(
+                group_id,
+                status,
+                offset,
+                limit,
+                title_contains,
+                participant_id,
+            )
+            .await
+        {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                tracing::warn!(%error, "list_by_group query failed");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn try_list_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        offset: u64,
+        limit: u64,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<Session>> {
         let mut conditions: Vec<String> = vec![
             "s.env = ?".to_string(),
             "s.group_id = ?".to_string(),
@@ -791,14 +819,16 @@ impl SessionRepoPort for MySqlSessionStore {
             where_clause = conditions.join(" AND "),
         );
 
-        let rows = match self.db.query(DbStatement::with_params(&sql, params)).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "list_by_group query failed");
-                return Vec::new();
-            }
-        };
-        rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "list sessions for Group '{group_id}': {error}"
+                ))
+            })?;
+        rows.iter().map(row_to_session).collect()
     }
 
     async fn latest_running(&self, group_id: &str) -> Option<Session> {
@@ -1124,11 +1154,37 @@ impl SessionRepoPort for MySqlSessionStore {
             .collect()
     }
 
+    async fn try_list_group_ids_by_session_participant(
+        &self,
+        bot_uuid: &str,
+    ) -> ServiceResult<Vec<String>> {
+        let sql = "SELECT DISTINCT group_id FROM bcs_session_participants \
+                   WHERE env = ? AND bot_uuid = ?";
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(bot_uuid),
+                ],
+            ))
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+
+        rows.iter()
+            .map(|row| {
+                db_get_column::<String>(row, "group_id").map_err(|error| {
+                    ServiceError::InternalError(format!("session db row: {error}"))
+                })
+            })
+            .collect()
+    }
+
     async fn delete(&self, session_id: &str) -> ServiceResult<bool> {
         let del_participants = "DELETE FROM bcs_session_participants \
                                WHERE env = ? AND session_id = ?";
-        let _ = self
-            .db
+        self.db
             .execute(DbStatement::with_params(
                 del_participants,
                 vec![
@@ -1136,10 +1192,11 @@ impl SessionRepoPort for MySqlSessionStore {
                     DbValue::from(session_id),
                 ],
             ))
-            .await;
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
 
         let del_session = "DELETE FROM bcs_group_sessions WHERE env = ? AND session_id = ?";
-        match self
+        let result = self
             .db
             .execute(DbStatement::with_params(
                 del_session,
@@ -1149,10 +1206,8 @@ impl SessionRepoPort for MySqlSessionStore {
                 ],
             ))
             .await
-        {
-            Ok(result) => Ok(result.affected_rows > 0),
-            Err(_) => Ok(false),
-        }
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+        Ok(result.affected_rows > 0)
     }
 
     async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {

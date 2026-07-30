@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
 use crate::types::{
-    Group, GroupKind, GroupMessage, Participant, ParticipantMode, ServiceResult, ServiceSpec,
-    GroupStatus, Workspace,
+    Group, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus, Participant,
+    ParticipantMode, ServiceResult, ServiceSpec, Workspace,
 };
 
 /// Repository contract for group persistence implementations.
@@ -13,9 +13,28 @@ use crate::types::{
 #[async_trait]
 pub trait GroupRepoPort: Send + Sync {
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
+    async fn patch_mutable_fields(
+        &self,
+        id: &str,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<()>;
     async fn get(&self, id: &str) -> Option<Group>;
+    async fn try_get(&self, id: &str) -> ServiceResult<Option<Group>> {
+        Ok(self.get(id).await)
+    }
     async fn add_message(&self, id: &str, message: GroupMessage) -> ServiceResult<()>;
     async fn add_participant(&self, id: &str, participant: Participant) -> ServiceResult<()>;
+    /// Add a participant while atomically preserving the invariant that a
+    /// public Group may contain only public Bot actors.
+    async fn add_participant_with_visibility_guard(
+        &self,
+        id: &str,
+        participant: Participant,
+        actor_is_public: bool,
+    ) -> ServiceResult<()> {
+        let _ = actor_is_public;
+        self.add_participant(id, participant).await
+    }
     async fn remove_participant(&self, group_id: &str, bot_uuid: &str) -> ServiceResult<()>;
     async fn update_participant_mode(
         &self,
@@ -41,6 +60,9 @@ pub trait GroupRepoPort: Send + Sync {
     /// Find groups by participant. Return order is intentionally undefined;
     /// callers with externally visible ordering needs must sort explicitly.
     async fn find_by_participant(&self, bot_uuid: &str) -> Vec<Group>;
+    async fn try_find_by_participant(&self, bot_uuid: &str) -> ServiceResult<Vec<Group>> {
+        Ok(self.find_by_participant(bot_uuid).await)
+    }
     async fn find_by_participant_filtered(
         &self,
         bot_uuid: &str,

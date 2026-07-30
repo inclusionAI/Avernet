@@ -6,8 +6,8 @@ use bcs_domain::Group;
 pub use bcs_domain::registry::deserialize_skills;
 pub use bcs_domain::{
     AgentCredentials, BindingChannel, BindingChannels, BotCapabilities, BotConnectParams,
-    BotConnectResult, BotDynamicStatus, ConnectionKind, CoordinationSurface,
-    DynamicStatusResponse, RegisteredBot, Skill, BotDeliveryTarget,
+    BotConnectResult, BotDeliveryTarget, BotDynamicStatus, ConnectionKind, CoordinationSurface,
+    DynamicStatusResponse, RegisteredBot, Skill,
 };
 
 // ---------------------------------------------------------------------------
@@ -67,6 +67,14 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// This method excludes `agent_code` so delivery contracts must opt in to
     /// exposing that routing identifier, and excludes the sensitive `agent_token` credential.
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
+
+    /// Get registration info without hiding persistence failures.
+    ///
+    /// Existing implementations retain their compatibility behavior through
+    /// this default. Fallible core/store implementations should override it.
+    async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
+        Ok(self.get(bot_id).await)
+    }
 
     /// Like [`get`](Self::get) but also returns soft-deleted bots.
     ///

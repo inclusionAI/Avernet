@@ -26,12 +26,12 @@ use bcs_service_api::{
     CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, DefinitionYamlSource, FrontendDeliveryCommand,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
-    GroupRuntimeBindingRepoPort,
-    HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanInputReadyEvent,
-    HumanResponseSource, HumanRunAccessCommand, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
-    ListPendingHumanNodesCommand, PatchGroupCollaborationDefinitionCommand,
-    RespondHumanNodeCommand, RespondHumanNodeOutcome, ServiceError, ServiceResult, ServiceSpec,
-    SessionChannelDeliveryOutcome, SessionChannelOutboundPort, SessionManagementService,
+    GroupRuntimeBindingRepoPort, HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome,
+    HumanInputReadyEvent, HumanResponseSource, HumanRunAccessCommand, JudgeDecision,
+    JudgeEvaluatorPort, JudgeRequest, ListPendingHumanNodesCommand,
+    PatchGroupCollaborationDefinitionCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome,
+    ServiceError, ServiceResult, ServiceSpec, SessionChannelDeliveryOutcome,
+    SessionChannelOutboundPort, SessionManagementService,
     SessionStateMachinePermissionCommand, StartSessionStateMachineRunCommand,
     StartStateMachineRunCommand, StateMachineDefinitionRepoPort, StateMachineNodeSubStatus,
     StateMachineResultPublishCommand, StateMachineResultPublisherPort,
@@ -596,7 +596,7 @@ async fn human_input_without_authenticated_or_present_human_is_invalid_request()
         store.clone(),
         store.clone(),
         store.clone(),
-        store.clone(),
+        store,
         group,
         sessions,
         delivery.clone(),
@@ -655,7 +655,7 @@ async fn human_input_can_start_without_authenticated_human_when_session_has_pres
         store.clone(),
         store.clone(),
         store.clone(),
-        store,
+        store.clone(),
         group,
         sessions,
         Arc::new(RecordingDelivery::default()),
@@ -750,8 +750,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
     assert_eq!(reviewer.effective_mode(), ParticipantMode::Present);
     assert_eq!(reviewer.bot_name.as_deref(), Some("Reviewer"));
 
-    let mut returning_reviewer =
-        Participant::human("human_2002", ParticipantRole::Observer);
+    let mut returning_reviewer = Participant::human("human_2002", ParticipantRole::Observer);
     returning_reviewer.mode = Some(ParticipantMode::Absent);
     let returning_session = sessions
         .create_or_reactivate(CreateOrReactivateCommand {
@@ -871,10 +870,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
         format!("{}/review", started.view.run.run_id)
     );
     assert_eq!(channel_events[0].display_name, "Review");
-    assert_eq!(
-        channel_events[0].instruction,
-        "请用自然语言给出你的意见。"
-    );
+    assert_eq!(channel_events[0].instruction, "请用自然语言给出你的意见。");
     assert!(channel_events[0].upstream_artifacts.is_empty());
     drop(channel_events);
 
@@ -2176,7 +2172,10 @@ async fn message_less_final_fails_attempt_and_schedules_retry() {
     .await
     .expect("list retry events");
     assert_eq!(retry_events.len(), 1);
-    assert_eq!(retry_events[0].payload["reason"], "bot completed without visible output");
+    assert_eq!(
+        retry_events[0].payload["reason"],
+        "bot completed without visible output"
+    );
 }
 
 #[tokio::test]
@@ -2382,6 +2381,93 @@ async fn start_run_uses_group_default_definition_binding() {
 }
 
 #[tokio::test]
+async fn group_runtime_cleanup_aborts_runs_and_removes_sessions_and_binding() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let sessions = test_sessions();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        group,
+        sessions.clone(),
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    );
+    runtime
+        .configure_group_runtime(ConfigureGroupRuntimeCommand {
+            group_id: "group-1".to_string(),
+            definition_yaml: Some(single_node_yaml()),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: Default::default(),
+            auto_start_on_service_invocation: true,
+        })
+        .await
+        .expect("configure group runtime");
+    let started = runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: None,
+            definition: None,
+            definition_ref: None,
+            participant_bindings: None,
+            input: json!({"question": "review this"}),
+            caller_id: Some("driver-bot".to_string()),
+            authenticated_human: None,
+        })
+        .await
+        .expect("start run");
+    let mut second_run = started.view.run.clone();
+    second_run.run_id = "group-cleanup-second-run".to_string();
+    second_run.created_at = second_run.created_at.saturating_add(1);
+    second_run.updated_at = second_run.created_at;
+    StateMachineRunRepoPort::create_run(&*store, second_run.clone(), Vec::new())
+        .await
+        .expect("seed second active run for the same session");
+
+    runtime
+        .cancel_group_runs("group-1", "group_deleted")
+        .await
+        .expect("cancel active group runs");
+    let aborted = StateMachineRunRepoPort::get_run(&*store, &started.view.run.run_id)
+        .await
+        .expect("read cancelled run")
+        .expect("cancelled run remains for audit");
+    assert_eq!(aborted.status, StateMachineRunStatus::Aborted);
+    let second_aborted = StateMachineRunRepoPort::get_run(&*store, &second_run.run_id)
+        .await
+        .expect("read second cancelled run")
+        .expect("second cancelled run remains for audit");
+    assert_eq!(second_aborted.status, StateMachineRunStatus::Aborted);
+
+    runtime
+        .delete_group_runtime_state("group-1")
+        .await
+        .expect("delete runtime state");
+    assert!(
+        sessions
+            .get(&started.view.run.session_id)
+            .await
+            .expect("read deleted session")
+            .is_none()
+    );
+    assert!(
+        GroupRuntimeBindingRepoPort::get(&*store, "group-1")
+            .await
+            .expect("read deleted binding")
+            .is_none()
+    );
+    runtime
+        .delete_group_runtime_state("group-1")
+        .await
+        .expect("runtime state deletion is idempotent");
+}
+
+#[tokio::test]
 async fn configure_im_definition_defers_channel_validation_until_run_start() {
     let group = Arc::new(GroupStore::new());
     group
@@ -2405,7 +2491,7 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
     )
     .with_session_channel_outbound(channel_outbound.clone());
 
-    runtime
+    let configured = runtime
         .configure_group_runtime(ConfigureGroupRuntimeCommand {
             group_id: "group-1".to_string(),
             definition_yaml: Some(human_input_yaml()),
@@ -2416,6 +2502,7 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
         })
         .await
         .expect("configuration must not require a binding that needs the group id");
+    assert!(configured.requires_human_input_channel);
     assert!(channel_outbound.validation_calls.lock().await.is_empty());
 
     let error = runtime

@@ -1503,6 +1503,22 @@ async fn delete_group_enforces_legacy_driver_and_dm_rules() {
 }
 
 #[tokio::test]
+async fn delete_group_is_idempotent_when_group_is_missing() {
+    let fixture = Fixture::new();
+    let result = fixture
+        .service_with_limits(5, 10, 10)
+        .delete_group(GroupDeleteCommand {
+            caller_actor_id: "driver".to_string(),
+            group_id: "missing-group".to_string(),
+        })
+        .await
+        .expect("missing group deletion should be idempotent");
+
+    assert_eq!(result.group_id, "missing-group");
+    assert!(!result.deleted);
+}
+
+#[tokio::test]
 async fn delete_group_cleans_up_channel_bindings() {
     let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
     let cleanup = Arc::new(RecordingChannelBindingCleanup::default());

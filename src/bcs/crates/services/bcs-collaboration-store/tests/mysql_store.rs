@@ -405,6 +405,12 @@ async fn mysql_runtime_reads_run_and_node_rows() {
         .expect("run row");
     assert_eq!(loaded_by_session.run_id, "sm-run-1");
 
+    let session_runs = store
+        .list_runs_by_session_id("group-1:abcdef12")
+        .await
+        .expect("list runs by session");
+    assert_eq!(session_runs.len(), 1);
+
     let nodes = store.list_node_runs("sm-run-1").await.expect("list nodes");
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes[0].node_timeout_ms, Some(120_000));
@@ -413,6 +419,8 @@ async fn mysql_runtime_reads_run_and_node_rows() {
     let queries = db.queries.lock().await;
     assert!(queries[1].sql().contains("session_id = ?"));
     assert_eq!(queries[1].params()[1], DbValue::from("group-1:abcdef12"));
+    assert!(queries[2].sql().contains("session_id = ?"));
+    assert!(!queries[2].sql().contains("LIMIT 1"));
 }
 
 #[tokio::test]
