@@ -12,6 +12,9 @@ import pytest
 from injector import Injector
 
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.api.caller_iam_token_service import (
+    CallerIamTokenServiceProtocol,
+)
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
     TeclawPublishTaskLifecycle,
 )
@@ -47,6 +50,8 @@ from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_MASA_AGENT_EVAL,
     HttpClient,
 )
+from agentclaw.community.plugin_api.auth import AuthRequestContext
+from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
 from agentclaw.community.plugins.http_client import HttpxClient
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 from agentclaw.community.plugins.local.policy_service import LocalPolicyService
@@ -189,7 +194,12 @@ def test_test_and_singlebox_have_explicit_access_and_http_bindings():
     assert legacy_access_module not in singlebox_names
 
     assert test_names - {"TestHttpClientModule", "TestDevicesModule"} == (
-        singlebox_names - {"SingleboxAccessModule", "SingleboxDevicesModule"}
+        singlebox_names
+        - {
+            "SingleboxAccessModule",
+            "SingleboxCallerIdentityModule",
+            "SingleboxDevicesModule",
+        }
     )
 
 
@@ -210,6 +220,24 @@ def test_singlebox_profile_resolves_local_policy_and_real_http_clients():
     assert all(
         isinstance(client, HttpxClient) for client in _resolve_http_clients(injector)
     )
+
+
+@pytest.mark.asyncio
+async def test_singlebox_profile_returns_mock_iam_token_without_cookie():
+    injector = build_injector(profile=DeployProfile.SINGLEBOX)
+
+    result = await injector.get(CallerIamTokenServiceProtocol).get_iam_token(
+        iam_token="",
+        auth_request=AuthRequestContext({}, {}, {}, "http://test/"),
+        bot_id=None,
+        stage=CallerIdentityStage.DRAFT,
+        publish_id=None,
+        entity_id=None,
+        is_test_exchange=False,
+    )
+
+    assert result.error is None
+    assert result.iam_token == "mock_iam_token"
 
 
 def test_singlebox_profile_resolves_baas_only_device_runtime():

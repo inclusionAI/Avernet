@@ -151,11 +151,18 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             from agentclaw.community.di.modules.singlebox_access_module import (
                 SingleboxAccessModule,
             )
+            from agentclaw.community.di.modules.infrastructure.singlebox.caller_identity import (
+                SingleboxCallerIdentityModule,
+            )
             from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
                 SingleboxDevicesModule,
             )
 
-            column.extend([SingleboxDevicesModule(), SingleboxAccessModule()])
+            column.extend([
+                SingleboxDevicesModule(),
+                SingleboxAccessModule(),
+                SingleboxCallerIdentityModule(),
+            ])
 
             # Corp overlay: default-env-bot router + DI supplied via the
             # default_env_bot.singlebox_overlay registry (populated by
