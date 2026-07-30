@@ -108,6 +108,10 @@ def _extract_user_input(trace_input: Any) -> str | None:
     return str(trace_input)
 
 
+def _trace_owner_id(trace: dict[str, Any], attributes: dict[str, Any]) -> Any:
+    return trace.get("userId") or attributes.get("identity.owner_id") or attributes.get("user.id")
+
+
 def _map_trace_to_session(trace: dict[str, Any]) -> ConversationSession:
     """Map a Langfuse trace dict to a ConversationSession."""
     metadata_raw = trace.get("metadata") or {}
@@ -146,7 +150,7 @@ def _map_trace_to_session(trace: dict[str, Any]) -> ConversationSession:
         ),
         status="FAILED" if trace.get("success") is False else "SUCCESS",
         timestamp=trace.get("timestamp", ""),
-        user_id=trace.get("userId"),
+        user_id=_trace_owner_id(trace, attributes),
         metadata=SessionMetadata(attributes=attributes),
         total_cost=float(trace.get("totalCost") or 0),
         latency_ms=float(trace.get("latency") or 0),
@@ -859,12 +863,13 @@ class BotChatService(OpenBotChatServiceMixin):
                 metadata_raw = trace_data.get("metadata") or {}
                 attributes = (metadata_raw.get("attributes") or {}) if isinstance(metadata_raw, dict) else {}
                 trace_bot_id = attributes.get("identity.bot_id")
+                trace_owner_id = _trace_owner_id(trace_data, attributes)
 
                 if (
                     trace_bot_id is None
                     or trace_bot_id == "default"
                 ):
-                    if trace_data.get("userId") != owner_id:
+                    if trace_owner_id != owner_id:
                         raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
                 else:
                     if not self._db_repo.has_bot_access(owner_id, trace_bot_id):
@@ -904,7 +909,7 @@ class BotChatService(OpenBotChatServiceMixin):
             output=trace_data.get("output"),
             status="FAILED" if trace_data.get("success") is False else "SUCCESS",
             timestamp=trace_data.get("timestamp", ""),
-            user_id=trace_data.get("userId"),
+            user_id=_trace_owner_id(trace_data, attributes),
             metadata=SessionMetadata(attributes=attributes),
             total_cost=float(trace_data.get("totalCost") or 0),
             latency_ms=float(trace_data.get("latency") or 0),
