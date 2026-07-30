@@ -186,7 +186,15 @@ async def write_unified_config(
             server_code=server_code,
             old_config=old_config,
         )
-        raise McpSyncFailedError(result.get("error") or "device sync failed")
+        # Preserve the internal surface's exact 500 detail: the literal fallback
+        # and ``.get(key, default)`` semantics (default only when the key is
+        # absent). The public surface maps this error to a fixed message and
+        # never reads str(exc), so carrying the internal text here costs it
+        # nothing. The real sync service always sets a non-empty ``error`` on
+        # failure, so the fallback is defense-in-depth.
+        raise McpSyncFailedError(
+            result.get("error", "Failed to sync to all devices")
+        )
 
     return UnifiedConfig(
         server_code=server_code,
