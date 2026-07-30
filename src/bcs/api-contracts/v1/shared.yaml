@@ -57,3 +57,43 @@ GroupIdPath:
   schema:
     type: string
     minLength: 1
+
+SessionIdPath:
+  name: session_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+ActorIdPath:
+  name: actor_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+FriendBotUuidPath:
+  name: friend_bot_uuid
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+FriendRequestIdPath:
+  name: request_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+InvitationTokenPath:
+  name: token
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1

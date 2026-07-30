@@ -1,11 +1,125 @@
-ListBotGroupsPath:
-  get:
-    operationId: list_bot_groups
-    summary: List groups visible from a Bot collaboration identity.
+CreateSessionRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - driver_bot_uuid
+    - participants
+  properties:
+    title:
+      type: string
+    context:
+      type: string
+    driver_bot_uuid:
+      type: string
+    participants:
+      type: array
+      minItems: 1
+      items:
+        $ref: "#/SessionParticipantInput"
+
+SessionParticipantInput:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_uuid
+  properties:
+    bot_uuid:
+      type: string
+    mode:
+      $ref: ../domain-models.yaml#/ParticipantMode
+
+UpdateSessionRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    title:
+      type: string
+    context:
+      type: string
+
+UpdateSessionParticipantRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    mode:
+      $ref: ../domain-models.yaml#/ParticipantMode
+
+GroupSessionsPath:
+  post:
+    operationId: create_session
+    summary: Create a Session under a Group.
     x-avernet-security:
       principal: required
     parameters:
-      - $ref: ../shared.yaml#/BotUuidPath
+      - $ref: ../shared.yaml#/GroupIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CreateSessionRequest"
+    responses:
+      "201":
+        description: Created session detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/CreatedSessionEnvelope
+      "400":
+        description: Invalid session definition.
+        x-error-codes:
+          - invalid_request
+          - invalid_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot create a session in the group.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group or referenced Bot is missing or hidden.
+        x-error-codes:
+          - group_not_found
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Session conflicts with current group state.
+        x-error-codes:
+          - conflict
+          - non_public_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+  get:
+    operationId: list_sessions
+    summary: List Sessions under a Group.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
       - name: offset
         in: query
         schema:
@@ -19,171 +133,19 @@ ListBotGroupsPath:
           minimum: 1
           maximum: 100
           default: 20
-      - name: q
+      - name: status
         in: query
         schema:
-          type: string
-      - name: membership
-        in: query
-        schema:
-          type: string
-          enum:
-            - all
-            - direct
-            - session_only
-          default: all
-      - name: kind
-        in: query
-        schema:
-          type: string
-          enum:
-            - normal
-            - dm
-            - all
-          default: normal
-      - name: strategy
-        in: query
-        schema:
-          type: string
-          enum:
-            - chat
-            - manager_worker
-            - state_machine
+          $ref: ../domain-models.yaml#/SessionStatus
     responses:
       "200":
-        description: Matching groups after relation filtering and pagination.
+        description: Matching sessions after authorization and pagination.
         content:
           application/json:
             schema:
-              $ref: ../domain-models.yaml#/GroupPageEnvelope
+              $ref: ../domain-models.yaml#/SessionPageEnvelope
       "400":
-        description: Invalid filter combination.
-        x-error-codes:
-          - invalid_request
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "401":
-        description: Gateway Principal is missing or invalid.
-        x-error-codes:
-          - unauthenticated
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "403":
-        description: Principal cannot manage the target Bot identity.
-        x-error-codes:
-          - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "404":
-        description: Target Bot is missing.
-        x-error-codes:
-          - bot_not_found
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "500":
-        $ref: ../shared.yaml#/InternalErrorResponse
-
-CreateGroupPath:
-  post:
-    operationId: create_group
-    summary: Create a collaboration group or direct-message group.
-    x-avernet-security:
-      principal: required
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            oneOf:
-              - $ref: "#/CreateCollaborationGroup"
-              - $ref: "#/CreateDirectMessageGroup"
-            discriminator:
-              propertyName: group_kind
-    responses:
-      "200":
-        description: Existing direct-message group detail when the actor pair is reused.
-        content:
-          application/json:
-            schema:
-              $ref: ../domain-models.yaml#/GroupDetailEnvelope
-      "201":
-        description: Created group detail.
-        content:
-          application/json:
-            schema:
-              $ref: ../domain-models.yaml#/CreatedGroupDetailEnvelope
-      "400":
-        description: Invalid group definition.
-        x-error-codes:
-          - invalid_request
-          - invalid_participant
-          - invalid_participant_binding
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "401":
-        description: Gateway Principal is missing or invalid.
-        x-error-codes:
-          - unauthenticated
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "403":
-        description: A selected Bot is not collaboration-eligible.
-        x-error-codes:
-          - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "404":
-        description: A referenced Bot Actor or collaboration definition is missing.
-        x-error-codes:
-          - bot_not_found
-          - collaboration_definition_not_found
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "409":
-        description: Group conflicts with an existing resource.
-        x-error-codes:
-          - conflict
-          - non_public_participant
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "500":
-        $ref: ../shared.yaml#/InternalErrorResponse
-
-GroupPath:
-  get:
-    operationId: get_group
-    summary: Get target-independent group detail.
-    x-avernet-security:
-      principal: required
-    parameters:
-      - $ref: ../shared.yaml#/GroupIdPath
-    responses:
-      "200":
-        description: Group detail.
-        content:
-          application/json:
-            schema:
-              $ref: ../domain-models.yaml#/GroupDetailEnvelope
-      "400":
-        description: Invalid group identifier encoding.
+        description: Invalid filter.
         x-error-codes:
           - invalid_request
         content:
@@ -207,17 +169,59 @@ GroupPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: Group is missing or intentionally hidden.
+        description: Group is missing or hidden.
         x-error-codes:
           - group_not_found
         content:
           application/json:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
-      "409":
-        description: Persisted state-machine configuration is incomplete.
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+SessionPath:
+  get:
+    operationId: get_session
+    summary: Get session detail.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    responses:
+      "200":
+        description: Session detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionDetailEnvelope
+      "400":
+        description: Invalid session identifier encoding.
         x-error-codes:
-          - state_machine_definition_missing
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot read the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
         content:
           application/json:
             schema:
@@ -225,25 +229,25 @@ GroupPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
   patch:
-    operationId: update_group
-    summary: Update the explicitly mutable group properties.
+    operationId: update_session
+    summary: Update the explicitly mutable session properties.
     x-avernet-security:
       principal: required
     parameters:
-      - $ref: ../shared.yaml#/GroupIdPath
+      - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/UpdateGroup"
+            $ref: "#/UpdateSessionRequest"
     responses:
       "200":
-        description: Updated group detail.
+        description: Updated session detail.
         content:
           application/json:
             schema:
-              $ref: ../domain-models.yaml#/GroupDetailEnvelope
+              $ref: ../domain-models.yaml#/SessionDetailEnvelope
       "400":
         description: Invalid patch.
         x-error-codes:
@@ -261,7 +265,7 @@ GroupPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the group.
+        description: Principal cannot manage the session.
         x-error-codes:
           - forbidden
         content:
@@ -269,20 +273,18 @@ GroupPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: Group is missing or intentionally hidden, or a persisted participant Bot is missing.
+        description: Session is missing or intentionally hidden.
         x-error-codes:
-          - group_not_found
-          - bot_not_found
+          - session_not_found
         content:
           application/json:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "409":
-        description: Patch conflicts with current group state.
+        description: Completed session rejects mutable operations.
         x-error-codes:
           - conflict
-          - non_public_participant
-          - state_machine_definition_missing
+          - session_completed
         content:
           application/json:
             schema:
@@ -290,12 +292,12 @@ GroupPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
   delete:
-    operationId: delete_group
-    summary: Delete a group using the authenticated Principal as caller.
+    operationId: delete_session
+    summary: Delete a session using the authenticated Principal as caller.
     x-avernet-security:
       principal: required
     parameters:
-      - $ref: ../shared.yaml#/GroupIdPath
+      - $ref: ../shared.yaml#/SessionIdPath
     responses:
       "200":
         description: Idempotent delete result.
@@ -304,7 +306,7 @@ GroupPath:
             schema:
               $ref: ../domain-models.yaml#/DeleteResultEnvelope
       "400":
-        description: Invalid group identifier encoding.
+        description: Invalid session identifier encoding.
         x-error-codes:
           - invalid_request
         content:
@@ -320,17 +322,9 @@ GroupPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot delete the group.
+        description: Principal cannot delete the session.
         x-error-codes:
           - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "409":
-        description: The group kind or state cannot be deleted.
-        x-error-codes:
-          - conflict
         content:
           application/json:
             schema:
@@ -338,166 +332,140 @@ GroupPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
 
-CreateParticipant:
-  type: object
-  additionalProperties: false
-  required:
-    - actor_id
-    - role
-  properties:
-    actor_id:
-      type: string
-    role:
-      type: string
-      enum:
-        - driver
-        - consultant
-        - manager
-        - worker
-        - observer
-
-CreateDeliveryPolicy:
-  $ref: ../domain-models.yaml#/DeliveryPolicy
-
-CreateChatConfiguration:
-  type: object
-  additionalProperties: false
-  required:
-    - strategy
-    - delivery_policy
-  properties:
-    strategy:
-      const: chat
-    delivery_policy:
-      $ref: "#/CreateDeliveryPolicy"
-
-CreateManagerWorkerConfiguration:
-  type: object
-  additionalProperties: false
-  required:
-    - strategy
-  properties:
-    strategy:
-      const: manager_worker
-
-CreateStateMachineConfiguration:
-  type: object
-  additionalProperties: false
-  required:
-    - strategy
-    - definition
-    - participant_bindings
-  properties:
-    strategy:
-      const: state_machine
-    definition:
-      $ref: ../domain-models.yaml#/StateMachineDefinitionReference
-    participant_bindings:
-      type: array
-      items:
-        $ref: ../domain-models.yaml#/StateMachineParticipantBinding
-
-CreateCollaborationConfiguration:
-  oneOf:
-    - $ref: "#/CreateChatConfiguration"
-    - $ref: "#/CreateManagerWorkerConfiguration"
-    - $ref: "#/CreateStateMachineConfiguration"
-  discriminator:
-    propertyName: strategy
-
-CreateCollaborationGroup:
-  type: object
-  additionalProperties: false
-  required:
-    - group_kind
-    - driver_bot_uuid
-    - participants
-    - collaboration
-  properties:
-    group_kind:
-      const: normal
-    name:
-      type: string
-    context:
-      type: string
-    visibility:
-      type: string
-      enum:
-        - private
-        - public
-      default: private
-    driver_bot_uuid:
-      type: string
-    participants:
-      type: array
-      items:
-        $ref: "#/CreateParticipant"
-    collaboration:
-      $ref: "#/CreateCollaborationConfiguration"
-
-CreateDirectMessageGroup:
-  type: object
-  additionalProperties: false
-  required:
-    - group_kind
-    - target_actor_id
-  properties:
-    group_kind:
-      const: dm
-    target_actor_id:
-      type: string
-      description: First-phase target must resolve to a Bot Actor.
-    name:
-      type: string
-    context:
-      type: string
-
-UpdateGroup:
-  type: object
-  additionalProperties: false
-  minProperties: 1
-  properties:
-    name:
-      type: string
-    context:
-      type: string
-    visibility:
-      type: string
-      enum:
-        - private
-        - public
-    delivery_policy:
-      $ref: ../domain-models.yaml#/DeliveryPolicy
-
-UpdateGroupParticipantRequest:
-  type: object
-  additionalProperties: false
-  minProperties: 1
-  properties:
-    mode:
-      $ref: ../domain-models.yaml#/ParticipantMode
-
-AddGroupParticipantPath:
+SessionCompletionPath:
   post:
-    operationId: add_group_participant
-    summary: Add a Human or Bot actor as a Group participant.
+    operationId: complete_session
+    summary: Complete a running chat session; idempotent after completion.
     x-avernet-security:
       principal: required
     parameters:
-      - $ref: ../shared.yaml#/GroupIdPath
+      - $ref: ../shared.yaml#/SessionIdPath
+    responses:
+      "200":
+        description: Session completion result. Returns the same result when repeated.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionCompletionEnvelope
+      "400":
+        description: Invalid session identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot complete the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+SessionMessagesPath:
+  get:
+    operationId: list_session_messages
+    summary: List session message history sorted by session_seq.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+    responses:
+      "200":
+        description: Message history page.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionMessagePageEnvelope
+      "400":
+        description: Invalid filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot read the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AddSessionParticipantPath:
+  post:
+    operationId: add_session_participant
+    summary: Add a Bot as a Session participant.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/CreateParticipant"
+            $ref: "#/SessionParticipantInput"
     responses:
       "200":
-        description: Added participant.
+        description: Added session participant.
         content:
           application/json:
             schema:
-              $ref: ../domain-models.yaml#/ParticipantEnvelope
+              $ref: ../domain-models.yaml#/SessionParticipantEnvelope
       "400":
         description: Invalid participant definition.
         x-error-codes:
@@ -516,7 +484,7 @@ AddGroupParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the group.
+        description: Principal cannot manage the session.
         x-error-codes:
           - forbidden
         content:
@@ -524,21 +492,20 @@ AddGroupParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: Group or referenced actor is missing or hidden.
+        description: Session or referenced Bot is missing or hidden.
         x-error-codes:
-          - group_not_found
+          - session_not_found
           - bot_not_found
-          - actor_not_found
         content:
           application/json:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "409":
-        description: Participant conflicts with current group state.
+        description: Participant conflicts with session state.
         x-error-codes:
           - conflict
           - participant_already_exists
-          - non_public_participant
+          - session_completed
         content:
           application/json:
             schema:
@@ -546,28 +513,28 @@ AddGroupParticipantPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
 
-GroupParticipantPath:
+SessionParticipantPath:
   patch:
-    operationId: update_group_participant
-    summary: Update the mutable properties of a Group participant.
+    operationId: update_session_participant
+    summary: Update a Session participant mode.
     x-avernet-security:
       principal: required
     parameters:
-      - $ref: ../shared.yaml#/GroupIdPath
-      - $ref: ../shared.yaml#/ActorIdPath
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: ../shared.yaml#/BotUuidPath
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/UpdateGroupParticipantRequest"
+            $ref: "#/UpdateSessionParticipantRequest"
     responses:
       "200":
-        description: Updated participant.
+        description: Updated session participant.
         content:
           application/json:
             schema:
-              $ref: ../domain-models.yaml#/ParticipantEnvelope
+              $ref: ../domain-models.yaml#/SessionParticipantEnvelope
       "400":
         description: Invalid patch.
         x-error-codes:
@@ -593,19 +560,19 @@ GroupParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: Group, participant, or referenced actor is missing or hidden.
+        description: Session or participant is missing or hidden.
         x-error-codes:
-          - group_not_found
+          - session_not_found
           - participant_not_found
-          - actor_not_found
         content:
           application/json:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "409":
-        description: Patch conflicts with role or group invariants.
+        description: Completed session rejects participant changes.
         x-error-codes:
           - conflict
+          - session_completed
         content:
           application/json:
             schema:
@@ -613,13 +580,13 @@ GroupParticipantPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
   delete:
-    operationId: remove_group_participant
-    summary: Remove a participant or let an actor leave the group.
+    operationId: remove_session_participant
+    summary: Remove a Session participant or let a Bot leave.
     x-avernet-security:
       principal: required
     parameters:
-      - $ref: ../shared.yaml#/GroupIdPath
-      - $ref: ../shared.yaml#/ActorIdPath
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: ../shared.yaml#/BotUuidPath
     responses:
       "200":
         description: Idempotent remove result.
@@ -652,17 +619,18 @@ GroupParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: Group is missing or hidden; a missing participant removes idempotently.
+        description: Session is missing or hidden; a missing participant removes idempotently.
         x-error-codes:
-          - group_not_found
+          - session_not_found
         content:
           application/json:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "409":
-        description: A required role cannot be removed before it is transferred.
+        description: Driver invariant or completed session prevents removal.
         x-error-codes:
           - conflict
+          - session_completed
         content:
           application/json:
             schema:

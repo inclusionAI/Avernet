@@ -1,0 +1,222 @@
+CreateInvitationRequest:
+  type: object
+  additionalProperties: false
+  properties:
+    expires_in_seconds:
+      type: integer
+      minimum: 1
+      description: Optional invitation lifetime in seconds. Servers apply a default when omitted.
+
+AcceptInvitationRequest:
+  type: object
+  additionalProperties: false
+  properties:
+    bot_uuid:
+      type: string
+      description: >-
+        Target Bot for Human-owned-Bot acceptance. Omitted when a Bot Principal
+        accepts for itself; a Bot Principal cannot override its own identity.
+
+CreateGroupInvitationPath:
+  post:
+    operationId: create_group_invitation
+    summary: Create an Invitation for a Group target.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CreateInvitationRequest"
+    responses:
+      "201":
+        description: Created invitation carrying a shareable token.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/CreatedInvitationEnvelope
+      "400":
+        description: Invalid invitation request.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot invite into the group.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group is missing or hidden.
+        x-error-codes:
+          - group_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Invitation conflicts with current group state.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+CreateSessionInvitationPath:
+  post:
+    operationId: create_session_invitation
+    summary: Create an Invitation for a Session target.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CreateInvitationRequest"
+    responses:
+      "201":
+        description: Created invitation carrying a shareable token.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/CreatedInvitationEnvelope
+      "400":
+        description: Invalid invitation request.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot invite into the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Completed or non-joinable session cannot receive invitations.
+        x-error-codes:
+          - conflict
+          - session_completed
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AcceptInvitationPath:
+  post:
+    operationId: accept_invitation
+    summary: Accept an invitation and join its target resource.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/InvitationTokenPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/AcceptInvitationRequest"
+    responses:
+      "200":
+        description: >-
+          Acceptance result. Repeating the request returns the same result with
+          already_joined=true.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/InvitationAcceptanceEnvelope
+      "400":
+        description: Invalid token or acceptance request.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot accept for the target Bot.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Token is unknown or its target is missing.
+        x-error-codes:
+          - invitation_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Target is completed or otherwise not joinable.
+        x-error-codes:
+          - conflict
+          - session_completed
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "410":
+        description: Invitation token has expired.
+        x-error-codes:
+          - invitation_expired
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

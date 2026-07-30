@@ -445,11 +445,8 @@ DeleteResult:
   type: object
   additionalProperties: false
   required:
-    - group_id
     - deleted
   properties:
-    group_id:
-      type: string
     deleted:
       type: boolean
 
@@ -468,5 +465,617 @@ DeleteResultEnvelope:
       type: string
     data:
       $ref: "#/DeleteResult"
+    request_id:
+      type: string
+
+# ---------------------------------------------------------------------------
+# Batch 2 resource models: Session, SessionParticipant, Invitation,
+# Friendship, and FriendRequest. They reuse Actor/ActorKind/Participant from
+# above and are V1-only projections; Legacy routing internals (mode,
+# sender_routes, dm_pair_key) are not leaked here.
+# ---------------------------------------------------------------------------
+
+ParticipantMode:
+  type: string
+  enum:
+    - auto
+    - muted
+    - present
+    - absent
+
+SessionStatus:
+  type: string
+  enum:
+    - running
+    - completed
+
+SessionMessageKind:
+  type: string
+  enum:
+    - text
+    - system
+
+SessionParticipant:
+  type: object
+  additionalProperties: false
+  required:
+    - actor_id
+    - actor_kind
+    - role
+    - mode
+  properties:
+    actor_id:
+      type: string
+    actor_kind:
+      $ref: "#/ActorKind"
+    name:
+      type: string
+    role:
+      type: string
+      enum:
+        - driver
+        - consultant
+        - manager
+        - worker
+        - observer
+    mode:
+      $ref: "#/ParticipantMode"
+    joined_at:
+      type: integer
+      minimum: 0
+
+SessionSummary:
+  type: object
+  additionalProperties: false
+  required:
+    - session_id
+    - version
+    - group_id
+    - status
+    - created_at
+    - updated_at
+  properties:
+    session_id:
+      type: string
+    version:
+      type: integer
+    group_id:
+      type: string
+    status:
+      $ref: "#/SessionStatus"
+    title:
+      type: string
+    participant_count:
+      type: integer
+      minimum: 0
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+SessionDetail:
+  type: object
+  additionalProperties: false
+  required:
+    - session_id
+    - version
+    - group_id
+    - status
+    - participants
+    - created_at
+    - updated_at
+  properties:
+    session_id:
+      type: string
+    version:
+      type: integer
+    group_id:
+      type: string
+    status:
+      $ref: "#/SessionStatus"
+    title:
+      type: string
+    context:
+      type: string
+    participants:
+      type: array
+      items:
+        $ref: "#/SessionParticipant"
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+SessionPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/SessionSummary"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+SessionMessage:
+  type: object
+  additionalProperties: false
+  required:
+    - message_id
+    - session_seq
+    - actor_id
+    - actor_kind
+    - kind
+    - content
+    - created_at
+  properties:
+    message_id:
+      type: string
+    session_seq:
+      type: integer
+      minimum: 0
+    actor_id:
+      type: string
+    actor_kind:
+      $ref: "#/ActorKind"
+    name:
+      type: string
+    kind:
+      $ref: "#/SessionMessageKind"
+    content:
+      type: string
+    created_at:
+      type: integer
+      minimum: 0
+
+SessionMessagePage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/SessionMessage"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+SessionCompletionResult:
+  type: object
+  additionalProperties: false
+  required:
+    - session_id
+    - status
+    - completed_at
+  properties:
+    session_id:
+      type: string
+    status:
+      type: string
+      enum:
+        - completed
+    completed_at:
+      type: integer
+      minimum: 0
+
+InvitationTargetType:
+  type: string
+  enum:
+    - group
+    - session
+
+InvitationState:
+  type: string
+  enum:
+    - pending
+    - accepted
+    - expired
+
+Invitation:
+  type: object
+  additionalProperties: false
+  required:
+    - token
+    - target_type
+    - target_id
+    - state
+    - created_at
+  properties:
+    token:
+      type: string
+    target_type:
+      $ref: "#/InvitationTargetType"
+    target_id:
+      type: string
+    state:
+      $ref: "#/InvitationState"
+    expires_at:
+      type: integer
+      minimum: 0
+    created_at:
+      type: integer
+      minimum: 0
+
+InvitationAcceptResult:
+  type: object
+  additionalProperties: false
+  required:
+    - target_type
+    - target_id
+    - joined
+  properties:
+    target_type:
+      $ref: "#/InvitationTargetType"
+    target_id:
+      type: string
+    joined:
+      type: boolean
+    already_joined:
+      type: boolean
+      default: false
+
+FriendRequestStatus:
+  type: string
+  enum:
+    - pending
+    - accepted
+    - rejected
+
+FriendRequestDirection:
+  type: string
+  enum:
+    - sent
+    - received
+
+Friendship:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_uuid
+    - friend_bot_uuid
+    - created_at
+  properties:
+    bot_uuid:
+      type: string
+    friend_bot_uuid:
+      type: string
+    created_at:
+      type: integer
+      minimum: 0
+
+FriendshipPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Friendship"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+FriendRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - request_id
+    - from_bot_uuid
+    - to_bot_uuid
+    - status
+    - created_at
+    - updated_at
+  properties:
+    request_id:
+      type: string
+    from_bot_uuid:
+      type: string
+    to_bot_uuid:
+      type: string
+    status:
+      $ref: "#/FriendRequestStatus"
+    message:
+      type: string
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+FriendRequestPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/FriendRequest"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+# ---- Success envelopes for batch 2 resources ------------------------------
+
+SessionDetailEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionDetail"
+    request_id:
+      type: string
+
+CreatedSessionEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "#/SessionDetail"
+    request_id:
+      type: string
+
+SessionPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionPage"
+    request_id:
+      type: string
+
+SessionMessagePageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionMessagePage"
+    request_id:
+      type: string
+
+SessionCompletionEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionCompletionResult"
+    request_id:
+      type: string
+
+ParticipantEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/Participant"
+    request_id:
+      type: string
+
+SessionParticipantEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionParticipant"
+    request_id:
+      type: string
+
+CreatedInvitationEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "#/Invitation"
+    request_id:
+      type: string
+
+InvitationAcceptanceEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/InvitationAcceptResult"
+    request_id:
+      type: string
+
+FriendshipPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/FriendshipPage"
+    request_id:
+      type: string
+
+CreatedFriendRequestEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "#/FriendRequest"
+    request_id:
+      type: string
+
+FriendRequestPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/FriendRequestPage"
+    request_id:
+      type: string
+
+FriendRequestDecisionEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/FriendRequest"
     request_id:
       type: string
