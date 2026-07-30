@@ -37,6 +37,12 @@ from engine.community.core.engine.exceptions import CapabilityNotSupportedError
 from engine.community.core.skills.exceptions import (
     InvalidPoolMappingRequestError,
 )
+from engine.community.core.skills.layout_planner import (
+    LayoutIdentity,
+    RuntimeLayoutContext,
+    SkillLayoutResolutionError,
+    resolve_skill_layout,
+)
 from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
@@ -90,6 +96,30 @@ async def probe_runtime_skills_layout(
     body: RuntimeLayoutProbeRequest,
 ) -> RuntimeLayoutProbeApiResponse:
     """通过 Skills Service API 核验当前运行时事实。"""
+    try:
+        resolve_skill_layout(
+            LayoutIdentity(
+                engine_type=body.engine,
+                layout_contract_version=body.layout_contract_version,
+            ),
+            RuntimeLayoutContext(),
+        )
+    except SkillLayoutResolutionError as error:
+        return RuntimeLayoutProbeApiResponse(
+            success=True,
+            data=RuntimeLayoutProbeResponse(
+                status="INVALID",
+                engine=body.engine,
+                layout_contract_version=body.layout_contract_version,
+                preparation_id=None,
+                evidence={
+                    "reason": "layout_identity_invalid",
+                    "error_type": type(error).__name__,
+                },
+            ),
+            message="运行时 Skills Pool 布局探测完成",
+        )
+
     plugin = _skills_plugin()
     try:
         result = await plugin.probe_pool_layout(
@@ -100,6 +130,21 @@ async def probe_runtime_skills_layout(
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    if result.engine != body.engine:
+        return RuntimeLayoutProbeApiResponse(
+            success=True,
+            data=RuntimeLayoutProbeResponse(
+                status="INVALID",
+                engine=body.engine,
+                layout_contract_version=body.layout_contract_version,
+                preparation_id=None,
+                evidence={
+                    "reason": "runtime_engine_mismatch",
+                    "actual_engine": result.engine,
+                },
+            ),
+            message="运行时 Skills Pool 布局探测完成",
+        )
     return RuntimeLayoutProbeApiResponse(
         success=True,
         data=RuntimeLayoutProbeResponse.model_validate(result.to_data()),
