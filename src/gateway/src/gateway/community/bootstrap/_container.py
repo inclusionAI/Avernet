@@ -41,6 +41,26 @@ def _render_provider_tree(
                 lines.append(f"{indent}  {name}: Selector → {type(resolved).__name__}")
             except Exception:
                 lines.append(f"{indent}  {name}: Selector (unresolved)")
+        elif isinstance(provider, providers.Singleton):
+            try:
+                resolved = provider()
+                lines.append(f"{indent}  {name}: Singleton → {type(resolved).__name__}")
+            except Exception:
+                lines.append(f"{indent}  {name}: Singleton (unresolved)")
+        elif isinstance(provider, providers.Callable):
+            try:
+                resolved = provider()
+                if isinstance(resolved, dict):
+                    items = ", ".join(
+                        f"{k}: {type(v).__name__}" for k, v in resolved.items()
+                    )
+                    lines.append(f"{indent}  {name}: Callable → {{{items}}}")
+                else:
+                    lines.append(
+                        f"{indent}  {name}: Callable → {type(resolved).__name__}"
+                    )
+            except Exception:
+                lines.append(f"{indent}  {name}: Callable (unresolved)")
         else:
             lines.append(f"{indent}  {name}: {_provider_label(provider)}")
     return lines
@@ -103,8 +123,6 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
             db=plugins.providers["database"],
             app_token_validator=plugins.providers["app_token_validator"],
             tenant_resolver=plugins.providers["tenant_resolver"],
-            authn_agentpass=plugins.providers["authn_agentpass"],
-            authn_xoneid=plugins.providers["authn_xoneid"],
         )
     )
 

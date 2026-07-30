@@ -71,3 +71,63 @@ class TestRegisterPluginOption:
         result = stored_factory()
         assert result == "result"
         assert call_count == 1
+
+
+class TestRegisterExtraAuthnStrategy:
+    def test_register_and_inject(self) -> None:
+        import gateway.community.bootstrap.plugins._registry as reg_mod
+
+        reg_mod._authn_registry = None  # reset singleton
+
+        result_obj = object()
+
+        def factory() -> object:
+            return result_obj
+
+        from gateway.community.plugin_registry import (
+            inject_extra_authn_strategies,
+            register_extra_authn_strategy,
+        )
+
+        register_extra_authn_strategy("agentpass", factory)
+        # Factory should not be called on register
+        assert "authn_strategies" in registry_mod._extra_options
+
+        # Inject should call factory and register into AuthnStrategyRegistry
+        inject_extra_authn_strategies()
+        pool = reg_mod.get_authn_registry().resolve_all()
+        assert pool["agentpass"] is result_obj
+
+    def test_inject_idempotent(self) -> None:
+        import gateway.community.bootstrap.plugins._registry as reg_mod
+
+        reg_mod._authn_registry = None
+
+        from gateway.community.plugin_registry import (
+            inject_extra_authn_strategies,
+            register_extra_authn_strategy,
+        )
+
+        register_extra_authn_strategy("x", lambda: "result")
+        inject_extra_authn_strategies()
+        pool_before = reg_mod.get_authn_registry().resolve_all()
+
+        # Second inject: _extra_options is already popped, should be no-op
+        inject_extra_authn_strategies()
+        pool_after = reg_mod.get_authn_registry().resolve_all()
+
+        # Both resolve the same factory, but factories produce different
+        # instances each call. Check keys match instead.
+        assert set(pool_before) == set(pool_after) == {"x"}
+
+    def test_inject_with_no_strategies_is_safe(self) -> None:
+        import gateway.community.bootstrap.plugins._registry as reg_mod
+
+        reg_mod._authn_registry = None
+
+        from gateway.community.plugin_registry import inject_extra_authn_strategies
+
+        # No strategies registered — should not raise
+        inject_extra_authn_strategies()
+        pool = reg_mod.get_authn_registry().resolve_all()
+        assert pool == {}

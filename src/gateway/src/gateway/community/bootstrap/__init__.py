@@ -96,11 +96,13 @@ def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
     try:
         from gateway.community.plugin_registry import (
             has_enterprise_plugins,
+            inject_extra_authn_strategies,
             inject_into_plugin_container,
         )
 
         if has_enterprise_plugins():
             inject_into_plugin_container(container)
+            inject_extra_authn_strategies()
     except ImportError:
         pass
 

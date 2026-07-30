@@ -1,5 +1,10 @@
 """Composition of the auth subsystem (composition root, Rule 14).
 
+All authn strategies (community + enterprise) are registered into
+the shared ``AuthnStrategyRegistry``. ``_strategy_chains()`` reads the
+full pool from the registry at bootstrap time — no split between
+hardcoded defaults and injected extras.
+
 Builds the database-backed identity registries (bot token, access-key token),
 the identity-chain registry, the route-security table, and assembles an
 :class:`Authenticator`. Only the composition root wires concrete plugins;
@@ -29,6 +34,8 @@ from gateway.community.spi.authn import (
     TenantResolver,
 )
 from gateway.community.spi.database import DataSourcePlugin
+
+from .plugins._registry import register_authn_strategy
 
 _logger = logging.getLogger("bootstrap")
 
@@ -77,29 +84,35 @@ def _seed_authn(db: DataSourcePlugin) -> None:
             )
 
 
-def _default_strategy_pool(
+def _register_community_strategies(
     db: DataSourcePlugin,
     app_token_validator: AppTokenValidator,
     tenant_resolver: TenantResolver,
-    authn_agentpass: AuthStrategy | None = None,
-    authn_xoneid: AuthStrategy | None = None,
-) -> dict[str, AuthStrategy]:
-    """The built-in strategy instances, keyed by their short name."""
-    pool = {
-        "google": GoogleUserStrategy(
+) -> None:
+    """Register the 4 community built-in strategies into the shared registry.
+
+    Register replaces any existing entry by the same name, so repeated
+    calls (e.g. across test ``bootstrap_app()`` invocations) always wire
+    the current DI-provided dependencies.
+    """
+    register_authn_strategy(
+        "google",
+        GoogleUserStrategy(
             token_header="x-google-token", default_tenant=_DEFAULT_TENANT
         ),
-        "bot_token": BotTokenStrategy(registry=BotRepository(db)),
-        "app_token": AppTokenStrategy(
-            keys=app_token_validator, tenants=tenant_resolver
-        ),
-        "access_key_token": AccessKeyTokenStrategy(registry=AccessKeyRepository(db)),
-    }
-    if authn_agentpass is not None:
-        pool["agentpass"] = authn_agentpass
-    if authn_xoneid is not None:
-        pool["xoneid"] = authn_xoneid
-    return pool
+    )
+    register_authn_strategy(
+        "bot_token",
+        BotTokenStrategy(registry=BotRepository(db)),
+    )
+    register_authn_strategy(
+        "app_token",
+        AppTokenStrategy(keys=app_token_validator, tenants=tenant_resolver),
+    )
+    register_authn_strategy(
+        "access_key_token",
+        AccessKeyTokenStrategy(registry=AccessKeyRepository(db)),
+    )
 
 
 def _default_chains(
@@ -119,8 +132,6 @@ def build_authenticator(
     db: DataSourcePlugin,
     app_token_validator: AppTokenValidator,
     tenant_resolver: TenantResolver,
-    authn_agentpass: AuthStrategy | None = None,
-    authn_xoneid: AuthStrategy | None = None,
 ) -> Authenticator:
     """Build the identity-chain registry + route table (once, from create_app).
 
@@ -132,8 +143,6 @@ def build_authenticator(
             db,
             app_token_validator,
             tenant_resolver,
-            authn_agentpass=authn_agentpass,
-            authn_xoneid=authn_xoneid,
         ),
         route_security=_load_route_security(),
     )
@@ -143,16 +152,18 @@ def _strategy_chains(
     db: DataSourcePlugin,
     app_token_validator: AppTokenValidator,
     tenant_resolver: TenantResolver,
-    authn_agentpass: AuthStrategy | None = None,
-    authn_xoneid: AuthStrategy | None = None,
 ) -> dict[PrincipalType, IdentityChain]:
     """Parse identity_strategies.yaml, wiring each declared strategy by name."""
-    pool = _default_strategy_pool(
-        db,
-        app_token_validator,
-        tenant_resolver,
-        authn_agentpass=authn_agentpass,
-        authn_xoneid=authn_xoneid,
+    from .plugins._registry import get_authn_registry
+
+    # Only register once — the registry is a module-level singleton that
+    # persists across tests. Enterprise strategies were already registered at
+    # import time (by gateway.enterprise.__init__ → _register.py).
+    _register_community_strategies(db, app_token_validator, tenant_resolver)
+    pool = get_authn_registry().resolve_all()
+    _logger.info(
+        "authn strategy pool: [%s]",
+        ", ".join(f"{name}: {type(s).__name__}" for name, s in sorted(pool.items())),
     )
     defaults = _default_chains(pool)
     configs_dir = _resolve_configs_dir()

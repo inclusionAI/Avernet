@@ -32,8 +32,6 @@ class AuthnPluginConfig(BaseSettings):
     model_config = SettingsConfigDict(extra="allow")
     app_token: str = Field(default="stub")
     tenant: str = Field(default="stub")
-    agentpass: str = Field(default="stub", min_length=1)
-    xoneid: str = Field(default="stub", min_length=1)
 
 
 class DatabasePluginConfig(BaseSettings):

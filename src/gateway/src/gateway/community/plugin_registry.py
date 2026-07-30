@@ -54,6 +54,23 @@ def inject_into_plugin_container(container: Any) -> None:
         selector.set_providers(**existing)
 
 
+def inject_extra_authn_strategies() -> None:
+    """Inject enterprise authn strategies into the shared AuthnStrategyRegistry."""
+    from gateway.community.bootstrap.plugins import register_authn_strategy
+
+    options = _extra_options.pop("authn_strategies", {})
+    for name, (factory, _ptype, _kwargs) in options.items():
+        register_authn_strategy(name, factory)
+
+
+def register_extra_authn_strategy(name: str, factory: Callable[..., Any]) -> None:
+    _extra_options.setdefault("authn_strategies", {})[name] = (
+        factory,
+        "singleton",
+        {},
+    )
+
+
 def has_enterprise_plugins() -> bool:
     """Check if any enterprise plugin options have been registered."""
     return bool(_extra_options)

@@ -162,3 +162,137 @@ class TestApplicationContainer:
 
         assert container.config.plugins.forwarder() == "sofa"
         assert container.config.plugins.cache() == "real"
+
+
+class TestRenderProviderTree:
+    """Cover the new Singleton/Callable branches in _render_provider_tree."""
+
+    def test_singleton_resolved(self) -> None:
+        from dependency_injector import containers, providers
+
+        from gateway.community.bootstrap._container import _render_provider_tree
+
+        class MyPlugin:
+            pass
+
+        class C(containers.DeclarativeContainer):
+            p = providers.Singleton(MyPlugin)
+
+        lines = _render_provider_tree(C())
+        assert any("Singleton → MyPlugin" in line for line in lines)
+
+    def test_singleton_unresolved(self) -> None:
+        from dependency_injector import containers, providers
+
+        from gateway.community.bootstrap._container import _render_provider_tree
+
+        def _raiser() -> str:
+            raise RuntimeError("boom")
+
+        class C(containers.DeclarativeContainer):
+            p = providers.Singleton(_raiser)
+
+        lines = _render_provider_tree(C())
+        assert any("Singleton (unresolved)" in line for line in lines)
+
+    def test_callable_dict_resolved(self) -> None:
+        from dependency_injector import containers, providers
+
+        from gateway.community.bootstrap._container import _render_provider_tree
+
+        class A:
+            pass
+
+        class B:
+            pass
+
+        class C(containers.DeclarativeContainer):
+            p = providers.Callable(lambda: {"x": A(), "y": B()})
+
+        lines = _render_provider_tree(C())
+        assert any("Callable" in line and "x: A, y: B" in line for line in lines)
+
+    def test_callable_non_dict_resolved(self) -> None:
+        from dependency_injector import containers, providers
+
+        from gateway.community.bootstrap._container import _render_provider_tree
+
+        class MyPlugin:
+            pass
+
+        class C(containers.DeclarativeContainer):
+            p = providers.Callable(MyPlugin)
+
+        lines = _render_provider_tree(C())
+        assert any("Callable → MyPlugin" in line for line in lines)
+
+    def test_callable_unresolved(self) -> None:
+        from dependency_injector import containers, providers
+
+        from gateway.community.bootstrap._container import _render_provider_tree
+
+        def _raiser() -> str:
+            raise RuntimeError("boom")
+
+        class C(containers.DeclarativeContainer):
+            p = providers.Callable(_raiser)
+
+        lines = _render_provider_tree(C())
+        assert any("Callable (unresolved)" in line for line in lines)
+
+
+class TestInjectEnterprisePlugins:
+    """Cover _inject_enterprise_plugins and the new inject_extra_authn_strategies path."""
+
+    def test_inject_runs_authn_strategies(self) -> None:
+        """When enterprise plugins are registered, _inject_enterprise_plugins
+        calls inject_extra_authn_strategies which populates AuthnStrategyRegistry."""
+        import gateway.community.bootstrap.plugins._registry as reg_mod
+        import gateway.community.plugin_registry as registry_mod
+        from gateway.community.bootstrap import get_container, set_container
+        from gateway.community.plugin_registry import (
+            has_enterprise_plugins,
+            register_extra_authn_strategy,
+            register_plugin_option,
+        )
+
+        # Reset state
+        reg_mod._authn_registry = None
+        registry_mod._extra_options.clear()
+
+        # Register an enterprise authn strategy
+        result = object()
+        register_extra_authn_strategy("test_strategy", lambda: result)
+        # Also register a selector plugin to trigger has_enterprise_plugins
+        register_plugin_option("cache_plugin", "test", lambda: "test-cache")
+        assert has_enterprise_plugins()
+
+        # Create container — _inject_enterprise_plugins runs here
+        container = get_container()
+        set_container(container)
+
+        # AuthnStrategyRegistry should now have the test strategy
+        pool = reg_mod.get_authn_registry().resolve_all()
+        assert "test_strategy" in pool
+        assert pool["test_strategy"] is result
+
+        # Cleanup
+        reg_mod._authn_registry = None
+        registry_mod._extra_options.clear()
+
+    def test_no_enterprise_plugins_no_injection(self) -> None:
+        """When no enterprise plugins are registered, inject paths are skipped."""
+        import gateway.community.bootstrap.plugins._registry as reg_mod
+        import gateway.community.plugin_registry as registry_mod
+        from gateway.community.bootstrap import get_container
+
+        reg_mod._authn_registry = None
+        registry_mod._extra_options.clear()
+
+        get_container()
+
+        pool = reg_mod.get_authn_registry().resolve_all()
+        assert pool == {}
+
+        reg_mod._authn_registry = None
+        registry_mod._extra_options.clear()
