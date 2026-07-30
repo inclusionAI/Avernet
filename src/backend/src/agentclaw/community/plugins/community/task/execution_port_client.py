@@ -93,6 +93,23 @@ class ExecutionPortClient(ExecutionPort):
             accept_token=_new_token(),
         )
 
+    # --- probe (watchdog 6.5) ---------------------------------------------
+
+    def probe(self, task_id: str, node_id: str, bot_id: str) -> DispatchResult:
+        # TODO(R6): engine probe/status-report-request endpoint — ask the bot
+        # to actively report its status (the bot may be hung). Fire-and-forget;
+        # the bot posts NODE_ACCEPTED/NODE_FAILED on receipt.
+        self._post(
+            f"{self._engine}/api/tasks/probe",
+            {"task_id": task_id, "node_id": node_id, "bot_id": bot_id},
+        )
+        return DispatchResult(
+            node_id=node_id,
+            executor_id=bot_id,
+            run_mode=RunMode.SINGLE_BOT,
+            accept_token=_new_token(),
+        )
+
     def bbs(self, task_id: str, node_id: str, reason: str = "") -> DispatchResult:
         # Phase 5: bbs_executor 广场 wiring.
         logger.info("[ExecutionPortClient] bbs dispatch task=%s node=%s reason=%s", task_id, node_id, reason)

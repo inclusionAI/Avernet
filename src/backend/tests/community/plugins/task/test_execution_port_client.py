@@ -77,6 +77,22 @@ def test_bbs_returns_bbs_dispatch_result_no_http():
     assert fake.posts == []  # bbs is a Phase 5 stub, no http yet
 
 
+def test_probe_posts_to_engine_and_returns_ack():
+    """6.5: watchdog PROBE pings the engine's probe endpoint (ask the bot to
+    report status) and returns a SINGLE_BOT ack DispatchResult."""
+    fake = _FakeClient()
+    client = ExecutionPortClient("http://engine", "http://bcs", client=fake)  # type: ignore[arg-type]
+    r = client.probe("t1", "n1", "bot-a")
+    assert isinstance(r, DispatchResult)
+    assert r.executor_id == "bot-a"
+    assert r.run_mode is RunMode.SINGLE_BOT
+    assert r.accept_token.startswith("tok-")
+    assert len(fake.posts) == 1
+    url, body = fake.posts[0]
+    assert url == "http://engine/api/tasks/probe"
+    assert body == {"task_id": "t1", "node_id": "n1", "bot_id": "bot-a"}
+
+
 def test_http_error_raises():
     class _ErrClient(_FakeClient):
         def post(self, url, json):

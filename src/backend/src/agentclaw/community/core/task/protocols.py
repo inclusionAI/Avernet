@@ -180,6 +180,15 @@ class ExecutionPort(Protocol):
     def redispatch_node(self, task_id: str, node_id: str, bot_id: str) -> DispatchResult:
         ...
 
+    def probe(self, task_id: str, node_id: str, bot_id: str) -> DispatchResult:
+        """Ask the executor to report its current status (watchdog PROBE, 6.5).
+
+        Fire-and-forget ping — the bot may be hung (instruction-following or
+        LLM-service instability); on receipt it should post ``NODE_ACCEPTED`` /
+        ``NODE_FAILED`` (or a status event). Returns an ack ``DispatchResult``.
+        """
+        ...
+
     def bbs(self, task_id: str, node_id: str, reason: str = "") -> DispatchResult:
         ...
 

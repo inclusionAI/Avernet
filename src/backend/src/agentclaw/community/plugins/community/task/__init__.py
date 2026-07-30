@@ -135,6 +135,9 @@ class NoopExecutionPort(ExecutionPort):
     def redispatch_node(self, task_id: str, node_id: str, bot_id: str) -> DispatchResult:
         return DispatchResult(node_id=node_id, executor_id=bot_id, run_mode=RunMode.SINGLE_BOT)
 
+    def probe(self, task_id: str, node_id: str, bot_id: str) -> DispatchResult:
+        return DispatchResult(node_id=node_id, executor_id=bot_id, run_mode=RunMode.SINGLE_BOT)
+
     def bbs(self, task_id: str, node_id: str, reason: str = "") -> DispatchResult:
         return DispatchResult(node_id=node_id, executor_id="", run_mode=RunMode.BBS)
 
