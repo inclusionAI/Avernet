@@ -96,19 +96,23 @@ public is written until the extraction is green.
         suite 168 passed.
 - **Depends on:** Task 2
 
-## Task 4: [ ] Public MCP request/response schemas
+## Task 4: [x] Public MCP request/response schemas
 - **Goal:** Turn the stub models into the strict public contract.
 - **Files:** `src/agentclaw/community/adapters/http/openapi_v1/mcp/schemas.py`
 - **Done when:**
-  - [ ] A module-level `_STRICT = ConfigDict(extra="forbid")` is applied to every
-        model (mirroring `bots/schemas.py:16`), so an unknown field is a 422.
-  - [ ] `McpConfigWrite.sync_mode` is removed.
-  - [ ] `McpConfigWrite.endpoint_env` is `Literal["PROD", "PRE"] | None` and
+  - [x] A module-level `_STRICT = ConfigDict(extra="forbid")` is applied to the
+        **request** body `McpConfigWrite` (mirroring `bots/schemas.py:16`, which
+        guards request bodies — `BotCreate`/`BotUpdate` — and leaves
+        server-constructed response models plain). An unknown field is a 422.
+  - [x] `McpConfigWrite.sync_mode` is removed.
+  - [x] `McpConfigWrite.endpoint_env` is `Literal["PROD", "PRE"] | None` and
         `transport_protocol` is `Literal["SSE", "STREAMABLE_HTTP"] | None` — no
         `DEV`; `None` means "leave unchanged".
-  - [ ] `McpConfig.api_key` documented as always masked.
-  - [ ] The response models still carry the fields the adapters populate
-        (`McpServer`, `McpServerDetail`, `McpPermission`, `McpTenant`, `McpConfig`).
+  - [x] `McpConfig.api_key` documented as always masked; `McpTenant` documented
+        as a marketplace concept distinct from the Avernet isolation tenant.
+  - [x] Response models still carry the fields the adapters populate. Package
+        imports clean under pytest (113 openapi_v1 tests collect); strict
+        behavior (`sync_mode`/`DEV` → 422) verified and covered by Task 5.
 - **Depends on:** —
 
 ## Task 5: [ ] Wire the six public handlers
