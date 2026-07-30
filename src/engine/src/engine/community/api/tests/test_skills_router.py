@@ -264,6 +264,101 @@ def test_runtime_layout_probe_has_no_engine_capability_dependency(
     plugin.probe_pool_layout.assert_awaited_once()
 
 
+def test_runtime_layout_probe_rejects_unknown_engine_before_dispatch(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.probe_pool_layout = AsyncMock()
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "unknown-engine",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "INVALID",
+        "engine": "unknown-engine",
+        "layout_contract_version": "skills-pool-p3-v1",
+        "preparation_id": None,
+        "evidence": {
+            "reason": "layout_identity_invalid",
+            "error_type": "SkillLayoutResolutionError",
+        },
+    }
+    plugin.probe_pool_layout.assert_not_awaited()
+
+
+def test_runtime_layout_probe_rejects_unknown_contract_before_dispatch(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.probe_pool_layout = AsyncMock()
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "hermes",
+            "layout_contract_version": "skills-pool-p3-v999",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "INVALID",
+        "engine": "hermes",
+        "layout_contract_version": "skills-pool-p3-v999",
+        "preparation_id": None,
+        "evidence": {
+            "reason": "layout_identity_invalid",
+            "error_type": "UnsupportedLayoutContractError",
+        },
+    }
+    plugin.probe_pool_layout.assert_not_awaited()
+
+
+def test_runtime_layout_probe_rejects_plugin_engine_mismatch(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.probe_pool_layout = AsyncMock(
+        return_value=PoolLayoutProbeResult(
+            status=PoolLayoutProbeStatus.READY,
+            engine="hermes",
+            layout_contract_version="skills-pool-p3-v1",
+            preparation_id="prep-1",
+            evidence={"checks": {"marker_valid": True}},
+        )
+    )
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "openclaw",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "INVALID",
+        "engine": "openclaw",
+        "layout_contract_version": "skills-pool-p3-v1",
+        "preparation_id": None,
+        "evidence": {
+            "reason": "runtime_engine_mismatch",
+            "actual_engine": "hermes",
+        },
+    }
+    plugin.probe_pool_layout.assert_awaited_once()
+
+
 def test_pool_activation_and_mapping_routes_are_capability_independent(
     client, rich_manager
 ):
