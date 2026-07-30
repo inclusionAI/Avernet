@@ -62,6 +62,7 @@ internal_dependencies:
   - agentclaw.community.core.economy.governance.domain.ticket    # GovernanceTicket — typed in governance_service.py Protocol
   - agentclaw.community.core.economy.governance.services.admin_service  # TicketActionOutcome — typed in governance_service.py Protocol
   - agentclaw.community.core.economy.governance.services.service_protocols  # Admin/Whitelist/Lifecycle Protocol — 定义在 core,api re-export 供 router 注入
+  - agentclaw.community.core.engine_runtime.models    # EngineResult — typed in engine_runtime_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.quality.repositories    # QualityTaskRecord — typed in quality_service.py and task_processor_service.py
   - agentclaw.community.core.service_bot.repository.models  # BotPublishRecord — typed in engine_config_service.py
   - agentclaw.community.core.resources.models        # Resource / ResourceType — typed in resource_service.py (Protocol signatures mirror slim ResourceService verbatim; round-2 review #4)

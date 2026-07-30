@@ -27,6 +27,7 @@ from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
 from agentclaw.community.di.modules.config_module import ConfigModule
 from agentclaw.community.di.modules.cron_module import CronModule
+from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 from agentclaw.community.di.modules.desktop_bot_module import DesktopBotModule
 from agentclaw.community.di.modules.devices_module import DevicesModule
 from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
@@ -104,6 +105,7 @@ def build_injector(
         McpModule(),
         AICodingModule(),
         CronModule(),
+        EngineRuntimeModule(),
         ExpertChatModule(),
         GrtChatModule(),
         IdentityModule(),

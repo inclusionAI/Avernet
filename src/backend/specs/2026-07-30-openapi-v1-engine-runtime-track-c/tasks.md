@@ -93,7 +93,7 @@ All paths are relative to `src/backend/`. Source package is
   `DeviceAdapterTimeoutError` likewise propagates unwrapped — it is already the
   precise public answer (504), and wrapping would lose it.
 
-## Task 4: Expose the relay as a Service API Protocol and wire DI
+## Task 4: Expose the relay as a Service API Protocol and wire DI  `[x]`
 - **Goal:** Let routers Inject a Protocol, never the concrete relay.
 - **Files:**
   - `…/api/engine_runtime_service.py` (new)
@@ -101,19 +101,29 @@ All paths are relative to `src/backend/`. Source package is
   - `…/di/container.py`
   - `tests/community/architecture/test_service_api_conformance.py`
 - **Done when:**
-  - [ ] `EngineRuntimeRelayProtocol` is `@runtime_checkable` with **real**
+  - [x] `EngineRuntimeRelayProtocol` is `@runtime_checkable` with **real**
         signatures for `call`, `capabilities`, `connection`.
-  - [ ] `EngineRuntimeModule` binds concrete → singleton and aliases the
+  - [x] `EngineRuntimeModule` binds concrete → singleton and aliases the
         Protocol, following `…/di/modules/cron_module.py:32-44`.
-  - [ ] Module registered in `…/di/container.py` alongside `CronModule`
+  - [x] Module registered in `…/di/container.py` alongside `CronModule`
         (`container.py:106`).
-  - [ ] `(EngineRuntimeRelayProtocol, EngineRuntimeRelay)` added to `_PAIRS` in
+  - [x] `(EngineRuntimeRelayProtocol, EngineRuntimeRelay)` added to `_PAIRS` in
         the conformance test, which checks **full signature equality** — names,
         kinds, defaults and coroutine status — so the Protocol must match the
         concrete class exactly.
-  - [ ] `test_api_layer_is_protocols_only.py` and
+  - [x] `test_api_layer_is_protocols_only.py` and
         `test_http_adapter_layer_is_http_only.py` pass.
 - **Depends on:** Task 3
+- **Adjusted while implementing:** the Protocol declares `resolve_bot` + `call`,
+  not the planned `capabilities` + `connection`. Those two were going to be
+  relay methods, but `capabilities` is just `call()` against one path, and
+  `connection` composes device-service output rather than forwarding — it
+  belongs in its own service (Task 10), not on the forwarding relay. `resolve_bot`
+  is on the Protocol because handlers must branch on bot facts (`bot_type`,
+  `active_engine`) *before* deciding whether to forward at all.
+- **Also required:** typing the Protocol with `EngineResult` is a new
+  `api/ → core/` import, so `api/README.md`'s Context Boundary needed the
+  declaration or `test_module_boundaries` fails.
 
 ## Task 5: Define the public enums and shared schemas
 - **Goal:** One module of enums plus the shared payload models, documented so a
