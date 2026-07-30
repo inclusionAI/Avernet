@@ -300,14 +300,14 @@ async def test_content_streams_from_engine_without_baas_download_call():
 
 
 @pytest.mark.asyncio
-async def test_missing_engine_file_requeues_materialization_without_oss_fallback():
+async def test_missing_engine_file_requires_reupload_without_rematerialization():
     queue = _Queue()
     transport = _Transport(status_code=409)
     service, repo, http = _service(queue, transport=transport)
     intent = _intent(service)
     repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
 
-    with pytest.raises(ValueError, match="resource_materializing"):
+    with pytest.raises(ValueError, match="resource_missing"):
         await service.open_content(
             owner_id="owner-1",
             bot_id="bot-1",
@@ -317,6 +317,25 @@ async def test_missing_engine_file_requeues_materialization_without_oss_fallback
         )
 
     assert transport.closed is True
-    assert repo.value.status is SessionResourceStatus.DEVICE_SYNCING
-    assert len(queue.calls) == 1
+    assert repo.value.status is SessionResourceStatus.READY
+    assert not queue.calls
     assert len(http.calls) == 1
+
+
+def test_list_pending_excludes_ready_and_deleted_resources():
+    service, repo, _ = _service()
+    intent = _intent(service)
+
+    pending = service.list_pending(
+        owner_id="owner-1",
+        bot_id="bot-1",
+        session_key="session/raw value",
+    )
+
+    assert [record.resource_id for record in pending] == [intent.resource.resource_id]
+    repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
+    assert not service.list_pending(
+        owner_id="owner-1",
+        bot_id="bot-1",
+        session_key="session/raw value",
+    )

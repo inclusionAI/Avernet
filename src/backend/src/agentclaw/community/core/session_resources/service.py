@@ -183,6 +183,26 @@ class SessionResourceService:
             and (not ready_only or record.status is SessionResourceStatus.READY)
         ]
 
+    def list_pending(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        session_key: str,
+    ) -> list[SessionResourceRecord]:
+        """Return only resources still controlled by the upload state machine."""
+        records = self._repository.list_owned(
+            owner_id,
+            bot_id,
+            hash_identifier(session_key),
+        )
+        return [
+            record
+            for record in records
+            if record.status
+            not in {SessionResourceStatus.READY, SessionResourceStatus.DELETED}
+        ]
+
     async def open_content(
         self,
         *,
@@ -220,8 +240,12 @@ class SessionResourceService:
             return record, response
         await response.close()
         if response.status_code == 409:
-            self._queue_rematerialization(record)
-            raise ValueError("resource_materializing")
+            log.info(
+                "session_resource.content.legacy_missing resource_id=%s provider=%s",
+                record.resource_id,
+                context.provider,
+            )
+            raise ValueError("resource_missing")
         log.warning(
             "session_resource.content.stream.fail resource_id=%s status=%s provider=%s",
             record.resource_id,
@@ -334,17 +358,6 @@ class SessionResourceService:
             bot_uuid=record.bot_uuid,
             transfer_id=record.transfer_id,
         )
-
-    def _queue_rematerialization(self, record: SessionResourceRecord) -> None:
-        try:
-            self._schedule_materialization(record, allow_ready=True)
-        except ValueError as exc:
-            if str(exc) != "materialize_state_conflict":
-                raise
-            log.info(
-                "session_resource.content.rematerialize.inflight resource_id=%s",
-                record.resource_id,
-            )
 
     def _schedule_materialization(
         self,
