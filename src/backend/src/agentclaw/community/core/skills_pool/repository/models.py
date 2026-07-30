@@ -56,6 +56,7 @@ class BotSkillLayoutStateModel(Base):
     env = Column(String(20), nullable=False)
     entity_id = Column(String(512), nullable=False)
     bot_id = Column(String(128), nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     active_layout = Column(
         String(20),
         nullable=False,
@@ -96,6 +97,7 @@ class BotSkillLayoutStateModel(Base):
 
     __table_args__ = (
         UniqueConstraint(
+            "avernet_tenant",
             "env",
             "entity_id",
             "bot_id",
@@ -157,6 +159,9 @@ class BotSkillLayoutStateModel(Base):
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )
+
+
+register_avernet_tenant_guard(BotSkillLayoutStateModel)
 
 
 class SkillsPoolRolloutAuditModel(Base):

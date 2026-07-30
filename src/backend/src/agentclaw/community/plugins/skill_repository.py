@@ -52,6 +52,7 @@ from sqlalchemy import and_, func, or_
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
@@ -1367,6 +1368,7 @@ class SkillSetRepository:
             dialect = db.get_bind().dialect.name
             table = DefaultSkillsetMcpExclusion.__table__
             values = {
+                "avernet_tenant": get_current_avernet_tenant(),
                 "user_id": user_id,
                 "bot_id": bot_id,
                 "skill_set_id": skill_set_id,
@@ -1385,6 +1387,7 @@ class SkillSetRepository:
                 )
                 stmt = stmt.on_conflict_do_update(
                     index_elements=[
+                        "avernet_tenant",
                         "user_id",
                         "bot_id",
                         "skill_set_id",
@@ -1503,6 +1506,7 @@ class SkillSetRepository:
             dialect = db.get_bind().dialect.name
             table = DefaultSkillsetSkillExclusion.__table__
             values = {
+                "avernet_tenant": get_current_avernet_tenant(),
                 "user_id": user_id,
                 "bot_id": bot_id,
                 "skill_set_id": skill_set_id,
@@ -1521,6 +1525,7 @@ class SkillSetRepository:
                 )
                 stmt = stmt.on_conflict_do_update(
                     index_elements=[
+                        "avernet_tenant",
                         "user_id",
                         "bot_id",
                         "skill_set_id",
