@@ -20,6 +20,10 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 与 `2026-07-27-openapi-v1-bots-track-b/`（Track B bots，已随 PR #494 合并）。
 两者各自都带有 `spec.md`、`plan.md`、`tasks.md`。
 
+**Track C**（包装 Bot 的 *engine* 运行时）的逐端点裁定放在配套参考文档：
+**[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**
+（[English](engine-surface.md)）。本 README 仍是唯一的状态看板；清单在那个文件里。
+
 ---
 
 ## 全局视角（请先读这一节）
@@ -38,17 +42,26 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 （repositories）和服务（services）**。因此，一个会返回真实数据的公共端点，如果没有隔离，
 就会读到*内部*租户的数据。防止这一点，正是这项工作存在的原因。
 
-因此，工作被拆分为**两条主线（Track）**：
+因此，工作被拆分为**三条主线（Track）**：
 
 - **Track A —— 租户隔离基础设施。** 在接通任何公共端点之前，先让*两套 API 界面之下的*
   每一类数据都做到按租户隔离。**Track A 按设计不实现任何端点** —— 它是底层管道。
 - **Track B —— 公共 API 实现。** 把七个 `/openapi/v1` 类别处理器接到已有的服务上。
   **这才是真正落地端点/API 代码的地方。** 每个类别都依赖于其数据已先经过 Track A 的
   隔离。**七个里已完成一个：bots（PR #494）。**
+- **Track C —— Engine（运行时）面。** _2026-07-30 新增。_ 把 engine adapter 面向
+  客户端的 HTTP 包装到 `/openapi/v1/bots/{bot_id}/…` 之下，并用一个净化过的
+  socket 信息端点取代 `get_device_connection` 的移交。**17 个端点，尚未开始。**
 
 > ⚠️ **唯一需要避免的误解：** "隔离 Stage N 已完成"**并不**意味着任何 API 端点被实现了。
 > Track A 的每个阶段都只是底层管道（可复用机制 + 该类别的记录）。API 端点落在
 > Track B —— bots 已完成，其余六个仍是桩。
+>
+> ⚠️ **Track C 没有对应的 Track A 阶段，这是对的。** Track A 与 Track B 是成对的
+> （先隔离一个类别，再接通它的端点）；Track C 不是。它的数据在 Bot 的设备上，
+> 不在后端表里，因此没有任何对象需要加 `avernet_tenant`，**也没有 DDL**。隔离
+> 完全来自"触达设备之前先经 bots 守卫（Stage 1 ✅）解析 `bot_id`" —— 与
+> `identity` 没有自己的阶段是同一个道理。别去找一个并不存在的 Track A 阶段。
 
 ---
 
@@ -116,6 +129,38 @@ _按优先级分层排序。_
 | channels | totalfrank | 🅳 **已降级** | `openapi_v1/channels/router.py` *(桩)* | ⏸️ 已搁置 —— 范围保持不变，并非取消 | Track A 阶段 3（同样搁置） |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(桩)* | ⬜ TODO | Track A skills（共担） |
+
+### Track C —— Engine（运行时）面（6 组里已完成 0 组）
+_所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶段，没有 DDL。
+完整裁定与逐端点映射见
+**[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**。_
+
+| 组 | 端点数 | 负责人 | 优先级 | 路由 | 状态 |
+|---|---|---|---|---|---|
+| sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` *(未创建)* | ⬜ TODO |
+| engine（只读） | 3 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` *(未创建)* | ⬜ TODO |
+| connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` *(未创建)* | ⬜ TODO |
+| approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` *(未创建)* | ⬜ TODO |
+| models | 2 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/models/` *(未创建)* | ⬜ TODO |
+| nodes | 1 | ⬜ 未分配 | P3 | `openapi_v1/engine_runtime/nodes/` *(未创建)* | ⬜ TODO |
+
+> **范围规则（为什么只有这些）。** 只包装前端经 proxypass **直连**的 engine HTTP
+> （`src/frontend/src/requestConfig.ts:189-205`）。前端**经由后端**触达的 engine
+> 路由 —— `/api/cron`（已经是 `routines` 类别）、`/api/file`、`/api/skills`、
+> `/api/mcp`、`/api/resource-materializations`、`/api/bash`、`/api/bot/config`、
+> `/api/work-items` —— 已经有后端契约在其之上，不纳入。仅 aicoding 的路由不纳入。
+> **WebSocket 不包装**：新的 `…/connection` 端点返回 socket URL + headers，
+> 由调用方自己建连。
+>
+> `engine/switch` 与 `engine/restart` 刻意排除 —— 包装 `switch` 等于给 #494 在
+> `PUT /openapi/v1/bots/{bot_id}` 上的 `engine` 不可变裁定开后门，包装 `restart`
+> 会让同一个 bot 有两个重启动词。`session-favorites` 与 `/api/openclaw` HTTP
+> 三件套是**延后，不是取消**（两者以后再加都是增量）。理由见 `engine-surface.zh-CN.md`。
+>
+> **routines 是 Track C 的样板，而不是 Track B 的。** 后端 `/api/cron` →
+> `CronRelayService` → `DeviceAdapterTransport` → engine 一直就是生产上的形状，
+> 而 `openapi_v1/routines/router.py:29` 已经 import 了 `CronRelayServiceProtocol`。
+> 动手写 handler 前先读它。
 
 ### 横切事项（非按阶段划分）
 | 事项 | 状态 | 备注 |
@@ -471,6 +516,21 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 | GET | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | 读取单个身份文件 | `Envelope[IdentityFile]` |
 | PUT | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | 覆写单个身份文件（`content`） | `Envelope[IdentityFileRef]` |
 
+### ⬜ 未分配 · Track C —— engine 运行时（17 个端点）
+这不是一个 Track B 类别 —— 它们包装的是 Bot 设备上的 **engine adapter**，
+而不是某个后端服务。逐端点清单、每个端点对应的 engine 路由，以及那约 72 条
+*不*包装的 engine 路由的裁定，都在
+**[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**。摘要：
+
+| 组 | 端点数 | 公共路径 |
+|---|---|---|
+| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` |
+| engine | 3 | `…/engine/{status,capabilities,available}` |
+| models | 2 | `…/models`、`…/models/{model_id}` |
+| approvals | 3 | `…/approvals/mode`（GET/PUT）、`…/approvals/modes` |
+| nodes | 1 | `…/nodes` |
+| connection | 1 | `…/connection` —— WS URL + headers，取代 `get_device_connection` |
+
 ---
 
 ## 完成的定义（整个 `/openapi/v1` 工作）
@@ -488,6 +548,9 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 7. **跨租户的外部身份问题已定案（[#556](https://github.com/inclusionAI/Avernet/issues/556)）** —— Passport、授权关系与 BCN 都带上
    租户维度，从而可以在公共路径上重新打开 BCN 同步。—— _⬜（2026-07-29 新增；它是开启
    多租户的前置闸口）。_
+8. **Track C：** 六个 engine 运行时组（17 个端点）均已实现、按 owner 收敛且能力感知，
+   并且 `…/connection` 返回 socket URL，使任何外部调用方都看不到 proxypass target
+   或裸设备 token。—— _⬜ 6 个里完成 0 个（2026-07-30 新增）。_
 
 ---
 
@@ -604,3 +667,28 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
      子句同样生效。这是实测确认的，不是推断。
 - **2026-07-29** —— **渠道降级（并非取消）**，Track A 阶段 3 与 Track B 端点均已搁置，
   范围保持不变。
+- **2026-07-30** —— **新增 Track C —— 公共 API 现在也包装 engine。** 此前前端从
+  `get_device_connection` 拿到连接，再经 `/proxypass/{target}` 自己去调 Bot 的
+  engine adapter；那次移交会对外发布 proxypass 拓扑和裸设备 token，并且让
+  engine —— 一个从未被设计成公共契约的东西 —— 成为集成方直接编程的对象。Track C
+  改为把 engine 面向客户端的 HTTP 包装到 `/openapi/v1/bots/{bot_id}/…` 之下。
+  有五点值得知道：
+  1. **是 17 个端点，不是 89 个。** engine 在 25 个 router 中提供 89 条 HTTP 路由
+     + 6 个 WS。范围规则只包装前端*直连*的那些（sessions 7、engine 3、models 2、
+     approvals 3、nodes 1），外加一个新增的 `…/connection`。经由后端的 engine
+     路由仍归已经在其之上的后端契约。
+  2. **`/api/cron` 早就是这个形状了。** 后端 `/api/cron` → `CronRelayService` →
+     `DeviceAdapterTransport` → engine 一直在生产上跑，而 `routines` 的桩已经
+     import 了 `CronRelayServiceProtocol`。Track C 是把既有形状一般化，不是发明
+     一个新的。
+  3. **没有 Track A 阶段，没有 DDL** —— 这是第一条在构造上就成立（而非碰巧成立）
+     的主线。已在开头加了提示，免得有人去找一个不存在的阶段。
+  4. **WebSocket 不包装。** `…/connection` 交还可直接使用的 `wss://` URL 以及需要
+     携带的 headers，socket 由调用方自己持有。不做 `POST /chat`，也不转发 engine
+     的帧格式。
+  5. **两处排除是契约决策，不是偷懒。** 包装 `engine/switch` 会成为绕过 #494
+     `engine` 不可变裁定的后门；包装 `engine/restart` 会让同一个 bot 有两个重启动词。
+
+  完整清单、逐端点映射，以及每一条未包装 engine 路由的裁定：
+  **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**。看板变动：新增 Track C
+  小节（6 组完成 0 组），新增 DoD 第 8 条。**负责人仍未分配。**
