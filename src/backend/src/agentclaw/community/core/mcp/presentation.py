@@ -124,7 +124,11 @@ def primary_transport_protocol(mcp_data: dict[str, Any]) -> str | None:
     server top level (``config_compose``/``local_mcp_registry`` both read it from
     there), so a flat projection reading only the top level always yields
     ``None``. Prefer an endpoint on an allowed network type — the ones this
-    surface would actually use — then any endpoint that declares a protocol;
+    surface would actually use — then any endpoint that declares a protocol.
+
+    A local MCP represented by ``stdioConfigs`` / ``stdio_configs`` carries no
+    HTTP endpoint; ``LocalMCPRegistry._transport_in`` classifies those as
+    ``STDIO``, so mirror that here rather than dropping the transport. Finally
     fall back to a top-level value for records that do carry one, else ``None``.
     First-in-list order breaks ties deterministically.
     """
@@ -143,5 +147,7 @@ def primary_transport_protocol(mcp_data: dict[str, Any]) -> str | None:
         for pool in (allowed, with_protocol):
             if pool:
                 return pool[0]["transportProtocol"]
+    if mcp_data.get("stdioConfigs") or mcp_data.get("stdio_configs"):
+        return "STDIO"
     top = mcp_data.get("transportProtocol")
     return top if isinstance(top, str) else None

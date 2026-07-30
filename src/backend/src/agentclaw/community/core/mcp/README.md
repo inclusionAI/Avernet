@@ -11,6 +11,28 @@ provides:
   - "MCPAuthService"
   - "MCPSyncService"
   - "MCPMarketService"
+  # Request-agnostic config flow extracted for both API surfaces (internal
+  # /api/mcp and public /openapi/v1/bots/mcp).
+  - "UnifiedConfig"
+  - "read_unified_config"
+  - "write_unified_config"
+  - "list_marketplace_servers"
+  - "list_marketplace_tenants"
+  # Presentation helpers shared by both surfaces.
+  - "mask_api_key"
+  - "strip_ext_info"
+  - "strip_ext_info_from_list"
+  - "is_network_type_visible"
+  - "normalize_network_types"
+  - "primary_transport_protocol"
+  - "ALLOWED_NETWORK_TYPES"
+  # Dependency-free domain errors each surface maps.
+  - "McpError"
+  - "McpServerNotFoundError"
+  - "McpHeadersInvalidError"
+  - "McpConfigValueError"
+  - "McpSyncFailedError"
+  - "McpMarketUnavailableError"
 consumes:
   - "BotRepository"
   - "DeviceMCPSyncPlugin"

@@ -171,6 +171,18 @@ class TestPrimaryTransportProtocol:
     def test_falls_back_to_top_level_when_no_endpoints(self):
         assert primary_transport_protocol({"transportProtocol": "SSE"}) == "SSE"
 
+    def test_stdio_config_reports_stdio(self):
+        # LocalMCPRegistry._transport_in classifies stdioConfigs entries as STDIO.
+        assert primary_transport_protocol({"stdioConfigs": [{"command": "x"}]}) == "STDIO"
+        assert primary_transport_protocol({"stdio_configs": [{"command": "x"}]}) == "STDIO"
+
+    def test_http_endpoint_wins_over_stdio(self):
+        data = {
+            "endpoints": [{"networkType": "INTERNET", "transportProtocol": "SSE"}],
+            "stdioConfigs": [{"command": "x"}],
+        }
+        assert primary_transport_protocol(data) == "SSE"
+
     def test_none_when_absent_everywhere(self):
         assert primary_transport_protocol({}) is None
         assert primary_transport_protocol({"endpoints": [{"url": "https://x"}]}) is None
