@@ -96,6 +96,31 @@ def test_create_session_fills_user_id_from_the_principal(client, relay):
     assert relay.calls[0]["body"]["user_id"] == OWNER
 
 
+def test_create_rejects_an_agent_one_engine_would_silently_drop(client, relay):
+    """``agent_id`` was offered on create and withdrawn, for the reason ``cwd``
+    was withdrawn from PATCH.
+
+    ``claude_code`` encodes the agent into the session key, so later reads
+    recover it; ``openclaw`` builds ``session:{uuid}:user:{user_id}`` without it
+    and then synthesises a 201 echoing the value it dropped. The same request
+    would attach or not depending on the bot's engine, and the response would
+    claim it attached either way — a 422 beats a 201 that misreports.
+    """
+    resp = client.post(_base(), json={"title": "T", "agent_id": "main"})
+    assert resp.status_code == 422, resp.json()
+    assert relay.calls == []
+
+
+def test_create_does_not_forward_an_agent_field(client, relay):
+    """The field is gone from the model, so nothing may reach the engine under
+    that key — an empty value forwarded anyway would still read as 'no agent'
+    on an engine that treats absence and blank differently."""
+    relay.results = [EngineResult(data=ENGINE_SESSION)]
+    resp = client.post(_base(), json={"title": "T"})
+    assert resp.status_code == 201, resp.json()
+    assert "agent_id" not in relay.calls[0]["body"]
+
+
 def test_get_session_uses_the_id_verbatim(client, relay):
     """Colons are legal in a path segment; no encoding scheme is applied."""
     relay.results = [EngineResult(data=ENGINE_SESSION)]

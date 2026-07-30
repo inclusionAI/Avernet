@@ -358,7 +358,6 @@ async def create_session(
         bot_id=bot_id, owner_id=owner_id, method="POST", path="/api/sessions",
         body={
             "title": body.title,
-            "agent_id": body.agent_id,
             "model": body.model,
             # Filled from the principal, never accepted from the caller.
             "user_id": owner_id,

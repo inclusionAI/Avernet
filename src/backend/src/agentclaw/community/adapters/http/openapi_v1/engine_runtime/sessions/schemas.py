@@ -115,10 +115,18 @@ class SessionCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Only fields every engine on this surface actually persists — the same
+    # ruling `cwd` got on SessionUpdate, for the same reason. An agent was
+    # offered here and withdrawn: `claude_code` encodes it into the session key
+    # (`agent:{agent_id}:session:…`) so later reads recover it, while `openclaw`
+    # builds `session:{uuid}:user:{user_id}` and never sends the agent at all,
+    # then synthesises a 201 echoing the value it dropped. The association would
+    # exist or not depending on the bot's engine, and the response would claim
+    # it either way. `extra="forbid"` makes a caller still sending `agent_id` a
+    # 422 rather than a false 201. Reading and filtering by agent are
+    # unaffected: `Session.agent_id` is still published, and `GET …/sessions`
+    # still takes an `agent_id` filter, which the engine applies upstream.
     title: str | None = Field(default=None, description="Optional session title.")
-    agent_id: str | None = Field(
-        default=None, description="Optional agent to attach the session to."
-    )
     model: str | None = Field(
         default=None, description="Optional model for the session."
     )
