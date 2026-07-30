@@ -115,36 +115,40 @@ public is written until the extraction is green.
         behavior (`sync_mode`/`DEV` → 422) verified and covered by Task 5.
 - **Depends on:** —
 
-## Task 5: [~] Wire the six public handlers
+## Task 5: [x] Wire the six public handlers
 - **Goal:** Replace the `NotImplementedError` stubs with real handlers on the
   shared flow, owner-scoped via the principal.
 - **Files:** `src/agentclaw/community/adapters/http/openapi_v1/mcp/router.py`
 - **Done when:**
-  - [ ] Every handler takes `request: Request`, `PrincipalDep`, its services via
+  - [x] Every handler takes `request: Request`, `PrincipalDep`, its services via
         `Injected`, carries `@envelope_errors`, and opens with
         `owner_id = caller_owner_id(principal)`.
-  - [ ] `list_mcp_servers` → `get_mcp_list(..., search_key=keyword,
-        network_types=ALLOWED_NETWORK_TYPES)`, `strip_ext_info_from_list`,
-        `page(total, items, request)`.
-  - [ ] `get_mcp_server` → `get_mcp_detail`; `None` **or** network-type-invisible
+  - [x] `list_mcp_servers` → `list_marketplace_servers(..., keyword,
+        network_types=ALLOWED_NETWORK_TYPES)` (upstream failure → 502),
+        `page(total, items, request)`. **No per-item `extInfo` strip:** the list
+        projects to `McpServer`, which carries no `tools`, so there is nothing to
+        strip — kept the list lightweight and dropped the dead call.
+  - [x] `get_mcp_server` → `get_mcp_detail`; `None` **or** network-type-invisible
         raise `McpServerNotFoundError` from **one** site, so the two 404 paths are
-        indistinguishable.
-  - [ ] `list_mcp_tenants` → `get_tenant_list`, mapped to `McpTenant` via an
-        adapter; an upstream `success: False` raises `McpMarketUnavailableError`.
-  - [ ] `check_mcp_permission` → `check_mcp_permission_detail(owner_id,
-        server_code)`; **no** `user_id` query parameter is exposed.
-  - [ ] `get_mcp_config` / `update_mcp_config` delegate to `config_flow` with
-        `entity_id = owner_id`, `entity_type = "staff"`; no `IAM_TOKEN` cookie
-        handling.
-  - [ ] Module-private `_to_server` / `_to_server_detail` / `_to_tenant` adapters
-        map MCP Center camelCase → the snake_case public models.
-  - [ ] Endpoint tests (`tests/community/adapters/http/openapi_v1/
-        test_mcp_endpoints.py`, new) cover, per handler: success shape +
-        envelope `code`/`request_id`; masking for long and short keys; a
-        never-configured server → `has_config: false` (not 404); invisible vs
-        unknown server → byte-identical 404; `extInfo` stripped; permission from
-        the principal only; `sync_mode`/unknown field → 422; missing principal →
-        401.
+        indistinguishable (test asserts byte-identical bodies).
+  - [x] `list_mcp_tenants` → `list_marketplace_tenants`, mapped to `McpTenant`;
+        an upstream `success: False` raises `McpMarketUnavailableError` (→ 502).
+  - [x] `check_mcp_permission` → `check_mcp_permission_detail(owner_id,
+        server_code)`; **no** `user_id` query parameter (test proves a spoofed
+        `?user_id=` is ignored — the principal's owner is used).
+  - [x] `get_mcp_config` → `read_unified_config`; `update_mcp_config` →
+        `write_unified_config` then re-read for a response equal to a subsequent
+        GET; `entity_id = owner_id`, `entity_type = "staff"`; no `IAM_TOKEN`
+        cookie handling.
+  - [x] Module-private `_to_server` / `_to_server_detail` / `_to_tenant` /
+        `_to_config` adapters map MCP Center camelCase → the snake_case models.
+  - [x] Endpoint tests (`test_mcp_endpoints.py`, new) cover every handler:
+        success shape + envelope `code`/`request_id`; masking long+short keys +
+        raw key never in response text; never-configured → `has_config: false`
+        (not 404); invisible vs unknown → byte-identical 404; `extInfo` stripped
+        on detail; permission from principal only; sync-failure → 502 + rollback;
+        `sync_mode`/`DEV` → 422; missing principal → 401. **21 passed; full
+        openapi_v1 suite 136 passed.**
 - **Depends on:** Tasks 2, 4
 
 ## Task 6: [x] Map the MCP domain errors to envelopes
