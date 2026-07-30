@@ -75,6 +75,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.tracer
   - agentclaw.community.plugins.prod.baas_service    # LocalBaasService inherits ProdBaasService to reuse httpx logic, override URL only
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.avernet_tenant_guard  # Shared tenant isolation for local SQLite ORM models
 ```
 
 ### Change impact
