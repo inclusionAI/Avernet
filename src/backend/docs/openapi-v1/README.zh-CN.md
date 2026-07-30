@@ -44,7 +44,7 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
   每一类数据都做到按租户隔离。**Track A 按设计不实现任何端点** —— 它是底层管道。
 - **Track B —— 公共 API 实现。** 把七个 `/openapi/v1` 类别处理器接到已有的服务上。
   **这才是真正落地端点/API 代码的地方。** 每个类别都依赖于其数据已先经过 Track A 的
-  隔离。**七个里已完成一个：bots（PR #494）。**
+  隔离。**七个里已完成两个：bots（PR #494）、mcp（PR #610）。**
 
 > ⚠️ **唯一需要避免的误解：** "隔离 Stage N 已完成"**并不**意味着任何 API 端点被实现了。
 > Track A 的每个阶段都只是底层管道（可复用机制 + 该类别的记录）。API 端点落在
@@ -105,12 +105,12 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 > Stage 1 同时构建了后续每个阶段都会复制的**可复用机制**（见下文）。它是地基，
 > 不只是"机器人"。
 
-### Track B —— 公共 API 实现（端点真正落地之处 —— 七个里已完成一个）
+### Track B —— 公共 API 实现（端点真正落地之处 —— 七个里已完成两个）
 _按优先级分层排序。_
 | 类别 | 负责人 | 优先级 | 路由 | 状态 | 依赖 |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE —— PR #494 已于 2026-07-29 合并**（13/13 端点） | ~~Track A 阶段 1~~ ✅ |
-| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(桩)* | ⬜ TODO —— **已解除阻塞** | ~~Track A 阶段 5~~ ✅（PR #564） |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE —— PR #610**（6/6 端点） | ~~Track A 阶段 5~~ ✅（PR #564） |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 9 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 9 端点接通 stub→service；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | channels | totalfrank | 🅳 **已降级** | `openapi_v1/channels/router.py` *(桩)* | ⏸️ 已搁置 —— 范围保持不变，并非取消 | Track A 阶段 3（同样搁置） |
@@ -323,8 +323,11 @@ ALTER TABLE ac_user_mcp_config
    错误），以及**针对真实 Track A 守卫的跨租户隔离测试**（别的租户的 `{id}` 必须是被掩盖
    的 404）。内部测试套件保持不修改且全绿。
 8. 每个类别有自己的 SDD（`spec.md`/`plan.md`/`tasks.md`）和自己的 PR。可以把
-   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` 和
-   `openapi_v1/bots/router.py` 当作已经做过一遍的参考样板。
+   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` +
+   `openapi_v1/bots/router.py` 当作已经做过一遍的参考样板；第二个样板是
+   `src/backend/specs/2026-07-30-openapi-v1-mcp-track-b/` + `openapi_v1/mcp/router.py`
+   —— 它示范了当一个类别需要**从仍在运行的内部路由里抽取共享逻辑**（配方第 6 步）到
+   `core/mcp/` 时的做法，并通过让内部测试套件保持不修改来证明抽取是行为保持的。
 
 > **架构门禁：** `tests/community/architecture/` 现在还会跑
 > `test_service_api_conformance.py` —— 这就是 `api/README.md` 在两处承诺过、但一直没有
@@ -341,12 +344,14 @@ ALTER TABLE ac_user_mcp_config
 **PR #363**（`docs/api-endpoints.zh-CN.md`，totalfrank 写的中文端点参考 —— 截至
 2026-07-29 仍是 open/draft；此处作为参考保留）中的 v1 契约总览做了交叉核对。
 
-> ⚠️ **路径分歧 —— 对其余六个桩组仍未对齐。** 路由把所有非 `bots` 的组都嵌套在
-> `/openapi/v1/bots/...` 之下（如 `/openapi/v1/bots/resources`、`/openapi/v1/bots/mcp`）。
-> 而 PR #363 的总览用的是**顶层**路径（`/openapi/v1/resources`、`/openapi/v1/mcp` 等）。
-> 实现以**路由为准** —— 下面的路径与路由一致。负责人：如果顶层形态才是想要的对外形状，
-> 请修改路由的 `prefix`，并在同一个 PR 里更新本节。_（bots 不受影响：两种读法下它都是
-> `/openapi/v1/bots`，#494 也正是按这个形状上线的。）_
+> ⚠️ **路径分歧 —— `mcp` 已定案（PR #610），其余桩组仍未对齐。** 路由把所有非 `bots`
+> 的组都嵌套在 `/openapi/v1/bots/...` 之下（如 `/openapi/v1/bots/resources`、
+> `/openapi/v1/bots/mcp`）。而 PR #363 的总览用的是**顶层**路径
+> （`/openapi/v1/resources`、`/openapi/v1/mcp` 等）。**裁定（mcp 负责人，PR #610）：
+> 保持嵌套的路由形态** —— 以路由为准，界面尚在认证前（pre-auth），重排前缀带来的改动没有收益。
+> 其余五个组沿用这一先例，除非各自负责人另有决定；如果确实想要顶层形态，请修改路由的
+> `prefix` 并在同一个 PR 里更新本节。_（bots 不受影响：两种读法下它都是 `/openapi/v1/bots`，
+> #494 也正是按这个形状上线的。）_
 >
 > **挂载顺序是有承重作用的。** `build_public_router()` 会先挂那六个字面量子组，再挂
 > bots 组，这样 `/openapi/v1/bots/channels` 才能排在通配的
@@ -401,8 +406,10 @@ _内部 `/api/bots` 也有变化，全部是有意为之，并由 #494 覆盖：
 _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #363 里写的是
 `Page[Channel]`。接线时请确认用哪种。_
 
-### 🟦 totalfrank · P1 —— mcp（6 个端点）· `openapi_v1/mcp/router.py`
-市场 + 租户 + 调用者的统一 per-server 配置。
+### ✅ totalfrank · P1 —— mcp（6 个端点）· `openapi_v1/mcp/router.py` —— **已实现（PR #610）**
+市场 + 租户 + 调用者的统一 per-server 配置。6 个端点全部接到内部 MCP 服务，经由从内部
+路由抽取出来的共享 `core/mcp/` 流程（抽取后两套界面回答一致）；用 `caller_owner_id`
+做 owner 作用域，由 Stage 5 守卫做租户作用域。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/mcp/servers` | 列出市场 MCP 服务器（`keyword`、分页） | `Envelope[Page[McpServer]]` |
@@ -411,6 +418,13 @@ _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | 查询调用者对该服务器的权限 | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 读取调用者的统一服务器配置 | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 写入配置（下发到设备） | `Envelope[McpConfig]` |
+
+_已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/...`）；写入体去掉了
+`sync_mode`（不存在单设备下发路径 —— `extra="forbid"` 让它变成 422）；下发设备失败会回滚
+写入并返回 502（与内部界面一致）；`endpoint_env`/`transport_protocol` 为严格枚举
+（`PROD`/`PRE`、`SSE`/`STREAMABLE_HTTP`）。**保留 fail-open：** 市场调用异常时仍报告
+调用者"有权限"（该端点仅供参考，真正的强制点是 MCP 服务器本身）—— 已用测试钉住，使其读起来
+是一个决策而非 bug。_
 
 ### 🟩 lucas-xzp · P1 —— resources（9 个端点）· `openapi_v1/resources/router.py`
 文件/链接/文件夹的统一抽象；存储位置从不暴露。
@@ -476,11 +490,11 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 ## 完成的定义（整个 `/openapi/v1` 工作）
 
 1. **Track A：** 每一类数据（bots、resources、channels、skills、mcp、routines）都带有
-   `avernet_tenant` 并被守卫，Stage-1 的测试形态全绿。—— _6 个里完成 1 个（bots ✅）。_
+   `avernet_tenant` 并被守卫，Stage-1 的测试形态全绿。—— _6 个里完成 2 个（bots ✅、mcp ✅ PR #564）。_
 2. 全程内部 API 保持不变（`to_dict()` 无泄漏；内部套件不作修改）。—— _仍然成立：#494
    时整个 `tests/community` 全绿（9171 通过，3 跳过）。_
 3. **Track B：** 七个 `/openapi/v1` 类别的处理器均已实现且租户安全，各自带测试 + PR。
-   —— _7 个里完成 1 个（bots ✅）。_
+   —— _7 个里完成 2 个（bots ✅、mcp ✅）。_
 4. F2 租户前导索引就位（强制策略）。—— _⬜_
 5. 后台/定时任务已针对按租户正确性完成复查。—— _⬜_
 6. `require_principal` / `resolve_avernet_tenant` 已接到真实验证器（认证工作线）——
@@ -604,3 +618,15 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
      子句同样生效。这是实测确认的，不是推断。
 - **2026-07-29** —— **渠道降级（并非取消）**，Track A 阶段 3 与 Track B 端点均已搁置，
   范围保持不变。
+- **2026-07-30** —— **Track B mcp 合并（PR #610）—— 第二个落地的公共类别（7 个里 2 个）。**
+  6 个 `/openapi/v1/bots/mcp` 端点全部接到内部 MCP 服务，经由一套从内部 `/api/mcp` 路由
+  **抽取出来的共享 `core/mcp/` 流程**（`presentation.py` 里的掩码 / `extInfo` 剥除 /
+  网络类型白名单；`config_flow.py` 里的 写入→下发→回滚 与 读取；`errors.py` 里的类型化
+  领域错误），使两套界面回答一致。内部路由现在调用这套流程 —— 由
+  `test_mcp_config_internal_unchanged.py` + `test_mcp.py` **保持不修改**通过来证明行为保持。
+  公共处理器用 `caller_owner_id` 做 owner 作用域，由 Stage 5 守卫做租户作用域（跨租户配置
+  不可见且不可覆写，已通过流程针对真实守卫验证）。决策：路径保持嵌套（**为 mcp 定案了路径
+  分歧**）、去掉 `sync_mode`（`extra="forbid"` → 422）、下发失败回滚 → 502、严格枚举
+  `endpoint_env`/`transport_protocol`（无 `DEV`）。**保留 fail-open** 的权限行为（市场异常时；
+  仅供参考的端点），已用测试钉住。看板已挪动：Track B mcp → 完成；"参考样板"清单现在把这里
+  列为第二个样板，专门示范*抽取共享逻辑*的模式。

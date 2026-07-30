@@ -53,7 +53,7 @@ The work therefore splits into **two tracks**:
 - **Track B — Public API implementation.** Wire the seven `/openapi/v1`
   category handlers to the existing services. **This is where the endpoint/API
   code actually lands.** Each category depends on its data being isolated
-  (Track A) first. **1 of 7 done: bots (PR #494).**
+  (Track A) first. **2 of 7 done: bots (PR #494), mcp (PR #610).**
 
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
@@ -120,12 +120,12 @@ must implement._
 > Stage 1 also builds the **reusable mechanism** (see below) that every later
 > stage copies. It's the foundation, not just "bots."
 
-### Track B — Public API implementation (where the endpoints land — 1 of 7 done)
+### Track B — Public API implementation (where the endpoints land — 2 of 7 done)
 _Ordered by priority tier._
 | Category | Owner | Pri | Router | State | Depends on |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
-| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(stub)* | ⬜ TODO — **unblocked** | ~~Track A stage 5~~ ✅ (PR #564) |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 9 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 9 endpoints wired stub→service; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
 | channels | totalfrank | 🅳 **DEPRIORITIZED** | `openapi_v1/channels/router.py` *(stub)* | ⏸️ PARKED — scope intact, not cancelled | Track A stage 3 (also parked) |
@@ -364,8 +364,12 @@ rebuild it. Everything below is category-agnostic and lives in
    guard** (a foreign `{id}` must be a masked 404). Keep the internal suite
    unmodified and green.
 8. Own SDD (`spec.md`/`plan.md`/`tasks.md`) and own PR per category. Use
-   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` and
-   `openapi_v1/bots/router.py` as the worked reference.
+   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` +
+   `openapi_v1/bots/router.py` as the worked reference, and
+   `src/backend/specs/2026-07-30-openapi-v1-mcp-track-b/` +
+   `openapi_v1/mcp/router.py` for the second — the pattern for a category that
+   **extracts shared logic** out of a live internal router (recipe step 6) into
+   `core/mcp/` and proves the extraction by leaving the internal suite unmodified.
 
 > **Architecture gate:** `tests/community/architecture/` now also runs
 > `test_service_api_conformance.py` — the Service API gate that `api/README.md`
@@ -385,14 +389,17 @@ contract overview in **PR #363** (`docs/api-endpoints.zh-CN.md`, a Chinese
 endpoint reference by totalfrank — still open/draft as of 2026-07-29; kept here
 as reference).
 
-> ⚠️ **Path divergence — still open for the six stub groups.** The routers nest
-> every non-`bots` group under `/openapi/v1/bots/...` (e.g.
-> `/openapi/v1/bots/resources`, `/openapi/v1/bots/mcp`). PR #363's overview used
-> **top-level** paths (`/openapi/v1/resources`, `/openapi/v1/mcp`, …). The
-> **router is authoritative** for implementation — the paths below match it.
-> Owners: if the top-level shape is the intended public surface, change the
-> router `prefix` and update this section in the same PR. _(bots is unaffected:
-> it is `/openapi/v1/bots` under either reading, and shipped that way in #494.)_
+> ⚠️ **Path divergence — RESOLVED for `mcp` (PR #610), open for the remaining
+> stub groups.** The routers nest every non-`bots` group under
+> `/openapi/v1/bots/...` (e.g. `/openapi/v1/bots/resources`,
+> `/openapi/v1/bots/mcp`). PR #363's overview used **top-level** paths
+> (`/openapi/v1/resources`, `/openapi/v1/mcp`, …). **Ruling (mcp owner, PR #610):
+> the nested router shape stays** — the router is authoritative and the churn of
+> a re-prefix buys nothing while the surface is pre-auth. The remaining five
+> groups inherit this precedent unless their owner decides otherwise; if you do
+> want the top-level shape, change the router `prefix` and update this section in
+> the same PR. _(bots is unaffected: it is `/openapi/v1/bots` under either
+> reading, and shipped that way in #494.)_
 >
 > **Mount order is load-bearing.** `build_public_router()` includes the six
 > literal sub-groups **before** the bots group, so `/openapi/v1/bots/channels`
@@ -448,8 +455,11 @@ DingTalk (`dingding`) config CRUD + status toggle.
 _Note: the stub returns `Envelope[list[Channel]]` for list (not `Page`); PR #363
 showed `Page[Channel]`. Confirm which you want when you wire it._
 
-### 🟦 totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py`
-Marketplace + tenants + the caller's unified per-server config.
+### ✅ totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED (PR #610)**
+Marketplace + tenants + the caller's unified per-server config. All 6 wired to
+the internal MCP services through the shared `core/mcp/` flow (extracted from the
+internal router so both surfaces answer identically); owner-scoped via
+`caller_owner_id`, tenant-scoped by the Stage 5 guard.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/mcp/servers` | List marketplace servers (`keyword`, paged) | `Envelope[Page[McpServer]]` |
@@ -458,6 +468,14 @@ Marketplace + tenants + the caller's unified per-server config.
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | Caller's permission for a server | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Read caller's unified server config | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Write config (pushed to devices) | `Envelope[McpConfig]` |
+
+_Delivered decisions (PR #610): paths stay nested (`/openapi/v1/bots/mcp/...`);
+`sync_mode` dropped from the write body (no single-device push path — `extra=
+"forbid"` makes it a 422); a failed device push rolls the write back and answers
+502 (mirrors the internal surface); `endpoint_env`/`transport_protocol` are
+strict enums (`PROD`/`PRE`, `SSE`/`STREAMABLE_HTTP`). **Preserved fail-open:** a
+marketplace outage still reports the caller as permitted (advisory endpoint; the
+MCP server enforces) — pinned by a test so it reads as a decision, not a bug._
 
 ### 🟩 lucas-xzp · P1 — resources (9 endpoints) · `openapi_v1/resources/router.py`
 Unified file/link/folder abstraction; storage location never exposed.
@@ -530,12 +548,12 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 
 1. **Track A:** every data category (bots, resources, channels, skills, mcp,
    routines) carries `avernet_tenant` and is guarded, Stage-1 test shape green.
-   — _1 of 6 (bots ✅)._
+   — _2 of 6 (bots ✅, mcp ✅ PR #564)._
 2. Internal API unchanged throughout (no `to_dict()` leaks; internal suites
    unmodified). — _holding: full `tests/community` green at #494 (9171 passed,
    3 skipped)._
 3. **Track B:** the seven `/openapi/v1` categories' handlers implemented and
-   tenant-safe, each with its own tests + PR. — _1 of 7 (bots ✅)._
+   tenant-safe, each with its own tests + PR. — _2 of 7 (bots ✅, mcp ✅)._
 4. F2 tenant-leading indexes in place (mandatory policy). — _⬜_
 5. Background/scheduled work revisited for per-tenant correctness. — _⬜_
 6. `require_principal` / `resolve_avernet_tenant` wired to the real verifier
@@ -689,3 +707,20 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
      `with_loader_criteria` applies to join clauses. Verified, not assumed.
 - **2026-07-29** — **Channels deprioritized (not cancelled)**, Track A stage 3
   and Track B endpoints both parked with scope intact.
+- **2026-07-30** — **Track B mcp merged (PR #610) — second public category
+  implemented (2 of 7).** All 6 `/openapi/v1/bots/mcp` endpoints wired to the
+  internal MCP services through a **shared `core/mcp/` flow** extracted from the
+  internal `/api/mcp` router (masking / `extInfo` stripping / network-type
+  allowlist in `presentation.py`; the write→push→rollback + read in
+  `config_flow.py`; typed domain errors in `errors.py`), so both surfaces answer
+  identically. The internal router now calls that flow — proven behavior-
+  preserving by `test_mcp_config_internal_unchanged.py` + `test_mcp.py` passing
+  **unmodified**. Public handlers owner-scoped via `caller_owner_id`,
+  tenant-scoped by the Stage 5 guard (cross-tenant config invisible + un-
+  overwritable, proven against the real guard through the flow). Decisions:
+  nested paths (**resolves the path divergence for mcp**), `sync_mode` dropped
+  (`extra="forbid"` → 422), push-failure rolls back → 502, strict
+  `endpoint_env`/`transport_protocol` enums (no `DEV`). **Preserved fail-open**
+  permission on a marketplace outage (advisory endpoint), pinned by a test. Board
+  moved: Track B mcp → done; the "worked reference" list now points here as the
+  second example, specifically for the *extract-shared-logic* pattern.

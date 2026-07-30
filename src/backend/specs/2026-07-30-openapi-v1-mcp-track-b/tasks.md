@@ -193,18 +193,22 @@ public is written until the extraction is green.
         made possible — would `IntegrityError` on the old key). **4 passed.**
 - **Depends on:** Task 5
 
-## Task 8: [ ] Move the handoff board + changelog
+## Task 8: [x] Move the handoff board + changelog
 - **Goal:** Reflect that mcp Track B has landed, in the same PR that lands it.
 - **Files:** `src/backend/docs/openapi-v1/README.md`,
   `src/backend/docs/openapi-v1/README.zh-CN.md`
 - **Done when:**
-  - [ ] The Track B board flips `mcp` to `✅ DONE — PR #610` (both editions).
-  - [ ] The `/openapi/v1/bots/mcp/...` vs top-level path note is resolved to the
-        nested shape (decision 1) rather than left "still open".
-  - [ ] A dated changelog line records the category, the shared-flow extraction,
-        the three decisions, and the preserved fail-open permission behavior.
-  - [ ] The reference-slice list ("use bots as the worked reference") gains mcp
-        as the second done category.
+  - [x] The Track B board flips `mcp` to `✅ DONE — PR #610` (both editions);
+        Track B counters → 2 of 7, and the (pre-existing-stale) Track A DoD
+        counter corrected to 2 of 6 (Stage 5 mcp merged in #564).
+  - [x] The `/openapi/v1/bots/mcp/...` vs top-level path note is resolved to the
+        nested shape for mcp (decision 1), remaining groups noted as inheriting
+        the precedent.
+  - [x] A dated changelog line (both editions) records the category, the
+        shared-flow extraction, the three decisions, and the preserved fail-open
+        permission behavior.
+  - [x] The reference-slice recipe (step 8) gains mcp as the second worked
+        reference, specifically for the extract-shared-logic pattern.
 - **Depends on:** Task 5
 
 ## Task 9: [ ] Tests & Verification
