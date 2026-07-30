@@ -200,33 +200,37 @@ All paths are relative to `src/backend/`. Source package is
   `BotNotFoundError`'s, asserted by test — otherwise a caller could distinguish
   "this session is gone" from "this bot is not yours".
 
-## Task 7: Sessions group — 7 endpoints
+## Task 7: Sessions group — 7 endpoints  `[x]`
 - **Goal:** Wrap the engine's session surface.
 - **Files:**
   - `…/adapters/http/openapi_v1/engine_runtime/sessions/{__init__,router,schemas}.py` (new)
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_sessions.py` (new)
 - **Done when:**
-  - [ ] All 7 routes served under
+  - [x] All 7 routes served under
         `/openapi/v1/bots/{bot_id}/sessions…`, with `PATCH` on the resource
         mapping to the engine's `POST …/{id}/update`.
-  - [ ] `session_id` path encoding settled and documented on every route that
-        takes one; reuse whatever the list returns as `id` rather than inventing
-        a second scheme. Tests cover a plain and an encoded id.
-  - [ ] `Page.total` is exact, via the fetch-then-slice approach used by
-        `openapi_v1/routines/router.py:126-131`, with a documented cap on the
-        engine-side request.
-  - [ ] `extra="forbid"`; `user_id`, `engine`, `agent_id` rejected → `422`.
-  - [ ] **Gated on `bot_type == "personal"`** (plan assumption 6). All seven
+  - [x] `session_id` encoding **settled by measurement, not choice**: ids are
+        used **verbatim**. A colon is legal in a URL path segment (RFC 3986) and
+        routes correctly, including with a `/messages` suffix — verified against
+        Starlette. Percent-encoded `/` does *not* survive routing, so an id
+        containing a slash would be unaddressable; no engine id format produces
+        one. No encoding scheme was invented.
+  - [x] `Page.total` is exact, via fetch-then-slice as
+        `openapi_v1/routines/router.py` does, capped at 500 engine-side items.
+        When the cap bites, `total` is a floor and the truncation is **logged**
+        rather than silently presented as complete.
+  - [x] `extra="forbid"`; `user_id`, `engine`, `agent_id` rejected → `422`.
+  - [x] **Gated on `bot_type == "personal"`** (plan assumption 6). All seven
         routes raise `EngineBotTypeNotSupportedError` → `501` on a `service`
         bot, checked **before** any device call. `DeviceContext.bot_type` is
         already populated (`core/devices/services/device_context.py:41`).
         Rationale: the engine drops `user_id` and returns every session on the
         device (`plugins/openclaw/_session.py:125-132`), so on a service bot the
         owner would see other callers' sessions and message history.
-  - [ ] A test asserts the `501` on a service bot **and** that the transport was
+  - [x] A test asserts the `501` on a service bot **and** that the transport was
         never invoked for it — the check must precede the forward, not filter
         its result.
-  - [ ] Success + each mapped error covered, using the in-memory transport.
+  - [x] Success + each mapped error covered, using the in-memory transport.
 - **Depends on:** Tasks 4, 5, 6
 
 ## Task 8: Engine + models groups — 5 endpoints
