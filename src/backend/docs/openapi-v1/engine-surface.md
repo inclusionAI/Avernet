@@ -271,7 +271,7 @@ Rules this endpoint must hold:
 | `api/routers/openclaw_http` | `/api/openclaw` | 3 | — | 🟡 **deferred** | `test-connection` / `disconnect` / `config`. Listed in the proxypass array as `'api/openclaw'` — **no leading slash**, so `url.startsWith()` never matches `/api/openclaw/...` and the entry is dead as written (`requestConfig.ts:191`). Also openclaw-specific gateway debug tooling. _Decided 2026-07-30._ |
 | `api/default_config` | `/api/openclaw` | 1 | — | 🟡 **deferred** | same dead prefix entry |
 | `api/zero_check` | `/api/openclaw/zero-check` | 2 | — | 🟡 **deferred** | same dead prefix entry |
-| `api/web_shell` | — | 2 | 1 | ⛔ **C3 / not v1** | `GET /terminal`, `/terminal/health`, `WS /ws/terminal`. The socket is reachable through `…/connection` when the engine declares `WEB_SHELL_OPEN`; the two HTTP routes are the shell's own bootstrap |
+| `api/web_shell` | — | 2 | 1 | ⛔ **C3 / not v1** | `GET /terminal`, `/terminal/health`, `WS /ws/terminal`. Not reachable through `…/connection` either — the terminal socket was implemented and then removed (see the connection entry above); the two HTTP routes are the shell's own bootstrap |
 | `api/routers/ws` | — | — | 1 | 🔌 **C3 — connection info** | `/api/openclaw/ws` |
 | `api/routers/claude_code_ws` | `/api/claude_code` | — | 1 | 🔌 **C3 — connection info** | `/api/claude_code/ws` |
 | `openclaw/router` | `/api/openclaw` | — | 1 | 🔌 **C3** | `/client` — gateway-side socket, not a tenant socket |

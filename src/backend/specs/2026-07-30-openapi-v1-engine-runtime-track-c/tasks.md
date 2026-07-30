@@ -141,7 +141,7 @@ All paths are relative to `src/backend/`. Source package is
   - `…/adapters/http/openapi_v1/engine_runtime/enums.py` (new)
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_schema_docs.py` (new)
 - **Done when:**
-  - [x] `SocketKind` (`chat`, `terminal`), `ApprovalMode`
+  - [x] `SocketKind` (`chat` only — see Task 10), `ApprovalMode`
         (`approve`, `on-miss`, `never`), `MessageRole`
         (`user`, `assistant`, `system`, `tool_use`, `tool_result`) all subclass
         `str, Enum`.
@@ -302,8 +302,12 @@ All paths are relative to `src/backend/`. Source package is
         `Envelope[Connection]` with `sockets` as a **list** of records carrying
         a `kind` enum.
   - [x] `chat` is derived from the bot's `active_engine` — a backend fact, no
-        device call. `terminal` appears only when the engine declares
-        `WEB_SHELL_OPEN`.
+        device call. **No `terminal` socket.** It was implemented against
+        `WEB_SHELL_OPEN` and then removed: spec.md excludes an interactive
+        shell on a tenant's device from v1 at any scope, and the engine's
+        terminal route authenticates a `token` *query* parameter that a
+        header-only connection never supplies, so it could not have worked as
+        published. Removing it also took a device call out of this endpoint.
   - [x] The payload contains **no** `target`, `type`, or bare `token` field; a
         test asserts those keys are absent.
   - [x] `expires_at` prefers a provider-reported expiry and falls back to

@@ -250,7 +250,14 @@ def _history_page(
     skip = (page_params.page - 1) * size
     n = len(items)
     end = n - skip
-    visible = items[max(0, end - size) : end] if end > 0 else []
+    # The lookahead item exists to prove more history remains; it must never be
+    # served as content. Within the cap that is automatic — the window is one
+    # longer than the pages consume. At the cap it is not: the clamped fetch
+    # stops at _MAX_HISTORY_DEPTH + 1, so the page that lands exactly on the
+    # boundary would otherwise return that single extra message as a short page,
+    # which also reads as "this is the whole history".
+    floor = max(0, n - _MAX_HISTORY_DEPTH)
+    visible = items[max(floor, end - size) : end] if end > floor else []
     if reported is not None:
         return reported, visible
     return n, visible

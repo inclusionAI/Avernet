@@ -222,7 +222,7 @@ genuinely closed at the source:
 
 | Enum | Values | Used on | Source of truth |
 |---|---|---|---|
-| `SocketKind` | `chat`, `terminal` | response | ours — we compose the payload |
+| `SocketKind` | `chat` (terminal dropped — see Risks) | response | ours — we compose the payload |
 | `ApprovalMode` | `approve`, `on-miss`, `never` | **request only** | the set the engine *advertises* via `GET /api/approvals/modes` (`approvals/router.py:104-125`) — see the investigation below for why it is not safe on responses |
 | `MessageRole` | `user`, `assistant`, `system`, `tool_use`, `tool_result` | response | a real `Literal` at `core/session/models.py:46` |
 | `EngineName` | as the bots category already defines it | response | `core/workspace/constants.py::_get_engine_types`, already imported by `openapi_v1/bots/router.py:65-68` — reuse, do not redefine |
@@ -424,8 +424,14 @@ and matches how cron behaves today, but the tests must not assume a live device.
   connection), doubling its failure surface.
   **Mitigation:** derive the **chat** socket from the bot's `active_engine` — a
   backend fact, no device call — and only consult capabilities for the optional
-  `terminal` socket. A capabilities failure then fails the whole endpoint with
-  the same `409` as everything else, rather than silently omitting a socket.
+  `terminal` socket.
+
+  **Resolved during implementation:** the terminal socket was dropped
+  altogether, so the second call went with it and this endpoint makes exactly
+  one device call. spec.md excludes an interactive shell on a tenant's device
+  from v1 at any scope; the socket had also been unusable as published, since
+  the engine's terminal route authenticates a `token` *query* parameter that a
+  header-only connection does not supply.
 
 - **Risk: `expires_at` may not match the token the provider actually issued.**
   `DeviceConnectionInfo` (`core/devices/models.py:115`) has no expiry field,
@@ -582,8 +588,9 @@ and matches how cron behaves today, but the tests must not assume a live device.
   before `DeviceAdapterHTTPStatusError` and before `BotServiceError`. The
   README's Track B gotcha ("map the base class last") is a real regression risk
   here because this change adds two base/leaf pairs at once.
-- Connection composition: socket list per engine; `terminal` present only when
-  the capability is declared; no `target`/`type`/`token` key in the payload.
+- Connection composition: socket list per engine; `chat` only, with the
+  terminal socket dropped (see Risks); no `target`/`type`/`token` key in the
+  payload.
 
 **Contract shape** (these make the two review points self-enforcing)
 - **Path prefix:** walk every route on the six new routers and assert the path

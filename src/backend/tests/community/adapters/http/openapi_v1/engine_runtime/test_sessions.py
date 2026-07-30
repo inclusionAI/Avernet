@@ -288,6 +288,46 @@ def test_a_page_past_the_capped_depth_reads_as_end_of_history(client, relay):
     assert data["items"] == []
 
 
+def test_the_page_landing_on_the_cap_does_not_serve_the_lookahead(client, relay):
+    """The boundary page, which a far-past-the-end page skips clean over.
+
+    The clamped fetch is ``_MAX_HISTORY_DEPTH + 1`` long, so page 51 at
+    ``page_size=100`` used to land with exactly one item left in the window —
+    the lookahead — and serve it as a short page, which also reads as an exact
+    total. The lookahead proves more history exists; it is never content.
+    """
+    relay.results = [EngineResult(data=_messages(5001))]
+    data = ok(client.get(
+        f"{_base()}/{SESSION_ID}/messages",
+        params={"page": 51, "page_size": 100},
+    ))
+    assert data["items"] == []
+
+
+def test_the_last_page_within_the_cap_is_still_whole(client, relay):
+    """The floor must not eat into content the cap does cover: page 50 is the
+    deepest served page and is a full 100 messages."""
+    relay.results = [EngineResult(data=_messages(5001))]
+    data = ok(client.get(
+        f"{_base()}/{SESSION_ID}/messages",
+        params={"page": 50, "page_size": 100},
+    ))
+    ids = [i["message_id"] for i in data["items"]]
+    assert len(ids) == 100
+    # Newest-first pages: page 50 is messages 4901..5000 counting back, which in
+    # the fetched tail of 5001 is indices 1..100 — index 0 is the lookahead.
+    assert ids == [f"m{i}" for i in range(1, 101)]
+
+
+def test_an_uncapped_history_still_serves_its_final_short_page(client, relay):
+    """The floor is inert below the cap — a genuinely short tail is unaffected."""
+    relay.results = [EngineResult(data=_messages(30))]
+    data = ok(client.get(
+        f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}
+    ))
+    assert [i["message_id"] for i in data["items"]] == [f"m{i}" for i in range(10)]
+
+
 def test_the_session_window_stays_page_sized(client, relay):
     """The session list paginates a materialised list, so ``limit`` there really
     is a page size and must not grow with the offset."""
