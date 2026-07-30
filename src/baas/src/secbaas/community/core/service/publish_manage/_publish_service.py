@@ -7,6 +7,7 @@ with approval gates and rolling updates. Per D-01, D-01a, D-07.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -66,6 +67,7 @@ from secbaas.community.core.repository.publish_batch import (
     PublishBatchRepository,
 )
 from secbaas.community.core.repository.publish_record import (
+    PublishRecordExtraConfig,
     PublishRecordRecord,
     PublishRecordRepository,
 )
@@ -1135,6 +1137,18 @@ class DefaultPublishService(PublishService):
             device_idx += batch_cap
 
             for device in batch_devices:
+                extra_config_dict = dataclasses.asdict(
+                    PublishRecordExtraConfig(
+                        device_uuid=device.device_uuid,
+                        provider_device_id=device.provider_device_id,
+                    )
+                )
+                extra_config = (
+                    extra_config_dict
+                    if extra_config_dict.get("device_uuid") is not None
+                    or extra_config_dict.get("provider_device_id") is not None
+                    else None
+                )
                 record_repo.insert_record(
                     tenant=tenant,
                     env=env,
@@ -1148,6 +1162,7 @@ class DefaultPublishService(PublishService):
                     result_message=None,
                     creator=operator,
                     modifier=operator,
+                    extra_config=extra_config,
                 )
 
         logger.info(
