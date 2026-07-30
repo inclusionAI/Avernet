@@ -412,10 +412,48 @@ class _EditGuard:
         return True
 
 
+class _FreshRollbackLeaseLooksUnchanged(_RollbackLayouts):
+    """Model MySQL changed-row semantics for an immediate same-owner renewal."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lease_acquire_calls = 0
+
+    def try_acquire_rollback_lease(self, **kwargs: object) -> bool:
+        self.lease_acquire_calls += 1
+        return False
+
+
+@pytest.mark.asyncio
+async def test_new_rollback_uses_the_lease_acquired_by_begin() -> None:
+    layouts = _FreshRollbackLeaseLooksUnchanged()
+    runtime = _RollbackRuntime()
+    runtime.publish_results = [True, True]
+    service = SkillsPoolRollbackService(
+        bot_repository=_Bots(),
+        layout_repository=layouts,
+        skill_repository=_Skills(),
+        runtime=runtime,
+        edit_guard=_EditGuard(),
+    )
+
+    result = await service.rollback(
+        scope=SCOPE,
+        rollback_generation="rollback-1",
+        lease_owner="operator-task-1",
+        operator="oncall-1",
+        note="fresh rollback already owns its lease",
+    )
+
+    assert result.outcome is SkillsPoolRollbackOutcome.LEGACY_ACTIVE
+    assert layouts.lease_acquire_calls == 0
+
+
 @pytest.mark.asyncio
 async def test_explicit_rollback_only_moves_forward_and_preserves_pool_writes() -> None:
     layouts = _RollbackLayouts()
     runtime = _RollbackRuntime()
+    runtime.publish_results = [False]
     service = SkillsPoolRollbackService(
         bot_repository=_Bots(),
         layout_repository=layouts,
@@ -437,14 +475,10 @@ async def test_explicit_rollback_only_moves_forward_and_preserves_pool_writes() 
     assert layouts.events == ["begin", "cutover", "failure"]
     assert runtime.events == [
         "probe",
-        "mapping",
-        "verify",
         "rollback",
         "mapping",
     ]
     assert runtime.mapping_layouts == [
-        SkillMappingSourceLayout.LEGACY,
-        SkillMappingSourceLayout.LEGACY,
         SkillMappingSourceLayout.LEGACY,
     ]
 
