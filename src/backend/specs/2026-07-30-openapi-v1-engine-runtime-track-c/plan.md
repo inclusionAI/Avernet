@@ -27,7 +27,7 @@ assumptions — overturning any of them changes this plan:
 
 | # | Assumption | Where it lands |
 |---|---|---|
-| 1 | Add an optional `warning` to `Envelope` | `contracts.py` — a shared Track B contract change |
+| 1 | ~~Add an optional `warning` to `Envelope`~~ — **reversed 2026-07-30.** No change to `Envelope`; engine caveats are logged server-side only | `relay._normalise` |
 | 2 | Unreachable device → immediate retryable `409`; **no auto-wake** | `EngineDeviceNotReadyError` → `ENVELOPE_ERRORS` |
 | 3 | Connection expiry mirrors the internal 120-minute WS token TTL; no caller override | `connection/router.py` |
 | 4 | Single owner; board row stays unassigned | docs only |
@@ -48,7 +48,8 @@ assumptions — overturning any of them changes this plan:
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/`
   **(new)** — five routers + schemas.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/contracts.py` —
-  add `Envelope.warning`; add `501`/`504` to `ERROR_RESPONSES`.
+  add `ENGINE_RUNTIME_ERROR_RESPONSES` (`501`/`504`) as a per-group superset.
+  `Envelope` is **not** modified.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py` —
   add the four new error mappings to `ENVELOPE_ERRORS`.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py` —
@@ -163,16 +164,24 @@ Query/body models all carry `extra="forbid"`. `user_id`, `engine`,
 `binding_id`, `device_uuid` and `agent_id` are **not** accepted on any route —
 `user_id` is filled from the principal, `engine` from the bot's `active_engine`.
 
-### `Envelope` gains an optional field
+### `Envelope` is unchanged
 
-```python
-warning: str = Field(default="", description=
-    "Non-empty when the engine served this request with a documented "
-    "limitation; the payload may be incomplete.")
-```
+The plan originally added an optional `warning` field to relay the engine's
+caveat for a capability it declares as *limited*. **Reversed** — Track C makes
+no change to the shared envelope.
 
-Additive and defaulted, so every existing category keeps working; they will
-simply serialize `"warning": ""`. `ErrorEnvelope` does **not** get it.
+Across both OSS engines the declared-limited capabilities are `MCP_START`,
+`MCP_STOP`, `SESSION_CREATE`, `MCP_TOOLS_CALL` and `SKILLS_EXECUTE`. Rule C2
+keeps the MCP and skills routes off this surface entirely, so **exactly one of
+the sixteen endpoints** — `POST …/sessions`, and only on `claude_code` — could
+ever populate it. That engine's caveat reads "OCB pre-allocates the sessionKey,
+first chat.send establishes it": a note about how the key is established, not a
+degraded result the caller must handle.
+
+A field permanently empty on 15 of 16 endpoints, and on all six other
+categories, is not worth a change to a contract they all share. The caveat is
+logged server-side in `relay._normalise`, and `…/engine/capabilities` remains
+the documented place to discover a bot's limitations.
 
 ### `Connection` payload
 
@@ -356,8 +365,8 @@ in `tests/community/architecture/test_service_api_conformance.py`.
 
 **Modified**
 
-- `openapi_v1/contracts.py:22` — add `Envelope.warning`.
-- `openapi_v1/contracts.py:66` — add `501` and `504` to `ERROR_RESPONSES`.
+- `openapi_v1/contracts.py` — add `ENGINE_RUNTIME_ERROR_RESPONSES` (`501`/`504`)
+  as a per-group superset. `Envelope` and `ERROR_RESPONSES` are untouched.
 - `openapi_v1/responses.py:113` — add to `ENVELOPE_ERRORS`, **before** the
   `BotServiceError` base entry at `responses.py:171`:
   - `EngineCapabilityUnsupportedError` → `(501, "Not supported by this bot's engine")`
@@ -430,12 +439,11 @@ and matches how cron behaves today, but the tests must not assume a live device.
   route, and cover both a plain and an encoded id in tests. Do **not** invent a
   second encoding — reuse what the session list returns as `id`.
 
-- **Risk: `Envelope.warning` changes a contract shared with all seven existing
-  categories.**
-  **Mitigation:** additive with a default, and the public surface answers `401`
-  to everything until the auth workstream lands, so there are no external
-  clients to break. Assert the new key's presence in the existing
-  `tests/.../test_responses.py` rather than letting it drift.
+- **Risk: touching anything shared with the six already-shipped categories.**
+  **Mitigation, and the outcome:** the one such change proposed — `Envelope.warning`
+  — was **reversed**, and `501`/`504` moved to a per-group dict. Track C now adds
+  no field, no status, and no behaviour to any contract outside its own prefix.
+  A regression guard pins `Envelope` to its four documented fields.
 
 - **Risk: `GET /sessions` returns every session on the device, not the caller's.**
   The engine drops `user_id` (see *Isolation* §2). On a personal bot the two sets
@@ -496,8 +504,11 @@ and matches how cron behaves today, but the tests must not assume a live device.
   **Mitigation:** this is exactly why `/engine/capabilities` ships in v1 and why
   the `501` message must name it. It is also the concrete case that justifies
   assumption 1: `SESSION_CREATE` on `claude_code` returns a **real, populated
-  warning string** today, so without `Envelope.warning` we would silently drop a
-  caveat the engine deliberately surfaces. Test both engines' matrices.
+  warning string** today — but rule C2 keeps every *other* limited capability
+  (`MCP_START`, `MCP_STOP`, `MCP_TOOLS_CALL`, `SKILLS_EXECUTE`) off this surface,
+  so it is the only one that can appear at all, and its caveat describes how the
+  session key is established rather than a degraded result. Hence assumption 1's
+  reversal: the caveat is logged, not published. Test both engines' matrices.
 
 - **Risk: `GET /approvals/modes` is the one engine route with no capability
   gate** (`approvals/router.py:104`), so on a `claude_code` bot it advertises
@@ -540,8 +551,10 @@ and matches how cron behaves today, but the tests must not assume a live device.
   workstream swaps `require_principal` (`openapi_v1/dependencies.py`), so Track
   C ships dark by construction — the same posture as bots in #494.
 - **No migration, no DDL, no deploy ordering constraint.**
-- **Backwards compatibility:** the only shared change is the additive
-  `Envelope.warning`. Internal `/api` routes are untouched.
+- **Backwards compatibility: nothing shared changes.** The one proposed change
+  to `Envelope` was reversed, and `501`/`504` are scoped to this track's routers.
+  Track C touches no contract outside `/openapi/v1/bots/{bot_id}/…`. Internal
+  `/api` routes are untouched.
 - Ship as one PR per the README's per-category convention, or split
   `sessions + engine + connection` (P1) from `approvals + models`
   (P2/P3) if review size becomes the constraint. The shared relay must land in

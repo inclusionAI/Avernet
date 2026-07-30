@@ -26,18 +26,14 @@ class EngineResult:
             **not**, hence ``None`` rather than ``0`` — "unknown" and "empty"
             are different, and a caller-visible ``total`` must not invent a
             number.
-        limited: True when the engine served this with a declared limitation,
-            so the payload may be incomplete. Deliberately a **flag, not the
-            engine's message**: those strings are internal engineering text
-            ("teamclaw-aicoding-relay has no explicit sessions.create…") and
-            some are not English ("通过 mcporter 命令启动"), and this surface
-            promises fixed English messages that leak no internals. The adapter
-            renders the public wording; core carries only the fact.
+
+    The engine's ``warning`` (its caveat for a capability it declares as
+    supported-with-a-limitation) is deliberately **not** carried. It is logged
+    server-side and goes no further — see ``relay._normalise``.
     """
 
     data: Any = None
     total: int | None = None
-    limited: bool = False
 
 
 @dataclass(frozen=True)

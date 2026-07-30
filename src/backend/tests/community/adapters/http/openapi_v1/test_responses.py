@@ -122,42 +122,27 @@ async def test_envelope_errors_passes_through_unmapped():
         await handler(request=_request())
 
 
-# ── Envelope.warning (Track C, Task 1) ────────────────────────────────────────
-#
-# Added for the engine-runtime surface: an engine may declare a capability as
-# supported-*with-a-caveat* and return a human-readable warning alongside a
-# real payload. The envelope had nowhere to put it, so the caveat was being
-# dropped. Additive and defaulted, so the six pre-existing categories are
-# unaffected beyond serialising an extra empty key.
+# ── Envelope shape (Track C) ─────────────────────────────────────────────────
 
 
-def test_envelope_warning_defaults_to_empty():
-    """Every existing caller builds envelopes without a warning."""
-    env = envelope({"x": 1}, _request())
-    assert env.warning == ""
-    assert env.model_dump()["warning"] == ""
+def test_envelope_has_exactly_the_four_documented_fields():
+    """Regression guard: the success envelope stays four keys.
 
-
-def test_envelope_warning_round_trips_when_set():
-    env = envelope({"x": 1}, _request(), warning="served with a limitation")
-    assert env.model_dump()["warning"] == "served with a limitation"
-
-
-def test_page_envelope_carries_the_warning_field():
-    """Page responses share the Envelope, so they inherit the field."""
-    env = page(2, [{"a": 1}], _request())
-    assert env.model_dump()["warning"] == ""
-
-
-def test_error_envelope_has_no_warning():
-    """A failed request has no partial payload to caveat.
-
-    ``ErrorEnvelope`` is the documented error model on every public route; adding
-    a field there would promise callers something no error path populates.
+    A ``warning`` field was added here and then removed. Across both OSS engines
+    the only *limited* capability this public surface can reach is
+    ``SESSION_CREATE`` on claude_code, whose caveat describes how the session key
+    is established rather than a degraded result — so the field would have been
+    permanently empty on 15 of 16 engine-runtime endpoints and on all six other
+    categories. Engine caveats are logged server-side in
+    ``core/engine_runtime/relay.py``; the engine-capabilities endpoint is where a
+    caller discovers which capabilities its bot serves with a limitation.
     """
-    from agentclaw.community.adapters.http.openapi_v1.contracts import ErrorEnvelope
+    from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 
-    assert "warning" not in ErrorEnvelope.model_fields
+    assert set(Envelope.model_fields) == {"code", "message", "data", "request_id"}
+    assert set(envelope({"x": 1}, _request()).model_dump()) == set(
+        Envelope.model_fields
+    )
 
 
 def test_501_and_504_are_scoped_to_the_engine_runtime_groups():
@@ -185,21 +170,9 @@ def test_501_and_504_are_scoped_to_the_engine_runtime_groups():
     assert set(ERROR_RESPONSES) <= set(ENGINE_RUNTIME_ERROR_RESPONSES)
 
 
-def test_envelope_builder_accepts_a_warning():
-    """The field needs a supported builder path, not attribute mutation."""
-    env = envelope({"x": 1}, _request(), warning="served with a limitation")
-    assert env.warning == "served with a limitation"
-    assert page(1, [{"x": 1}], _request(), warning="w").warning == "w"
-
-
 def test_error_body_matches_the_documented_error_model():
-    """Failure bodies serialise ``ErrorEnvelope``, not ``Envelope``.
-
-    Once ``Envelope`` gained ``warning`` the two shapes diverged, and
-    ``_error_response`` was building the wrong one — every error body carried a
-    ``warning: ""`` key that ``ERROR_RESPONSES`` does not document. Regression
-    guard: the emitted key set must equal the documented model's field set.
-    """
+    """Failure bodies serialise ``ErrorEnvelope``, the model ``ERROR_RESPONSES``
+    actually documents, rather than ``Envelope``."""
     import json
 
     from agentclaw.community.adapters.http.openapi_v1.contracts import ErrorEnvelope
@@ -208,4 +181,3 @@ def test_error_body_matches_the_documented_error_model():
     resp = error_response(404, "Not found", _request())
     body = json.loads(bytes(resp.body))
     assert set(body) == set(ErrorEnvelope.model_fields)
-    assert "warning" not in body

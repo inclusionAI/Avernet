@@ -34,14 +34,6 @@ class Envelope[T](BaseModel):
     request_id: str = Field(
         description="Trace id; mirrors the X-Trace-Id response header."
     )
-    warning: str = Field(
-        default="",
-        description="Empty unless the request was served with a documented "
-        "limitation, in which case the payload may be incomplete. Fixed public "
-        "wording, never the upstream engine's own text. Only the engine-runtime "
-        "endpoints populate it today; the engine-capabilities endpoint says "
-        "which capabilities a given bot serves with a caveat.",
-    )
 
 
 class ErrorEnvelope(BaseModel):

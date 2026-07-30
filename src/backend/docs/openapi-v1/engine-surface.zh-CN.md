@@ -212,10 +212,11 @@ engine 返回 `ApiResponse{success, data, message, warning, total}`
 - `total` → `Page.total`。
 - `success: false` → 抛异常，不要透传 —— 带着 `success: false` 的 `200`
   绝不能到达公共调用方。
-- **`warning` 在公共契约里还没有位置。** 它是能力*受限*信号（"该引擎只能列出当前
-  会话"），静默丢掉会降低答案的正确性。**建议：给 `Envelope` 增加一个可选
-  `warning` 字段。** 这是 Track C 唯一改动共享 Track B 契约的地方，需要 bots
-  owner 签字。
+- **engine 的 `warning` 被刻意丢弃。** 它是能力*受限*信号，但那些字符串是内部
+  工程文案且不总是英文；而且规则 C2 把除一个以外的全部 limited 能力都挡在本面之外
+  —— 只有 `claude_code` 的 `SESSION_CREATE` 能触达，而那条说明讲的是 session key
+  如何建立，并非结果不完整。它只**记录在服务端日志**，不再往外传。`Envelope`
+  保持不变；`…/engine/capabilities` 才是调用方发现限制的地方。_2026-07-30 决定。_
 
 ### 2. 能力是公共契约的逃生舱
 
@@ -292,8 +293,9 @@ engine 的每个 handler 都会调用 `check_capability()`
 | models | ✅ | ✅ |
 | engine status/capabilities/available | ✅ 无门禁 | ✅ 无门禁 |
 
-`claude_code` 的 **limited** `SESSION_CREATE` 正是让 `Envelope.warning` 从"理论
-需要"变成"实际必需"的活例子。
+`claude_code` 的 **limited** `SESSION_CREATE` 是本面唯一能触达的 limited 能力
+—— 另外四个（`MCP_START`、`MCP_STOP`、`MCP_TOOLS_CALL`、`SKILLS_EXECUTE`）都落在
+规则 C2 排除掉的路由上。这也正是那条说明只记日志、不放进响应的原因。
 
 一处刻意的背离：`GET /api/approvals/modes` 是 engine 侧唯一**没有**能力门禁的
 路由（`approvals/router.py:104`），所以在 `claude_code` bot 上它照样公布三个模式，

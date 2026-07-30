@@ -7,25 +7,28 @@ All paths are relative to `src/backend/`. Source package is
 
 ---
 
-## Task 1: Extend the shared public contract for engine-sourced results  `[x]`
-- **Goal:** Give `Envelope` the `warning` field and document the two new HTTP
-  statuses this track can return, before anything depends on them.
+## Task 1: Document the two new HTTP statuses this track can return  `[x]`
+- **Goal:** Declare `501`/`504` for the engine-runtime groups. **Originally also
+  added `Envelope.warning`; that was reversed — see the note below.**
 - **Files:**
   - `…/adapters/http/openapi_v1/contracts.py`
   - `tests/community/adapters/http/openapi_v1/test_responses.py`
 - **Done when:**
-  - [x] `Envelope.warning: str = ""` exists with a description explaining it is
-        non-empty only when the engine served the request with a documented
-        limitation.
-  - [x] `ErrorEnvelope` is **unchanged** — no `warning` on error responses.
-  - [x] `ERROR_RESPONSES` gains `501` and `504` entries, both `ErrorEnvelope`.
-  - [x] Existing envelope tests still pass, plus a new assertion that a success
-        envelope serialises `warning` and that it defaults to `""`.
-  - [x] Spot-check one existing category (bots) still serialises correctly with
-        the added key.
+  - [x] `Envelope` is **unchanged** — four fields, as before this track.
+  - [x] `501`/`504` live in `ENGINE_RUNTIME_ERROR_RESPONSES`, a per-group
+        superset of `ERROR_RESPONSES`, **not** in the surface-wide dict.
+  - [x] A regression guard pins the envelope to its four documented fields.
+  - [x] Existing envelope tests pass unmodified.
 - **Depends on:** —
-- **Note:** This is the one change touching a contract shared with all seven
-  existing categories (plan assumption 1). Keep it to exactly these edits.
+- **Reversed 2026-07-30 (plan assumption 1):** `Envelope.warning` was added and
+  then removed at the owner's call. Only `POST …/sessions` on `claude_code`
+  could ever set it — rule C2 keeps the other limited capabilities (MCP, skills)
+  off this surface — and that engine's caveat describes how the session key is
+  established, not a degraded result. A field permanently empty on 15 of 16
+  endpoints and on all six other categories does not justify changing a shared
+  contract. Engine caveats are logged in `relay._normalise`;
+  `…/engine/capabilities` is where a caller discovers limitations.
+  **Net effect: Track C changes nothing outside its own prefix.**
 - **Found while doing it:** `_error_response` was building `Envelope`, so the
   new field leaked a `warning: ""` key into every error body — including the six
   existing categories' — while `ERROR_RESPONSES` documents `ErrorEnvelope`,

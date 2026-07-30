@@ -227,11 +227,14 @@ The engine returns `ApiResponse{success, data, message, warning, total}`
 - `total` → `Page.total`.
 - `success: false` → raise, don't pass through — a `200` carrying
   `success: false` must never reach a public caller.
-- **`warning` has no home in the public contract yet.** It is the
-  capability-*limited* signal ("this engine can only list the current session"),
-  and dropping it silently degrades the answer. **Recommendation: add an optional
-  `warning` field to `Envelope`.** This is the one change Track C makes to a
-  shared Track B contract, so it needs the bots owner's sign-off.
+- **The engine's `warning` is dropped, deliberately.** It is the
+  capability-*limited* signal, but the strings are internal engineering prose
+  and not always English, and rule C2 keeps all but one limited capability off
+  this surface — only `SESSION_CREATE` on `claude_code` can reach it, and that
+  caveat describes how the session key is established rather than a degraded
+  result. It is **logged server-side** and goes no further. `Envelope` is
+  unchanged; `…/engine/capabilities` is where a caller discovers limitations.
+  _Decided 2026-07-30._
 
 ### 2. Capabilities are the public contract's escape hatch
 
@@ -321,8 +324,10 @@ Two traps worth knowing before you write the enums:
 | models | ✅ | ✅ |
 | engine status/capabilities/available | ✅ ungated | ✅ ungated |
 
-`claude_code`'s **limited** `SESSION_CREATE` is the live case that makes
-`Envelope.warning` load-bearing rather than theoretical.
+`claude_code`'s **limited** `SESSION_CREATE` is the only limited capability
+this surface can reach at all — the other four (`MCP_START`, `MCP_STOP`,
+`MCP_TOOLS_CALL`, `SKILLS_EXECUTE`) sit on routes rule C2 excludes. That is why
+the caveat is logged rather than carried in the response.
 
 One deliberate divergence: `GET /api/approvals/modes` is the only engine route
 with **no** capability gate (`approvals/router.py:104`), so on a `claude_code`

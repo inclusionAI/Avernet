@@ -231,14 +231,28 @@ class EngineRuntimeRelay:
             )
             raise EngineUpstreamError(f"engine reported failure for {path}")
 
+        # The engine attaches ``warning`` when it serves a capability it
+        # declares as limited. It goes no further than this log line. Two
+        # reasons: the strings are internal engineering prose and not always
+        # English ("通过 mcporter 命令启动"), and across both OSS engines the
+        # only limited capability this surface can even reach is
+        # ``SESSION_CREATE`` on claude_code — whose caveat describes how the
+        # session key is established, not a degraded result. Callers that need
+        # to know which capabilities a bot serves with a caveat ask the
+        # engine-capabilities endpoint.
+        if raw.get("warning"):
+            logger.info(
+                "[engine_runtime] engine served with a declared limitation "
+                "bot=%s path=%s warning=%s",
+                bot_id,
+                path,
+                raw.get("warning"),
+            )
+
         total = raw.get("total")
         return EngineResult(
             data=raw.get("data"),
             total=total if isinstance(total, int) else None,
-            # Flag only. The engine's warning text is internal engineering
-            # prose and sometimes not English; the adapter renders fixed public
-            # wording from this. See BotFacts/EngineResult docstrings.
-            limited=bool(raw.get("warning")),
         )
 
 

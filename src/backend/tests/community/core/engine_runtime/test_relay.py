@@ -180,7 +180,6 @@ async def test_success_envelope_is_normalised():
     )
     assert result.data == [{"id": "s1"}]
     assert result.total == 7
-    assert result.limited is True
 
 
 @pytest.mark.asyncio
@@ -193,28 +192,19 @@ async def test_absent_total_is_none_not_zero():
 
 
 @pytest.mark.asyncio
-async def test_absent_warning_leaves_limited_false():
-    result = await _relay(transport=_Transport({"success": True, "data": 1})).call(
-        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models"
-    )
-    assert result.limited is False
-
-
-@pytest.mark.asyncio
 async def test_engine_warning_text_never_escapes_the_relay():
-    """The engine's caveat strings are internal prose, some not English.
+    """The engine's caveat strings are internal prose, and some are not English.
 
-    e.g. claude_code declares SESSION_CREATE limited with
-    "teamclaw-aicoding-relay has no explicit sessions.create; OCB pre-allocates
-    the sessionKey…" and openclaw uses "通过 mcporter 命令启动". This surface
-    promises fixed English messages that leak no internals, so the relay keeps
-    only the fact that a limitation applied.
+    claude_code declares SESSION_CREATE limited with "teamclaw-aicoding-relay
+    has no explicit sessions.create; OCB pre-allocates the sessionKey…";
+    openclaw uses "通过 mcporter 命令启动". None of it may reach an external
+    caller, so the relay logs it and carries nothing forward.
     """
     leak = "teamclaw-aicoding-relay has no explicit sessions.create"
     result = await _relay(
         transport=_Transport({"success": True, "data": {}, "warning": leak})
     ).call(bot_id=BOT, owner_id=OWNER, method="POST", path="/api/sessions")
-    assert result.limited is True
+    assert result.data == {}
     assert leak not in repr(result)
 
 
@@ -264,7 +254,6 @@ async def test_raw_payload_route_returns_the_whole_body_as_data():
     )
     assert result.data == status
     assert result.total is None
-    assert result.limited is False
 
 
 @pytest.mark.asyncio

@@ -87,7 +87,9 @@ proven path rather than inventing one.
       documented "not supported by this bot" outcome that names the capabilities
       endpoint, not as a generic server error.
 - [ ] An operation the bot's engine supports only partially still returns its
-      result, and the caller is told the result may be incomplete.
+      result. The response carries no extra caveat field; the capabilities
+      endpoint is where a caller discovers which operations its bot serves with
+      a limitation.
 - [ ] A bot whose device is unreachable — cold, dormant, or restarting — is
       answered with a single, consistent, retryable outcome across all sixteen
       endpoints, distinct from both "not found" and "server error".
