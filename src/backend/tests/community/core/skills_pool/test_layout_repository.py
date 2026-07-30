@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from threading import Barrier
 
-from sqlalchemy import create_engine, func, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -38,6 +38,9 @@ from agentclaw.community.core.skills_pool.repository.protocol import (
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.plugins.skills_pool_layout_repository import (
     SkillsPoolLayoutRepository,
+)
+from agentclaw.community.plugins.skills_pool_quarantine_repository import (
+    _database_timestamp,
 )
 
 
@@ -102,6 +105,23 @@ def test_skills_pool_operational_tables_use_mysql_timestamp_contract() -> None:
     assert "EFFECTIVE_AT TIMESTAMP(6)" in audit_ddl
     assert "GMT_CREATE TIMESTAMP" in audit_ddl
     assert "GMT_MODIFY TIMESTAMP" in audit_ddl
+
+
+def test_aware_runtime_observation_uses_mysql_session_timestamp() -> None:
+    observed_at = datetime(2026, 7, 30, 12, 58, 13, 841734, tzinfo=UTC)
+
+    expression = _database_timestamp(observed_at, dialect_name="mysql")
+    compiled = str(
+        select(expression).compile(
+            dialect=mysql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    ).lower()
+
+    assert "from_unixtime(1785416293.841734)" in compiled
+    assert _database_timestamp(observed_at, dialect_name="sqlite") == (
+        observed_at.replace(tzinfo=None)
+    )
 
 
 def rollout_evidence() -> RolloutEvidence:
