@@ -18,6 +18,9 @@ from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     SkillMappingSourceLayout,
 )
+from agentclaw.community.core.skills_pool.aicoding_retirement import (
+    is_trusted_aicoding_repo_restoration_resume,
+)
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
     local_locators_from_evidence,
@@ -338,7 +341,15 @@ class SkillsPoolRollbackService:
             user_id=user_id,
             engine=engine,
         )
-        if probe.status is not RuntimeLayoutProbeStatus.READY:
+        restoration_resume = is_trusted_aicoding_repo_restoration_resume(
+            state=state,
+            engine=engine,
+            probe=probe,
+        )
+        if (
+            probe.status is not RuntimeLayoutProbeStatus.READY
+            and not restoration_resume
+        ):
             return self._failure(
                 scope=scope,
                 rollback_generation=rollback_generation,
