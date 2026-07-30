@@ -314,6 +314,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
             group_id: cmd.group_id,
             default_definition: cmd.definition_ref,
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
+            requires_human_input_channel: false,
         })
     }
 }

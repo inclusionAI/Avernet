@@ -387,6 +387,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-api-http"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bcs-service-api",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "ulid",
+]
+
+[[package]]
 name = "bcs-auth-alipay"
 version = "0.1.0"
 dependencies = [
@@ -874,9 +891,14 @@ name = "bcs-group"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bcs-bot",
+ "bcs-friend",
  "bcs-group-store",
+ "bcs-relation",
  "bcs-route-security",
  "bcs-service-api",
+ "bcs-session",
+ "bcs-session-store",
  "bcs-test-support",
  "chrono",
  "serde_json",
@@ -904,6 +926,27 @@ dependencies = [
  "tokio-test",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "bcs-group-v1"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-bot",
+ "bcs-bot-store",
+ "bcs-cache-local",
+ "bcs-db-api",
+ "bcs-friend",
+ "bcs-group",
+ "bcs-group-store",
+ "bcs-relation",
+ "bcs-service-api",
+ "bcs-session",
+ "bcs-session-store",
+ "bcs-test-support",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

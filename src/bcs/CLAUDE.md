@@ -255,6 +255,7 @@ crates/
 │   ├── bcs-bot/                - Bot application/core service implementations
 │   ├── bcs-bot-store/          - BotRepo implementations (memory, plugin DB/cache-backed)
 │   ├── bcs-group/              - Group application/core service implementations
+│   ├── bcs-group-v1/           - Unmounted BCN V1 Group Service API implementation
 │   ├── bcs-group-store/        - GroupRepo implementations (memory, MySQL-backed)
 │   ├── bcs-relation/           - Relation core service implementation
 │   ├── bcs-relation-store/     - RelationRepo implementations (memory, DB-backed)

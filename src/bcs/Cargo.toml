@@ -3,6 +3,7 @@ members = [
     # bootstrap
     "crates/bootstrap/bcs",
     # adapters
+    "crates/adapters/http/bcs-api-http",
     "crates/adapters/http/bcs-http",
     "crates/adapters/http/bcs-provider-http",
     "crates/adapters/ws/bcs-ws",
@@ -18,6 +19,7 @@ members = [
     "crates/services/bcs-friend",
     "crates/services/bcs-friend-store",
     "crates/services/bcs-group",
+    "crates/services/bcs-group-v1",
     "crates/services/bcs-group-store",
     "crates/services/bcs-message",
     "crates/services/bcs-message-flow",
@@ -203,6 +205,7 @@ redis = { version = "0.27.6", features = ["tokio-comp"] }
 
 # Workspace crates
 bcs            = { path = "crates/bootstrap/bcs" }
+bcs-api-http   = { path = "crates/adapters/http/bcs-api-http" }
 bcs-admin      = { path = "crates/tools/bcs-admin" }
 bcs-cli        = { path = "crates/tools/bcs-cli" }
 bcs-rule-bot   = { path = "crates/tools/bcs-rule-bot" }
@@ -217,6 +220,7 @@ bcs-collaboration-store = { path = "crates/services/bcs-collaboration-store" }
 bcs-judge = { path = "crates/services/bcs-judge" }
 bcs-jwt = { path = "crates/services/bcs-jwt" }
 bcs-group      = { path = "crates/services/bcs-group" }
+bcs-group-v1   = { path = "crates/services/bcs-group-v1" }
 bcs-group-store = { path = "crates/services/bcs-group-store" }
 bcs-message = { path = "crates/services/bcs-message" }
 bcs-message-flow = { path = "crates/services/bcs-message-flow" }

@@ -68,6 +68,8 @@ pub trait StateMachineDefinitionRepoPort: Send + Sync {
 pub trait GroupRuntimeBindingRepoPort: Send + Sync {
     async fn upsert(&self, binding: GroupRuntimeBinding) -> ServiceResult<()>;
     async fn get(&self, group_id: &str) -> ServiceResult<Option<GroupRuntimeBinding>>;
+    /// Delete all runtime binding state for a Group. Idempotent.
+    async fn delete(&self, group_id: &str) -> ServiceResult<bool>;
     async fn bind_default_definition(
         &self,
         group_id: &str,
@@ -141,6 +143,20 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         &self,
         session_id: &str,
     ) -> ServiceResult<Option<StateMachineRun>>;
+    /// List every run associated with a session.
+    ///
+    /// The compatibility default preserves existing external implementations;
+    /// production stores override it so cleanup can cancel all active runs.
+    async fn list_runs_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Vec<StateMachineRun>> {
+        Ok(self
+            .get_run_by_session_id(session_id)
+            .await?
+            .into_iter()
+            .collect())
+    }
     async fn list_node_runs(&self, run_id: &str) -> ServiceResult<Vec<StateMachineNodeRun>>;
     async fn get_node_run(
         &self,

@@ -7,11 +7,12 @@ use bcs_domain::{
     MessageOwnerFilter, MessageQuery, NewMessage, SenderType,
 };
 use bcs_service_api::{
-    BindingChannel, BotCapabilities, BotRepoPort, FriendRepoPort, FriendRequest,
+    BindingChannel, BotCapabilities, BotRepoPort, DefaultDelivery, FriendRepoPort, FriendRequest,
     FriendRequestDirection, FriendRequestRepoPort, FriendRequestStatus, Group, GroupChatProposal,
-    GroupKind, GroupRepoPort, GroupStatus, NewSessionParams, Participant,
+    GroupKind, GroupMutableFieldsPatch, GroupRepoPort, GroupStatus, NewSessionParams, Participant,
     ParticipantMode, ParticipantRole, ProposalCoreService, RelationEdge, RelationRepoPort,
-    ServiceSpec, Session, SessionKind, SessionRepoPort, SessionStatus, Skill,
+    RoutingMode, RoutingPolicy, ServiceSpec, Session, SessionKind, SessionRepoPort, SessionStatus,
+    Skill,
 };
 use bcs_service_api::ServiceError;
 use bcs_service_api::port::repo::{
@@ -259,6 +260,14 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
         ],
     );
     group.label = Some("initial label".to_string());
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Structured,
+        default_bot_final_delivery: DefaultDelivery::SendToDriver,
+        sender_routes: std::collections::HashMap::from([(
+            "repo-helper".to_string(),
+            vec!["repo-driver".to_string()],
+        )]),
+    });
 
     repo.upsert(group.clone()).await.expect("upsert group");
     let stored = repo
@@ -293,6 +302,30 @@ pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {
         .find(|p| p.bot_uuid == "repo-helper")
         .expect("helper participant");
     assert_eq!(helper.mode, Some(ParticipantMode::Muted));
+
+    repo.patch_mutable_fields(
+        &group.id,
+        GroupMutableFieldsPatch {
+            label: Some("patched label".to_string()),
+            default_bot_final_delivery: Some(DefaultDelivery::InjectObservers),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch mutable fields");
+    let stored = repo.get(&group.id).await.expect("group after mutable patch");
+    let routing = stored.routing_policy.expect("routing policy preserved");
+    assert_eq!(stored.label.as_deref(), Some("patched label"));
+    assert_eq!(stored.participants.len(), 3);
+    assert_eq!(routing.mode, RoutingMode::Structured);
+    assert_eq!(
+        routing.sender_routes.get("repo-helper"),
+        Some(&vec!["repo-driver".to_string()])
+    );
+    assert_eq!(
+        routing.default_bot_final_delivery,
+        DefaultDelivery::InjectObservers
+    );
 
     repo.update_label(&group.id, Some("updated label".to_string()))
         .await

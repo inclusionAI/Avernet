@@ -868,8 +868,18 @@ runtime:
             "human_input"
         );
         assert!(
+            detail.definition["runtime"]["state_machine"]
+                .get("human_input_channel")
+                .is_none()
+        );
+        assert!(
             detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]
                 .get("assignee")
+                .is_none()
+        );
+        assert!(
+            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]
+                .get("notification")
                 .is_none()
         );
         assert_eq!(

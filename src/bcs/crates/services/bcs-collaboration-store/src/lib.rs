@@ -233,6 +233,11 @@ impl GroupRuntimeBindingRepoPort for MemoryCollaborationStore {
         Ok(inner.bindings.get(group_id).cloned())
     }
 
+    async fn delete(&self, group_id: &str) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        Ok(inner.bindings.remove(group_id).is_some())
+    }
+
     async fn bind_default_definition(
         &self,
         group_id: &str,
@@ -345,6 +350,26 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             .filter(|run| run.session_id == session_id)
             .max_by_key(|run| run.created_at)
             .cloned())
+    }
+
+    async fn list_runs_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Vec<StateMachineRun>> {
+        let inner = self.inner.read().await;
+        let mut runs = inner
+            .runs
+            .values()
+            .filter(|run| run.session_id == session_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        runs.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| right.run_id.cmp(&left.run_id))
+        });
+        Ok(runs)
     }
 
     async fn list_node_runs(&self, run_id: &str) -> ServiceResult<Vec<StateMachineNodeRun>> {
@@ -1248,6 +1273,20 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
         }))
     }
 
+    async fn delete(&self, group_id: &str) -> ServiceResult<bool> {
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                "DELETE FROM bcs_group_runtime_bindings WHERE env = ? AND group_id = ?",
+                vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("group runtime binding delete: {error}"))
+            })?;
+        Ok(result.affected_rows > 0)
+    }
+
     async fn bind_default_definition(
         &self,
         group_id: &str,
@@ -1569,6 +1608,29 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             .transpose()
     }
 
+    async fn list_runs_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Vec<StateMachineRun>> {
+        let sql = format!(
+            "SELECT {SM_RUN_SELECT_COLS} \
+             FROM bcs_state_machine_runs \
+             WHERE env = ? AND session_id = ? AND record_status = 'active' \
+             ORDER BY created_at_ms DESC, id DESC"
+        );
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                sql,
+                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
+            ))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!("state machine runs list by session: {error}"))
+            })?;
+        rows.into_iter().map(row_to_state_machine_run).collect()
+    }
+
     async fn list_node_runs(&self, run_id: &str) -> ServiceResult<Vec<StateMachineNodeRun>> {
         let sql = format!(
             "SELECT {SM_NODE_SELECT_COLS} \
@@ -1851,7 +1913,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                )",
             self.flavor.set_modified_now()
         );
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
@@ -1864,9 +1927,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             ))
             .await
             .map_err(|error| {
-                ServiceError::InternalError(format!(
-                    "state machine node record artifact: {error}"
-                ))
+                ServiceError::InternalError(format!("state machine node record artifact: {error}"))
             })?;
         Ok(result.affected_rows > 0)
     }
@@ -1893,7 +1954,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                )",
             self.flavor.set_modified_now()
         );
-        let result = self.db
+        let result = self
+            .db
             .execute(DbStatement::with_params(
                 sql,
                 vec![
@@ -1907,9 +1969,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             ))
             .await
             .map_err(|error| {
-                ServiceError::InternalError(format!(
-                    "state machine human response record: {error}"
-                ))
+                ServiceError::InternalError(format!("state machine human response record: {error}"))
             })?;
         Ok(result.affected_rows > 0)
     }
@@ -3140,12 +3200,7 @@ mod tests {
         assert_eq!(node.timeout_deadline_ms, Some(122_000));
 
         let recorded = store
-            .record_node_artifact_if_running(
-                "run-sqlite-cas",
-                "answer",
-                0,
-                "candidate".to_string(),
-            )
+            .record_node_artifact_if_running("run-sqlite-cas", "answer", 0, "candidate".to_string())
             .await?;
         assert!(recorded);
         let node = store

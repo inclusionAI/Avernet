@@ -100,6 +100,17 @@ async fn run_lookup_by_session_id_returns_latest_session_run() {
         .expect("lookup by session")
         .expect("run");
     assert_eq!(loaded.run_id, "sm-run-newer");
+    let all_runs = store
+        .list_runs_by_session_id("group-1:abcdef12")
+        .await
+        .expect("list runs by session");
+    assert_eq!(
+        all_runs
+            .into_iter()
+            .map(|run| run.run_id)
+            .collect::<Vec<_>>(),
+        vec!["sm-run-newer", "sm-run-older"]
+    );
 }
 
 #[tokio::test]
