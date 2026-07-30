@@ -27,6 +27,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
+    EngineUpstreamError,
 )
 from agentclaw.community.di import Injected
 
@@ -54,6 +55,23 @@ def _state(raw: Any, session_key: str) -> ApprovalState:
         session_key=str(data.get("sessionKey") or session_key),
         mode=str(data.get("mode") or ""),
     )
+
+
+def _reject_refused_set(raw: Any) -> None:
+    """Raise when the engine acknowledged the write but refused it.
+
+    ``exec.approvals.set`` reports two independent outcomes: the *call* worked
+    (outer ``success``), and the mode change was *applied* (``data.ok``). The
+    relay only sees the first, so a refusal arrives here as a success envelope
+    whose payload says otherwise — and echoing the requested mode back would
+    tell the caller a change took effect that did not.
+
+    ``is False`` rather than falsy: the read route's payload carries no ``ok``
+    at all, and a missing flag is not a refusal.
+    """
+    data = raw if isinstance(raw, dict) else {}
+    if data.get("ok") is False:
+        raise EngineUpstreamError("engine refused the approval-mode change")
 
 
 @router.get("/mode", response_model=Envelope[ApprovalState])
@@ -100,6 +118,7 @@ async def set_approval_mode(
             "user_id": owner_id,
         },
     )
+    _reject_refused_set(result.data)
     return envelope(_state(result.data, body.session_key), request)
 
 

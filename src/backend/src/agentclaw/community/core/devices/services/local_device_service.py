@@ -523,6 +523,11 @@ class LocalDeviceService(DeviceService):
             target=ws_info.target,
             token=token,
             expires_at=expires_at,
+            # target 来自 ws-info，凭据也必须来自 ws-info。正常路径的 token 是
+            # http-info 的（另一个 token），配着 ws 地址发出去就是一对不匹配的
+            # socket/凭据 —— socket caller 读这一对。
+            ws_token=ws_info.token,
+            ws_expires_at=ws_info.expires_at,
             engine_type=device.device_props.get("engine", DEFAULT_ENGINE_TYPE),
             baas_base_url=ws_info.baas_base_url,
             bot_uuid=ws_info.bot_uuid,

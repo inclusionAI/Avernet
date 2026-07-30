@@ -129,6 +129,35 @@ def test_a_relayed_url_is_not_appended_to():
     assert result.sockets[0].url == "wss://relay.example/wsrelay/s1/api/openclaw/ws"
 
 
+def test_the_socket_carries_the_ws_credential_not_the_http_one():
+    """The local provider's healthy path returns http-info's token while the
+    address comes from ws-info's target — publishing `token` there would pair a
+    ws URL with the wrong credential."""
+    devices = _Devices(token="http-tok", ws_token="ws-tok")
+    result = _build(_svc(devices=devices))
+    assert result.sockets[0].headers["x-proxypass-token"] == "ws-tok"
+
+
+def test_the_socket_expiry_describes_the_ws_credential():
+    """Same pairing for the expiry: `expires_at` describes the http token, which
+    is not what was published."""
+    devices = _Devices(
+        token="http-tok",
+        ws_token="ws-tok",
+        expires_at="",
+        ws_expires_at="2026-07-30T20:00:00Z",
+    )
+    result = _build(_svc(devices=devices))
+    assert result.expires_at == "2026-07-30T20:00:00+00:00"
+
+
+def test_a_provider_issuing_no_ws_credential_still_uses_its_token():
+    """Providers that do not distinguish the two leave `ws_token` empty."""
+    devices = _Devices(token="only-tok", ws_token="")
+    result = _build(_svc(devices=devices))
+    assert result.sockets[0].headers["x-proxypass-token"] == "only-tok"
+
+
 def test_a_failing_provider_is_an_upstream_error_not_a_500():
     """A ws-info call that times out reaches here as ``BaasDeviceServiceError``.
     The bot's device may be healthy, so this is an upstream fault — and

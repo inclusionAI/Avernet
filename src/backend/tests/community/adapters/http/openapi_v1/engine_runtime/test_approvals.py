@@ -41,6 +41,33 @@ def test_set_mode_forwards_the_value_verbatim(client, relay):
     }
 
 
+def test_a_refused_set_is_not_reported_as_applied(client, relay):
+    """``exec.approvals.set`` reports the call and the change separately: the
+    envelope succeeds while ``data.ok`` says the mode was not applied. Echoing
+    the requested mode back would claim a change that never happened."""
+    relay.results = [
+        EngineResult(data={"ok": False, "mode": "never", "sessionKey": SESSION})
+    ]
+    resp = client.put(f"{BASE}/mode", json={"session_key": SESSION, "mode": "never"})
+    assert resp.status_code == 502
+
+
+def test_an_applied_set_is_reported_as_applied(client, relay):
+    relay.results = [
+        EngineResult(data={"ok": True, "mode": "never", "sessionKey": SESSION})
+    ]
+    data = ok(client.put(f"{BASE}/mode", json={"session_key": SESSION, "mode": "never"}))
+    assert data["mode"] == "never"
+
+
+def test_a_read_without_an_ok_flag_is_not_treated_as_refused(client, relay):
+    """The read route's payload carries no ``ok`` — a missing flag is not a
+    refusal, which is why the check is ``is False`` rather than falsy."""
+    relay.results = [EngineResult(data={"mode": "on-miss", "sessionKey": SESSION})]
+    data = ok(client.get(f"{BASE}/mode", params={"session_key": SESSION}))
+    assert data["mode"] == "on-miss"
+
+
 @pytest.mark.parametrize("mode", ["approve", "on-miss", "never"])
 def test_advertised_modes_are_accepted(client, relay, mode):
     relay.results = [EngineResult(data={"mode": mode, "sessionKey": SESSION})]

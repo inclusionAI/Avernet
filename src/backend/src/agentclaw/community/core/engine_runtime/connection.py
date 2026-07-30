@@ -127,7 +127,11 @@ class EngineConnectionService:
         if not getattr(info, "available", True):
             raise EngineDeviceNotReadyError(f"device unavailable for bot={bot_id}")
 
-        token = getattr(info, "token", "") or ""
+        # The *WebSocket* credential, not `token`. On the local provider's
+        # healthy path `token` is http-info's while the address is built from
+        # ws-info's target — a mismatched pair. Providers that issue no separate
+        # ws credential leave it empty and `token` is right there.
+        token = getattr(info, "ws_token", "") or getattr(info, "token", "") or ""
         headers = {_PROXY_TOKEN_HEADER: token} if token else {}
 
         sockets = [
@@ -230,11 +234,20 @@ class EngineConnectionService:
         disagrees with the real token, and a caller that trusts it either
         re-fetches early or keeps using a dead credential.
 
+        Read from the ``ws_*`` pair for the same reason the token is: on the
+        local provider's healthy path ``expires_at`` describes the http-info
+        token, which is not the credential published here.
+
         Falling back to the computed value covers the paths that report nothing
-        (a local device whose HTTP token carries no stated expiry): a bound of
-        the right order beats omitting a field the contract makes mandatory.
+        (a provider that issues no ws credential and whose HTTP token carries no
+        stated expiry): a bound of the right order beats omitting a field the
+        contract makes mandatory.
         """
-        reported = str(getattr(info, "expires_at", "") or "")
+        reported = str(
+            getattr(info, "ws_expires_at", "")
+            or getattr(info, "expires_at", "")
+            or ""
+        )
         if reported:
             normalised = self._as_utc_iso(reported)
             if normalised:

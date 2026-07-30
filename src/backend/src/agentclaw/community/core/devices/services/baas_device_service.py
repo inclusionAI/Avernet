@@ -768,8 +768,8 @@ class BaasDeviceService(DeviceService):
             ttl: TTL（BaaS 层忽略，由服务端决定）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
             ws_conn_mode: WebSocket 连接模式透传（可选）；不传则不覆盖
-            path: 目标 in-device 路径（可选）。BaaS 用它拼 ``ws_url``，故 relay 下它
-                决定 URL 指向哪个引擎 socket；不传落到默认 ``api/openclaw/ws``。
+            path: 目标 in-device 路径（可选）；BaaS 用它拼 ``ws_url``，故 relay 下它
+                决定 URL 指向哪个引擎 socket，不传落到默认 ``api/openclaw/ws``
 
         Returns:
             DeviceConnectionInfo: 设备连接信息
@@ -815,6 +815,7 @@ class BaasDeviceService(DeviceService):
             tenant=ws_info.tenant,
             engine_port=ws_info.engine_port,
             # 服务端签发；ttl 入参本层忽略，caller 自行推算必然与真 token 不符。
+            # 本链路 token 就是 ws token，故不另填 ws_*（留空即"用 token"）。
             expires_at=ws_info.expires_at,
         )
 

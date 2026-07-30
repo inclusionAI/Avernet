@@ -146,7 +146,7 @@ Two things about this group are not the shape a reader would assume:
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
 | GET | `…/approvals/mode` | `POST /api/approvals/mode/get` | **divergence:** a read is `GET` with `session_key` as a query param, not a `POST` |
-| PUT | `…/approvals/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}` |
+| PUT | `…/approvals/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}`; a refusal (`data.ok=false` under an outer success) is a 502, not a 200 — see below |
 | GET | `…/approvals/modes` | `GET /api/approvals/modes` | static enum; note this is the one engine route with **no** capability gate |
 
 ### connection (1) — NEW, no engine counterpart
@@ -223,6 +223,15 @@ Rules this endpoint must hold:
   of the right order beats omitting a mandatory field. Provider values are
   normalised to UTC ISO 8601 so one shape reaches the wire either way.
   _Corrected 2026-07-30._
+- **The published credential is the WebSocket one.** `DeviceConnectionInfo` now
+  carries a `ws_token`/`ws_expires_at` pair alongside `token`/`expires_at`,
+  because on the local provider's healthy path they are two different tokens:
+  the address is built from ws-info's `target` while `token` is http-info's, so
+  publishing `token` there pairs a WebSocket URL with an HTTP credential. The
+  local path fills the pair from ws-info; the BaaS path leaves it empty because
+  its `token` already *is* the ws token. Empty therefore means "`token` is it",
+  and every reader does `ws_token or token` — which is also what makes the
+  expiry above describe the credential actually handed out. _Added 2026-07-30._
 - The socket set is **capability-derived**, so this endpoint and
   `…/engine/capabilities` must never disagree.
 
@@ -399,6 +408,19 @@ the device — an endpoint this runtime doesn't serve),
 `DeviceAdapterTimeoutError`. All three need `ENVELOPE_ERRORS` entries. Per the
 README's Track B gotcha, **map the base class last** — `ENVELOPE_ERRORS` returns
 on the first `isinstance` match in insertion order.
+
+Two engine failures do **not** arrive as transport errors and have to be read
+out of an otherwise-successful payload:
+
+- `exec.approvals.set` reports the *call* and the *change* separately. A refused
+  mode change comes back as an outer success whose `data.ok` is `false`, so the
+  PUT checks the flag and answers 502 rather than echoing the requested mode as
+  though it had been applied. The check is `is False`, not falsy: the matching
+  read carries no `ok` at all.
+- `GET /engine/status` on an adapter that reports failure in-band returns a raw
+  `{"success": false}` body, rejected before the payload is passed through.
+
+_Added 2026-07-30._
 
 ---
 
