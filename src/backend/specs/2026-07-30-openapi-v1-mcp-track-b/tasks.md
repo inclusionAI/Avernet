@@ -9,7 +9,7 @@ public is written until the extraction is green.
 
 ---
 
-## Task 1: [ ] Extract shared presentation helpers + error types
+## Task 1: [x] Extract shared presentation helpers + error types
 - **Goal:** Give both surfaces one definition of masking, `extInfo` stripping,
   the network-type allowlist, and the domain errors the flow raises.
 - **Files:**
@@ -17,19 +17,20 @@ public is written until the extraction is green.
   - `src/agentclaw/community/core/mcp/presentation.py` (new)
   - `tests/community/core/mcp/test_presentation.py` (new)
 - **Done when:**
-  - [ ] `errors.py` defines `McpServerNotFoundError`, `McpHeadersInvalidError`,
+  - [x] `errors.py` defines `McpServerNotFoundError`, `McpHeadersInvalidError`,
         `McpConfigValueError`, `McpSyncFailedError`, `McpMarketUnavailableError`
         — dependency-free, mirroring `openapi_v1/errors.py`.
-  - [ ] `presentation.py` defines `ALLOWED_NETWORK_TYPES = ("INTERNET",
+  - [x] `presentation.py` defines `ALLOWED_NETWORK_TYPES = ("INTERNET",
         "OFFICE")`, `strip_ext_info` / `strip_ext_info_from_list` (moved verbatim
         from `adapters/http/mcp/router.py:58-85`), `is_network_type_visible`, and
         `mask_api_key(key) -> str | None`.
-  - [ ] `mask_api_key` reproduces the existing expression exactly for both
+  - [x] `mask_api_key` reproduces the existing expression exactly for both
         branches — `len > 8` → `key[:4] + "****" + key[-4:]`, else `"****"`,
         `None` → `None` — matching `router.py:308-309` and `:372-373`.
-  - [ ] Unit tests cover: masking for a long key, a short key (`≤8`), and `None`;
+  - [x] Unit tests cover: masking for a long key, a short key (`≤8`), and `None`;
         `extInfo` removed from a tool's `inputSchema.properties` and left intact
         when absent; the network-type rule for INTERNET/OFFICE/neither/empty.
+        **15 passed.**
 - **Depends on:** —
 
 ## Task 2: [ ] Extract the config read/write flow
