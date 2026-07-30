@@ -5,8 +5,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
+from engine.community.core.skills.exceptions import (
+    InvalidPoolMappingRequestError,
+)
 from engine.community.core.skills.models import (
     PoolLayoutActivateRequest,
     PoolLayoutActivationStatus,
@@ -253,3 +255,24 @@ async def test_openclaw_adapter_keeps_unversioned_physical_mapping() -> None:
     }
     port.publish_pool_mappings.assert_awaited_once_with(expected)
     port.verify_pool_mappings.assert_awaited_once_with(expected)
+
+
+@pytest.mark.asyncio
+async def test_openclaw_adapter_preserves_invalid_mapping_request_contract() -> None:
+    error = InvalidPoolMappingRequestError("invalid mapping payload")
+    port = MagicMock()
+    port.activate_pool_layout = AsyncMock(side_effect=error)
+    port.publish_pool_mappings = AsyncMock(side_effect=error)
+    port.verify_pool_mappings = AsyncMock(side_effect=error)
+    adapter = OpenClawSkillsAdapter(port)
+    request = PoolLayoutActivateRequest(
+        migration_generation="generation-1",
+        preparation_id="preparation-1",
+    )
+
+    with pytest.raises(InvalidPoolMappingRequestError):
+        await adapter.activate_pool_layout(request)
+    with pytest.raises(InvalidPoolMappingRequestError):
+        await adapter.publish_pool_mappings([])
+    with pytest.raises(InvalidPoolMappingRequestError):
+        await adapter.verify_pool_mappings([])

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -139,6 +140,19 @@ def test_desktop_download_layout_uses_public_cutover_and_rollback(
         assert active.evidence["checks"]["stable_repo_bridge_valid"] is True
     else:
         assert "stable_repo_bridge_valid" not in active.evidence["checks"]
+
+    active_marker = json.loads(layout.active_marker.read_text())
+    active_marker["activation_state"] = "finalizing"
+    layout.active_marker.write_text(json.dumps(active_marker))
+    finalizing = inspect_runtime_layout(
+        engine=engine,
+        home=home,
+        repo_delivery=RepoDelivery.DOWNLOAD,
+    )
+    assert finalizing.status is RuntimeLayoutInspectionStatus.READY
+    assert "stable_repo_bridge_valid" not in finalizing.evidence["checks"]
+    active_marker["activation_state"] = "active"
+    layout.active_marker.write_text(json.dumps(active_marker))
 
     (layout.pool_local / "handmade/SKILL.md").write_text("pool")
     rolled_back = ROLLBACK[engine](

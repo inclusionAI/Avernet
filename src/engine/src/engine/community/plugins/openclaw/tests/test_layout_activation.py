@@ -10,11 +10,12 @@ from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
+from engine.community.core.skills.exceptions import (
+    InvalidPoolMappingRequestError,
+)
 from engine.community.core.skills.layout_planner import (
     MAPPING_CONTRACT_VERSION,
-    SkillLayoutResolutionError,
 )
 from engine.community.core.skills.models import (
     PoolLayoutActivateRequest,
@@ -2012,7 +2013,7 @@ async def test_openclaw_port_rejects_nul_before_publish(
     publish = MagicMock()
     monkeypatch.setattr(_skills, "publish_pool_mappings", publish)
 
-    with pytest.raises(SkillLayoutResolutionError):
+    with pytest.raises(InvalidPoolMappingRequestError):
         await OpenClawPluginImpl().publish_pool_mappings(
             {
                 "mapping_contract_version": MAPPING_CONTRACT_VERSION,
@@ -2030,7 +2031,7 @@ def test_logical_dot_mapping_is_rejected_before_active_tree_mutation(
     home, legacy_local, _pool_local, _pool_repo = _prepared_home(tmp_path)
     active_target = legacy_local.parent / "all-skills"
 
-    with pytest.raises(SkillLayoutResolutionError):
+    with pytest.raises(InvalidPoolMappingRequestError):
         resolved = resolve_mapping_payload(
             engine="openclaw",
             source_layout=MappingSourceLayout.POOL,

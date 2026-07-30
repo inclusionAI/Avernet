@@ -30,6 +30,9 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from engine.community.core.engine.context import AuthContext
+from engine.community.core.skills.exceptions import (
+    InvalidPoolMappingRequestError,
+)
 from engine.community.core.skills.models import (
     CenterEnsureRequest,
     CenterEnsureResult,
@@ -183,7 +186,12 @@ class SkillsService(Protocol):
         request: PoolLayoutActivateRequest,
         auth: AuthContext | None = None,
     ) -> PoolLayoutActivationResult:
-        """核对登记事实、同步完整 local 并原子提交 Legacy→Pool bridge。"""
+        """核对登记事实、同步完整 local 并原子提交 Legacy→Pool bridge。
+
+        Raises:
+            InvalidPoolMappingRequestError: The versioned mapping request is
+                invalid and no filesystem mutation has started.
+        """
         ...
 
     async def rollback_pool_layout(
@@ -222,6 +230,10 @@ class SkillsService(Protocol):
 
         ``skills-pool-mapping-v2`` carries logical intents. An omitted version
         is the compatibility form for legacy physical ``SymlinkItem`` values.
+
+        Raises:
+            InvalidPoolMappingRequestError: The version, wire shape, or
+                logical mapping is invalid before filesystem publication.
         """
         ...
 
@@ -233,8 +245,13 @@ class SkillsService(Protocol):
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:
-        """Verify mappings using the same versioned contract as publication."""
+        """Verify mappings using the same versioned contract as publication.
+
+        Raises:
+            InvalidPoolMappingRequestError: The version, wire shape, or
+                logical mapping is invalid before filesystem inspection.
+        """
         ...
 
 
-__all__ = ["SkillsService"]
+__all__ = ["InvalidPoolMappingRequestError", "SkillsService"]

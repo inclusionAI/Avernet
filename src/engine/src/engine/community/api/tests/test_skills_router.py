@@ -11,14 +11,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from engine.community.api.skills.router import router as skills_router
+from engine.community.core.adapters.openclaw.skills import (
+    OpenClawSkillsAdapter,
+)
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.exceptions import (
     CapabilityNotSupportedError,
 )
 from engine.community.core.engine.registry import EngineRegistry
-from engine.community.core.skills.layout_planner import (
-    SkillLayoutResolutionError,
+from engine.community.core.skills.exceptions import (
+    InvalidPoolMappingRequestError,
 )
 from engine.community.core.skills.models import (
     CleanSymlinksResult,
@@ -35,6 +38,7 @@ from engine.community.core.skills.models import (
     SyncSymlinksResult,
 )
 from engine.community.manager import EngineManager
+from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -444,7 +448,7 @@ def test_pool_mapping_routes_propagate_logical_v2_contract(
         ),
     ],
 )
-def test_pool_mapping_routes_map_layout_resolution_errors_to_400(
+def test_pool_mapping_routes_map_invalid_request_errors_to_400(
     client,
     rich_manager,
     method: str,
@@ -456,7 +460,7 @@ def test_pool_mapping_routes_map_layout_resolution_errors_to_400(
         plugin,
         method,
         AsyncMock(
-            side_effect=SkillLayoutResolutionError(
+            side_effect=InvalidPoolMappingRequestError(
                 "mapping_contract_version is unsupported"
             )
         ),
@@ -469,6 +473,57 @@ def test_pool_mapping_routes_map_layout_resolution_errors_to_400(
     assert response.json()["detail"] == (
         "mapping_contract_version is unsupported"
     )
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/api/skills/layout/activate",
+            {
+                "migration_generation": "generation-1",
+                "preparation_id": "preparation-1",
+                "registered_local_names": [],
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {"source": "/pool/a", "target": "/active/a"}
+                ],
+            },
+        ),
+        (
+            "/api/skills/layout/mappings/publish",
+            {
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {"source": "/pool/a", "target": "/active/a"}
+                ],
+            },
+        ),
+        (
+            "/api/skills/layout/mappings/verify",
+            {
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {"source": "/pool/a", "target": "/active/a"}
+                ],
+            },
+        ),
+    ],
+)
+def test_pool_mapping_routes_reject_v2_physical_shape_via_real_adapter(
+    client,
+    rich_manager,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    rich_manager._active_engine._skills = OpenClawSkillsAdapter(
+        OpenClawPluginImpl()
+    )
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 400
+    assert "logical mapping" in response.json()["detail"]
 
 
 @pytest.mark.parametrize(
