@@ -58,11 +58,12 @@ def resolver(fake_binding_repo, fake_bot_repo, builders):
     )
 
 
-def _mock_binding(bid: int, provider: str):
+def _mock_binding(bid: int, provider: str, *, status: str = "ACTIVE"):
     b = MagicMock()
     b.id = bid
     b.device_provider = provider
     b.device_id = f"device-{bid}"
+    b.status = status
     return b
 
 
@@ -109,6 +110,62 @@ def test_bot_no_active_binding_raises_device_not_bound(resolver, fake_binding_re
     fake_binding_repo.get_active_by_bot_and_owner.return_value = None
     with pytest.raises(DeviceNotBoundError):
         resolver.resolve_for_bot("non-existent", "user-1")
+
+
+def test_current_runtime_uses_bot_device_id_instead_of_stale_binding_id(
+    resolver,
+    fake_binding_repo,
+    fake_bot_repo,
+    builders,
+):
+    """重启后 bot.binding_id 可能仍指向 RELEASED 历史记录。
+
+    当前运行时解析必须以 Bot 当前 device_id 为准，不能复用历史 binding_id。
+    """
+    fake_bot_repo.get_by_id_and_owner.return_value = {
+        "bot_type": "personal",
+        "binding_id": 10,
+        "device_id": "device-20",
+    }
+    fake_binding_repo.get_active_by_bot_and_owner.return_value = _mock_binding(
+        10,
+        "arca",
+        status="RELEASED",
+    )
+    current = _mock_binding(20, "arca")
+    current.device_id = "device-20"
+    fake_binding_repo.get_by_device_id.return_value = current
+
+    ctx = resolver.resolve_current_runtime_for_bot("bot-1", "owner-1")
+
+    assert ctx.binding_id == 20
+    assert ctx.conn_info["_provider_mark"] == "arca-built"
+    fake_binding_repo.get_by_device_id.assert_called_once_with("device-20")
+    fake_binding_repo.get_active_by_bot_and_owner.assert_not_called()
+    builders["arca"].build.assert_called_once_with(
+        current,
+        "owner-1",
+        device_uuid=None,
+    )
+
+
+@pytest.mark.parametrize("status", ["PENDING", "FAILED", "RELEASED", "STOPPED"])
+def test_current_runtime_rejects_non_active_binding(
+    resolver,
+    fake_binding_repo,
+    fake_bot_repo,
+    status,
+):
+    fake_bot_repo.get_by_id_and_owner.return_value = {
+        "bot_type": "personal",
+        "device_id": "device-20",
+    }
+    current = _mock_binding(20, "arca", status=status)
+    current.device_id = "device-20"
+    fake_binding_repo.get_by_device_id.return_value = current
+
+    with pytest.raises(DeviceNotBoundError, match="no active runtime binding"):
+        resolver.resolve_current_runtime_for_bot("bot-1", "owner-1")
 
 
 def test_unknown_provider_raises_unknown_provider_error(resolver, fake_binding_repo):

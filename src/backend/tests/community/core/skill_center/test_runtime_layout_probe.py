@@ -29,9 +29,9 @@ def _service(
     context = Mock(conn_info={"url": "http://current-runtime"})
     resolver = Mock()
     if resolver_error is not None:
-        resolver.resolve_for_bot.side_effect = resolver_error
+        resolver.resolve_current_runtime_for_bot.side_effect = resolver_error
     else:
-        resolver.resolve_for_bot.return_value = context
+        resolver.resolve_current_runtime_for_bot.return_value = context
     transport = Mock()
     if transport_error is not None:
         transport.invoke = AsyncMock(side_effect=transport_error)
@@ -74,7 +74,10 @@ async def test_ready_is_taken_from_current_runtime_inspection():
 
     assert result.status is RuntimeLayoutProbeStatus.READY
     assert result.preparation_id == "2a958f59-8cf4-4413-a267-7d56d3382f23"
-    resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
+    resolver.resolve_current_runtime_for_bot.assert_called_once_with(
+        "bot-1",
+        "user-1",
+    )
     transport.invoke.assert_awaited_once_with(
         context.conn_info,
         "POST",
@@ -116,7 +119,10 @@ async def test_claude_code_ready_uses_current_runtime_probe():
 
     assert result.status is RuntimeLayoutProbeStatus.READY
     assert result.engine == "claude_code"
-    resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
+    resolver.resolve_current_runtime_for_bot.assert_called_once_with(
+        "bot-1",
+        "user-1",
+    )
     transport.invoke.assert_awaited_once_with(
         context.conn_info,
         "POST",
@@ -158,7 +164,10 @@ async def test_aicoding_ready_uses_current_runtime_probe():
 
     assert result.status is RuntimeLayoutProbeStatus.READY
     assert result.engine == "aicoding"
-    resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
+    resolver.resolve_current_runtime_for_bot.assert_called_once_with(
+        "bot-1",
+        "user-1",
+    )
     transport.invoke.assert_awaited_once_with(
         context.conn_info,
         "POST",
@@ -201,7 +210,10 @@ async def test_hermes_ready_requires_current_runtime_h0_evidence():
     assert result.status is RuntimeLayoutProbeStatus.READY
     assert result.engine == "hermes"
     assert result.evidence["checks"]["legacy_local_bridge_valid"] is True
-    resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
+    resolver.resolve_current_runtime_for_bot.assert_called_once_with(
+        "bot-1",
+        "user-1",
+    )
     transport.invoke.assert_awaited_once_with(
         context.conn_info,
         "POST",
@@ -460,7 +472,7 @@ async def test_teclaw_is_noop_without_resolving_runtime():
         preparation_id=None,
         evidence={"reason": "engine_has_no_filesystem_pool_layout"},
     )
-    resolver.resolve_for_bot.assert_not_called()
+    resolver.resolve_current_runtime_for_bot.assert_not_called()
     transport.invoke.assert_not_awaited()
 
 

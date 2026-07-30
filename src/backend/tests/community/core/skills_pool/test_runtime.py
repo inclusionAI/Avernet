@@ -20,7 +20,7 @@ class FakeResolver:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def resolve_for_bot(self, bot_id: str, user_id: str):
+    def resolve_current_runtime_for_bot(self, bot_id: str, user_id: str):
         self.calls.append((bot_id, user_id))
         return SimpleNamespace(conn_info={"binding": len(self.calls)})
 

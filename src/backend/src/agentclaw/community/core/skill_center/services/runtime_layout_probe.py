@@ -87,7 +87,10 @@ class CurrentRuntimeLayoutProbeService:
         if engine not in {"openclaw", "claude_code", "aicoding", "hermes"}:
             return self._not_capable(engine, "engine_pool_probe_not_implemented")
         try:
-            context = self._resolver.resolve_for_bot(bot_id, user_id)
+            context = self._resolver.resolve_current_runtime_for_bot(
+                bot_id,
+                user_id,
+            )
             response = await self._transport.invoke(
                 context.conn_info,
                 "POST",
