@@ -54,6 +54,7 @@ class ExecutionPortClient(ExecutionPort):
 
     def dispatch_single_bot(self, task_id: str, node_id: str, bot_id: str) -> DispatchResult:
         # TODO(R6): engine programmatic dispatch + 回投 endpoint.
+        logger.info("[ExecutionPortClient] dispatch_single_bot task=%s node=%s bot=%s", task_id, node_id, bot_id)
         self._post(
             f"{self._engine}/api/tasks/dispatch",
             {"task_id": task_id, "node_id": node_id, "bot_id": bot_id, "mode": "single_bot"},
@@ -99,6 +100,7 @@ class ExecutionPortClient(ExecutionPort):
         # TODO(R6): engine probe/status-report-request endpoint — ask the bot
         # to actively report its status (the bot may be hung). Fire-and-forget;
         # the bot posts NODE_ACCEPTED/NODE_FAILED on receipt.
+        logger.info("[ExecutionPortClient] probe task=%s node=%s bot=%s", task_id, node_id, bot_id)
         self._post(
             f"{self._engine}/api/tasks/probe",
             {"task_id": task_id, "node_id": node_id, "bot_id": bot_id},

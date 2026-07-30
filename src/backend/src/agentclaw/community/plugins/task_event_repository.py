@@ -105,11 +105,13 @@ def _row_to_event(row: AcTaskEventModel) -> TaskEvent:
     kind = EventKind(row.kind)
     payload = json.loads(row.payload_json) if row.payload_json else {}
     reported = bool(row.reported) or is_reported_kind(kind)
+    occurred_at = row.gmt_create.isoformat() if row.gmt_create is not None else None
     common = dict(
         task_id=row.task_id,
         seq=row.seq,
         kind=kind,
         reported=reported,
+        occurred_at=occurred_at,
     )
     if kind is EventKind.TASK_CREATED:
         return TaskCreated(title=payload.get("title", ""), source=payload.get("source", ""), **common)

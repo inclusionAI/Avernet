@@ -206,6 +206,15 @@ def test_load_events_after_seq(event_repo):
     assert all(isinstance(e, TaskEvent) for e in tail)
 
 
+def test_load_events_backfills_occurred_at(event_repo):
+    # occurred_at is populated from ac_task_event.gmt_create on read so the
+    # GET /tasks/{id}/history trace carries a wall-clock.
+    event_repo.append(TaskEvent(task_id="task-1", seq=1, kind=EventKind.TASK_CREATED))
+    loaded = event_repo.load_events("task-1")
+    assert loaded[0].occurred_at is not None
+    assert isinstance(loaded[0].occurred_at, str)
+
+
 def test_latest_seq_none_when_no_events(event_repo):
     assert event_repo.latest_seq("ghost") is None
 

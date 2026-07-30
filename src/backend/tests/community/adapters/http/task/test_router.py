@@ -161,6 +161,19 @@ class _StubTaskService:
             "edges": [],
         }
 
+    def history(self, task_id: str, after_seq: int = 0) -> list[Any]:
+        # Real TaskEvent objects (router maps via getattr). seq-ordered trace.
+        from agentclaw.community.core.task.domain.events import EventKind, TaskEvent
+        all_events = [
+            TaskEvent(task_id=task_id, seq=1, kind=EventKind.TASK_CREATED,
+                      payload={"title": "x"}, reported=False, occurred_at="2026-07-30T00:00:00"),
+            TaskEvent(task_id=task_id, seq=2, kind=EventKind.PLAN_FINALIZED,
+                      payload={"node_count": 3}, reported=False, occurred_at="2026-07-30T00:00:01"),
+            TaskEvent(task_id=task_id, seq=3, kind=EventKind.NODE_RUNNING,
+                      payload={"node_id": "n1"}, reported=True, occurred_at="2026-07-30T00:00:02"),
+        ]
+        return [e for e in all_events if e.seq > after_seq]
+
 
 def _client_with_stub() -> TestClient:
     from agentclaw.community.api.task import TaskServiceProtocol
@@ -238,3 +251,26 @@ def test_get_sub_dag_returns_200():
     assert r.status_code == 200
     body = r.json()
     assert body["nodes"][0]["node_id"] == "sm-n1"
+
+
+def test_get_task_history_returns_200():
+    client = _client_with_stub()
+    r = client.get("/api/tasks/t1/history")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["task_id"] == "t1"
+    assert body["total"] == 3
+    evs = body["items"]
+    assert [e["seq"] for e in evs] == [1, 2, 3]  # seq-ordered
+    assert evs[0]["kind"] == "task.created"
+    assert evs[2]["reported"] is True
+    assert evs[0]["occurred_at"] == "2026-07-30T00:00:00"
+
+
+def test_get_task_history_after_seq_filter():
+    client = _client_with_stub()
+    r = client.get("/api/tasks/t1/history?after_seq=1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 2
+    assert [e["seq"] for e in body["items"]] == [2, 3]

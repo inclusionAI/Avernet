@@ -72,6 +72,9 @@ class NoopTaskService(TaskService):
     def claim_node(self, task_id: str, node_id: str, executor_id: str) -> Optional[DispatchResult]:
         return None
 
+    def history(self, task_id: str, after_seq: int = 0) -> list:
+        return []
+
     # --- canvas (secondary panel) query face (Phase 0.8, plan §1.4b) -------
     # Neutral snapshots so the router/canvas smoke runs before the real query
     # group (Phase 2) and SmGraphAdapter (Phase 4) land. Never raise.

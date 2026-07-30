@@ -152,6 +152,10 @@ class TaskService:
             title=title,
             source=source_enum.value,
         )
+        logger.info(
+            "[Task] task=%s create source=%s title=%r status=intake seq=1",
+            task_id, source_enum.value, title,
+        )
         # ★ FR-OBS-11: popup the task-entry dynamic-workflow canvas on create.
         self._panel_publisher.publish(
             PanelMessage(
@@ -196,6 +200,10 @@ class TaskService:
             node_count=len(plan.sub_tasks),
             confidence=float(plan.confidence),
         )
+        logger.info(
+            "[Task] task=%s finalize_plan nodes=%d confidence=%.2f → planned",
+            task_id, len(plan.sub_tasks), float(plan.confidence),
+        )
         self._task_repo.save(task)
         return self._task_repo.get_by_id(task_id)
 
@@ -232,6 +240,10 @@ class TaskService:
         task.latest_event_seq = log_event.seq
         self._apply_event(task, kind, payload)
         self._task_repo.save(task)
+        logger.info(
+            "[Task] task=%s on_event kind=%s seq=%d → status=%s",
+            task_id, kind.value, log_event.seq, task.status.value,
+        )
         return self._task_repo.get_by_id(task_id)
 
     def claim_node(
@@ -260,6 +272,10 @@ class TaskService:
         )
         token = _new_accept_token()
         self._task_repo.save(task)
+        logger.info(
+            "[Task] task=%s claim_node node=%s → running executor=%s run_mode=%s",
+            task_id, node_id, executor_id, node.run_mode.value,
+        )
         return DispatchResult(
             node_id=node_id,
             executor_id=executor_id,
@@ -271,6 +287,11 @@ class TaskService:
 
     def get(self, task_id: str) -> Optional[Task]:
         return self._load(task_id)
+
+    def history(self, task_id: str, after_seq: int = 0) -> list[TaskEvent]:
+        """Return the append-only event log in seq order (the authoritative
+        execution trace). ``after_seq`` for incremental follow."""
+        return self._event_repo.load_events(task_id, after_seq=after_seq)
 
     def list_by_user(self, user_id: str, limit: int = 50) -> list[Task]:
         tasks = self._task_repo.list_by_user(user_id)

@@ -172,3 +172,27 @@ class TaskNodeDetailView(BaseModel):
     acceptance_result: Optional[Any] = None
     properties: dict[str, Any] = Field(default_factory=dict)
     note: str = ""
+
+
+class TaskEventItem(BaseModel):
+    """One row of the append-only event log (the authoritative execution trace).
+
+    ``seq`` is monotonic per task (single-writer); ``occurred_at`` is the
+    wall-clock the event landed in ``ac_task_event`` (ISO-8601, from
+    ``gmt_create``); ``reported`` distinguishes owner-bot 回投 from
+    system-driven events.
+    """
+
+    seq: int
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    reported: bool = False
+    occurred_at: Optional[str] = None
+
+
+class TaskHistoryResponse(BaseModel):
+    """Seq-ordered event log for a task — exposed via GET /tasks/{id}/history."""
+
+    task_id: str
+    items: list[TaskEventItem] = Field(default_factory=list)
+    total: int = 0

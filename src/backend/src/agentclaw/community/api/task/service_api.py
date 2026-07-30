@@ -47,6 +47,9 @@ class TaskServiceProtocol(Protocol):
 
     def claim_node(self, *args: Any, **kwargs: Any) -> Any: ...
 
+    # --- history / trace face (GET /tasks/{id}/history) ---
+    def history(self, *args: Any, **kwargs: Any) -> Any: ...
+
 
 @runtime_checkable
 class TaskSchedulerProtocol(Protocol):

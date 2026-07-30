@@ -87,6 +87,10 @@ class TaskEvent:
     kind: EventKind
     reported: bool = False
     payload: dict = field(default_factory=dict)
+    # Wall-clock of when the event landed in the log (ISO-8601). Set by the
+    # ORM repo on read (from ``gmt_create``); None for in-memory events that
+    # have not been persisted/reloaded. Exposed via GET /tasks/{id}/history.
+    occurred_at: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.seq < 0:

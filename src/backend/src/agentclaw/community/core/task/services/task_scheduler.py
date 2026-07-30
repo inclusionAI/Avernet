@@ -248,6 +248,7 @@ class TaskScheduler:
             raise IllegalTransitionError(
                 f"start requires PLANNED, task {task_id} is {task.status.value}"
             )
+        logger.info("[Scheduler] task=%s start planned→executing", task_id)
         # PLANNED → EXECUTING (legal edge)
         task.status = TaskStatus.EXECUTING
         if task.execution_graph is not None:
@@ -270,6 +271,7 @@ class TaskScheduler:
             return {"task_id": task_id, "action": "noop", "reason": "not_found"}
         if task.status not in {TaskStatus.EXECUTING}:
             return {"task_id": task_id, "action": "noop", "reason": f"status={task.status.value}"}
+        logger.info("[Scheduler] task=%s tick status=executing", task_id)
 
         progressed = False
         if task.execution_graph is not None:
@@ -335,6 +337,11 @@ class TaskScheduler:
         to BBS via the Driver; the no-candidate fallback uses the Driver (Noop).
         """
         task_id = task.id
+        logger.info(
+            "[Scheduler] task=%s dispatch node=%s route=%s run_mode=%s candidates=%d",
+            task_id, node.node_id, rc.value,
+            recommendation.run_mode.value, len(recommendation.candidates),
+        )
         if rc is RouteClass.C5:
             self._driver.escalate_to_bbs(task_id, reason=f"node {node.node_id} C5")
             return False  # BBS escalation does not set RUNNING here
@@ -392,6 +399,13 @@ class TaskScheduler:
             n.properties["running_ticks"] = int(n.properties.get("running_ticks", 0)) + 1
             action = watchdog(n)
             bot_id = n.assignee
+            logger.info(
+                "[Scheduler] task=%s watchdog node=%s action=%s bot=%s ticks=%d probes=%d redrives=%d",
+                task.id, n.node_id, action.value, bot_id,
+                n.properties.get("running_ticks", 0),
+                n.properties.get("probe_count", 0),
+                n.properties.get("redrive_count", 0),
+            )
             if action is WatchdogAction.PROBE:
                 self._execution.probe(task.id, n.node_id, bot_id)
                 n.properties["probe_count"] = int(n.properties.get("probe_count", 0)) + 1

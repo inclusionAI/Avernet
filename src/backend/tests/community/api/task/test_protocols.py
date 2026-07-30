@@ -67,6 +67,10 @@ class _NoopTaskService:
     def claim_node(self, task_id: str, node_id: str, executor_id: str) -> Any:
         return None
 
+    # history / trace face (GET /tasks/{id}/history)
+    def history(self, task_id: str, after_seq: int = 0) -> list[Any]:
+        return []
+
 
 class _NoopDiscover:
     def recommend(self, task_id: str, node_id: str) -> Any:

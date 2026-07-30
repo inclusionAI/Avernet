@@ -136,6 +136,13 @@ class TaskService(Protocol):
         Raises if the node is already claimed or terminal."""
         ...
 
+    # --- history / trace face (plan §6.6) ---------------------------------
+    def history(self, task_id: str, after_seq: int = 0) -> list[TaskEvent]:
+        """Return the append-only event log for ``task_id`` in seq order
+        (the authoritative execution trace). ``after_seq`` for incremental
+        follow. Exposed via GET /tasks/{task_id}/history."""
+        ...
+
 
 @runtime_checkable
 class BotDiscoverPort(Protocol):

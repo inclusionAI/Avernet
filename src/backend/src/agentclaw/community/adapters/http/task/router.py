@@ -39,7 +39,9 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskCreatedResponse,
     TaskDetailResponse,
     TaskEdgeView,
+    TaskEventItem,
     TaskGraphView,
+    TaskHistoryResponse,
     TaskListItem,
     TaskListResponse,
     TaskNodeDetailView,
@@ -302,6 +304,29 @@ def get_sub_dag(task_id: str, node_id: str, service: TaskServiceProtocol = Injec
     if snapshot is None:
         raise HTTPException(status_code=404, detail="node has no sub-dag reference")
     return _graph_view_of(snapshot)
+
+
+@router.get("/{task_id}/history", response_model=TaskHistoryResponse)
+def get_task_history(
+    task_id: str,
+    after_seq: int = Query(0, ge=0, description="Return events with seq > after_seq (incremental follow)."),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
+) -> Any:
+    """The append-only event log in seq order — the authoritative execution
+    trace (task created → plan finalized → node dispatched/running →
+    accepted/rejected/failed → ...). ``after_seq`` for incremental follow."""
+    events = service.history(task_id, after_seq=after_seq)
+    items = [
+        TaskEventItem(
+            seq=int(getattr(e, "seq", 0)),
+            kind=str(getattr(getattr(e, "kind", None), "value", getattr(e, "kind", ""))),
+            payload=dict(getattr(e, "payload", {}) or {}),
+            reported=bool(getattr(e, "reported", False)),
+            occurred_at=getattr(e, "occurred_at", None),
+        )
+        for e in events
+    ]
+    return TaskHistoryResponse(task_id=task_id, items=items, total=len(items))
 
 
 @router.websocket("/{task_id}/graph/stream")
