@@ -504,6 +504,9 @@ class LocalDeviceService(DeviceService):
             )
             url = http_info.http_url
             token = http_info.token
+            # http_info 返回的 target 是 3 段格式 LOCAL_{dev}@{tpl}:{port}，
+            # 与 token（JWT 中的 target claim）对齐。
+            target = http_info.target
         except Exception as e:
             logger.warning(
                 "[_compose_device_conn_info] http-info unavailable bind=%s: %s "
@@ -512,10 +515,11 @@ class LocalDeviceService(DeviceService):
             )
             url = ""
             token = ws_info.token
-
+            # 回退到 WS 链路的 target，与 ws_info.token 对齐。
+            target = ws_info.target
         return DeviceConnectionInfo(
             type=LOCAL_DEVICE_PROVIDER,
-            target=ws_info.target,
+            target=target,
             token=token,
             engine_type=device.device_props.get("engine", DEFAULT_ENGINE_TYPE),
             baas_base_url=ws_info.baas_base_url,
