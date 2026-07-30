@@ -70,6 +70,8 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
     "errors",        # adapter-owned error types (kept import-light on purpose)
     "clusters",      # public-API domain rule (engine ↔ cluster bijection)
     "principal",     # caller-identity extraction from the principal seam
+    "enums",         # adapter-owned public enums (import-light by design:
+                     # a public vocabulary must not depend on the HTTP stack)
 )
 
 
