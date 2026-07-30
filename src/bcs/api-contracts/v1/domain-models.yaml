@@ -640,7 +640,7 @@ SessionMessage:
   type: object
   additionalProperties: false
   required:
-    - message_id
+    - id
     - session_seq
     - sender_id
     - sender_type
@@ -648,7 +648,7 @@ SessionMessage:
     - content
     - created_at
   properties:
-    message_id:
+    id:
       type: string
     session_seq:
       type: integer

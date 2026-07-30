@@ -63,6 +63,8 @@ Comment follow-ups (Rust mapping):
 3. `SessionInput{query?}` + group-context fallback — `create_session` input narrowed (extract `query` from JSON); `SessionDetail.input` projects `Session.input.query`; fallback: no `input` → V1 facade uses parent group `context` as `input.query`.
 4. Stable ordering — `SessionRepoPort::list_by_group` enforces `created_at DESC, session_id ASC`; message store enforces `session_seq ASC` (memory sort + mysql `ORDER BY`).
 5. `SessionDetail.input` projection + `SessionMessage.content` from legacy `serde_json::Value` to string.
+6. C2 — `GroupMessage` add `session_seq: Option<i64>` + `sender_type` with `#[serde(default, skip_serializing_if)]` (serde-compat: old JSON decodes None, None not serialized, legacy wire unchanged); stores fill `session_seq` from `PersistedMessage`; V1 derives `MessageSenderKind` from sender/`"system"`, maps `GroupMessageType`→`SessionMessageKind`. V1 field `message_id`→`id` to match legacy wire.
+7. C5 — `SessionRepoPort` add `count_by_group(group_id, status, title_contains, participant_id) -> u64`; old `list_by_group` signature unchanged (compat); `SessionManagementService` exposes count so V1 `list_sessions` populates `total`.
 
 Other alignments: `SessionStatus[running,completed]`; completion idempotent (`complete_if_running` CAS, Completed→`Ok(None)`→V1 200); `delete_session` idempotent (`delete`→bool→`{deleted}`); `SessionParticipant.actor_kind=const bot`; `update_session` only `title`.
 
@@ -85,6 +87,8 @@ Comment follow-ups:
 2. Friend-request `message` removed (`9aca2977`); Rust DTO carries no message.
 3. `remove_friendship` single-pair (V1 new capability) — legacy `FriendCoreService` only has `remove_all_friendships`; per design §8.7 add single-pair remove to `FriendCoreService` + `FriendRepo` + store in this slice.
 4. `accept_invitation` `bot_uuid` semantics — Bot Principal omits `bot_uuid` (self); Human carries `bot_uuid` (must verify `created_by`); Bot Principal carrying `bot_uuid` rejected (no impersonation).
+5. C3 — `InviteTokenPayload` add `target_type: Option<InvitationTargetType>` + `#[serde(default)]` (runtime-compat: old tokens decode None, legacy `/groups/join` / `/sessions/join` don't read it); V1 `accept` rejects `target_type=None`, serves only V1-issued tokens.
+6. C4 — do NOT change old `list_friends` (`Vec<String>`); add `FriendRepoPort::list_friends_with_created_at`; add `created_at` column to `bcs_friendships` (migration) + write `now` inside `add_friendship` (signature unchanged); V1 `FriendshipService` uses new method; legacy `GET /bots/{id}/friends` unaffected.
 
 Tests: use case (token target_type/target_id, Bot self-accept, Human owned-bot accept `created_by`, expired→410, repeat-accept idempotent, completed session→409, friend-request receiver-only, accept/reject idempotent, friendship symmetric idempotent) + route (9 ops; `bot_uuid` path cannot override Principal, `from_bot_uuid` cannot override Bot Principal, no Legacy response leak).
 Dependency: based on #P2 merged `dev`; legacy `InviteService` / `FriendCoreService` / `FriendRequestCoreService` ready; **single-pair friendship remove needs new legacy Core API** (done in-slice).
@@ -123,6 +127,11 @@ Plan tasks 13 (mount) + 14 (gateway) + 15 (principal transport) + 16 (compat gat
 | List stable ordering | `ddb84bd3` | #P2 (session) + #P3 (friendship) |
 | `accept_invitation` `bot_uuid` semantics | (contract already correct) | #P3 |
 | `remove_friendship` single-pair (new capability) | (contract already defines) | #P3 (new legacy Core API) |
+| C1 arbitrary JSON session input | narrowing intentional (declined) | — |
+| C2 GroupMessage `session_seq`/`sender_type` + `message_id`→`id` | `message_id`→`id` | #P2 (GroupMessage add fields, serde-compat) |
+| C3 invitation token `target_type` | (contract already) | #P3 (`InviteTokenPayload` add `Option<target_type>`, old tokens via legacy join) |
+| C4 friendship `created_at` | (contract already) | #P3 (new `list_friends_with_created_at` + DB column, old `list_friends` unchanged) |
+| C5 session list `total` | (contract already) | #P2 (new `count_by_group`, old `list_by_group` unchanged) |
 
 ## References
 
