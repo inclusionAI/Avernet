@@ -90,7 +90,18 @@ class Session(BaseModel):
     )
     cwd: str = Field(description="Working directory on the device; may be empty.")
     runtime: str = Field(description="Runtime label reported by the bot; may be empty.")
-    message_count: int = Field(description="Number of messages in the session.")
+    # Lower bound, not exact: one bundled engine reports an authoritative
+    # messageCount, the other derives it from a history fetch capped at 100,
+    # so a longer session saturates at the cap. Lifting that would cost an
+    # extra RPC per session on a list route — the same trade rejected for
+    # Page.total, and resolved the same way: bound it and say so.
+    message_count: int = Field(
+        description="Number of messages in the session, as a lower bound. "
+        "Depending on the bot's engine this may saturate at an internal fetch "
+        "cap instead of the session's true length, so read a large value as "
+        "'at least this many'. The messages endpoint reports an exact total "
+        "once its last page is reached."
+    )
     gmt_create: str = Field(description="Creation time (ISO 8601); may be empty.")
     gmt_modified: str = Field(description="Last-modified time (ISO 8601); may be empty.")
 
