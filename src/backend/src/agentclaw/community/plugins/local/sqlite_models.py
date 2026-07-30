@@ -69,6 +69,7 @@ class EntityDeviceBinding(Base):
     __table_args__ = (
         Index("idx_entity_status", "entity_type", "entity_id", "status"),
         Index("idx_env_entity_status", "env", "entity_type", "entity_id", "status"),
+        Index("idx_env_entity_id_status", "env", "entity_id", "status"),
         Index("idx_device_id", "device_id"),
     )
 

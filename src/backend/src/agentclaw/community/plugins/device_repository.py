@@ -367,19 +367,19 @@ class DeviceRepository(_DeviceBindingRepositoryProtocol):
         self,
         *,
         entity_id: str,
-        entity_type: str,
         env: str,
     ) -> list[DeviceBindingRecord]:
-        """按 entity_id + entity_type 查询所有 ACTIVE 状态的绑定记录。
+        """按 entity_id 查询所有 ACTIVE 状态的绑定记录。
 
         不通过 ac_bots.binding_id JOIN，直接查 ac_entity_device_binding。
+        不使用 entity_type 过滤：避免上游 bot 记录缺失时 fallback 到
+        错误的 entity_type 导致查询遗漏（如 staff 误查 team）。
         """
         with self._db.orm_session() as db:
             rows = (
                 db.query(EntityDeviceBinding)
                 .filter(
                     EntityDeviceBinding.entity_id == entity_id,
-                    EntityDeviceBinding.entity_type == entity_type,
                     EntityDeviceBinding.env == env,
                     EntityDeviceBinding.status == _DeviceBindingStatus.ACTIVE,
                 )

@@ -189,10 +189,9 @@ class DeviceBindingRepository(Protocol):
         self,
         *,
         entity_id: str,
-        entity_type: str,
         env: str,
     ) -> list[DeviceBindingRecord]:
-        """按 entity_id + entity_type 查询所有 ACTIVE 状态的绑定记录.
+        """按 entity_id 查询所有 ACTIVE 状态的绑定记录.
 
         与 ``get_active_by_bot_and_owner`` 不同，本方法**不通过**
         ``ac_bots.binding_id`` JOIN，而是直接查 ``ac_entity_device_binding``
@@ -201,9 +200,14 @@ class DeviceBindingRepository(Protocol):
         用途：default 区评测沙箱的 binding 不被 ``ac_bots.binding_id``
         引用，只能通过实体 + device_props 标记来查找。
 
+        不使用 entity_type 作为查询条件：entity_type 依赖上游 bot 记录
+        的 fallback，当 bot 数据缺失时可能产生错误匹配（如 staff 误查
+        team），去掉后由 entity_id + env + status 三字段精确隔离，
+        Python 层按 device_props 中的 AGENTCLAW_DEFAULT_TAG 和 bot_id
+        进一步过滤。
+
         Args:
             entity_id: 实体 ID（与 ac_bots.owner_id 一致）
-            entity_type: 实体类型（如 "staff"）
             env: 环境标识（dev/pre/prod）
 
         Returns:

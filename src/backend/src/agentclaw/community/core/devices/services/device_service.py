@@ -647,6 +647,7 @@ class DeviceService:
             "nas_mappings": json.dumps(nas_mappings_json, ensure_ascii=False) if nas_mappings else "[]",
             "callback_token": callback_token,
             "bolt_id": bolt_id,
+            "bot_id": resolved_bot_id,
             "symbol": json.dumps(symbol_json, ensure_ascii=False) if symbol else "[]",
             "entity_id": resolved_entity_id,
             "entity_type": resolved_entity_type,

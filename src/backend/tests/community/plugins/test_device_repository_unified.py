@@ -1255,7 +1255,11 @@ def test_update_bot_status_on_device_active_env_isolation(repo, db):
 
 
 def test_get_active_bindings_by_entity_returns_active_only(repo):
-    """Only ACTIVE bindings for the given entity are returned."""
+    """Only ACTIVE bindings for the given entity are returned.
+
+    不区分 entity_type，同一个 entity_id 下所有 entity_type 的
+    ACTIVE binding 均返回。
+    """
     b1 = repo.insert_binding(**_binding(
         entity_id="staff-x", entity_type="staff",
         device_id="dev-active", status="ACTIVE",
@@ -1270,16 +1274,39 @@ def test_get_active_bindings_by_entity_returns_active_only(repo):
     ))
 
     result = repo.get_active_bindings_by_entity(
-        entity_id="staff-x", entity_type="staff", env="dev",
+        entity_id="staff-x", env="dev",
     )
     ids = {r.id for r in result}
     assert b1 in ids
     assert b3 not in ids
 
 
+def test_get_active_bindings_by_entity_cross_type(repo):
+    """同一 entity_id 不同 entity_type 的 ACTIVE binding 均返回。"""
+    b_staff = repo.insert_binding(**_binding(
+        entity_id="x001", entity_type="staff",
+        device_id="dev-staff", status="ACTIVE",
+    ))
+    b_team = repo.insert_binding(**_binding(
+        entity_id="x001", entity_type="team",
+        device_id="dev-team", status="ACTIVE",
+    ))
+    repo.insert_binding(**_binding(
+        entity_id="x001", entity_type="staff",
+        device_id="dev-released", status="RELEASED",
+    ))
+
+    result = repo.get_active_bindings_by_entity(
+        entity_id="x001", env="dev",
+    )
+    ids = {r.id for r in result}
+    assert b_staff in ids
+    assert b_team in ids
+
+
 def test_get_active_bindings_by_entity_empty(repo):
     """No matching entity → empty list."""
     result = repo.get_active_bindings_by_entity(
-        entity_id="nonexistent", entity_type="staff", env="dev",
+        entity_id="nonexistent", env="dev",
     )
     assert result == []
