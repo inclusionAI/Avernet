@@ -22,6 +22,10 @@
 三张表仍走现有约定：ORM 模型挂在共享 `Base` 上，由 `DataSourcePlugin.create_all()`
 建表（`BareDatabasePlugin` 已会把 `BIGINT` 主键降级为 `Integer` 以适配内存 SQLite）。
 
+同时把 **bot 域对 app 的引用**也对齐到 `avernet_application.id`：`bcs_bots.app_id` /
+`RegisteredBot.app_id` / `Bot.app_id`（`BotPrincipal.bot`）由 `str` 改为 `int`（long），取值即所属
+app 的代理主键 `id`。
+
 ### 已确认决策
 
 1. **替换并迁移**（非并存）：三张新表是最终 canonical schema；把现有 app / access_key 的
@@ -38,8 +42,7 @@
 - app token 过期（`avernet_application` 无 `expire_at`）。
 - `/admin` 接口鉴权（沿用现状：not-for-prod，不鉴权）。
 - Alembic 迁移文件：gateway 目前无 migrations 目录，建表机制是 `create_all`。
-- bot 域的 `app_id`（`bcs_bots` / `RegisteredBot` / `BotPrincipal`）改造——那是"bot 所属 app"的另一概念，
-  本期保持不动（见 §9 风险）。
+- bot 域的 `env` / `agent_code` / `created_by` 等其它列的改造（只改 `app_id` 的类型）。
 - app-token 凭证 JWT 的下游验签。
 
 ## 2. 三张表 schema
@@ -107,10 +110,12 @@
 - **`spi/authn/_models.py` → `ThirdPartyApp`**：`app_id` 类型 `str` → `int`，取值 = 行的代理主键 `id`；
   更新注释（"the app's surrogate bigint id"）。`AppPrincipal` 结构不变（仍 `app: ThirdPartyApp`）。
 - **`spi/access_key/_ports.py` → `RegisteredAccessKey`**：不变。
+- **`spi/bot/_ports.py` → `RegisteredBot`**：`app_id: str` → `int`（所属 app 的代理主键 `id`）。
+- **`spi/authn/_models.py` → `Bot`**：`app_id: str` → `int`（`BotPrincipal.bot.app_id`）。注释同步。
 
-> 契约影响：转发给下游的签名 principal 里 `principals[].app.app_id` 由 string 变 int。
-> gateway 内由 `BarePrincipalSigner.sign()` 经 `model_dump(mode="json")` 序列化进 JWT `principals`
-> claim，故下游解析该字段的代码需兼容 int。bot 域 `BotPrincipal.app_id` 不受影响（保持 str）。
+> 契约影响：转发给下游的签名 principal 里 `principals[].app.app_id` 与 `principals[].bot.app_id`
+> 均由 string 变 int。gateway 内由 `BarePrincipalSigner.sign()` 经 `model_dump(mode="json")` 序列化进
+> JWT `principals` claim，故下游解析这两处 `app_id` 的代码需兼容 int。
 
 ## 4. 代码改动（按模块）
 
@@ -131,6 +136,11 @@
 - **`_issuer.py`**：签名不变；docstring 表名更新。
 - **`__init__.py`**：导出不变。
 
+### core/bot（app 引用类型对齐）
+- **`_orm.py`**：`BotRow.app_id` 列 `Mapped[str]` → `Mapped[int] = mapped_column(BigInteger)`
+  （逻辑引用 `avernet_application.id`；ORM 层不加 FK）。`to_record()` 不变。
+- **`plugins/authn/bot_token/_strategy.py`**：无代码改动（`app_id=bot.app_id` 透传，类型随之变 int）。
+
 ### 新增 core/tenant（仅 ORM）
 - **`core/tenant/_orm.py` → `TenantRow`**：`__tablename__` = `"avernet_tenant"`，列按 §2.2。
 - **`core/tenant/__init__.py`**：导出 `TenantRow`。
@@ -148,8 +158,9 @@
 
 ### bootstrap
 - **`bootstrap/_authn.py`**：`_seed_authn` 中 `AppRow` seed 去 `app_id`，补
-  `status="ACTIVE", env="dev", config={}`；可选新增 `TenantRow` seed（`name="t"`）保持 demo 自洽。
-  `BotRow(app_id="app-1")` **保持不动**（bot 域）。模块 docstring 表名更新。
+  `status="ACTIVE", env="dev", config={}`；`BotRow(app_id="app-1")` → `app_id=1`（int，引用 seeded app 的
+  `id=1`）；可选新增 `TenantRow` seed（`name="t"`）保持 demo 自洽。模块 docstring 表名更新
+  （`avernet_apps`→`avernet_application`、`baas_access_key_token`→`avernet_access_key_token`）。
 
 ### spi/database
 - 无需改动（`Base` 不变；新模型自动进 `Base.metadata`）。
@@ -174,23 +185,35 @@ authn app_token:
 
 ## 6. 测试影响
 
-需更新的测试（断言 `app_id` / 旧表名 / `IssuedApp` 形状）：
+需更新的测试（`app_id` str→int / 旧表名 / `IssuedApp` 形状）：
 
-- `tests/unit/plugins/test_app_registrar.py`、`test_app_registry_db.py`、`test_app_token_strategy.py`
-- `tests/contracts/spi/test_app_ports.py`、`test_auth_strategy.py`
-- `tests/integration/test_admin_issuance.py`、`test_forward_signs_principal.py`、`test_identity_pipeline.py`
-- `tests/test_authn_models.py`、`test_auth_runner.py`、`test_forward_seam.py`、`test_plugin_registry.py`
-- `tests/unit/plugins/test_access_key_registry_db.py`（表名/docstring）；`test_access_key_issuer.py`、
-  `test_access_key_token_strategy.py`（若断言审计列/`store` 签名则更新，否则不动）
+- **app 域**：`tests/unit/plugins/test_app_registrar.py`、`test_app_registry_db.py`、
+  `test_app_token_strategy.py`、`tests/contracts/spi/test_app_ports.py`、
+  `tests/integration/test_admin_issuance.py`、`tests/integration/test_forward_signs_principal.py`、
+  `tests/test_authn_models.py`、`tests/test_auth_runner.py`、`tests/test_forward_seam.py`、
+  `tests/unit/plugins/test_principal_signer.py`
+- **bot 域**：`tests/unit/plugins/test_bot_token_strategy.py`、`test_bot_registry_db.py`
+- **同时含 app + bot fake**：`tests/contracts/spi/test_auth_strategy.py`（`_FakeAppRegistry` / `_FakeBotRegistry` 都改 int）
+- **access_key**：`tests/unit/plugins/test_access_key_registry_db.py`（仅 docstring 表名）；
+  `test_access_key_issuer.py` / `test_access_key_token_strategy.py` 无需改动
+- **无需改动**：`tests/integration/test_identity_pipeline.py`（仅断言 identity 存在）、
+  `tests/unit/plugins/test_plugin_registry.py`（与本主题无关）
 
 新增：`avernet_tenant` 建表的最小冒烟（`TenantRow` 在 `Base.metadata` 且 `create_all` 能建表）。
 
+> 断言技巧：seeded app 的代理 `id` 由自增决定——首次 `build_database()` seed 时 `app-key` 行为
+> `avernet_application` 的第一行 → `id=1`，故 `test_app_registry_db` 断言 `RegisteredApp(id=1, ...)`、
+> `test_bot_registry_db` 断言 `app_id=1`。但 registrar/HTTP 注册的 app 其 `id` 随测试顺序递增，故
+> `test_app_registrar` / `test_admin_issuance` 应断言 `isinstance(id, int)` 且 `rec.id == issued.id`，
+> 不要写死具体数值。
+
 ## 7. 风险与后续
 
-1. **下游 principal 契约破坏**：`app_id` str→int。需与下游（bcs/backend 投影 `AppPrincipal` 的组件）确认兼容；
-   若下游按 string 解析需同步改造。
-2. **bot 域 `app_id` 不一致**：`bcs_bots.app_id` / `BotPrincipal.app_id` 仍为 string，逻辑上引用 app。app 身份已改为
-   int 代理主键后，该引用语义 dangling（无 FK，不影响运行）。建议后续 workstream 把 bot 域的 app 引用统一为 int id。
+1. **下游 principal 契约破坏**：`principals[].app.app_id` 与 `principals[].bot.app_id` 均 str→int。
+   需与下游（bcs/backend 投影 `AppPrincipal` / `BotPrincipal` 的组件）确认兼容；若下游按 string 解析需同步改造。
+2. **bot↔app 引用无 DB 级 FK**：`bcs_bots.app_id` 与 `avernet_application.id` 之间仅逻辑引用，无 `ForeignKey`
+   （gateway 无 FK 先例）。seed 中 bot `app_id=1` 与 app `id=1` 靠自增顺序对齐——无 FK 不影响运行，但后续若加 FK
+   需显式声明并处理存量。
 3. **`sub`(app_name) 与 `app_id`(int id) 不同源**：凭证 JWT `sub` 是 app_name、转发 principal `app_id` 是 int。
    若需统一为 id，见 §5 两次写流程。
 4. **首个 JSON ORM 列**：`config` 引入 `JSON` 类型；bare SQLite 经插件注入的 JSON 函数兼容，但需在测试中验证
