@@ -1,10 +1,11 @@
 """ORM model for the bot registry (``bcs_bots`` table) — canonical schema.
 
-The canonical :class:`BotRepository` resolves a presented token to a bot row
-keyed by ``token``. Registered on the shared
+The canonical :class:`BotRepository` resolves a presented session token to a bot
+row (surrogate ``id`` PK; ``session_token`` is the unique lookup key). Registered on the shared
 :class:`~gateway.community.spi.database.Base` so ``DataSourcePlugin.create_all()``
 creates the table. :meth:`BotRow.to_record` maps a row onto the SPI
-:class:`~gateway.community.spi.bot.RegisteredBot`.
+:class:`~gateway.community.spi.bot.RegisteredBot` (core fields only; ``env`` /
+``agent_code`` / ``app_id`` stay DB-side).
 """
 
 from __future__ import annotations
@@ -16,17 +17,24 @@ from gateway.community.spi.database import Base
 
 
 class BotRow(Base):  # type: ignore[misc]
-    """A bot resolvable by token (the ``bcs_bots`` table)."""
+    """A bot resolvable by session token (the ``bcs_bots`` table)."""
 
     __tablename__ = "bcs_bots"
 
-    token: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_token: Mapped[str] = mapped_column(unique=True)
     bot_uuid: Mapped[str] = mapped_column()
-    owner_id: Mapped[str] = mapped_column()
+    env: Mapped[str] = mapped_column()
+    created_by: Mapped[str] = mapped_column()
+    agent_code: Mapped[str] = mapped_column()
+    app_id: Mapped[str] = mapped_column()
     tenant: Mapped[str] = mapped_column()
 
     def to_record(self) -> RegisteredBot:
-        """Map this row onto the SPI :class:`RegisteredBot`."""
+        """Map this row onto the SPI :class:`RegisteredBot` (core fields only)."""
         return RegisteredBot(
-            bot_uuid=self.bot_uuid, owner_id=self.owner_id, tenant=self.tenant
+            bot_uuid=self.bot_uuid,
+            owner_id=self.created_by,
+            app_id=self.app_id,
+            tenant=self.tenant,
         )

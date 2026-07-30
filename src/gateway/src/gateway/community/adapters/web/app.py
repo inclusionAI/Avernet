@@ -15,6 +15,7 @@ from fastapi import FastAPI
 
 from gateway.community import __version__
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
+from gateway.community.adapters.web.admin import router as admin_router
 from gateway.community.config import ConfigLoader
 from gateway.community.logger import get_logger, get_logger_plugin
 from gateway.community.tracer import get_tracer_plugin
@@ -94,6 +95,8 @@ def create_app() -> FastAPI:
     app.state.domain_map = bs.forwarding.domain_map
     app.state.forwarder = bs.forwarding.forwarder
     app.state.principal_signer = bs.principal_signer
+    app.state.access_key_issuer = bs.access_key_issuer
+    app.state.app_registrar = bs.app_registrar
 
     _default_openapi = app.openapi
 
@@ -112,6 +115,10 @@ def create_app() -> FastAPI:
         return served
 
     app.openapi = _served_openapi  # type: ignore[method-assign]
+
+    # Admin endpoints (credential issuance/registration) — explicit routes, so
+    # they win over the catch-all forward. Unauthenticated (single-box/dev only).
+    app.include_router(admin_router, prefix="/admin")
 
     app.add_api_route(
         "/{full_path:path}",

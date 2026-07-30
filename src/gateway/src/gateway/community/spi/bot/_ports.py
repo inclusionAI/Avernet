@@ -13,13 +13,16 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class RegisteredBot:
-    """A bot a registry resolves a token to (registry record).
+    """A bot a registry resolves a session token to (registry record).
 
-    ``owner_id`` is the bot's creator/owner; ``tenant`` is the owner's tenant.
+    ``owner_id`` is the bot's creator/owner (resource-ownership anchor, from the
+    DB ``created_by`` column); ``app_id`` is the app the bot belongs to;
+    ``tenant`` is its tenant. ``env`` / ``agent_code`` are DB-side only.
     """
 
     bot_uuid: str
     owner_id: str
+    app_id: str
     tenant: str
 
 

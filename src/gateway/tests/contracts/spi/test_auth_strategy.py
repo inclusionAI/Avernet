@@ -31,7 +31,9 @@ _GOOGLE_BODY = {"sub": "g-1", "email": "a@example.com", "name": "A"}
 class _FakeBotRegistry:
     """Resolves only ``bot-key``; else None (soft miss). No DB."""
 
-    _BOT = RegisteredBot(bot_uuid="bot-7", owner_id="owner-1", tenant="t")
+    _BOT = RegisteredBot(
+        bot_uuid="bot-7", owner_id="owner-1", app_id="app-1", tenant="t"
+    )
 
     async def find_bot_by_token(self, token: str) -> RegisteredBot | None:
         return self._BOT if token == "bot-key" else None
@@ -41,7 +43,7 @@ class _FakeAccessKeyRegistry:
     """Resolves only ``ak-token``; else None (soft miss). No DB."""
 
     _AK = RegisteredAccessKey(
-        access_key_id="ak-1", tenant="t", expire_at=datetime(2027, 1, 1, 0, 0, 0)
+        access_key="ak-1", tenant="t", expire_at=datetime(2027, 1, 1, 0, 0, 0)
     )
 
     async def find_access_key_by_token(self, token: str) -> RegisteredAccessKey | None:

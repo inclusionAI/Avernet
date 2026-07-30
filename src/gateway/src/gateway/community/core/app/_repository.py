@@ -13,6 +13,8 @@ single body runs unchanged across runtimes (mirrors ``BotRepository`` /
 
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from gateway.community.spi.app import AppRegistry, RegisteredApp
 from gateway.community.spi.database import DataSourcePlugin
 
@@ -20,7 +22,11 @@ from ._orm import AppRow
 
 
 class AppRepository(AppRegistry):
-    """Resolve an app token against the ``avernet_apps`` table (canonical)."""
+    """App table access (read + write) for ``avernet_apps``.
+
+    Resolves a presented token (read) and persists a freshly registered app
+    (write) — all DB touch lives here, never in the registrar.
+    """
 
     Model: type[AppRow] = AppRow
 
@@ -29,5 +35,28 @@ class AppRepository(AppRegistry):
 
     async def find_app_by_token(self, token: str) -> RegisteredApp | None:
         with self._db.orm_session() as session:
-            row = session.get(self.Model, token)
+            row = session.scalar(select(self.Model).where(self.Model.token == token))
             return None if row is None else row.to_record()
+
+    async def store(
+        self,
+        *,
+        token: str,
+        app_id: str,
+        app_name: str,
+        owners: str,
+        app_type: str,
+        tenant: str,
+    ) -> None:
+        """Persist a freshly registered app (``token`` = its JWT, the unique lookup key)."""
+        with self._db.orm_session() as session:
+            session.add(
+                AppRow(
+                    token=token,
+                    app_id=app_id,
+                    app_name=app_name,
+                    owners=owners,
+                    app_type=app_type,
+                    tenant=tenant,
+                )
+            )

@@ -1,7 +1,7 @@
 """ORM model for the third-party-app registry (``avernet_apps`` table).
 
 The canonical :class:`AppRepository` resolves a presented app token to an app
-row keyed by ``token``. Registered on the shared
+row (surrogate ``id`` PK; ``token`` is the unique lookup key). Registered on the shared
 :class:`~gateway.community.spi.database.Base` so ``DataSourcePlugin.create_all()``
 creates the table. :meth:`AppRow.to_record` maps a row onto the SPI
 :class:`~gateway.community.spi.app.RegisteredApp`.
@@ -20,7 +20,8 @@ class AppRow(Base):  # type: ignore[misc]
 
     __tablename__ = "avernet_apps"
 
-    token: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(unique=True)
     app_id: Mapped[str] = mapped_column()
     app_name: Mapped[str] = mapped_column()
     owners: Mapped[str] = mapped_column()

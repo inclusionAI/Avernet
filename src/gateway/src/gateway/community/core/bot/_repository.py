@@ -11,6 +11,8 @@ single body runs unchanged across runtimes (mirrors backend ``BotFriendRepositor
 
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from gateway.community.spi.bot import BotRegistry, RegisteredBot
 from gateway.community.spi.database import DataSourcePlugin
 
@@ -27,5 +29,7 @@ class BotRepository(BotRegistry):
 
     async def find_bot_by_token(self, token: str) -> RegisteredBot | None:
         with self._db.orm_session() as session:
-            row = session.get(self.Model, token)
+            row = session.scalar(
+                select(self.Model).where(self.Model.session_token == token)
+            )
             return None if row is None else row.to_record()

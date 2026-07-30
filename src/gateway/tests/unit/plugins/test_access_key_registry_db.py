@@ -27,7 +27,7 @@ async def test_known_token_resolves_seeded_access_key(
 ) -> None:
     ak = await registry.find_access_key_by_token("ak-token")
     assert ak == RegisteredAccessKey(
-        access_key_id="ak-1",
+        access_key="ak-1",
         tenant="t",
         expire_at=datetime(2027, 1, 1, 0, 0, 0),
     )

@@ -18,6 +18,8 @@ import logging
 from datetime import datetime
 from typing import Any, cast
 
+from sqlalchemy import select
+
 from gateway.community.core.access_key import AccessKeyRepository, AccessKeyRow
 from gateway.community.core.app import AppRepository, AppRow
 from gateway.community.core.authn import Authenticator, IdentityChain, RouteSecurity
@@ -75,25 +77,34 @@ def _seed_authn(db: DataSourcePlugin) -> None:
     in the composition root, not in the (flavor-neutral) domain modules.
     """
     with db.orm_session() as session:
-        if session.get(BotRow, "bot-key") is None:
+        if (
+            session.scalar(select(BotRow).where(BotRow.session_token == "bot-key"))
+            is None
+        ):
             session.add(
                 BotRow(
-                    token="bot-key",
+                    session_token="bot-key",
                     bot_uuid="bot-7",
-                    owner_id="owner-1",
+                    env="dev",
+                    created_by="owner-1",
+                    agent_code="agent-1",
+                    app_id="app-1",
                     tenant="t",
                 )
             )
-        if session.get(AccessKeyRow, "ak-token") is None:
+        if (
+            session.scalar(select(AccessKeyRow).where(AccessKeyRow.token == "ak-token"))
+            is None
+        ):
             session.add(
                 AccessKeyRow(
                     token="ak-token",
-                    access_key_id="ak-1",
+                    access_key="ak-1",
                     tenant="t",
                     expire_at=datetime(2027, 1, 1, 0, 0, 0),
                 )
             )
-        if session.get(AppRow, "app-key") is None:
+        if session.scalar(select(AppRow).where(AppRow.token == "app-key")) is None:
             session.add(
                 AppRow(
                     token="app-key",

@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 
 from dependency_injector.wiring import Provide
 
+from gateway.community.core.access_key import AccessKeyIssuer
+from gateway.community.core.app import AppRegistrar
 from gateway.community.core.authn import Authenticator as _Authn
 from gateway.community.core.forwarding import Forwarding as _Fwd
 from gateway.community.spi.principal_signer import PrincipalSigner
@@ -26,6 +28,7 @@ from ._container import (
     initialize_services,
     shutdown_services,
 )
+from ._credential_issuance import build_access_key_issuer, build_app_registrar
 from ._forwarding import build_forwarding
 from ._principal_signer import build_principal_signer
 
@@ -40,6 +43,8 @@ class BootstrapResult:
     authenticator: Authenticator
     forwarding: Forwarding
     principal_signer: PrincipalSigner
+    access_key_issuer: AccessKeyIssuer
+    app_registrar: AppRegistrar
 
     _container: ApplicationContainer = field(repr=False)
 
@@ -89,10 +94,15 @@ def bootstrap_app() -> BootstrapResult:
     authenticator = container.authenticator()
     forwarding = container.forwarding()
     principal_signer = build_principal_signer()
+    db = container.plugins().database()
+    access_key_issuer = build_access_key_issuer(db, principal_signer)
+    app_registrar = build_app_registrar(db, principal_signer)
     return BootstrapResult(
         authenticator=authenticator,
         forwarding=forwarding,
         principal_signer=principal_signer,
+        access_key_issuer=access_key_issuer,
+        app_registrar=app_registrar,
         _container=container,
     )
 
@@ -134,6 +144,8 @@ __all__ = [
     "Forwarding",
     "Provide",
     "bootstrap_app",
+    "build_access_key_issuer",
+    "build_app_registrar",
     "build_authenticator",
     "build_database",
     "build_forwarding",

@@ -12,7 +12,7 @@ Behaviour:
 - a token whose access key is unknown → ``None`` (soft miss, like the bot
   registry's ``find_bot_by_token → None``);
 - a resolved access key → :class:`AccessKeyPrincipal` carrying the access key's
-  ``access_key_id`` (the lookup token is NOT carried downstream — the access key
+  ``access_key`` (the lookup token is NOT carried downstream — the access key
   is identified by id alone, by design).
 """
 
@@ -52,7 +52,7 @@ class AccessKeyTokenStrategy:
         return AccessKeyPrincipal(
             tenant=record.tenant,
             access_key=AccessKey(
-                access_key_id=record.access_key_id,
+                access_key=record.access_key,
                 access_key_token=token,
                 expire_at=record.expire_at,
             ),

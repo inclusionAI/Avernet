@@ -96,7 +96,13 @@ def test_app_and_bot_principal_types() -> None:
 
     bot = BotPrincipal(
         tenant="t-bot",
-        bot=Bot(bot_uuid="b-1", owner_id="org-1", token="tok"),
+        bot=Bot(
+            bot_uuid="b-1",
+            owner_id="org-1",
+            token="tok",
+            app_id="app-x",
+            tenant="t-bot",
+        ),
     )
     assert bot.type == "bot"
     assert bot.bot.bot_uuid == "b-1"
@@ -112,20 +118,20 @@ def test_access_key_principal_type() -> None:
     ak = AccessKeyPrincipal(
         tenant="t-ak",
         access_key=AccessKey(
-            access_key_id="ak-1",
+            access_key="ak-1",
             access_key_token="tok",
             expire_at=datetime(2027, 1, 1, 0, 0, 0),
         ),
     )
     assert ak.type == "access_key"
     assert ak.tenant == "t-ak"
-    assert ak.access_key.access_key_id == "ak-1"
+    assert ak.access_key.access_key == "ak-1"
     assert ak.access_key.access_key_token == "tok"
     assert ak.access_key.expire_at == datetime(2027, 1, 1, 0, 0, 0)
 
 
 def test_access_key_requires_all_fields() -> None:
     with pytest.raises(ValidationError):
-        AccessKey(access_key_id="ak-1")  # type: ignore[call-arg]
+        AccessKey(access_key="ak-1")  # type: ignore[call-arg]
     with pytest.raises(ValidationError):
         AccessKey()  # type: ignore[call-arg]

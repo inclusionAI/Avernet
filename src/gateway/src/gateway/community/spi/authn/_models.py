@@ -47,16 +47,19 @@ class ThirdPartyApp(BaseModel):
 class Bot(BaseModel):
     """A bot/agent acting as a first-class caller in its own right.
 
-    ``bot_uuid`` is the bot's stable id; ``owner_id`` is the user who owns it
+    ``bot_uuid`` is the bot's stable id; ``owner_id`` is the user who created it
     (the resource-ownership anchor); ``token`` is the presented/verified bot
-    credential (a secret flowing downstream — components must treat it as such).
+    session token (a secret flowing downstream — components must treat it as
+    such); ``app_id`` is the app the bot belongs to; ``tenant`` is its tenant.
     """
 
     model_config = ConfigDict(frozen=True)
 
     bot_uuid: str  # stable, provider-issued bot id
-    owner_id: str  # owning user (resource-ownership anchor)
-    token: str  # the presented/verified bot credential (secret)
+    owner_id: str  # creator/owner (resource-ownership anchor)
+    token: str  # the presented/verified bot session token (secret)
+    app_id: str  # the app the bot belongs to
+    tenant: str  # the bot's tenant
 
 
 class UserPrincipal(BaseModel):
@@ -95,13 +98,13 @@ class AppPrincipal(BaseModel):
 class AccessKey(BaseModel):
     """An access key a caller authenticated against.
 
-    Carries its ``access_key_id``, the presented ``access_key_token`` (a secret
+    Carries its ``access_key``, the presented ``access_key_token`` (a secret
     flowing downstream — components must treat it as such), and its ``expire_at``.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    access_key_id: str  # stable id of the resolved access key
+    access_key: str  # stable id of the resolved access key
     access_key_token: str  # the presented/verified access-key credential (secret)
     expire_at: datetime  # when the access key expires
 

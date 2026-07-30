@@ -26,3 +26,12 @@ class PrincipalSigner(Protocol):
     async def sign(
         self, principals: Mapping[PrincipalType, Principal], *, audience: str
     ) -> str: ...
+
+    async def sign_token(self, claims: Mapping[str, object]) -> str:
+        """Sign an arbitrary claim set as an HS256 JWT (kid in the JOSE header).
+
+        The principal-forwarding ``sign`` delegates here; credential issuance
+        (access_key / app tokens) also uses it so all gateway-issued JWTs share
+        one key.
+        """
+        ...

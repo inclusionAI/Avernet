@@ -115,7 +115,12 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
 
     logger.info("Building authenticator …")
     plugins = container.plugins()
-    from ._authn import build_authenticator
+    from ._authn import build_authenticator, build_database
+
+    # create_all + seed the container's DB so the DB-backed strategies
+    # (bot/app/access-key token) and the credential issuer/registrar share one
+    # initialised, seeded DataSourcePlugin.
+    build_database(plugins.database())
 
     container.authenticator.override(
         providers.Singleton(

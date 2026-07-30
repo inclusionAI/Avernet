@@ -56,6 +56,9 @@ class BarePrincipalSigner:
             "exp": now + self._cfg.ttl_seconds,
             "principals": [p.model_dump(mode="json") for p in principals.values()],
         }
+        return await self.sign_token(claims)
+
+    async def sign_token(self, claims: Mapping[str, object]) -> str:
         return jwt.encode(
             claims,
             self._cfg.signing_key,

@@ -99,3 +99,22 @@ def test_load_signer_config_dev_fallback_when_unset() -> None:
     assert cfg.signing_key  # dev fallback present
     assert cfg.kid == "bare"
     assert cfg.ttl_seconds == 60
+
+
+async def test_sign_token_signs_arbitrary_claims_with_kid_header() -> None:
+    signer = BarePrincipalSigner(_cfg("k"), clock=lambda: _FIXED_NOW)
+    token = await signer.sign_token(
+        {
+            "iss": "gateway",
+            "typ": "access_key",
+            "sub": "ak-1",
+            "tenant": "t",
+            "jti": "j1",
+        }
+    )
+    decoded = jwt.decode(token, "k", algorithms=["HS256"])
+    assert decoded["typ"] == "access_key"
+    assert decoded["sub"] == "ak-1"
+    assert decoded["tenant"] == "t"
+    assert decoded["jti"] == "j1"
+    assert jwt.get_unverified_header(token)["kid"] == "bare"
