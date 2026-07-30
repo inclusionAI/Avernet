@@ -282,7 +282,7 @@ All paths are relative to `src/backend/`. Source package is
   Chinese ("每个操作都需要确认") and this surface promises English. The device
   call it does make is to `/api/engine/capabilities`, purely to honour the gate.
 
-## Task 10: Connection endpoint
+## Task 10: Connection endpoint  `[x]`
 - **Goal:** Replace the `get_device_connection` hand-off with a sanitised
   socket list.
 - **Files:**
@@ -290,43 +290,48 @@ All paths are relative to `src/backend/`. Source package is
   - `…/core/engine_runtime/relay.py`
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_connection.py` (new)
 - **Done when:**
-  - [ ] `GET /openapi/v1/bots/{bot_id}/connection` returns
+  - [x] `GET /openapi/v1/bots/{bot_id}/connection` returns
         `Envelope[Connection]` with `sockets` as a **list** of records carrying
         a `kind` enum.
-  - [ ] `chat` is derived from the bot's `active_engine` — a backend fact, no
+  - [x] `chat` is derived from the bot's `active_engine` — a backend fact, no
         device call. `terminal` appears only when the engine declares
         `WEB_SHELL_OPEN`.
-  - [ ] The payload contains **no** `target`, `type`, or bare `token` field; a
+  - [x] The payload contains **no** `target`, `type`, or bare `token` field; a
         test asserts those keys are absent.
-  - [ ] `expires_at` prefers a provider-reported expiry and falls back to
+  - [x] `expires_at` prefers a provider-reported expiry and falls back to
         `now + ttl` for the TTL actually requested — never a hardcoded constant
         independent of it.
-  - [ ] The bot is resolved owner-scoped **first**, and the resolved owner is
+  - [x] The bot is resolved owner-scoped **first**, and the resolved owner is
         passed as operator, so the wider public-bot/collaborator check in
         `…/core/devices/services/device_service.py:974-1006` cannot widen this
         surface. A test proves a collaborator (non-owner) gets `404`.
-  - [ ] A capabilities failure fails the endpoint with the same `409` as every
+  - [x] A capabilities failure fails the endpoint with the same `409` as every
         other route, rather than silently omitting a socket.
 - **Depends on:** Tasks 4, 5, 6
 
-## Task 11: Mount the routers and enforce the path invariant
+## Task 11: Mount the routers and enforce the path invariant  `[x]`
 - **Goal:** Make the six groups reachable, in the right order, under the right
   prefix.
 - **Files:**
   - `…/adapters/http/openapi_v1/__init__.py`
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_routing.py` (new)
 - **Done when:**
-  - [ ] All five routers added to `_SUBGROUPS` (`openapi_v1/__init__.py:33`),
-        above `bots_router`, so `/openapi/v1/bots/mcp` still resolves ahead of
-        `/openapi/v1/bots/{bot_id}`.
-  - [ ] A test walks **every** route on the five routers and asserts the path
+  - [x] All five routers mounted in `build_public_router`, before `bots_router`.
+        They live in their **own** list rather than `_SUBGROUPS` because they
+        carry `ENGINE_RUNTIME_ERROR_RESPONSES` (501/504) that the rest of the
+        surface must not advertise.
+  - [x] A test walks **every** route on the five routers and asserts the path
         starts with the literal `/openapi/v1/bots/` — the gateway-routing
         invariant; a route mounted elsewhere is unreachable in production.
-  - [ ] A test asserts the total new route count is 16.
-  - [ ] A test generates the OpenAPI document and asserts the enums appear as
+  - [x] A test asserts the total new route count is 16.
+  - [x] A test generates the OpenAPI document and asserts the enums appear as
         `type: string` with the expected `enum` lists — catching the case where
         a model annotates an enum but Pydantic emits a bare string.
 - **Depends on:** Tasks 7, 8, 9, 10
+- **Harness note:** route introspection goes through the generated OpenAPI
+  document, not `app.routes`. FastAPI wraps an included router in an
+  `_IncludedRouter` instead of flattening its endpoints, so walking `.routes`
+  finds none of them — a test written that way passes vacuously.
 
 ## Task 12: Cross-tenant and owner isolation across all 16 routes
 - **Goal:** Prove the isolation claim on every route, not a sample.

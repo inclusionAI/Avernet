@@ -38,7 +38,11 @@ import inspect
 import pytest
 
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
+from agentclaw.community.api.engine_connection_service import (
+    EngineConnectionServiceProtocol,
+)
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
 from agentclaw.community.core.services.engine_config import EngineConfigService
 
@@ -47,6 +51,7 @@ from agentclaw.community.core.services.engine_config import EngineConfigService
 _PAIRS = [
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
+    (EngineConnectionServiceProtocol, EngineConnectionService),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

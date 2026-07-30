@@ -9,6 +9,7 @@ request to that bot's engine adapter and normalises the answer.
 purpose: "Engine-runtime relay — resolves the caller's bot, forwards one HTTP call to its engine adapter, and normalises the engine envelope."
 provides:
   - "EngineRuntimeRelay — owner-scoped bot resolution + device forward + envelope normalisation"
+  - "EngineConnectionService — composes a bot's usable WebSocket connections"
   - "EngineResult / ConnectionResult / SocketInfo value objects"
   - "Engine-runtime domain errors (no HTTP status; the adapter maps them)"
 consumes:
@@ -22,7 +23,9 @@ internal_dependencies:
   - agentclaw.community.core.devices.services.device_context_resolver
   - agentclaw.community.core.devices.services.device_service
   - agentclaw.community.log
+  - agentclaw.community.core.devices.models
   - agentclaw.community.plugin_api.device_adapter_transport
+  - agentclaw.community.plugin_api.sandbox_runtime
 ```
 
 ### Change impact

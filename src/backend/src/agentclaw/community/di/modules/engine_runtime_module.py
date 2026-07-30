@@ -14,7 +14,11 @@ from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.api.engine_connection_service import (
+    EngineConnectionServiceProtocol,
+)
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
 
 
@@ -23,6 +27,9 @@ class EngineRuntimeModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(EngineRuntimeRelay, to=EngineRuntimeRelay, scope=singleton)
+        binder.bind(
+            EngineConnectionService, to=EngineConnectionService, scope=singleton
+        )
 
     @singleton
     @provider
@@ -30,4 +37,12 @@ class EngineRuntimeModule(Module):
     def _engine_runtime_relay_protocol(
         self, svc: EngineRuntimeRelay
     ) -> EngineRuntimeRelayProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _engine_connection_service_protocol(
+        self, svc: EngineConnectionService
+    ) -> EngineConnectionServiceProtocol:
         return svc
