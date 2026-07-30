@@ -17,15 +17,20 @@ principal at the forwarder seam.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import replace
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.responses import Response
 
+from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import CredentialBundle, Principal, PrincipalType
 from gateway.community.spi.forwarder import ForwardRequest
+from gateway.community.spi.principal_signer import PrincipalSigner
 from gateway.community.tracer import get_tracer_plugin
+
+logger = get_logger("forward")
 
 _ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
 
@@ -64,17 +69,32 @@ def _target_url(base_url: str, request: Request) -> str:
     return f"{base}{request.url.path}" + (f"?{query}" if query else "")
 
 
-def _attach_identities(
-    forward: ForwardRequest, identities: dict[PrincipalType, Principal]
-) -> ForwardRequest:
-    """Forwarder seam for the resolved identities.
+_PRINCIPAL_HEADER = "X-Avernet-Principal"
+# Inbound headers that must NEVER pass through to the upstream (call site
+# strips these when building ForwardRequest.headers). `host` is dropped so
+# httpx sets it from the upstream URL; `X-Avernet-Principal` is dropped so a
+# caller cannot forge the identity header (the gateway injects its own signed
+# token).
+_INBOUND_STRIP = frozenset({"host", "x-avernet-principal"})
 
-    Per auth design §7.1, components must NEVER trust a bare Principal header;
-    the signing workstream swaps this no-op for a signed-token injection.
-    Until then, the resolved identities are available here but NOT forwarded.
+
+async def _attach_identities(
+    forward: ForwardRequest,
+    identities: dict[PrincipalType, Principal],
+    *,
+    signer: PrincipalSigner,
+    audience: str,
+) -> ForwardRequest:
+    """Inject the signed identity set into the forwarded request (auth §7.1).
+
+    Components must verify this token — never trust a bare
+    ``X-Avernet-Principal`` header. An empty identity set adds no header.
     """
-    _ = identities  # referenced so the value is provably available at the seam
-    return forward
+    if not identities:
+        return forward
+    token = await signer.sign(identities, audience=audience)
+    headers = {**forward.headers, _PRINCIPAL_HEADER: token}
+    return replace(forward, headers=headers)
 
 
 async def forward_request(request: Request) -> Response:
@@ -92,16 +112,27 @@ async def forward_request(request: Request) -> Response:
         return _error(401, 1, str(exc))
 
     body = await request.body()
-    forward = _attach_identities(
-        ForwardRequest(
-            method=request.method,
-            url=_target_url(server.base_url, request),
-            # Drop Host so httpx sets it from the upstream URL, not the gateway's.
-            headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
-            content=body,
-        ),
-        identities,
-    )
+    try:
+        forward = await _attach_identities(
+            ForwardRequest(
+                method=request.method,
+                url=_target_url(server.base_url, request),
+                # Drop Host (httpx sets it from the upstream URL) and any
+                # caller-supplied X-Avernet-Principal (forgery guard).
+                headers={
+                    k: v
+                    for k, v in request.headers.items()
+                    if k.lower() not in _INBOUND_STRIP
+                },
+                content=body,
+            ),
+            identities,
+            signer=request.app.state.principal_signer,
+            audience=server.name,
+        )
+    except Exception:
+        logger.exception("principal signing failed")
+        return _error(500, 1, "principal signing failed")
 
     cm = request.app.state.forwarder.forward(forward)
     try:

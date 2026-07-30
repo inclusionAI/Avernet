@@ -20,7 +20,7 @@ class RegisteredAccessKey:
     the access key expires.
     """
 
-    access_key_id: str
+    access_key: str
     tenant: str
     expire_at: datetime
 
