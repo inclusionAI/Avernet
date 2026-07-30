@@ -507,6 +507,9 @@ class LocalDeviceService(DeviceService):
             # http-info 不带过期时间，而返回的 token 是它的——ws-info 的
             # expires_at 描述的是另一个 token，填上就是错的。
             expires_at = ""
+            # http_info 返回的 target 是 3 段格式 LOCAL_{dev}@{tpl}:{port}，
+            # 与 token（JWT 中的 target claim）对齐。
+            target = http_info.target
         except Exception as e:
             logger.warning(
                 "[_compose_device_conn_info] http-info unavailable bind=%s: %s "
@@ -517,15 +520,16 @@ class LocalDeviceService(DeviceService):
             token = ws_info.token
             # 回落到 ws-info 的 token，所以 ws-info 的过期时间此刻是对的。
             expires_at = ws_info.expires_at
-
+            # 回退到 WS 链路的 target，与 ws_info.token 对齐。
+            target = ws_info.target
         return DeviceConnectionInfo(
             type=LOCAL_DEVICE_PROVIDER,
-            target=ws_info.target,
+            target=target,
             token=token,
             expires_at=expires_at,
-            # target 来自 ws-info，凭据也必须来自 ws-info。正常路径的 token 是
-            # http-info 的（另一个 token），配着 ws 地址发出去就是一对不匹配的
-            # socket/凭据 —— socket caller 读这一对。
+            # HTTP 与 WS 的 target/token 都来自各自同一次签发，避免代理校验时
+            # 把一条链路的 JWT 与另一条链路的 target 错配。
+            ws_target=ws_info.target,
             ws_token=ws_info.token,
             ws_expires_at=ws_info.expires_at,
             engine_type=device.device_props.get("engine", DEFAULT_ENGINE_TYPE),

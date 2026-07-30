@@ -316,7 +316,11 @@ class EngineConnectionService:
            relay URL and was never published here either.
         2. Otherwise the gateway, re-addressed from the provider's relay URL.
         """
-        target = str(getattr(info, "target", "") or "")
+        target = str(
+            getattr(info, "ws_target", "")
+            or getattr(info, "target", "")
+            or ""
+        )
         if not target:
             raise EngineUpstreamError("device connection carries no routing target")
 
