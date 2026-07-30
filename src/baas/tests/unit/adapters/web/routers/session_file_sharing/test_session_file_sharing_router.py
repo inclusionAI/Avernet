@@ -235,6 +235,121 @@ class TestGetUploadUrl:
         call_kwargs = mock_dispatcher.dispatch_get_upload_url.call_args.kwargs
         assert call_kwargs["content_type"] == "image/png"
 
+    @pytest.mark.asyncio
+    async def test_upload_url_content_type_with_charset(self, mock_dispatcher):
+        """content_type with charset parameter → accepted (RFC 2045)."""
+        mock_dispatcher.dispatch_get_upload_url.return_value = (
+            SessionGetUploadUrlResponse(
+                upload_url="https://oss.example.com/upload?token=abc",
+                transfer_id="tf-cc",
+                expires_at="2099-01-01T00:00:00",
+                type="SINGLE",
+            )
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/upload-url",
+            json_data={
+                "filename": "readme.md",
+                "content_type": "text/markdown; charset=utf-8",
+            },
+        )
+
+        assert resp.status_code == 200
+        call_kwargs = mock_dispatcher.dispatch_get_upload_url.call_args.kwargs
+        assert call_kwargs["content_type"] == "text/markdown; charset=utf-8"
+
+    @pytest.mark.asyncio
+    async def test_upload_url_content_type_with_quoted_charset(self, mock_dispatcher):
+        """content_type with quoted-string charset → accepted."""
+        mock_dispatcher.dispatch_get_upload_url.return_value = (
+            SessionGetUploadUrlResponse(
+                upload_url="https://oss.example.com/upload?token=abc",
+                transfer_id="tf-qc",
+                expires_at="2099-01-01T00:00:00",
+                type="SINGLE",
+            )
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/upload-url",
+            json_data={
+                "filename": "index.html",
+                "content_type": 'text/html; charset="UTF-8"',
+            },
+        )
+
+        assert resp.status_code == 200
+        call_kwargs = mock_dispatcher.dispatch_get_upload_url.call_args.kwargs
+        assert call_kwargs["content_type"] == 'text/html; charset="UTF-8"'
+
+    @pytest.mark.asyncio
+    async def test_upload_url_content_type_multi_params(self, mock_dispatcher):
+        """content_type with multiple parameters → accepted."""
+        mock_dispatcher.dispatch_get_upload_url.return_value = (
+            SessionGetUploadUrlResponse(
+                upload_url="https://oss.example.com/upload?token=abc",
+                transfer_id="tf-mp",
+                expires_at="2099-01-01T00:00:00",
+                type="SINGLE",
+            )
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/upload-url",
+            json_data={
+                "filename": "notes.txt",
+                "content_type": "text/plain; charset=utf-8; format=flowed",
+            },
+        )
+
+        assert resp.status_code == 200
+        call_kwargs = mock_dispatcher.dispatch_get_upload_url.call_args.kwargs
+        assert call_kwargs["content_type"] == "text/plain; charset=utf-8; format=flowed"
+
+    @pytest.mark.asyncio
+    async def test_upload_url_content_type_boundary(self, mock_dispatcher):
+        """content_type with boundary parameter → accepted."""
+        mock_dispatcher.dispatch_get_upload_url.return_value = (
+            SessionGetUploadUrlResponse(
+                upload_url="https://oss.example.com/upload?token=abc",
+                transfer_id="tf-bd",
+                expires_at="2099-01-01T00:00:00",
+                type="SINGLE",
+            )
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/upload-url",
+            json_data={
+                "filename": "form.dat",
+                "content_type": "multipart/form-data; boundary=abc123",
+            },
+        )
+
+        assert resp.status_code == 200
+        call_kwargs = mock_dispatcher.dispatch_get_upload_url.call_args.kwargs
+        assert call_kwargs["content_type"] == "multipart/form-data; boundary=abc123"
+
+    @pytest.mark.asyncio
+    async def test_upload_url_content_type_invalid_rejected(self):
+        """content_type without '/' → 422 string_pattern_mismatch."""
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/upload-url",
+            json_data={
+                "filename": "test.dat",
+                "content_type": "not-a-mime",
+            },
+        )
+
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert any(
+            e.get("loc") == ["body", "content_type"]
+            and "string_pattern_mismatch" in e.get("type", "")
+            for e in detail
+        ), f"Expected string_pattern_mismatch for content_type, got: {detail}"
+
 
 # ==========================================================================
 # Complete Upload endpoint tests
