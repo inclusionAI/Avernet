@@ -2,7 +2,8 @@ use bcs_service_api::application::v1::{
     BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CreateCollaborationGroup,
     CreateDirectMessageGroup, CreateGroupSpec, CreateParticipant, GroupDeliveryPolicy,
     GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility, ManagerWorkerConfiguration,
-    MembershipFilter, ParticipantRole, StateMachineConfiguration, StateMachineDefinitionReference,
+    MembershipFilter, ParticipantMode, ParticipantRole, StateMachineConfiguration,
+    StateMachineDefinitionReference,
     StateMachineParticipantBinding,
 };
 use serde::{Deserialize, Deserializer, de::Error as _};
@@ -77,6 +78,19 @@ impl ListGroupsQuery {
 pub struct ParticipantRequest {
     pub actor_id: String,
     pub role: ParticipantRole,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddParticipantRequest {
+    pub actor_id: String,
+    pub role: ParticipantRole,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateParticipantRequest {
+    pub mode: ParticipantMode,
 }
 
 #[derive(Debug, Deserialize)]
