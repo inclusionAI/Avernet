@@ -33,8 +33,16 @@ def _creds(headers: dict[str, str]) -> CredentialBundle:
     return CredentialBundle(headers=headers, cookies={}, query={})
 
 
-async def test_dedicated_header_wins_over_authorization() -> None:
-    creds = _creds({"x-avernet-bot-token": "bot-key", "authorization": "Bearer other"})
+async def test_authorization_wins_over_dedicated_header() -> None:
+    creds = _creds({"x-avernet-bot-token": "nope", "authorization": "Bearer bot-key"})
+    result = await _strat().build(creds)
+    assert isinstance(result, BotPrincipal)
+    assert result.bot.token == "bot-key"
+
+
+async def test_jwt_authorization_falls_back_to_dedicated_header() -> None:
+    # A JWT-shaped Authorization is not a bot token → fall back to the dedicated header.
+    creds = _creds({"x-avernet-bot-token": "bot-key", "authorization": "Bearer a.b.c"})
     result = await _strat().build(creds)
     assert isinstance(result, BotPrincipal)
     assert result.bot.token == "bot-key"

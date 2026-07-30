@@ -53,3 +53,20 @@ async def test_valid_token_builds_access_key_principal() -> None:
     assert result.access_key.access_key == "ak-1"
     assert result.access_key.access_key_token == "ak-token"
     assert result.access_key.expire_at == _AK_EXPIRE
+
+
+async def test_authorization_bearer_resolves() -> None:
+    result = await _strat().build(_creds({"authorization": "Bearer ak-token"}))
+    assert isinstance(result, AccessKeyPrincipal)
+    assert result.access_key.access_key == "ak-1"
+    assert result.access_key.access_key_token == "ak-token"
+
+
+async def test_authorization_wins_over_dedicated_header() -> None:
+    result = await _strat().build(
+        _creds(
+            {"x-avernet-access-key-token": "nope", "authorization": "Bearer ak-token"}
+        )
+    )
+    assert isinstance(result, AccessKeyPrincipal)
+    assert result.access_key.access_key_token == "ak-token"

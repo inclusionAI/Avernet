@@ -1,4 +1,4 @@
-"""Unit tests for the ``app_token`` strategy (``x-avernet-app-token`` / Bearer → AppPrincipal).
+"""Unit tests for the ``app_token`` strategy (Bearer / ``x-avernet-app-token`` → AppPrincipal).
 
 Uses a tiny in-test fake registry (no DB) so the strategy's extraction /
 adjudication logic is exercised in isolation; the DB-backed registry has its
@@ -49,22 +49,22 @@ async def test_dedicated_header_resolves() -> None:
     assert result.app.tenant == "t"
 
 
-async def test_bearer_fallback_resolves() -> None:
+async def test_authorization_bearer_resolves() -> None:
     result = await _strat().build(_creds({"authorization": "Bearer app-key"}))
     assert isinstance(result, AppPrincipal)
     assert result.app.app_id == 1
 
 
-async def test_dedicated_header_wins_over_bearer() -> None:
-    # The dedicated header wins; the Bearer is not consulted.
+async def test_authorization_wins_over_dedicated_header() -> None:
+    # Authorization wins; the dedicated header is not consulted.
     result = await _strat().build(
-        _creds({_APP_HEADER: "app-key", "authorization": "Bearer nope"})
+        _creds({_APP_HEADER: "nope", "authorization": "Bearer app-key"})
     )
     assert isinstance(result, AppPrincipal)
     assert result.app.app_id == 1
 
 
-async def test_empty_dedicated_header_falls_back_to_bearer() -> None:
+async def test_authorization_resolves_with_empty_dedicated_header() -> None:
     result = await _strat().build(
         _creds({_APP_HEADER: "   ", "authorization": "Bearer app-key"})
     )

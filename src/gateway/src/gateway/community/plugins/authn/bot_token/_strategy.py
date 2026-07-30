@@ -2,11 +2,11 @@
 
 Token extraction:
 
-- the dedicated bot-token header (``x-avernet-bot-token``) **wins** and is taken as-is
-  when non-empty;
-- otherwise an ``Authorization: Bearer <token>`` (or a bare token) is used, but
-  **only when it is NOT JWT-shaped** — a JWT is left for a (future) JWT-based
+- an ``Authorization: Bearer <token>`` (or a bare token) is the default source,
+  but **only when it is NOT JWT-shaped** — a JWT is left for a (future) JWT-based
   identity strategy, never mistaken for a bot session token;
+- otherwise the dedicated bot-token header (``x-avernet-bot-token``) is used,
+  taken as-is;
 - absent/empty → not applicable (``None``).
 
 The strategy resolves the token itself in a **single** registry lookup:
@@ -37,22 +37,27 @@ def is_jwt_format(token: str) -> bool:
 
 
 def extract_bot_token(creds: CredentialBundle, dedicated_header: str) -> str | None:
-    """Extract a bot session token from the request.
+    """Extract a bot session token: ``Authorization`` first (non-JWT), else the dedicated header.
 
-    Returns ``None`` when no usable bot token is present.
+    ``Authorization`` (a Bearer or bare token) is the default source, but only
+    when it is NOT JWT-shaped — a JWT is left for a (future) JWT-based identity
+    strategy, never mistaken for a bot session token. If no usable Authorization
+    token is present, the dedicated bot-token header is used as a fallback
+    (taken as-is). Returns ``None`` when no usable bot token is present.
     """
-    if dedicated_header:
-        dedicated: str = creds.headers.get(dedicated_header, "").strip()
-        if dedicated:
-            return dedicated  # dedicated header wins; taken as-is (no JWT check)
     auth: str = creds.headers.get(_AUTH_HEADER, "")
     if auth.lower().startswith("bearer"):
         token: str = auth[len("bearer") :].strip()
     else:
         token = auth.strip()
-    if not token or is_jwt_format(token):
-        return None  # empty or JWT-shaped → not a bot session token
-    return token
+    if token and not is_jwt_format(token):
+        return token  # Authorization (Bearer or bare, non-JWT) wins
+    # No usable Authorization token → fall back to the dedicated header (as-is).
+    if dedicated_header:
+        dedicated: str = creds.headers.get(dedicated_header, "").strip()
+        if dedicated:
+            return dedicated
+    return None
 
 
 class BotTokenStrategy:

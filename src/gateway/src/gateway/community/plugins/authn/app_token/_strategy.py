@@ -1,11 +1,10 @@
-"""App-identity strategy — ``x-avernet-app-token`` (or ``Authorization: Bearer``) → ``AppPrincipal``.
+"""App-identity strategy — ``Authorization: Bearer`` (or ``x-avernet-app-token``) → ``AppPrincipal``.
 
-The dedicated ``x-avernet-app-token`` header **wins** when non-empty; otherwise
-an ``Authorization: Bearer <app_token>`` is accepted as a fallback (so a caller
-may present the app token either way, mirroring the bot_token fallback). The
-strategy resolves the app — and its tenant — in one registry lookup:
-``find_app_by_token(token) → RegisteredApp | None``. The app record's ``tenant``
-is the authoritative tenant for the principal.
+An ``Authorization: Bearer <app_token>`` is the default source; if absent, the
+dedicated ``x-avernet-app-token`` header is used as a fallback (so a caller may
+present the app token either way). The strategy resolves the app — and its
+tenant — in one registry lookup: ``find_app_by_token(token) → RegisteredApp | None``.
+The app record's ``tenant`` is the authoritative tenant for the principal.
 
 A token that the registry does not recognise is treated as absent (returns
 ``None``), so other Bearer-based chains (e.g. bot_token) may resolve the same
@@ -27,16 +26,18 @@ _AUTH_HEADER = "authorization"
 
 
 def extract_app_token(creds: CredentialBundle, dedicated_header: str) -> str | None:
-    """Extract an app token: the dedicated header wins, else ``Authorization: Bearer``.
+    """Extract an app token: ``Authorization: Bearer`` first, else the dedicated header.
 
     Returns ``None`` when no usable app token is present.
     """
-    dedicated: str = creds.headers.get(dedicated_header, "").strip()
-    if dedicated:
-        return dedicated  # dedicated header wins; taken as-is
     auth: str = creds.headers.get(_AUTH_HEADER, "")
     if auth.lower().startswith("bearer"):
-        return auth[len("bearer") :].strip() or None
+        token = auth[len("bearer") :].strip()
+        if token:
+            return token
+    dedicated: str = creds.headers.get(dedicated_header, "").strip()
+    if dedicated:
+        return dedicated
     return None
 
 
