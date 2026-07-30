@@ -60,32 +60,38 @@ All paths are relative to `src/backend/`. Source package is
   - [x] `tests/community/architecture/` passes.
 - **Depends on:** —
 
-## Task 3: Implement `EngineRuntimeRelay`
+## Task 3: Implement `EngineRuntimeRelay`  `[x]`
 - **Goal:** One place that resolves the caller's bot, resolves its device,
   forwards a single engine call, and normalises the response.
 - **Files:**
   - `…/core/engine_runtime/relay.py` (new)
   - `tests/community/core/engine_runtime/test_relay.py` (new)
 - **Done when:**
-  - [ ] `_resolve_bot(bot_id, owner_id)` goes through `BotService` scoped by
+  - [x] `_resolve_bot(bot_id, owner_id)` goes through `BotService` scoped by
         owner and raises `BotNotFoundError` for a bot that is not the caller's.
         **This runs before any device work.**
-  - [ ] `_resolve_device` calls `DeviceContextResolver.resolve_for_bot`
+  - [x] `_resolve_device` calls `DeviceContextResolver.resolve_for_bot`
         (`…/core/devices/services/device_context_resolver.py:61`) and wraps
         `DeviceNotBoundError` / `ConnInfoBuildError` as
         `EngineDeviceNotReadyError`.
-  - [ ] `call(...)` forwards via `DeviceAdapterTransport.invoke`
+  - [x] `call(...)` forwards via `DeviceAdapterTransport.invoke`
         (`…/plugin_api/device_adapter_transport.py:59`).
-  - [ ] `_normalise` turns the engine's
+  - [x] `_normalise` turns the engine's
         `ApiResponse{success, data, message, warning, total}` into
         `EngineResult`; a `200` carrying `success: false` raises
         `EngineUpstreamError` and never reaches a caller.
-  - [ ] `DeviceAdapterHTTPStatusError` with `status_code == 501` becomes
+  - [x] `DeviceAdapterHTTPStatusError` with `status_code == 501` becomes
         `EngineCapabilityUnsupportedError`; other non-2xx become
         `EngineUpstreamError`.
-  - [ ] Unit tests cover each translation above, including the
+  - [x] Unit tests cover each translation above, including the
         `success: false` case and the `warning`/`total` pass-through.
 - **Depends on:** Task 2
+- **Decided while implementing:** `UnknownProviderError` is **not** folded into
+  `EngineDeviceNotReadyError`. A binding row naming a provider we don't know is
+  bad data on our side; reporting it as retryable would have callers retrying
+  something no retry can fix. It propagates to the existing 500 mapping.
+  `DeviceAdapterTimeoutError` likewise propagates unwrapped — it is already the
+  precise public answer (504), and wrapping would lose it.
 
 ## Task 4: Expose the relay as a Service API Protocol and wire DI
 - **Goal:** Let routers Inject a Protocol, never the concrete relay.
