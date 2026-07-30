@@ -35,6 +35,8 @@ def _run(apply_result):
     passport = MagicMock()
     passport.apply_first_agent_passport.return_value = apply_result
     bot_service = MagicMock()
+    bot_repo = MagicMock()
+    bot_repo.exists_by_owner_and_bot_type.return_value = False
     skill_set_factory = MagicMock()
     skill_set_factory.create.return_value.get_bot_mcp_codes.return_value = []
     return create_bot_with_authorization(
@@ -43,6 +45,7 @@ def _run(apply_result):
         bot_id="default",
         spec=_SPEC,
         bot_service=bot_service,
+        bot_repo=bot_repo,
         passport_plugin=passport,
         auth_rel_plugin=MagicMock(),
         skill_set_factory=skill_set_factory,

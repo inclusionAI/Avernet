@@ -353,11 +353,14 @@ class TestRouterLogic:
 
         mock_factory = MagicMock()
         mock_factory.create.return_value.get_bot_mcp_codes.return_value = ["mcp_1"]
+        mock_bot_repo = MagicMock()
+        mock_bot_repo.exists_by_owner_and_bot_type.return_value = False
         with patch('agentclaw.community.adapters.http.bot_management.router.generate_bot_id', return_value="default"):
             result = await create_bot(
                 mock_request,
                 mock_ctx,
                 bot_service=mock_bot_service,
+                bot_repo=mock_bot_repo,
                 passport_plugin=mock_passport_plugin,
                 auth_rel_plugin=MagicMock(),
                 skill_set_factory=mock_factory,
@@ -407,11 +410,14 @@ class TestRouterLogic:
 
         mock_factory = MagicMock()
         mock_factory.create.return_value.get_bot_mcp_codes.return_value = ["mcp_1"]
+        mock_bot_repo = MagicMock()
+        mock_bot_repo.exists_by_owner_and_bot_type.return_value = False
         with patch('agentclaw.community.adapters.http.bot_management.router.generate_bot_id', return_value="default"):
             result = await create_bot(
                 mock_request,
                 mock_ctx,
                 bot_service=mock_bot_service,
+                bot_repo=mock_bot_repo,
                 passport_plugin=mock_passport_plugin,
                 auth_rel_plugin=MagicMock(),
                 skill_set_factory=mock_factory,

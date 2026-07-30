@@ -91,6 +91,12 @@ def _stub_skill_set_factory(mcp_codes=None):
     return factory
 
 
+def _mock_bot_repo(*, has_personal_bot=False):
+    repo = MagicMock()
+    repo.exists_by_owner_and_bot_type.return_value = has_personal_bot
+    return repo
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -184,9 +190,11 @@ def client(mock_bot_service, mock_passport):
     create_for_others_service = MagicMock()
     app.state.default_bot_passport_repair_service = repair_service
     app.state.create_bot_for_others_service = create_for_others_service
+    mock_repo = _mock_bot_repo()
+    app.state.mock_bot_repo = mock_repo
     attach_injector(app, Injector([_bind_bot_service(
         mock_bot_service,
-        bot_repo=MagicMock(),
+        bot_repo=mock_repo,
         passport=mock_passport,
         auth=mock_auth,
         auth_rel=MagicMock(),
@@ -1285,6 +1293,50 @@ class TestCreateBot:
         assert data["data"]["passport"]["token"] == "tok123"
         svc.create_bot.assert_called_once()
 
+    def test_first_personal_bot_uses_first_passport_even_when_default_id_is_taken(
+        self, client
+    ):
+        tc, _, passport = client
+        tc.app.state.mock_bot_repo.exists_by_owner_and_bot_type.return_value = False
+
+        with patch(
+            "agentclaw.community.adapters.http.bot_management.router.generate_bot_id",
+            return_value="generated-bot-id",
+        ):
+            resp = tc.post("/api/bots", json={"bot_name": "PersonalBot"})
+
+        assert resp.json()["success"] is True
+        assert resp.json()["data"]["passport"]["is_first_bot"] is False
+        passport.apply_first_agent_passport.assert_called_once()
+        passport.apply_agent_passport.assert_not_called()
+
+    def test_additional_personal_bot_uses_regular_passport(self, client):
+        tc, _, passport = client
+        tc.app.state.mock_bot_repo.exists_by_owner_and_bot_type.return_value = True
+
+        with patch(
+            "agentclaw.community.adapters.http.bot_management.router.generate_bot_id",
+            return_value="generated-bot-id",
+        ):
+            resp = tc.post("/api/bots", json={"bot_name": "PersonalBot"})
+
+        assert resp.json()["success"] is True
+        passport.apply_first_agent_passport.assert_not_called()
+        passport.apply_agent_passport.assert_called_once()
+
+    def test_service_bot_never_uses_first_personal_passport(self, client):
+        tc, _, passport = client
+        tc.app.state.mock_bot_repo.exists_by_owner_and_bot_type.return_value = False
+
+        resp = tc.post(
+            "/api/bots",
+            json={"bot_name": "ServiceBot", "bot_type": "service"},
+        )
+
+        assert resp.json()["success"] is True
+        passport.apply_first_agent_passport.assert_not_called()
+        passport.apply_agent_passport.assert_called_once()
+
     def test_create_filters_local_mcp_codes_before_passport(
         self, mock_bot_service, mock_passport
     ):
@@ -1303,7 +1355,7 @@ class TestCreateBot:
         )
         attach_injector(app, Injector([_bind_bot_service(
             mock_bot_service,
-            bot_repo=MagicMock(),
+            bot_repo=_mock_bot_repo(),
             passport=mock_passport,
             auth=mock_auth,
             auth_rel=MagicMock(),
@@ -1343,7 +1395,7 @@ class TestCreateBot:
         )
         attach_injector(app, Injector([_bind_bot_service(
             mock_bot_service,
-            bot_repo=MagicMock(),
+            bot_repo=_mock_bot_repo(),
             passport=mock_passport,
             auth=mock_auth,
             auth_rel=MagicMock(),
@@ -1391,7 +1443,7 @@ class TestCreateBot:
         )
         attach_injector(app, Injector([_bind_bot_service(
             mock_bot_service,
-            bot_repo=MagicMock(),
+            bot_repo=_mock_bot_repo(),
             passport=mock_passport,
             auth=mock_auth,
             auth_rel=MagicMock(),

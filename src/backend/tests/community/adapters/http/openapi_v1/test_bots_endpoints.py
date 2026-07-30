@@ -62,7 +62,9 @@ def svc():
 
 @pytest.fixture
 def bot_repo():
-    return MagicMock()
+    repo = MagicMock()
+    repo.exists_by_owner_and_bot_type.return_value = False
+    return repo
 
 
 @pytest.fixture

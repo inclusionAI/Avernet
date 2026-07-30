@@ -930,6 +930,7 @@ async def create_bot(
             spec=_bot_create_spec(data, user_id),
             cookie=cookie,
             bot_service=bot_service,
+            bot_repo=bot_repo,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
             skill_set_factory=skill_set_factory,

@@ -36,6 +36,7 @@ from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipErr
 from agentclaw.community.plugin_api.passport import PassportError
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
     from agentclaw.community.core.bot_management.services.bot_service import BotService
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
     from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
@@ -302,6 +303,7 @@ def create_bot_with_authorization(
     spec: BotCreateSpec,
     cookie: str | None = None,  # see the note on cookies below
     bot_service: BotService,
+    bot_repo: BotRepository,
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
     skill_set_factory: SkillSetServiceFactory,
@@ -326,7 +328,14 @@ def create_bot_with_authorization(
     # Validate the name up front so an invalid one never reaches Passport or
     # create. An unset name stays unset — create_bot applies default naming.
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
+    # Keep the response field compatible: it describes id allocation, not which
+    # Passport API was selected. A converted service Bot may still own the
+    # ``default`` id while the user has no personal Bot.
     is_first_bot = bot_id == "default"
+    use_first_passport = (
+        spec.bot_type == "personal"
+        and not bot_repo.exists_by_owner_and_bot_type(user_id, "personal")
+    )
 
     # Pre-flight before Passport, so a limit or a taken name is reported before
     # the user is sent through authorization and before an external Passport
@@ -346,7 +355,7 @@ def create_bot_with_authorization(
         cli_items=get_default_cli_items(
             spec.engine_type, spec.template_type
         ),
-        is_first_bot=is_first_bot,
+        is_first_bot=use_first_passport,
     )
 
     passport_token = passport_result.get("token") if passport_result else None
