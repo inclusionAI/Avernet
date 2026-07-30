@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models import Skill, SkillSet, SkillSetMCPServer, SkillSetSkill
+from agentclaw.community.plugins.skill_repository import SkillSetRepository
 from agentclaw.community.utils.avernet_tenant import (
     avernet_tenant_scope,
 )
@@ -141,3 +142,52 @@ def test_catalog_raw_writers_receive_teamclaw_server_default(db, sql):
         assert session.execute(
             text(f"SELECT avernet_tenant FROM {table_name}")
         ).scalar_one() == "teamclaw"
+
+
+def test_catalog_allows_the_same_legacy_identity_in_two_tenants(db):
+    for tenant in ("tenant-a", "tenant-b"):
+        with avernet_tenant_scope(tenant):
+            with db.orm_session() as session:
+                session.add_all(
+                    (
+                        Skill(
+                            name="shared-skill",
+                            skill_uuid="shared-skill-uuid",
+                            env="dev",
+                            version=1,
+                        ),
+                        SkillSet(
+                            name="shared-set",
+                            user_id="shared-user",
+                            env="dev",
+                            bolt_id="default",
+                        ),
+                    )
+                )
+                session.flush()
+
+
+def test_association_writes_reject_references_owned_by_another_tenant(db):
+    tenant_a_skill_id, tenant_a_set_id, _, _ = _seed_catalog(db, "tenant-a", "a")
+    tenant_b_skill_id, tenant_b_set_id, _, _ = _seed_catalog(db, "tenant-b", "b")
+    repository = SkillSetRepository(db)
+
+    with avernet_tenant_scope("tenant-a"):
+        assert repository.add_skill_to_set(tenant_a_set_id, tenant_a_skill_id) is True
+        assert (
+            repository.add_mcp_to_set(
+                tenant_a_set_id,
+                server_code="own-server",
+                name="Own MCP",
+            )
+            is True
+        )
+        assert repository.add_skill_to_set(tenant_b_set_id, tenant_b_skill_id) is False
+        assert (
+            repository.add_mcp_to_set(
+                tenant_b_set_id,
+                server_code="foreign-server",
+                name="Foreign MCP",
+            )
+            is False
+        )

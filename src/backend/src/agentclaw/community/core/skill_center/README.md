@@ -50,6 +50,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
   - agentclaw.community.utils
+  - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
 ```
 

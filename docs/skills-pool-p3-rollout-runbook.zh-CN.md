@@ -7,7 +7,7 @@
 ## 发布前置
 
 生产环境不由 Backend 自动建表。发布新 Backend 前，必须先通过 OceanBase
-数据库变更流程创建 `ac_skill_migration_quarantine` 和
+数据库变更流程创建或升级 `ac_skill_migration_quarantine` 和
 `ac_skills_pool_rollout_audit`，并分别执行 `SELECT 1 ... LIMIT 1` 作为发布
 preflight；任一表不存在或不可读写时禁止开启 rollout。Avernet 仓库只维护
 ORM，数据库变更单需使用以下与 ORM 一致的 DDL：
@@ -16,6 +16,8 @@ ORM，数据库变更单需使用以下与 ORM 一致的 DDL：
 CREATE TABLE ac_skill_migration_quarantine (
   id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT
     COMMENT '自增主键',
+  avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT '数据隔离租户；既有内部数据归属 teamclaw',
   env VARCHAR(20) NOT NULL
     COMMENT '部署环境，如 pre、prod',
   entity_id VARCHAR(512) NOT NULL
@@ -54,8 +56,8 @@ CREATE TABLE ac_skill_migration_quarantine (
     ON UPDATE CURRENT_TIMESTAMP
     COMMENT '记录最后修改时间',
   PRIMARY KEY (id),
-  UNIQUE KEY uk_skill_migration_quarantine_scope_generation
-    (env, entity_id, bot_id, migration_generation) GLOBAL,
+  UNIQUE KEY uk_skill_migration_quarantine_tenant_scope_generation
+    (avernet_tenant, env, entity_id, bot_id, migration_generation) GLOBAL,
   KEY idx_skill_migration_quarantine_cleanup
     (env, status, pool_activated_at) GLOBAL
 ) DEFAULT CHARSET = utf8mb4
@@ -64,6 +66,8 @@ CREATE TABLE ac_skill_migration_quarantine (
 CREATE TABLE ac_skills_pool_rollout_audit (
   id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT
     COMMENT '自增主键',
+  avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT '数据隔离租户；既有内部数据归属 teamclaw',
   env VARCHAR(20) NOT NULL
     COMMENT 'Rollout 配置所属部署环境',
   config_id BIGINT(20) UNSIGNED NOT NULL
@@ -90,15 +94,42 @@ CREATE TABLE ac_skills_pool_rollout_audit (
     ON UPDATE CURRENT_TIMESTAMP
     COMMENT '审计记录的数据库修改时间',
   PRIMARY KEY (id),
-  UNIQUE KEY uk_skills_pool_rollout_audit_revision
-    (env, effective_config_version) GLOBAL,
+  UNIQUE KEY uk_skills_pool_rollout_audit_tenant_revision
+    (avernet_tenant, env, effective_config_version) GLOBAL,
   KEY idx_skills_pool_rollout_audit_batch
     (env, batch_id, id) GLOBAL
 ) DEFAULT CHARSET = utf8mb4
   COMMENT = 'Skills Pool 灰度配置变更追加式审计记录';
 
+-- 已存在上述两表的环境不得重复 CREATE。发布读取 avernet_tenant 的 Backend
+-- 前，按以下顺序升级：先加列，再建 tenant 前导唯一键，最后删除旧唯一键。
+ALTER TABLE ac_skill_migration_quarantine
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT '数据隔离租户；既有内部数据归属 teamclaw';
+ALTER TABLE ac_skills_pool_rollout_audit
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT '数据隔离租户；既有内部数据归属 teamclaw';
+
+ALTER TABLE ac_skill_migration_quarantine
+  ADD UNIQUE KEY uk_skill_migration_quarantine_tenant_scope_generation
+    (avernet_tenant, env, entity_id, bot_id, migration_generation) GLOBAL;
+ALTER TABLE ac_skills_pool_rollout_audit
+  ADD UNIQUE KEY uk_skills_pool_rollout_audit_tenant_revision
+    (avernet_tenant, env, effective_config_version) GLOBAL;
+
+ALTER TABLE ac_skill_migration_quarantine
+  DROP INDEX uk_skill_migration_quarantine_scope_generation;
+ALTER TABLE ac_skills_pool_rollout_audit
+  DROP INDEX uk_skills_pool_rollout_audit_revision;
+
 SELECT 1 FROM ac_skill_migration_quarantine LIMIT 1;
 SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1;
+SELECT COUNT(*) AS null_tenant_rows
+  FROM ac_skill_migration_quarantine WHERE avernet_tenant IS NULL;
+SELECT COUNT(*) AS null_tenant_rows
+  FROM ac_skills_pool_rollout_audit WHERE avernet_tenant IS NULL;
+SHOW INDEX FROM ac_skill_migration_quarantine;
+SHOW INDEX FROM ac_skills_pool_rollout_audit;
 ```
 
 数据库变更顺序固定为：建表并 preflight → 发布 Backend → 保持 feature disabled

@@ -851,12 +851,14 @@ class SkillSetRepository:
     @inject
     def __init__(self, db: DatabasePlugin):
         from agentclaw.community.core.models import (
+            Skill,
             SkillSet,
             SkillSetMCPServer,
             SkillSetSkill,
         )
 
         self._db = db
+        self.Skill = Skill
         self.SkillSet = SkillSet
         self.SkillSetSkill = SkillSetSkill
         self.SkillSetMCPServer = SkillSetMCPServer
@@ -1105,6 +1107,24 @@ class SkillSetRepository:
         user_id: Optional[str] = None,
     ) -> bool:
         with self._db.orm_session() as db:
+            skill_set = (
+                db.query(self.SkillSet)
+                .filter(
+                    self.SkillSet.id == int(skill_set_id),
+                    self.SkillSet.env == get_current_env(),
+                )
+                .one_or_none()
+            )
+            skill = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.id == int(skill_id),
+                    self.Skill.env == get_current_env(),
+                )
+                .one_or_none()
+            )
+            if skill_set is None or skill is None:
+                return False
             db.add(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),
@@ -1269,6 +1289,17 @@ class SkillSetRepository:
         env: Optional[str] = None,
     ) -> bool:
         with self._db.orm_session() as db:
+            target_env = env or get_current_env()
+            skill_set = (
+                db.query(self.SkillSet)
+                .filter(
+                    self.SkillSet.id == int(skill_set_id),
+                    self.SkillSet.env == target_env,
+                )
+                .one_or_none()
+            )
+            if skill_set is None:
+                return False
             db.add(
                 self.SkillSetMCPServer(
                     skill_set_id=int(skill_set_id),

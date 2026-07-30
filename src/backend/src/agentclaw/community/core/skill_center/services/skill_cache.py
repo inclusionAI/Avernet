@@ -16,6 +16,7 @@ from injector import inject
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 
 logger = get_logger()
@@ -26,10 +27,10 @@ logger = get_logger()
 # ============================================================================
 
 class MarketCache:
-    """全局市场技能缓存
+    """按环境和 tenant 分区的市场技能缓存
 
     优先使用 分布式缓存，失败时降级到内存缓存。
-    缓存键使用环境变量区分，全局共享。
+    缓存键按环境和当前 tenant 区分；同一 tenant 内共享。
     """
 
     # 缓存键前缀
@@ -60,9 +61,10 @@ class MarketCache:
             return "dev"
 
     def _build_key(self, base_key: str) -> str:
-        """构建全局缓存键"""
+        """构建环境和 tenant 隔离的缓存键。"""
         env = self._get_env()
-        return f"{self.CACHE_KEY_PREFIX}:{base_key}:{env}"
+        tenant = get_current_avernet_tenant()
+        return f"{self.CACHE_KEY_PREFIX}:{base_key}:{env}:{tenant}"
 
     def _check_zcache_available(self) -> bool:
         """检查 分布式缓存 是否可用（带 TTL 复检）。
