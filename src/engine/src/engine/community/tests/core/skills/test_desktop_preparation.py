@@ -85,6 +85,82 @@ def _legacy_runtime(home: Path, engine: str):
     return layout, repo_source, managed, external
 
 
+def _fresh_legacy_runtime(home: Path, engine: str):
+    layout = _layout(home, engine)
+    repo_source = home / ".openclaw/workspace/skills/skills-repo"
+    repo_source.mkdir(parents=True)
+
+    layout.active_root.mkdir(parents=True, exist_ok=True)
+    if layout.local_bridge != layout.legacy_local:
+        layout.local_bridge.symlink_to(
+            layout.legacy_local,
+            target_is_directory=True,
+        )
+    if layout.legacy_repo != repo_source:
+        layout.legacy_repo.parent.mkdir(parents=True, exist_ok=True)
+        layout.legacy_repo.symlink_to(repo_source, target_is_directory=True)
+    if (
+        layout.repo_bridge != layout.legacy_repo
+        and not layout.repo_bridge.exists()
+        and not layout.repo_bridge.is_symlink()
+    ):
+        layout.repo_bridge.symlink_to(
+            layout.legacy_repo,
+            target_is_directory=True,
+        )
+    return layout, repo_source
+
+
+@pytest.mark.parametrize("engine", FILESYSTEM_ENGINES)
+def test_preparation_creates_empty_legacy_local_for_fresh_desktop_runtime(
+    tmp_path: Path,
+    engine: str,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout, repo_source = _fresh_legacy_runtime(home, engine)
+    assert not layout.legacy_local.exists()
+    assert not layout.legacy_local.is_symlink()
+
+    result = prepare_desktop_pool(
+        engine=engine,
+        repo_source=repo_source,
+        home=home,
+    )
+
+    assert result.status is DesktopPreparationStatus.PREPARED
+    assert layout.legacy_local.is_dir()
+    assert not layout.legacy_local.is_symlink()
+    assert layout.pool_local.is_dir()
+    probe = inspect_runtime_layout(
+        engine=engine,
+        home=home,
+        repo_delivery=RepoDelivery.DOWNLOAD,
+    )
+    assert probe.status is RuntimeLayoutInspectionStatus.READY
+    assert probe.preparation_id == result.preparation_id
+
+
+def test_preparation_does_not_replace_missing_legacy_local_symlink(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout, repo_source = _fresh_legacy_runtime(home, "openclaw")
+    wrong = home / "wrong-local"
+    layout.legacy_local.symlink_to(wrong, target_is_directory=True)
+
+    result = prepare_desktop_pool(
+        engine="openclaw",
+        repo_source=repo_source,
+        home=home,
+    )
+
+    assert result.status is DesktopPreparationStatus.FAILED
+    assert layout.legacy_local.is_symlink()
+    assert _target(layout.legacy_local) == wrong
+    assert not wrong.exists()
+    assert not layout.ready_marker.exists()
+
+
 @pytest.mark.parametrize("engine", FILESYSTEM_ENGINES)
 def test_preparation_reuses_downloaded_repo_and_preserves_legacy_layout(
     tmp_path: Path,

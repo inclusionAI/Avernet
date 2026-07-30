@@ -224,7 +224,12 @@ def prepare_desktop_pool(
         ):
             raise OSError(f"Pool local is not a directory: {layout.pool_local}")
         layout.pool_local.mkdir(exist_ok=True)
-        if not layout.legacy_local.is_dir() or layout.legacy_local.is_symlink():
+        if layout.legacy_local.is_symlink():
+            raise OSError(
+                f"Legacy local is not a directory: {layout.legacy_local}"
+            )
+        layout.legacy_local.mkdir(parents=True, exist_ok=True)
+        if not layout.legacy_local.is_dir():
             raise OSError(
                 f"Legacy local is not a directory: {layout.legacy_local}"
             )
