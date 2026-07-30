@@ -12,6 +12,11 @@ from agentclaw.community.core.bot_collaborator.models import (
     PermissionLevel,
 )
 from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
+from agentclaw.community.core.bot_collaborator.services.aicoding.utils.member_management import (
+    get_template_ext,
+    has_member_management_enabled,
+    is_coding_app_bot,
+)
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -145,6 +150,7 @@ class CollaboratorService:
         passport_plugin: PassportPlugin,
         resolver_provider: "Callable[[], DeviceContextResolver]",
         device_fs_dispatcher_provider: "Callable[[], DeviceFilesystemDispatcher]",
+        template_service: Any = None,
     ) -> None:
         """初始化服务。
 
@@ -157,12 +163,14 @@ class CollaboratorService:
                 （device 图反向依赖 ``BotService``）。
             device_fs_dispatcher_provider: 惰性 thunk，返回 ``DeviceFilesystemDispatcher``
                 （按 ``DeviceContext`` 派发 per-bot 文件读写插件）。
+            template_service: 模板服务，用于读取 ``ac_templates.ext``。
         """
         self._collaborator_repo = collaborator_repo
         self._bot_repo = bot_repo
         self._passport_plugin = passport_plugin
         self._resolver_provider = resolver_provider
         self._device_fs_dispatcher_provider = device_fs_dispatcher_provider
+        self._template_service = template_service
 
     # ========================================================================
     # 权限检查
@@ -275,12 +283,19 @@ class CollaboratorService:
         #    - service：Service Bot 协作者，走原逻辑。
         #    - coding 应用（active_engine == "claude_code" 且 template_type ==
         #      "applicationCoding"）：作为"应用成员"复用同一套协作者流程，放行。
-        is_coding_app = (
-            bot.get("active_engine") == "claude_code"
-            and bot.get("template_type") == "applicationCoding"
-        )
-        if bot.get("bot_type") != "service" and not is_coding_app:
-            raise BotNotServiceTypeError(f"Bot 不是服务型且非 coding 应用: bot_id={bot_id}")
+        #    - 模板显式打开成员管理：
+        #      ac_templates.ext.bot_template_config.advanced_config.member_management
+        #      == true 时，不强绑定 bot_type / engine / template_type，也放行。
+        is_service_bot = bot.get("bot_type") == "service"
+        is_coding_app = is_coding_app_bot(bot)
+        has_member_management = False
+        if not is_service_bot and not is_coding_app:
+            template_ext = get_template_ext(self._template_service, bot_id)
+            has_member_management = has_member_management_enabled(template_ext)
+        if not is_service_bot and not is_coding_app and not has_member_management:
+            raise BotNotServiceTypeError(
+                f"Bot 不是服务型、非 coding 应用且未开启成员管理: bot_id={bot_id}"
+            )
 
         bot_pk = bot["id"]
         owner_id_from_bot = bot["owner_id"]

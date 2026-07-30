@@ -26,6 +26,9 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_lock_servic
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
+from agentclaw.community.core.bot_collaborator.services.aicoding.utils.member_management import (
+    is_member_management_enabled_bot,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -487,8 +490,9 @@ class CollaboratorPermissionInterceptor:
         """判断目标 Bot 是否为 coding 应用。
 
         coding 应用：``active_engine == "claude_code"`` 且
-        ``template_type == "applicationCoding"``。失败时保守返回 False
-        （即按 Service Bot 原逻辑走 bot 级锁）。
+        ``template_type == "applicationCoding"``；或模板显式开启
+        ``ac_templates.ext.bot_template_config.advanced_config.member_management == true``。
+        失败时保守返回 False（即按 Service Bot 原逻辑走 bot 级锁）。
         """
         if not bot_id or not owner_id or ctx.injector is None:
             return False
@@ -499,10 +503,7 @@ class CollaboratorPermissionInterceptor:
 
             bot_service = ctx.injector.get(BotServiceProtocol)
             bot = bot_service.get_bot(bot_id, owner_id)
-            return bool(bot) and (
-                bot.get("active_engine") == "claude_code"
-                and bot.get("template_type") == "applicationCoding"
-            )
+            return is_member_management_enabled_bot(bot)
         except Exception as e:
             logger.warning("[_is_coding_app] check failed: %s", e)
             return False

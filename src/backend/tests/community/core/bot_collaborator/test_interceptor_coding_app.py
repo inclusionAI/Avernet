@@ -44,6 +44,42 @@ class TestIsCodingApp:
         assert result is True
         mock_bot_service.get_bot.assert_called_once_with("bot_123", "owner_001")
 
+    def test_member_management_flag_return_true(self):
+        """advanced_config.member_management=true -> True even when not coding app."""
+        ctx = InterceptorContext(user=None, route_kwargs={})
+        mock_injector = MagicMock()
+        mock_bot_service = MagicMock()
+        mock_bot_service.get_bot.return_value = {
+            "active_engine": "openclaw",
+            "template_type": "chat",
+            "template_config": {
+                "bot_template_config": {"advanced_config": {"member_management": True}}
+            },
+        }
+        mock_injector.get.return_value = mock_bot_service
+        ctx.injector = mock_injector
+
+        result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
+        assert result is True
+
+    def test_member_management_flag_requires_boolean_true(self):
+        """member_management 字符串 true 不放行。"""
+        ctx = InterceptorContext(user=None, route_kwargs={})
+        mock_injector = MagicMock()
+        mock_bot_service = MagicMock()
+        mock_bot_service.get_bot.return_value = {
+            "active_engine": "openclaw",
+            "template_type": "chat",
+            "template_config": {
+                "bot_template_config": {"advanced_config": {"member_management": "true"}}
+            },
+        }
+        mock_injector.get.return_value = mock_bot_service
+        ctx.injector = mock_injector
+
+        result = self.interceptor._is_coding_app(ctx, "bot_123", "owner_001")
+        assert result is False
+
     def test_service_bot_return_false(self):
         """Service Bot (not claude_code) -> False."""
         ctx = InterceptorContext(user=None, route_kwargs={})
