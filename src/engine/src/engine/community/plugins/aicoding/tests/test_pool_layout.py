@@ -345,6 +345,36 @@ def test_aicoding_retirement_failure_stays_retryable_finalizing(
     assert marker["activation_state"] == "finalizing"
 
 
+def test_aicoding_retirement_io_failure_stays_retryable_finalizing(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, _, _, pool_repo = _prepared_home(tmp_path)
+    active_repo = local_bridge.parent / "skills-repo"
+    active_repo.mkdir()
+
+    def fail_retirement(_generation: str, _preparation_id: str):
+        raise OSError(16, "mount busy")
+
+    result = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        retire_active_repo=fail_retirement,
+    )
+
+    assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert result.evidence["reason"] == "active_repo_retirement_failed"
+    assert result.evidence["retirement_reason"] == "active_repo_retirement_io_error"
+    assert result.evidence["errno"] == 16
+    marker = json.loads(
+        (home / ".aicoding" / "workspace" / "skills-pool" / ".pool-active").read_text()
+    )
+    assert marker["activation_state"] == "finalizing"
+
+
 def test_aicoding_finalizing_retry_retires_active_repo_and_commits(
     tmp_path: Path,
 ) -> None:
