@@ -1122,7 +1122,9 @@ class SkillExecutionResult:
   payload、带 v2 的 physical payload、logical/physical 混合 payload 和未知
   version 均在任何文件系统 mutation 前以
   `InvalidPoolMappingRequestError` 拒绝，HTTP delivery adapter 固定映射为
-  `400`；Engine layout descriptor/invariant 异常不归入该输入错误。
+  `400`；Engine layout descriptor/invariant 异常不归入该输入错误。未知
+  corpus 等不满足 HTTP schema 的结构错误由 FastAPI 在进入 Skills Service
+  前以 `422` 拒绝，同样不能触发 plugin 调用或文件系统 mutation。
 - 消费者包括 Backend `SkillsPoolRuntimeProtocol`/
   `SkillsPoolReconcileService`、Engine `/api/skills` router 与
   `SkillsService`，以及 OpenClaw、Claude Code、AICoding、Hermes 的
