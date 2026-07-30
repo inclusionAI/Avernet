@@ -120,3 +120,75 @@ async def test_envelope_errors_passes_through_unmapped():
 
     with pytest.raises(ValueError, match="boom"):
         await handler(request=_request())
+
+
+# ── Envelope.warning (Track C, Task 1) ────────────────────────────────────────
+#
+# Added for the engine-runtime surface: an engine may declare a capability as
+# supported-*with-a-caveat* and return a human-readable warning alongside a
+# real payload. The envelope had nowhere to put it, so the caveat was being
+# dropped. Additive and defaulted, so the six pre-existing categories are
+# unaffected beyond serialising an extra empty key.
+
+
+def test_envelope_warning_defaults_to_empty():
+    """Every existing caller builds envelopes without a warning."""
+    env = envelope({"x": 1}, _request())
+    assert env.warning == ""
+    assert env.model_dump()["warning"] == ""
+
+
+def test_envelope_warning_round_trips_when_set():
+    env = envelope({"x": 1}, _request())
+    env.warning = "engine can only list the current session"
+    assert env.model_dump()["warning"] == (
+        "engine can only list the current session"
+    )
+
+
+def test_page_envelope_carries_the_warning_field():
+    """Page responses share the Envelope, so they inherit the field."""
+    env = page(2, [{"a": 1}], _request())
+    assert env.model_dump()["warning"] == ""
+
+
+def test_error_envelope_has_no_warning():
+    """A failed request has no partial payload to caveat.
+
+    ``ErrorEnvelope`` is the documented error model on every public route; adding
+    a field there would promise callers something no error path populates.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.contracts import ErrorEnvelope
+
+    assert "warning" not in ErrorEnvelope.model_fields
+
+
+def test_error_responses_document_501_and_504():
+    """The engine-runtime surface can return both; the schema must say so."""
+    from agentclaw.community.adapters.http.openapi_v1.contracts import (
+        ERROR_RESPONSES,
+        ErrorEnvelope,
+    )
+
+    for status in (501, 504):
+        assert status in ERROR_RESPONSES
+        assert ERROR_RESPONSES[status]["model"] is ErrorEnvelope
+
+
+def test_error_body_matches_the_documented_error_model():
+    """Failure bodies serialise ``ErrorEnvelope``, not ``Envelope``.
+
+    Once ``Envelope`` gained ``warning`` the two shapes diverged, and
+    ``_error_response`` was building the wrong one — every error body carried a
+    ``warning: ""`` key that ``ERROR_RESPONSES`` does not document. Regression
+    guard: the emitted key set must equal the documented model's field set.
+    """
+    import json
+
+    from agentclaw.community.adapters.http.openapi_v1.contracts import ErrorEnvelope
+    from agentclaw.community.adapters.http.openapi_v1.responses import error_response
+
+    resp = error_response(404, "Not found", _request())
+    body = json.loads(bytes(resp.body))
+    assert set(body) == set(ErrorEnvelope.model_fields)
+    assert "warning" not in body

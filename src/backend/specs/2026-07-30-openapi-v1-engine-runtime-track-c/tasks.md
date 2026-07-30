@@ -7,25 +7,32 @@ All paths are relative to `src/backend/`. Source package is
 
 ---
 
-## Task 1: Extend the shared public contract for engine-sourced results
+## Task 1: Extend the shared public contract for engine-sourced results  `[x]`
 - **Goal:** Give `Envelope` the `warning` field and document the two new HTTP
   statuses this track can return, before anything depends on them.
 - **Files:**
   - `…/adapters/http/openapi_v1/contracts.py`
   - `tests/community/adapters/http/openapi_v1/test_responses.py`
 - **Done when:**
-  - [ ] `Envelope.warning: str = ""` exists with a description explaining it is
+  - [x] `Envelope.warning: str = ""` exists with a description explaining it is
         non-empty only when the engine served the request with a documented
         limitation.
-  - [ ] `ErrorEnvelope` is **unchanged** — no `warning` on error responses.
-  - [ ] `ERROR_RESPONSES` gains `501` and `504` entries, both `ErrorEnvelope`.
-  - [ ] Existing envelope tests still pass, plus a new assertion that a success
+  - [x] `ErrorEnvelope` is **unchanged** — no `warning` on error responses.
+  - [x] `ERROR_RESPONSES` gains `501` and `504` entries, both `ErrorEnvelope`.
+  - [x] Existing envelope tests still pass, plus a new assertion that a success
         envelope serialises `warning` and that it defaults to `""`.
-  - [ ] Spot-check one existing category (bots) still serialises correctly with
+  - [x] Spot-check one existing category (bots) still serialises correctly with
         the added key.
 - **Depends on:** —
 - **Note:** This is the one change touching a contract shared with all seven
   existing categories (plan assumption 1). Keep it to exactly these edits.
+- **Found while doing it:** `_error_response` was building `Envelope`, so the
+  new field leaked a `warning: ""` key into every error body — including the six
+  existing categories' — while `ERROR_RESPONSES` documents `ErrorEnvelope`,
+  which has no such field. Fixed at the source: error paths now build
+  `ErrorEnvelope`. The three pre-existing envelope-shape tests pass unmodified,
+  and a regression guard asserts the emitted key set equals the documented
+  model's fields.
 
 ## Task 2: Create the `core/engine_runtime` module skeleton and error types
 - **Goal:** Stand up the new core module with its models, errors and Context

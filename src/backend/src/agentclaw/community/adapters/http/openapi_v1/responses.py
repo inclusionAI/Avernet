@@ -30,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_OK,
     Deleted,
     Envelope,
+    ErrorEnvelope,
     Page,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
@@ -250,7 +251,13 @@ def _error_response(
     *,
     headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
-    body = Envelope(
+    # ``ErrorEnvelope``, not ``Envelope``: it is the model every route documents
+    # for failures (``ERROR_RESPONSES``), and since ``Envelope`` gained the
+    # optional ``warning`` field the two shapes are no longer identical. Building
+    # the documented model keeps the wire and the published schema in step — an
+    # error body has no partial payload to caveat, so ``warning`` has no meaning
+    # here.
+    body = ErrorEnvelope(
         code=http_status * 1000,
         message=message,
         data=None,
