@@ -124,7 +124,7 @@ _按优先级分层排序。_
 ### 横切事项（非按阶段划分）
 | 事项 | 状态 | 备注 |
 |---|---|---|
-| 真实的调用方身份验证器（认证工作线） | ✅ **后端这一半已完成 —— PR #TBD**（网关那一半：[#599](https://github.com/inclusionAI/Avernet/pull/599)，未合并） | `require_principal` 与 `resolve_avernet_tenant` 现在会校验网关签发的 `X-Avernet-Principal`（HS256、`aud=backend`），并从中读出租户与 owner。**端到端仍不可调用**：#599 必须先合并（否则没有东西转发这个头），且网关的 `route_security.yaml` 必须允许本界面真实的调用方 —— 见下方两个待定问题 |
+| 真实的调用方身份验证器（认证工作线） | ✅ **后端这一半已完成 —— PR [#634](https://github.com/inclusionAI/Avernet/pull/634)**（网关那一半：[#599](https://github.com/inclusionAI/Avernet/pull/599)，未合并） | `require_principal` 与 `resolve_avernet_tenant` 现在会校验网关签发的 `X-Avernet-Principal`（HS256、`aud=backend`），并从中读出租户与 owner。**端到端仍不可调用**：#599 必须先合并（否则没有东西转发这个头），且网关的 `route_security.yaml` 必须允许本界面真实的调用方 —— 见下方两个待定问题 |
 | 租户前导索引（F2，**强制**策略） | ⬜ TODO | 多租户上线前必须完成 |
 | 后台/定时任务的复查 | ⬜ TODO | 在第二个租户持有真实数据之前完成 |
 | **Agent 身份标识在租户之间会撞车**（[#556](https://github.com/inclusionAI/Avernet/issues/556)） | ⬜ TODO（totalfrank） | Passport、授权关系、BCN、策略行都只用 `bot_id`/`owner_id` 作键，没有租户维度，而每个 owner 的第一个 bot 的 id 就是字符串 `"default"`。**应当成为开启多租户的前置闸口。** #494 里以公共更新路径上的 `sync_to_bcn=False` 做了临时止血 |
