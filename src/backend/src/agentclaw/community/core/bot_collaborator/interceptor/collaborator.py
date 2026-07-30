@@ -26,6 +26,9 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_lock_servic
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -484,10 +487,11 @@ class CollaboratorPermissionInterceptor:
     def _is_coding_app(
         self, ctx: InterceptorContext, bot_id: str | None, owner_id: str | None
     ) -> bool:
-        """判断目标 Bot 是否为 coding 应用。
+        """判断目标 Bot 是否使用应用/成员管理语义。
 
-        coding 应用：``active_engine == "claude_code"`` 且
-        ``template_type == "applicationCoding"``。失败时保守返回 False
+        具体规则通过 ``MemberManagementCapabilityService`` 协调：通用层只
+        依赖 engine capability interface，不解释任何引擎私有 schema；各引擎
+        的定制判断放在各自目录的 capability 实现中。失败时保守返回 False
         （即按 Service Bot 原逻辑走 bot 级锁）。
         """
         if not bot_id or not owner_id or ctx.injector is None:
@@ -499,10 +503,8 @@ class CollaboratorPermissionInterceptor:
 
             bot_service = ctx.injector.get(BotServiceProtocol)
             bot = bot_service.get_bot(bot_id, owner_id)
-            return bool(bot) and (
-                bot.get("active_engine") == "claude_code"
-                and bot.get("template_type") == "applicationCoding"
-            )
+            capability_service = ctx.injector.get(MemberManagementCapabilityService)
+            return capability_service.uses_member_management_semantics(bot, bot_id)
         except Exception as e:
             logger.warning("[_is_coding_app] check failed: %s", e)
             return False
