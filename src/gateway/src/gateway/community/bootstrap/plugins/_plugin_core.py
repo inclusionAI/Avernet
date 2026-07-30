@@ -1,9 +1,12 @@
 from dependency_injector import containers, providers
 
+from gateway.community.plugins.auth.stub import StubAuthPlugin
+from gateway.community.plugins.authn.agentpass_noop import NoopAgentPassStrategy
 from gateway.community.plugins.authn.app_token import (
     StubAppTokenValidator,
     StubTenantResolver,
 )
+from gateway.community.plugins.authn.xoneid_noop import NoopXOneIdStrategy
 from gateway.community.plugins.cache.in_memory import InMemoryCachePlugin
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
@@ -33,6 +36,11 @@ class PluginContainer(containers.DeclarativeContainer):
         stub=providers.Singleton(InMemoryCachePlugin),
     )
 
+    auth = providers.Selector(
+        config.plugins.auth,
+        stub=providers.Singleton(StubAuthPlugin),
+    )
+
     app_token_validator = providers.Selector(
         config.plugins.authn.app_token,
         stub=providers.Singleton(StubAppTokenValidator),
@@ -41,6 +49,16 @@ class PluginContainer(containers.DeclarativeContainer):
     tenant_resolver = providers.Selector(
         config.plugins.authn.tenant,
         stub=providers.Singleton(StubTenantResolver),
+    )
+
+    authn_agentpass = providers.Selector(
+        config.plugins.authn.agentpass,
+        stub=providers.Singleton(NoopAgentPassStrategy),
+    )
+
+    authn_xoneid = providers.Selector(
+        config.plugins.authn.xoneid,
+        stub=providers.Singleton(NoopXOneIdStrategy),
     )
 
 

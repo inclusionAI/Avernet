@@ -103,6 +103,8 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
             db=plugins.providers["database"],
             app_token_validator=plugins.providers["app_token_validator"],
             tenant_resolver=plugins.providers["tenant_resolver"],
+            authn_agentpass=plugins.providers["authn_agentpass"],
+            authn_xoneid=plugins.providers["authn_xoneid"],
         )
     )
 

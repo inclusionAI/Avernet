@@ -30,8 +30,10 @@ class LogConfig:
 
 class AuthnPluginConfig(BaseSettings):
     model_config = SettingsConfigDict(extra="allow")
-    app_token: str = Field(default="stub", pattern=r"^(stub|real)$")
-    tenant: str = Field(default="stub", pattern=r"^(stub|real)$")
+    app_token: str = Field(default="stub")
+    tenant: str = Field(default="stub")
+    agentpass: str = Field(default="stub", min_length=1)
+    xoneid: str = Field(default="stub", min_length=1)
 
 
 class DatabasePluginConfig(BaseSettings):
@@ -41,14 +43,22 @@ class DatabasePluginConfig(BaseSettings):
 
 
 class PluginConfig(BaseSettings):
-    """Plugin selection config for gateway DI container."""
+    """Plugin selection config for gateway DI container.
+
+    Values are validated only for minimum length. The community
+    package MUST NOT restrict which selectors enterprise can use —
+    enterprise registrations (auth, cache, database, etc.) inject
+    additional provider options at bootstrap time through the
+    ``plugin_registry`` module.
+    """
 
     model_config = SettingsConfigDict(extra="allow")
     config_section: ClassVar[str] = "plugins"
 
-    forwarder: str = Field(default="httpx", pattern=r"^(httpx|sofa)$")
-    schema_catalog: str = Field(default="file", pattern=r"^(file|sofa)$")
-    cache: str = Field(default="stub", pattern=r"^(stub|real)$")
+    forwarder: str = Field(default="httpx", min_length=1)
+    schema_catalog: str = Field(default="file", min_length=1)
+    cache: str = Field(default="stub", min_length=1)
+    auth: str = Field(default="stub", min_length=1)
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
     database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
 

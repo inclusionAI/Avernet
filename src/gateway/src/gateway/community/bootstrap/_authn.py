@@ -81,9 +81,11 @@ def _default_strategy_pool(
     db: DataSourcePlugin,
     app_token_validator: AppTokenValidator,
     tenant_resolver: TenantResolver,
+    authn_agentpass: AuthStrategy | None = None,
+    authn_xoneid: AuthStrategy | None = None,
 ) -> dict[str, AuthStrategy]:
     """The built-in strategy instances, keyed by their short name."""
-    return {
+    pool = {
         "google": GoogleUserStrategy(
             token_header="x-google-token", default_tenant=_DEFAULT_TENANT
         ),
@@ -93,6 +95,11 @@ def _default_strategy_pool(
         ),
         "access_key_token": AccessKeyTokenStrategy(registry=AccessKeyRepository(db)),
     }
+    if authn_agentpass is not None:
+        pool["agentpass"] = authn_agentpass
+    if authn_xoneid is not None:
+        pool["xoneid"] = authn_xoneid
+    return pool
 
 
 def _default_chains(
@@ -112,6 +119,8 @@ def build_authenticator(
     db: DataSourcePlugin,
     app_token_validator: AppTokenValidator,
     tenant_resolver: TenantResolver,
+    authn_agentpass: AuthStrategy | None = None,
+    authn_xoneid: AuthStrategy | None = None,
 ) -> Authenticator:
     """Build the identity-chain registry + route table (once, from create_app).
 
@@ -119,7 +128,13 @@ def build_authenticator(
     through the DI container.
     """
     return Authenticator(
-        strategies=_strategy_chains(db, app_token_validator, tenant_resolver),
+        strategies=_strategy_chains(
+            db,
+            app_token_validator,
+            tenant_resolver,
+            authn_agentpass=authn_agentpass,
+            authn_xoneid=authn_xoneid,
+        ),
         route_security=_load_route_security(),
     )
 
@@ -128,9 +143,17 @@ def _strategy_chains(
     db: DataSourcePlugin,
     app_token_validator: AppTokenValidator,
     tenant_resolver: TenantResolver,
+    authn_agentpass: AuthStrategy | None = None,
+    authn_xoneid: AuthStrategy | None = None,
 ) -> dict[PrincipalType, IdentityChain]:
     """Parse identity_strategies.yaml, wiring each declared strategy by name."""
-    pool = _default_strategy_pool(db, app_token_validator, tenant_resolver)
+    pool = _default_strategy_pool(
+        db,
+        app_token_validator,
+        tenant_resolver,
+        authn_agentpass=authn_agentpass,
+        authn_xoneid=authn_xoneid,
+    )
     defaults = _default_chains(pool)
     configs_dir = _resolve_configs_dir()
     if configs_dir is None:

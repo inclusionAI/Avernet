@@ -29,13 +29,15 @@ class TestPluginConfig:
         assert cfg.database.plugin_database == "SQLITE_ORM"
         assert cfg.database.database_url == ""
 
-    def test_invalid_forwarder_raises(self) -> None:
-        with pytest.raises(Exception):
-            PluginConfig(forwarder="INVALID")
+    def test_arbitrary_forwarder_accepted(self) -> None:
+        """Community does not restrict which values enterprise can use."""
+        cfg = PluginConfig(forwarder="custom-backend")
+        assert cfg.forwarder == "custom-backend"
 
-    def test_invalid_cache_raises(self) -> None:
-        with pytest.raises(Exception):
-            PluginConfig(cache="INVALID")
+    def test_arbitrary_cache_accepted(self) -> None:
+        """Community does not restrict which values enterprise can use."""
+        cfg = PluginConfig(cache="custom-backend")
+        assert cfg.cache == "custom-backend"
 
     def test_custom_values_accepted(self) -> None:
         cfg = PluginConfig(
