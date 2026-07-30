@@ -9,14 +9,20 @@ This service provides a unified interface for managing different types of resour
 
 All resource metadata is stored in the main database (SQLite or the corp store).
 """
+
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Dict, Any
 
-from agentclaw.community.core.resources.services.file_service import DATA_DIR, FileService
+from agentclaw.community.core.resources.services.file_service import (
+    DATA_DIR,
+    FileService,
+)
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
+    from agentclaw.community.core.devices.services.device_filesystem import (
+        DeviceFileSystem,
+    )
 from agentclaw.community.core.resources.models import (
     Resource,
     ResourceType,
@@ -75,7 +81,9 @@ def _get_resource_data_dir(
             # Pure entity_id, use provided entity_type or default to "staff"
             effective_entity_type = entity_type if entity_type else "staff"
             effective_entity_id = entity_id
-        return factory.get_bot_data_dir(effective_entity_id, bot_id, engine_type, effective_entity_type)
+        return factory.get_bot_data_dir(
+            effective_entity_id, bot_id, engine_type, effective_entity_type
+        )
 
     # Priority 2: Construct from user_id
     if user_id:
@@ -83,7 +91,12 @@ def _get_resource_data_dir(
         effective_entity_id = user_id
         effective_bot_id = "default"
         effective_engine = DEFAULT_ENGINE_TYPE
-        return factory.get_bot_data_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
+        return factory.get_bot_data_dir(
+            effective_entity_id,
+            effective_bot_id,
+            effective_engine,
+            effective_entity_type,
+        )
 
     # Priority 3: Fallback to default DATA_DIR
     return DATA_DIR
@@ -138,7 +151,7 @@ class ResourceService:
                 entity_id=entity_id,
                 bot_id=bot_id,
                 engine_type=engine_type,
-                entity_type=entity_type
+                entity_type=entity_type,
             )
 
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -147,7 +160,9 @@ class ResourceService:
         self._bot_repo = bot_repo
         self._file_service = FileService(self.data_dir)
 
-        logger.info(f"[ResourceService] Initialized: data_dir={self.data_dir}, repository={type(self._repo).__name__}")
+        logger.info(
+            f"[ResourceService] Initialized: data_dir={self.data_dir}, repository={type(self._repo).__name__}"
+        )
 
     async def check_name_exists(
         self,
@@ -155,7 +170,7 @@ class ResourceService:
         resource_type: ResourceType,
         parent_path: Optional[str] = None,
         user_id: Optional[str] = None,
-        exclude_id: Optional[str] = None
+        exclude_id: Optional[str] = None,
     ) -> bool:
         """
         Check if a resource with the same name already exists.
@@ -163,15 +178,17 @@ class ResourceService:
         Uniqueness is determined by (name, resource_type, parent_path, user_id, bolt_id).
         """
         existing = self._repo.list_resources(
-            resource_type=resource_type.value if isinstance(resource_type, ResourceType) else resource_type,
+            resource_type=resource_type.value
+            if isinstance(resource_type, ResourceType)
+            else resource_type,
             parent_path=parent_path,
             user_id=user_id,
-            bolt_id=self._bot_id
+            bolt_id=self._bot_id,
         )
 
         for item in existing:
-            if item['name'] == name:
-                if exclude_id and item['id'] == exclude_id:
+            if item["name"] == name:
+                if exclude_id and item["id"] == exclude_id:
                     continue
                 return True
 
@@ -182,18 +199,20 @@ class ResourceService:
         name: str,
         resource_type: ResourceType,
         parent_path: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
     ) -> Optional[Resource]:
         """Get a resource by name, type, parent_path and user_id."""
         existing = self._repo.list_resources(
-            resource_type=resource_type.value if isinstance(resource_type, ResourceType) else resource_type,
+            resource_type=resource_type.value
+            if isinstance(resource_type, ResourceType)
+            else resource_type,
             parent_path=parent_path,
             user_id=user_id,
-            bolt_id=self._bot_id
+            bolt_id=self._bot_id,
         )
 
         for item in existing:
-            if item['name'] == name:
+            if item["name"] == name:
                 return Resource(**item)
 
         return None
@@ -205,30 +224,30 @@ class ResourceService:
         user_id: Optional[str] = None,
         status: Optional[ResourceStatus] = None,
         limit: Optional[int] = None,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Resource]:
         """List resources with filters."""
         items = self._repo.list_resources(
-            resource_type=resource_type.value if isinstance(resource_type, ResourceType) else resource_type,
+            resource_type=resource_type.value
+            if isinstance(resource_type, ResourceType)
+            else resource_type,
             parent_path=parent_path,
             user_id=user_id,
             status=status.value if isinstance(status, ResourceStatus) else status,
-            bolt_id=self._bot_id
+            bolt_id=self._bot_id,
         )
 
         resources = [Resource(**item) for item in items]
 
         if limit:
-            resources = resources[offset:offset + limit]
+            resources = resources[offset : offset + limit]
 
         return resources
 
     # ==================== File Resource Operations ====================
 
     async def list_file_resources(
-        self,
-        parent_path: Optional[str] = None,
-        flat: bool = False
+        self, parent_path: Optional[str] = None, flat: bool = False
     ) -> List[Resource]:
         """
         List file resources.
@@ -238,8 +257,7 @@ class ResourceService:
         """
         if flat:
             return self.list_resources(
-                resource_type=ResourceType.FILE,
-                parent_path=parent_path or ""
+                resource_type=ResourceType.FILE, parent_path=parent_path or ""
             )
         else:
             return await self._sync_and_build_tree(parent_path or "")
@@ -252,48 +270,48 @@ class ResourceService:
 
         def process_node(node_data: dict, parent: str = "") -> Resource:
             """Process a filesystem node and create/update database record."""
-            node_path = node_data.get('path', '')
-            is_dir = node_data.get('is_dir', False)
+            node_path = node_data.get("path", "")
+            is_dir = node_data.get("is_dir", False)
 
             # Check if resource exists in database
             existing = self._repo.get_by_path(node_path, bolt_id=self._bot_id)
 
             if existing:
                 # Update existing resource
-                existing['attributes']['is_directory'] = is_dir
-                existing['attributes']['size'] = node_data.get('size', 0)
-                existing['attributes']['parent_path'] = parent
-                existing['gmt_modified'] = datetime.now().isoformat()
-                self._repo.update(existing['id'], existing)
+                existing["attributes"]["is_directory"] = is_dir
+                existing["attributes"]["size"] = node_data.get("size", 0)
+                existing["attributes"]["parent_path"] = parent
+                existing["gmt_modified"] = datetime.now().isoformat()
+                self._repo.update(existing["id"], existing)
                 resource = Resource(**existing)
             else:
                 # Create new resource
                 resource = create_file_resource(
-                    name=node_data.get('name', ''),
+                    name=node_data.get("name", ""),
                     path=node_path,
                     parent_path=parent,
                     is_directory=is_dir,
-                    size=node_data.get('size', 0),
-                    extension=self._get_extension(node_data.get('name', '')),
-                    mime_type=self._guess_mime_type(node_data.get('name', '')),
-                    source='filesystem',
+                    size=node_data.get("size", 0),
+                    extension=self._get_extension(node_data.get("name", "")),
+                    mime_type=self._guess_mime_type(node_data.get("name", "")),
+                    source="filesystem",
                 )
                 result = self._repo.create(resource.to_dict())
-                resource.id = result.get('id')
+                resource.id = result.get("id")
 
             # Process children if directory
-            if is_dir and 'children' in node_data:
+            if is_dir and "children" in node_data:
                 children = []
-                for child_data in node_data['children']:
+                for child_data in node_data["children"]:
                     child = process_node(child_data, node_path)
                     children.append(child)
-                resource.metadata = {'children': [c.id for c in children if c.id]}
+                resource.metadata = {"children": [c.id for c in children if c.id]}
 
             return resource
 
         # Process root items
-        if 'children' in fs_items:
-            for child_data in fs_items['children']:
+        if "children" in fs_items:
+            for child_data in fs_items["children"]:
                 resource = process_node(child_data, path)
                 resources.append(resource)
 
@@ -318,7 +336,9 @@ class ResourceService:
                 ``DeviceFilesystemDispatcher.for_bot(...)``) the underlying write
                 is delivered through.
         """
-        logger.info(f"[ResourceService.upload_file] Start: filename={filename}, target_dir={target_dir}, user_id={user_id}")
+        logger.info(
+            f"[ResourceService.upload_file] Start: filename={filename}, target_dir={target_dir}, user_id={user_id}"
+        )
 
         # Check for duplicate name
         file_name = filename or "unnamed"
@@ -326,9 +346,11 @@ class ResourceService:
             name=file_name,
             resource_type=ResourceType.FILE,
             parent_path=target_dir if target_dir else "",
-            user_id=user_id
+            user_id=user_id,
         ):
-            logger.warning(f"[ResourceService.upload_file] Duplicate name detected: {file_name}")
+            logger.warning(
+                f"[ResourceService.upload_file] Duplicate name detected: {file_name}"
+            )
             raise ValueError(f"Resource '{file_name}' already exists")
 
         # Save file via the device-filesystem boundary
@@ -343,35 +365,37 @@ class ResourceService:
         # Create resource record with path info in metadata for deletion
         metadata = {}
         if self._entity_id:
-            metadata['entity_id'] = self._entity_id
+            metadata["entity_id"] = self._entity_id
         if self._entity_type:
-            metadata['entity_type'] = self._entity_type
+            metadata["entity_type"] = self._entity_type
         if self._bot_id:
-            metadata['bot_id'] = self._bot_id
+            metadata["bot_id"] = self._bot_id
         if self._engine_type:
-            metadata['engine_type'] = self._engine_type
+            metadata["engine_type"] = self._engine_type
         # device_provider/sandbox_id are no longer resolved here (the write
         # goes through the injected device_fs); they were only stored in
         # metadata historically and are not read back on the delete path
         # (delete resolves the device fresh from entity_id/bot_id/engine_type).
         resource = create_file_resource(
-            name=file_info['name'],
-            path=file_info['path'],
+            name=file_info["name"],
+            path=file_info["path"],
             parent_path=target_dir,
-            size=file_info.get('size', 0),
-            extension=self._get_extension(file_info['name']),
-            mime_type=self._guess_mime_type(file_info['name']),
+            size=file_info.get("size", 0),
+            extension=self._get_extension(file_info["name"]),
+            mime_type=self._guess_mime_type(file_info["name"]),
             is_directory=False,
-            source='upload',
+            source="upload",
             user_id=user_id,
             created_by=created_by,
             metadata=metadata if metadata else None,
-            bolt_id=self._bot_id if self._bot_id else 'default',
+            bolt_id=self._bot_id if self._bot_id else "default",
         )
 
         result = self._repo.create(resource.to_dict())
-        resource.id = result.get('id')
-        logger.info(f"[ResourceService.upload_file] Success: resource_id={resource.id}, path={resource.path}")
+        resource.id = result.get("id")
+        logger.info(
+            f"[ResourceService.upload_file] Success: resource_id={resource.id}, path={resource.path}"
+        )
         return resource
 
     async def upload_files(
@@ -404,17 +428,14 @@ class ResourceService:
                 )
                 uploaded.append(resource.to_dict())
             except Exception as e:
-                errors.append({
-                    'filename': filename,
-                    'error': str(e)
-                })
+                errors.append({"filename": filename, "error": str(e)})
 
         return {
-            'uploaded': uploaded,
-            'errors': errors,
-            'total': len(files),
-            'success_count': len(uploaded),
-            'error_count': len(errors)
+            "uploaded": uploaded,
+            "errors": errors,
+            "total": len(files),
+            "success_count": len(uploaded),
+            "error_count": len(errors),
         }
 
     async def get_file_resource(self, resource_id: str) -> Optional[Resource]:
@@ -453,67 +474,72 @@ class ResourceService:
         device_provider: str | None = None,
     ) -> Resource:
         """Create a directory resource."""
-        logger.info(f"[ResourceService.create_directory] Start: path={path}, user_id={user_id}")
+        logger.info(
+            f"[ResourceService.create_directory] Start: path={path}, user_id={user_id}"
+        )
 
         # Extract directory name from path
-        dir_name = path.split('/')[-1] if '/' in path else path
-        parent_path = '/'.join(path.split('/')[:-1]) if '/' in path else ''
+        dir_name = path.split("/")[-1] if "/" in path else path
+        parent_path = "/".join(path.split("/")[:-1]) if "/" in path else ""
 
         # Check for duplicate name
         if await self.check_name_exists(
             name=dir_name,
             resource_type=ResourceType.FILE,
             parent_path=parent_path if parent_path else "",
-            user_id=user_id
+            user_id=user_id,
         ):
-            logger.warning(f"[ResourceService.create_directory] Duplicate name: {dir_name}")
+            logger.warning(
+                f"[ResourceService.create_directory] Duplicate name: {dir_name}"
+            )
             raise ValueError(f"Resource '{dir_name}' already exists")
 
         # Create directory in filesystem
         # todo use new device
-        dir_info = {
-            'path': 'null'
-        }
-        if device_provider == 'arac':
-            logger.info(f"[ResourceService.create_directory] Arca device: path={path}, skip create dir")
+        dir_info = {"path": "null"}
+        if device_provider == "arac":
+            logger.info(
+                f"[ResourceService.create_directory] Arca device: path={path}, skip create dir"
+            )
         else:
             dir_info = await self._file_service.create_directory(path)
-        logger.info(f"[ResourceService.create_directory] Directory created: {dir_info['path']}")
+        logger.info(
+            f"[ResourceService.create_directory] Directory created: {dir_info['path']}"
+        )
 
         # Create resource record with path info in metadata for deletion
         metadata = {}
         if self._entity_id:
-            metadata['entity_id'] = self._entity_id
+            metadata["entity_id"] = self._entity_id
         if self._entity_type:
-            metadata['entity_type'] = self._entity_type
+            metadata["entity_type"] = self._entity_type
         if self._bot_id:
-            metadata['bot_id'] = self._bot_id
+            metadata["bot_id"] = self._bot_id
         if self._engine_type:
-            metadata['engine_type'] = self._engine_type
+            metadata["engine_type"] = self._engine_type
 
         resource = create_file_resource(
-            name=dir_info['name'],
-            path=dir_info['path'],
-            parent_path=parent_path or '',
+            name=dir_info["name"],
+            path=dir_info["path"],
+            parent_path=parent_path or "",
             is_directory=True,
             size=0,
-            source='upload',
+            source="upload",
             user_id=user_id,
             created_by=created_by,
             metadata=metadata if metadata else None,
-            bolt_id=self._bot_id if self._bot_id else 'default',
+            bolt_id=self._bot_id if self._bot_id else "default",
         )
 
         result = self._repo.create(resource.to_dict())
-        resource.id = result.get('id')
-        logger.info(f"[ResourceService.create_directory] Success: resource_id={resource.id}")
+        resource.id = result.get("id")
+        logger.info(
+            f"[ResourceService.create_directory] Success: resource_id={resource.id}"
+        )
         return resource
 
     async def move_resource(
-        self,
-        resource_id: str,
-        new_path: str,
-        overwrite: bool = False
+        self, resource_id: str, new_path: str, overwrite: bool = False
     ) -> Optional[Resource]:
         """Move resource to new path."""
         resource = await self.get_file_resource(resource_id)
@@ -530,10 +556,12 @@ class ResourceService:
 
         # Update resource record
         resource_dict = resource.to_dict()
-        resource_dict['attributes']['path'] = new_path
-        resource_dict['attributes']['parent_path'] = '/'.join(new_path.split('/')[:-1]) if '/' in new_path else ''
-        resource_dict['attributes']['name'] = result.get('name', resource.name)
-        resource_dict['gmt_modified'] = datetime.now().isoformat()
+        resource_dict["attributes"]["path"] = new_path
+        resource_dict["attributes"]["parent_path"] = (
+            "/".join(new_path.split("/")[:-1]) if "/" in new_path else ""
+        )
+        resource_dict["attributes"]["name"] = result.get("name", resource.name)
+        resource_dict["gmt_modified"] = datetime.now().isoformat()
 
         self._repo.update(resource_id, resource_dict)
         return Resource(**resource_dict)
@@ -548,7 +576,7 @@ class ResourceService:
         headers: Optional[Dict[str, str]] = None,
         parent_path: Optional[str] = None,
         user_id: Optional[str] = None,
-        created_by: Optional[str] = None
+        created_by: Optional[str] = None,
     ) -> Resource:
         """Create a URL resource."""
         # Check for duplicate name
@@ -556,7 +584,7 @@ class ResourceService:
             name=name,
             resource_type=ResourceType.URL,
             parent_path=parent_path,
-            user_id=user_id
+            user_id=user_id,
         ):
             raise ValueError(f"Resource '{name}' already exists")
 
@@ -568,11 +596,11 @@ class ResourceService:
             parent_path=parent_path,
             user_id=user_id,
             created_by=created_by,
-            source='manual',
-            bolt_id=self._bot_id if self._bot_id else 'default',
+            source="manual",
+            bolt_id=self._bot_id if self._bot_id else "default",
         )
         result = self._repo.create(resource.to_dict())
-        resource.id = result.get('id')
+        resource.id = result.get("id")
         return resource
 
     # ==================== Node Resource Operations ====================
@@ -585,7 +613,7 @@ class ResourceService:
         scan_recursive: bool = True,
         parent_path: Optional[str] = None,
         user_id: Optional[str] = None,
-        created_by: Optional[str] = None
+        created_by: Optional[str] = None,
     ) -> Resource:
         """Create a Node resource."""
         # Check for duplicate name
@@ -593,7 +621,7 @@ class ResourceService:
             name=name,
             resource_type=ResourceType.NODE,
             parent_path=parent_path,
-            user_id=user_id
+            user_id=user_id,
         ):
             raise ValueError(f"Resource '{name}' already exists")
 
@@ -605,11 +633,11 @@ class ResourceService:
             parent_path=parent_path,
             user_id=user_id,
             created_by=created_by,
-            source='manual',
-            bolt_id=self._bot_id if self._bot_id else 'default',
+            source="manual",
+            bolt_id=self._bot_id if self._bot_id else "default",
         )
         result = self._repo.create(resource.to_dict())
-        resource.id = result.get('id')
+        resource.id = result.get("id")
         return resource
 
     # ==================== Generic Resource Operations ====================
@@ -622,13 +650,15 @@ class ResourceService:
     def count_resources(
         self,
         resource_type: Optional[ResourceType] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
     ) -> int:
         """Count resources."""
         return self._repo.count_resources(
-            resource_type=resource_type.value if isinstance(resource_type, ResourceType) else resource_type,
+            resource_type=resource_type.value
+            if isinstance(resource_type, ResourceType)
+            else resource_type,
             user_id=user_id,
-            bolt_id=self._bot_id
+            bolt_id=self._bot_id,
         )
 
     def count_children(self, parent_path: str) -> int:
@@ -658,161 +688,72 @@ class ResourceService:
             # Delete from filesystem using correct path
             # Get path info from resource metadata if available
             metadata = resource.metadata or {}
-            entity_id = metadata.get('entity_id')
-            bot_id = metadata.get('bot_id')
-            engine_type = metadata.get('engine_type')
+            entity_id = metadata.get("entity_id")
+            bot_id = metadata.get("bot_id")
+            engine_type = metadata.get("engine_type")
 
             if entity_id and bot_id and engine_type:
                 # Use path factory to get correct data_dir
                 factory = self._path_factory
                 # Determine entity_type from entity_id format or metadata
-                if entity_id.startswith('proj_'):
-                    effective_entity_type = 'proj'
+                if entity_id.startswith("proj_"):
+                    effective_entity_type = "proj"
                     effective_entity_id = entity_id[5:]
-                elif entity_id.startswith('staff_'):
-                    effective_entity_type = 'staff'
+                elif entity_id.startswith("staff_"):
+                    effective_entity_type = "staff"
                     effective_entity_id = entity_id[6:]
-                elif entity_id.startswith('team_'):
-                    effective_entity_type = 'team'
+                elif entity_id.startswith("team_"):
+                    effective_entity_type = "team"
                     effective_entity_id = entity_id[5:]
                 else:
                     # Pure entity_id, use entity_type from metadata or default to staff
-                    effective_entity_type = metadata.get('entity_type', 'staff')
+                    effective_entity_type = metadata.get("entity_type", "staff")
                     effective_entity_id = entity_id
 
-                data_dir = factory.get_bot_data_dir(effective_entity_id, bot_id, engine_type, effective_entity_type)
+                data_dir = factory.get_bot_data_dir(
+                    effective_entity_id, bot_id, engine_type, effective_entity_type
+                )
                 file_service = FileService(data_dir)
-                logger.info(f"[delete_resource] Using data_dir from metadata: {data_dir}")
+                logger.info(
+                    f"[delete_resource] Using data_dir from metadata: {data_dir}"
+                )
             else:
                 # Fallback to current file_service (for backward compatibility)
                 file_service = self._file_service
-                logger.info(f"[delete_resource] Using default data_dir (metadata missing)")
+                logger.info(
+                    "[delete_resource] Using default data_dir (metadata missing)"
+                )
 
-            if device_provider == 'arca' and sandbox_id:
+            if device_provider == "arca" and sandbox_id:
                 if data_dir is None:
-                    logger.error(f"[delete_resource] data_dir is None, cannot delete from arca")
+                    logger.error(
+                        "[delete_resource] data_dir is None, cannot delete from arca"
+                    )
                     return False
                 # 处理路径拼接，避免重复的斜杠
-                resource_path = resource.path.lstrip('/')
+                resource_path = resource.path.lstrip("/")
                 path = str(data_dir) + "/" + resource_path
-                logger.info(f"[delete_resource] Deleting from arca with sandbox_id: {sandbox_id}, path: {path}")
+                logger.info(
+                    f"[delete_resource] Deleting from arca with sandbox_id: {sandbox_id}, path: {path}"
+                )
                 import asyncio
+
                 asyncio.create_task(device_fs.delete_file(path))
             else:
                 import asyncio
+
                 asyncio.create_task(file_service.delete_item(resource.path))
 
         return self._repo.delete(resource_id)
-
-    async def download_resource(
-        self,
-        resource_id: str,
-        *,
-        device_fs: "DeviceFileSystem",
-    ) -> tuple[bytes, str] | None:
-        """Read a FILE resource's raw bytes for download.
-
-        Returns ``(content_bytes, content_type)`` for a downloadable FILE
-        resource, or ``None`` when the record is missing, is not a file,
-        is a directory, has no path, or the device_fs read fails (the
-        caller maps ``None`` to a 404). Errors from ``device_fs.read_file``
-        (arca HTTP 404, teclaw, etc.) are swallowed and surfaced as
-        ``None`` rather than propagated — the openapi adapter must not
-        leak provider errors. Resource-level preconditions (not-file /
-        is-directory) mirror the legacy download handler.
-        """
-        item = self._repo.get_by_id(resource_id)
-        if not item:
-            return None
-        resource = Resource(**item)
-        if not resource.is_file:
-            return None
-        if resource.is_directory:
-            return None
-        if not resource.path:
-            return None
-        try:
-            content_bytes = await device_fs.read_file(resource.path)
-        except Exception:
-            # arca 404 / teclaw read errors → signal "not downloadable",
-            # not propagate; the adapter renders a 404.
-            return None
-        content_type = resource.mime_type or "application/octet-stream"
-        return (content_bytes, content_type)
-
-    async def preview_resource(
-        self,
-        resource_id: str,
-        *,
-        device_fs: "DeviceFileSystem",
-        max_size: int = 1_048_576,  # 1 MB preview cap (legacy parity)
-    ) -> dict | None:
-        """Preview a FILE resource's content.
-
-        Returns ``{"content": str, "content_type": str, "size": int}`` for a
-        previewable non-directory FILE, or ``None`` when the record is
-        missing, the record is not a file, is a directory, has no path, or
-        the device_fs read fails or returns empty bytes (the caller maps
-        ``None`` to a 404). Errors from ``device_fs.read_file`` (arca HTTP
-        404, teclaw read errors) are swallowed and surfaced as ``None``
-        rather than propagated — the openapi adapter must not leak provider
-        errors (parity with ``download_resource``).
-
-        Raises ``ValueError`` when the content exceeds ``max_size`` — the
-        caller maps that to HTTP 413 (legacy parity: "File too large for
-        preview"). The 1 MB default mirrors the legacy preview cap; it is
-        not derived from ``device_fs.read_file``'s own cap because not every
-        impl enforces one (see ``FileTooLargeError``).
-
-        ``device_fs`` is non-Optional — the handler always resolves it via
-        ``DeviceFilesystemDispatcher`` before calling this method. Mirrors
-        ``download_resource``; ``delete_resource`` is the lone Optional
-        variant (legacy sync contract).
-        """
-        item = self._repo.get_by_id(resource_id)
-        if not item:
-            return None
-        resource = Resource(**item)
-        if not resource.is_file or resource.is_directory:
-            return None
-        if not resource.path:
-            return None
-        try:
-            content_bytes = await device_fs.read_file(resource.path)
-        except Exception:
-            # arca 404 / teclaw read errors → signal "not previewable",
-            # not propagate; the adapter renders a 404 (parity with
-            # download_resource).
-            return None
-        if not content_bytes:
-            # legacy parity: empty content → 404, not an empty preview body.
-            return None
-        if len(content_bytes) > max_size:
-            raise ValueError(
-                f"File too large for preview (max {max_size} bytes)"
-            )
-        content_type = resource.mime_type or "application/octet-stream"
-        # preview content is text-ifiable; decode utf-8 best-effort, fall
-        # back to latin-1 so binary blobs don't crash the handler (the
-        # content is opaque to the caller; latin-1 round-trips any byte).
-        try:
-            content_str = content_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            content_str = content_bytes.decode("latin-1")
-        return {
-            "content": content_str,
-            "content_type": content_type,
-            "size": len(content_bytes),
-        }
 
     # ==================== Helper Methods ====================
 
     @staticmethod
     def _get_extension(filename: str) -> str:
         """Get file extension."""
-        if '.' in filename:
-            return filename.split('.')[-1].lower()
-        return ''
+        if "." in filename:
+            return filename.split(".")[-1].lower()
+        return ""
 
     @staticmethod
     def _guess_mime_type(filename: str) -> Optional[str]:
@@ -820,33 +761,33 @@ class ResourceService:
         ext = ResourceService._get_extension(filename)
 
         mime_types = {
-            'pdf': 'application/pdf',
-            'txt': 'text/plain',
-            'md': 'text/markdown',
-            'json': 'application/json',
-            'yaml': 'application/yaml',
-            'yml': 'application/yaml',
-            'xml': 'application/xml',
-            'html': 'text/html',
-            'htm': 'text/html',
-            'css': 'text/css',
-            'js': 'application/javascript',
-            'csv': 'text/csv',
-            'png': 'image/png',
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'gif': 'image/gif',
-            'svg': 'image/svg+xml',
-            'mp4': 'video/mp4',
-            'mp3': 'audio/mpeg',
-            'doc': 'application/msword',
-            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'xls': 'application/vnd.ms-excel',
-            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'ppt': 'application/vnd.ms-powerpoint',
-            'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            'drawio': 'application/xml',
-            'dio': 'application/xml',
+            "pdf": "application/pdf",
+            "txt": "text/plain",
+            "md": "text/markdown",
+            "json": "application/json",
+            "yaml": "application/yaml",
+            "yml": "application/yaml",
+            "xml": "application/xml",
+            "html": "text/html",
+            "htm": "text/html",
+            "css": "text/css",
+            "js": "application/javascript",
+            "csv": "text/csv",
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "gif": "image/gif",
+            "svg": "image/svg+xml",
+            "mp4": "video/mp4",
+            "mp3": "audio/mpeg",
+            "doc": "application/msword",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xls": "application/vnd.ms-excel",
+            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "ppt": "application/vnd.ms-powerpoint",
+            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "drawio": "application/xml",
+            "dio": "application/xml",
         }
 
         return mime_types.get(ext)
