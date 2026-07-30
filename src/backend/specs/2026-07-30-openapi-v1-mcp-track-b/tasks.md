@@ -1,0 +1,220 @@
+# Tasks: Public API — MCP Category (Track B)
+
+> Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
+
+The order is deliberate: build the shared `core/mcp/` primitives, prove them
+behavior-preserving by rewiring the **internal** router (its pinned tests are the
+proof), then wire the public surface on top, then isolation + docs. Nothing
+public is written until the extraction is green.
+
+---
+
+## Task 1: [ ] Extract shared presentation helpers + error types
+- **Goal:** Give both surfaces one definition of masking, `extInfo` stripping,
+  the network-type allowlist, and the domain errors the flow raises.
+- **Files:**
+  - `src/agentclaw/community/core/mcp/errors.py` (new)
+  - `src/agentclaw/community/core/mcp/presentation.py` (new)
+  - `tests/community/core/mcp/test_presentation.py` (new)
+- **Done when:**
+  - [ ] `errors.py` defines `McpServerNotFoundError`, `McpHeadersInvalidError`,
+        `McpConfigValueError`, `McpSyncFailedError`, `McpMarketUnavailableError`
+        — dependency-free, mirroring `openapi_v1/errors.py`.
+  - [ ] `presentation.py` defines `ALLOWED_NETWORK_TYPES = ("INTERNET",
+        "OFFICE")`, `strip_ext_info` / `strip_ext_info_from_list` (moved verbatim
+        from `adapters/http/mcp/router.py:58-85`), `is_network_type_visible`, and
+        `mask_api_key(key) -> str | None`.
+  - [ ] `mask_api_key` reproduces the existing expression exactly for both
+        branches — `len > 8` → `key[:4] + "****" + key[-4:]`, else `"****"`,
+        `None` → `None` — matching `router.py:308-309` and `:372-373`.
+  - [ ] Unit tests cover: masking for a long key, a short key (`≤8`), and `None`;
+        `extInfo` removed from a tool's `inputSchema.properties` and left intact
+        when absent; the network-type rule for INTERNET/OFFICE/neither/empty.
+- **Depends on:** —
+
+## Task 2: [ ] Extract the config read/write flow
+- **Goal:** Lift the internal write orchestration (validate → server-exists →
+  write → push → rollback) into a FastAPI-free function both surfaces call.
+- **Files:**
+  - `src/agentclaw/community/core/mcp/config_flow.py` (new)
+  - `tests/community/core/mcp/test_mcp_config_flow.py` (new)
+- **Done when:**
+  - [ ] `read_unified_config(*, user_id, server_code, config_service) ->
+        UnifiedConfig` and async `write_unified_config(...)` exist, taking
+        already-injected services, raising the Task 1 errors, and returning a
+        frozen `UnifiedConfig` whose `api_key` is **already masked** (so no
+        caller can reach the raw key).
+  - [ ] `write_unified_config` preserves the internal ordering from
+        `router.py:250-337` exactly: validate values → validate headers →
+        `market_service.get_mcp_detail` (missing → `McpServerNotFoundError`,
+        *before* any DB write) → `update_user_unified_config` keeping the old row
+        → `sync_mcp_detail_to_all_bots` → on failure `rollback_unified_config`
+        then raise `McpSyncFailedError`.
+  - [ ] `write_unified_config` returns the sync results alongside the config, so
+        the internal adapter can keep populating `MCPUnifiedConfigData.sync_results`
+        (the public handler ignores them).
+  - [ ] Header validation surfaces the validator's failure as
+        `McpHeadersInvalidError`; the `endpoint_env`/`transport_protocol` value
+        check remains as the internal path's backstop, raising
+        `McpConfigValueError`.
+  - [ ] Tests (no HTTP): an omitted field is left unchanged (merge, not replace);
+        an unknown server code never reaches `update_user_unified_config`;
+        rollback restores the prior row on sync failure; rollback **deletes** the
+        row when it was newly created (`config_service.py:172-177`).
+- **Depends on:** Task 1
+
+## Task 3: [ ] Rewire the internal router onto the extracted code
+- **Goal:** Make `/api/mcp` call the shared flow and helpers, with its HTTP
+  contract byte-identical — this is the proof the extraction preserved behavior.
+- **Files:**
+  - `src/agentclaw/community/adapters/http/mcp/router.py`
+  - `src/agentclaw/community/core/mcp/README.md` (context boundary)
+- **Done when:**
+  - [ ] `_remove_ext_info_*` deleted from the router; `strip_ext_info*`,
+        `ALLOWED_NETWORK_TYPES`, `is_network_type_visible`, `mask_api_key`
+        imported from `core/mcp/presentation.py` (`router.py:58-85,108-115,
+        162-166,307-309,370-373`).
+  - [ ] `update_mcp_unified_config` (`:237-344`) becomes a thin adapter: call
+        `write_unified_config`, catch each typed error and re-raise the identical
+        `HTTPException` (same status, same `detail` string) it raised before;
+        `get_mcp_unified_config` (`:347-386`) calls `read_unified_config`.
+  - [ ] `core/mcp/README.md` `## Context Boundary` updated — `MCPMarketService`
+        added to `provides` (the flow now consumes it) and any new
+        `internal_dependencies` declared.
+  - [ ] **`tests/community/api/mcp/routers/test_mcp_config_internal_unchanged.py`
+        and `test_mcp.py` pass UNMODIFIED.** No edit to either file.
+  - [ ] `tests/community/architecture/` passes after the README edit.
+- **Depends on:** Task 2
+
+## Task 4: [ ] Public MCP request/response schemas
+- **Goal:** Turn the stub models into the strict public contract.
+- **Files:** `src/agentclaw/community/adapters/http/openapi_v1/mcp/schemas.py`
+- **Done when:**
+  - [ ] A module-level `_STRICT = ConfigDict(extra="forbid")` is applied to every
+        model (mirroring `bots/schemas.py:16`), so an unknown field is a 422.
+  - [ ] `McpConfigWrite.sync_mode` is removed.
+  - [ ] `McpConfigWrite.endpoint_env` is `Literal["PROD", "PRE"] | None` and
+        `transport_protocol` is `Literal["SSE", "STREAMABLE_HTTP"] | None` — no
+        `DEV`; `None` means "leave unchanged".
+  - [ ] `McpConfig.api_key` documented as always masked.
+  - [ ] The response models still carry the fields the adapters populate
+        (`McpServer`, `McpServerDetail`, `McpPermission`, `McpTenant`, `McpConfig`).
+- **Depends on:** —
+
+## Task 5: [ ] Wire the six public handlers
+- **Goal:** Replace the `NotImplementedError` stubs with real handlers on the
+  shared flow, owner-scoped via the principal.
+- **Files:** `src/agentclaw/community/adapters/http/openapi_v1/mcp/router.py`
+- **Done when:**
+  - [ ] Every handler takes `request: Request`, `PrincipalDep`, its services via
+        `Injected`, carries `@envelope_errors`, and opens with
+        `owner_id = caller_owner_id(principal)`.
+  - [ ] `list_mcp_servers` → `get_mcp_list(..., search_key=keyword,
+        network_types=ALLOWED_NETWORK_TYPES)`, `strip_ext_info_from_list`,
+        `page(total, items, request)`.
+  - [ ] `get_mcp_server` → `get_mcp_detail`; `None` **or** network-type-invisible
+        raise `McpServerNotFoundError` from **one** site, so the two 404 paths are
+        indistinguishable.
+  - [ ] `list_mcp_tenants` → `get_tenant_list`, mapped to `McpTenant` via an
+        adapter; an upstream `success: False` raises `McpMarketUnavailableError`.
+  - [ ] `check_mcp_permission` → `check_mcp_permission_detail(owner_id,
+        server_code)`; **no** `user_id` query parameter is exposed.
+  - [ ] `get_mcp_config` / `update_mcp_config` delegate to `config_flow` with
+        `entity_id = owner_id`, `entity_type = "staff"`; no `IAM_TOKEN` cookie
+        handling.
+  - [ ] Module-private `_to_server` / `_to_server_detail` / `_to_tenant` adapters
+        map MCP Center camelCase → the snake_case public models.
+  - [ ] Endpoint tests (`tests/community/adapters/http/openapi_v1/
+        test_mcp_endpoints.py`, new) cover, per handler: success shape +
+        envelope `code`/`request_id`; masking for long and short keys; a
+        never-configured server → `has_config: false` (not 404); invisible vs
+        unknown server → byte-identical 404; `extInfo` stripped; permission from
+        the principal only; `sync_mode`/unknown field → 422; missing principal →
+        401.
+- **Depends on:** Tasks 2, 4
+
+## Task 6: [ ] Map the MCP domain errors to envelopes
+- **Goal:** Every error these handlers raise answers in the envelope; nothing
+  reaches the generic 500 fallback.
+- **Files:** `src/agentclaw/community/adapters/http/openapi_v1/responses.py`
+- **Done when:**
+  - [ ] `ENVELOPE_ERRORS` gains the five errors with fixed public messages:
+        `McpServerNotFoundError`→404 "Not found",
+        `McpHeadersInvalidError`→400 "Invalid MCP headers",
+        `McpConfigValueError`→400 "Invalid MCP configuration",
+        `McpSyncFailedError`→502 "Device sync failed",
+        `McpMarketUnavailableError`→502 "MCP service error".
+  - [ ] They are placed above `BotServiceError` (they share no base with it, so
+        order among themselves is free); no message is `str(exc)`, and none
+        carries the validator's Chinese text.
+  - [ ] A test asserts every mapped error round-trips to its status + fixed
+        message, and that the 404 message is byte-identical to the not-found
+        the bots surface returns.
+- **Depends on:** Task 1
+
+## Task 7: [ ] Cross-tenant isolation against the real Stage 5 guard
+- **Goal:** Prove a config in another tenant is invisible and un-overwritable
+  through the path the handlers use — end to end, not mocked.
+- **Files:** `tests/community/adapters/http/openapi_v1/test_mcp_tenant_isolation.py`
+  (new)
+- **Done when:**
+  - [ ] Uses a real `UserMCPConfigRepository` over SQLite with the Stage 5
+        guard, in the shape of `test_bots_tenant_isolation.py`.
+  - [ ] A config written under tenant A is invisible from tenant B (read →
+        "no config"); a tenant-B write creates B's own row rather than
+        overwriting A's.
+  - [ ] Two tenants each hold a row for the same `user_id` + `server_code` and
+        neither sees or displaces the other (the case the Stage 5 unique-key swap
+        made possible).
+- **Depends on:** Task 5
+
+## Task 8: [ ] Move the handoff board + changelog
+- **Goal:** Reflect that mcp Track B has landed, in the same PR that lands it.
+- **Files:** `src/backend/docs/openapi-v1/README.md`,
+  `src/backend/docs/openapi-v1/README.zh-CN.md`
+- **Done when:**
+  - [ ] The Track B board flips `mcp` to `✅ DONE — PR #610` (both editions).
+  - [ ] The `/openapi/v1/bots/mcp/...` vs top-level path note is resolved to the
+        nested shape (decision 1) rather than left "still open".
+  - [ ] A dated changelog line records the category, the shared-flow extraction,
+        the three decisions, and the preserved fail-open permission behavior.
+  - [ ] The reference-slice list ("use bots as the worked reference") gains mcp
+        as the second done category.
+- **Depends on:** Task 5
+
+## Task 9: [ ] Tests & Verification
+- **Goal:** Ensure the feature meets every `spec.md` acceptance criterion and
+  the internal surface is untouched.
+- **Files:** — (runs the suites)
+- **Done when:**
+  - [ ] Every `spec.md` acceptance criterion maps to a passing test (marketplace,
+        permission, config read/write, isolation, error contract, internal
+        surface).
+  - [ ] The fail-open permission behavior is pinned by a test and noted in the
+        handler docstring, so it reads as a recorded decision (Open Question 1).
+  - [ ] The rollback-on-sync-failure path answers 502 and leaves the stored row
+        as it was (or absent, on a create).
+  - [ ] Raw API keys (long and short) appear nowhere in either surface's response
+        text.
+  - [ ] `test_mcp_config_internal_unchanged.py`, `test_mcp.py`,
+        `tests/community/architecture/`, and the full `tests/community` suite all
+        pass; no pre-existing test modified.
+- **Depends on:** Tasks 3, 5, 6, 7, 8
+
+---
+
+## Groups
+
+- **Group A — Shared extraction (behavior-preserving):** Tasks 1, 2, 3
+  - Theme: Lift masking / presentation / errors and the write-flow into
+    `core/mcp/`, and prove it by rewiring the internal router with its pinned
+    tests unmodified. Lands as a self-contained refactor even before any public
+    handler exists.
+- **Group B — Public MCP surface:** Tasks 4, 5, 6
+  - Theme: The strict public schemas, the six wired handlers, and the error
+    mapping — the category becomes callable (modulo the 401 auth stub).
+- **Group C — Isolation & docs:** Tasks 7, 8
+  - Theme: Prove tenant safety against the real guard and move the handoff board
+    in the same PR.
+- **Group D — Verification:** Task 9
+  - Theme: Final spec acceptance check + internal-surface regression gate.
