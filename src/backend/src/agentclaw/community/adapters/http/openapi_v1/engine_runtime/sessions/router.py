@@ -138,7 +138,7 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
     return [d for d in raw if isinstance(d, dict)]
 
 
-def _window(page_params: Any, *, limit_covers_offset: bool = False) -> dict[str, int]:
+def _window(page_params: Any) -> dict[str, int]:
     """The engine query for exactly the requested page, plus one lookahead item.
 
     Asking the engine for the caller's window — rather than always fetching from
@@ -146,23 +146,41 @@ def _window(page_params: Any, *, limit_covers_offset: bool = False) -> dict[str,
     hundred work at all. Fetching a fixed prefix left every later page empty and
     capped the reported total at the prefix length.
 
-    ``limit_covers_offset`` exists because the two engine routes paginate
-    differently, and one of them makes ``limit`` mean something else:
+    This is the **session list**'s window, and it is the straightforward one: the
+    engine paginates a fully-materialised list
+    (``plugins/openclaw/_session.py``: ``raw_sessions[offset : offset+limit]``),
+    so ``offset``/``limit`` mean what they say. Message history does not — see
+    :func:`_history_window`.
+    """
+    return {
+        "offset": (page_params.page - 1) * page_params.page_size,
+        "limit": page_params.page_size + _LOOKAHEAD,
+    }
 
-    - The **session list** paginates a fully-materialised list
-      (``plugins/openclaw/_session.py``: ``raw_sessions[offset : offset+limit]``),
-      so ``limit`` really is a page size.
-    - The **message history** bounds the *fetch* by ``limit`` first and only
-      then slices from ``offset`` (``adapters/*/session.py``:
-      ``messages[offset : offset+limit]``). A page-sized limit there fetches
-      fewer messages than the offset skips, so every page but the first comes
-      back empty. Those callers must ask for enough to reach their offset.
+
+def _history_window(page_params: Any) -> dict[str, int]:
+    """The engine query for a page of message history.
+
+    The history route does not paginate — it **tail-limits**. ``limit`` selects
+    the *newest* N messages, both in the bundled providers
+    (``local/openclaw/plugin_impl.py``, ``local/claude_code/plugin_impl.py``:
+    ``items[-limit:]``) and in the ``chat.history`` RPC they mirror, whose only
+    windowing parameter is ``limit``. The adapter then applies ``offset`` *to
+    that tail* (``messages[offset : offset+limit]``).
+
+    Those two compose badly. Growing ``limit`` to cover the offset moves the
+    tail's start back by exactly the offset, and skipping the offset walks
+    forward to the same place: with 100 messages and ``page_size=20``, page 1
+    and page 2 both return messages 79–98. Sending a page-sized limit instead
+    just makes every page past the first empty.
+
+    So the offset is not sent at all. We ask for the newest
+    ``offset + page_size + 1`` messages and cut the page out of that tail
+    ourselves in :func:`_history_page`, which is the one shape the engine's
+    "newest N" contract can serve exactly.
     """
     offset = (page_params.page - 1) * page_params.page_size
-    limit = page_params.page_size + _LOOKAHEAD
-    if limit_covers_offset:
-        limit += offset
-    return {"offset": offset, "limit": limit}
+    return {"offset": 0, "limit": offset + page_params.page_size + _LOOKAHEAD}
 
 
 def _page(
@@ -188,6 +206,36 @@ def _page(
     if reported is not None:
         return reported, visible
     return offset + len(visible) + (1 if has_more else 0), visible
+
+
+def _history_page(
+    items: list[Any], page_params: Any, *, reported: int | None
+) -> tuple[int, list[Any]]:
+    """The requested page cut out of a "newest N" tail. See :func:`_history_window`.
+
+    ``items`` is the newest ``offset + page_size + 1`` messages in chronological
+    order, so the page is measured from the *end*: page 1 is the most recent
+    ``page_size`` messages, page 2 the ``page_size`` before those. Paging a chat
+    history backwards is the only direction a tail-limited fetch can serve —
+    reaching the oldest page directly would mean fetching the whole history,
+    which has no count to size the request from.
+
+    Messages stay in chronological order *within* a page; it is the pages that
+    run newest-first.
+
+    The total falls out of the same window and is stronger than the session
+    list's: when the tail comes back short, it is the whole history, so the
+    count is exact. While it comes back full, it is a lower bound — the same
+    contract ``MessagePage.total`` documents.
+    """
+    size = page_params.page_size
+    skip = (page_params.page - 1) * size
+    n = len(items)
+    end = n - skip
+    visible = items[max(0, end - size) : end] if end > 0 else []
+    if reported is not None:
+        return reported, visible
+    return n, visible
 
 
 @router.get("", response_model=Envelope[SessionPage])
@@ -343,22 +391,25 @@ async def list_session_messages(
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[MessagePage]:
-    """Read a session's message history."""
+    """Read a session's message history, newest page first.
+
+    Page 1 is the most recent messages; paging forward walks back through the
+    history. Messages are chronological within a page.
+    """
     owner_id = caller_owner_id(principal)
     _require_personal_bot(relay, bot_id, owner_id)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="GET",
         path=f"/api/sessions/{session_id}/messages",
-        # The history route bounds its fetch by ``limit`` *before* skipping
-        # ``offset``, so the limit has to cover the offset or a later page is
-        # sliced out of a prefix too short to contain it.
-        params=_window(page, limit_covers_offset=True),
+        # The history route tail-limits rather than paginating, so the offset is
+        # applied here instead of being sent. See ``_history_window``.
+        params=_history_window(page),
     )
     mapped = [_map_message(d, session_id) for d in _as_list(result.data)]
     # The engine's envelope carries a total field, so it is used when filled —
     # but both bundled adapters return None for history, so this is normally the
-    # derived lower bound. See ``_page``.
-    total, items = _page(mapped, page, reported=result.total)
+    # derived value. See ``_history_page``.
+    total, items = _history_page(mapped, page, reported=result.total)
     return page_envelope(total, items, request)
 
 

@@ -200,13 +200,60 @@ def test_pagination_total_is_a_floor_while_more_remain(client, relay):
     assert [i["session_id"] for i in data["items"]] == ["s0", "s1", "s2"]
 
 
-def test_message_window_asks_for_enough_to_reach_the_offset(client, relay):
-    """The history route bounds its *fetch* by ``limit`` and only then skips
-    ``offset``, so a page-sized limit slices out of a prefix too short to
-    contain the page — every page but the first came back empty."""
-    relay.results = [EngineResult(data=[ENGINE_MESSAGE], total=1200)]
+def _messages(n: int) -> list[dict]:
+    """``n`` messages oldest-first, the order the engine returns them in."""
+    return [{**ENGINE_MESSAGE, "id": f"m{i}"} for i in range(n)]
+
+
+def test_the_history_window_sends_no_offset_and_a_covering_limit(client, relay):
+    """The history route tail-limits instead of paginating, so the offset is
+    applied locally; sending it would cancel against the tail."""
+    relay.results = [EngineResult(data=_messages(1))]
     ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 3, "page_size": 50}))
-    assert relay.calls[0]["params"] == {"offset": 100, "limit": 151}
+    assert relay.calls[0]["params"] == {"offset": 0, "limit": 151}
+
+
+def test_history_pages_run_newest_first_without_repeating(client, relay):
+    """The regression this replaces: growing ``limit`` with the offset moved the
+    tail's start back by exactly the offset, so page 2 re-served page 1."""
+    # 100 messages, page_size 20. Page 1 asks for the newest 21, page 2 the
+    # newest 41 — the engine tail-limits, so that is m79-m99 and m59-m99.
+    relay.results = [EngineResult(data=_messages(100)[-21:])]
+    first = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 1, "page_size": 20}))
+    relay.results = [EngineResult(data=_messages(100)[-41:])]
+    second = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}))
+
+    ids = lambda d: [i["message_id"] for i in d["items"]]
+    assert ids(first) == [f"m{i}" for i in range(80, 100)]
+    assert ids(second) == [f"m{i}" for i in range(60, 80)]
+    assert not set(ids(first)) & set(ids(second))
+
+
+def test_the_newest_message_is_on_the_first_page(client, relay):
+    """It used to be spent as the lookahead item and never shown."""
+    relay.results = [EngineResult(data=_messages(100)[-21:])]
+    data = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 1, "page_size": 20}))
+    assert data["items"][-1]["message_id"] == "m99"
+
+
+def test_history_total_is_exact_once_the_tail_is_the_whole_history(client, relay):
+    """A short tail proves nothing older exists, so the count is not a bound."""
+    relay.results = [EngineResult(data=_messages(30))]
+    data = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}))
+    assert data["total"] == 30
+    assert [i["message_id"] for i in data["items"]] == [f"m{i}" for i in range(10)]
+
+
+def test_history_total_is_a_floor_while_older_messages_remain(client, relay):
+    relay.results = [EngineResult(data=_messages(100)[-41:])]
+    data = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}))
+    assert data["total"] == 41
+
+
+def test_paging_past_the_start_of_history_is_empty(client, relay):
+    relay.results = [EngineResult(data=_messages(30))]
+    data = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 3, "page_size": 20}))
+    assert data["items"] == []
 
 
 def test_the_session_window_stays_page_sized(client, relay):

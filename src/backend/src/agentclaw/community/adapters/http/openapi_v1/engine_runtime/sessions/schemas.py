@@ -138,7 +138,15 @@ class SessionPage(BoundedPage[Session]):
 
 
 class MessagePage(BoundedPage[Message]):
-    """A page of messages whose total is a lower bound, not an exact count."""
+    """A page of messages, newest page first.
+
+    Page 1 holds the most recent messages, page 2 the ones before those, and so
+    on back through the history. Messages stay in chronological order within a
+    page; it is the pages that run newest-first.
+
+    As with any bounded page, total is a lower bound while full pages keep
+    coming and becomes exact once you reach a page shorter than page_size.
+    """
 
 
 __all__ = [

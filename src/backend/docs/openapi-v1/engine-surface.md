@@ -108,11 +108,24 @@ Two things about this group are not the shape a reader would assume:
   session. A number that is honest about being a bound beats one that is wrong.
   These are the only two list endpoints on the API that do not report an exact
   total; every other category reads a database we own.
-- **The two paged routes need different `limit` semantics.** The session list
-  paginates a materialised list, so `limit` is a page size. The message history
-  bounds its *fetch* by `limit` and only then skips `offset`, so its limit must
-  cover the offset — a page-sized limit there slices out of a prefix too short
-  to contain the page, and every page but the first came back empty.
+- **The two paged routes do not paginate the same way, and one of them does not
+  paginate at all.** The session list paginates a materialised list, so
+  `offset`/`limit` mean what they say and are forwarded. The message history
+  **tail-limits**: `limit` selects the *newest* N messages — that is what both
+  bundled providers do (`items[-limit:]`) and all the `chat.history` RPC they
+  mirror offers — and the adapter then applies `offset` to that tail. The two
+  cancel: growing `limit` to cover the offset moves the tail's start back by
+  exactly the offset, so with 100 messages and `page_size=20` pages 1 and 2 both
+  returned messages 79–98, and the newest message was spent as the lookahead and
+  never shown. A page-sized limit instead leaves every page past the first
+  empty. So the history route sends **no offset** and asks for the newest
+  `offset + page_size + 1`, cutting the page out of that tail itself.
+- **History pages run newest-first**, chronological within a page. That is a
+  consequence of the above, not a preference: reaching the oldest page directly
+  would mean fetching the entire history, and there is no count to size that
+  request from. It also makes `MessagePage.total` *exact* whenever the tail
+  comes back short, since a short tail is the whole history. _Decided
+  2026-07-30._
 - **`PATCH` accepts `title` and `model` only.** A working directory was offered
   and withdrawn: of the two bundled engines one applies it and the other
   discards it without saying so, which would make the same request succeed and
