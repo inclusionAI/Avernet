@@ -19,11 +19,11 @@ from agentclaw.community.core.bot_chat.models import (
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.bot_chat.query_support import (
     QueryScope,
+    enrich_bot_names,
     enrich_group_labels,
     enrich_task_labels,
     enrich_trace_labels,
     list_group_sessions,
-    load_bot_names,
     load_task_refs,
     match_column,
     task_trace_condition,
@@ -143,6 +143,16 @@ class BotChatDbRepository:
         value = attributes.get("identity.bot_id")
         return str(value) if value else None
 
+    def _metadata_owner_id(self, metadata_json: str | None) -> str | None:
+        metadata = self._safe_json_loads(metadata_json, {})
+        if not isinstance(metadata, dict):
+            return None
+        attributes = metadata.get("attributes") or {}
+        if not isinstance(attributes, dict):
+            return None
+        value = attributes.get("identity.owner_id") or attributes.get("user.id")
+        return str(value) if value else None
+
     def _ref_digest(self, ref_value: str) -> str:
         return f"sha256:{sha256(ref_value.encode('utf-8')).hexdigest()}"
 
@@ -159,7 +169,7 @@ class BotChatDbRepository:
             biz_scene=getattr(row, "biz_scene", None),
             session_id=row.session_id,
             session_key=row.session_id,
-            user_id=row.user_id,
+            user_id=row.user_id or self._metadata_owner_id(row.trace_metadata),
             trace_metadata=row.trace_metadata,
             latency=row.latency,
             total_cost=row.total_cost,
@@ -186,7 +196,7 @@ class BotChatDbRepository:
             biz_scene=row.biz_scene,
             session_id=row.session_id,
             session_key=row.session_key or row.session_id,
-            user_id=row.user_id,
+            user_id=row.user_id or self._metadata_owner_id(row.metadata_json),
             trace_metadata=row.metadata_json,
             latency=row.latency_ms,
             total_cost=row.total_cost,
@@ -459,9 +469,7 @@ class BotChatDbRepository:
             enrich_task_labels(
                 session, rows, preferred_biz_scene, preferred_biz_task_id
             )
-            names = load_bot_names(session, {row.bot_id for row in rows if row.bot_id})
-            for row in rows:
-                row.bot_name = names.get(row.bot_id)
+            enrich_bot_names(session, rows)
 
     def list_traces(
         self,
@@ -577,11 +585,8 @@ class BotChatDbRepository:
 
             detached = [self._detach_trace_row(row) for row in rows]
             enrich_group_labels(session, detached, group_id, group_sessions)
-            bot_names = load_bot_names(
-                session, {row.bot_id for row in detached if row.bot_id}
-            )
+            enrich_bot_names(session, detached)
             for row in detached:
-                row.bot_name = bot_names.get(row.bot_id)
                 if biz_scene or biz_task_id:
                     row.match_sources = ["biz_ref"]
             enrich_task_labels(session, detached, biz_scene, biz_task_id)
@@ -674,15 +679,11 @@ class BotChatDbRepository:
                 for row in rows
             ]
             enrich_group_labels(session, detached, group_id, group_sessions)
-            bot_names = load_bot_names(
-                session,
-                {row.bot_id for row in detached if row.bot_id},
-            )
+            enrich_bot_names(session, detached)
             ref_trace_ids = task_refs.get("trace_id", set())
             ref_session_ids = task_refs.get("session_id", set())
             ref_session_keys = task_refs.get("session_key", set())
             for row in detached:
-                row.bot_name = bot_names.get(row.bot_id)
                 sources = []
                 direct_scene = not biz_scene or (
                     biz_scene in (row.biz_scene or "")
