@@ -18,8 +18,6 @@ import logging
 from datetime import datetime
 from typing import Any, cast
 
-import yaml
-
 from gateway.community.core.access_key import AccessKeyRepository, AccessKeyRow
 from gateway.community.core.authn import Authenticator, IdentityChain, RouteSecurity
 from gateway.community.core.bot import BotRepository, BotRow
@@ -85,9 +83,9 @@ def _seed_authn(db: DataSourcePlugin) -> None:
 
 
 def _register_community_strategies(
-    db: DataSourcePlugin,
-    app_token_validator: AppTokenValidator,
-    tenant_resolver: TenantResolver,
+        db: DataSourcePlugin,
+        app_token_validator: AppTokenValidator,
+        tenant_resolver: TenantResolver,
 ) -> None:
     """Register the 4 community built-in strategies into the shared registry.
 
@@ -116,7 +114,7 @@ def _register_community_strategies(
 
 
 def _default_chains(
-    pool: dict[str, AuthStrategy],
+        pool: dict[str, AuthStrategy],
 ) -> dict[PrincipalType, IdentityChain]:
     return {
         PrincipalType.USER: IdentityChain(PrincipalType.USER, (pool["google"],)),
@@ -129,9 +127,9 @@ def _default_chains(
 
 
 def build_authenticator(
-    db: DataSourcePlugin,
-    app_token_validator: AppTokenValidator,
-    tenant_resolver: TenantResolver,
+        db: DataSourcePlugin,
+        app_token_validator: AppTokenValidator,
+        tenant_resolver: TenantResolver,
 ) -> Authenticator:
     """Build the identity-chain registry + route table (once, from create_app).
 
@@ -149,11 +147,11 @@ def build_authenticator(
 
 
 def _strategy_chains(
-    db: DataSourcePlugin,
-    app_token_validator: AppTokenValidator,
-    tenant_resolver: TenantResolver,
+        db: DataSourcePlugin,
+        app_token_validator: AppTokenValidator,
+        tenant_resolver: TenantResolver,
 ) -> dict[PrincipalType, IdentityChain]:
-    """Parse identity_strategies.yaml, wiring each declared strategy by name."""
+    """Parse application.yaml identity_strategies, wiring each declared strategy."""
     from .plugins._registry import get_authn_registry
 
     # Only register once — the registry is a module-level singleton that
@@ -166,30 +164,24 @@ def _strategy_chains(
         ", ".join(f"{name}: {type(s).__name__}" for name, s in sorted(pool.items())),
     )
     defaults = _default_chains(pool)
-    configs_dir = _resolve_configs_dir()
-    if configs_dir is None:
-        raise FileNotFoundError("configs directory not found — set GATEWAY_CONFIG_PATH")
-    path = configs_dir / "identity_strategies.yaml"
-    if not path.exists():
-        raise FileNotFoundError(f"required config file not found: {path}")
+    from gateway.community.config import ConfigLoader
 
-    _logger.info("loading identity strategies from %s", path)
-    raw = cast(dict[str, Any], yaml.safe_load(path.read_text()) or {})
-    declared = cast(dict[str, list[str]], raw.get("identity_strategies", {}) or {})
+    config = ConfigLoader.load()
+    declared = cast(dict[str, list[str]], config.raw.get("identity_strategies", {}) or {})
     chains: dict[PrincipalType, IdentityChain] = {}
     for identity_value, names in declared.items():
         try:
             identity = PrincipalType(identity_value)
         except ValueError as exc:
             raise KeyError(
-                f"unknown identity '{identity_value}' in identity_strategies.yaml"
+                f"unknown identity '{identity_value}' in application.yaml identity_strategies"
             ) from exc
         declared_chain: list[AuthStrategy] = []
         for name in names or []:
             if name not in pool:
                 raise KeyError(
                     f"unknown strategy '{name}' for identity '{identity.value}' "
-                    f"in identity_strategies.yaml"
+                    f"in application.yaml identity_strategies"
                 )
             declared_chain.append(pool[name])
         chains[identity] = IdentityChain(identity, tuple(declared_chain))
@@ -197,8 +189,7 @@ def _strategy_chains(
         chains.setdefault(identity, default_chain)
 
     _logger.info(
-        "identity strategies (%s): %d chains\n%s",
-        path.name,
+        "identity strategies (application.yaml): %d chains\n%s",
         len(chains),
         "\n".join(
             f"  {idty.value}: [{', '.join(s.name for s in chain._strategies)}]"
@@ -209,17 +200,14 @@ def _strategy_chains(
 
 
 def _load_route_security() -> RouteSecurity:
-    configs_dir = _resolve_configs_dir()
-    if configs_dir is None:
-        raise FileNotFoundError("configs directory not found — set GATEWAY_CONFIG_PATH")
-    path = configs_dir / "route_security.yaml"
-    if not path.exists():
-        raise FileNotFoundError(f"required config file not found: {path}")
-    _logger.info("loading route security from %s", path)
-    rules = RouteSecurity.from_yaml(path)
+    from gateway.community.config import ConfigLoader
+
+    config = ConfigLoader.load()
+    table = cast(dict[str, Any], config.raw.get("route_security", {}) or _DEFAULT_TABLE)
+    _logger.info("loading route security from application.yaml")
+    rules = RouteSecurity.from_table(table)
     _logger.info(
-        "route security (%s): %d routes\n%s",
-        path.name,
+        "route security (application.yaml): %d routes\n%s",
         len(rules._rules),
         "\n".join(
             f"  {rule.method or '*'} /{'/'.join(rule.segments)} → "
@@ -228,9 +216,3 @@ def _load_route_security() -> RouteSecurity:
         ),
     )
     return rules
-
-
-def _resolve_configs_dir():
-    from ._configs import resolve_configs_dir as _rcd
-
-    return _rcd()

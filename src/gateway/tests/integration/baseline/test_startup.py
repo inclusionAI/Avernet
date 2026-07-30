@@ -91,6 +91,25 @@ class TestApiDocsDisabled:
                     },
                 }
             ),
+            raw={
+                "upstreams": {
+                    "base_path": "/openapi/v1",
+                    "domains": {
+                        "bots": {
+                            "server": "backend",
+                            "schema": {
+                                "source": "file",
+                                "path": "schemas/bots.openapi.json",
+                            },
+                        }
+                    },
+                    "servers": {
+                        "backend": {"base_url": "${backend_server_url}"},
+                    },
+                },
+                "identity_strategies": {"user": ["google"]},
+                "route_security": {"/**": {"user": "required"}},
+            },
         )
         with patch.object(ConfigLoader, "load", return_value=disabled_config):
             app = create_app()

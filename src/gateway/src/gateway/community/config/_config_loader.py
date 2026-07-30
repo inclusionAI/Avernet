@@ -30,7 +30,8 @@ class ConfigLoader:
             overlay = _load_yaml(overlay_path)
             base = _merge(base, overlay)
 
-        return _parse_config(base)
+        config_dir = base_path.parent if base_path is not None else None
+        return _parse_config(base, config_dir=config_dir)
 
     @staticmethod
     def load_raw() -> dict:
@@ -85,7 +86,7 @@ def _merge(base: dict, overlay: dict) -> dict:
     return out
 
 
-def _parse_config(raw: dict) -> Config:
+def _parse_config(raw: dict, *, config_dir: Path | None = None) -> Config:
     module_raw = raw.get("module_config") or {}
     web_raw = module_raw.get("web") or {}
     web = WebConfig(
@@ -112,4 +113,5 @@ def _parse_config(raw: dict) -> Config:
         module_config=ModuleConfig(web=web if web_raw else None),
         user_config=user_config,
         raw=raw,
+        config_dir=config_dir,
     )
