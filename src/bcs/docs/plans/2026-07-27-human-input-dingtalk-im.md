@@ -202,16 +202,17 @@ definition 绑定到 group 和 HumanInputRequest 创建时执行：
 普通机器人 binding 行为保持不变；系统不得从最近 conversation 或任意
 ConversationSessionMap 猜测要使用的机器人。
 
-`direct_assignee` 还需要扩展现有 IM participant repo 的反向查询能力：
+`direct_assignee` 通过 Channel Provider 的身份解析扩展点获取原生 IM 收件人：
 
 ```text
-find_by_actor(channel_type, account_ref, actor_id)
-  -> Vec<ImParticipantMap>
+resolve_direct_recipient(actor_id)
+  -> Option<im_user_id>
 ```
 
-当前主查询方向 `im_user_id -> actor_id` 保持不变；Store 为
-`channel_type + account_ref + actor_id` 增加查询索引。application 层要求反查
-结果恰好一个，零个返回 identity missing，多个返回 identity ambiguous。
+钉钉 Provider 只接受规范的 `human_<im_user_id>`，校验后直接提取后缀。
+因此单聊主动通知不依赖用户先给机器人发消息，也不依赖 IM participant 反查。
+当前 `im_user_id -> actor_id` 的入站身份记录保持不变，但不作为 HumanInput
+出站投递的前置条件。Provider 返回空或拒绝 actor 时，本次投递失败。
 
 ### 3.3 HumanInputRequest
 
@@ -235,7 +236,7 @@ status
 provider_message_ref
 delivery_attempts
 last_delivery_error
-created_at
+created_at (TIMESTAMP)
 activated_at
 responded_at
 ```
@@ -303,7 +304,7 @@ HumanInput 节点激活后：
 队列选择顺序：
 
 1. deadline 较早的优先；
-2. deadline 相同或为空时按 created_at FIFO；
+2. deadline 相同或为空时按业务时间字段 `created_at` FIFO；
 3. 已 active 的请求不因新请求 deadline 更早而抢占；
 4. 排队不延长 Runtime 已确定的 node deadline。
 
@@ -516,6 +517,8 @@ active HumanInputRequest
 - group-context 中零个或多个 Active DingTalk binding 时拒绝启动；
 - 固定群只向 YAML 配置的 openConversationId 发送 Markdown；
 - 单聊 Streaming 使用 request_id 隔离的 outTrackId 并 finalize；
+- 单聊收件人由钉钉 Provider 从规范的 `human_<im_user_id>` 解析，不要求存在
+  历史 IM participant 映射；
 - Streaming 失败后降级 OTO；
 - HumanInput 通知、摘要和 ack 不污染普通 run_id streaming state；
 - HumanInput、协同完成和协同失败消息具有不同的钉钉标题、正文首行和回复提示；

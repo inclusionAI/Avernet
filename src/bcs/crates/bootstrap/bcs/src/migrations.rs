@@ -190,7 +190,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         display_name TEXT DEFAULT NULL,
         PRIMARY KEY (channel_type, account_ref, im_user_id)
     )",
-    "CREATE INDEX IF NOT EXISTS idx_channel_im_participants_actor ON bcs_channel_im_participants(channel_type, account_ref, actor_id)",
     // ── HumanInput IM requests ────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_human_input_requests (
         request_id TEXT PRIMARY KEY,
@@ -216,7 +215,7 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         provider_message_ref TEXT DEFAULT NULL,
         delivery_attempts INTEGER NOT NULL DEFAULT 0,
         last_delivery_error TEXT DEFAULT NULL,
-        created_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         activated_at INTEGER DEFAULT NULL,
         responded_at INTEGER DEFAULT NULL
     )",
@@ -1226,6 +1225,7 @@ mod tests {
                 .iter()
                 .any(|column| column == "provider_message_ref")
         );
+        assert!(request_columns.iter().any(|column| column == "created_at"));
         assert_eq!(
             migration_rows(&db).await?,
             vec![

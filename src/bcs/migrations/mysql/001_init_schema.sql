@@ -462,7 +462,7 @@ CREATE TABLE IF NOT EXISTS `bcs_human_input_requests` (
   `provider_message_ref` varchar(256) DEFAULT NULL,
   `delivery_attempts` bigint(20) unsigned NOT NULL DEFAULT '0',
   `last_delivery_error` text DEFAULT NULL,
-  `created_at` bigint(20) unsigned NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `activated_at` bigint(20) unsigned DEFAULT NULL,
   `responded_at` bigint(20) unsigned DEFAULT NULL,
   PRIMARY KEY (`request_id`),
