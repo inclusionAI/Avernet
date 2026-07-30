@@ -56,6 +56,15 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.resources.service import (
+    DuplicateResourceError,
+    FileTooLargeError,
+    ResourceNotFoundError,
+)
+from agentclaw.community.core.services.identity import (
+    InvalidIdentityEntityTypeError,
+    InvalidIdentityFileTypeError,
+)
 from agentclaw.community.plugin_api.passport import PassportError
 
 T = TypeVar("T")
@@ -74,7 +83,9 @@ def envelope(
     message: str = "OK",
 ) -> Envelope[T]:
     """Wrap ``data`` in the standard success envelope."""
-    return Envelope(code=code, message=message, data=data, request_id=_trace_id(request))
+    return Envelope(
+        code=code, message=message, data=data, request_id=_trace_id(request)
+    )
 
 
 def page(total: int, items: list[T], request: Request) -> Envelope[Page[T]]:
@@ -111,7 +122,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     BotNameInvalidError: (400, "Invalid bot name"),
     BotLimitExceededError: (409, "Bot creation limit reached"),
     DeviceLimitError: (409, "Device limit reached"),
-    BotInvalidLifecycleStateError: (409, "Bot is not in a valid state for this operation"),
+    BotInvalidLifecycleStateError: (
+        409,
+        "Bot is not in a valid state for this operation",
+    ),
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
@@ -133,6 +147,17 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # a caller mistake, and not an unhandled crash.
     AuthStatusUnavailableError: (502, "Authorization service error"),
     JSONDecodeError: (500, "Malformed engine configuration"),
+    # Resources domain errors — ValueError subclasses raised by the slim
+    # core/resources/service.py. Mapped here so the openapi_v1 resources router
+    # lets them propagate to @envelope_errors instead of hand-translating with
+    # str(exc), which would leak internal ids/paths to external callers.
+    DuplicateResourceError: (409, "Resource already exists"),
+    ResourceNotFoundError: (404, "Not found"),
+    FileTooLargeError: (413, "File too large for preview"),
+    # Identity domain errors — ValueError subclasses raised by IdentityService
+    # validate_entity_type / validate_file_type.
+    InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
+    InvalidIdentityFileTypeError: (400, "Invalid file type"),
     # Base class LAST: every mapping above is a subclass of BotServiceError, and
     # the lookup returns on the first isinstance match in insertion order, so the
     # specific mappings still win. Services raise the bare base for device,
@@ -195,25 +220,23 @@ def error_response(http_status: int, message: str, request: Request) -> JSONResp
 # the envelope it is about to serialize, so forwarding an exception's copies
 # would describe the body we discarded — a wrong Content-Length is a broken
 # response, not a cosmetic issue.
-_BODY_HEADERS: frozenset[str] = frozenset({
-    "content-length",
-    "content-type",
-    "transfer-encoding",
-})
+_BODY_HEADERS: frozenset[str] = frozenset(
+    {
+        "content-length",
+        "content-type",
+        "transfer-encoding",
+    }
+)
 
 
-def _error_headers(
-    request: Request, extra: Mapping[str, str] | None
-) -> dict[str, str]:
+def _error_headers(request: Request, extra: Mapping[str, str] | None) -> dict[str, str]:
     """Protocol headers to echo, plus the trace id.
 
     The trace header is set on success by the tracer middleware; it is repeated
     here so an error response carries it regardless of middleware ordering —
     matching ``request_id`` in the body.
     """
-    headers = {
-        k: v for k, v in (extra or {}).items() if k.lower() not in _BODY_HEADERS
-    }
+    headers = {k: v for k, v in (extra or {}).items() if k.lower() not in _BODY_HEADERS}
     trace_id = _trace_id(request)
     if trace_id:
         headers.setdefault("X-Trace-ID", trace_id)

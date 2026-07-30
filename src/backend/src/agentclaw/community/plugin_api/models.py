@@ -4,9 +4,20 @@ Defines the declarative Base used by all ORM models and concrete model
 classes that plugin implementations (local / prod) need without pulling
 in the full OpenClaw server layer.
 """
+
 import json
 
-from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base  # noqa: F401  — canonical registry lives in core/
@@ -32,11 +43,14 @@ AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
 
 class BotModel(Base):
     """SQLAlchemy ORM model for ac_bots table."""
+
     __tablename__ = "ac_bots"
 
     # Uses AutoIncrementBigInteger: BigInteger on MySQL, Integer on SQLite.
     # SQLite requires exactly "INTEGER PRIMARY KEY" for autoincrement to work.
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     bot_id = Column(String(64), nullable=False)
     bot_name = Column(String(1024), nullable=True)
     bot_desc = Column(String(1024), nullable=True)
@@ -45,20 +59,24 @@ class BotModel(Base):
     creator_id = Column(String(1024), nullable=False)
     owner_id = Column(String(1024), nullable=False)
     owner_name = Column(String(100), nullable=True)
-    engine_types = Column(String(2048), default=lambda: json.dumps(SUPPORTED_ENGINE_TYPES), nullable=False)
+    engine_types = Column(
+        String(2048), default=lambda: json.dumps(SUPPORTED_ENGINE_TYPES), nullable=False
+    )
     active_engine = Column(String(64), default=DEFAULT_ENGINE_TYPE, nullable=False)
     status = Column(String(50), default="PENDING", nullable=False)
     binding_id = Column(BigInteger, nullable=True)
     device_id = Column(String(128), nullable=True)
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
     modifier_id = Column(String(1024), nullable=True)
     share_policy = Column(Text, nullable=True)
     is_delete = Column(SmallInteger, default=0, nullable=False)
     public = Column(String(64), default="0", nullable=False)
     ext = Column(Text, nullable=True)
     env = Column(String(20), default=get_current_env, nullable=False)
-    bot_type = Column(String(128), default='personal', nullable=True)
+    bot_type = Column(String(128), default="personal", nullable=True)
     template_type = Column(String(64), nullable=True)  # 模板类型，如 applicationCoding
     call_type = Column(String(16), default="owner", nullable=False)
     caller_config_revision = Column(BigInteger, default=0, nullable=False)
@@ -82,15 +100,21 @@ class BotModel(Base):
             "creator_id": self.creator_id,
             "owner_id": self.owner_id,
             "owner_name": self.owner_name,
-            "engine_types": json.loads(self.engine_types) if self.engine_types else SUPPORTED_ENGINE_TYPES,
+            "engine_types": json.loads(self.engine_types)
+            if self.engine_types
+            else SUPPORTED_ENGINE_TYPES,
             "active_engine": self.active_engine,
             "status": self.status,
             "binding_id": self.binding_id,
             "device_id": self.device_id,
             "gmt_create": self.gmt_create.isoformat() if self.gmt_create else None,
-            "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
+            "gmt_modified": self.gmt_modified.isoformat()
+            if self.gmt_modified
+            else None,
             "modifier_id": self.modifier_id,
-            "share_policy": json.loads(self.share_policy) if self.share_policy else None,
+            "share_policy": json.loads(self.share_policy)
+            if self.share_policy
+            else None,
             "is_delete": self.is_delete,
             "public": self.public,
             "ext": json.loads(self.ext) if self.ext else None,
@@ -123,37 +147,53 @@ class ResourceModel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
     resource_type = Column(String(50), nullable=False)
-    status = Column(String(50), default='active', nullable=False)
+    status = Column(String(50), default="active", nullable=False)
     gmt_created = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
     # Type-specific attributes stored as JSON
-    attributes = Column(Text, default='{}')
+    attributes = Column(Text, default="{}")
     # Custom metadata (using 'meta' because 'metadata' is SQLAlchemy reserved)
     meta = Column(Text)
     # Ownership and source
     user_id = Column(String(128))
     created_by = Column(String(128))
     source = Column(String(50))
-    bolt_id = Column(String(100), default='default')
+    bolt_id = Column(String(100), default="default")
     env = Column(String(20), default=get_current_env, nullable=False)
+    # Data-isolation tenant (see utils/avernet_tenant + the guards in this
+    # module). server_default (not Python default=) so create_all emits the
+    # same DEFAULT 'teamclaw' prod's out-of-band DDL applies, backfilling
+    # existing rows and covering any non-ORM insert. Deliberately absent from
+    # to_dict().
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
-            'id': str(self.id) if self.id is not None else None,
-            'name': self.name,
-            'resource_type': self.resource_type,
-            'status': self.status,
-            'gmt_created': self.gmt_created.isoformat() if self.gmt_created else None,
-            'gmt_modified': self.gmt_modified.isoformat() if self.gmt_modified else None,
-            'attributes': json.loads(self.attributes) if self.attributes else {},
-            'metadata': json.loads(self.meta) if self.meta else None,
-            'user_id': str(self.user_id) if self.user_id is not None else None,
-            'created_by': str(self.created_by) if self.created_by is not None else None,
-            'source': self.source,
-            'bolt_id': self.bolt_id if self.bolt_id else 'default',
-            'env': self.env,
+            "id": str(self.id) if self.id is not None else None,
+            "name": self.name,
+            "resource_type": self.resource_type,
+            "status": self.status,
+            "gmt_created": self.gmt_created.isoformat() if self.gmt_created else None,
+            "gmt_modified": self.gmt_modified.isoformat()
+            if self.gmt_modified
+            else None,
+            "attributes": json.loads(self.attributes) if self.attributes else {},
+            "metadata": json.loads(self.meta) if self.meta else None,
+            "user_id": str(self.user_id) if self.user_id is not None else None,
+            "created_by": str(self.created_by) if self.created_by is not None else None,
+            "source": self.source,
+            "bolt_id": self.bolt_id if self.bolt_id else "default",
+            "env": self.env,
         }
+
+
+# ── Avernet tenant guard ────────────────────────────────────────────
+# Same model-agnostic mechanism as BotModel above (utils/avernet_tenant_guard):
+# import ResourceModel, get the guard. PR #543 extended isolation to ac_resource.
+register_avernet_tenant_guard(ResourceModel)
 
 
 class ChannelConfig(Base):
@@ -161,11 +201,14 @@ class ChannelConfig(Base):
 
     Mirrors the MySQL DDL at services/channel/sql/ac_channel_config.sql.
     """
+
     __tablename__ = "ac_channel_config"
 
     # DDL: id bigint(20) unsigned. AutoIncrementBigInteger = BIGINT on
     # MySQL/OceanBase, INTEGER on SQLite (autoincrement parity).
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     type = Column(String(128), nullable=False)
     description = Column(String(4000), nullable=True)
     identity_id = Column(String(128), nullable=False)
@@ -203,9 +246,12 @@ class OssToNasRecord(Base):
     the SQLite repository impl; the corp store impl uses raw SQL against the
     same table.
     """
+
     __tablename__ = "ac_oss_to_nas_record"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     staff_no = Column(String(64), nullable=False)
     bot_id = Column(String(64), nullable=False)
     bot_info = Column(Text, nullable=True)  # JSON: {"storage_dir_name": "..."}
@@ -242,9 +288,7 @@ class OssToNasRecord(Base):
             "batch_no": self.batch_no,
             "sub_batch_no": self.sub_batch_no,
             "storage_status": self.storage_status,
-            "gmt_create": self.gmt_create.isoformat()
-            if self.gmt_create
-            else None,
+            "gmt_create": self.gmt_create.isoformat() if self.gmt_create else None,
             "gmt_modified": self.gmt_modified.isoformat()
             if self.gmt_modified
             else None,
@@ -256,9 +300,12 @@ class QualityTaskModel(Base):
 
     Quality task management: evaluation, stress testing, etc.
     """
+
     __tablename__ = "ac_bot_quality_task"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     uuid = Column(String(64), nullable=True, unique=True, index=True)
     task_type = Column(String(32), nullable=True)  # eval, etc.
     biz_type = Column(String(32), nullable=True)  # service_bot_single, etc.
@@ -290,7 +337,9 @@ class CommonConfig(Base):
 
     __tablename__ = "ac_common_config"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
     gmt_create = Column(DateTime, server_default=func.now(), nullable=False)
     gmt_modified = Column(
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
