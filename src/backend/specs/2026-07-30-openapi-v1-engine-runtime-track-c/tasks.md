@@ -233,23 +233,31 @@ All paths are relative to `src/backend/`. Source package is
   - [x] Success + each mapped error covered, using the in-memory transport.
 - **Depends on:** Tasks 4, 5, 6
 
-## Task 8: Engine + models groups — 5 endpoints
+## Task 8: Engine + models groups — 5 endpoints  `[x]`
 - **Goal:** Wrap the two read-only groups that share one shape.
 - **Files:**
   - `…/adapters/http/openapi_v1/engine_runtime/engine/{__init__,router,schemas}.py` (new)
   - `…/adapters/http/openapi_v1/engine_runtime/models/{__init__,router,schemas}.py` (new)
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_engine_models.py` (new)
 - **Done when:**
-  - [ ] `…/engine/{status,capabilities,available}` served; `available` maps to
+  - [x] `…/engine/{status,capabilities,available}` served; `available` maps to
         the engine's `/api/engine/list`. **`switch` and `restart` are not
         exposed** (plan Out of Scope).
-  - [ ] `…/models` and `…/models/{model_id:path}` served, the `:path` converter
+  - [x] `…/models` and `…/models/{model_id:path}` served, the `:path` converter
         preserving ids containing `/`.
-  - [ ] Capability names in the capabilities payload are `list[str]`, with the
+  - [x] Capability names in the capabilities payload are `list[str]`, with the
         known vocabulary in the field description — not a validating enum.
-  - [ ] Engine-status `process` and `transition` stay **open dicts**, not
+  - [x] Engine-status `process` and `transition` stay **open dicts**, not
         modelled — they are assembled ad hoc at `manager.py:743-748`.
 - **Depends on:** Tasks 4, 5, 6
+- **Closed the leak the Group A review flagged for this task:** the engine
+  reports `limited`/`fallback` as `{capability: explanation}` maps whose values
+  are internal engineering text, some not English. Only the **keys** are
+  published — a stable capability vocabulary that leaks nothing. Asserted by a
+  test that the prose and the non-ASCII string are absent from the body.
+- **`fallback` is published as `unavailable`.** The engine means "declared, not
+  served directly, here is another way"; the note is internal, and from a
+  caller's side the capability is simply not available.
 
 ## Task 9: Approvals group — 3 endpoints
 - **Goal:** Wrap approvals, resolving the vocabulary mess the plan documented.

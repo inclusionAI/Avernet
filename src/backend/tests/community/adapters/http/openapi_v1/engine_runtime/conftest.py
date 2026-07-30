@@ -51,6 +51,11 @@ class FakeRelay:
         self, *, bot_id, owner_id, method, path,
         body=None, params=None, timeout=None, enveloped=True,
     ) -> EngineResult:
+        # Mirrors the real relay: bot resolution precedes the forward, so a
+        # foreign bot never reaches the transport. Modelling this matters — a
+        # fake that recorded the call anyway would make "no device was touched"
+        # assertions pass for handlers that genuinely leak.
+        self.resolve_bot(bot_id, owner_id)
         self.calls.append(
             {
                 "bot_id": bot_id, "owner_id": owner_id, "method": method,
@@ -70,6 +75,7 @@ class FakeRelay:
 
     @property
     def paths(self) -> list[str]:
+        """Forwards that actually reached the transport."""
         return [c["path"] for c in self.calls]
 
 
