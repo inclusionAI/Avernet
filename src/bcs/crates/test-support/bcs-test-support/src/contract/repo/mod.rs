@@ -882,6 +882,43 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
     repo.uncollect(&collect_session.id, "bot-stranger")
         .await
         .expect("uncollect non-participant idempotent");
+
+    // count_by_group — mirrors list_by_group filters, returns total (no pagination).
+    // Group now has 3 sessions:
+    //   s               — Completed, title=None,    bot1
+    //   svc             — Running,   title="hello", bot1
+    //   collect_session — Running,   title=None,    bot-collector + bot-other
+    assert_eq!(repo.count_by_group(group_id, None, None, None).await, 3);
+    assert_eq!(
+        repo.count_by_group(group_id, Some(SessionStatus::Running), None, None).await,
+        2
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, Some(SessionStatus::Completed), None, None).await,
+        1
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, None, Some("hello"), None).await,
+        1
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, Some("bot1")).await,
+        2
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, Some("bot-collector")).await,
+        1
+    );
+    // count_by_group must equal list_by_group total (large limit) — consistency.
+    let listed_all = repo.list_by_group(group_id, None, 0, 1000, None, None).await;
+    assert_eq!(
+        listed_all.len() as u64,
+        repo.count_by_group(group_id, None, None, None).await
+    );
+    // count != paginated subset
+    let listed_page = repo.list_by_group(group_id, None, 0, 1, None, None).await;
+    assert_eq!(listed_page.len(), 1);
+    assert_eq!(repo.count_by_group(group_id, None, None, None).await, 3);
 }
 
 pub async fn session_repo_port_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) {
@@ -1198,6 +1235,40 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
         .expect("query public owner rows");
     assert_eq!(public_owner_page.messages.len(), 1);
     assert_eq!(public_owner_page.messages[0].owner_bot_id, None);
+
+    // list_session_messages_by_seq — ascending order + total + pagination.
+    // Session now has 9 messages (seq 1..9).
+    let (asc, total) = repo
+        .list_session_messages_by_seq(session_id, 0, 100)
+        .await
+        .expect("list_session_messages_by_seq full");
+    assert_eq!(total, 9);
+    assert_eq!(asc.len(), 9);
+    assert_eq!(
+        asc.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        (1..=9).collect::<Vec<_>>(),
+        "must be session_seq ASC"
+    );
+
+    // pagination: offset=2, limit=3 → seqs [3,4,5], total still 9
+    let (page_asc, page_total) = repo
+        .list_session_messages_by_seq(session_id, 2, 3)
+        .await
+        .expect("list_session_messages_by_seq paged");
+    assert_eq!(page_total, 9);
+    assert_eq!(page_asc.len(), 3);
+    assert_eq!(
+        page_asc.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![3, 4, 5]
+    );
+
+    // unknown session → empty, total 0
+    let (none, none_total) = repo
+        .list_session_messages_by_seq("no-such-session", 0, 10)
+        .await
+        .expect("list_session_messages_by_seq unknown");
+    assert!(none.is_empty());
+    assert_eq!(none_total, 0);
 }
 
 fn now_ms() -> u64 {

@@ -3,13 +3,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbTransactionStep, DbValue, db_get_column};
+use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbTransactionStep, DbValue, db_get_column, db_get_column_opt};
 use tracing::{debug, info};
 
 use bcs_domain::{
     MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, PersistedMessage, PersistedMessageStatus, SenderType,
 };
 use bcs_service_api::port::repo::{MessageRepoError, MessageRepoPort};
+use bcs_service_api::{ServiceError, ServiceResult};
 
 // ---------------------------------------------------------------------------
 // SQL constants
@@ -410,6 +411,70 @@ impl MessageRepoPort for MySqlMessageStore {
         } else {
             Ok(0)
         }
+    }
+
+    /// List messages for a session ordered by `session_seq` ASCENDING with
+    /// offset/limit pagination, plus the total count for the session (before
+    /// pagination). Runs a separate `SELECT COUNT(*)` for the total. Does NOT
+    /// replace `query_messages` (compat).
+    async fn list_session_messages_by_seq(
+        &self,
+        session_id: &str,
+        offset: u64,
+        limit: u64,
+    ) -> ServiceResult<(Vec<PersistedMessage>, u64)> {
+        let select_sql = format!(
+            "SELECT {SELECT_COLS} FROM bcs_messages \
+             WHERE session_id = ? ORDER BY session_seq ASC LIMIT ? OFFSET ?"
+        );
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                &select_sql,
+                vec![
+                    DbValue::from(session_id.to_string()),
+                    DbValue::from(limit),
+                    DbValue::from(offset),
+                ],
+            ))
+            .await
+            .map_err(|e| {
+                ServiceError::InternalError(format!("list_session_messages_by_seq query: {e}"))
+            })?;
+
+        let mut messages = Vec::with_capacity(rows.len());
+        for row in &rows {
+            messages.push(row_to_message(row).map_err(|e| {
+                ServiceError::InternalError(format!("list_session_messages_by_seq row: {e}"))
+            })?);
+        }
+
+        let count_sql = "SELECT COUNT(*) AS cnt FROM bcs_messages WHERE session_id = ?";
+        let count_rows = self
+            .db
+            .query(DbStatement::with_params(
+                count_sql,
+                vec![DbValue::from(session_id.to_string())],
+            ))
+            .await
+            .map_err(|e| {
+                ServiceError::InternalError(format!("list_session_messages_by_seq count: {e}"))
+            })?;
+        let total = count_rows
+            .into_iter()
+            .next()
+            .and_then(|row| db_get_column_opt::<i64>(&row, "cnt").ok().flatten())
+            .map(|v| v.max(0) as u64)
+            .unwrap_or(0);
+
+        info!(
+            session_id = %session_id,
+            count = messages.len(),
+            total,
+            backend = %self.backend_label(),
+            "messages listed by seq (asc)"
+        );
+        Ok((messages, total))
     }
 }
 

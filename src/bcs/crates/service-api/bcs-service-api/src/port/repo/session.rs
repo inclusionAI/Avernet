@@ -64,6 +64,26 @@ pub trait SessionRepoPort: Send + Sync {
     async fn count_running_service(&self, group_id: &str) -> u64;
     async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session>;
 
+    /// Count sessions in a group matching the SAME filters as [`SessionRepoPort::list_by_group`]
+    /// (`status` / `title_contains` / `participant_id`), but WITHOUT pagination.
+    ///
+    /// Used by the V1 session list endpoint to compute `total`. The filter
+    /// semantics MUST match `list_by_group` exactly so `total` is consistent
+    /// with the paginated page returned alongside it.
+    ///
+    /// Default returns `0` so noop/test impls keep compiling; real impls
+    /// (memory + mysql) override this.
+    async fn count_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> u64 {
+        let _ = (group_id, status, title_contains, participant_id);
+        0
+    }
+
     /// **CAS 完成**：仅当当前 status=Running 时落 Completed 并返回新 session；
     /// 已是 Completed 则返回 `Ok(None)`。spec §桶 8。
     async fn complete_if_running(

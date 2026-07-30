@@ -866,6 +866,70 @@ impl SessionRepoPort for MySqlSessionStore {
             .unwrap_or(0)
     }
 
+    /// Mirrors [`SessionRepoPort::try_list_by_group`] filter conditions exactly
+    /// (env + group_id + optional status / title_contains / participant_id
+    /// JOIN) but runs `SELECT COUNT(*)` without LIMIT/OFFSET. Used by the V1
+    /// session list endpoint to compute `total`.
+    async fn count_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> u64 {
+        let mut conditions: Vec<String> = vec![
+            "s.env = ?".to_string(),
+            "s.group_id = ?".to_string(),
+        ];
+        let mut params: Vec<DbValue> = vec![
+            DbValue::from(self.env.as_str()),
+            DbValue::from(group_id),
+        ];
+
+        if let Some(s) = status {
+            let status_str = match s {
+                SessionStatus::Running => "running",
+                SessionStatus::Completed => "completed",
+            };
+            conditions.push("s.status = ?".to_string());
+            params.push(DbValue::from(status_str));
+        }
+
+        if let Some(q) = title_contains {
+            conditions.push("s.session_title LIKE ?".to_string());
+            params.push(DbValue::from(format!("%{}%", q)));
+        }
+
+        let join_clause = if let Some(pid) = participant_id {
+            conditions.push("sp.bot_uuid = ?".to_string());
+            params.push(DbValue::from(pid));
+            "JOIN bcs_session_participants sp ON sp.env = s.env AND sp.session_id = s.session_id"
+        } else {
+            ""
+        };
+
+        let sql = format!(
+            "SELECT COUNT(*) AS cnt FROM bcs_group_sessions s {join} \
+             WHERE {where_clause}",
+            join = join_clause,
+            where_clause = conditions.join(" AND "),
+        );
+
+        match self.db.query(DbStatement::with_params(&sql, params)).await {
+            Ok(rows) => rows
+                .into_iter()
+                .next()
+                .and_then(|row| {
+                    db_get_column_opt::<i64>(&row, "cnt")
+                        .ok()
+                        .flatten()
+                        .map(|v| v.max(0) as u64)
+                })
+                .unwrap_or(0),
+            Err(_) => 0,
+        }
+    }
+
     async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> {
         let select_cols = self.select_cols();
         let sql = format!(

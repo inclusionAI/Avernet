@@ -8,6 +8,7 @@ use tracing::info;
 
 use bcs_domain::{MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, PersistedMessage, PersistedMessageStatus};
 use bcs_service_api::port::repo::{MessageRepoError, MessageRepoPort};
+use bcs_service_api::ServiceResult;
 
 /// In-memory implementation of [`MessageRepoPort`].
 #[derive(Debug, Default)]
@@ -162,6 +163,33 @@ impl MessageRepoPort for MemoryMessageRepo {
         })
     }
 
+    /// List messages for a session ordered by `session_seq` ASCENDING with
+    /// offset/limit pagination, plus the total count for the session (before
+    /// pagination). Does NOT replace `query_messages` (compat).
+    async fn list_session_messages_by_seq(
+        &self,
+        session_id: &str,
+        offset: u64,
+        limit: u64,
+    ) -> ServiceResult<(Vec<PersistedMessage>, u64)> {
+        let sessions = self.sessions.read().await;
+        let entry = match sessions.get(session_id) {
+            Some(e) => e,
+            None => return Ok((Vec::new(), 0)),
+        };
+        // Clone then sort by session_seq ASCENDING so out-of-order storage
+        // (e.g. direct seeding in tests) still yields chronological order.
+        let mut filtered: Vec<PersistedMessage> = entry.messages.iter().cloned().collect();
+        filtered.sort_by(|a, b| a.session_seq.cmp(&b.session_seq));
+        let total = filtered.len() as u64;
+        let paged = filtered
+            .into_iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect();
+        Ok((paged, total))
+    }
+
     async fn get_message_by_id(
         &self,
         session_id: &str,
@@ -191,5 +219,115 @@ fn content_text(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bcs_domain::SenderType;
+
+    fn make_msg(session_id: &str, message_id: &str, session_seq: i64) -> PersistedMessage {
+        PersistedMessage {
+            message_id: message_id.to_string(),
+            group_id: "g1".to_string(),
+            session_id: session_id.to_string(),
+            session_seq,
+            sender_id: "bot1".to_string(),
+            sender_type: SenderType::Bot,
+            message_type: "chat".to_string(),
+            content: serde_json::json!(format!("msg-{message_id}")),
+            client_msg_id: None,
+            owner_bot_id: None,
+            status: PersistedMessageStatus::Normal,
+            created_at: session_seq as u64 * 1000,
+            run_id: String::new(),
+        }
+    }
+
+    /// `list_session_messages_by_seq` must return messages ordered by
+    /// `session_seq` ASCENDING even when stored out of order, with the correct
+    /// total (pre-pagination) and offset/limit behavior.
+    #[tokio::test]
+    async fn list_session_messages_by_seq_orders_ascending_and_paginates() {
+        let repo = MemoryMessageRepo::new();
+        // Seed messages with out-of-order session_seq values directly so we can
+        // assert the method sorts ASC regardless of insertion order.
+        {
+            let mut sessions = repo.sessions.write().await;
+            let entry = sessions.entry("s1".to_string()).or_default();
+            entry.messages.push(make_msg("s1", "m1", 3));
+            entry.messages.push(make_msg("s1", "m2", 1));
+            entry.messages.push(make_msg("s1", "m3", 2));
+            entry.messages.push(make_msg("s1", "m4", 5));
+            entry.messages.push(make_msg("s1", "m5", 4));
+            entry.seq = 5;
+        }
+
+        // Full list, ASC order
+        let (msgs, total) = repo.list_session_messages_by_seq("s1", 0, 100).await.unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(msgs.len(), 5);
+        assert_eq!(
+            msgs.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5]
+        );
+
+        // Pagination: offset=1, limit=2 → seqs [2, 3], total still 5
+        let (msgs, total) = repo.list_session_messages_by_seq("s1", 1, 2).await.unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].session_seq, 2);
+        assert_eq!(msgs[1].session_seq, 3);
+
+        // offset beyond total → empty page, total still 5
+        let (msgs, total) = repo.list_session_messages_by_seq("s1", 10, 5).await.unwrap();
+        assert!(msgs.is_empty());
+        assert_eq!(total, 5);
+
+        // limit=0 → empty page, total still 5
+        let (msgs, total) = repo.list_session_messages_by_seq("s1", 0, 0).await.unwrap();
+        assert!(msgs.is_empty());
+        assert_eq!(total, 5);
+
+        // Unknown session → empty, total 0
+        let (msgs, total) = repo.list_session_messages_by_seq("nope", 0, 10).await.unwrap();
+        assert!(msgs.is_empty());
+        assert_eq!(total, 0);
+    }
+
+    /// `query_messages` (old compat API) must remain DESC-by-created_at and
+    /// unaffected by the new ASC method.
+    #[tokio::test]
+    async fn query_messages_still_desc_after_new_method() {
+        let repo = MemoryMessageRepo::new();
+        {
+            let mut sessions = repo.sessions.write().await;
+            let entry = sessions.entry("s2".to_string()).or_default();
+            entry.messages.push(make_msg("s2", "a", 1));
+            entry.messages.push(make_msg("s2", "b", 2));
+            entry.messages.push(make_msg("s2", "c", 3));
+            entry.seq = 3;
+        }
+        let page = repo
+            .query_messages(MessageQuery {
+                group_id: "g1".to_string(),
+                session_id: "s2".to_string(),
+                cursor: None,
+                limit: 10,
+                keyword: None,
+                sender_id: None,
+                message_type: None,
+                owner_filter: MessageOwnerFilter::Any,
+                time_range: None,
+                visible_from_seq: None,
+            })
+            .await
+            .unwrap();
+        // created_at DESC, session_seq DESC → [3, 2, 1]
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![3, 2, 1]
+        );
     }
 }
