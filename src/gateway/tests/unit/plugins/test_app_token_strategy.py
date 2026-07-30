@@ -6,15 +6,15 @@ import pytest
 
 from gateway.community.plugins.authn.app_token import (
     AppTokenStrategy,
-    BareAppTokenValidator,
-    BareTenantResolver,
+    StubAppTokenValidator,
+    StubTenantResolver,
 )
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import AppPrincipal, CredentialBundle
 
 
 def _strat() -> AppTokenStrategy:
-    return AppTokenStrategy(keys=BareAppTokenValidator(), tenants=BareTenantResolver())
+    return AppTokenStrategy(keys=StubAppTokenValidator(), tenants=StubTenantResolver())
 
 
 def _creds(headers: dict[str, str]) -> CredentialBundle:
@@ -33,14 +33,14 @@ async def test_unrecognized_bearer_returns_none() -> None:
 
 async def test_valid_token_and_tenant_builds_app_principal() -> None:
     result = await _strat().build(
-        _creds({"authorization": "Bearer bare-app-token", "x-tenant-token": "t"})
+        _creds({"authorization": "Bearer stub-app-token", "x-tenant-token": "t"})
     )
     assert isinstance(result, AppPrincipal)
-    assert result.tenant == "tenant-bare"
-    assert result.app.app_id == "bare-app"
-    assert result.app.app_name == "Bare App"
-    assert result.app.owners == "bare-org"
-    assert result.app.app_type == "bare"
+    assert result.tenant == "stub_tenant"
+    assert result.app.app_id == "stub-app"
+    assert result.app.app_name == "Stub App"
+    assert result.app.owners == "stub-org"
+    assert result.app.app_type == "stub"
     assert result.on_behalf_of_opaque is None
 
 
@@ -48,7 +48,7 @@ async def test_on_behalf_of_opaque_passed_through() -> None:
     result = await _strat().build(
         _creds(
             {
-                "authorization": "Bearer bare-app-token",
+                "authorization": "Bearer stub-app-token",
                 "x-tenant-token": "t",
                 "x-end-user-id": "enduser-9",
             }
@@ -59,7 +59,7 @@ async def test_on_behalf_of_opaque_passed_through() -> None:
 
 
 async def test_tenant_mismatch_raises_auth_error() -> None:
-    # BareTenantResolver always maps to "tenant-bare"; force a mismatch by
+    # StubTenantResolver always maps to "stub_tenant"; force a mismatch by
     # using a tenant resolver that returns a different tenant.
     from gateway.community.spi.authn import TenantResolver
 
@@ -67,10 +67,10 @@ async def test_tenant_mismatch_raises_auth_error() -> None:
         async def resolve(self, tenant_token: str) -> str:
             return "tenant-other"
 
-    strat = AppTokenStrategy(keys=BareAppTokenValidator(), tenants=_OtherTenant())
+    strat = AppTokenStrategy(keys=StubAppTokenValidator(), tenants=_OtherTenant())
     with pytest.raises(AuthError):
         await strat.build(
-            _creds({"authorization": "Bearer bare-app-token", "x-tenant-token": "t"})
+            _creds({"authorization": "Bearer stub-app-token", "x-tenant-token": "t"})
         )
 
 

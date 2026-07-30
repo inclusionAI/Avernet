@@ -191,7 +191,7 @@ async def authenticate(creds, requirement, strategies) -> dict[PrincipalType, Pr
 - **签名/JWT(§7.1)不在本 spec**:本 spec 只交付"解析出的集合",并保证它在转发处可被取到;`PrincipalSigner`/`PrincipalVerifier` 留给独立 workstream。
 
 ### flavor
-- `bare`:桩实现 `BareAuthPlugin`(已有)、`bare` 的 `ApiKeyValidator`/`TenantResolver`(落地设计稿 §6.1、§6.4 的 bare 形态)、新增 `bare` 的 `BotTokenValidator`(固定/内存 bot 记录)。
+- `bare`:桩实现 `StubAuthPlugin`(已有)、`bare` 的 `ApiKeyValidator`/`TenantResolver`(落地设计稿 §6.1、§6.4 的 bare 形态)、新增 `bare` 的 `BotTokenValidator`(固定/内存 bot 记录)。
 - `sofa`:通过 `register_plugin_option` 挂 BUService 实现(后续 pass);Strategy/Extractor 零改动。
 
 ### 与设计稿的关系
@@ -250,7 +250,7 @@ async def authenticate(creds, requirement, strategies) -> dict[PrincipalType, Pr
 
 ### 与现行代码的衔接点
 - 现有 `FirstPartyUserStrategy` 的 cookie 读取逻辑迁移为 `session_cookie` extractor,不丢弃 `bare` 的硬编码用户行为。
-- 现有 `BareAuthPlugin` 保留并作为 User 侧 SPI 桩。
+- 现有 `StubAuthPlugin` 保留并作为 User 侧 SPI 桩。
 - 现有 `route_security.yaml`/`x-avernet-security` 机制保留,仅改值形状;`test_route_security.py` 随之改形。
 - 现有 forwarder 的"裸 await 丢 Principal"(`_forward`)在本 spec 之后**至少**改为"把解析出的身份集合传到 forwarder seam 可取到";真正签名注入仍属 §7.1。
 

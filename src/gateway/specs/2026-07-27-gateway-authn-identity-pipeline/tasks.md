@@ -494,7 +494,7 @@ from gateway.community.plugins.authn.bot_token_validator.bare import (
     BareBotTokenValidator,
 )
 from gateway.community.plugins.authn.tenant_resolver.bare import (
-    BareTenantResolver,
+    StubTenantResolver,
 )
 from gateway.community.spi.auth import AuthError
 
@@ -512,13 +512,13 @@ async def test_api_key_validator_no_match_returns_none() -> None:
 
 
 async def test_bare_tenant_resolver_requires_token() -> None:
-    r = BareTenantResolver()
+    r = StubTenantResolver()
     with pytest.raises(AuthError):
         await r.resolve("")
 
 
 async def test_bare_tenant_resolver_maps_to_fixed_tenant() -> None:
-    r = BareTenantResolver()
+    r = StubTenantResolver()
     assert await r.resolve("any-non-empty") == "tenant-bare"
 
 
@@ -583,14 +583,14 @@ class BareApiKeyValidator(ApiKeyValidator):
 
 `src/gateway/src/gateway/community/plugins/authn/tenant_resolver/bare/__init__.py`:
 ```python
-from ._plugin import BareTenantResolver
+from ._plugin import StubTenantResolver
 
-__all__ = ["BareTenantResolver"]
+__all__ = ["StubTenantResolver"]
 ```
 
 `src/gateway/src/gateway/community/plugins/authn/tenant_resolver/bare/_plugin.py`:
 ```python
-"""BareTenantResolver — open-source single-box stub for the tenant resolver.
+"""StubTenantResolver — open-source single-box stub for the tenant resolver.
 
 Maps any non-empty tenant token to the fixed ``tenant-bare``. NOT real
 validation — production uses the sofa flavor (a tenant-token registry).
@@ -604,7 +604,7 @@ from gateway.community.spi.authn import TenantResolver
 _BARE_TENANT = "tenant-bare"
 
 
-class BareTenantResolver(TenantResolver):
+class StubTenantResolver(TenantResolver):
     """Single-box stub: one fixed tenant."""
 
     async def resolve(self, tenant_token: str) -> str:
@@ -1012,8 +1012,8 @@ from gateway.community.plugins.auth.api_key_validator.bare import BareApiKeyVali
 from gateway.community.plugins.auth.bot_token_validator.bare import (
     BareBotTokenValidator,
 )
-from gateway.community.plugins.auth.tenant_resolver.bare import BareTenantResolver
-from gateway.community.plugins.auth.bare import BareAuthPlugin
+from gateway.community.plugins.auth.tenant_resolver.bare import StubTenantResolver
+from gateway.community.plugins.auth.stub import StubAuthPlugin
 from gateway.community.spi.auth import AuthenticatedUser
 from gateway.community.spi.authn import (
     AppPrincipal,
@@ -1031,7 +1031,7 @@ def _creds_session() -> CredentialBundle:
 
 async def test_session_cookie_absent_returns_none() -> None:
     ex = SessionCookieExtractor(
-        auth=BareAuthPlugin(default_user=AuthenticatedUser(id="u1", username="a")),
+        auth=StubAuthPlugin(default_user=AuthenticatedUser(id="u1", username="a")),
         default_tenant="tenant-default",
     )
     result = await ex.extract(CredentialBundle(headers={}, cookies={}, query={}))
@@ -1040,7 +1040,7 @@ async def test_session_cookie_absent_returns_none() -> None:
 
 async def test_session_cookie_builds_user_principal() -> None:
     ex = SessionCookieExtractor(
-        auth=BareAuthPlugin(
+        auth=StubAuthPlugin(
             default_user=AuthenticatedUser(id="u1", username="a", tenant_id="t-9")
         ),
         default_tenant="tenant-default",
@@ -1053,7 +1053,7 @@ async def test_session_cookie_builds_user_principal() -> None:
 
 async def test_session_cookie_falls_back_to_default_tenant() -> None:
     ex = SessionCookieExtractor(
-        auth=BareAuthPlugin(default_user=AuthenticatedUser(id="u1", username="a")),
+        auth=StubAuthPlugin(default_user=AuthenticatedUser(id="u1", username="a")),
         default_tenant="tenant-default",
     )
     result = await ex.extract(_creds_session())
@@ -1071,7 +1071,7 @@ def _creds_bearer(token: str) -> CredentialBundle:
 
 async def test_api_key_absent_returns_none() -> None:
     ex = ApiKeyExtractor(
-        keys=BareApiKeyValidator(), tenants=BareTenantResolver()
+        keys=BareApiKeyValidator(), tenants=StubTenantResolver()
     )
     result = await ex.extract(
         CredentialBundle(headers={}, cookies={}, query={})
@@ -1080,7 +1080,7 @@ async def test_api_key_absent_returns_none() -> None:
 
 
 async def test_api_key_invalid_raises() -> None:
-    ex = ApiKeyExtractor(keys=BareApiKeyValidator(), tenants=BareTenantResolver())
+    ex = ApiKeyExtractor(keys=BareApiKeyValidator(), tenants=StubTenantResolver())
     with pytest.raises(Exception):
         await ex.extract(
             CredentialBundle(
@@ -1090,7 +1090,7 @@ async def test_api_key_invalid_raises() -> None:
 
 
 async def test_api_key_valid_builds_app_principal() -> None:
-    ex = ApiKeyExtractor(keys=BareApiKeyValidator(), tenants=BareTenantResolver())
+    ex = ApiKeyExtractor(keys=BareApiKeyValidator(), tenants=StubTenantResolver())
     result = await ex.extract(_creds_bearer("bare-api-key"))
     assert isinstance(result, AppPrincipal)
     assert result.tenant == "tenant-bare"
@@ -1332,8 +1332,8 @@ from gateway.community.plugins.auth.api_key_validator.bare import BareApiKeyVali
 from gateway.community.plugins.auth.bot_token_validator.bare import (
     BareBotTokenValidator,
 )
-from gateway.community.plugins.auth.tenant_resolver.bare import BareTenantResolver
-from gateway.community.plugins.auth.bare import BareAuthPlugin
+from gateway.community.plugins.auth.tenant_resolver.bare import StubTenantResolver
+from gateway.community.plugins.auth.stub import StubAuthPlugin
 from gateway.community.plugins.authn.app._extractors import ApiKeyExtractor
 from gateway.community.plugins.authn.bot._extractors import BotTokenExtractor
 from gateway.community.plugins.authn.user._extractors import SessionCookieExtractor
@@ -1344,7 +1344,7 @@ from gateway.community.spi.authn import AppPrincipal, BotPrincipal, UserPrincipa
 class TestSessionCookieExtractorConformance:
     def setup_method(self) -> None:
         self.extractor = SessionCookieExtractor(
-            auth=BareAuthPlugin(default_user=AuthenticatedUser(id="u", username="a")),
+            auth=StubAuthPlugin(default_user=AuthenticatedUser(id="u", username="a")),
             default_tenant="t-d",
         )
         self.applicable_creds = CredentialBundle(
@@ -1369,7 +1369,7 @@ class TestSessionCookieExtractorConformance:
 class TestApiKeyExtractorConformance:
     def setup_method(self) -> None:
         self.extractor = ApiKeyExtractor(
-            keys=BareApiKeyValidator(), tenants=BareTenantResolver()
+            keys=BareApiKeyValidator(), tenants=StubTenantResolver()
         )
         self.applicable_creds = CredentialBundle(
             headers={"authorization": "Bearer bare-api-key", "x-tenant-token": "t"},
@@ -2225,12 +2225,12 @@ import yaml
 from gateway.community.core.authn import IdentityStrategy, RouteSecurity
 from gateway.community.core.authn import authenticate as run_auth
 from gateway.community.plugin_accessor import PluginAccessor
-from gateway.community.plugins.auth.bare import BareAuthPlugin
+from gateway.community.plugins.auth.stub import StubAuthPlugin
 from gateway.community.plugins.auth.api_key_validator.bare import BareApiKeyValidator
 from gateway.community.plugins.auth.bot_token_validator.bare import (
     BareBotTokenValidator,
 )
-from gateway.community.plugins.auth.tenant_resolver.bare import BareTenantResolver
+from gateway.community.plugins.auth.tenant_resolver.bare import StubTenantResolver
 from gateway.community.plugins.authn.app._extractors import ApiKeyExtractor
 from gateway.community.plugins.authn.bot._extractors import BotTokenExtractor
 from gateway.community.plugins.authn.user._extractors import SessionCookieExtractor
@@ -2250,9 +2250,9 @@ _DEFAULT_TENANT = "default"
 # Fail-closed default: every route requires an authenticated user.
 _DEFAULT_TABLE = {"/**": {"user": "required"}}
 
-_auth_plugin = PluginAccessor[AuthPlugin]("gateway.auth", BareAuthPlugin)
+_auth_plugin = PluginAccessor[AuthPlugin]("gateway.auth", StubAuthPlugin)
 _api_key_plugin = PluginAccessor[ApiKeyValidator]("gateway.auth.api_key", BareApiKeyValidator)
-_tenant_plugin = PluginAccessor[TenantResolver]("gateway.auth.tenant", BareTenantResolver)
+_tenant_plugin = PluginAccessor[TenantResolver]("gateway.auth.tenant", StubTenantResolver)
 _bot_token_plugin = PluginAccessor[BotTokenValidator](
     "gateway.auth.bot_token", BareBotTokenValidator
 )
@@ -2468,7 +2468,7 @@ cd src/gateway && git rm tests/test_first_party_user_strategy.py
 from __future__ import annotations
 
 from gateway.community.core.authn import IdentityStrategy
-from gateway.community.plugins.auth.bare import BareAuthPlugin
+from gateway.community.plugins.auth.stub import StubAuthPlugin
 from gateway.community.plugins.authn.user._extractors import SessionCookieExtractor
 from gateway.community.spi.auth import AuthenticatedUser
 from gateway.community.spi.authn import (
@@ -2503,7 +2503,7 @@ class AuthStrategyContract:
 class TestUserIdentityStrategy(AuthStrategyContract):
     def setup_method(self) -> None:
         extractor = SessionCookieExtractor(
-            auth=BareAuthPlugin(default_user=AuthenticatedUser(id="u", username="a")),
+            auth=StubAuthPlugin(default_user=AuthenticatedUser(id="u", username="a")),
             default_tenant="tenant-default",
         )
         self.strategy = IdentityStrategy(
@@ -2673,7 +2673,7 @@ def test_real_authenticator_admits_session_cookie_then_forwards() -> None:
     app.state.domain_map = DomainMap.from_config(
         {"domains": {"bots": {"server": "up"}}, "servers": {"up": {"base_url": "http://upstream"}}}
     )
-    app.state.forwarder = BareForwarder(client=client)
+    app.state.forwarder = HttpxForwarder(client=client)
     app.state.authenticator = authenticator
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
 
@@ -2699,7 +2699,7 @@ def test_real_authenticator_rejects_missing_required_identity() -> None:
     app.state.domain_map = DomainMap.from_config(
         {"domains": {"bots": {"server": "up"}}, "servers": {"up": {"base_url": "http://upstream"}}}
     )
-    app.state.forwarder = BareForwarder(client=client)
+    app.state.forwarder = HttpxForwarder(client=client)
     app.state.authenticator = authenticator
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
 

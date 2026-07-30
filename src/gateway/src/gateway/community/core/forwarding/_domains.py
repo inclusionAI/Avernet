@@ -10,7 +10,6 @@ No web framework here (Rule 7): this is pure resolution logic.
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,9 +22,9 @@ _DEFAULT_BASE_PATH = "/openapi/v1"
 _DEFAULT_REFRESH_SECONDS = 300
 
 
-def _expand_env(value: str) -> str:
-    """Expand ``${VAR}`` references from the environment (unset → empty)."""
-    return _ENV_REF.sub(lambda m: os.getenv(m.group(1), ""), value)
+def _expand_vars(value: str, variables: dict[str, str]) -> str:
+    """Expand ``${VAR}`` references from *variables* (missing key → empty)."""
+    return _ENV_REF.sub(lambda m: variables.get(m.group(1), ""), value)
 
 
 @dataclass(frozen=True)
@@ -62,16 +61,16 @@ class DomainMap:
     domains: dict[str, Domain] = field(default_factory=dict)
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> DomainMap:
+    def from_yaml(cls, path: str | Path, variables: dict[str, str]) -> DomainMap:
         raw = yaml.safe_load(Path(path).read_text()) or {}
         if not isinstance(raw, dict):
             raw = {}
-        return cls.from_config(raw)
+        return cls.from_config(raw, variables=variables)
 
     @classmethod
-    def from_config(cls, raw: dict[str, Any]) -> DomainMap:
+    def from_config(cls, raw: dict[str, Any], variables: dict[str, str]) -> DomainMap:
         base_path = str(raw.get("base_path", _DEFAULT_BASE_PATH))
-        servers = _parse_servers(raw.get("servers") or {})
+        servers = _parse_servers(raw.get("servers") or {}, variables)
         domains = _parse_domains(raw.get("domains") or {}, servers)
         return cls(base_path=base_path, domains=domains)
 
@@ -96,14 +95,26 @@ def _segments(path: str) -> list[str]:
     return [seg for seg in path.split("/") if seg]
 
 
-def _parse_servers(raw: dict[str, Any]) -> dict[str, Server]:
+def _parse_servers(raw: dict[str, Any], variables: dict[str, str]) -> dict[str, Server]:
     servers: dict[str, Server] = {}
     for name, spec in raw.items():
         spec = spec or {}
-        servers[name] = Server(
-            name=name, base_url=_expand_env(str(spec.get("base_url", "")))
-        )
+        raw_base_url = str(spec.get("base_url", ""))
+        base_url = _expand_vars(raw_base_url, variables)
+        if not base_url:
+            raise ValueError(
+                f"upstream server {name!r}: base_url {raw_base_url!r} resolved to "
+                f"empty — add '{_var_name(raw_base_url)}' to application.yaml "
+                f"user_config.upstreams"
+            )
+        servers[name] = Server(name=name, base_url=base_url)
     return servers
+
+
+def _var_name(template: str) -> str:
+    """Extract ``${VAR}`` name from a template string."""
+    m = _ENV_REF.search(template)
+    return m.group(1) if m else template
 
 
 def _parse_domains(

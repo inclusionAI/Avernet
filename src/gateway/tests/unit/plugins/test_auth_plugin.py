@@ -1,11 +1,11 @@
-"""Unit tests for BareAuthPlugin and AuthenticatedUser model."""
+"""Unit tests for StubAuthPlugin and AuthenticatedUser model."""
 
 from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
 
-from gateway.community.plugins.auth.bare import BareAuthPlugin
+from gateway.community.plugins.auth.stub import StubAuthPlugin
 from gateway.community.spi.auth import AuthenticatedUser, AuthError
 
 # ── AuthenticatedUser model ───────────────────────────────────────────────────
@@ -65,12 +65,12 @@ class TestAuthError:
             raise AuthError("access denied")
 
 
-# ── BareAuthPlugin ────────────────────────────────────────────────────────────
+# ── StubAuthPlugin ────────────────────────────────────────────────────────────
 
 
-class TestBareAuthPlugin:
+class TestStubAuthPlugin:
     def test_default_user_values(self) -> None:
-        plugin = BareAuthPlugin()
+        plugin = StubAuthPlugin()
         user = plugin._default_user
         assert user.id == "bare-user-001"
         assert user.username == "bare_operator"
@@ -78,13 +78,13 @@ class TestBareAuthPlugin:
 
     @pytest.mark.asyncio
     async def test_get_login_user_returns_default(self) -> None:
-        plugin = BareAuthPlugin()
+        plugin = StubAuthPlugin()
         user = await plugin.get_login_user()
         assert user.id == "bare-user-001"
 
     @pytest.mark.asyncio
     async def test_get_login_user_ignores_cookie_referer(self) -> None:
-        plugin = BareAuthPlugin()
+        plugin = StubAuthPlugin()
         user1 = await plugin.get_login_user(cookie="abc", referer="http://x")
         user2 = await plugin.get_login_user()
         assert user1 is user2 or user1.id == user2.id
@@ -92,33 +92,33 @@ class TestBareAuthPlugin:
     @pytest.mark.asyncio
     async def test_custom_user_injection(self) -> None:
         custom = AuthenticatedUser(id="custom-001", username="custom_op")
-        plugin = BareAuthPlugin(default_user=custom)
+        plugin = StubAuthPlugin(default_user=custom)
         user = await plugin.get_login_user()
         assert user.id == "custom-001"
         assert user.username == "custom_op"
 
     def test_is_allowed_always_true(self) -> None:
-        plugin = BareAuthPlugin()
+        plugin = StubAuthPlugin()
         user = AuthenticatedUser(id="any", username="any")
         assert plugin.is_allowed(user) is True
 
     def test_is_allowed_with_none_user(self) -> None:
-        plugin = BareAuthPlugin()
+        plugin = StubAuthPlugin()
         assert plugin.is_allowed(None) is True  # type: ignore[arg-type]
 
     def test_check_permission_always_true(self) -> None:
-        plugin = BareAuthPlugin()
+        plugin = StubAuthPlugin()
         assert plugin.check_permission("user1", "perm:read") is True
         assert plugin.check_permission("user1", "perm:write", "/api/test", "{}") is True
 
     def test_check_permission_empty_args(self) -> None:
-        plugin = BareAuthPlugin()
+        plugin = StubAuthPlugin()
         assert plugin.check_permission("", "") is True
 
     @pytest.mark.asyncio
     async def test_multiple_instances_independent(self) -> None:
-        p1 = BareAuthPlugin()
-        p2 = BareAuthPlugin(default_user=AuthenticatedUser(id="other", username="op"))
+        p1 = StubAuthPlugin()
+        p2 = StubAuthPlugin(default_user=AuthenticatedUser(id="other", username="op"))
         u1 = await p1.get_login_user()
         u2 = await p2.get_login_user()
         assert u1.id == "bare-user-001"

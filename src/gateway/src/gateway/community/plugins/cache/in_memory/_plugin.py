@@ -22,7 +22,7 @@ class _CacheEntry:
         self.expires_at = expires_at
 
 
-class BareCachePlugin(CachePlugin):
+class InMemoryCachePlugin(CachePlugin):
     """In-memory dict-based cache plugin for bare mode.
 
     Supports TTL-based expiry via ``time.monotonic()``. Thread-safe

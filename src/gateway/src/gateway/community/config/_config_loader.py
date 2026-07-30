@@ -7,7 +7,14 @@ from pathlib import Path
 
 import yaml
 
-from ._models import Config, LogConfig, ModuleConfig, WebConfig
+from ._models import (
+    Config,
+    LogConfig,
+    ModuleConfig,
+    PluginConfig,
+    UserConfig,
+    WebConfig,
+)
 
 
 class ConfigLoader:
@@ -92,11 +99,17 @@ def _parse_config(raw: dict) -> Config:
         log_level=log_raw.get("log_level", "INFO"),
         log_dir=log_raw.get("log_dir", ""),
     )
+    user_raw = raw.get("user_config") or {}
+    plugins_raw = user_raw.pop("plugins", {}) if isinstance(user_raw, dict) else {}
+    user_raw = user_raw if isinstance(user_raw, dict) else {}
+    plugin_config = PluginConfig.model_validate(plugins_raw)
+    user_config = UserConfig(plugins=plugin_config, **user_raw)
     return Config(
         app_name=raw.get("app_name", "gateway"),
         enable_sidecar=bool(raw.get("enable_sidecar", False)),
         workers=int(raw.get("workers", 1)),
         log_config=log_config,
         module_config=ModuleConfig(web=web if web_raw else None),
+        user_config=user_config,
         raw=raw,
     )

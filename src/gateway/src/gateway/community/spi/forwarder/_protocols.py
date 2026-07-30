@@ -19,7 +19,7 @@ class Forwarder(Protocol):
                 ...
 
     Implementations:
-    - BareForwarder: httpx-backed, streams raw bytes (open-source default).
+    - HttpxForwarder: httpx-backed, streams raw bytes (open-source default).
     - a sofa flavor (enterprise) may add pooling/observability at this seam;
       the auth workstream attaches the signed principal here.
     """

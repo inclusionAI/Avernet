@@ -8,12 +8,18 @@ import pytest
 
 from gateway.community.bootstrap._authn import build_database
 from gateway.community.core.access_key import AccessKeyRepository
+from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.access_key import RegisteredAccessKey
+
+
+def _make_db():
+    db = SqliteDatabasePlugin()
+    return build_database(db)
 
 
 @pytest.fixture(scope="module")
 def registry() -> AccessKeyRepository:
-    return AccessKeyRepository(build_database())
+    return AccessKeyRepository(_make_db())
 
 
 async def test_known_token_resolves_seeded_access_key(
