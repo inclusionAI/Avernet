@@ -63,7 +63,9 @@ def _load_domain_map(config: Config | None = None) -> DomainMap:
         upstream_vars = {}
     upstreams_raw = config.raw.get("upstreams", {}) or {}
     if not isinstance(upstreams_raw, dict) or not upstreams_raw:
-        raise ValueError("required config section not found: application.yaml upstreams")
+        raise ValueError(
+            "required config section not found: application.yaml upstreams"
+        )
     _logger.info("loading upstream config from application.yaml")
     domain_map = DomainMap.from_config(upstreams_raw, variables=upstream_vars)
     _logger.info(
