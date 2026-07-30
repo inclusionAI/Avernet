@@ -152,6 +152,7 @@ internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database
   - agentclaw.community.core.skills_pool.ports
+  - agentclaw.community.utils.avernet_tenant_guard
 ```
 
 ### Change impact

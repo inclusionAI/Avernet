@@ -31,6 +31,9 @@ from agentclaw.community.core.skills_pool.quarantine import (
     RuntimeReconciliationStatus,
 )
 from agentclaw.community.plugin_api.models import AutoIncrementBigInteger
+from agentclaw.community.utils.avernet_tenant_guard import (
+    register_avernet_tenant_guard,
+)
 
 
 def _operational_timestamp(*, fsp: int | None = None):
@@ -192,12 +195,17 @@ class SkillsPoolRolloutAuditModel(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+    # Persistence-only isolation metadata. The server default preserves the
+    # internal/background compatibility tenant for non-ORM writers; the shared
+    # guard stamps request-scoped ORM writes and never exposes this field.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     __table_args__ = (
         UniqueConstraint(
+            "avernet_tenant",
             "env",
             "effective_config_version",
-            name="uk_skills_pool_rollout_audit_revision",
+            name="uk_skills_pool_rollout_audit_tenant_revision",
         ),
         Index(
             "idx_skills_pool_rollout_audit_batch",
@@ -256,14 +264,18 @@ class SkillMigrationQuarantineModel(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+    # Persistence-only isolation metadata. See SkillsPoolRolloutAuditModel for
+    # why this is a server default rather than a Python-side default.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     __table_args__ = (
         UniqueConstraint(
+            "avernet_tenant",
             "env",
             "entity_id",
             "bot_id",
             "migration_generation",
-            name="uk_skill_migration_quarantine_scope_generation",
+            name="uk_skill_migration_quarantine_tenant_scope_generation",
         ),
         Index(
             "idx_skill_migration_quarantine_cleanup",
@@ -314,3 +326,10 @@ class SkillMigrationQuarantineModel(Base):
                 else None
             ),
         )
+
+
+# These records are control-plane data, but their identities become tenant-local
+# as soon as Skills has a second tenant. Reuse the single ORM enforcement point
+# rather than adding repository-specific predicates or listeners.
+register_avernet_tenant_guard(SkillsPoolRolloutAuditModel)
+register_avernet_tenant_guard(SkillMigrationQuarantineModel)
