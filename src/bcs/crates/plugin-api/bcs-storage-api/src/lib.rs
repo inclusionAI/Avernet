@@ -6,12 +6,15 @@
 //! reuse — covering single + multipart paths.
 
 pub mod contract;
+pub mod factory;
 pub mod fake;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+
+pub use bcs_domain::ActorRef;
 
 pub type ByteStream = Box<dyn ByteStreamTrait + Send + Unpin>;
 
@@ -23,6 +26,7 @@ pub struct StorageCapabilities {
     pub supports_presign_download: bool,
     pub supports_stream_put: bool,
     pub supports_stream_get: bool,
+    pub supports_inline_view: bool,
     pub max_object_size: u64,
 }
 
@@ -90,6 +94,12 @@ pub struct PresignGetTicket {
     pub expires_at: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PresignGetOptions {
+    pub ttl_secs: u64,
+    pub show: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorageObjectMeta {
     pub key: String,
@@ -123,7 +133,7 @@ pub trait StoragePlugin: Send + Sync + 'static {
     /// Cheap, sync, no IO. Returns a value precomputed at construction.
     fn capabilities(&self) -> StorageCapabilities;
 
-    async fn prepare_upload(&self, req: UploadPrepareRequest) -> Result<PreparedUpload, StorageError>;
+    async fn prepare_upload(&self, req: UploadPrepareRequest, caller: Option<&ActorRef>) -> Result<PreparedUpload, StorageError>;
     async fn stream_upload(
         &self,
         handle: &UploadHandle,
@@ -137,7 +147,8 @@ pub trait StoragePlugin: Send + Sync + 'static {
     async fn presign_get(
         &self,
         handle: &StorageHandle,
-        ttl_secs: u64,
+        opts: PresignGetOptions,
+        caller: Option<&ActorRef>,
     ) -> Result<PresignGetTicket, StorageError>;
     async fn delete(&self, handle: &StorageHandle) -> Result<(), StorageError>;
 

@@ -21,6 +21,17 @@ pub enum ChannelOutboundEventKind {
     System,
 }
 
+/// User-visible business purpose, orthogonal to streaming frame lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelOutboundPurpose {
+    Conversation,
+    HumanInputRequest,
+    HumanInputQueueSummary,
+    HumanInputAck,
+    StateMachineCompleted,
+    StateMachineFailed,
+}
+
 /// adapter 如何处理该事件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelRenderHint {
@@ -49,6 +60,7 @@ pub struct ChannelOutboundEvent {
     pub render_sender_label: bool,
     pub sender_role: ParticipantRole,
     pub kind: ChannelOutboundEventKind,
+    pub purpose: ChannelOutboundPurpose,
     pub text: Option<String>,
     pub raw_payload: serde_json::Value,
     pub render_hint: ChannelRenderHint,
@@ -60,6 +72,8 @@ pub struct ChannelOutboundEvent {
 #[derive(Debug)]
 pub struct ChannelDeliveryResult {
     pub delivered: bool,
+    /// Stable provider-side message/card reference when the provider exposes one.
+    pub provider_message_ref: Option<String>,
     pub error: Option<ServiceError>,
 }
 

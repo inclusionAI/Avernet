@@ -39,8 +39,89 @@ from engine.community.plugins.openclaw.layout_sync import (
 )
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 from engine.community.plugins.skills_pool import layout_atomic
+from engine.community.plugins.skills_pool.layout_activation import (
+    mapping_sources_use_pool,
+)
 
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
+
+
+def test_mapping_source_classifier_selects_one_managed_layout(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    pool_source = (
+        home / ".openclaw" / "workspace" / "skills-pool" / "skills-local" / "pool-skill"
+    )
+    legacy_source = (
+        home / ".openclaw" / "workspace" / "skills" / "skills-local" / "legacy-skill"
+    )
+    external_source = home / "external-skills" / "external"
+
+    assert mapping_sources_use_pool(
+        engine="openclaw",
+        sources=[pool_source, external_source],
+        home=home,
+    )
+    assert not mapping_sources_use_pool(
+        engine="openclaw",
+        sources=[legacy_source, external_source],
+        home=home,
+    )
+    with pytest.raises(ValueError, match="mix Legacy and Pool"):
+        mapping_sources_use_pool(
+            engine="openclaw",
+            sources=[legacy_source, pool_source],
+            home=home,
+        )
+
+
+def test_external_only_mapping_fails_closed_on_invalid_active_marker(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    active_marker = home / ".openclaw" / "workspace" / "skills-pool" / ".pool-active"
+    active_marker.parent.mkdir(parents=True)
+    active_marker.write_text("{invalid")
+
+    with pytest.raises(ValueError, match="marker"):
+        mapping_sources_use_pool(
+            engine="openclaw",
+            sources=[home / "external-skills" / "external"],
+            home=home,
+        )
+
+
+def test_external_only_mapping_uses_active_marker_as_layout_authority(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    external_source = home / "external-skills" / "external"
+    assert not mapping_sources_use_pool(
+        engine="openclaw",
+        sources=[external_source],
+        home=home,
+    )
+
+    active_marker = home / ".openclaw" / "workspace" / "skills-pool" / ".pool-active"
+    active_marker.parent.mkdir(parents=True)
+    active_marker.write_text(
+        json.dumps(
+            {
+                "engine": "openclaw",
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "preparation_id": PREPARATION_ID,
+                "migration_generation": "generation-1",
+                "activation_state": "active",
+            }
+        )
+    )
+
+    assert mapping_sources_use_pool(
+        engine="openclaw",
+        sources=[external_source],
+        home=home,
+    )
 
 
 def _prepared_home(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
@@ -120,10 +201,7 @@ def test_registered_local_cutover_syncs_latest_content_and_retires_bridges(
     assert (pool_local / "handmade" / "SKILL.md").read_text() == "latest"
     assert not (pool_local / "handmade" / "stale.txt").exists()
     quarantine = (
-        pool_local.parent
-        / ".migration-quarantine"
-        / "generation-1"
-        / "skills-local"
+        pool_local.parent / ".migration-quarantine" / "generation-1" / "skills-local"
     )
     assert (quarantine / "handmade" / "SKILL.md").read_text() == "latest"
 
@@ -132,9 +210,7 @@ def test_registered_local_cutover_syncs_latest_content_and_retires_bridges(
     external_entry = legacy_local.parent / "external"
     external_entry.symlink_to(external_source, target_is_directory=True)
     unclassified_entry = legacy_local.parent / "unclassified"
-    unclassified_entry.symlink_to(
-        pool_local / "handmade", target_is_directory=True
-    )
+    unclassified_entry.symlink_to(pool_local / "handmade", target_is_directory=True)
     published = publish_pool_mappings(mappings=mappings, home=home)
     assert published.published
     assert external_entry.is_symlink()
@@ -143,9 +219,7 @@ def test_registered_local_cutover_syncs_latest_content_and_retires_bridges(
     assert not legacy_local.is_symlink()
     assert not (legacy_local.parent / "skills-repo").exists()
     assert not (legacy_local.parent / "skills-repo").is_symlink()
-    active_marker = json.loads(
-        (pool_local.parent / ".pool-active").read_text()
-    )
+    active_marker = json.loads((pool_local.parent / ".pool-active").read_text())
     assert active_marker["activation_state"] == "active"
     assert active_marker["mappings"] == []
     verification = verify_skill_mappings(mappings=mappings, home=home)
@@ -200,15 +274,9 @@ def test_explicit_rollback_rebuilds_legacy_from_current_pool_content(
     assert result.status is PoolActivationStatus.COMMITTED
     assert legacy_local.is_dir()
     assert not legacy_local.is_symlink()
-    assert (legacy_local / "handmade" / "SKILL.md").read_text() == (
-        "pool-new-write"
-    )
-    assert (
-        legacy_local / "created-after-activation" / "SKILL.md"
-    ).read_text() == "new"
-    assert (pool_local / "handmade" / "SKILL.md").read_text() == (
-        "pool-new-write"
-    )
+    assert (legacy_local / "handmade" / "SKILL.md").read_text() == ("pool-new-write")
+    assert (legacy_local / "created-after-activation" / "SKILL.md").read_text() == "new"
+    assert (pool_local / "handmade" / "SKILL.md").read_text() == ("pool-new-write")
     assert external.is_symlink()
 
     repeated = rollback_openclaw_pool(
@@ -397,9 +465,7 @@ def test_unregistered_local_and_managed_entry_follow_filesystem_truth(
     verified = verify_skill_mappings(mappings=[], home=home)
 
     assert activated.status is PoolActivationStatus.COMMITTED
-    assert (
-        pool_local / "agent-created" / "SKILL.md"
-    ).read_text() == "filesystem-only"
+    assert (pool_local / "agent-created" / "SKILL.md").read_text() == "filesystem-only"
     assert activated.evidence["local_inventory"] == {
         "registered": 1,
         "unregistered": 1,
@@ -743,9 +809,7 @@ def test_post_rename_sync_captures_existing_file_update_before_retire(
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
     def update_before_retire() -> None:
-        (legacy_local / "handmade" / "SKILL.md").write_text(
-            "updated-before-retire"
-        )
+        (legacy_local / "handmade" / "SKILL.md").write_text("updated-before-retire")
 
     result = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -879,9 +943,7 @@ def test_post_rename_pool_parent_deletion_is_not_resurrected(
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
 
     def add_child_before_retire() -> None:
-        (legacy_local / "handmade" / "late-child.txt").write_text(
-            "legacy-window"
-        )
+        (legacy_local / "handmade" / "late-child.txt").write_text("legacy-window")
 
     def delete_pool_parent() -> None:
         shutil.rmtree(pool_local / "handmade")
@@ -899,9 +961,9 @@ def test_post_rename_pool_parent_deletion_is_not_resurrected(
 
     assert result.status is PoolActivationStatus.COMMITTED
     assert not (pool_local / "handmade").exists()
-    assert result.evidence["post_sync"][
-        "conflicts_preserved_in_pool"
-    ] == ["handmade/late-child.txt"]
+    assert result.evidence["post_sync"]["conflicts_preserved_in_pool"] == [
+        "handmade/late-child.txt"
+    ]
 
 
 def test_post_rename_deleted_parent_does_not_stall_new_subdirectory(
@@ -930,9 +992,7 @@ def test_post_rename_deleted_parent_does_not_stall_new_subdirectory(
 
     assert result.status is PoolActivationStatus.COMMITTED
     assert not (pool_local / "handmade").exists()
-    assert set(
-        result.evidence["post_sync"]["conflicts_preserved_in_pool"]
-    ) == {
+    assert set(result.evidence["post_sync"]["conflicts_preserved_in_pool"]) == {
         "handmade/late-directory",
         "handmade/late-directory/child.txt",
     }
@@ -943,8 +1003,7 @@ def test_retry_after_exchange_finishes_quarantine_move(tmp_path: Path) -> None:
     write_baseline_manifest(
         pool_local=pool_local,
         local_names=["handmade"],
-        manifest_path=pool_local.parent
-        / ".cutover-baseline-generation-1.json",
+        manifest_path=pool_local.parent / ".cutover-baseline-generation-1.json",
     )
     temporary = legacy_local.parent / ".skills-local.pool-cutover-generation-1"
     legacy_local.rename(temporary)
@@ -960,10 +1019,7 @@ def test_retry_after_exchange_finishes_quarantine_move(tmp_path: Path) -> None:
     )
 
     quarantine = (
-        pool_local.parent
-        / ".migration-quarantine"
-        / "generation-1"
-        / "skills-local"
+        pool_local.parent / ".migration-quarantine" / "generation-1" / "skills-local"
     )
     assert result.status is PoolActivationStatus.ALREADY_COMMITTED
     assert quarantine.is_dir()
@@ -982,14 +1038,10 @@ def test_retry_after_legacy_rename_finishes_from_quarantine(
     write_baseline_manifest(
         pool_local=pool_local,
         local_names=["handmade"],
-        manifest_path=pool_local.parent
-        / ".cutover-baseline-generation-1.json",
+        manifest_path=pool_local.parent / ".cutover-baseline-generation-1.json",
     )
     quarantine = (
-        pool_local.parent
-        / ".migration-quarantine"
-        / "generation-1"
-        / "skills-local"
+        pool_local.parent / ".migration-quarantine" / "generation-1" / "skills-local"
     )
     quarantine.parent.mkdir(parents=True)
     legacy_local.rename(quarantine)
@@ -1011,9 +1063,7 @@ def test_retry_after_legacy_rename_finishes_from_quarantine(
     assert result.status is PoolActivationStatus.ALREADY_COMMITTED
     assert quarantine.is_dir()
     assert not legacy_local.exists()
-    assert (legacy_local.parent / "handmade").resolve() == (
-        pool_local / "handmade"
-    )
+    assert (legacy_local.parent / "handmade").resolve() == (pool_local / "handmade")
 
 
 def test_finalizing_marker_retry_collects_recreated_legacy_local(
@@ -1028,14 +1078,10 @@ def test_finalizing_marker_retry_collects_recreated_legacy_local(
     write_baseline_manifest(
         pool_local=pool_local,
         local_names=["handmade"],
-        manifest_path=pool_local.parent
-        / ".cutover-baseline-generation-1.json",
+        manifest_path=pool_local.parent / ".cutover-baseline-generation-1.json",
     )
     quarantine = (
-        pool_local.parent
-        / ".migration-quarantine"
-        / "generation-1"
-        / "skills-local"
+        pool_local.parent / ".migration-quarantine" / "generation-1" / "skills-local"
     )
     quarantine.parent.mkdir(parents=True)
     legacy_local.rename(quarantine)
@@ -1119,10 +1165,7 @@ def test_cutover_retry_replays_residue_after_merge_failure(
     def flaky_merge(**kwargs: object) -> dict[str, object]:
         nonlocal fail_residue_once
         source_root = Path(str(kwargs["source_root"]))
-        if (
-            fail_residue_once
-            and source_root.name.startswith("skills-local-residue-")
-        ):
+        if fail_residue_once and source_root.name.startswith("skills-local-residue-"):
             fail_residue_once = False
             raise OSError(5, "injected merge failure")
         return real_merge(**kwargs)  # type: ignore[arg-type]
@@ -1143,9 +1186,7 @@ def test_cutover_retry_replays_residue_after_merge_failure(
     )
 
     assert first.status is PoolActivationStatus.TRANSIENT_ERROR
-    assert (
-        pool_local.parent / ".cutover-baseline-generation-1.json"
-    ).is_file()
+    assert (pool_local.parent / ".cutover-baseline-generation-1.json").is_file()
 
     retry = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -1236,9 +1277,7 @@ def test_cutover_commits_without_atomic_exchange_and_retires_storage_bridges(
     assert not legacy_local.exists()
     assert not legacy_local.is_symlink()
     assert not (legacy_local.parent / "skills-repo").exists()
-    assert (legacy_local.parent / "handmade").resolve() == (
-        pool_local / "handmade"
-    )
+    assert (legacy_local.parent / "handmade").resolve() == (pool_local / "handmade")
 
 
 def test_atomic_exchange_treats_einval_as_unavailable(
@@ -1321,9 +1360,19 @@ def test_cutover_retry_rejects_noncanonical_temporary_symlink(
 @pytest.mark.parametrize(
     ("generation", "preparation_id", "names", "reason"),
     [
-        ("bad generation", PREPARATION_ID, ["handmade"], "migration_generation_invalid"),
+        (
+            "bad generation",
+            PREPARATION_ID,
+            ["handmade"],
+            "migration_generation_invalid",
+        ),
         ("generation-1", "stale-preparation", ["handmade"], "runtime_layout_not_ready"),
-        ("generation-1", PREPARATION_ID, ["../escape"], "registered_local_name_invalid"),
+        (
+            "generation-1",
+            PREPARATION_ID,
+            ["../escape"],
+            "registered_local_name_invalid",
+        ),
     ],
 )
 def test_cutover_rejects_invalid_inputs(
@@ -1373,9 +1422,7 @@ def test_cutover_cleans_stale_staging_and_replaces_pool_symlink(
     staging = pool_local.parent / ".final-sync-generation-1"
     staging.symlink_to(tmp_path / "unused", target_is_directory=True)
     shutil.rmtree(pool_local / "handmade")
-    (pool_local / "handmade").symlink_to(
-        tmp_path / "old", target_is_directory=True
-    )
+    (pool_local / "handmade").symlink_to(tmp_path / "old", target_is_directory=True)
 
     result = activate_openclaw_pool(
         migration_generation="generation-1",
@@ -1412,11 +1459,7 @@ def test_cutover_rejects_unowned_quarantine_generation(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
-    generation_dir = (
-        pool_local.parent
-        / ".migration-quarantine"
-        / "generation-1"
-    )
+    generation_dir = pool_local.parent / ".migration-quarantine" / "generation-1"
     generation_dir.mkdir(parents=True)
     unknown = generation_dir / "unknown"
     unknown.write_text("external")
@@ -1431,9 +1474,7 @@ def test_cutover_rejects_unowned_quarantine_generation(
     )
 
     assert result.status is PoolActivationStatus.INVALID
-    assert result.evidence["reason"] == (
-        "cutover_quarantine_ownership_unproven"
-    )
+    assert result.evidence["reason"] == ("cutover_quarantine_ownership_unproven")
     assert legacy_local.is_dir()
     assert unknown.read_text() == "external"
     assert not (pool_local.parent / ".pool-active").exists()
@@ -1443,11 +1484,7 @@ def test_cutover_recovers_truncated_quarantine_owner(
     tmp_path: Path,
 ) -> None:
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
-    generation_dir = (
-        pool_local.parent
-        / ".migration-quarantine"
-        / "generation-1"
-    )
+    generation_dir = pool_local.parent / ".migration-quarantine" / "generation-1"
     generation_dir.mkdir(parents=True)
     (generation_dir / ".owner.json").write_text("{")
 
@@ -1571,9 +1608,7 @@ def test_mapping_verifier_reports_each_drift_class(tmp_path: Path) -> None:
     )
 
     assert not result.valid
-    assert {
-        failure["reason"] for failure in result.evidence["failures"]
-    } == {
+    assert {failure["reason"] for failure in result.evidence["failures"]} == {
         "source_outside_pool",
         "source_missing",
         "target_invalid",
@@ -1652,12 +1687,8 @@ async def test_openclaw_service_api_translates_pool_port_contract() -> None:
             "evidence": {},
         }
     )
-    port.publish_pool_mappings = AsyncMock(
-        return_value={"published": True, "total": 1}
-    )
-    port.verify_pool_mappings = AsyncMock(
-        return_value={"valid": True, "checked": 1}
-    )
+    port.publish_pool_mappings = AsyncMock(return_value={"published": True, "total": 1})
+    port.verify_pool_mappings = AsyncMock(return_value={"valid": True, "checked": 1})
     service = OpenClawSkillsAdapter(port)
     mapping = SymlinkItem(source="/pool/a", target="/skills/a")
 

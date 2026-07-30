@@ -1672,6 +1672,41 @@ async fn task_run_alias_requires_target_bot_and_dispatched_task() {
 }
 
 #[tokio::test]
+async fn channel_source_message_can_be_rebound_to_accepted_run_id() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+    flow.message_tracker
+        .cache_channel_source_message_id("source-run", "source-message")
+        .await;
+
+    let rebound = flow
+        .rebind_channel_source_message("source-run", "accepted-run")
+        .await
+        .unwrap();
+
+    assert!(rebound);
+    assert!(
+        flow.message_tracker
+            .channel_source_message_id("source-run")
+            .await
+            .is_none()
+    );
+    assert_eq!(
+        flow.message_tracker
+            .channel_source_message_id("accepted-run")
+            .await
+            .as_deref(),
+        Some("source-message")
+    );
+}
+
+#[tokio::test]
 async fn task_ledger_notifications_are_sent_to_driver_after_dispatch_and_reply() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();

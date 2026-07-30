@@ -45,17 +45,37 @@ CONTAINER_WORKSPACE_BASE = "/home/admin/.aicoding/workspace"
 # 10 MiB cap for inline preview to keep responses bounded.
 PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 
-# Keep this command static and pass the validated workspace separately as
-# BashService.cwd.  GNU find's ``%y`` supplies the entry type and ``%P`` the
+# Default number of workspace-relative levels returned by the file-tree API.
+# ``0`` is reserved for an unlimited recursive scan.
+DEFAULT_FILE_TREE_MAX_DEPTH = 3
+
+# Keep the expression static and pass the validated workspace separately as
+# BashService.cwd. GNU find's ``%y`` supplies the entry type and ``%P`` the
 # workspace-relative path; NUL delimiters preserve whitespace/newlines in file
-# names.  Deliberately omit ``%s`` so NAS-backed workspaces do not pay one
+# names. Deliberately omit ``%s`` so NAS-backed workspaces do not pay one
 # explicit size metadata lookup per file.
-_FILE_TREE_FIND_COMMAND = (
-    r"find -P . -ignore_readdir_race -mindepth 1 "
+_FILE_TREE_FIND_EXPRESSION = (
     r"\( -type d \( -name .git -o -name node_modules "
-    r"-o -path './skills' -o -path './.repos' \) -prune \) "
+    r"-o -path './skills' -o -path './skills-repo' "
+    r"-o -path './.repos' \) -prune \) "
     r"-o -printf '%y\0%P\0'"
 )
+
+
+def _build_file_tree_find_command(max_depth: int) -> str:
+    """Build the GNU find command for a depth-limited workspace scan.
+
+    ``find`` counts direct children of ``.`` at depth 1. A ``max_depth`` of
+    zero means unlimited traversal, so no ``-maxdepth`` option is emitted.
+    """
+    if max_depth < 0:
+        raise ValueError("max_depth must be greater than or equal to 0")
+
+    max_depth_arg = "" if max_depth == 0 else f"-maxdepth {max_depth} "
+    return (
+        "find -P . -ignore_readdir_race -mindepth 1 "
+        f"{max_depth_arg}{_FILE_TREE_FIND_EXPRESSION}"
+    )
 
 
 def _resolve_workspace_base() -> str:
@@ -249,9 +269,16 @@ class WorkspaceService:
     # ── file tree ─────────────────────────────────────────────────────
 
     async def list_file_tree(
-        self, session_id: str | None, cwd: str | None = None
+        self,
+        session_id: str | None,
+        cwd: str | None = None,
+        max_depth: int = DEFAULT_FILE_TREE_MAX_DEPTH,
     ) -> list[FileTreeNode]:
-        """List workspace files recursively, excluding AICoding mounts."""
+        """List workspace files up to ``max_depth``, excluding mounts.
+
+        Direct children of the workspace are level 1. ``max_depth=0`` means
+        unlimited recursive traversal.
+        """
         normalized_session_id = (
             (session_id.strip() or None) if session_id else None
         )
@@ -259,12 +286,13 @@ class WorkspaceService:
         if not normalized_session_id and not normalized_cwd:
             raise ValueError("session_id and cwd cannot both be empty")
 
+        find_command = _build_file_tree_find_command(max_depth)
         workspace = self.ensure_workspace_exists(
             normalized_session_id or "",
             normalized_cwd,
         )
         result = await self._bash.exec(
-            cmd=_FILE_TREE_FIND_COMMAND,
+            cmd=find_command,
             cwd=workspace,
             timeout=30,
         )

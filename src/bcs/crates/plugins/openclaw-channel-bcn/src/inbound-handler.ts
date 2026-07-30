@@ -3,7 +3,7 @@
  *
  * Handles chat.send requests from BCS:
  * 1. Extract text from message content blocks
- * 2. Generate run_id, ACK immediately
+ * 2. Resolve run_id, ACK immediately
  * 3. Dispatch to OpenClaw agent via SDK
  * 4. Stream response back to BCS as event frames
  */
@@ -842,6 +842,13 @@ function extractGroupContext(sessionContext: GroupContext): Record<string, unkno
   };
 }
 
+export function resolveChatRunId(requestId: unknown, idempotencyKey: unknown): string {
+  const upstreamRunId = typeof idempotencyKey === 'string' ? idempotencyKey.trim() : '';
+  if (upstreamRunId) return upstreamRunId;
+  const frameRunId = typeof requestId === 'string' ? requestId.trim() : '';
+  return frameRunId || randomUUID();
+}
+
 /** Handle chat.send request from BCS. */
 export async function handleChatSend(
   request: RequestFrame,
@@ -867,8 +874,9 @@ export async function handleChatSend(
     return;
   }
 
-  // Generate run_id and ACK immediately
-  const runId = randomUUID();
+  // Preserve the BCS correlation id when available. Older callers that do not
+  // provide one still receive a stable request-id or generated run-id fallback.
+  const runId = resolveChatRunId(request.id, params.idempotency_key);
   client.sendResponse(request.id, true, { run_id: runId });
 
   const { senderName, text: strippedText } = extractFromPrefix(text);

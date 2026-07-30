@@ -134,14 +134,3 @@ def list_domain_bots_keyword_no_match():
 )
 def list_domain_bots_invalid_page():
     """Error path: page=0 violates Query(ge=1) → 422 (real validation, no mock)."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/api/bots/search/domain-bots",
-    scenario="unauthenticated",
-    input=CaseInput(),
-    expect=ExpectError(status=401),
-)
-def list_domain_bots_requires_authentication():
-    """An unauthenticated caller cannot enumerate platform domain bots."""

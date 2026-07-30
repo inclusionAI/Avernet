@@ -3,32 +3,31 @@ use std::{collections::HashSet, sync::Arc};
 use async_trait::async_trait;
 use bcs_route_security::OutboundUrlGuard;
 
+use crate::core::validate_service_spec_patch;
+use crate::noop::{
+    EmptyRelationCoreService, EmptySessionManagementService, NoopSystemMessageService,
+};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
-    ChannelBindingCleanupPort, DmActorSpec, DmCreateCommand,
-    DmCreateResult, FriendCoreService, Group as DomainGroup, GroupAddMemberCommand,
-    GroupAddMemberResult, GroupCoreService, GroupCreateCommand,
-    GroupDeleteCommand, GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind,
-    GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService,
-    GroupPatchSettingsCommand, GroupPatchSettingsConflict, GroupPatchSettingsResult,
-    GroupParticipantModeCommand, GroupParticipantModeResult, GroupParticipantView, GroupQueryService,
+    CallbackChannelConfig, ChannelBindingCleanupPort, DmActorSpec, DmCreateCommand, DmCreateResult,
+    FriendCoreService, Group as DomainGroup, GroupAddMemberCommand, GroupAddMemberResult,
+    GroupCoreService, GroupCreateCommand, GroupDeleteCommand, GroupDeleteResult,
+    GroupDetailCommand, GroupDetailResult, GroupKind, GroupListCommand, GroupListEntry,
+    GroupListResult, GroupManagementService, GroupParticipantModeCommand,
+    GroupParticipantModeResult, GroupParticipantView, GroupPatchSettingsCommand,
+    GroupPatchSettingsConflict, GroupPatchSettingsResult, GroupQueryService,
     GroupRemoveMemberCommand, GroupRemoveMemberResult, GroupRoutingPolicyCommand,
-    GroupRoutingPolicyResult, GroupStatus, GroupStatusCommand, GroupTerminateCommand,
-    GroupStrategy, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
-    GroupUpdateWorkspaceCommand, GroupUseCaseError,
-    GroupWorkspaceQueryCommand, GroupWorkspaceResult, Participant, ParticipantMode,
-    NoopChannelBindingCleanupPort, ParticipantRole, RelationCoreService, RegisteredBot,
-    ServiceError, ServiceSpec,
-    ServiceSpecPatchConflictField, Session, SessionKind,
-    SessionManagementService, SystemMessageEvent,
-    WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
-    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchUseCaseError,
-    backfill_bot_names, validate_sender_routes, CallbackChannelConfig,
-    generated_group_id,
+    GroupRoutingPolicyResult, GroupStatus, GroupStatusCommand, GroupStrategy,
+    GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
+    GroupUpdateWorkspaceCommand, GroupUseCaseError, GroupWorkspaceQueryCommand,
+    GroupWorkspaceResult, NoopChannelBindingCleanupPort, Participant, ParticipantMode,
+    ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, ServiceSpec,
+    ServiceSpecPatchConflictField, Session, SessionKind, SessionManagementService,
+    SystemMessageEvent, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
+    WorkbenchConnectOutcome, WorkbenchParticipantView, WorkbenchSessionService,
+    WorkbenchUseCaseError, backfill_bot_names, generated_group_id, validate_sender_routes,
 };
 use tracing::warn;
-use crate::core::validate_service_spec_patch;
-use crate::noop::{EmptyRelationCoreService, EmptySessionManagementService, NoopSystemMessageService};
 
 #[derive(Debug, Clone)]
 pub struct GroupConfig {
@@ -60,6 +59,7 @@ pub struct GroupManagement {
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     outbound_url_guard: OutboundUrlGuard,
+    v1_openapi_create_policy: bool,
 }
 
 fn validate_service_spec_callback_urls(
@@ -104,13 +104,11 @@ impl GroupManagement {
             channel_binding_cleanup: Arc::new(NoopChannelBindingCleanupPort),
             bot_runtime: None,
             outbound_url_guard: OutboundUrlGuard::strict(),
+            v1_openapi_create_policy: false,
         }
     }
 
-    pub fn with_bot_runtime(
-        mut self,
-        bot_runtime: Arc<dyn BotRuntimeConnectionService>,
-    ) -> Self {
+    pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {
         self.bot_runtime = Some(bot_runtime);
         self
     }
@@ -125,6 +123,16 @@ impl GroupManagement {
 
     pub fn with_outbound_url_guard(mut self, outbound_url_guard: OutboundUrlGuard) -> Self {
         self.outbound_url_guard = outbound_url_guard;
+        self
+    }
+
+    /// Select the OpenAPI v1 group-creation reachability policy.
+    ///
+    /// Legacy instances retain their original caller/originator checks. A
+    /// dedicated V1 instance validates collaboration from the selected driver,
+    /// after the V1 facade has verified Principal-to-driver eligibility.
+    pub fn for_v1_openapi(mut self) -> Self {
+        self.v1_openapi_create_policy = true;
         self
     }
 
@@ -181,9 +189,8 @@ impl GroupManagement {
         }
 
         let driver_active_count = self
-            .group
-            .find_by_participant(driver_bot_id)
-            .await
+            .groups_for_quota(driver_bot_id)
+            .await?
             .into_iter()
             .filter(|group| {
                 group.driver_bot == driver_bot_id && group.status == GroupStatus::Active
@@ -198,9 +205,8 @@ impl GroupManagement {
 
         for bot_id in participant_ids {
             let active_count = self
-                .group
-                .find_by_participant(bot_id)
-                .await
+                .groups_for_quota(bot_id)
+                .await?
                 .into_iter()
                 .filter(|group| group.status == GroupStatus::Active)
                 .count();
@@ -213,6 +219,16 @@ impl GroupManagement {
         }
 
         Ok(())
+    }
+
+    async fn groups_for_quota(
+        &self,
+        actor_id: &str,
+    ) -> Result<Vec<DomainGroup>, GroupUseCaseError> {
+        if self.v1_openapi_create_policy {
+            return Ok(self.group.try_find_by_participant(actor_id).await?);
+        }
+        Ok(self.group.find_by_participant(actor_id).await)
     }
 
     async fn ensure_reachable(
@@ -245,13 +261,47 @@ impl GroupManagement {
         }
     }
 
+    async fn ensure_v1_reachable(
+        &self,
+        driver_bot_id: &str,
+        target: &RegisteredBot,
+    ) -> Result<(), GroupUseCaseError> {
+        if target.status == ActorStatus::Hidden {
+            return Err(GroupUseCaseError::Forbidden(format!(
+                "Bot '{}' is hidden (offline) and cannot be invited into a group",
+                target.bot_uuid
+            )));
+        }
+
+        match target.capabilities.visibility.as_str() {
+            "public" => Ok(()),
+            "protected"
+                if self
+                    .friend
+                    .try_are_friends(driver_bot_id, &target.bot_uuid)
+                    .await? =>
+            {
+                Ok(())
+            }
+            "protected" => Err(GroupUseCaseError::Forbidden(format!(
+                "Bot '{}' is not friends with '{}'",
+                driver_bot_id, target.bot_uuid
+            ))),
+            _ => Err(ServiceError::BotNotFound(target.bot_uuid.clone()).into()),
+        }
+    }
+
     async fn try_write_subscription_edge(&self, requester_bot_id: &str, target: &RegisteredBot) {
         if target.capabilities.visibility != "public" {
             return;
         }
 
         let env = &self.config.relation_env;
-        match self.relation.get_edge(requester_bot_id, &target.bot_uuid, env).await {
+        match self
+            .relation
+            .get_edge(requester_bot_id, &target.bot_uuid, env)
+            .await
+        {
             Ok(Some(_)) => {}
             Ok(None) => {
                 if let Err(error) = self
@@ -298,9 +348,10 @@ impl GroupManagement {
             )));
         }
 
+        let is_friend = self.friend.are_friends(driver_bot_id, target_bot_id).await;
         match target.capabilities.visibility.as_str() {
             "public" => Ok(()),
-            "protected" if self.friend.are_friends(driver_bot_id, target_bot_id).await => Ok(()),
+            _ if is_friend => Ok(()),
             "protected" => Err(GroupUseCaseError::Forbidden(format!(
                 "Bot '{}' is not friends with '{}'",
                 driver_bot_id, target_bot_id
@@ -382,6 +433,9 @@ impl GroupManagement {
             return Ok(true);
         }
 
+        if self.v1_openapi_create_policy {
+            return Ok(self.friend.try_are_friends(actor_id, bot_id).await?);
+        }
         Ok(self.friend.are_friends(actor_id, bot_id).await)
     }
 
@@ -465,6 +519,14 @@ impl GroupManagement {
         action: &str,
     ) -> Result<(), GroupUseCaseError> {
         if group.originator() == caller_actor_id || group.driver_bot == caller_actor_id {
+            return Ok(());
+        }
+        if group.group_strategy == GroupStrategy::ManagerWorker
+            && group.participants.iter().any(|participant| {
+                participant.bot_uuid == caller_actor_id
+                    && participant.role == ParticipantRole::Manager
+            })
+        {
             return Ok(());
         }
 
@@ -608,18 +670,24 @@ impl GroupQueryService for GroupManagement {
         &self,
         cmd: GroupListCommand,
     ) -> Result<GroupListResult, GroupUseCaseError> {
-        let total = self.group.count_filtered(
-            cmd.group_kind,
-            cmd.visibility.as_deref(),
-            cmd.label.as_deref(),
-        ).await;
-        let mut groups = self.group.list_paginated_filtered(
-            cmd.offset,
-            cmd.limit,
-            cmd.group_kind,
-            cmd.visibility.as_deref(),
-            cmd.label.as_deref(),
-        ).await;
+        let total = self
+            .group
+            .count_filtered(
+                cmd.group_kind,
+                cmd.visibility.as_deref(),
+                cmd.label.as_deref(),
+            )
+            .await;
+        let mut groups = self
+            .group
+            .list_paginated_filtered(
+                cmd.offset,
+                cmd.limit,
+                cmd.group_kind,
+                cmd.visibility.as_deref(),
+                cmd.label.as_deref(),
+            )
+            .await;
         for group in &mut groups {
             backfill_bot_names(self.registry.as_ref(), group).await;
         }
@@ -669,10 +737,7 @@ impl GroupQueryService for GroupManagement {
         for group in &mut page {
             backfill_bot_names(self.registry.as_ref(), group).await;
         }
-        let items = page
-            .into_iter()
-            .map(group_to_list_entry)
-            .collect();
+        let items = page.into_iter().map(group_to_list_entry).collect();
         Ok(GroupListResult {
             items,
             total,
@@ -715,8 +780,15 @@ impl GroupManagementService for GroupManagement {
             .clone()
             .unwrap_or_else(|| cmd.driver_bot_id.clone());
 
-        self.authorize_originator(cmd.caller_actor_id.as_deref(), &originator)
-            .await?;
+        if self.v1_openapi_create_policy {
+            cmd.caller_actor_id
+                .as_deref()
+                .filter(|caller| !caller.is_empty())
+                .ok_or_else(|| GroupUseCaseError::Unauthorized("caller is required".to_string()))?;
+        } else {
+            self.authorize_originator(cmd.caller_actor_id.as_deref(), &originator)
+                .await?;
+        }
 
         let is_human_originator = originator.starts_with("human_");
 
@@ -745,13 +817,21 @@ impl GroupManagementService for GroupManagement {
             if !seen.insert(bot_id.clone()) {
                 continue;
             }
-            let bot = self
-                .registry
-                .get(&bot_id)
-                .await
-                .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
+            let bot = if self.v1_openapi_create_policy {
+                self.registry.try_get(&bot_id).await?
+            } else {
+                self.registry.get(&bot_id).await
+            }
+            .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
             if bot.actor_kind == ActorKind::Bot {
-                if bot_id != originator {
+                if self.v1_openapi_create_policy {
+                    if bot_id != cmd.driver_bot_id {
+                        self.ensure_v1_reachable(&cmd.driver_bot_id, &bot).await?;
+                    }
+                    if bot_id != cmd.driver_bot_id && bot.capabilities.visibility == "public" {
+                        subscription_targets.push(bot.clone());
+                    }
+                } else if bot_id != originator {
                     if is_human_originator {
                         let staff_no = originator.trim_start_matches("human_");
                         if bot.capabilities.visibility != "public"
@@ -826,10 +906,7 @@ impl GroupManagementService for GroupManagement {
         group.service_spec = cmd.service_spec.clone();
         group.group_strategy = requested_strategy;
 
-        let visibility = cmd.visibility
-            .as_deref()
-            .unwrap_or("private")
-            .to_string();
+        let visibility = cmd.visibility.as_deref().unwrap_or("private").to_string();
         if visibility != "public" && visibility != "private" {
             return Err(GroupUseCaseError::InvalidProposal(
                 "Invalid visibility value: must be 'public' or 'private'".to_string(),
@@ -848,22 +925,23 @@ impl GroupManagementService for GroupManagement {
         self.group.upsert(group.clone()).await?;
 
         for target in &subscription_targets {
-            self.try_write_subscription_edge(&cmd.driver_bot_id, target).await;
+            self.try_write_subscription_edge(&cmd.driver_bot_id, target)
+                .await;
         }
 
-        let topic = cmd.topic.as_deref().unwrap_or_else(|| {
-            group.label.as_deref().unwrap_or("")
-        });
+        let topic = cmd
+            .topic
+            .as_deref()
+            .unwrap_or_else(|| group.label.as_deref().unwrap_or(""));
         let initial_session_kind = match requested_strategy {
             GroupStrategy::StateMachine => SessionKind::ServiceInvocation,
             GroupStrategy::Chat | GroupStrategy::ManagerWorker => SessionKind::Chat,
         };
         let initial_session_title = Some("新会话".to_string());
         let initial_session_input = match requested_strategy {
-            GroupStrategy::StateMachine => state_machine_initial_session_input(
-                cmd.context.as_deref(),
-                cmd.topic.as_deref(),
-            ),
+            GroupStrategy::StateMachine => {
+                state_machine_initial_session_input(cmd.context.as_deref(), cmd.topic.as_deref())
+            }
             GroupStrategy::Chat | GroupStrategy::ManagerWorker => None,
         };
         let mut initial_session_participants = group.participants.clone();
@@ -877,8 +955,7 @@ impl GroupManagementService for GroupManagement {
             // boundary. Do not derive this participant from request YAML or bindings.
             initial_session_participants
                 .retain(|participant| participant.bot_uuid != human_actor_id);
-            let mut participant =
-                Participant::human(human_actor_id, ParticipantRole::Observer);
+            let mut participant = Participant::human(human_actor_id, ParticipantRole::Observer);
             participant.mode = Some(ParticipantMode::Present);
             initial_session_participants.push(participant);
         }
@@ -946,9 +1023,9 @@ impl GroupManagementService for GroupManagement {
                         "failed to roll back group after initial session creation failure"
                     );
                 }
-                return Err(GroupUseCaseError::Service(ServiceError::InternalError(format!(
-                    "failed to auto-create initial session for new group: {error}"
-                ))));
+                return Err(GroupUseCaseError::Service(ServiceError::InternalError(
+                    format!("failed to auto-create initial session for new group: {error}"),
+                )));
             }
         };
 
@@ -964,16 +1041,18 @@ impl GroupManagementService for GroupManagement {
             .filter(|caller| !caller.is_empty())
             .ok_or_else(|| GroupUseCaseError::Unauthorized("caller is required".to_string()))?;
 
-        let caller_actor = self
-            .registry
-            .get(caller)
-            .await
-            .ok_or_else(|| GroupUseCaseError::ActorNotFound(caller.to_string()))?;
-        let target = self
-            .registry
-            .get(&cmd.target_actor_id)
-            .await
-            .ok_or_else(|| GroupUseCaseError::ActorNotFound(cmd.target_actor_id.clone()))?;
+        let caller_actor = if self.v1_openapi_create_policy {
+            self.registry.try_get(caller).await?
+        } else {
+            self.registry.get(caller).await
+        }
+        .ok_or_else(|| GroupUseCaseError::ActorNotFound(caller.to_string()))?;
+        let target = if self.v1_openapi_create_policy {
+            self.registry.try_get(&cmd.target_actor_id).await?
+        } else {
+            self.registry.get(&cmd.target_actor_id).await
+        }
+        .ok_or_else(|| GroupUseCaseError::ActorNotFound(cmd.target_actor_id.clone()))?;
         if target.actor_kind != ActorKind::Bot {
             return Err(GroupUseCaseError::InvalidProposal(
                 "DM target must be a Bot actor".to_string(),
@@ -985,7 +1064,9 @@ impl GroupManagementService for GroupManagement {
             .unwrap_or_else(|| generated_group_id(GroupKind::Dm));
         let label = dm_label(cmd.label, cmd.topic.as_deref(), caller, &target.bot_uuid);
 
-        let (actor_a, actor_b, legacy_driver_bot, originator_actor_id) = match caller_actor.actor_kind {
+        let (actor_a, actor_b, legacy_driver_bot, originator_actor_id) = match caller_actor
+            .actor_kind
+        {
             ActorKind::Human => {
                 if let Some(driver_bot) = cmd.driver_bot.as_deref() {
                     if driver_bot != target.bot_uuid {
@@ -1011,7 +1092,11 @@ impl GroupManagementService for GroupManagement {
                 )
             }
             ActorKind::Bot => {
-                self.ensure_reachable(caller, &target.bot_uuid).await?;
+                if self.v1_openapi_create_policy {
+                    self.ensure_v1_reachable(caller, &target).await?;
+                } else {
+                    self.ensure_reachable(caller, &target.bot_uuid).await?;
+                }
                 (
                     DmActorSpec {
                         actor_id: caller_actor.bot_uuid.clone(),
@@ -1100,10 +1185,9 @@ impl GroupManagementService for GroupManagement {
                     role,
                     ParticipantRole::Consultant | ParticipantRole::Observer
                 ),
-                GroupStrategy::ManagerWorker => matches!(
-                    role,
-                    ParticipantRole::Worker | ParticipantRole::Observer
-                ),
+                GroupStrategy::ManagerWorker => {
+                    matches!(role, ParticipantRole::Worker | ParticipantRole::Observer)
+                }
             };
             if !allowed {
                 let strategy_name = match group.group_strategy {
@@ -1146,11 +1230,16 @@ impl GroupManagementService for GroupManagement {
         };
 
         self.group
-            .add_participant(&cmd.group_id, participant.clone())
+            .add_participant_with_visibility_guard(
+                &cmd.group_id,
+                participant.clone(),
+                bot.actor_kind != ActorKind::Bot || bot.capabilities.visibility == "public",
+            )
             .await?;
 
         if bot.actor_kind == ActorKind::Bot {
-            self.try_write_subscription_edge(&group.driver_bot, &bot).await;
+            self.try_write_subscription_edge(&group.driver_bot, &bot)
+                .await;
         }
 
         Ok(GroupAddMemberResult {
@@ -1192,9 +1281,9 @@ impl GroupManagementService for GroupManagement {
             if caller.starts_with("human_") {
                 let staff_no = caller.trim_start_matches("human_");
                 let owned = self.registry.list_bots_by_creator(staff_no).await;
-                owned.iter().any(|b| {
-                    b.bot_uuid == group.driver_bot || b.bot_uuid == group.originator()
-                })
+                owned
+                    .iter()
+                    .any(|b| b.bot_uuid == group.driver_bot || b.bot_uuid == group.originator())
             } else {
                 false
             }
@@ -1223,7 +1312,11 @@ impl GroupManagementService for GroupManagement {
         }
 
         if group.group_strategy == GroupStrategy::ManagerWorker {
-            if let Some(manager) = group.participants.iter().find(|p| p.role == ParticipantRole::Manager) {
+            if let Some(manager) = group
+                .participants
+                .iter()
+                .find(|p| p.role == ParticipantRole::Manager)
+            {
                 if cmd.bot_id == manager.bot_uuid {
                     return Err(GroupUseCaseError::InvalidProposal(
                         "Cannot remove the Manager bot from a ManagerWorker group".to_string(),
@@ -1250,11 +1343,12 @@ impl GroupManagementService for GroupManagement {
         &self,
         cmd: GroupDeleteCommand,
     ) -> Result<GroupDeleteResult, GroupUseCaseError> {
-        let group = self
-            .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
+        let Some(group) = self.group.try_get(&cmd.group_id).await? else {
+            return Ok(GroupDeleteResult {
+                group_id: cmd.group_id,
+                deleted: false,
+            });
+        };
 
         if group.group_kind == GroupKind::Dm {
             return Err(GroupUseCaseError::InvalidProposal(
@@ -1265,13 +1359,18 @@ impl GroupManagementService for GroupManagement {
 
         // Remove the group first so concurrent binding creation can no longer validate the target.
         // If binding cleanup fails, restore the group instead of leaving a dangling binding.
-        self.group.delete(&cmd.group_id).await?;
+        let Some(deleted_group) = self.group.delete(&cmd.group_id).await? else {
+            return Ok(GroupDeleteResult {
+                group_id: cmd.group_id,
+                deleted: false,
+            });
+        };
         if let Err(cleanup_error) = self
             .channel_binding_cleanup
             .delete_bindings_for_group(&cmd.group_id)
             .await
         {
-            if let Err(rollback_error) = self.group.upsert(group).await {
+            if let Err(rollback_error) = self.group.upsert(deleted_group).await {
                 return Err(ServiceError::InternalError(format!(
                     "Failed to delete channel bindings for group '{}': {}; group rollback also failed: {}",
                     cmd.group_id, cleanup_error, rollback_error
@@ -1340,14 +1439,21 @@ impl GroupManagementService for GroupManagement {
             ));
         }
 
-        let group = self.group.get(&cmd.group_id).await
+        let group = self
+            .group
+            .get(&cmd.group_id)
+            .await
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
 
         // Only coordinator (driver, originator, or driver's owner) can change visibility
         let is_coordinator = cmd.caller_actor_id == group.driver_bot
             || group.originator.as_deref() == Some(&cmd.caller_actor_id)
-            || self.registry.list_bots_by_creator(&cmd.caller_actor_id).await
-                .iter().any(|b| b.bot_uuid == group.driver_bot);
+            || self
+                .registry
+                .list_bots_by_creator(&cmd.caller_actor_id)
+                .await
+                .iter()
+                .any(|b| b.bot_uuid == group.driver_bot);
         if !is_coordinator {
             return Err(GroupUseCaseError::Forbidden(
                 "Only the group coordinator can change visibility".to_string(),
@@ -1363,9 +1469,14 @@ impl GroupManagementService for GroupManagement {
             self.ensure_all_bots_public(&group.participants).await?;
         }
 
-        self.group.update_visibility(&cmd.group_id, visibility).await?;
+        self.group
+            .update_visibility(&cmd.group_id, visibility)
+            .await?;
 
-        let updated = self.group.get(&cmd.group_id).await
+        let updated = self
+            .group
+            .get(&cmd.group_id)
+            .await
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
         Ok(group_to_detail(updated))
     }
@@ -1472,9 +1583,11 @@ impl GroupManagementService for GroupManagement {
             .unwrap_or(0);
 
         if let Some(spec_patch) = cmd.service_spec.clone() {
-            if let Err(error) =
-                validate_service_spec_patch(group.service_spec.as_ref(), spec_patch.as_ref(), running_service_count)
-            {
+            if let Err(error) = validate_service_spec_patch(
+                group.service_spec.as_ref(),
+                spec_patch.as_ref(),
+                running_service_count,
+            ) {
                 let conflict = match error {
                     crate::core::ServiceSpecPatchError::CallbackConfigImmutable => {
                         GroupPatchSettingsConflict {
@@ -1489,8 +1602,10 @@ impl GroupManagementService for GroupManagement {
                         }
                     }
                 };
-                return Err(GroupUseCaseError::Conflict(serde_json::to_string(&conflict)
-                    .unwrap_or_else(|_| "service_spec patch rejected".to_string())));
+                return Err(GroupUseCaseError::Conflict(
+                    serde_json::to_string(&conflict)
+                        .unwrap_or_else(|_| "service_spec patch rejected".to_string()),
+                ));
             }
 
             self.group
@@ -1541,7 +1656,9 @@ impl WorkbenchSessionService for GroupManagement {
                     .get(session_id)
                     .await
                     .map_err(|error| {
-                        WorkbenchUseCaseError::Service(ServiceError::InternalError(error.to_string()))
+                        WorkbenchUseCaseError::Service(ServiceError::InternalError(
+                            error.to_string(),
+                        ))
                     })?
                     .filter(|session| session.group_id == command.group_id)
                     .ok_or(WorkbenchUseCaseError::ForbiddenGroupAccess)?;
@@ -1582,11 +1699,7 @@ impl WorkbenchSessionService for GroupManagement {
                     .ok_or(WorkbenchUseCaseError::Unauthorized)?;
                 let staff_no = staff_no_from_bound_actor(Some(actor_id))?;
                 if self
-                    .session_participant(
-                        command.session_id.as_deref(),
-                        &command.group_id,
-                        actor_id,
-                    )
+                    .session_participant(command.session_id.as_deref(), &command.group_id, actor_id)
                     .await?
                     .is_some()
                 {
@@ -1776,7 +1889,10 @@ fn validate_human_constraints(
     for p in participants.iter().filter(|p| p.is_human()) {
         match strategy {
             GroupStrategy::Chat | GroupStrategy::StateMachine => {
-                if !matches!(p.role, ParticipantRole::Consultant | ParticipantRole::Observer) {
+                if !matches!(
+                    p.role,
+                    ParticipantRole::Consultant | ParticipantRole::Observer
+                ) {
                     return Err(GroupUseCaseError::InvalidProposal(
                         "Human actors can only be consultant or observer in chat/state_machine groups".to_string(),
                     ));
@@ -1785,7 +1901,8 @@ fn validate_human_constraints(
             GroupStrategy::ManagerWorker => {
                 if !matches!(p.role, ParticipantRole::Worker | ParticipantRole::Observer) {
                     return Err(GroupUseCaseError::InvalidProposal(
-                        "Human actors can only be worker or observer in manager_worker groups".to_string(),
+                        "Human actors can only be worker or observer in manager_worker groups"
+                            .to_string(),
                     ));
                 }
             }
@@ -1813,8 +1930,7 @@ fn state_machine_initial_session_input(
     context: Option<&str>,
     topic: Option<&str>,
 ) -> Option<serde_json::Value> {
-    first_non_empty([context, topic])
-        .map(|query| serde_json::json!({ "query": query }))
+    first_non_empty([context, topic]).map(|query| serde_json::json!({ "query": query }))
 }
 
 fn first_non_empty<const N: usize>(values: [Option<&str>; N]) -> Option<&str> {
@@ -1896,8 +2012,7 @@ fn group_to_list_entry(group: DomainGroup) -> GroupListEntry {
 
 fn group_has_non_absent_participant(group: &DomainGroup, actor_id: &str) -> bool {
     group.participants.iter().any(|participant| {
-        participant.bot_uuid == actor_id
-            && participant.effective_mode() != ParticipantMode::Absent
+        participant.bot_uuid == actor_id && participant.effective_mode() != ParticipantMode::Absent
     })
 }
 

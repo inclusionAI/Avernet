@@ -24,6 +24,14 @@ pub trait FriendCoreService: Send + Sync {
     /// Check if two bots are friends.
     async fn are_friends(&self, bot_a: &str, bot_b: &str) -> bool;
 
+    /// Check if two bots are friends without hiding persistence failures.
+    ///
+    /// The compatibility default preserves existing implementations. Services
+    /// backed by fallible persistence should override this method.
+    async fn try_are_friends(&self, bot_a: &str, bot_b: &str) -> ServiceResult<bool> {
+        Ok(self.are_friends(bot_a, bot_b).await)
+    }
+
     /// Check if all bots in the list are friends of the given bot.
     ///
     /// Returns `ServiceError::NotFriends` with non-friend bot_uuids on failure.

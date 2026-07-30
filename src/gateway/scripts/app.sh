@@ -182,6 +182,9 @@ do_start() {
         APP_MODE="bare"
     fi
 
+    # Regenerate OpenAPI schemas from upstreams before launch so /docs and /redoc
+    # reflect the latest API changes. Skips gracefully if upstream dependencies
+    # aren't installed.
     if [[ -n "$debug_port" ]]; then
         log_info "Debug port: $debug_port (app starts immediately without waiting for debugger)"
         SERVER_ENV="$env_name" nohup "$VENV_DIR/bin/python" -m debugpy --listen "0.0.0.0:$debug_port" \

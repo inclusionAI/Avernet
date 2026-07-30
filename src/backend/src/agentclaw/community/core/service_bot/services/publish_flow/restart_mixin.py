@@ -9,11 +9,17 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     service_skills_env_from_ext,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    PublishFlowServiceError,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     TargetBotGoneError,
     acquire_deploy_workflow,
 )
-from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.service_bot.types import (
+    OnlineDeployDecision,
+    PublishStage,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -223,6 +229,12 @@ class RestartMixin:
         if not migration_path and not config_artifact:
             return {"success": False, "message": f"Missing build artifact: publish_id={publish_id}"}
 
+        # Mark restart in progress (cleared on success/failure by sync_restart_progress)
+        def _set_restarting_flag(latest_ext: dict) -> None:
+            latest_ext.setdefault("restart", {})["restarting"] = True
+
+        self._mutate_and_update_ext(publish_id=publish_id, mutator=_set_restarting_flag)
+
         version = f"{publish_record.version}"
         # STORED overrides slot: reproduce what was promoted (not a live re-fetch),
         # so restarting a non-latest stage never delivers another stage's channels.
@@ -247,6 +259,70 @@ class RestartMixin:
             return {"success": True,
                     "message": f"Restart submitted, stage: {stage_enum.value}",
                     "stage": stage_enum.value, "restart_publish_id": recreate_wid}
+
+        # Provider-aware reuse-vs-recreate decision (online stage). Any non-UPGRADE
+        # decision recreates *directly* rather than issuing the in-place UPGRADE:
+        # a teclaw not-live target's UPDATE cannot rebuild a gone container (it
+        # would silently fail the publish), and a DESTROYING/gone target's UPDATE
+        # is rejected with an error the atom does not classify as BOT_NOT_FOUND —
+        # both would strand the restart. Before recreating we open+abandon a fresh
+        # RESTART op so ``sync_restart_progress`` (which prefers the latest RESTART
+        # op's workflow id) does not read a stale earlier restart, and instead
+        # falls back to the ``ext.restart`` handle the recreate writes.
+        if stage_enum == PublishStage.ONLINE:
+            decision = self._decide_online_deploy(publish_record, bot)
+            if decision not in (
+                OnlineDeployDecision.UPGRADE,
+                OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE,
+                OnlineDeployDecision.FIRST_RELEASE,
+            ):
+                raise PublishFlowServiceError(
+                    f"Unhandled online deploy decision: {decision}"
+                )
+            if decision != OnlineDeployDecision.UPGRADE:
+                # Release the record's now-stale online binding before recreating
+                # (the recreate below mints a fresh one and rewrites
+                # ext.binding.<stage>), so the old binding does not linger ACTIVE
+                # pointing at a gone/retired bot. For RETIRE_THEN_FIRST_RELEASE we
+                # destroy the still-registered bot first and stash its destroy id;
+                # for FIRST_RELEASE the target is already gone (RELEASED/DESTROYING,
+                # e.g. an external BaaS deletion) so no destroy is issued.
+                destroy_publish_id = None
+                if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                    destroy_publish_id = self._build_service.retire_superseded_bot(
+                        bot_uuid, operator=operator
+                    )
+                self._release_binding(
+                    binding_id, destroy_publish_id=destroy_publish_id
+                )
+                # Supersede any prior RESTART op with a fresh abandoned one, so
+                # restart-status reads the recreate's workflow (via ext.restart).
+                superseding_op = self._operation_runner.open_operation(
+                    publish_id=publish_id,
+                    kind=PublishOperationKind.RESTART,
+                    stage=stage_enum,
+                    bot_uuid=bot_uuid,
+                    operator=operator,
+                )
+                self._operation_runner.abandon_operation(
+                    superseding_op, f"{decision.value} -> recreate"
+                )
+                logger.info(
+                    "[PublishFlowService.execute_restart] decision=%s -> recreate: "
+                    "publish_id=%s bot_uuid=%s stage=%s",
+                    decision.value, publish_id, bot_uuid, stage_enum.value,
+                )
+                return await self._recreate_restart_target(
+                    publish_id=publish_id,
+                    stage_enum=stage_enum,
+                    publish_record=publish_record,
+                    bot=bot,
+                    migration_path=migration_path,
+                    version=version,
+                    delivery=delivery,
+                    skills_env=skills_env,
+                    operator=operator,
+                )
 
         async def _issue():
             return await self._build_service.upgrade_async(
@@ -280,11 +356,26 @@ class RestartMixin:
                 bot_uuid=bot_uuid,
                 bot_gone_reason="BOT_NOT_FOUND -> recreate",
             )
-        except TargetBotGoneError:
+        except TargetBotGoneError as e:
             logger.warning(
-                "[PublishFlowService.execute_restart] target bot not found, "
+                "[PublishFlowService.execute_restart] target bot gone (%s), "
                 "recreating via first release: publish_id=%s bot_uuid=%s stage=%s",
-                publish_id, bot_uuid, stage_enum.value,
+                e.error_code, publish_id, bot_uuid, stage_enum.value,
+            )
+            # Secondary net (mirrors upgrade_release). Either way the recreate
+            # below mints a fresh binding and rewrites ext.binding.<stage>, so the
+            # record's current binding must be released or it lingers ACTIVE
+            # pointing at the gone bot. A DEVICE_NOT_FOUND means the record still
+            # lingers with a gone container, so retire it first (and stash the
+            # destroy id); a BOT_NOT_FOUND means the bot is already fully gone (no
+            # destroy needed → destroy_publish_id=None).
+            destroy_publish_id = None
+            if e.error_code == "DEVICE_NOT_FOUND":
+                destroy_publish_id = self._build_service.retire_superseded_bot(
+                    bot_uuid, operator=operator
+                )
+            self._release_binding(
+                binding_id, destroy_publish_id=destroy_publish_id
             )
             return await self._recreate_restart_target(
                 publish_id=publish_id,

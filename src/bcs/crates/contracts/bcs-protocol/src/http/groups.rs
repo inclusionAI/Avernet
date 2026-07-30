@@ -113,6 +113,12 @@ pub struct CreateGroupRequest {
     /// binding when `collaboration_definition_yaml` is provided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_start_on_service_invocation: Option<bool>,
+    /// Whether group creation should immediately start the initial
+    /// service-invocation run. Defaults to true for backward compatibility.
+    /// Clients that must provision group-scoped runtime resources first can
+    /// set this to false and explicitly start the returned `session_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_initial_run: Option<bool>,
     /// Group visibility: "public" or "private" (default). Public groups allow
     /// any actor to create sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]

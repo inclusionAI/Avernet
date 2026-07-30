@@ -35,13 +35,16 @@ pub use actor::{ActorKind, ActorRef, ActorStatus, EnsureHumanResult, EnsureOwner
 pub use attachment::{Attachment, AttachmentType};
 pub use channel::{
     BindingStatus, BindingTarget, GroupChatScope, ChannelBinding, ChannelConfig, ChannelType,
-    ConversationSessionMap, ImParticipantMap, SessionScope, Visibility,
+    ConversationSessionMap, HumanInputRequest, HumanInputRequestStatus, ImParticipantMap,
+    SessionScope, Visibility,
 };
 pub use collaboration::{
     ChatRuntimeProfile, CollaborationDefinition, CollaborationDefinitionRef,
     CollaborationMetadata, CollaborationParticipantBinding, CollaborationRequirements,
     CollaborationRuntimeDefinition, GroupRuntimeBinding, JudgePolicy,
-    ManagerWorkerRuntimeProfile, OutputContract, ProjectionPolicy, ProjectionVisibility,
+    HumanInputChannelDefinition, HumanInputConversationType, HumanInputFixedGroupDefinition,
+    HumanInputNotificationDefinition, HumanInputNotificationMode, ManagerWorkerRuntimeProfile,
+    OutputContract, ProjectionPolicy, ProjectionVisibility,
     ResolvedParticipant, ResolvedParticipantBinding, RuntimeParticipantBinding,
     StateMachineAction, StateMachineAssignee, StateMachineDefaults,
     StateMachineDefinition, StateMachineDeliveryCorrelation, StateMachineGraphMode,
@@ -65,8 +68,10 @@ pub use group_id::{
     generated_group_id,
 };
 pub use message::{
-    AuditEntry, DeliveryType, GroupMessage, GroupMessageType, MessageOwnerFilter, MessagePage, MessageQuery,
-    MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus, SenderType, Task, TaskStatus,
+    AuditEntry, BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+    DeliveryType, GroupMessage, GroupMessageType, MessageOwnerFilter, MessagePage, MessageQuery,
+    MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus,
+    STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType, Task, TaskStatus,
 };
 pub use organization::{Organization, OrganizationMember};
 pub use proposal::GroupChatProposal;

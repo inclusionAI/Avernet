@@ -2869,7 +2869,7 @@ async fn add_group_member_route_rejects_non_owner_human_identity() {
 }
 
 #[tokio::test]
-async fn add_group_member_route_hides_private_friend_target() {
+async fn add_group_member_route_allows_private_friend_target() {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     for (bot_id, visibility) in [("driver-bot", "public"), ("private-bot", "private")] {
@@ -2939,9 +2939,13 @@ async fn add_group_member_route_hides_private_friend_target() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.status(), StatusCode::OK);
     let stored = groups.get("group-private-target").await.unwrap();
-    assert_eq!(stored.participants.len(), 1);
+    assert_eq!(stored.participants.len(), 2);
+    assert!(stored
+        .participants
+        .iter()
+        .any(|participant| participant.bot_uuid == "private-bot"));
 }
 
 #[tokio::test]

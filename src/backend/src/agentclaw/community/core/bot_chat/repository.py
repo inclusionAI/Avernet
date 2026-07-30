@@ -447,27 +447,21 @@ class BotChatDbRepository:
         """Check if user_id is either owner or collaborator of bot_id."""
         return self.is_bot_owner(user_id, bot_id) or self.is_bot_collaborator(user_id, bot_id)
 
-    def get_bot_name(self, bot_id: str | None) -> str | None:
-        if not bot_id:
-            return None
+    def enrich_labels(
+        self,
+        rows: list[Any],
+        preferred_biz_scene: str | None = None,
+        preferred_biz_task_id: str | None = None,
+    ) -> None:
+        """Batch-fill display labels for one final response page."""
         with self._db.orm_session() as session:
-            return load_bot_names(session, {bot_id}).get(bot_id)
-
-    def get_group_labels(
-        self, session_key: str | None
-    ) -> tuple[str | None, str | None]:
-        if not session_key:
-            return None, None
-        probe = SimpleNamespace(
-            bot_id=None,
-            bot_name=None,
-            session_key=session_key,
-            group_id=None,
-            session_kind=None,
-        )
-        with self._db.orm_session() as session:
-            enriched = enrich_trace_labels(session, probe)
-        return enriched.group_id, enriched.session_kind
+            enrich_group_labels(session, rows)
+            enrich_task_labels(
+                session, rows, preferred_biz_scene, preferred_biz_task_id
+            )
+            names = load_bot_names(session, {row.bot_id for row in rows if row.bot_id})
+            for row in rows:
+                row.bot_name = names.get(row.bot_id)
 
     def list_traces(
         self,
@@ -583,7 +577,6 @@ class BotChatDbRepository:
 
             detached = [self._detach_trace_row(row) for row in rows]
             enrich_group_labels(session, detached, group_id, group_sessions)
-            enrich_task_labels(session, detached)
             bot_names = load_bot_names(
                 session, {row.bot_id for row in detached if row.bot_id}
             )
@@ -591,6 +584,7 @@ class BotChatDbRepository:
                 row.bot_name = bot_names.get(row.bot_id)
                 if biz_scene or biz_task_id:
                     row.match_sources = ["biz_ref"]
+            enrich_task_labels(session, detached, biz_scene, biz_task_id)
             sessions = [self._row_to_session(row) for row in detached]
             return sessions, total
 
@@ -709,7 +703,7 @@ class BotChatDbRepository:
                 ):
                     sources.append("biz_ref")
                 row.match_sources = sources
-            enrich_task_labels(session, detached)
+            enrich_task_labels(session, detached, biz_scene, biz_task_id)
             sessions = [
                 self._row_to_session(row)
                 for row in detached

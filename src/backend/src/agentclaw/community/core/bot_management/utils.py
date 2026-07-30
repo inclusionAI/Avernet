@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Dict, List
 
 import requests
 
+from agentclaw.community.core.bot_management.capabilities import (
+    is_template_factory_config,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -160,6 +163,65 @@ def build_aix_extra_envs(
     )
     return strategy.build_extra_envs(ctx)
 
+
+LEGACY_YUQUE_KNOWLEDGE_KEYS = ("yuque_kb_repos",)
+TEMPLATE_FACTORY_YUQUE_KNOWLEDGE_KEYS = (
+    "wiki_knowledge_spaces",
+    "business_wiki_spaces",
+    "repo_wiki_spaces",
+)
+
+LEGACY_CODE_REPO_KEYS = ("backend_repo", "frontend_repo", "lib_repo")
+TEMPLATE_FACTORY_CODE_REPO_KEYS = (
+    "repos",
+    "init_repos",
+    "application_repo_urls",
+)
+
+
+def _extract_item_url(item: Any, *, url_keys: tuple[str, ...]) -> str:
+    """Extract a URL-like value from either a string item or a dict item."""
+    if isinstance(item, str):
+        return item.strip()
+    if not isinstance(item, dict):
+        return ""
+    for key in url_keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _extract_item_token(item: Any) -> str:
+    """Extract the Yuque team token from known field names."""
+    if not isinstance(item, dict):
+        return ""
+    for key in ("token", "teamToken", "team_token"):
+        value = item.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _iter_template_list_items(
+    template_config: Dict[str, Any], keys: tuple[str, ...]
+) -> List[Any]:
+    """Iterate list values for top-level template_config keys.
+
+    AC resolved snapshots may expose the same AppCoding-compatible shape under
+    different semantic keys.  The backend runtime keeps using the existing
+    AppCoding consumers, so these helpers normalize aliases at the edge instead
+    of adding new hard-coded product branches in callers.
+    """
+    if not isinstance(template_config, dict):
+        return []
+    result: List[Any] = []
+    for key in keys:
+        value = template_config.get(key)
+        if isinstance(value, list):
+            result.extend(value)
+    return result
+
 def trigger_memory_initialization(
     bot_id: str,
     bot_name: str,
@@ -197,35 +259,20 @@ def trigger_memory_initialization(
             "userId": user_id,
         }
 
-        # Extract code repo URLs from template_config
-        code_repo_urls: List[str] = []
-        for repo_key in ["backend_repo", "frontend_repo", "lib_repo"]:
-            repos = template_config.get(repo_key, [])
-            if repos:
-                for repo in repos:
-                    repo_url = repo.get("repo_url")
-                    if repo_url:
-                        code_repo_urls.append(repo_url)
-
+        # Extract code repo URLs from template_config.  New template-factory
+        # bots reuse the AppCoding memory/knowledge pipeline but their resolved
+        # snapshots may carry repo aliases such as repos/init_repos.
+        code_repo_urls = _extract_code_repo_urls(template_config)
         if code_repo_urls:
             payload["codeRepoUrls"] = code_repo_urls
 
-        # Extract yuque URLs from template_config (yuque_kb_repos field)
-        # 每一项形如 {"url": ..., "teamToken": ...}，teamToken 取自 template_config 中的 token 字段
-        yuque_urls: List[Dict[str, str]] = []
-        yuque_kb_repos = template_config.get("yuque_kb_repos", [])
-        if yuque_kb_repos:
-            for item in yuque_kb_repos:
-                if not isinstance(item, dict):
-                    continue
-                url = item.get("url")
-                if not url:
-                    continue
-                yuque_urls.append(
-                    {"url": url, "teamToken": item.get("token") or ""}
-                )
-            if yuque_urls:
-                payload["yuqueUrls"] = yuque_urls
+        # Extract Yuque/Wiki URLs from AppCoding-compatible and semantic keys.
+        yuque_urls: List[Dict[str, str]] = [
+            {"url": url, "teamToken": token}
+            for url, token in _extract_yuque_pairs(template_config)
+        ]
+        if yuque_urls:
+            payload["yuqueUrls"] = yuque_urls
 
         # Call the memoryos init API with cookie (environment-dependent)
         current_env = get_current_env()
@@ -286,38 +333,65 @@ def trigger_memory_initialization(
 
 
 def _extract_yuque_pairs(template_config: Dict[str, Any]) -> List[tuple]:
-    """从 template_config.yuque_kb_repos 中提取 (url, token) 列表（已过滤空 url）。
+    """Extract (url, token) pairs from template_config knowledge fields.
 
-    token 缺省视为空字符串。用于变更检测，能同时捕获 url 与 teamToken 的变化。
+    Historical AppCoding bots use ``yuque_kb_repos``.  New template-factory bots
+    reuse the same memory/knowledge consumers but AC may resolve semantic keys
+    such as ``wiki_knowledge_spaces``, ``business_wiki_spaces`` or
+    ``repo_wiki_spaces``.  Treat all of them as AppCoding-compatible knowledge
+    sources at the backend edge.  Empty URLs are skipped; missing token is the
+    empty string so token changes still participate in diff detection.
     """
     if not isinstance(template_config, dict):
         return []
-    items = template_config.get("yuque_kb_repos") or []
-    if not isinstance(items, list):
-        return []
     pairs: List[tuple] = []
-    for item in items:
-        if isinstance(item, dict):
-            url = item.get("url")
+    keys = LEGACY_YUQUE_KNOWLEDGE_KEYS
+    if is_template_factory_config(template_config):
+        keys = keys + TEMPLATE_FACTORY_YUQUE_KNOWLEDGE_KEYS
+    for key in keys:
+        value = template_config.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            # Preserve AppCoding compatibility: legacy yuque_kb_repos only
+            # accepts object items.  Template-factory alias keys may use direct
+            # URL strings.
+            if isinstance(item, str):
+                if key in LEGACY_YUQUE_KNOWLEDGE_KEYS:
+                    continue
+                if not item.strip().startswith(("http://", "https://")):
+                    continue
+            url = _extract_item_url(
+                item,
+                url_keys=("url", "wiki_url", "repo_wiki_url", "space_url", "link"),
+            )
             if url:
-                pairs.append((url, item.get("token") or ""))
+                pairs.append((url, _extract_item_token(item)))
     return pairs
 
 
 def _extract_code_repo_urls(template_config: Dict[str, Any]) -> List[str]:
-    """从 template_config 的 backend_repo/frontend_repo/lib_repo 中提取 repo_url 列表。"""
+    """Extract repository URLs from AppCoding and template-factory aliases."""
     if not isinstance(template_config, dict):
         return []
     urls: List[str] = []
-    for repo_key in ["backend_repo", "frontend_repo", "lib_repo"]:
-        repos = template_config.get(repo_key) or []
-        if not isinstance(repos, list):
+    keys = LEGACY_CODE_REPO_KEYS
+    if is_template_factory_config(template_config):
+        keys = keys + TEMPLATE_FACTORY_CODE_REPO_KEYS
+    for key in keys:
+        value = template_config.get(key)
+        if not isinstance(value, list):
             continue
-        for repo in repos:
-            if isinstance(repo, dict):
-                repo_url = repo.get("repo_url")
-                if repo_url:
-                    urls.append(repo_url)
+        for item in value:
+            # Preserve AppCoding compatibility: legacy repo keys only accept
+            # object items.  Template-factory alias keys may use direct strings.
+            if isinstance(item, str) and key in LEGACY_CODE_REPO_KEYS:
+                continue
+            url = _extract_item_url(
+                item, url_keys=("repo_url", "url", "git_url", "ssh_url")
+            )
+            if url:
+                urls.append(url)
     return urls
 
 

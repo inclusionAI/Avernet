@@ -1,6 +1,6 @@
-"""Open API Session 路由
+"""Open API Session Router
 
-提供会话查询的 Open API 端点。
+Provides session query Open API endpoints.
 """
 
 from dependency_injector.wiring import Provide, inject
@@ -34,7 +34,7 @@ from secbaas.community.logger import get_logger
 
 logger = get_logger("router-open-api")
 
-router = APIRouter(prefix="/openapi/v1", tags=["Open API Sessions"])
+router = APIRouter(prefix="/openapi/v1", tags=["sessions"])
 
 
 def _check_app_type(api_key_record: APIKeyRecord) -> None:
@@ -55,14 +55,14 @@ def _check_app_type(api_key_record: APIKeyRecord) -> None:
 @router.get(
     "/sessions/{session_id}",
     response_model=SessionQueryResponse,
-    summary="查询会话",
-    description="通过 Bearer Token 认证的 API Key 查询指定会话信息",
+    summary="Query session",
+    description="Query a specific session's information using a Bearer Token-authenticated API Key",
     responses={
-        200: {"description": "查询成功"},
-        401: {"description": "认证失败"},
-        403: {"description": "无权限访问"},
-        404: {"description": "会话不存在"},
-        500: {"description": "服务内部错误"},
+        200: {"description": "Query successful"},
+        401: {"description": "Authentication failed"},
+        403: {"description": "Access denied"},
+        404: {"description": "Session not found"},
+        500: {"description": "Internal server error"},
     },
 )
 @inject
@@ -70,30 +70,30 @@ async def get_session(
     session_id: str,
     bot_id: str | None = Query(
         default=None,
-        description="Bot ID，格式为 bot_id 或 default:staff_no，不传则从 API Key 解析",
+        description="Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
     ),
     lifecycle_stage: str = Query(
         default="online",
-        description="Bot 生命周期阶段，可选值: online, verify, draft, all",
+        description="Bot lifecycle stage. Options: online, verify, draft, all",
     ),
     api_key_record: APIKeyRecord = Depends(validate_api_key),
     context: BotChatContext = Depends(get_bot_chat_context),
     bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
 ) -> SessionQueryResponse:
-    """查询会话端点
+    """Query session endpoint
 
     Args:
-        session_id: 会话 ID
-        bot_id: Bot ID，格式为 bot_id 或 default:staff_no，不传则从 API Key 解析
-        lifecycle_stage: Bot 生命周期阶段，可选值: online, verify, draft, all，默认 online
-        api_key_record: 从 API Key 验证获取的记录
-        context: 请求上下文（身份认证、调用者信息等）
-        bot_runner: BotRunner 实例
+        session_id: Session ID
+        bot_id: Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.
+        lifecycle_stage: Bot lifecycle stage. Options: online, verify, draft, all. Default: online
+        api_key_record: Record obtained from API Key validation
+        context: Request context (authentication, caller identity, etc.)
+        bot_runner: BotRunner instance
 
     Returns:
-        SessionQueryResponse: 会话查询响应
+        SessionQueryResponse: Session query response
     """
-    # 只有 app_type=bot 时才可从 API Key 解析 bot_id，其余类型必须显式传入
+    # Only app_type=bot can resolve bot_id from the API Key; other types must pass it explicitly
     if bot_id:
         resolved_bot_id = bot_id
     elif api_key_record.app_type == "bot":
@@ -103,7 +103,7 @@ async def get_session(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": OpenAPICode.BUSINESS_ERROR,
-                "message": "bot_id 是必填参数",
+                "message": "bot_id is a required parameter",
             },
         )
 
@@ -179,54 +179,56 @@ async def get_session(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": 50001, "message": f"服务内部错误: {str(e)}"},
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )
 
 
 @router.get(
     "/sessions/{session_id}/messages",
     response_model=SessionMessagesResponse,
-    summary="查询会话消息",
-    description="通过 Bearer Token 认证的 API Key 查询指定会话的消息列表",
+    summary="Query session messages",
+    description="Query a specific session's message list using a Bearer Token-authenticated API Key",
     responses={
-        200: {"description": "查询成功"},
-        401: {"description": "认证失败"},
-        403: {"description": "无权限访问"},
-        404: {"description": "会话不存在"},
-        500: {"description": "服务内部错误"},
+        200: {"description": "Query successful"},
+        401: {"description": "Authentication failed"},
+        403: {"description": "Access denied"},
+        404: {"description": "Session not found"},
+        500: {"description": "Internal server error"},
     },
 )
 @inject
 async def get_session_messages(
     session_id: str,
-    limit: int = Query(default=1000, ge=1, le=1000, description="返回消息数量上限"),
+    limit: int = Query(
+        default=1000, ge=1, le=1000, description="Maximum number of messages to return"
+    ),
     bot_id: str | None = Query(
         default=None,
-        description="Bot ID，格式为 bot_id 或 default:staff_no，不传则从 API Key 解析",
+        description="Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
     ),
     lifecycle_stage: str = Query(
         default="online",
-        description="Bot 生命周期阶段，可选值: online, verify, draft, all",
+        description="Bot lifecycle stage. Options: online, verify, draft, all",
     ),
     api_key_record: APIKeyRecord = Depends(validate_api_key),
     context: BotChatContext = Depends(get_bot_chat_context),
     bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
 ) -> SessionMessagesResponse:
-    """查询会话消息端点
+    """Query session messages endpoint
 
     Args:
-        session_id: 会话 ID
-        limit: 返回消息数量上限，默认 1000，范围 1-1000
-        bot_id: Bot ID，格式为 bot_id 或 default:staff_no，不传则从 API Key 解析
-        lifecycle_stage: Bot 生命周期阶段，可选值: online, verify, draft, all，默认 online
-        api_key_record: 从 API Key 验证获取的记录
-        context: 请求上下文（身份认证、调用者信息等）
-        bot_runner: BotRunner 实例
+        session_id: Session ID
+        limit: Maximum number of messages to return. Default 1000, range 1-1000
+        bot_id: Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.
+        lifecycle_stage: Bot lifecycle stage. Options: online, verify, draft, all. Default: online
+        api_key_record: Record obtained from API Key validation
+        context: Request context (authentication, caller identity, etc.)
+        bot_runner: BotRunner instance
 
     Returns:
-        SessionMessagesResponse: 会话消息列表响应
+        SessionMessagesResponse: Session messages list response
     """
-    # 只有 app_type=bot 时才可从 API Key 解析 bot_id，其余类型必须显式传入
+    # Only app_type=bot can resolve bot_id from the API Key; other types must pass it explicitly
     if bot_id:
         resolved_bot_id = bot_id
     elif api_key_record.app_type == "bot":
@@ -236,7 +238,7 @@ async def get_session_messages(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": OpenAPICode.BUSINESS_ERROR,
-                "message": "bot_id 是必填参数",
+                "message": "bot_id is a required parameter",
             },
         )
 
@@ -335,5 +337,5 @@ async def get_session_messages(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": 50001, "message": f"服务内部错误: {str(e)}"},
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )

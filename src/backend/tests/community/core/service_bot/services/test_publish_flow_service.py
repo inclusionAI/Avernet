@@ -1,10 +1,16 @@
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+    PublishOperationKind,
+    PublishOperationRecord,
+    PublishOperationState,
+    PublishStatus,
+)
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService, BotBuildServiceError
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
@@ -17,10 +23,16 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.errors import (
+    DraftRestoreRetryableError,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     operation_request_id,
 )
-from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.service_bot.types import (
+    OnlineDeployDecision,
+    PublishStage,
+)
 
 
 def _make_publish_record(**kwargs):
@@ -271,7 +283,13 @@ async def test_service_release_uses_frozen_engine_layout_not_live_draft_drift():
 
 
 @pytest.mark.asyncio
-async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_found():
+@pytest.mark.parametrize("error_code,expect_retire", [
+    ("BOT_NOT_FOUND", False),     # bot fully gone → no destroy, but still release binding
+    ("DEVICE_NOT_FOUND", True),   # record lingers → retire before first release
+])
+async def test_execute_upgrade_release_fallback_retires_only_on_device_not_found(
+    error_code, expect_retire
+):
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
@@ -285,11 +303,13 @@ async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_fo
     publish_service.get_device_binding_by_id.return_value = binding
     build_service.upgrade_async = AsyncMock(return_value={
         'success': False,
-        'error_code': 'BOT_NOT_FOUND',
-        'message': 'Bot not found or already destroyed',
+        'error_code': error_code,
+        'message': 'gone',
     })
+    build_service.retire_superseded_bot.return_value = 909  # destroy publish id
     expected = Mock()
     svc._execute_first_release = AsyncMock(return_value=expected)
+    svc.release_binding = Mock()
 
     result = await svc._execute_upgrade_release(
         publish_record=publish_record,
@@ -305,58 +325,124 @@ async def test_execute_upgrade_release_falls_back_to_first_release_on_bot_not_fo
         migration_path='/tmp/migration',
         bot={'bot_id': 'b1'},
     )
+    # The stale binding (id 88) is released either way so it does not linger
+    # ACTIVE; only DEVICE_NOT_FOUND retires the still-registered bot first (and
+    # stashes its destroy id), while BOT_NOT_FOUND is already gone (None).
+    if expect_retire:
+        build_service.retire_superseded_bot.assert_called_once_with(
+            'BOT-old', operator='u1'
+        )
+        svc.release_binding.assert_called_once_with(88, destroy_publish_id=909)
+    else:
+        build_service.retire_superseded_bot.assert_not_called()
+        svc.release_binding.assert_called_once_with(88, destroy_publish_id=None)
 
 
-def test_should_upgrade_online_requires_last_publish_success():
+@pytest.mark.parametrize("provider,status,expected", [
+    # ACTIVE / PENDING → reuse in place on either provider.
+    ("baas", "ACTIVE", OnlineDeployDecision.UPGRADE),
+    ("teclaw", "ACTIVE", OnlineDeployDecision.UPGRADE),
+    ("baas", "PENDING", OnlineDeployDecision.UPGRADE),
+    ("teclaw", "PENDING", OnlineDeployDecision.UPGRADE),
+    # gone / self-terminating → fresh first release, nothing to reuse.
+    ("baas", "RELEASED", OnlineDeployDecision.FIRST_RELEASE),
+    ("teclaw", "RELEASED", OnlineDeployDecision.FIRST_RELEASE),
+    ("baas", "DESTROYING", OnlineDeployDecision.FIRST_RELEASE),
+    ("teclaw", "DESTROYING", OnlineDeployDecision.FIRST_RELEASE),
+    # not-live-but-present → baas/ARCA rebuilds in place; teclaw must retire+recreate.
+    ("baas", "FAILED", OnlineDeployDecision.UPGRADE),
+    ("teclaw", "FAILED", OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE),
+    ("baas", "STOPPED", OnlineDeployDecision.UPGRADE),
+    ("teclaw", "STOPPED", OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE),
+    # STOPPING is a wait state (see test_decide_online_deploy_stopping_waits) —
+    # not in this matrix because it raises rather than returning a decision.
+])
+def test_decide_online_deploy_matrix(provider, status, expected):
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
 
-    publish_record = _make_publish_record(last_pub_id=10)
-    publish_service.get_publish_by_id.return_value = _make_publish_record(
-        id=10,
-        status=PublishStatus.SUCCESS.value,
-    )
-    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': 'RUNNING'})
-    assert svc._should_upgrade_online(publish_record) is True
+    # This record has its OWN online binding (a prior attempt) → the reuse candidate.
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.return_value = {'status': status}
+    baas_service.resolve_container_provider.return_value = provider
 
-    publish_service.get_publish_by_id.return_value = _make_publish_record(
-        id=10,
-        status=PublishStatus.SUCCESS.value,
-    )
-    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': 'RELEASED'})
-    assert svc._should_upgrade_online(publish_record) is False
-
-    publish_service.get_publish_by_id.return_value = _make_publish_record(
-        id=10,
-        status=PublishStatus.RELEASED.value,
-    )
-    assert svc._should_upgrade_online(publish_record) is False
-
-    publish_service.get_publish_by_id.return_value = None
-    assert svc._should_upgrade_online(publish_record) is False
+    assert svc._decide_online_deploy(publish_record, {'bot_id': 'b'}) is expected
 
 
-@pytest.mark.parametrize("baas_status", ["RELEASED", "STOPPED", "STOPPING", "FAILED"])
-def test_should_upgrade_online_forces_first_release_when_prev_bot_gone(baas_status):
-    """Regression (#435): an offlined SUCCESS publish leaves its online bot
-    ``STOPPED`` (a TeClaw STOP physically destroys the device), not
-    ``RELEASED``. The upgrade guard must treat every gone/not-live status —
-    not only ``RELEASED`` — as first-release, or the re-publish issues an
-    UPDATE against the destroyed bot and fails with ``DEVICE_NOT_FOUND``."""
+def test_decide_online_deploy_no_candidate_is_first_release():
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
 
-    publish_record = _make_publish_record(last_pub_id=10)
-    publish_service.get_publish_by_id.return_value = _make_publish_record(
-        id=10,
-        status=PublishStatus.RELEASED.value,
+    # No own binding and no last_pub_id → nothing to reuse; never queries BaaS.
+    publish_record = _make_publish_record(ext={}, last_pub_id=0)
+    assert (
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+        is OnlineDeployDecision.FIRST_RELEASE
     )
-    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': baas_status})
-    assert svc._should_upgrade_online(publish_record) is False
+    baas_service.get_bot.assert_not_called()
+
+
+def test_decide_online_deploy_get_bot_error_propagates():
+    # get_bot normalizes a real 404 to RELEASED; a raised error is transient/
+    # non-404, so it must propagate (durable task retries the status read) rather
+    # than be treated as "gone" and create a replacement for a possibly-live bot.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.side_effect = RuntimeError("baas unreachable")
+
+    with pytest.raises(RuntimeError, match="baas unreachable"):
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+
+
+@pytest.mark.parametrize("provider", ["teclaw", "baas"])
+def test_decide_online_deploy_stopping_waits(provider):
+    # STOPPING has an active STOP publish in flight; BaaS create_publish rejects
+    # any new publish of a different type (UPGRADE's UPDATE or a retire's DESTROY)
+    # while it runs. The decision must WAIT (raise so the durable task retries)
+    # rather than issue a doomed publish — for BOTH providers, no retire.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.return_value = {'status': 'STOPPING'}
+    baas_service.resolve_container_provider.return_value = provider
+
+    with pytest.raises(PublishFlowServiceError, match="STOPPING"):
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+    build_service.retire_superseded_bot.assert_not_called()
+
+
+def test_decide_online_deploy_missing_status_propagates():
+    # A *successful* envelope with no status (get_bot returns `data`, which
+    # defaults to {}) is ambiguous — NOT proof the candidate is gone. It must
+    # raise (durable task retries) rather than map to FIRST_RELEASE and create a
+    # replacement for a possibly-live bot. Only a real 404 (already normalized to
+    # RELEASED) or an explicit terminal status recreates.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(ext={'binding': {'online': 99}})
+    publish_service.get_device_binding_by_id.return_value = Mock(device_id='BOT-cand')
+    baas_service.get_bot.return_value = {}  # 200 envelope, empty data → no status
+
+    with pytest.raises(PublishFlowServiceError, match="no status"):
+        svc._decide_online_deploy(publish_record, {'bot_id': 'b'})
+    build_service.retire_superseded_bot.assert_not_called()
 
 
 # (#197 all-auto) approve_baas_publish was removed — every BaaS mutation is
@@ -399,18 +485,21 @@ async def test_execute_release_phase_falls_back_to_first_release_when_last_publi
 
 
 @pytest.mark.asyncio
-async def test_execute_release_phase_first_release_when_offlined_online_bot_stopped():
-    """Regression (#435): the full offline→re-publish cycle. Offlining a SUCCESS
-    publish marks it RELEASED and tears its online bot down via a BaaS STOP —
-    which physically destroys the TeClaw device but leaves ``baas_bot`` STOPPED.
-    The re-publish's online stage must resolve to a fresh CREATE (first release),
-    not an UPDATE against the destroyed bot (which would 404 DEVICE_NOT_FOUND)."""
+@pytest.mark.parametrize("provider", ["teclaw", "baas"])
+async def test_execute_release_phase_offlined_online_bot_stopped_no_orphan(provider):
+    """Offline→re-publish cycle. Offlining a SUCCESS publish tears its online bot
+    down via a BaaS STOP, leaving ``baas_bot`` STOPPED. The re-publish must not
+    orphan that bot:
+    - teclaw: the UPDATE cannot rebuild a gone container → retire the STOPPED bot,
+      then fresh first release (exactly one live bot, old destroyed).
+    - baas/ARCA: the UPDATE rebuilds the device in place → upgrade (reuse)."""
     publish_service = Mock()
     build_service = Mock()
     baas_service = Mock()
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
 
-    # The re-publish record (v2) points back at the offlined publish (5724 → id=10).
+    # The re-publish record (v2) points back at the offlined publish (id=10),
+    # whose online binding still references the STOPPED bot.
     publish_record = _make_publish_record(
         id=2,
         status=PublishStatus.VALIDATING.value,
@@ -418,24 +507,111 @@ async def test_execute_release_phase_first_release_when_offlined_online_bot_stop
         last_pub_id=10,
         ext={'migration_path': '/tmp/migration'},
     )
-    # The previous publish is RELEASED (offline flipped SUCCESS→RELEASED)...
     publish_service.get_publish_by_id.return_value = _make_publish_record(
         id=10,
         status=PublishStatus.RELEASED.value,
+        ext={'binding': {'online': 88}},
     )
-    # ...and its online bot is STOPPED, not RELEASED (the offline STOP leaves it so).
-    svc.get_publish_bot_status = Mock(return_value={'baas_bot_status': 'STOPPED'})
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id='BOT-stopped'
+    )
+    baas_service.resolve_container_provider.return_value = provider
+    baas_service.get_bot.return_value = {'status': 'STOPPED'}
+    build_service.retire_superseded_bot.return_value = 777  # destroy publish id
 
     bot_service = Mock()
     bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
     svc._bot_service = bot_service
     svc._execute_first_release = AsyncMock(return_value='FIRST')
     svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
+    svc._release_binding = Mock()
 
     result = await svc.execute_release_phase(publish_record, operator='u1')
 
-    assert result == 'FIRST'
-    svc._execute_first_release.assert_awaited_once()
+    if provider == "teclaw":
+        assert result == 'FIRST'
+        build_service.retire_superseded_bot.assert_called_once_with(
+            'BOT-stopped', operator='u1'
+        )
+        # The retired bot's stale binding (id 88) is released, stashing the
+        # destroy workflow id — no lingering ACTIVE binding to a destroyed bot.
+        svc._release_binding.assert_called_once_with(88, destroy_publish_id=777)
+        svc._execute_first_release.assert_awaited_once()
+        svc._execute_upgrade_release.assert_not_awaited()
+    else:
+        assert result == 'UPGRADE'
+        build_service.retire_superseded_bot.assert_not_called()
+        svc._release_binding.assert_not_called()
+        svc._execute_upgrade_release.assert_awaited_once()
+        svc._execute_first_release.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_online_retire_then_first_release_is_crash_safe_on_redelivery():
+    """Crash-safety: a teclaw not-live candidate retires + first-releases. If the
+    durable task is redelivered after destroy(old) but before first-release
+    lands, the candidate now reads gone → the decision is FIRST_RELEASE (no
+    second destroy) and first-release runs again (adopting the in-doubt new bot
+    via the deploy atom). Retire happens exactly once; no double-destroy."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source',
+        ext={'binding': {'online': 99}, 'migration_path': '/m'},
+    )
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id='BOT-old'
+    )
+    baas_service.resolve_container_provider.return_value = 'teclaw'
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    svc._bot_service = bot_service
+    svc._execute_first_release = AsyncMock(return_value='FIRST')
+
+    # Delivery 1: candidate STOPPED (teclaw) → retire old + first release.
+    baas_service.get_bot.return_value = {'status': 'STOPPED'}
+    assert await svc.execute_release_phase(publish_record, operator='op') == 'FIRST'
+
+    # Redelivery: the retired bot now reads gone → first release, NO second destroy.
+    baas_service.get_bot.return_value = {'status': 'RELEASED'}
+    assert await svc.execute_release_phase(publish_record, operator='op') == 'FIRST'
+
+    build_service.retire_superseded_bot.assert_called_once_with('BOT-old', operator='op')
+    assert svc._execute_first_release.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_release_phase_unhandled_decision_fails_loudly():
+    """The dispatch is exhaustive: a new/unknown OnlineDeployDecision must fail
+    the publish loudly, never silently fall through to first-release."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source', ext={'migration_path': '/m'}
+    )
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    svc._bot_service = bot_service
+    svc._decide_online_deploy = Mock(return_value="BOGUS_DECISION")
+    svc._execute_first_release = AsyncMock()
+    svc._execute_upgrade_release = AsyncMock()
+    # Stub the failure-handling plumbing so the guard's raise surfaces as a
+    # FAILED publish result (the process fails), not a silent first-release.
+    svc._get_latest_ext = Mock(return_value={})
+    svc._clear_retry_flag = Mock()
+    svc._update_publish_status = Mock()
+
+    result = await svc.execute_release_phase(publish_record, operator='op')
+
+    assert result.status == PublishStatus.FAILED
+    assert "Unhandled online deploy decision" in result.message
+    svc._execute_first_release.assert_not_awaited()
     svc._execute_upgrade_release.assert_not_awaited()
 
 
@@ -610,7 +786,7 @@ def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():
     ext = {
         'retry': True,
         'source_status': PublishStatus.ONLINE_PUB.value,
-        'restart': {'online': '456'},
+        'restart': {'online': '456', 'restarting': True},
     }
 
     result = svc._handle_sync_failure(
@@ -625,6 +801,7 @@ def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():
     publish_service.update_publish_status_with_ext.assert_called_once()
     updated_ext = publish_service.update_publish_status_with_ext.call_args.kwargs['ext']
     assert 'retry' not in updated_ext
+    assert 'restarting' not in updated_ext['restart']
     assert updated_ext['source_status'] == PublishStatus.ONLINE_PUB.value
     assert updated_ext['error_message'] == 'BaaS publish failed: 1 device(s) failed'
 
@@ -799,6 +976,59 @@ def _setup_restart(svc, record, bot_uuid="BOT-x"):
 
 
 @pytest.mark.asyncio
+async def test_restart_sets_restarting_flag_in_ext():
+    """Test that execute_restart sets ext.restart.restarting = True at the start."""
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(return_value={"publish_id": 100})
+    baas_service = Mock()
+    svc = _pf(
+        publish_service, build_service, baas_service, Mock(), _arca_router(build_service)
+    )
+
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "migration_path": "/path/to/artifact"},
+    )
+    _setup_restart(svc, record)
+
+    # Track the mutator calls
+    mutate_calls = []
+
+    def track_mutate(publish_id, mutator):
+        test_ext = {}
+        mutator(test_ext)
+        mutate_calls.append(test_ext)
+        # Return the ext for the real call (which is mocked anyway)
+        return test_ext
+
+    svc._mutate_and_update_ext = Mock(side_effect=track_mutate)
+
+    # Mock the operation runner's complete_operation to avoid DB issues
+    svc._operation_runner.complete_operation = Mock()
+
+    # Use async mock for acquire_deploy_workflow via MonkeyPatch
+    async def mock_acquire(runner, publish_id, kind, stage, operator, issue, **kwargs):
+        # Create a simple object with the required attributes
+        from types import SimpleNamespace
+        return SimpleNamespace(id=1, baas_publish_id=100, bot_uuid="BOT-x")
+
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(
+            "agentclaw.community.core.service_bot.services.publish_flow.restart_mixin.acquire_deploy_workflow",
+            mock_acquire,
+        )
+        result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+
+    # Verify the restarting flag was set in the first mutate call
+    assert len(mutate_calls) >= 1
+    first_ext = mutate_calls[0]
+    assert first_ext.get("restart", {}).get("restarting") is True
+
+
+@pytest.mark.asyncio
 async def test_restart_recreate_threads_config_artifact():
     # On BOT_NOT_FOUND, restart recreates via release_async (the crash-safe
     # recreate leg) — which for a teclaw bot must carry the frozen artifact
@@ -830,6 +1060,166 @@ async def test_restart_recreate_threads_config_artifact():
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
     # The recreate minted a fresh binding for the new bot.
     assert publish_service.create_device_binding.call_args.kwargs["device_id"] == "BOT-recreated"
+    # BOT_NOT_FOUND = the record is already gone → nothing to retire.
+    build_service.retire_superseded_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restart_teclaw_not_live_target_retires_then_recreates():
+    # A teclaw online bot in STOPPED/FAILED can't be rebuilt by an UPDATE, so the
+    # restart must retire it and recreate — never leaving it as an orphan.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock()  # must NOT be issued
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "STOPPED"}
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_called_once_with("BOT-old", operator="op")
+    build_service.upgrade_async.assert_not_awaited()
+    build_service.release_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_restart_first_release_target_releases_stale_binding_no_retire():
+    # A restart whose target is already RELEASED/DESTROYING (e.g. an external BaaS
+    # deletion) → FIRST_RELEASE → recreate. No bot to destroy, but the old ACTIVE
+    # binding must still be released (destroy_publish_id=None) so it does not
+    # linger pointing at the gone bot after ext.binding is rewritten.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock()  # must NOT be issued
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "RELEASED"}
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+    svc._release_binding = Mock()
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_not_called()  # bot already gone
+    build_service.upgrade_async.assert_not_awaited()
+    build_service.release_async.assert_awaited_once()  # recreate
+    # Old binding released with no destroy id (nothing was destroyed).
+    svc._release_binding.assert_called_once_with(1, destroy_publish_id=None)
+
+
+@pytest.mark.asyncio
+async def test_restart_baas_not_live_target_upgrades_in_place():
+    # A baas/ARCA online bot in FAILED is rebuilt in place by the UPDATE, so the
+    # restart upgrades (reuses the bot) — no recreate, no retire.
+    publish_service = Mock()
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"publish_id": 77, "bot_uuid": "BOT-old"}
+    )
+    build_service.release_async = AsyncMock()  # must NOT be called
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "FAILED"}
+    baas_service.resolve_container_provider.return_value = "baas"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "migration_path": "/m/1"},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.upgrade_async.assert_awaited_once()
+    build_service.release_async.assert_not_awaited()
+    build_service.retire_superseded_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_restart_device_not_found_fallback_retires_then_recreates():
+    # Secondary net: proactive status said reusable (ACTIVE) but the UPDATE hit a
+    # gone device (DEVICE_NOT_FOUND) → retire the lingering record, then recreate.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "DEVICE_NOT_FOUND"}
+    )
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "ACTIVE"}
+    baas_service.resolve_container_provider.return_value = "baas"
+    build_service.retire_superseded_bot.return_value = 424  # destroy publish id
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+    svc._release_binding = Mock()
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_called_once_with("BOT-old", operator="op")
+    # The lingering bot's stale binding (id 1) is released, stashing the destroy id.
+    svc._release_binding.assert_called_once_with(1, destroy_publish_id=424)
+    build_service.release_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_restart_bot_not_found_fallback_releases_binding_no_retire():
+    # Secondary net: proactive status said reusable (ACTIVE) but the UPDATE raced
+    # with deletion and returned BOT_NOT_FOUND (bot fully gone). No retire, but the
+    # record's stale binding (id 1) must still be released (destroy_publish_id=None)
+    # so it does not linger ACTIVE after the recreate rewrites ext.binding.
+    publish_service = Mock()
+    publish_service.create_device_binding.return_value = 55
+    build_service = Mock()
+    build_service.upgrade_async = AsyncMock(
+        return_value={"success": False, "error_code": "BOT_NOT_FOUND"}
+    )
+    build_service.release_async = AsyncMock(
+        return_value={"publish_id": 99, "bot_uuid": "BOT-new"}
+    )
+    baas_service = Mock()
+    baas_service.get_bot.return_value = {"status": "ACTIVE"}
+    baas_service.resolve_container_provider.return_value = "baas"
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={"binding": {"online": 1}, "config_artifact": {"skills": []}},
+    )
+    _setup_restart(svc, record, bot_uuid="BOT-old")
+    svc._release_binding = Mock()
+
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+
+    assert result["success"] is True
+    build_service.retire_superseded_bot.assert_not_called()  # bot already gone
+    svc._release_binding.assert_called_once_with(1, destroy_publish_id=None)
+    build_service.release_async.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -2715,7 +3105,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
     publish_record = _make_publish_record(
         id=23,
         status=PublishStatus.VALIDATE_PUB.value,
-        ext={"binding": {PublishStage.VERIFY.value: 300}, "retry": True},
+        ext={"binding": {PublishStage.VERIFY.value: 300}, "retry": True, "restart": {"verify": 123, "restarting": True}},
     )
     ext = dict(publish_record.ext)
     progress = {"status": "SUCCESS", "device_details": []}
@@ -2738,6 +3128,7 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
     assert result.message == "Publish progress synced successfully, status: SUCCESS"
     assert result.data == progress
     assert "retry" not in ext
+    assert "restarting" not in ext["restart"]
     publish_service.update_publish_status_with_ext.assert_called_once_with(
         publish_id=23,
         target_status=PublishStatus.VALIDATING,
@@ -3189,6 +3580,122 @@ def test_sync_restart_progress_stable_status_still_fails_on_baas_failed():
     svc._handle_sync_failure.assert_called_once()
 
 
+def test_sync_restart_progress_stable_success_activates_recreated_binding():
+    # A restart that RECREATED the target minted a NEW binding as PENDING and
+    # pointed ext.binding.online at it. The record stays SUCCESS (no forward
+    # advance), but on BaaS SUCCESS the recreated binding must be activated here
+    # or it stays PENDING forever. (The in-place upgrade path is unaffected —
+    # _activate_binding is idempotent for an already-ACTIVE binding.)
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        source_bot_id="bot-src",
+        ext={"restart": {"online": 700}, "binding": {"online": 88}},
+    )
+    svc, _ = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    svc._activate_binding = Mock()
+    svc.refresh_publish_handle = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+
+    result = svc.sync_restart_progress(publish_id=1)
+
+    # No status advance (still SUCCESS), but the recreated binding is activated.
+    assert result.status == PublishStatus.SUCCESS
+    svc._activate_binding.assert_called_once()
+    kwargs = svc._activate_binding.call_args.kwargs
+    assert kwargs["stage"] == PublishStage.ONLINE
+    assert kwargs["baas_publish_id"] == 700
+    assert kwargs["bot_id"] == "bot-src"
+    # Activation replaces device_props (reuse_binding), so the teclaw status
+    # handle publish_id is re-merged afterward, pointing at the restart workflow.
+    svc.refresh_publish_handle.assert_called_once_with(88, 700)
+    # A recreated teclaw container needs the post-deploy MCP outbound rule that
+    # _handle_sync_success would apply; this stable branch runs it too.
+    svc._refresh_provider_mcp_after_success.assert_called_once()
+
+
+def test_sync_restart_progress_stable_success_clears_restarting_flag():
+    # When a restart completes with SUCCESS for a stable record (VALIDATING/SUCCESS),
+    # the restarting in-progress marker must be cleared. This test verifies the fix
+    # for the bug where the marker persisted because the stable-state branch did not
+    # call _handle_sync_success (which normally clears this flag).
+    record = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        source_bot_id="bot-src",
+        ext={
+            "restart": {"online": 700, "restarting": True},
+            "binding": {"online": 88},
+        },
+    )
+    svc, mock_pub_service = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    svc._activate_binding = Mock()
+    svc.refresh_publish_handle = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+    # Mock _mutate_and_update_ext to capture the mutator and verify it clears restarting
+    original_mutate = svc._mutate_and_update_ext
+    captured_mutator = None
+
+    def capture_mutator(publish_id, mutator):
+        nonlocal captured_mutator
+        captured_mutator = mutator
+        return original_mutate(publish_id, mutator)
+
+    svc._mutate_and_update_ext = Mock(side_effect=capture_mutator)
+
+    result = svc.sync_restart_progress(publish_id=1)
+
+    # No status advance (still SUCCESS)
+    assert result.status == PublishStatus.SUCCESS
+
+    # Verify that _mutate_and_update_ext was called to clear the restarting flag
+    assert svc._mutate_and_update_ext.called, "Expected _mutate_and_update_ext to be called"
+    assert captured_mutator is not None, "Expected mutator to be captured"
+
+    # Verify the mutator function clears the restarting flag
+    test_ext = {"restart": {"online": 700, "restarting": True}}
+    captured_mutator(test_ext)
+    assert "restarting" not in test_ext.get("restart", {}), "restarting flag should be cleared"
+
+
+def test_sync_restart_progress_validating_success_clears_restarting_flag():
+    # Same as above but for VALIDATING status (the other stable state).
+    record = _make_publish_record(
+        status=PublishStatus.VALIDATING.value,
+        source_bot_id="bot-src",
+        ext={
+            "restart": {"verify": 600, "restarting": True},
+            "binding": {"verify": 77},
+        },
+    )
+    svc, mock_pub_service = _svc_with_record(record)
+    svc.get_baas_publish_progress = Mock(return_value={"status": "SUCCESS"})
+    svc._activate_binding = Mock()
+    svc.refresh_publish_handle = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+    original_mutate = svc._mutate_and_update_ext
+    captured_mutator = None
+
+    def capture_mutator(publish_id, mutator):
+        nonlocal captured_mutator
+        captured_mutator = mutator
+        return original_mutate(publish_id, mutator)
+
+    svc._mutate_and_update_ext = Mock(side_effect=capture_mutator)
+
+    result = svc.sync_restart_progress(publish_id=1)
+
+    # No status advance (still VALIDATING)
+    assert result.status == PublishStatus.VALIDATING
+    assert svc._mutate_and_update_ext.called, "Expected _mutate_and_update_ext to be called"
+    assert captured_mutator is not None, "Expected mutator to be captured"
+
+    # Verify the mutator clears restarting
+    test_ext = {"restart": {"verify": 600, "restarting": True}}
+    captured_mutator(test_ext)
+    assert "restarting" not in test_ext.get("restart", {}), "restarting flag should be cleared"
+
+
 # ---- restart_bot() submit path ---------------------------------------------
 
 def test_restart_bot_not_found_returns_failure():
@@ -3462,3 +3969,607 @@ async def test_retry_from_built_source_enqueues_verify_flow():
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
     assert result.action == "process"
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_uses_migration_path_and_keeps_state():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    assert operation.id is not None
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    draft = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    source = _make_publish_record(
+        id=1,
+        status=PublishStatus.UPGRADED.value,
+        version=1,
+        ext={"migration_path": "/artifact/v1/openclaw"},
+    )
+    publish_service.get_publish_by_id.side_effect = [draft, source]
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-draft", status="ACTIVE"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "binding_id": 77,
+        "active_engine": "openclaw",
+    }
+    build_service.restore_draft_async = AsyncMock(return_value={
+        "restore_type": "migration_path",
+        "artifact_path": "/artifact/v1/openclaw",
+        "draft_path": "/draft/openclaw",
+    })
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2, operation_id=operation.id, operator="admin"
+    )
+
+    assert result["status"] == "success"
+    assert result["draft_binding_id"] == 77
+    kwargs = build_service.restore_draft_async.await_args.kwargs
+    assert "bot_uuid" not in kwargs
+    assert kwargs["source_version"] == 1
+    assert kwargs["artifact_ext"]["migration_path"] == "/artifact/v1/openclaw"
+    assert "config_artifact" not in kwargs["artifact_ext"]
+    publish_service.update_publish_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_rejects_changed_last_publish_id():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    assert operation.id is not None
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2,
+        status=PublishStatus.DRAFT.value,
+        version=3,
+        last_pub_id=9,
+    )
+
+    with pytest.raises(PublishFlowServiceError, match="上一版本已变化"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2,
+            operation_id=operation.id,
+            operator="admin",
+        )
+
+    recorded = operation_repo.get_by_id(operation.id)
+    assert recorded is not None
+    assert recorded.state == PublishOperationState.FAILED.value
+    assert "上一版本已变化" in recorded.last_error
+    build_service.restore_draft_async.assert_not_called()
+    build_service.restore_teclaw_draft_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_operation_mismatch_does_not_fail_other_operation():
+    publish_service = Mock()
+    build_service = Mock()
+    operation_repo = Mock()
+    operation_repo.get_by_id.return_value = PublishOperationRecord(
+        id=7,
+        publish_id=999,
+        operation_kind=str(PublishOperationKind.DRAFT_RESTORE),
+        stage=PublishStage.DRAFT.value,
+        attempt=1,
+        state=PublishOperationState.PENDING.value,
+        request_id="draft-restore-999-1",
+        params={
+            "source_publish_id": 1,
+            "source_version": 1,
+            "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+        },
+        operator="admin",
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+
+    with pytest.raises(PublishFlowServiceError, match="operation 与当前发布单不匹配"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2,
+            operation_id=7,
+            operator="admin",
+        )
+
+    operation_repo.fail.assert_not_called()
+    build_service.restore_draft_async.assert_not_called()
+    build_service.restore_teclaw_draft_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_teclaw_uses_current_binding_and_historical_artifact():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "bot_uuid": "BOT-current-draft",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    assert operation.id is not None
+    svc = _pf(
+        publish_service,
+        build_service,
+        baas_service,
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    draft = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    historical_artifact = {
+        "schema_version": 4,
+        "engine_type": "teclaw",
+        "resources": [{"name": "old.txt", "store": "bot-data", "path": "old"}],
+        "engine_ext": {"stage": "release"},
+    }
+    source = _make_publish_record(
+        id=1,
+        status=PublishStatus.UPGRADED.value,
+        version=1,
+        ext={"config_artifact": historical_artifact},
+    )
+    publish_service.get_publish_by_id.side_effect = [draft, source]
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-current-draft", status="ACTIVE"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "binding_id": 77,
+        "active_engine": "teclaw",
+    }
+    async def _restore_teclaw_draft(**kwargs):
+        if kwargs.get("baas_publish_id") is None:
+            return {
+                "restore_type": "config_artifact",
+                "publish_id": 901,
+                "bot_uuid": "BOT-current-draft",
+                "baas_status": "SUBMITTED",
+                "status": "restoring",
+            }
+        return {
+            "restore_type": "config_artifact",
+            "baas_publish_id": 901,
+            "baas_status": "SUCCESS",
+            "status": "success",
+        }
+    build_service.restore_teclaw_draft_async = AsyncMock(
+        side_effect=_restore_teclaw_draft
+    )
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2,
+        operation_id=operation.id,
+        operator="admin",
+    )
+
+    assert result["status"] == "success"
+    assert result["draft_binding_id"] == 77
+    assert build_service.restore_teclaw_draft_async.await_count == 2
+    kwargs = build_service.restore_teclaw_draft_async.await_args_list[0].kwargs
+    assert kwargs["bot_uuid"] == "BOT-current-draft"
+    assert kwargs["owner_id"] == "u1"
+    assert kwargs["source_version"] == 1
+    assert kwargs["artifact_ext"]["config_artifact"] == historical_artifact
+    assert kwargs["artifact_ext"]["config_artifact"] is not historical_artifact
+    assert kwargs["request_id"]
+    progress_kwargs = build_service.restore_teclaw_draft_async.await_args_list[1].kwargs
+    assert progress_kwargs["baas_publish_id"] == 901
+    recorded = operation_repo.get_by_id(operation.id)
+    assert recorded is not None
+    assert recorded.baas_publish_id == 901
+    assert recorded.bot_uuid == "BOT-current-draft"
+    assert recorded.state == "completed"
+    build_service.restore_draft_async.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_teclaw_resumes_recorded_workflow_without_reissue():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "bot_uuid": "BOT-current-draft",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    operation = operation_repo.record_workflow(
+        operation.id, baas_publish_id=901, bot_uuid="BOT-current-draft"
+    )
+    assert operation is not None
+
+    svc = _pf(
+        publish_service,
+        build_service,
+        baas_service,
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    draft = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    historical_artifact = {
+        "schema_version": 4,
+        "engine_type": "teclaw",
+        "resources": [],
+    }
+    source = _make_publish_record(
+        id=1,
+        status=PublishStatus.UPGRADED.value,
+        version=1,
+        ext={"config_artifact": historical_artifact},
+    )
+    publish_service.get_publish_by_id.side_effect = [draft, source]
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-current-draft", status="ACTIVE"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "binding_id": 77,
+        "active_engine": "teclaw",
+    }
+    build_service.restore_teclaw_draft_async = AsyncMock(
+        return_value={
+            "restore_type": "config_artifact",
+            "baas_publish_id": 901,
+            "baas_status": "SUCCESS",
+            "status": "success",
+        }
+    )
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2,
+        operation_id=operation.id,
+        operator="admin",
+    )
+
+    assert result["status"] == "success"
+    build_service.restore_teclaw_draft_async.assert_awaited_once()
+    kwargs = build_service.restore_teclaw_draft_async.await_args.kwargs
+    assert kwargs["baas_publish_id"] == 901
+    assert kwargs["request_id"] is None
+    recorded = operation_repo.get_by_id(operation.id)
+    assert recorded.state == PublishOperationState.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_teclaw_crash_after_issue_resumes_via_adopt():
+    publish_service = Mock()
+    build_service = Mock()
+    bot_service = Mock()
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "teclaw"
+    operation_repo = _real_ledger()
+    operation = operation_repo.insert(
+        {
+            "publish_id": 2,
+            "operation_kind": str(PublishOperationKind.DRAFT_RESTORE),
+            "stage": PublishStage.DRAFT.value,
+            "attempt": 1,
+            "request_id": "draft-restore-2-1",
+            "operator": "admin",
+            "bot_uuid": "BOT-current-draft",
+            "params": {
+                "source_publish_id": 1,
+                "source_version": 1,
+                "deadline_at": (datetime.now() + timedelta(minutes=30)).isoformat(),
+            },
+        }
+    )
+    assert operation.id is not None
+
+    real_record_workflow = operation_repo.record_workflow
+    record_attempts = 0
+
+    def _record_workflow_crashes_once(*args, **kwargs):
+        nonlocal record_attempts
+        record_attempts += 1
+        if record_attempts == 1:
+            raise RuntimeError("database unavailable after BaaS accepted update")
+        return real_record_workflow(*args, **kwargs)
+
+    operation_repo.record_workflow = Mock(side_effect=_record_workflow_crashes_once)
+    svc = _pf(
+        publish_service,
+        build_service,
+        baas_service,
+        bot_service,
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+    draft = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    source = _make_publish_record(
+        id=1,
+        status=PublishStatus.UPGRADED.value,
+        version=1,
+        ext={
+            "config_artifact": {
+                "schema_version": 4,
+                "engine_type": "teclaw",
+                "resources": [],
+            }
+        },
+    )
+    publish_service.get_publish_by_id.side_effect = [draft, source, draft, source]
+    publish_service.get_device_binding_by_id.return_value = Mock(
+        device_id="BOT-current-draft", status="ACTIVE"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "bot-source",
+        "entity_id": "u1",
+        "binding_id": 77,
+        "active_engine": "teclaw",
+    }
+    baas_service.list_bot_publishes.side_effect = [
+        [],
+        [{"id": 901, "publish_type": "UPDATE"}],
+    ]
+    build_service.restore_teclaw_draft_async = AsyncMock(
+        side_effect=[
+            {
+                "restore_type": "config_artifact",
+                "publish_id": 901,
+                "bot_uuid": "BOT-current-draft",
+                "baas_status": "SUBMITTED",
+                "status": "restoring",
+            },
+            {
+                "restore_type": "config_artifact",
+                "baas_publish_id": 901,
+                "baas_status": "SUCCESS",
+                "status": "success",
+            },
+        ]
+    )
+
+    with pytest.raises(DraftRestoreRetryableError, match="database unavailable"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2, operation_id=operation.id, operator="admin"
+        )
+
+    in_doubt = operation_repo.get_by_id(operation.id)
+    assert in_doubt.state == PublishOperationState.PENDING.value
+    assert in_doubt.baas_publish_id is None
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2, operation_id=operation.id, operator="admin"
+    )
+
+    assert result["status"] == "success"
+    assert build_service.restore_teclaw_draft_async.await_count == 2
+    issue_call, poll_call = build_service.restore_teclaw_draft_async.await_args_list
+    assert issue_call.kwargs["baas_publish_id"] is None
+    assert issue_call.kwargs["request_id"]
+    assert poll_call.kwargs["baas_publish_id"] == 901
+    assert poll_call.kwargs["request_id"] is None
+    recorded = operation_repo.get_by_id(operation.id)
+    assert recorded.baas_publish_id == 901
+    assert recorded.state == PublishOperationState.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_rejects_operation_without_deadline():
+    publish_service = Mock()
+    build_service = Mock()
+    operation_repo = Mock()
+    operation_repo.get_by_id.return_value = PublishOperationRecord(
+        id=7,
+        publish_id=2,
+        operation_kind=str(PublishOperationKind.DRAFT_RESTORE),
+        stage=PublishStage.DRAFT.value,
+        attempt=1,
+        state=PublishOperationState.PENDING.value,
+        request_id="draft-restore-2-1",
+        bot_uuid="BOT-current-draft",
+        params={"source_publish_id": 1, "source_version": 1},
+        operator="admin",
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+
+    with pytest.raises(PublishFlowServiceError, match="缺少有效的 deadline_at"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2,
+            operation_id=7,
+            operator="admin",
+        )
+
+    operation_repo.fail.assert_called_once_with(
+        7, "草稿恢复 operation 缺少有效的 deadline_at"
+    )
+    build_service.restore_teclaw_draft_async.assert_not_called()
+    build_service.restore_draft_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_marks_operation_failed_after_30_minutes():
+    publish_service = Mock()
+    build_service = Mock()
+    operation_repo = Mock()
+    operation_repo.get_by_id.return_value = PublishOperationRecord(
+        id=7,
+        publish_id=2,
+        operation_kind=str(PublishOperationKind.DRAFT_RESTORE),
+        stage=PublishStage.DRAFT.value,
+        attempt=1,
+        state=PublishOperationState.ID_RECORDED.value,
+        request_id="draft-restore-2-1",
+        bot_uuid="BOT-current-draft",
+        baas_publish_id=901,
+        params={
+            "source_publish_id": 1,
+            "source_version": 1,
+            "deadline_at": (datetime.now() - timedelta(minutes=1)).isoformat(),
+        },
+        operator="admin",
+    )
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2, status=PublishStatus.DRAFT.value, version=2, last_pub_id=1
+    )
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+
+    with pytest.raises(PublishFlowServiceError, match="默认限制 30 分钟"):
+        await svc.execute_restore_draft(
+            draft_publish_id=2,
+            operation_id=7,
+            operator="admin",
+        )
+
+    operation_repo.fail.assert_called_once_with(
+        7, "恢复草稿超时（默认限制 30 分钟）"
+    )
+    build_service.restore_teclaw_draft_async.assert_not_called()
+    build_service.restore_draft_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_draft_completed_operation_replay_is_noop():
+    publish_service = Mock()
+    build_service = Mock()
+    operation_repo = Mock()
+    operation_repo.get_by_id.return_value = PublishOperationRecord(
+        id=7,
+        publish_id=2,
+        operation_kind=str(PublishOperationKind.DRAFT_RESTORE),
+        stage=PublishStage.DRAFT.value,
+        attempt=1,
+        state=PublishOperationState.COMPLETED.value,
+        request_id="draft-restore-2-1",
+        result={"restore_type": "config_artifact", "draft_binding_id": 77},
+        operator="admin",
+    )
+    # The user may already have advanced the draft after restore completed. A
+    # redelivered queue task must still acknowledge the completed ledger row.
+    publish_service.get_publish_by_id.return_value = _make_publish_record(
+        id=2, status=PublishStatus.BUILDING.value, version=2, last_pub_id=1
+    )
+    svc = _pf(
+        publish_service,
+        build_service,
+        Mock(),
+        Mock(),
+        _arca_router(build_service),
+        publish_operation_repo=operation_repo,
+    )
+
+    result = await svc.execute_restore_draft(
+        draft_publish_id=2, operation_id=7, operator="admin"
+    )
+
+    assert result == {
+        "restore_type": "config_artifact",
+        "draft_binding_id": 77,
+        "status": "success",
+    }
+    operation_repo.fail.assert_not_called()
+    build_service.restore_teclaw_draft_async.assert_not_called()
+    build_service.restore_draft_async.assert_not_called()

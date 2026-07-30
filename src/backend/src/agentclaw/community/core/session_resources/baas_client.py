@@ -1,116 +1,178 @@
-"""Known BaaS upload/download URL contract."""
+"""BaaS Session File Sharing and legacy transfer control-plane client."""
 from __future__ import annotations
 
 import logging
-import re
+from urllib.parse import quote
 
-from agentclaw.community.core.session_resources.types import DownloadGrant, UploadGrant
+from agentclaw.community.core.session_resources.types import UploadGrant
 from agentclaw.community.plugin_api.http_client import HttpClient
 
 log = logging.getLogger("session_resource.baas")
-_SAFE_ROUTE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class SessionResourceBaasClient:
     def __init__(self, http_client: HttpClient) -> None:
         self._http = http_client
 
-    def create_upload_grant(
+    def create_session_upload_grant(
         self,
         *,
         tenant: str,
-        bot_uuid: str,
-        device_path: str,
+        session_id: str,
         filename: str,
+        file_size: int | None,
+        operator: str,
         expire_seconds: int = 3600,
     ) -> UploadGrant:
-        path = self._path(tenant, bot_uuid, "upload-url")
         log.info(
-            "session_resource.baas.upload_url.request tenant_hash=%s path_hash=%s",
+            "session_resource.baas.session_upload_url.request tenant_hash=%s session_hash=%s",
             self._hash(tenant),
-            self._hash(device_path),
+            self._hash(session_id),
         )
         try:
             response = self._http.post(
-                path,
+                self._session_path(tenant, session_id, "files/upload-url"),
                 json={
-                    "device_path": device_path,
                     "filename": filename,
+                    "file_size": file_size or 0,
+                    "operator": operator,
                     "expire_seconds": expire_seconds,
                 },
                 timeout=30.0,
             )
         except Exception as exc:
             log.warning(
-                "session_resource.baas.upload_url.fail tenant_hash=%s error_type=%s",
+                "session_resource.baas.session_upload_url.fail tenant_hash=%s error_type=%s",
                 self._hash(tenant),
                 type(exc).__name__,
             )
             raise
         data = self._data(response)
         grant = UploadGrant(
-            upload_url=self._string(data, "upload_url"),
             transfer_id=self._string(data, "transfer_id"),
-            expires_at=self._string(data, "expires_at"),
+            upload_type=self._string(data, "type"),
+            upload_url=self._optional_string(data, "upload_url"),
+            http_method=self._optional_string(data, "http_method") or "PUT",
+            expires_at=self._optional_string(data, "expires_at"),
+            upload_session_id=self._optional_string(data, "upload_session_id"),
+            part_size=self._optional_int(data, "part_size"),
+            part_count=self._optional_int(data, "part_count"),
+            parts=self._optional_parts(data),
         )
         log.info(
-            "session_resource.baas.upload_url.success tenant_hash=%s transfer_hash=%s",
+            "session_resource.baas.session_upload_url.success tenant_hash=%s transfer_hash=%s upload_type=%s",
             self._hash(tenant),
             self._hash(grant.transfer_id),
+            grant.upload_type,
         )
         return grant
 
-    def create_download_grant(
+    def complete_session_upload(
         self,
         *,
         tenant: str,
-        bot_uuid: str,
-        device_path: str,
-        expire_seconds: int = 600,
-    ) -> DownloadGrant:
+        session_id: str,
+        transfer_id: str,
+    ) -> str:
         log.info(
-            "session_resource.baas.download_url.request tenant_hash=%s path_hash=%s",
+            "session_resource.baas.session_upload_complete.request tenant_hash=%s transfer_hash=%s",
             self._hash(tenant),
-            self._hash(device_path),
+            self._hash(transfer_id),
         )
         try:
             response = self._http.post(
-                self._path(tenant, bot_uuid, "download-url"),
-                json={"device_path": device_path, "expire_seconds": expire_seconds},
+                self._session_path(
+                    tenant,
+                    session_id,
+                    f"files/upload-url/{self._segment(transfer_id)}/complete",
+                ),
+                json=None,
                 timeout=30.0,
             )
         except Exception as exc:
             log.warning(
-                "session_resource.baas.download_url.fail tenant_hash=%s error_type=%s",
+                "session_resource.baas.session_upload_complete.fail tenant_hash=%s error_type=%s",
                 self._hash(tenant),
                 type(exc).__name__,
             )
             raise
-        data = self._data(response)
-        grant = DownloadGrant(
-            download_url=self._string(data, "download_url"),
-            filename=self._string(data, "filename"),
-            file_size=int(data.get("file_size", 0)),
-            expires_at=self._string(data, "expires_at"),
-        )
+        status = self._string(self._data(response), "status")
         log.info(
-            "session_resource.baas.download_url.success tenant_hash=%s file_size=%s",
+            "session_resource.baas.session_upload_complete.success tenant_hash=%s transfer_hash=%s status=%s",
             self._hash(tenant),
-            grant.file_size,
+            self._hash(transfer_id),
+            status,
         )
-        return grant
+        return status
+
+    def complete_legacy_upload(
+        self,
+        *,
+        tenant: str,
+        bot_uuid: str,
+        transfer_id: str,
+    ) -> str:
+        """Complete a record created before the Session File Sharing API."""
+        log.info(
+            "session_resource.baas.legacy_upload_complete.request tenant_hash=%s transfer_hash=%s",
+            self._hash(tenant),
+            self._hash(transfer_id),
+        )
+        try:
+            response = self._http.post(
+                self._legacy_path(
+                    tenant,
+                    bot_uuid,
+                    f"upload-url/{self._segment(transfer_id)}/complete",
+                ),
+                json=None,
+                timeout=30.0,
+            )
+        except Exception as exc:
+            log.warning(
+                "session_resource.baas.legacy_upload_complete.fail tenant_hash=%s error_type=%s",
+                self._hash(tenant),
+                type(exc).__name__,
+            )
+            raise
+        status = self._string(self._data(response), "status")
+        log.info(
+            "session_resource.baas.legacy_upload_complete.success tenant_hash=%s transfer_hash=%s status=%s",
+            self._hash(tenant),
+            self._hash(transfer_id),
+            status,
+        )
+        return status
 
     @staticmethod
-    def _path(tenant: str, bot_uuid: str, operation: str) -> str:
-        if not _SAFE_ROUTE_ID.fullmatch(tenant) or not _SAFE_ROUTE_ID.fullmatch(bot_uuid):
+    def _session_path(tenant: str, session_id: str, operation: str) -> str:
+        return "/api/v1/sessions/{}/{}/{}".format(
+            SessionResourceBaasClient._segment(tenant),
+            SessionResourceBaasClient._segment(session_id),
+            operation,
+        )
+
+    @staticmethod
+    def _legacy_path(tenant: str, bot_uuid: str, operation: str) -> str:
+        return "/api/v1/bots/{}/{}/files/{}".format(
+            SessionResourceBaasClient._segment(tenant),
+            SessionResourceBaasClient._segment(bot_uuid),
+            operation,
+        )
+
+    @staticmethod
+    def _segment(value: str) -> str:
+        if not isinstance(value, str) or not value:
             raise ValueError("invalid BaaS route identity")
-        return f"/api/v1/bots/{tenant}/{bot_uuid}/files/{operation}"
+        return quote(value, safe="")
 
     @staticmethod
     def _data(response) -> dict:
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, dict) or payload.get("error"):
+            raise ValueError("BaaS file transfer returned an error")
+        if payload.get("code") not in {None, 0}:
             raise ValueError("BaaS file transfer returned an error")
         data = payload.get("data")
         if not isinstance(data, dict):
@@ -122,6 +184,33 @@ class SessionResourceBaasClient:
         value = data.get(key)
         if not isinstance(value, str) or not value:
             raise ValueError(f"BaaS response is missing {key}")
+        return value
+
+    @staticmethod
+    def _optional_string(data: dict, key: str) -> str | None:
+        value = data.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"BaaS response has invalid {key}")
+        return value
+
+    @staticmethod
+    def _optional_int(data: dict, key: str) -> int | None:
+        value = data.get(key)
+        if value is None:
+            return None
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"BaaS response has invalid {key}")
+        return value
+
+    @staticmethod
+    def _optional_parts(data: dict) -> list[dict] | None:
+        value = data.get("parts")
+        if value is None:
+            return None
+        if not isinstance(value, list) or not all(isinstance(part, dict) for part in value):
+            raise ValueError("BaaS response has invalid parts")
         return value
 
     @staticmethod

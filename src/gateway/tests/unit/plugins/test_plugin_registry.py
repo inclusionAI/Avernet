@@ -32,7 +32,8 @@ class TestRegisterPluginOption:
 
         register_plugin_option("gateway.cache", "sofa", factory)
         assert has_enterprise_plugins() is True
-        assert registry_mod._extra_options["gateway.cache"]["sofa"] is factory
+        stored_factory, _, _ = registry_mod._extra_options["gateway.cache"]["sofa"]
+        assert stored_factory is factory
 
     def test_register_multiple_plugins(self) -> None:
         register_plugin_option("gateway.cache", "sofa", lambda: "cache-sofa")
@@ -53,7 +54,8 @@ class TestRegisterPluginOption:
         factory2: Callable[[], Any] = lambda: "v2"
         register_plugin_option("gateway.cache", "sofa", factory1)
         register_plugin_option("gateway.cache", "sofa", factory2)
-        assert registry_mod._extra_options["gateway.cache"]["sofa"] is factory2
+        stored_factory, _, _ = registry_mod._extra_options["gateway.cache"]["sofa"]
+        assert stored_factory is factory2
 
     def test_factory_is_stored_not_called(self) -> None:
         call_count = 0
@@ -65,6 +67,67 @@ class TestRegisterPluginOption:
 
         register_plugin_option("gateway.auth", "sofa", factory)
         assert call_count == 0
-        result = registry_mod._extra_options["gateway.auth"]["sofa"]()
+        stored_factory, _, _ = registry_mod._extra_options["gateway.auth"]["sofa"]
+        result = stored_factory()
         assert result == "result"
         assert call_count == 1
+
+
+class TestRegisterExtraAuthnStrategy:
+    def test_register_and_inject(self) -> None:
+        import gateway.community.bootstrap.plugins._registry as reg_mod
+
+        reg_mod._authn_registry = None  # reset singleton
+
+        result_obj = object()
+
+        def factory() -> object:
+            return result_obj
+
+        from gateway.community.plugin_registry import (
+            inject_extra_authn_strategies,
+            register_extra_authn_strategy,
+        )
+
+        register_extra_authn_strategy("agentpass", factory)
+        # Factory should not be called on register
+        assert "authn_strategies" in registry_mod._extra_options
+
+        # Inject should call factory and register into AuthnStrategyRegistry
+        inject_extra_authn_strategies()
+        pool = reg_mod.get_authn_registry().resolve_all()
+        assert pool["agentpass"] is result_obj
+
+    def test_inject_idempotent(self) -> None:
+        import gateway.community.bootstrap.plugins._registry as reg_mod
+
+        reg_mod._authn_registry = None
+
+        from gateway.community.plugin_registry import (
+            inject_extra_authn_strategies,
+            register_extra_authn_strategy,
+        )
+
+        register_extra_authn_strategy("x", lambda: "result")
+        inject_extra_authn_strategies()
+        pool_before = reg_mod.get_authn_registry().resolve_all()
+
+        # Second inject: _extra_options is already popped, should be no-op
+        inject_extra_authn_strategies()
+        pool_after = reg_mod.get_authn_registry().resolve_all()
+
+        # Both resolve the same factory, but factories produce different
+        # instances each call. Check keys match instead.
+        assert set(pool_before) == set(pool_after) == {"x"}
+
+    def test_inject_with_no_strategies_is_safe(self) -> None:
+        import gateway.community.bootstrap.plugins._registry as reg_mod
+
+        reg_mod._authn_registry = None
+
+        from gateway.community.plugin_registry import inject_extra_authn_strategies
+
+        # No strategies registered — should not raise
+        inject_extra_authn_strategies()
+        pool = reg_mod.get_authn_registry().resolve_all()
+        assert pool == {}

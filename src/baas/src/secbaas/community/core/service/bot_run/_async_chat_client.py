@@ -291,6 +291,7 @@ class AsyncChatClient:
             timeout: 超时时间（秒），None 表示无限等待
             auth_token: 认证令牌，为空时传 OPEN_API:NOT_PROVIDED
             app_id: 应用标识，用于标识调用方应用
+            chat_metadata: chat metadata
 
         Returns:
             Tuple[content, agent_events]: 返回 (响应内容, agent事件列表)
@@ -365,7 +366,7 @@ class AsyncChatClient:
                     message=message,
                     auth_token=auth_token,
                     app_id=app_id,
-                    timeout_ms=timeout * 1000 if timeout else None,
+                    timeout_ms=int(timeout * 1000) if timeout else None,
                     chat_metadata=chat_metadata,
                 )
 
@@ -380,16 +381,7 @@ class AsyncChatClient:
 
                 # 5. 等待主对话事件完成
                 if timeout:
-                    try:
-                        await asyncio.wait_for(
-                            state.chat_complete.wait(), timeout=timeout
-                        )
-                    except TimeoutError:
-                        logger.warning(
-                            "[send] timeout waiting for chat events, "
-                            "session_key=%s, returning anyway",
-                            session_key,
-                        )
+                    await asyncio.wait_for(state.chat_complete.wait(), timeout=timeout)
                 else:
                     # 无超时等待
                     await state.chat_complete.wait()
@@ -483,7 +475,7 @@ class AsyncChatClient:
                     message=message,
                     auth_token=auth_token,
                     app_id=app_id,
-                    timeout_ms=timeout * 1000 if timeout else None,
+                    timeout_ms=int(timeout * 1000) if timeout else None,
                     chat_metadata=chat_metadata,
                 )
 
@@ -748,6 +740,25 @@ class AsyncChatClient:
             self._handle_terminal_error(
                 state, session_key, payload.get("errorMessage", ""), "agent"
             )
+            return
+
+        if agent_state and agent_state == "final":
+            # agent final 事件视为整个会话的结束标志：
+            # 设置 agent_complete + chat_complete 唤醒等待方，并 emit final chunk
+            # 让流式迭代器终止。
+            state.state = "final"
+            state.agent_complete.set()
+            state.chat_complete.set()
+            content = payload.get("message", {}).get("content", [])
+            text = content[0].get("text", "") if content else ""
+            state.content = text
+            self._emit_stream_chunk(
+                state, StreamChunk(type="final", content=text)
+            )
+            if self.verbose:
+                logger.info(
+                    "[agent] final: sessionKey=%s, stream=%s", session_key, stream
+                )
             return
 
         if self.verbose:

@@ -252,6 +252,17 @@ impl MessageFlowService for BcsMessageFlow {
         handle_chat_abort(self, cmd).await
     }
 
+    async fn rebind_channel_source_message(
+        &self,
+        source_run_id: &str,
+        accepted_run_id: &str,
+    ) -> ServiceResult<bool> {
+        Ok(self
+            .message_tracker
+            .rebind_channel_source_message_id(source_run_id, accepted_run_id)
+            .await)
+    }
+
     async fn register_task_run_alias(
         &self,
         task_id: &str,

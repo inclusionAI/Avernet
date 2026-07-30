@@ -82,7 +82,7 @@ async def probe_runtime_skills_layout(
 async def activate_runtime_skills_layout(
     body: PoolLayoutActivateRequest,
 ) -> PoolLayoutActivateApiResponse:
-    """在当前容器的持久化文件系统上提交 OpenClaw Pool 数据面。"""
+    """在当前容器的持久化文件系统上提交对应引擎的 Pool 数据面。"""
 
     plugin = _skills_plugin()
     try:

@@ -18,10 +18,14 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 
 pub use bcs_storage_api::{
-    ByteStream, ByteStreamTrait, ClientUploadTarget, PreparedUpload, PresignGetTicket,
+    ActorRef, ByteStream, ByteStreamTrait, ClientUploadTarget, PreparedUpload, PresignGetOptions,
+    PresignGetTicket,
     StorageCapabilities, StorageError, StorageHandle, StorageHealth, StorageObjectMeta,
     StoragePlugin, UploadHandle, UploadPrepareRequest,
 };
+
+pub mod factory;
+pub use factory::LocalStoragePluginFactory;
 
 /// Configuration for the local filesystem storage plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +50,7 @@ impl LocalStoragePlugin {
             supports_presign_download: false,
             supports_stream_put: true,
             supports_stream_get: true,
+            supports_inline_view: true,
             max_object_size: cfg.max_object_size,
         };
         Self { data_dir: cfg.data_dir, caps }
@@ -125,7 +130,7 @@ impl StoragePlugin for LocalStoragePlugin {
         self.caps
     }
 
-    async fn prepare_upload(&self, req: UploadPrepareRequest) -> Result<PreparedUpload, StorageError> {
+    async fn prepare_upload(&self, req: UploadPrepareRequest, _caller: Option<&ActorRef>) -> Result<PreparedUpload, StorageError> {
         let final_path = self.final_path(&req.key);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -396,7 +401,8 @@ impl StoragePlugin for LocalStoragePlugin {
     async fn presign_get(
         &self,
         _handle: &StorageHandle,
-        _ttl_secs: u64,
+        _opts: PresignGetOptions,
+        _caller: Option<&ActorRef>,
     ) -> Result<PresignGetTicket, StorageError> {
         Err(StorageError::Unsupported("local"))
     }
@@ -459,7 +465,7 @@ mod tests {
     async fn multipart_roundtrip() {
         let (p, _dir) = plugin();
         let key = "multipart";
-        let prep = p.prepare_upload(req(key, 6)).await.unwrap();
+        let prep = p.prepare_upload(req(key, 6), None).await.unwrap();
         p.stream_upload(&prep.handle, Some(1), stream_of(Bytes::from_static(b"abc")))
             .await
             .unwrap();
@@ -488,7 +494,7 @@ mod tests {
     #[tokio::test]
     async fn multipart_missing_part_yields_conflict() {
         let (p, _dir) = plugin();
-        let prep = p.prepare_upload(req("k1", 6)).await.unwrap();
+        let prep = p.prepare_upload(req("k1", 6), None).await.unwrap();
         // Upload part 1 only — part 2 never arrives.
         p.stream_upload(&prep.handle, Some(1), stream_of(Bytes::from_static(b"abc")))
             .await
@@ -500,7 +506,7 @@ mod tests {
     #[tokio::test]
     async fn abort_removes_temp_files() {
         let (p, _dir) = plugin();
-        let prep = p.prepare_upload(req("k2", 3)).await.unwrap();
+        let prep = p.prepare_upload(req("k2", 3), None).await.unwrap();
         p.stream_upload(&prep.handle, None, stream_of(Bytes::from_static(b"abc")))
             .await
             .unwrap();
@@ -518,7 +524,7 @@ mod tests {
             key: "k3".into(),
             backend_handle: serde_json::Value::Null,
         };
-        let err = p.presign_get(&h, 300).await.unwrap_err();
+        let err = p.presign_get(&h, PresignGetOptions { ttl_secs: 300, show: false }, None).await.unwrap_err();
         assert!(matches!(err, StorageError::Unsupported("local")));
     }
 
@@ -542,7 +548,7 @@ mod tests {
         // scan dir is a nested path that was never created.
         let (p, _dir) = plugin();
         let prepared = p
-            .prepare_upload(req("session-files/test/sid/fid/free_chat.png", 100))
+            .prepare_upload(req("session-files/test/sid/fid/free_chat.png", 100), None)
             .await
             .unwrap();
         assert!(p.abort_upload(&prepared.handle).await.is_ok());
@@ -556,7 +562,7 @@ mod tests {
         // dir is a state conflict (no parts), not a backend error.
         let (p, _dir) = plugin();
         let prepared = p
-            .prepare_upload(req("session-files/test/sid/fid/no-parts.bin", 100))
+            .prepare_upload(req("session-files/test/sid/fid/no-parts.bin", 100), None)
             .await
             .unwrap();
         let err = p.complete_upload(&prepared.handle).await.unwrap_err();
@@ -589,7 +595,7 @@ mod tests {
         let body = Bytes::from_static(b"hello slashed key");
         let size = body.len() as u64;
 
-        let prep = p.prepare_upload(req(key, size)).await.unwrap();
+        let prep = p.prepare_upload(req(key, size), None).await.unwrap();
         p.stream_upload(&prep.handle, None, stream_of(body.clone()))
             .await
             .unwrap();
@@ -619,7 +625,7 @@ mod tests {
         let key = "session-files/test/sid/fid/file.txt";
         let body = Bytes::from_static(b"single upload with p-prefixed suffix");
         let size = body.len() as u64;
-        let prep = p.prepare_upload(req(key, size)).await.unwrap();
+        let prep = p.prepare_upload(req(key, size), None).await.unwrap();
 
         let staged = p.data_dir.join(format!("{key}.pABCDEFG.part"));
         tokio::fs::create_dir_all(staged.parent().unwrap())
@@ -650,7 +656,7 @@ mod tests {
     async fn malformed_p_prefixed_temp_is_rejected() {
         let (p, _dir) = plugin();
         let key = "session-files/test/sid/fid/file.txt";
-        let prep = p.prepare_upload(req(key, 3)).await.unwrap();
+        let prep = p.prepare_upload(req(key, 3), None).await.unwrap();
         let staged = p.data_dir.join(format!("{key}.pBAD.X.part"));
         tokio::fs::create_dir_all(staged.parent().unwrap())
             .await
@@ -665,7 +671,7 @@ mod tests {
     async fn stream_upload_rejects_oversize() {
         let (p, _dir) = plugin();
         // Prepare size 5, stream 6 bytes.
-        let prep = p.prepare_upload(req("k-oversize", 5)).await.unwrap();
+        let prep = p.prepare_upload(req("k-oversize", 5), None).await.unwrap();
         let err = p
             .stream_upload(
                 &prep.handle,

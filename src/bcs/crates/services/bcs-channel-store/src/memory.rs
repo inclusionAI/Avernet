@@ -8,16 +8,18 @@ use tracing::info;
 
 use bcs_domain::{
     BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
-    ImParticipantMap, SessionScope,
+    HumanInputRequest, HumanInputRequestStatus, ImParticipantMap, SessionScope,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
 use bcs_service_api::port::repo::{
-    ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort,
+    ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
+    HumanInputRequestRepoPort, ImParticipantRepoPort,
 };
 
 const CHANNEL_BINDINGS_FILE: &str = "channel_bindings.json";
 const CHANNEL_CONVERSATIONS_FILE: &str = "channel_conversations.json";
 const CHANNEL_IM_PARTICIPANTS_FILE: &str = "channel_im_participants.json";
+const HUMAN_INPUT_REQUESTS_FILE: &str = "human_input_requests.json";
 
 /// In-memory implementation of [`ChannelBindingRepoPort`].
 #[derive(Debug)]
@@ -457,11 +459,315 @@ impl ImParticipantRepoPort for MemoryImParticipantRepo {
     }
 }
 
+/// In-memory implementation of [`HumanInputRequestRepoPort`].
+#[derive(Debug)]
+pub struct MemoryHumanInputRequestRepo {
+    requests: RwLock<Vec<HumanInputRequest>>,
+    data_dir: Option<PathBuf>,
+}
+
+impl MemoryHumanInputRequestRepo {
+    pub fn new() -> Self {
+        Self {
+            requests: RwLock::new(Vec::new()),
+            data_dir: None,
+        }
+    }
+
+    pub fn with_data_dir(data_dir: PathBuf) -> Self {
+        Self {
+            requests: RwLock::new(Vec::new()),
+            data_dir: Some(data_dir),
+        }
+    }
+
+    pub async fn load_from_disk(&self) -> ServiceResult<()> {
+        let Some(ref dir) = self.data_dir else {
+            return Ok(());
+        };
+        let path = dir.join(HUMAN_INPUT_REQUESTS_FILE);
+        if !path.exists() {
+            return Ok(());
+        }
+        let data = tokio::fs::read_to_string(&path).await?;
+        let loaded: Vec<HumanInputRequest> = serde_json::from_str(&data)?;
+        *self.requests.write().await = loaded;
+        Ok(())
+    }
+
+    async fn save_to_disk(&self) -> ServiceResult<()> {
+        let Some(ref dir) = self.data_dir else {
+            return Ok(());
+        };
+        tokio::fs::create_dir_all(dir).await?;
+        let requests = self.requests.read().await;
+        let data = serde_json::to_string_pretty(&*requests)?;
+        tokio::fs::write(dir.join(HUMAN_INPUT_REQUESTS_FILE), data).await?;
+        Ok(())
+    }
+
+    fn occupies_slot(request: &HumanInputRequest) -> bool {
+        matches!(
+            request.status,
+            HumanInputRequestStatus::Notifying | HumanInputRequestStatus::Active
+        )
+    }
+}
+
+impl Default for MemoryHumanInputRequestRepo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
+    async fn enqueue(
+        &self,
+        mut request: HumanInputRequest,
+    ) -> ServiceResult<HumanInputEnqueueDisposition> {
+        let disposition = {
+            let mut requests = self.requests.write().await;
+            if let Some(existing) = requests
+                .iter()
+                .find(|existing| existing.request_id == request.request_id)
+            {
+                return Ok(if Self::occupies_slot(existing) {
+                    HumanInputEnqueueDisposition::Notifying
+                } else {
+                    HumanInputEnqueueDisposition::Queued
+                });
+            }
+            let occupied = requests.iter().any(|existing| {
+                existing.reply_scope_key == request.reply_scope_key
+                    && Self::occupies_slot(existing)
+            });
+            if occupied {
+                request.status = HumanInputRequestStatus::Queued;
+                request.active_slot_key = None;
+                requests.push(request);
+                HumanInputEnqueueDisposition::Queued
+            } else {
+                request.status = HumanInputRequestStatus::Notifying;
+                request.active_slot_key = Some(request.reply_scope_key.clone());
+                requests.push(request);
+                HumanInputEnqueueDisposition::Notifying
+            }
+        };
+        self.save_to_disk().await?;
+        Ok(disposition)
+    }
+
+    async fn get(&self, request_id: &str) -> ServiceResult<Option<HumanInputRequest>> {
+        Ok(self
+            .requests
+            .read()
+            .await
+            .iter()
+            .find(|request| request.request_id == request_id)
+            .cloned())
+    }
+
+    async fn list_by_run(&self, run_id: &str) -> ServiceResult<Vec<HumanInputRequest>> {
+        Ok(self
+            .requests
+            .read()
+            .await
+            .iter()
+            .filter(|request| request.run_id == run_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn find_active_by_scope(
+        &self,
+        reply_scope_key: &str,
+    ) -> ServiceResult<Option<HumanInputRequest>> {
+        Ok(self
+            .requests
+            .read()
+            .await
+            .iter()
+            .find(|request| {
+                request.reply_scope_key == reply_scope_key
+                    && request.status == HumanInputRequestStatus::Active
+            })
+            .cloned())
+    }
+
+    async fn mark_active(
+        &self,
+        request_id: &str,
+        provider_message_ref: Option<&str>,
+        activated_at: u64,
+    ) -> ServiceResult<bool> {
+        let updated = {
+            let mut requests = self.requests.write().await;
+            let Some(request) = requests.iter_mut().find(|request| {
+                request.request_id == request_id
+                    && request.status == HumanInputRequestStatus::Notifying
+            }) else {
+                return Ok(false);
+            };
+            request.status = HumanInputRequestStatus::Active;
+            request.provider_message_ref = provider_message_ref.map(str::to_string);
+            request.delivery_attempts = request.delivery_attempts.saturating_add(1);
+            request.activated_at = Some(activated_at);
+            true
+        };
+        self.save_to_disk().await?;
+        Ok(updated)
+    }
+
+    async fn mark_delivery_failed(
+        &self,
+        request_id: &str,
+        error: &str,
+    ) -> ServiceResult<bool> {
+        let updated = {
+            let mut requests = self.requests.write().await;
+            let Some(request) = requests.iter_mut().find(|request| {
+                request.request_id == request_id
+                    && request.status == HumanInputRequestStatus::Notifying
+            }) else {
+                return Ok(false);
+            };
+            request.status = HumanInputRequestStatus::DeliveryFailed;
+            request.active_slot_key = None;
+            request.delivery_attempts = request.delivery_attempts.saturating_add(1);
+            request.last_delivery_error = Some(error.to_string());
+            true
+        };
+        self.save_to_disk().await?;
+        Ok(updated)
+    }
+
+    async fn mark_responded(
+        &self,
+        request_id: &str,
+        responded_at: u64,
+    ) -> ServiceResult<bool> {
+        let updated = {
+            let mut requests = self.requests.write().await;
+            let Some(request) = requests.iter_mut().find(|request| {
+                request.request_id == request_id
+                    && request.status == HumanInputRequestStatus::Active
+            }) else {
+                return Ok(false);
+            };
+            request.status = HumanInputRequestStatus::Responded;
+            request.active_slot_key = None;
+            request.responded_at = Some(responded_at);
+            true
+        };
+        self.save_to_disk().await?;
+        Ok(updated)
+    }
+
+    async fn promote_next(
+        &self,
+        reply_scope_key: &str,
+        now_ms: u64,
+    ) -> ServiceResult<Option<HumanInputRequest>> {
+        let promoted = {
+            let mut requests = self.requests.write().await;
+            for request in requests.iter_mut().filter(|request| {
+                request.reply_scope_key == reply_scope_key
+                    && request.status == HumanInputRequestStatus::Queued
+                    && request.deadline_ms <= now_ms
+            }) {
+                request.status = HumanInputRequestStatus::Expired;
+            }
+            if requests.iter().any(|request| {
+                request.reply_scope_key == reply_scope_key && Self::occupies_slot(request)
+            }) {
+                None
+            } else {
+                let next_index = requests
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, request)| {
+                        request.reply_scope_key == reply_scope_key
+                            && request.status == HumanInputRequestStatus::Queued
+                    })
+                    .min_by_key(|(_, request)| {
+                        (request.deadline_ms, request.created_at, request.request_id.as_str())
+                    })
+                    .map(|(index, _)| index);
+                next_index.map(|index| {
+                    let request = &mut requests[index];
+                    request.status = HumanInputRequestStatus::Notifying;
+                    request.active_slot_key = Some(reply_scope_key.to_string());
+                    request.clone()
+                })
+            }
+        };
+        self.save_to_disk().await?;
+        Ok(promoted)
+    }
+
+    async fn count_queued(&self, reply_scope_key: &str) -> ServiceResult<usize> {
+        Ok(self
+            .requests
+            .read()
+            .await
+            .iter()
+            .filter(|request| {
+                request.reply_scope_key == reply_scope_key
+                    && request.status == HumanInputRequestStatus::Queued
+            })
+            .count())
+    }
+
+    async fn close_for_run_node(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        status: HumanInputRequestStatus,
+    ) -> ServiceResult<u64> {
+        if !matches!(
+            status,
+            HumanInputRequestStatus::Expired | HumanInputRequestStatus::Cancelled
+        ) {
+            return Err(ServiceError::InvalidOperation {
+                message: "HumanInput request can only be closed as expired or cancelled"
+                    .to_string(),
+                request_id: None,
+            });
+        }
+        let updated = {
+            let mut requests = self.requests.write().await;
+            let mut updated = 0_u64;
+            for request in requests.iter_mut().filter(|request| {
+                request.run_id == run_id
+                    && request.node_id == node_id
+                    && matches!(
+                        request.status,
+                        HumanInputRequestStatus::Queued
+                            | HumanInputRequestStatus::Notifying
+                            | HumanInputRequestStatus::Active
+                    )
+            }) {
+                request.status = status;
+                request.active_slot_key = None;
+                updated += 1;
+            }
+            updated
+        };
+        if updated > 0 {
+            self.save_to_disk().await?;
+        }
+        Ok(updated)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use bcs_domain::{BindingTarget, GroupChatScope, Visibility};
+    use bcs_domain::{
+        BindingTarget, GroupChatScope, HumanInputNotificationMode, Visibility,
+    };
 
     fn binding(id: &str, account_ref: &str, status: BindingStatus) -> ChannelBinding {
         ChannelBinding {
@@ -511,6 +817,35 @@ mod tests {
             im_user_id: "staff_1".to_string(),
             actor_id: actor_id.to_string(),
             display_name: Some(display_name.to_string()),
+        }
+    }
+
+    fn human_input_request(id: &str, scope: &str, created_at: u64) -> HumanInputRequest {
+        HumanInputRequest {
+            request_id: id.to_string(),
+            session_id: format!("session-{id}"),
+            run_id: format!("run-{id}"),
+            node_id: "review".to_string(),
+            binding_id: "binding_1".to_string(),
+            channel_type: "dingtalk".to_string(),
+            account_ref: "robot_1".to_string(),
+            notification_mode: HumanInputNotificationMode::FixedGroup,
+            reply_scope_key: scope.to_string(),
+            active_slot_key: None,
+            assignee_actor_id: "human_1".to_string(),
+            im_conversation_id: "cid_1".to_string(),
+            im_conversation_type: "2".to_string(),
+            im_user_id: None,
+            node_display_name: "Review".to_string(),
+            notification_text: "Please review".to_string(),
+            deadline_ms: 10_000,
+            status: HumanInputRequestStatus::Queued,
+            provider_message_ref: None,
+            delivery_attempts: 0,
+            last_delivery_error: None,
+            created_at,
+            activated_at: None,
+            responded_at: None,
         }
     }
 
@@ -645,7 +980,50 @@ mod tests {
                 .map(String::as_str),
             Some("New Name")
         );
+        Ok(())
+    }
 
+    #[tokio::test]
+    async fn human_input_requests_serialize_and_promote_fifo_per_scope() -> ServiceResult<()> {
+        let repo = MemoryHumanInputRequestRepo::new();
+        assert_eq!(
+            repo.enqueue(human_input_request("first", "scope-a", 10))
+                .await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert_eq!(
+            repo.enqueue(human_input_request("second", "scope-a", 20))
+                .await?,
+            HumanInputEnqueueDisposition::Queued
+        );
+        assert_eq!(
+            repo.enqueue(human_input_request("parallel", "scope-b", 30))
+                .await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert!(repo.mark_active("first", Some("card-1"), 40).await?);
+        assert!(repo.mark_active("parallel", None, 41).await?);
+        assert_eq!(repo.count_queued("scope-a").await?, 1);
+        assert!(repo.mark_responded("first", 50).await?);
+
+        let promoted = repo
+            .promote_next("scope-a", 50)
+            .await?
+            .expect("queued request should be promoted");
+        assert_eq!(promoted.request_id, "second");
+        assert_eq!(promoted.status, HumanInputRequestStatus::Notifying);
+        assert_eq!(promoted.active_slot_key.as_deref(), Some("scope-a"));
+        assert!(
+            repo.find_active_by_scope("scope-a").await?.is_none(),
+            "notifying requests must not consume user replies before delivery is confirmed"
+        );
+        assert!(repo.mark_active("second", Some("card-2"), 60).await?);
+        assert_eq!(
+            repo.find_active_by_scope("scope-a")
+                .await?
+                .map(|request| request.request_id),
+            Some("second".to_string())
+        );
         Ok(())
     }
 

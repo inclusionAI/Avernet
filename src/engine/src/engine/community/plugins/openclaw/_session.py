@@ -13,6 +13,7 @@ from engine.community.openclaw.client.gateway_client import OpenClawGatewayClien
 log = logging.getLogger("openclaw-port")
 
 _BCS_GROUP_SESSION_MARKER = "bcs:group:"
+_BCS_INTERNAL_SESSION_PREFIX = "agent:main:bcs_grp_"
 
 
 def _is_bcs_dm_session_key(key: str) -> bool:
@@ -28,6 +29,8 @@ def _should_keep_session(session: dict[str, Any]) -> bool:
     """Return whether a valid gateway session should remain visible."""
     key = session.get("key")
     if not isinstance(key, str):
+        return False
+    if key.startswith(_BCS_INTERNAL_SESSION_PREFIX):
         return False
     return (
         "bcs:group" not in key
@@ -131,7 +134,8 @@ class _SessionPortMixin:
 
         Exact sequence (mirrors `engines/openclaw/session.py:list`):
           1. `sessions.list` RPC → raw sessions
-          2. Filter `bcs:group` sessions, keeping `bcs_grp_*_dm_*` and bcs-cli
+          2. Filter internal BCS sessions and `bcs:group` sessions, keeping
+             namespaced `bcs_grp_*_dm_*` and bcs-cli
           3. Filter by `agent_id` if provided
           4. Filter by exact non-blank `session_key` if provided
           5. Paginate: slice `[offset : offset+limit]` — BEFORE history fetch

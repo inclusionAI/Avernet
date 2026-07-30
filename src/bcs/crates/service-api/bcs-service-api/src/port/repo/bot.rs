@@ -34,6 +34,15 @@ pub trait BotRepoPort: Send + Sync {
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
 
+    /// Read a Bot without hiding persistence failures.
+    ///
+    /// The compatibility default preserves existing repositories. Persistent
+    /// repositories should override this method so application paths that
+    /// distinguish "missing" from "store unavailable" can do so.
+    async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
+        Ok(self.get(bot_id).await)
+    }
+
     /// Like [`get`](Self::get) but also returns soft-deleted bots.
     ///
     /// Default implementation delegates to `get` (which excludes deleted bots),

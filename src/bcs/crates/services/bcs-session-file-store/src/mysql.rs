@@ -34,8 +34,9 @@ const SELECT_BASE_COLS: &str = "file_id, session_id, file_name, mime_type, size,
 /// DB-managed `gmt_create`/`gmt_modified` audit timestamps. The domain fields
 /// are projected from those on read (epoch seconds) in a flavor-aware way
 /// (`UNIX_TIMESTAMP` on MySQL, `strftime('%s', …)` on SQLite), and `list`
-/// orders by `gmt_create`. `json_extract` is lowercase for MySQL/SQLite
-/// portability, so the only dialect branch is the timestamp projection.
+/// orders by `gmt_create DESC` (newest uploads first). `json_extract` is lowercase for MySQL/SQLite
+/// portability, so the dialect branches are the timestamp projection and the
+/// `expires_at` JSON cast (`... AS SIGNED` on MySQL, `... AS INTEGER` on SQLite).
 #[derive(Clone)]
 pub struct MySqlSessionFileStore {
     db: Arc<dyn DbPlugin>,
@@ -84,6 +85,16 @@ fn column_u64(row: &DbRow, name: &str) -> u64 {
 fn parse_status(raw: &str) -> ServiceResult<FileStatus> {
     serde_json::from_value(serde_json::Value::String(raw.to_string()))
         .map_err(|e| ServiceError::InternalError(format!("parse status: {e}")))
+}
+
+/// Flavor-aware SQL cast of `object_handle->'$.expires_at'` to an integer for
+/// comparison. MySQL/OceanBase only accept `CAST(... AS SIGNED)` (their `CAST`
+/// has no `INTEGER` target); SQLite only accepts `CAST(... AS INTEGER)`.
+fn expires_at_cast(flavor: DbSqlFlavor) -> &'static str {
+    match flavor {
+        DbSqlFlavor::Mysql => "CAST(json_extract(object_handle, '$.expires_at') AS SIGNED)",
+        DbSqlFlavor::Sqlite => "CAST(json_extract(object_handle, '$.expires_at') AS INTEGER)",
+    }
 }
 
 impl MySqlSessionFileStore {
@@ -394,7 +405,7 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         let page_sql = format!(
             "SELECT {} FROM bcs_session_files \
              WHERE {where_clause} \
-             ORDER BY gmt_create, file_id LIMIT ? OFFSET ?",
+             ORDER BY gmt_create DESC, file_id DESC LIMIT ? OFFSET ?",
             self.select_cols()
         );
 
@@ -421,10 +432,14 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         limit: u32,
     ) -> ServiceResult<Vec<SessionFile>> {
         // Use lowercase `json_extract` for both MySQL and SQLite portability.
+        // The `expires_at` cast must be flavor-aware (see [`expires_at_cast`]):
+        // MySQL/OceanBase reject `CAST(... AS INTEGER)` (only `AS SIGNED`),
+        // SQLite needs `AS INTEGER`.
+        let expires_at_cast = expires_at_cast(self.flavor);
         let sql = format!(
             "SELECT {} FROM bcs_session_files \
              WHERE env = ? AND status = 'Pending' \
-             AND CAST(json_extract(object_handle, '$.expires_at') AS INTEGER) < ? \
+             AND {expires_at_cast} < ? \
              LIMIT ?",
             self.select_cols()
         );
@@ -545,5 +560,11 @@ mod tests {
         assert_eq!(sf.created_at, 1000);
         assert_eq!(sf.updated_at, 2000);
         assert_eq!(sf.status, FileStatus::Pending);
+    }
+    #[test]
+    fn expires_at_cast_is_flavor_aware() {
+        assert!(expires_at_cast(DbSqlFlavor::Mysql).contains("AS SIGNED"));
+        assert!(!expires_at_cast(DbSqlFlavor::Mysql).contains("AS INTEGER"));
+        assert!(expires_at_cast(DbSqlFlavor::Sqlite).contains("AS INTEGER"));
     }
 }

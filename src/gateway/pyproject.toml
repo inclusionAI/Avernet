@@ -15,6 +15,8 @@ dependencies = [
     "opentelemetry-api",
     "opentelemetry-sdk",
     "opentelemetry-instrumentation-asgi>=0.63b1",
+    "dependency-injector>=4.49.1",
+    "pydantic-settings>=2.14.2",
 ]
 
 [project.optional-dependencies]
@@ -33,21 +35,6 @@ bare = "gateway.community.plugins.logger.bare:BareLoggerPlugin"
 
 [project.entry-points."gateway.tracer"]
 bare = "gateway.community.plugins.tracer.bare:BareTracerPlugin"
-
-[project.entry-points."gateway.cache"]
-bare = "gateway.community.plugins.cache.bare:BareCachePlugin"
-
-[project.entry-points."gateway.auth"]
-bare = "gateway.community.plugins.auth.bare:BareAuthPlugin"
-
-[project.entry-points."gateway.database"]
-bare = "gateway.community.plugins.database.bare:BareDatabasePlugin"
-
-[project.entry-points."gateway.forwarder"]
-bare = "gateway.community.plugins.forwarder.bare:BareForwarder"
-
-[project.entry-points."gateway.schema_catalog"]
-bare = "gateway.community.plugins.schema_catalog.bare:BareSchemaCatalog"
 
 # --- 包索引配置（开源：阿里云公共镜像） ---
 [[tool.uv.index]]

@@ -5,6 +5,8 @@
 - HTTP delivery adapter for BCS.
 - Single resource-oriented router and route modules under `src/routes/`.
 - Request/response parsing, HTTP auth extraction, and HTTP error mapping.
+- Authenticated Bot endpoints for querying current-session state-machine
+  permission and submitting one-shot YAML, transient role bindings, and input.
 
 ## Consumes
 

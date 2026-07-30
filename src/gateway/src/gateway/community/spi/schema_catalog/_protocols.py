@@ -17,7 +17,7 @@ class SchemaCatalog(Protocol):
     ``current`` is a fast, non-blocking read.
 
     Implementations:
-    - BareSchemaCatalog: reads a committed local file (single-box default).
+    - FileSchemaCatalog: reads a committed local file (single-box default).
     - an object-store flavor reads from a vendor-neutral object store
       (S3 / MinIO / GCS / OSS / …) and auto-adopts the latest published version.
       Used by any deployed edition — corp or community — not enterprise-only.

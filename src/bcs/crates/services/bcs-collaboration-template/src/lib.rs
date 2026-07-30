@@ -714,6 +714,7 @@ runtime:
                 "write-and-review",
                 "parallel-expert-review",
                 "solution-and-risk-review",
+                "bot-human-bot-review",
                 "world-cup-preview-content-production",
                 "micro-merchant-event-orchestration",
                 "single-bot-guided-answer",
@@ -753,6 +754,7 @@ runtime:
                 "world-cup-preview-content-production",
                 "micro-merchant-event-orchestration",
                 "single-bot-guided-answer",
+                "bot-human-bot-review",
                 "write-and-review",
             ]
         );
@@ -770,10 +772,17 @@ runtime:
                 tags: vec!["judge".to_string()],
             })
             .await?;
-        assert_eq!(english_response.templates.len(), 1);
+        assert_eq!(english_response.templates.len(), 2);
         assert_eq!(
-            english_response.templates[0].name,
-            "Write & Review (requires LLM)"
+            english_response
+                .templates
+                .iter()
+                .map(|template| template.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "Bot-Human-Bot Review (requires LLM)",
+                "Write & Review (requires LLM)",
+            ]
         );
 
         Ok(())
@@ -833,6 +842,51 @@ runtime:
         assert!(detail.yaml.contains("# 写作质检协同模板。"));
         assert_eq!(detail.definition["name"], "写作质检协同");
         assert!(detail.definition.get("id").is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn returns_bot_human_bot_template_with_human_input_node(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let repo = Arc::new(FileCollaborationTemplateRepo::new(seed_template_dir()));
+        let service =
+            CollaborationTemplateServiceImpl::new(repo, "zh-CN").with_judge_templates_enabled(true);
+
+        let detail = service
+            .get_template(GetCollaborationTemplateQuery {
+                template_id: "bot-human-bot-review".to_string(),
+                requested_language: Some("zh-CN".to_string()),
+                accept_language: None,
+                format: CollaborationTemplateFormat::Json,
+            })
+            .await?;
+
+        assert_eq!(detail.name, "Bot-Human-Bot 三节点协作");
+        assert_eq!(
+            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]["kind"],
+            "human_input"
+        );
+        assert!(
+            detail.definition["runtime"]["state_machine"]
+                .get("human_input_channel")
+                .is_none()
+        );
+        assert!(
+            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]
+                .get("assignee")
+                .is_none()
+        );
+        assert!(
+            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]
+                .get("notification")
+                .is_none()
+        );
+        assert_eq!(
+            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]
+                ["node_timeout_ms"],
+            86_400_000
+        );
 
         Ok(())
     }

@@ -68,6 +68,8 @@ pub trait StateMachineDefinitionRepoPort: Send + Sync {
 pub trait GroupRuntimeBindingRepoPort: Send + Sync {
     async fn upsert(&self, binding: GroupRuntimeBinding) -> ServiceResult<()>;
     async fn get(&self, group_id: &str) -> ServiceResult<Option<GroupRuntimeBinding>>;
+    /// Delete all runtime binding state for a Group. Idempotent.
+    async fn delete(&self, group_id: &str) -> ServiceResult<bool>;
     async fn bind_default_definition(
         &self,
         group_id: &str,
@@ -110,11 +112,51 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         nodes: Vec<StateMachineNodeRun>,
     ) -> ServiceResult<()>;
 
+    /// Atomically create a run only when the target session has no active run.
+    ///
+    /// Stores used by one-shot session launches must override this method with
+    /// backend-level serialization. The default preserves compatibility for
+    /// external implementations, but only provides best-effort protection.
+    async fn create_run_if_session_idle(
+        &self,
+        run: StateMachineRun,
+        nodes: Vec<StateMachineNodeRun>,
+    ) -> ServiceResult<bool> {
+        if self
+            .get_run_by_session_id(&run.session_id)
+            .await?
+            .is_some_and(|existing| {
+                matches!(
+                    existing.status,
+                    StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+                )
+            })
+        {
+            return Ok(false);
+        }
+        self.create_run(run, nodes).await?;
+        Ok(true)
+    }
+
     async fn get_run(&self, run_id: &str) -> ServiceResult<Option<StateMachineRun>>;
     async fn get_run_by_session_id(
         &self,
         session_id: &str,
     ) -> ServiceResult<Option<StateMachineRun>>;
+    /// List every run associated with a session.
+    ///
+    /// The compatibility default preserves existing external implementations;
+    /// production stores override it so cleanup can cancel all active runs.
+    async fn list_runs_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Vec<StateMachineRun>> {
+        Ok(self
+            .get_run_by_session_id(session_id)
+            .await?
+            .into_iter()
+            .collect())
+    }
     async fn list_node_runs(&self, run_id: &str) -> ServiceResult<Vec<StateMachineNodeRun>>;
     async fn get_node_run(
         &self,

@@ -4,7 +4,7 @@ Ten read-only endpoints, all served directly by the engine running inside
 the aicoding container:
 
 * ``GET /api/aicoding/sessions``                     — sessions list + run_status enrich
-* ``GET /api/aicoding/sessions/file-tree``           — recursive workspace tree
+* ``GET /api/aicoding/sessions/file-tree``           — depth-limited workspace tree
 * ``GET /api/aicoding/sessions/files/preview``       — file content (size-bounded)
 * ``GET /api/aicoding/sessions/git-diff``            — changed files (tree per project)
 * ``GET /api/aicoding/sessions/files/diff``          — unified diff for one file
@@ -61,6 +61,7 @@ from engine.community.api.session.router import _session_to_dict
 from engine.community.core.aicoding.models import DiffTreeNode, FileTreeNode
 from engine.community.core.aicoding.runstatus_service import RunStatusService
 from engine.community.core.aicoding.workspace_service import (
+    DEFAULT_FILE_TREE_MAX_DEPTH,
     FilePreviewTooLargeError,
     WorkspaceService,
 )
@@ -146,8 +147,13 @@ async def list_file_tree(
         None,
         description="可选：前端直传工作目录绝对路径；与 session_id 至少提供一个",
     ),
+    depth: int = Query(
+        DEFAULT_FILE_TREE_MAX_DEPTH,
+        ge=0,
+        description="最大遍历层数；默认 3，0 表示返回所有层级",
+    ),
 ) -> FileTreeResponse:
-    """Return the full workspace tree (recursive, filtered, sorted)."""
+    """Return a depth-limited workspace tree (filtered and sorted)."""
     normalized_session_id = (session_id.strip() or None) if session_id else None
     normalized_cwd = (cwd.strip() or None) if cwd else None
     if not normalized_session_id and not normalized_cwd:
@@ -162,6 +168,7 @@ async def list_file_tree(
         tree = await service.list_file_tree(
             normalized_session_id,
             normalized_cwd,
+            max_depth=depth,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

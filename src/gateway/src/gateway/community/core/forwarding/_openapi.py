@@ -13,7 +13,6 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from gateway.community.core.authn import RouteSecurity
-from gateway.community.spi.authn import Delegation, StrategyParams
 
 _HTTP_METHODS = frozenset(
     {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
@@ -88,22 +87,11 @@ def _with_security(
         if requirement is None:
             continue
         new_op = dict(operation)
-        new_op["x-avernet-security"] = [
-            {name: _params_to_dict(params) for name, params in alternative.items()}
-            for alternative in requirement
-        ]
+        new_op["x-avernet-security"] = {
+            identity.value: presence.value for identity, presence in requirement.items()
+        }
         new_item[method] = new_op
     return new_item
-
-
-def _params_to_dict(params: StrategyParams) -> dict[str, Any]:
-    """Serialize strategy params, omitting defaults (empty scopes, optional)."""
-    out: dict[str, Any] = {}
-    if params.scopes:
-        out["scopes"] = sorted(params.scopes)
-    if params.delegation is not Delegation.OPTIONAL:
-        out["delegation"] = params.delegation.value
-    return out
 
 
 # ── component pruning ────────────────────────────────────────────────────────

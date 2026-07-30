@@ -655,6 +655,16 @@ class TestUpdateBot:
         assert "不能为空" in body["message"]
         svc.update_bot.assert_not_called()
 
+    def test_legacy_name_empty_rejected(self, client):
+        # 兼容旧字段 name，不能静默忽略空名称并返回成功。
+        tc, svc, _ = client
+        resp = tc.put("/api/bots/default", json={"name": ""})
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        assert "不能为空" in body["message"]
+        svc.update_bot.assert_not_called()
+
     def test_invalid_name_too_long_rejected(self, client):
         tc, svc, _ = client
         resp = tc.put("/api/bots/default", json={"bot_name": "x" * 33})
@@ -1762,20 +1772,20 @@ class TestListDomainBots:
         assert data["error_code"] == 500
         assert "查询失败" in data["message"] or "失败" in data["message"]
 
-    def test_list_domain_bots_non_operator_forbidden(self, client):
-        """An authenticated non-operator cannot enumerate domain bots."""
+    def test_list_domain_bots_strips_iam_token(self, client):
+        """iam_token 是调用方 IAM 凭据,公开域 Bot 列表响应中必须剔除。"""
         tc, svc, _ = client
-
-        async def _deny_operator():
-            raise HTTPException(status_code=403, detail="operator required")
-
-        tc.app.dependency_overrides[require_operator] = _deny_operator
-        svc.list_domain_bots.reset_mock()
+        bot_with_token = {**BOT_SAMPLE, "ext": {"iam_token": "secret-token", "is_domain_bot": True}}
+        svc.list_domain_bots.return_value = {"total": 1, "items": [bot_with_token]}
 
         resp = tc.get("/api/bots/search/domain-bots")
 
-        assert resp.status_code == 403
-        svc.list_domain_bots.assert_not_called()
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        item = data["data"]["items"][0]
+        assert "iam_token" not in item["ext"]
+        assert item["ext"]["is_domain_bot"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -1831,7 +1841,9 @@ class TestListCodingBotsByArchitect:
 def _engine_config_app(mock_bot_service, mock_svc):
     """An app with the bot-management router + a mocked EngineConfigService bound."""
     from agentclaw.community.adapters.http.bot_management.router import router
-    from agentclaw.community.core.services.engine_config import EngineConfigService
+    from agentclaw.community.api.engine_config_service import (
+        EngineConfigServiceProtocol,
+    )
 
     app = FastAPI()
     app.include_router(router)
@@ -1839,7 +1851,7 @@ def _engine_config_app(mock_bot_service, mock_svc):
 
     class _Extra(Module):
         def configure(self, binder):
-            binder.bind(EngineConfigService, to=mock_svc)
+            binder.bind(EngineConfigServiceProtocol, to=mock_svc)
 
     attach_injector(app, Injector([
         _bind_bot_service(mock_bot_service, bot_repo=MagicMock(), auth=MagicMock()),
@@ -1877,6 +1889,26 @@ class TestUpdateEngineConfig:
         body = resp.json()
         assert body["success"] is False
         assert body["error_code"] == 500
+
+    def test_invalid_json_rejected(self, engine_cfg_client):
+        tc, svc = engine_cfg_client
+        resp = tc.put(
+            "/api/bots/default/engine-config",
+            content="this is not valid json {{{",
+            headers={"content-type": "application/json"},
+        )
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        svc.write_bot_config.assert_not_awaited()
+
+    def test_non_object_json_rejected(self, engine_cfg_client):
+        tc, svc = engine_cfg_client
+        resp = tc.put("/api/bots/default/engine-config", json=["not", "an", "object"])
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        svc.write_bot_config.assert_not_awaited()
 
 
 class TestGetEngineConfig:

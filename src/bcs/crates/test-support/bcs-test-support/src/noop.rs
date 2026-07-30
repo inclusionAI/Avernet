@@ -1884,6 +1884,7 @@ impl ChannelDeliveryPort for NoopChannelDeliveryPort {
     ) -> ServiceResult<ChannelDeliveryResult> {
         Ok(ChannelDeliveryResult {
             delivered: false,
+            provider_message_ref: None,
             error: None,
         })
     }

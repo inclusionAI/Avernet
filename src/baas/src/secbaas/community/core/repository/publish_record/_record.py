@@ -9,6 +9,19 @@ from typing import Any
 
 
 @dataclass(slots=True)
+class PublishRecordExtraConfig:
+    """Typed model for baas_publish_record.extra_config.
+
+    Captures device identity metadata at record creation time so the
+    device's provider identity is preserved even after the source
+    baas_device record is overwritten by subsequent publishes.
+    """
+
+    device_uuid: str | None = None
+    provider_device_id: str | None = None
+
+
+@dataclass(slots=True)
 class PublishRecordRecord:
     """Database record for baas_publish_record table.
 

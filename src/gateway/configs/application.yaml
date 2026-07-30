@@ -18,3 +18,20 @@ module_config:
     port: 8888
     start: "gateway.community.adapters.web.app:app"
     enable_api_docs: true
+
+# Plugin selection — community-safe defaults (all stub/descriptive).
+# Enterprise overrides specific selectors via config overlay.
+user_config:
+  plugins:
+    forwarder: "httpx"
+    schema_catalog: "file"
+    cache: "stub"
+    authn:
+      app_token: "stub"
+      tenant: "stub"
+    database:
+      plugin_database: "SQLITE_ORM"
+      database_url: ""
+  upstreams:
+    backend_server_url: backend.sample.com
+    baas_server_url: baas.sample.com

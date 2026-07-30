@@ -132,6 +132,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         file_transfer_backend=plugins.file_transfer_backend,
         ws_relay_session_repo=repository.ws_relay_session_repository,
         ticket_repository=repository.ticket_repository,
+        session_ticket_repository=repository.session_ticket_repository,
     )
 
     tasks = providers.Container(

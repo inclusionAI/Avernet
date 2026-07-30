@@ -13,6 +13,7 @@ pub mod repo;
 pub mod secret;
 pub mod session_callback;
 pub mod session_channel_outbound;
+pub mod state_machine_result;
 
 pub use bot_connection::{BotConnectionControlPort, KickReason};
 pub use bot_terminal_observer::{
@@ -24,7 +25,7 @@ pub use channel_binding_cleanup::{
 };
 pub use channel_delivery::{
     ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
-    ChannelOutboundEventKind, ChannelRenderHint,
+    ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
 };
 pub use delivery::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult,
@@ -54,7 +55,8 @@ pub use repo::{
     OrganizationCandidateReadQuery, OrganizationMemberPage, OrganizationRepoPort, UpdateOrganizationRecord,
     ConversationSessionRepoPort, FriendRepoPort, FriendRequestRepoPort, GroupRepoPort,
     GroupRuntimeBindingRepoPort, ImParticipantRepoPort, MarkHumanNodeRunningCommand,
-    NewSessionParams, ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
+    HumanInputEnqueueDisposition, HumanInputRequestRepoPort, NewSessionParams,
+    ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
     ProviderBotDiscoverySelector, ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort,
     SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineRunRepoPort, UserIdentity,
     UserIdentityRepoPort, UpsertOrganizationMemberRecord,
@@ -63,4 +65,8 @@ pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
 pub use session_callback::SessionCallbackDispatchPort;
 pub use session_channel_outbound::{
     HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    StateMachineTerminalEvent, StateMachineTerminalStatus,
+};
+pub use state_machine_result::{
+    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
 };

@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use bcs_domain::{
     CollaborationDefinition, CollaborationRequirements, CollaborationRuntimeDefinition,
-    StateMachineAssignee, StateMachineDefinition, StateMachineGraphMode, StateMachineNodeKind,
+    HumanInputNotificationMode, StateMachineAssignee, StateMachineDefinition,
+    StateMachineGraphMode, StateMachineNodeKind,
 };
 use bcs_service_api::CollaborationRuntimeError;
 
@@ -67,6 +68,18 @@ pub fn validate_definition(
     }
     if state_machine.nodes.is_empty() {
         return invalid("state_machine.nodes must not be empty");
+    }
+    if let Some(channel) = &state_machine.human_input_channel {
+        if channel.channel_type.trim().is_empty() {
+            return invalid("state_machine.human_input_channel.channel_type must not be empty");
+        }
+        if let Some(fixed_group) = &channel.fixed_group
+            && fixed_group.conversation_id.trim().is_empty()
+        {
+            return invalid(
+                "state_machine.human_input_channel.fixed_group.conversation_id must not be empty",
+            );
+        }
     }
 
     let mut terminal_nodes = Vec::new();
@@ -151,10 +164,46 @@ pub fn validate_definition(
                 None => return invalid(format!("node {node_id} assignee is required")),
             },
             StateMachineNodeKind::HumanInput => {
-                if node.assignee.is_some() {
-                    return invalid(format!(
-                        "human_input node {node_id} must not define assignee"
-                    ));
+                match (&node.notification, &node.assignee) {
+                    (None, None) => {}
+                    (None, Some(_)) => {
+                        return invalid(format!(
+                            "frontend human_input node {node_id} must not define assignee"
+                        ));
+                    }
+                    (
+                        Some(notification),
+                        Some(StateMachineAssignee::RuntimeActor { actor }),
+                    ) if !actor.trim().is_empty() => {
+                        let channel =
+                            state_machine.human_input_channel.as_ref().ok_or_else(|| {
+                                CollaborationRuntimeError::InvalidDefinition(format!(
+                                    "human_input node {node_id} with notification requires state_machine.human_input_channel"
+                                ))
+                            })?;
+                        if notification.mode == HumanInputNotificationMode::FixedGroup
+                            && channel.fixed_group.is_none()
+                        {
+                            return invalid(format!(
+                                "human_input node {node_id} fixed_group notification requires state_machine.human_input_channel.fixed_group"
+                            ));
+                        }
+                    }
+                    (Some(_), Some(StateMachineAssignee::RuntimeActor { .. })) => {
+                        return invalid(format!(
+                            "human_input node {node_id} assignee actor must not be empty"
+                        ));
+                    }
+                    (Some(_), Some(StateMachineAssignee::BotBinding { .. })) => {
+                        return invalid(format!(
+                            "human_input node {node_id} assignee must be runtime_actor"
+                        ));
+                    }
+                    (Some(_), None) => {
+                        return invalid(format!(
+                            "human_input node {node_id} with notification requires runtime_actor assignee"
+                        ));
+                    }
                 }
                 if node.max_attempts.is_some() {
                     return invalid(format!(

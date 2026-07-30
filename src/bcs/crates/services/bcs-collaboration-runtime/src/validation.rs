@@ -234,6 +234,7 @@ fn validate_authoring_shape(
             "graph_mode",
             "projection",
             "defaults",
+            "human_input_channel",
             "nodes",
             "extensions",
             "initial_node",
@@ -257,6 +258,24 @@ fn validate_authoring_shape(
             "$.runtime.state_machine.defaults",
         )?;
     }
+    if let Some(channel) =
+        mapping_get(machine, "human_input_channel").and_then(Value::as_mapping)
+    {
+        ensure_allowed_keys(
+            channel,
+            &["channel_type", "fixed_group"],
+            "$.runtime.state_machine.human_input_channel",
+        )?;
+        if let Some(fixed_group) =
+            mapping_get(channel, "fixed_group").and_then(Value::as_mapping)
+        {
+            ensure_allowed_keys(
+                fixed_group,
+                &["conversation_type", "conversation_id"],
+                "$.runtime.state_machine.human_input_channel.fixed_group",
+            )?;
+        }
+    }
     let Some(nodes) = mapping_get(machine, "nodes").and_then(Value::as_mapping) else {
         return Ok(());
     };
@@ -279,6 +298,7 @@ fn validate_authoring_shape(
                 "kind",
                 "display_name",
                 "assignee",
+                "notification",
                 "instruction",
                 "node_timeout_ms",
                 "max_attempts",
@@ -295,8 +315,15 @@ fn validate_authoring_shape(
         if let Some(assignee) = mapping_get(node, "assignee").and_then(Value::as_mapping) {
             ensure_allowed_keys(
                 assignee,
-                &["type", "binding"],
+                &["type", "binding", "actor"],
                 &format!("{node_path}.assignee"),
+            )?;
+        }
+        if let Some(notification) = mapping_get(node, "notification").and_then(Value::as_mapping) {
+            ensure_allowed_keys(
+                notification,
+                &["mode"],
+                &format!("{node_path}.notification"),
             )?;
         }
         if let Some(transitions) = mapping_get(node, "transitions").and_then(Value::as_mapping) {

@@ -18,7 +18,7 @@
 
 ## Task 2: Forwarder SPI + bare httpx plugin `[x]`
 - **Goal:** A streaming HTTP forwarder behind an SPI so flavors can swap.
-- **Files:** `src/gateway/src/gateway/community/spi/forwarder/{_protocols,_models,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/forwarder/bare/_plugin.py` (new), `pyproject.toml`
+- **Files:** `src/gateway/src/gateway/community/spi/forwarder/{_protocols,_models,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/forwarder/httpx/_plugin.py` (new), `pyproject.toml`
 - **Done when:**
   - [x] `Forwarder.forward(request) -> AsyncContextManager[ForwardResponse]` protocol defined (neutral `ForwardRequest`/`ForwardResponse` models).
   - [x] Bare plugin issues the upstream call with `httpx`, streaming the response body (raw bytes) and dropping hop-by-hop headers both directions. (Downstream principal conveyance/signing is added by the auth workstream at this seam; not built here.)
@@ -28,7 +28,7 @@
 
 ## Task 3: SchemaCatalog SPI + file loader + background refresh `[x]`
 - **Goal:** Provide the current published description per domain, refreshed in the background with last-known-good.
-- **Files:** `src/gateway/src/gateway/community/spi/schema_catalog/{_protocols,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/schema_catalog/bare/_plugin.py` (new)
+- **Files:** `src/gateway/src/gateway/community/spi/schema_catalog/{_protocols,__init__}.py` (new), `src/gateway/src/gateway/community/plugins/schema_catalog/file/_plugin.py` (new)
 - **Done when:**
   - [x] `SchemaCatalog.current(domain) -> dict` protocol defined.
   - [x] Bare plugin reads a local file (single-box); `refresh_loop` re-reads every `refresh_seconds` and swaps the in-memory copy.

@@ -113,9 +113,43 @@ pub struct StartStateMachineRunCommand {
     pub definition: Option<Value>,
     /// Optional override for explicit debug starts. Omit to use group binding.
     pub definition_ref: Option<CollaborationDefinitionRef>,
+    /// Optional one-run participant bindings. When present, these override the
+    /// group's persisted bindings without mutating the group configuration.
+    pub participant_bindings: Option<BTreeMap<String, RuntimeParticipantBinding>>,
     pub input: Value,
     pub caller_id: Option<String>,
     pub authenticated_human: Option<AuthenticatedHumanCaller>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionStateMachinePermissionCommand {
+    pub session_id: String,
+    pub caller_bot_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionStateMachinePermissionView {
+    pub session_id: String,
+    pub group_id: String,
+    pub caller_bot_id: String,
+    pub allowed: bool,
+    pub reason_code: String,
+    pub message: String,
+    pub policy_version: String,
+    pub group_strategy: String,
+    pub group_owner_bot_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_run_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StartSessionStateMachineRunCommand {
+    pub session_id: String,
+    pub caller_bot_id: String,
+    pub definition_yaml: String,
+    pub participant_bindings: BTreeMap<String, RuntimeParticipantBinding>,
+    pub input: Value,
+    pub judge_available: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -213,6 +247,8 @@ pub struct ConfigureGroupRuntimeOutcome {
     pub group_id: String,
     pub default_definition: Option<CollaborationDefinitionRef>,
     pub auto_start_on_service_invocation: bool,
+    #[serde(default)]
+    pub requires_human_input_channel: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -379,6 +415,26 @@ pub trait CollaborationRuntimeService: Send + Sync {
         &self,
         cmd: StartStateMachineRunCommand,
     ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError>;
+
+    async fn get_session_state_machine_permission(
+        &self,
+        cmd: SessionStateMachinePermissionCommand,
+    ) -> Result<SessionStateMachinePermissionView, CollaborationRuntimeError> {
+        let _ = cmd;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "session state-machine permission lookup is not implemented".to_string(),
+        ))
+    }
+
+    async fn start_session_state_machine_run(
+        &self,
+        cmd: StartSessionStateMachineRunCommand,
+    ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
+        let _ = cmd;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "session state-machine start is not implemented".to_string(),
+        ))
+    }
 
     async fn get_state_machine_run(
         &self,
@@ -608,6 +664,34 @@ pub trait CollaborationRuntimeService: Send + Sync {
         &self,
         cmd: ConfigureGroupRuntimeCommand,
     ) -> Result<ConfigureGroupRuntimeOutcome, CollaborationRuntimeError>;
+
+    /// Abort every active StateMachine run currently associated with a Group.
+    ///
+    /// This is the first phase of Group deletion: bindings and sessions remain
+    /// available if the Group persistence delete subsequently fails.
+    async fn cancel_group_runs(
+        &self,
+        group_id: &str,
+        reason: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let _ = (group_id, reason);
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "group run cancellation is not implemented".to_string(),
+        ))
+    }
+
+    /// Remove the Group runtime binding and its sessions after the Group row
+    /// has been deleted. Implementations must be idempotent so a DELETE retry
+    /// can finish cleanup after an earlier partial failure.
+    async fn delete_group_runtime_state(
+        &self,
+        group_id: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let _ = group_id;
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "group runtime state deletion is not implemented".to_string(),
+        ))
+    }
 
     async fn get_group_collaboration_definition(
         &self,

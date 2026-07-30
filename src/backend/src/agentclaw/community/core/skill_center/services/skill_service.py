@@ -76,6 +76,8 @@ class SkillService:
         local_dir: Path | None = None,
         global_repo_dir: Path | None = None,
         local_skill_path_adapter: "Callable[[str], str] | None" = None,
+        local_skill_locator_adapter: "Callable[[str], str] | None" = None,
+        runtime_uses_pool_paths: bool = False,
     ):
         """
         Args:
@@ -117,6 +119,19 @@ class SkillService:
         self._local_skill_path_adapter: "Callable[[str], str]" = (
             local_skill_path_adapter or (lambda p: p)
         )
+        # Adapter applied only when persisting a local:// DB locator. It is
+        # deliberately separate from the device-I/O adapter above: Teclaw
+        # expands its logical locator for container I/O but must keep the
+        # minimal logical value in DB. Pool-active file engines set both
+        # adapters to the canonical Pool resolver.
+        self._local_skill_locator_adapter: "Callable[[str], str]" = (
+            local_skill_locator_adapter or (lambda p: p)
+        )
+        # Public request-scope policy consumed by the HTTP adapter. Legacy
+        # runtimes historically tolerate an unavailable device-sync endpoint;
+        # once Pool owns I/O, reporting CRUD success without committing the
+        # runtime mapping would leave DB/filesystem/runtime inconsistent.
+        self.runtime_uses_pool_paths = runtime_uses_pool_paths
 
         # Lazy GitSyncService lookup — eager injection would close the cycle
         # GitSyncService → SkillServiceFactory → SkillService → GitSyncService.
@@ -504,10 +519,10 @@ class SkillService:
             bolt_id: Bolt ID（用于 device_fs 路由）
 
         Note:
-            不再检查源路径是否存在，因为：
-            1. 管理时 repo_dir 可能是空目录或不存在（软链接未创建）
-            2. 运行时 skills-repo 被 mount，软链接才能解析
-            3. 软链接指向相对路径 skills-repo/... 或 skills-local/...
+            Pool-owned local skill 必须先通过 DeviceFileSystem 验证源路径
+            存在，避免向运行时发布 dangling mapping。Legacy 保留历史
+            best-effort 行为；git skill 继续由运行时 repo mount 解析，不在
+            Backend 管理视图预检源路径。
         """
         logger.info(f"[SkillService.activate_skill] Start: skill_path={skill_path}")
 
@@ -516,6 +531,28 @@ class SkillService:
         except ValueError as e:
             logger.error(f"[SkillService.activate_skill] Invalid skill_path: {e}")
             return False
+
+        device_fs = self._device_fs_factory(bolt_id, user_id)
+        if protocol == "local" and self.runtime_uses_pool_paths:
+            source = Path(self._local_skill_path_adapter(str(source)))
+            try:
+                source_exists = await device_fs.exists(str(source))
+            except Exception as e:
+                logger.warning(
+                    "[SkillService.activate_skill] Failed to verify local "
+                    "source %s: %s",
+                    source,
+                    e,
+                    exc_info=True,
+                )
+                return False
+            if not source_exists:
+                logger.error(
+                    "[SkillService.activate_skill] Refusing to activate "
+                    "missing local source: %s",
+                    source,
+                )
+                return False
 
         # 生成链接名称 —— 软链名取尾名 patent-quality-audit，与 local 分支
         # (Path(path).name) 及 get_symlink_mappings (split('/')[-1]) 对齐。
@@ -563,7 +600,6 @@ class SkillService:
 
         if target_link.exists() or target_link.is_symlink():
             # Phase 4: engine-view path — 让 engine 在 VM 内删，不要宿主机 shutil.rmtree
-            device_fs = self._device_fs_factory(bolt_id, user_id)
             success = await self._delete_active_entry(device_fs, target_link)
             if not success:
                 logger.error(
@@ -1808,18 +1844,21 @@ class SkillService:
             if existing_skill is not None
             else ""
         )
-        skill_dir = (
+        locator_skill_dir = (
             Path(existing_locator)
             if existing_locator.startswith("/")
             else self.local_dir / skill_name
         )
-        skill_dir_str = str(skill_dir)
-        # The DB ``git_path`` keeps ``skill_dir_str`` (logical for teclaw, host for
-        # arca); the device-fs delete/write use the adapter-expanded engine path
-        # (identity for non-teclaw, ``workspace/skills-local/...`` for teclaw).
+        # During cutover the existing DB locator can still point at Legacy.
+        # Resolve it before both file I/O and persistence so a same-name upload
+        # becomes a controlled copy-forward into canonical Pool rather than
+        # continuing to write Legacy.
+        skill_dir_str = self._local_skill_locator_adapter(
+            str(locator_skill_dir)
+        )
         engine_skill_dir_str = self._local_skill_path_adapter(skill_dir_str)
         logger.info(
-            f"[SkillService.upload_skill] Skill directory: {skill_dir} "
+            f"[SkillService.upload_skill] Skill directory: {skill_dir_str} "
             f"(engine: {engine_skill_dir_str})"
         )
 
@@ -1846,6 +1885,7 @@ class SkillService:
                     'description': skill_info.get("description", ""),
                     'category': skill_info.get("category", "general"),
                     'tags': json.dumps(skill_info.get("tags", [])),
+                    'git_path': skill_path,
                     'gmt_modified': datetime.utcnow()
                 }
                 if user_id:

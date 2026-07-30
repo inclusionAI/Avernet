@@ -1,6 +1,6 @@
 import pytest
 
-from gateway.community.plugins.database.bare._plugin import BareDatabasePlugin
+from gateway.community.plugins.database.sqlite._plugin import SqliteDatabasePlugin
 from gateway.community.spi.database import DataSourcePlugin
 
 
@@ -35,9 +35,9 @@ class DataSourcePluginContract:
         self.plugin.init_database(mock_config)
 
 
-class TestBareDatabasePlugin(DataSourcePluginContract):
+class TestSqliteDatabasePlugin(DataSourcePluginContract):
     def setup_method(self) -> None:
-        self.plugin = BareDatabasePlugin()
+        self.plugin = SqliteDatabasePlugin()
 
     def test_sync_connection_raises_not_implemented(self) -> None:
         with pytest.raises(NotImplementedError):

@@ -156,11 +156,18 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             from agentclaw.community.di.modules.singlebox_access_module import (
                 SingleboxAccessModule,
             )
+            from agentclaw.community.di.modules.infrastructure.singlebox.caller_identity import (
+                SingleboxCallerIdentityModule,
+            )
             from agentclaw.community.di.modules.infrastructure.singlebox.devices import (
                 SingleboxDevicesModule,
             )
 
-            column.extend([SingleboxDevicesModule(), SingleboxAccessModule()])
+            column.extend([
+                SingleboxDevicesModule(),
+                SingleboxAccessModule(),
+                SingleboxCallerIdentityModule(),
+            ])
 
         return column
 

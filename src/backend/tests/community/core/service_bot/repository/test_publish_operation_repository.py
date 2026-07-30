@@ -144,6 +144,18 @@ def test_complete_cas(repo):
     assert repo.complete(op.id) is None
 
 
+def test_complete_without_workflow_cas(repo):
+    op = _intent(
+        repo,
+        kind=PublishOperationKind.DRAFT_RESTORE.value,
+        stage="draft",
+    )
+    done = repo.complete_without_workflow(op.id)
+    assert done.state == PublishOperationState.COMPLETED.value
+    assert done.baas_publish_id is None
+    assert repo.complete_without_workflow(op.id) is None
+
+
 def test_fail_from_any_nonterminal(repo):
     op = _intent(repo)
     failed = repo.fail(op.id, "boom")
@@ -217,6 +229,7 @@ def test_update_result_blind_overwrite(repo):
 def test_transitions_on_missing_row_return_none(repo):
     assert repo.record_workflow(123456, baas_publish_id=1) is None
     assert repo.complete(123456) is None
+    assert repo.complete_without_workflow(123456) is None
     assert repo.fail(123456, "e") is None
     assert repo.abandon(123456, "r") is None
 
@@ -250,5 +263,6 @@ def test_publish_operation_kind_deploy_partition():
     assert preserving == {
         PublishOperationKind.RESTART,
         PublishOperationKind.SCALE,
+        PublishOperationKind.DRAFT_RESTORE,
         PublishOperationKind.EVAL_TEARDOWN,
     }

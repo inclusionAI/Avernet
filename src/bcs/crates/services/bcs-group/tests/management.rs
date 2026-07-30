@@ -879,12 +879,9 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             bot_id: "private-friend".to_string(),
             role: Some("consultant".to_string()),
         })
-        .await;
-    assert!(matches!(
-        private_friend,
-        Err(GroupUseCaseError::Service(ServiceError::BotNotFound(bot_id)))
-            if bot_id == "private-friend"
-    ));
+        .await
+        .expect("private friend target is reachable");
+    assert_eq!(private_friend.member.bot_uuid, "private-friend");
 
     let wrong_human_owner = service
         .add_member(GroupAddMemberCommand {
@@ -1503,6 +1500,22 @@ async fn delete_group_enforces_legacy_driver_and_dm_rules() {
         GroupUseCaseError::InvalidProposal(message)
             if message.contains("DM groups")
     ));
+}
+
+#[tokio::test]
+async fn delete_group_is_idempotent_when_group_is_missing() {
+    let fixture = Fixture::new();
+    let result = fixture
+        .service_with_limits(5, 10, 10)
+        .delete_group(GroupDeleteCommand {
+            caller_actor_id: "driver".to_string(),
+            group_id: "missing-group".to_string(),
+        })
+        .await
+        .expect("missing group deletion should be idempotent");
+
+    assert_eq!(result.group_id, "missing-group");
+    assert!(!result.deleted);
 }
 
 #[tokio::test]

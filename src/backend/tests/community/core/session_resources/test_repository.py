@@ -6,6 +6,7 @@ import pytest_asyncio
 from agentclaw.community.core.session_resources.types import (
     SessionResourceRecord,
     SessionResourceStatus,
+    TransferApiVersion,
 )
 from agentclaw.community.plugins.local.database import SqliteDB, reset_for_tests
 from agentclaw.community.plugins.session_resource_repository import (
@@ -35,6 +36,8 @@ def _record() -> SessionResourceRecord:
         ),
         transfer_id="transfer-1",
         status=SessionResourceStatus.UPLOAD_URL_ISSUED,
+        transfer_api_version=TransferApiVersion.SESSION_V2,
+        session_key_ciphertext="enc:v1:ciphertext",
     )
 
 
@@ -134,3 +137,40 @@ async def test_soft_delete_is_idempotent_without_nested_session(repo):
 
     assert first.status is SessionResourceStatus.DELETED
     assert second.status is SessionResourceStatus.DELETED
+
+
+@pytest.mark.asyncio
+async def test_ready_resource_can_be_cas_restarted_without_losing_transfer_source(repo):
+    repo.create(_record())
+    started = repo.cas_start_materialization(
+        resource_id="sr_001",
+        owner_id="owner-1",
+        bot_id="bot-1",
+        session_key_hash="session-hash",
+        transfer_id="transfer-1",
+        task_id="task-1",
+    )
+    repo.cas_finish_materialization(
+        resource_id="sr_001",
+        transfer_id="transfer-1",
+        task_id="task-1",
+        task_version=started.task_version,
+        ready=True,
+        materialized_ref={"relative_path": "file"},
+        error_code=None,
+    )
+
+    restarted = repo.cas_start_materialization(
+        resource_id="sr_001",
+        owner_id="owner-1",
+        bot_id="bot-1",
+        session_key_hash="session-hash",
+        transfer_id="transfer-1",
+        task_id="task-2",
+        allow_ready=True,
+    )
+
+    assert restarted.status is SessionResourceStatus.DEVICE_SYNCING
+    assert restarted.task_version == 2
+    assert restarted.transfer_api_version is TransferApiVersion.SESSION_V2
+    assert restarted.session_key_ciphertext == "enc:v1:ciphertext"

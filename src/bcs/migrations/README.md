@@ -13,6 +13,7 @@ The open-source v1 baseline starts from a single MySQL/OceanBase init schema:
 | 005 | `mysql/005_add_session_collection_timestamp.sql` | Add session collection timestamp |
 | 006 | `mysql/006_session_files.sql` | Add session file metadata |
 | 007 | `mysql/007_add_human_input_runtime.sql` | Add generic node outcome and HumanInput responder metadata |
+| 008 | `mysql/008_human_input_im_requests.sql` | Add persisted HumanInput IM request and queue state |
 
 The previous internal incremental SQL files were removed from the public
 migration path and replaced by the v1 baseline. New public migrations should be
