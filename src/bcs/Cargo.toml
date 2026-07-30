@@ -48,6 +48,7 @@ members = [
     "crates/services/bcs-session",
     "crates/services/bcs-session-store",
     "crates/services/bcs-session-v1",
+    "crates/services/bcs-invitation-friendship-v1",
     "crates/services/bcs-session-file",
     "crates/services/bcs-session-file-store",
     "crates/services/bcs-routing",
@@ -258,6 +259,7 @@ bcs-route-security         = { path = "crates/services/bcs-route-security" }
 bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }
 bcs-session-v1             = { path = "crates/services/bcs-session-v1" }
+bcs-invitation-friendship-v1 = { path = "crates/services/bcs-invitation-friendship-v1" }
 bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }

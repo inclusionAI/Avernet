@@ -1007,6 +1007,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-invitation-friendship-v1"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-bot",
+ "bcs-domain",
+ "bcs-friend",
+ "bcs-group",
+ "bcs-relation",
+ "bcs-service-api",
+ "bcs-session",
+ "bcs-session-store",
+ "bcs-test-support",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-judge"
 version = "0.1.0"
 dependencies = [
