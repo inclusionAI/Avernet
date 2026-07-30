@@ -1,7 +1,5 @@
-import os
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import Field
@@ -132,17 +130,3 @@ def init_container_config(container: "ApplicationContainer") -> None:
     config: providers.Configuration = container.config
     config.from_dict(_schema_defaults())
     config.from_dict(load_container_config())
-
-
-def resolve_configs_dir() -> Path | None:
-    """Resolve the gateway configuration directory.
-
-    Returns the path to the configs directory (from GATEWAY_CONFIG_PATH env
-    var or ``./configs``), or *None* if no directory is found.
-    """
-    explicit = os.getenv("GATEWAY_CONFIG_PATH", "").strip()
-    if explicit:
-        p = Path(explicit)
-        return p if p.is_dir() else p.parent
-    cwd = Path.cwd() / "configs"
-    return cwd if cwd.exists() else None

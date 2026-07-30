@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from gateway.community.core.forwarding import DomainMap
 from gateway.community.core.forwarding._domains import _expand_vars, _parse_servers
 
-_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "upstreams.yaml"
+_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
 
 _VARS = {
     "backend_server_url": "http://backend:8080",
@@ -63,7 +64,8 @@ def test_schema_source_parsed() -> None:
 
 
 def test_shipped_config_loads() -> None:
-    dm = DomainMap.from_yaml(_CONFIG, variables=_VARS)
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["upstreams"], variables=_VARS)
     assert dm.domain_for("/openapi/v1/bots") is not None
 
 

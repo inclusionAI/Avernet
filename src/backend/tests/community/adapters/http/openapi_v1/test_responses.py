@@ -322,3 +322,63 @@ def test_engine_runtime_messages_are_fixed_not_exception_text():
         _, message = _lookup(getattr(errs, name)(leak))
         assert leak not in message
         assert message.isascii(), f"{name}: public messages are always English"
+
+# ── MCP category error mappings (Track B mcp, Task 6) ───────────────
+
+
+@pytest.mark.asyncio
+async def test_mcp_errors_map_to_status_and_fixed_message():
+    """Every MCP domain error round-trips to its status + fixed public message."""
+    import json
+
+    from agentclaw.community.core.mcp.errors import (
+        McpConfigValueError,
+        McpHeadersInvalidError,
+        McpMarketUnavailableError,
+        McpServerNotFoundError,
+        McpSyncFailedError,
+    )
+
+    cases = [
+        # Internal-language / identifier-bearing text that must NOT leak.
+        (McpServerNotFoundError("mcp.secret.server"), 404, "Not found"),
+        (McpHeadersInvalidError("Header 键不能为空"), 400, "Invalid MCP headers"),
+        (McpConfigValueError("endpoint_env must be PROD or PRE"), 400, "Invalid MCP configuration"),
+        (McpSyncFailedError("bot b-123 device down"), 502, "Device sync failed"),
+        (McpMarketUnavailableError("upstream 500"), 502, "MCP service error"),
+    ]
+    for exc, status, message in cases:
+
+        @envelope_errors
+        async def handler(request: Request, _exc=exc):
+            raise _exc
+
+        resp = await handler(request=_request())
+        assert resp.status_code == status
+        body = json.loads(bytes(resp.body))
+        assert body["message"] == message
+        assert body["code"] == status * 1000
+        assert body["data"] is None
+        # The raw exception text (identifiers / Chinese) never reaches the caller.
+        assert str(exc) not in body["message"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_not_found_is_indistinguishable_from_bots_not_found():
+    """A missing MCP server and a masked bot 404 answer byte-identical bodies."""
+    import json
+
+    from agentclaw.community.core.mcp.errors import McpServerNotFoundError
+
+    @envelope_errors
+    async def mcp_missing(request: Request):
+        raise McpServerNotFoundError("mcp.x")
+
+    @envelope_errors
+    async def bot_missing(request: Request):
+        raise BotNotFoundError("Bot not found: b-1")
+
+    a = await mcp_missing(request=_request())
+    b = await bot_missing(request=_request())
+    assert a.status_code == b.status_code == 404
+    assert json.loads(bytes(a.body)) == json.loads(bytes(b.body))

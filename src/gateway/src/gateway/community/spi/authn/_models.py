@@ -37,25 +37,31 @@ class ThirdPartyApp(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    app_id: str  # app id issued at registration
+    app_id: int  # the app's surrogate bigint id (avernet_application.id)
     app_name: str  # human-facing app name
     owners: str  # owning developer/org; resource-ownership fallback subject
+    tenant: str  # tenant the app belongs to (from the resolved app record)
     app_type: str = "UNKNOWN"  # from the app-token record
 
 
 class Bot(BaseModel):
     """A bot/agent acting as a first-class caller in its own right.
 
-    ``bot_uuid`` is the bot's stable id; ``owner_id`` is the user who owns it
+    ``bot_uuid`` is the bot's stable id; ``owner_id`` is the user who created it
     (the resource-ownership anchor); ``token`` is the presented/verified bot
-    credential (a secret flowing downstream — components must treat it as such).
+    session token (a secret flowing downstream — components must treat it as
+    such); ``app_id`` is the app the bot belongs to; ``agent_code`` is the bot's
+    agent/engine code; ``tenant`` is its tenant.
     """
 
     model_config = ConfigDict(frozen=True)
 
     bot_uuid: str  # stable, provider-issued bot id
-    owner_id: str  # owning user (resource-ownership anchor)
-    token: str  # the presented/verified bot credential (secret)
+    owner_id: str  # creator/owner (resource-ownership anchor)
+    token: str  # the presented/verified bot session token (secret)
+    app_id: int  # the app the bot belongs to (avernet_application.id)
+    agent_code: str  # the bot's agent/engine code
+    tenant: str  # the bot's tenant
 
 
 class UserPrincipal(BaseModel):
@@ -89,27 +95,18 @@ class AppPrincipal(BaseModel):
     type: Literal[PrincipalType.APP] = PrincipalType.APP
     tenant: str = Field(description="Tenant id the caller belongs to (stable id).")
     app: ThirdPartyApp = Field(description="The authenticated third-party app.")
-    on_behalf_of_opaque: str | None = Field(
-        default=None,
-        description=(
-            "Opaque, unverified handle of the app's own end user. ``None`` is an "
-            "intentional default (the app calls on its own behalf). Used only for "
-            "ownership/quota/audit — never as an authenticated identity for "
-            "cross-resource decisions."
-        ),
-    )
 
 
 class AccessKey(BaseModel):
     """An access key a caller authenticated against.
 
-    Carries its ``access_key_id``, the presented ``access_key_token`` (a secret
+    Carries its ``access_key``, the presented ``access_key_token`` (a secret
     flowing downstream — components must treat it as such), and its ``expire_at``.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    access_key_id: str  # stable id of the resolved access key
+    access_key: str  # stable id of the resolved access key
     access_key_token: str  # the presented/verified access-key credential (secret)
     expire_at: datetime  # when the access key expires
 

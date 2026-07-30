@@ -1,8 +1,8 @@
 """Integration smoke for the real identity pipeline (runner + identity chains).
 
 Builds the real :func:`build_authenticator` (which inits+seeds the in-memory DB
-backing the bot/access-key registries), so the bot/access-key paths exercise the
-DB-backed registries end-to-end. The google path swaps the USER chain to a
+backing the bot/access-key/app registries), so the bot/access-key/app paths
+exercise the DB-backed registries end-to-end. The google path swaps the USER chain to a
 ``GoogleUserStrategy`` with an ``httpx.MockTransport`` so no real network call.
 """
 
@@ -13,28 +13,12 @@ import pytest
 
 from gateway.community.bootstrap._authn import build_authenticator
 from gateway.community.core.authn import IdentityChain, authenticate
-from gateway.community.plugins.authn.app_token import (
-    StubAppTokenValidator,
-    StubTenantResolver,
-)
-from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
     CredentialBundle,
     Presence,
     PrincipalType,
 )
-
-
-def _bootstrap_db():
-    from gateway.community.bootstrap._configs import DatabasePluginConfig
-
-    db = SqliteDatabasePlugin()
-    db.init_database(DatabasePluginConfig(plugin_type="SQLITE_ORM", db_url=""))
-    from gateway.community.bootstrap._authn import _seed_authn
-
-    _seed_authn(db)
-    return db
 
 
 def _userinfo_handler(
@@ -50,25 +34,19 @@ _GOOGLE_BODY = {"sub": "g-1", "email": "a@example.com", "name": "A"}
 
 
 def _strategies() -> dict[PrincipalType, IdentityChain]:
-    db = _bootstrap_db()
-    return build_authenticator(
-        db, StubAppTokenValidator(), StubTenantResolver()
-    ).strategies
+    return build_authenticator().strategies
 
 
 def _google_strategies() -> dict[PrincipalType, IdentityChain]:
     """Strategies with a mock-google user strategy (no real network)."""
     from gateway.community.plugins.authn.google_token import GoogleUserStrategy
 
-    db = _bootstrap_db()
-    strategies = build_authenticator(
-        db, StubAppTokenValidator(), StubTenantResolver()
-    ).strategies
+    strategies = build_authenticator().strategies
     strategies[PrincipalType.USER] = IdentityChain(
         PrincipalType.USER,
         (
             GoogleUserStrategy(
-                token_header="x-google-token",
+                token_header="x-avernet-google-token",
                 default_tenant="default",
                 transport=_userinfo_handler(_GOOGLE_BODY),
             ),
@@ -79,7 +57,7 @@ def _google_strategies() -> dict[PrincipalType, IdentityChain]:
 
 async def test_app_only_resolves_app_identity() -> None:
     creds = CredentialBundle(
-        headers={"authorization": "Bearer stub-app-token", "x-tenant-token": "t"},
+        headers={"x-avernet-app-token": "app-key"},
         cookies={},
         query={},
     )
@@ -91,7 +69,9 @@ async def test_app_only_resolves_app_identity() -> None:
 
 
 async def test_bot_only_resolves_bot_identity() -> None:
-    creds = CredentialBundle(headers={"x-bot-token": "bot-key"}, cookies={}, query={})
+    creds = CredentialBundle(
+        headers={"x-avernet-bot-token": "bot-key"}, cookies={}, query={}
+    )
     result = await authenticate(
         creds, {PrincipalType.BOT: Presence.REQUIRED}, _strategies()
     )
@@ -99,7 +79,9 @@ async def test_bot_only_resolves_bot_identity() -> None:
 
 
 async def test_google_user_resolves_user_identity() -> None:
-    creds = CredentialBundle(headers={"x-google-token": "tok"}, cookies={}, query={})
+    creds = CredentialBundle(
+        headers={"x-avernet-google-token": "tok"}, cookies={}, query={}
+    )
     result = await authenticate(
         creds, {PrincipalType.USER: Presence.REQUIRED}, _google_strategies()
     )
@@ -109,7 +91,9 @@ async def test_google_user_resolves_user_identity() -> None:
 async def test_bot_token_absent_for_app_required_denies() -> None:
     # A bot token on an app-required route: app chain returns None (absent) →
     # bot is optional here, app required-missing → 401.
-    creds = CredentialBundle(headers={"x-bot-token": "bot-key"}, cookies={}, query={})
+    creds = CredentialBundle(
+        headers={"x-avernet-bot-token": "bot-key"}, cookies={}, query={}
+    )
     with pytest.raises(AuthError):
         await authenticate(
             creds,
@@ -124,7 +108,9 @@ async def test_bot_token_absent_for_app_required_denies() -> None:
 async def test_bot_token_satisfies_bot_required_with_app_optional() -> None:
     # US27: a bot token on a (app optional, bot required) route resolves bot
     # and leaves app absent — no terminal raise from the app chain.
-    creds = CredentialBundle(headers={"x-bot-token": "bot-key"}, cookies={}, query={})
+    creds = CredentialBundle(
+        headers={"x-avernet-bot-token": "bot-key"}, cookies={}, query={}
+    )
     result = await authenticate(
         creds,
         {PrincipalType.APP: Presence.OPTIONAL, PrincipalType.BOT: Presence.REQUIRED},
@@ -137,9 +123,8 @@ async def test_bot_token_satisfies_bot_required_with_app_optional() -> None:
 async def test_mixed_app_and_google_user_resolve_both() -> None:
     creds = CredentialBundle(
         headers={
-            "x-google-token": "tok",
-            "authorization": "Bearer stub-app-token",
-            "x-tenant-token": "t",
+            "x-avernet-google-token": "tok",
+            "x-avernet-app-token": "app-key",
         },
         cookies={},
         query={},

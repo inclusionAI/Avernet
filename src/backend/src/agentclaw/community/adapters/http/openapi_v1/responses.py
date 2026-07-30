@@ -65,6 +65,14 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineRuntimeError,
     EngineUpstreamError,
 )
+from agentclaw.community.core.gateway_principal import PrincipalVerificationError
+from agentclaw.community.core.mcp.errors import (
+    McpConfigValueError,
+    McpHeadersInvalidError,
+    McpMarketUnavailableError,
+    McpServerNotFoundError,
+    McpSyncFailedError,
+)
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
@@ -130,6 +138,13 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # tell "exists but not yours/other tenant" from "does not exist".
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     MissingPrincipalError: (401, "Unauthorized"),
+    # Byte-identical to the line above, deliberately. "You sent no principal" and
+    # "your principal did not verify" must be indistinguishable, or the response
+    # tells a forger whether their signature was the part that failed. The seam
+    # in ``dependencies.py`` already funnels both into MissingPrincipalError; this
+    # entry covers a handler that calls ``verify_principal_token`` directly, so
+    # the error cannot escape the envelope as a 500.
+    PrincipalVerificationError: (401, "Unauthorized"),
     BotNotFoundError: (404, "Not found"),
     BotPermissionError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
@@ -215,7 +230,22 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # A sibling of the entry above, not its base — see the block comment. Order
     # between these two is therefore free.
     DeviceAdapterHTTPStatusError: (502, "Engine service error"),
-    # Base class LAST: every mapping above is a subclass of BotServiceError, and
+    # MCP category (Track B). These share no base with BotServiceError, so their
+    # order among themselves is free — but they must sit above the BotServiceError
+    # fallback like everything else. Fixed public messages: the header-validation
+    # and value errors carry internal-language text (the validator answers in
+    # Chinese), which is exactly what the fixed-message rule keeps from leaking.
+    # 404 message is byte-identical to the bots not-found so existence can't be
+    # probed. The two upstream failures are 502 (downstream problem), matching how
+    # PassportError / ConnInfoBuildError are mapped above.
+    McpServerNotFoundError: (404, "Not found"),
+    McpHeadersInvalidError: (400, "Invalid MCP headers"),
+    McpConfigValueError: (400, "Invalid MCP configuration"),
+    McpSyncFailedError: (502, "Device sync failed"),
+    McpMarketUnavailableError: (502, "MCP service error"),
+    # Base class LAST: the bot mappings above subclass BotServiceError (the
+    # resources, identity, MCP, and engine-runtime entries are separate
+    # hierarchies that never match a bot error), and
     # the lookup returns on the first isinstance match in insertion order, so the
     # specific mappings still win. Services raise the bare base for device,
     # persistence, and downstream failures — without this the decorator would
@@ -351,12 +381,31 @@ def envelope_errors(
         try:
             return await fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 — re-raised unless mapped
-            for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
-                if isinstance(exc, error_type):
-                    request = _find_request(args, kwargs)
-                    if request is None:
-                        raise
-                    return _error_response(http_status, message, request)
-            raise
+            request = _find_request(args, kwargs)
+            if request is None:
+                raise
+            response = mapped_error_response(exc, request)
+            if response is None:
+                raise
+            return response
 
     return wrapper
+
+
+def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | None:
+    """The enveloped response for ``exc``, or ``None`` if it is not mapped.
+
+    Shared by :func:`envelope_errors` and the app-level backstop in ``app.py``,
+    so one table decides an error's public status and message no matter *where*
+    it was raised. That matters because a handler decorator only sees failures
+    inside the handler: a mapped error raised in a **dependency** — the auth seam
+    being the one every public route has — is raised before the handler runs and
+    would otherwise be answered as a 500.
+
+    Returns on the first ``isinstance`` match in insertion order, so a specific
+    leaf listed before its base class still wins.
+    """
+    for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
+        if isinstance(exc, error_type):
+            return _error_response(http_status, message, request)
+    return None

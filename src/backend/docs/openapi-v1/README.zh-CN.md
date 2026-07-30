@@ -32,11 +32,15 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 `src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`。其中 **bots**
 类别已经实现（PR #494）；其余六个仍然是**带桩（stub）处理器的路由定义**。
 
-> 🔒 **这套界面目前还不可被真正调用 —— 这是设计如此。** `require_principal` 仍是
-> 返回 `None` 的桩，因此任何真实请求打到 `/openapi/v1/...` 都会得到 `401` ——
-> 已实现的 bots 端点也不例外。真实的调用方认证器属于另一条工作线，DoD 也把公共界面
-> 的开放门槛压在它上面。"bots 做完了"指的是处理器、契约和测试做完了，**不是**指
-> 外部租户已经可以调用它们。
+> 🔒 **这套界面端到端仍不可被真正调用，但原因已不再是"桩"。**
+> `require_principal` 现在会真正校验网关签发的 `X-Avernet-Principal` 令牌，
+> `resolve_avernet_tenant` 也会真正从中读出租户（见下文**认证接缝**一节）。上游还有
+> 两件事挡在外部租户与 `200` 之间：网关的签发 PR
+> （[#599](https://github.com/inclusionAI/Avernet/pull/599)）尚未合并，因此 `dev` 上
+> 还没有任何东西会转发这个头；以及网关的 `route_security.yaml` 要求由 Google 链解析出
+> 的 `user` 身份，而持访问密钥（access key）的外部租户满足不了它。在这两件事推进之前，
+> 任何真实请求依然返回 `401` —— 只不过现在是**因为拒绝**，而不是因为打桩。
+> "bots 做完了"的含义不变：处理器、契约和测试做完了。
 
 关键难点：内部的 `/api/...` 界面与公共的 `/openapi/v1` 界面**共享同一批表、仓储
 （repositories）和服务（services）**。因此，一个会返回真实数据的公共端点，如果没有隔离，
@@ -48,7 +52,7 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
   每一类数据都做到按租户隔离。**Track A 按设计不实现任何端点** —— 它是底层管道。
 - **Track B —— 公共 API 实现。** 把七个 `/openapi/v1` 类别处理器接到已有的服务上。
   **这才是真正落地端点/API 代码的地方。** 每个类别都依赖于其数据已先经过 Track A 的
-  隔离。**七个里已完成一个：bots（PR #494）。**
+  隔离。**七个里已完成两个：bots（PR #494）、mcp（PR #610）。**
 - **Track C —— Engine（运行时）面。** _2026-07-30 新增。_ 把 engine adapter 面向
   客户端的 HTTP 包装到 `/openapi/v1/bots/{bot_id}/…` 之下，并用一个净化过的
   socket 信息端点取代 `get_device_connection` 的移交。**16 个端点 —— 已实现，PR #630。**
@@ -118,12 +122,12 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 > Stage 1 同时构建了后续每个阶段都会复制的**可复用机制**（见下文）。它是地基，
 > 不只是"机器人"。
 
-### Track B —— 公共 API 实现（端点真正落地之处 —— 七个里已完成一个）
+### Track B —— 公共 API 实现（端点真正落地之处 —— 七个里已完成两个）
 _按优先级分层排序。_
 | 类别 | 负责人 | 优先级 | 路由 | 状态 | 依赖 |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE —— PR #494 已于 2026-07-29 合并**（13/13 端点） | ~~Track A 阶段 1~~ ✅ |
-| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(桩)* | ⬜ TODO —— **已解除阻塞** | ~~Track A 阶段 5~~ ✅（PR #564） |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE —— PR #610**（6/6 端点） | ~~Track A 阶段 5~~ ✅（PR #564） |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 9 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 9 端点接通 stub→service；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | channels | totalfrank | 🅳 **已降级** | `openapi_v1/channels/router.py` *(桩)* | ⏸️ 已搁置 —— 范围保持不变，并非取消 | Track A 阶段 3（同样搁置） |
@@ -164,7 +168,7 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 ### 横切事项（非按阶段划分）
 | 事项 | 状态 | 备注 |
 |---|---|---|
-| 真实的调用方身份验证器（认证工作线） | ⬜ TODO（其他团队） | 把 `require_principal` 与 `resolve_avernet_tenant` 的函数体替换为读取网关 principal；**在它落地之前，整个公共界面都只会返回 401** |
+| 真实的调用方身份验证器（认证工作线） | ✅ **后端这一半已完成 —— PR [#634](https://github.com/inclusionAI/Avernet/pull/634)**（网关那一半：[#599](https://github.com/inclusionAI/Avernet/pull/599)，未合并） | `require_principal` 与 `resolve_avernet_tenant` 现在会校验网关签发的 `X-Avernet-Principal`（HS256、`aud=backend`），并从中读出租户与 owner。**端到端仍不可调用**：#599 必须先合并（否则没有东西转发这个头），且网关的 `route_security.yaml` 必须允许本界面真实的调用方 —— 见下方两个待定问题 |
 | 租户前导索引（F2，**强制**策略） | ⬜ TODO | 多租户上线前必须完成 |
 | 后台/定时任务的复查 | ⬜ TODO | 在第二个租户持有真实数据之前完成 |
 | **Agent 身份标识在租户之间会撞车**（[#556](https://github.com/inclusionAI/Avernet/issues/556)） | ⬜ TODO（totalfrank） | Passport、授权关系、BCN、策略行都只用 `bot_id`/`owner_id` 作键，没有租户维度，而每个 owner 的第一个 bot 的 id 就是字符串 `"default"`。**应当成为开启多租户的前置闸口。** #494 里以公共更新路径上的 `sync_to_bcn=False` 做了临时止血 |
@@ -274,12 +278,53 @@ ALTER TABLE ac_user_mcp_config
   中间件（**不是** `BaseHTTPMiddleware` —— 出于 ContextVar 的健壮性考虑）。它为每个请求
   设置租户。**已覆盖所有请求；Track A 阶段 2 及以后无需改动它。**
 - `adapters/http/openapi_v1/dependencies.py` —— `resolve_avernet_tenant(request)`：
-  唯一的接缝（seam）。今天返回默认租户；认证工作线会就地替换其函数体。与具体类别无关。
-  _（这个文件里现在是两个桩：`require_principal` 与 `resolve_avernet_tenant`；建立在
-  前者之上的 owner 侧接缝是 `openapi_v1/principal.py::caller_owner_id`。）_
+  唯一的接缝（seam）。与具体类别无关。**已不再是桩** —— 它和 `require_principal` 都读取
+  校验过的网关 principal，见下文**认证接缝**一节。建立在后者之上的 owner 侧接缝是
+  `openapi_v1/principal.py::caller_owner_id`。
 
 以上所有路径都位于
 `src/backend/src/agentclaw/community/` 之下。
+
+---
+
+## 认证接缝 —— 一个调用方如何变成"租户 + owner"
+
+两处公共接缝读的是**同一个**头，且每个请求只校验**一次**。
+SDD：`src/backend/specs/2026-07-30-gateway-principal-verifier/`。
+
+```
+网关                校验凭证 → 解析出身份集合 → 签名
+  │                 （HS256、aud = 上游服务名、TTL 60s、principals[]）
+  ▼  X-Avernet-Principal
+AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
+                                                            ├─ 只校验一次，
+路由依赖                → require_principal(request)       ─┘  结果缓存在 scope 上
+                             │
+                             └→ caller_owner_id(principal) → owner 作用域的服务调用
+```
+
+- `core/gateway_principal/` —— 验证器与**我们自己**的线上格式 DTO。后端从不 import
+  网关类型（Rule 7 / §9），而是做投影（project）。
+- `utils/gateway_principal_config.py` —— 环境变量配置。
+  **`AVERNET_PRINCIPAL_SIGNING_KEY` 未设置 ⇒ 一律 401。** 这一侧故意**不带** dev
+  兜底密钥（提交进仓库的共享密钥就是提交进仓库的凭据）；单盒需要两侧设成同一个值。
+- 会被拒绝的情形，全部返回**完全一致**的 `401`：签名错误、`alg: none`、`aud` 指向别的
+  上游、`iss` 不对、已过期、缺少必需 claim、未知的 `type` tag、契约字段被改名、身份集合
+  内部租户不一致，以及**声称自己是 `teamclaw` 的租户**（后者会把全部内部数据交给外部
+  调用方）。
+- 网关的租户 id **就是** `avernet_tenant` 的值 —— 没有映射表。因此真实外部租户在拥有
+  自己的数据之前读到的是空集；这是隔离在正常工作，不是 bug。
+
+**如果你负责某个 Track B 类别，有两件事会传导到你：**
+
+1. **`app` 与 `access_key` 调用方目前一律 401。** owner id 只从 `user` 或 `bot`
+   principal 推导。网关的 `app.owners` 是自由文本的组织归属，其访问密钥注册表根本没有
+   owner 列，两者都指不出一个可用于作用域的人 —— 而"猜"出来的就是跨账号数据 bug。鉴于
+   公共 API 的调用方本就是*外部注册租户*，这件事很可能要在任何类别对外开放之前定案。
+2. **依赖（dependency）里抛出的已映射错误现在也会被套上信封。** `@envelope_errors`
+   只包裹 handler，所以接缝的 401（在依赖里抛出）会绕过它；现在查表逻辑落在
+   `responses.py::mapped_error_response`，应用的 catch-all 查的是同一张表。你新增的依赖
+   若抛出领域错误，已经会以信封格式作答。
 
 ---
 
@@ -367,8 +412,11 @@ ALTER TABLE ac_user_mcp_config
    错误），以及**针对真实 Track A 守卫的跨租户隔离测试**（别的租户的 `{id}` 必须是被掩盖
    的 404）。内部测试套件保持不修改且全绿。
 8. 每个类别有自己的 SDD（`spec.md`/`plan.md`/`tasks.md`）和自己的 PR。可以把
-   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` 和
-   `openapi_v1/bots/router.py` 当作已经做过一遍的参考样板。
+   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` +
+   `openapi_v1/bots/router.py` 当作已经做过一遍的参考样板；第二个样板是
+   `src/backend/specs/2026-07-30-openapi-v1-mcp-track-b/` + `openapi_v1/mcp/router.py`
+   —— 它示范了当一个类别需要**从仍在运行的内部路由里抽取共享逻辑**（配方第 6 步）到
+   `core/mcp/` 时的做法，并通过让内部测试套件保持不修改来证明抽取是行为保持的。
 
 > **架构门禁：** `tests/community/architecture/` 现在还会跑
 > `test_service_api_conformance.py` —— 这就是 `api/README.md` 在两处承诺过、但一直没有
@@ -385,12 +433,14 @@ ALTER TABLE ac_user_mcp_config
 **PR #363**（`docs/api-endpoints.zh-CN.md`，totalfrank 写的中文端点参考 —— 截至
 2026-07-29 仍是 open/draft；此处作为参考保留）中的 v1 契约总览做了交叉核对。
 
-> ⚠️ **路径分歧 —— 对其余六个桩组仍未对齐。** 路由把所有非 `bots` 的组都嵌套在
-> `/openapi/v1/bots/...` 之下（如 `/openapi/v1/bots/resources`、`/openapi/v1/bots/mcp`）。
-> 而 PR #363 的总览用的是**顶层**路径（`/openapi/v1/resources`、`/openapi/v1/mcp` 等）。
-> 实现以**路由为准** —— 下面的路径与路由一致。负责人：如果顶层形态才是想要的对外形状，
-> 请修改路由的 `prefix`，并在同一个 PR 里更新本节。_（bots 不受影响：两种读法下它都是
-> `/openapi/v1/bots`，#494 也正是按这个形状上线的。）_
+> ⚠️ **路径分歧 —— `mcp` 已定案（PR #610），其余桩组仍未对齐。** 路由把所有非 `bots`
+> 的组都嵌套在 `/openapi/v1/bots/...` 之下（如 `/openapi/v1/bots/resources`、
+> `/openapi/v1/bots/mcp`）。而 PR #363 的总览用的是**顶层**路径
+> （`/openapi/v1/resources`、`/openapi/v1/mcp` 等）。**裁定（mcp 负责人，PR #610）：
+> 保持嵌套的路由形态** —— 以路由为准，界面尚在认证前（pre-auth），重排前缀带来的改动没有收益。
+> 其余五个组沿用这一先例，除非各自负责人另有决定；如果确实想要顶层形态，请修改路由的
+> `prefix` 并在同一个 PR 里更新本节。_（bots 不受影响：两种读法下它都是 `/openapi/v1/bots`，
+> #494 也正是按这个形状上线的。）_
 >
 > **挂载顺序是有承重作用的。** `build_public_router()` 会先挂那六个字面量子组，再挂
 > bots 组，这样 `/openapi/v1/bots/channels` 才能排在通配的
@@ -445,8 +495,10 @@ _内部 `/api/bots` 也有变化，全部是有意为之，并由 #494 覆盖：
 _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #363 里写的是
 `Page[Channel]`。接线时请确认用哪种。_
 
-### 🟦 totalfrank · P1 —— mcp（6 个端点）· `openapi_v1/mcp/router.py`
-市场 + 租户 + 调用者的统一 per-server 配置。
+### ✅ totalfrank · P1 —— mcp（6 个端点）· `openapi_v1/mcp/router.py` —— **已实现（PR #610）**
+市场 + 租户 + 调用者的统一 per-server 配置。6 个端点全部接到内部 MCP 服务，经由从内部
+路由抽取出来的共享 `core/mcp/` 流程（抽取后两套界面回答一致）；用 `caller_owner_id`
+做 owner 作用域，由 Stage 5 守卫做租户作用域。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/mcp/servers` | 列出市场 MCP 服务器（`keyword`、分页） | `Envelope[Page[McpServer]]` |
@@ -455,6 +507,13 @@ _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | 查询调用者对该服务器的权限 | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 读取调用者的统一服务器配置 | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 写入配置（下发到设备） | `Envelope[McpConfig]` |
+
+_已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/...`）；写入体去掉了
+`sync_mode`（不存在单设备下发路径 —— `extra="forbid"` 让它变成 422）；下发设备失败会回滚
+写入并返回 502（与内部界面一致）；`endpoint_env`/`transport_protocol` 为严格枚举
+（`PROD`/`PRE`、`SSE`/`STREAMABLE_HTTP`）。**保留 fail-open：** 市场调用异常时仍报告
+调用者"有权限"（该端点仅供参考，真正的强制点是 MCP 服务器本身）—— 已用测试钉住，使其读起来
+是一个决策而非 bug。_
 
 ### 🟩 lucas-xzp · P1 —— resources（9 个端点）· `openapi_v1/resources/router.py`
 文件/链接/文件夹的统一抽象；存储位置从不暴露。
@@ -534,15 +593,16 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 ## 完成的定义（整个 `/openapi/v1` 工作）
 
 1. **Track A：** 每一类数据（bots、resources、channels、skills、mcp、routines）都带有
-   `avernet_tenant` 并被守卫，Stage-1 的测试形态全绿。—— _6 个里完成 1 个（bots ✅）。_
+   `avernet_tenant` 并被守卫，Stage-1 的测试形态全绿。—— _6 个里完成 2 个（bots ✅、mcp ✅ PR #564）。_
 2. 全程内部 API 保持不变（`to_dict()` 无泄漏；内部套件不作修改）。—— _仍然成立：#494
    时整个 `tests/community` 全绿（9171 通过，3 跳过）。_
 3. **Track B：** 七个 `/openapi/v1` 类别的处理器均已实现且租户安全，各自带测试 + PR。
-   —— _7 个里完成 1 个（bots ✅）。_
+   —— _7 个里完成 2 个（bots ✅、mcp ✅）。_
 4. F2 租户前导索引就位（强制策略）。—— _⬜_
 5. 后台/定时任务已针对按租户正确性完成复查。—— _⬜_
 6. `require_principal` / `resolve_avernet_tenant` 已接到真实验证器（认证工作线）——
-   到此，第二个租户才能安全地持有真实数据，公共界面也才会停止一律返回 401。—— _⬜_
+   到此，第二个租户才能安全地持有真实数据，公共界面也才会停止一律返回 401。
+   —— _🔧 后端这一半已完成；还需网关 [#599](https://github.com/inclusionAI/Avernet/pull/599) 合并**并且** `route_security.yaml` 增加允许本界面真实调用方的规则。_
 7. **跨租户的外部身份问题已定案（[#556](https://github.com/inclusionAI/Avernet/issues/556)）** —— Passport、授权关系与 BCN 都带上
    租户维度，从而可以在公共路径上重新打开 BCN 同步。—— _⬜（2026-07-29 新增；它是开启
    多租户的前置闸口）。_
@@ -561,10 +621,11 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   `idx_entity`、搜索索引），采用**先建新、再删旧**（命名约定把索引名与其列绑定，因此先建后删，
   避免出现无索引的窗口）。低基数索引（`idx_status`、`idx_is_delete`）与唯一查找索引
   （`idx_binding_id`）保持不动。
-- **真实的调用方身份验证器。** 把 `require_principal` 的函数体换成返回网关转发的
-  principal，把 `resolve_avernet_tenant` 换成返回它的租户。两处接缝都已就绪，而且
-  `caller_owner_id` 既接受裸的 id 字符串、也接受带 `user_id` 的对象/字典，因此处理器
-  不需要改动。**在它落地之前，公共界面对任何请求都只会返回 401。**
+- ~~**真实的调用方身份验证器。**~~ **后端侧已完成** —— 见上文**认证接缝**一节。
+  `caller_owner_id` 本来就接受带 `user_id` 的对象，这正是它能零改动落地的原因。
+  剩下的都在上游：网关 [#599](https://github.com/inclusionAI/Avernet/pull/599) 合并、
+  `route_security.yaml` 为本界面的调用方加规则，以及 `app` / `access_key` 调用方的
+  owner 语义问题。
 - **后台/定时任务。** 现在都解析为默认租户（在全部数据都是 `teamclaw` 时是正确的）；在第二个
   租户持有真实数据之前需复查（skill_center / governance / dormant / 设备轮询器中的定时扫描、
   轮询器、同步循环）。
@@ -666,6 +727,34 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
      子句同样生效。这是实测确认的，不是推断。
 - **2026-07-29** —— **渠道降级（并非取消）**，Track A 阶段 3 与 Track B 端点均已搁置，
   范围保持不变。
+- **2026-07-30** —— **Track B mcp 合并（PR #610）—— 第二个落地的公共类别（7 个里 2 个）。**
+  6 个 `/openapi/v1/bots/mcp` 端点全部接到内部 MCP 服务，经由一套从内部 `/api/mcp` 路由
+  **抽取出来的共享 `core/mcp/` 流程**（`presentation.py` 里的掩码 / `extInfo` 剥除 /
+  网络类型白名单；`config_flow.py` 里的 写入→下发→回滚 与 读取；`errors.py` 里的类型化
+  领域错误），使两套界面回答一致。内部路由现在调用这套流程 —— 由
+  `test_mcp_config_internal_unchanged.py` + `test_mcp.py` **保持不修改**通过来证明行为保持。
+  公共处理器用 `caller_owner_id` 做 owner 作用域，由 Stage 5 守卫做租户作用域（跨租户配置
+  不可见且不可覆写，已通过流程针对真实守卫验证）。决策：路径保持嵌套（**为 mcp 定案了路径
+  分歧**）、去掉 `sync_mode`（`extra="forbid"` → 422）、下发失败回滚 → 502、严格枚举
+  `endpoint_env`/`transport_protocol`（无 `DEV`）。**保留 fail-open** 的权限行为（市场异常时；
+  仅供参考的端点），已用测试钉住。看板已挪动：Track B mcp → 完成；"参考样板"清单现在把这里
+  列为第二个样板，专门示范*抽取共享逻辑*的模式。
+- **2026-07-30** —— **网关 principal 校验落地（后端这一半）。** PR #456 埋下的两处接缝
+  变成了真的：`require_principal` 校验网关签发的 `X-Avernet-Principal`（HS256、
+  `aud=backend`、`principals[]`），`resolve_avernet_tenant` 从中读出租户 —— **没有改动
+  任何 handler、路由或中间件**，这正是当初留这两处接缝的目的。新增
+  `core/gateway_principal/`（我们自己的 DTO + 验证器，不 import 网关类型）与
+  `utils/gateway_principal_config.py`（环境变量，**没有 dev 兜底密钥** —— 未设置即 401）。
+  是对着网关 PR [#599](https://github.com/inclusionAI/Avernet/pull/599) 的契约写的，
+  没有等它合并 —— 因为 #599 明确把组件侧验证器留给我们。刻意加的守卫：线上传来的租户是
+  `teamclaw` 一律拒绝、身份集合租户不一致一律拒绝、转发过来的密钥不做投影、"没带凭据"与
+  "凭据非法"的 401 逐字节一致。一处必要的连带修复：查表逻辑挪进
+  `responses.py::mapped_error_response`，应用 catch-all 改为查同一张表 —— 因为接缝是在
+  *依赖*里抛错的，不改的话未认证的公共请求会返回 500 而不是 401。看板已挪动：横切的验证器
+  行与 DoD 第 6 项 → 后端这一半完成。**上游仍有闸口**：#599 合并，以及
+  `route_security.yaml` 允许本界面真实的调用方；另外 `app` / `access_key` 调用方在有人
+  就"它们归属于谁"定案之前一律 401。SDD：
+  `src/backend/specs/2026-07-30-gateway-principal-verifier/`。
 - **2026-07-30** —— **Track C 已实现（PR #630）** —— 五个组共 16 个 engine 运行时
   端点，外加 `core/engine_runtime/`（relay 与 connection service）及其 Service API
   Protocol。动这条主线或参考它之前，有七点值得知道：

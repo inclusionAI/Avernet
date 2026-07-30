@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.spi.authn import Presence, PrincipalType
 
-_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "route_security.yaml"
+_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
 
 
 def test_shipped_config_loads_and_requires_user() -> None:
-    rs = RouteSecurity.from_yaml(_CONFIG)
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["route_security"])
     req = rs.resolve("GET", "/openapi/v1/bots/abc")
     assert req is not None
     assert req[PrincipalType.USER] is Presence.REQUIRED

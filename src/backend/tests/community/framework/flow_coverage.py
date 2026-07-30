@@ -57,6 +57,13 @@ _TASK_QUEUE_EXEMPT_REASON = (
     "Internal infra component with no HTTP/router surface (in-process worker + repo); "
     "covered by unit/integration tests, not an e2e flow."
 )
+_GATEWAY_PRINCIPAL_EXEMPT_REASON = (
+    "Verifies a token only the gateway can mint, so an e2e flow needs a gateway "
+    "in the box signing with the shared key; singlebox runs the backend alone and "
+    "the public surface it guards answers 401 by design until that exists. Covered "
+    "by unit tests that mint tokens with the gateway's own claim shape plus the "
+    "HTTP seam tests. Drain this when singlebox fronts the backend with a gateway."
+)
 _SESSION_RESOURCES_EXEMPT_REASON = (
     "Requires the Frontend upload, BaaS transfer, and Engine callback chain; "
     "the unpublished BaaS pull contract remains fail-closed and this change "
@@ -94,6 +101,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "desktop_bot": _EXEMPT_REASON,
     "economy": _EXEMPT_REASON,
     "events": _EXEMPT_REASON,
+    "gateway_principal": _GATEWAY_PRINCIPAL_EXEMPT_REASON,
     "group_chat": _EXEMPT_REASON,
     "grt_chat": _EXEMPT_REASON,
     "models": _EXEMPT_REASON,

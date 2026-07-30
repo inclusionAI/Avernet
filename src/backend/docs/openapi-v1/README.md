@@ -38,12 +38,17 @@ registered tenants**. It lives under
 category is implemented (PR #494); the other six are still **route definitions
 with stub handlers**.
 
-> 🔒 **The surface is not callable yet, by design.** `require_principal` is
-> still a stub returning `None`, so every real request to `/openapi/v1/...`
-> answers `401` — including the implemented bots endpoints. The real caller
-> authenticator is a separate workstream, and the DoD gates the public surface
-> on it. "bots is done" means the handlers, contracts and tests are done, not
-> that an external tenant can call them.
+> 🔒 **The surface is still not callable end-to-end, but no longer because of a
+> stub.** `require_principal` now really verifies the gateway's signed
+> `X-Avernet-Principal` token and `resolve_avernet_tenant` really reads the
+> tenant out of it (see **The auth seam** below). Two things upstream still stand
+> between an external tenant and a `200`: the gateway's signing PR
+> ([#599](https://github.com/inclusionAI/Avernet/pull/599)) is open, so on `dev`
+> nothing forwards the header yet; and the gateway's `route_security.yaml`
+> requires a `user` identity resolved by the Google chain, which an external
+> tenant presenting an access key cannot satisfy. Until both move, every real
+> request still answers `401` — now by denying rather than by stubbing. "bots is
+> done" still means handlers, contracts and tests are done.
 
 The catch: the internal `/api/...` surface and the public `/openapi/v1` surface
 share the **same tables, repositories, and services**. So a public endpoint
@@ -58,7 +63,7 @@ The work therefore splits into **three tracks**:
 - **Track B — Public API implementation.** Wire the seven `/openapi/v1`
   category handlers to the existing services. **This is where the endpoint/API
   code actually lands.** Each category depends on its data being isolated
-  (Track A) first. **1 of 7 done: bots (PR #494).**
+  (Track A) first. **2 of 7 done: bots (PR #494), mcp (PR #610).**
 - **Track C — Engine (runtime) surface.** _Added 2026-07-30._ Wrap the engine
   adapter's client-facing HTTP behind `/openapi/v1/bots/{bot_id}/…`, and replace
   the `get_device_connection` hand-off with one sanitised socket-info endpoint.
@@ -137,12 +142,12 @@ must implement._
 > Stage 1 also builds the **reusable mechanism** (see below) that every later
 > stage copies. It's the foundation, not just "bots."
 
-### Track B — Public API implementation (where the endpoints land — 1 of 7 done)
+### Track B — Public API implementation (where the endpoints land — 2 of 7 done)
 _Ordered by priority tier._
 | Category | Owner | Pri | Router | State | Depends on |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
-| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(stub)* | ⬜ TODO — **unblocked** | ~~Track A stage 5~~ ✅ (PR #564) |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 9 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 9 endpoints wired stub→service; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
 | channels | totalfrank | 🅳 **DEPRIORITIZED** | `openapi_v1/channels/router.py` *(stub)* | ⏸️ PARKED — scope intact, not cancelled | Track A stage 3 (also parked) |
@@ -186,7 +191,7 @@ DDL. Full ruling and per-endpoint mapping in
 ### Cross-cutting (not per-stage)
 | Item | State | Note |
 |---|---|---|
-| Real caller-identity verifier (auth workstream) | ⬜ TODO (other team) | swap `require_principal` + `resolve_avernet_tenant` bodies to read the gateway principal; **the whole public surface answers 401 until this lands** |
+| Real caller-identity verifier (auth workstream) | ✅ **BACKEND HALF DONE — PR [#634](https://github.com/inclusionAI/Avernet/pull/634)** (gateway half: [#599](https://github.com/inclusionAI/Avernet/pull/599), open) | `require_principal` + `resolve_avernet_tenant` now verify the gateway's signed `X-Avernet-Principal` (HS256, `aud=backend`) and read tenant + owner from it. **The surface is still not callable end-to-end:** #599 must merge (until then nothing forwards the header) and the gateway's `route_security.yaml` must admit the public API's actual callers — see the two open questions below |
 | Tenant-leading indexes (F2, **MANDATORY** policy) | ⬜ TODO | before multi-tenant go-live |
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
 | **Bot identity keys collide across tenants** ([#556](https://github.com/inclusionAI/Avernet/issues/556)) | ⬜ TODO (totalfrank) | Passport, auth relationships, BCN, policy row are keyed on `bot_id`/`owner_id` with no tenant axis, and every owner's first bot is literally `"default"`. **Should gate enabling multi-tenancy.** Stopgapped in #494 by `sync_to_bcn=False` on the public update path |
@@ -304,13 +309,60 @@ Category-agnostic; reuse as-is. These files are **on `dev`** (PR #456):
   request's tenant. **Covers every request already; Track A stage 2+ does not
   touch it.**
 - `adapters/http/openapi_v1/dependencies.py` — `resolve_avernet_tenant(request)`:
-  the single seam. Returns the default tenant today; the auth workstream swaps
-  the body in place. Category-agnostic. _(This file holds both stubs today —
-  `require_principal` and `resolve_avernet_tenant`; the owner-side seam on top
-  of the former is `openapi_v1/principal.py::caller_owner_id`.)_
+  the single seam. Category-agnostic. **No longer a stub** — it and
+  `require_principal` both read the verified gateway principal; see **The auth
+  seam** below. The owner-side seam on top of the latter is
+  `openapi_v1/principal.py::caller_owner_id`.
 
 All paths are under
 `src/backend/src/agentclaw/community/`.
+
+---
+
+## The auth seam — how a caller becomes a tenant + an owner
+
+Both public seams read **one** header and verification happens **once** per
+request. SDD: `src/backend/specs/2026-07-30-gateway-principal-verifier/`.
+
+```
+gateway            verifies credentials → resolves identity set → signs it
+  │                (HS256, aud = the upstream's name, TTL 60s, principals[])
+  ▼  X-Avernet-Principal
+AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
+                                                            ├─ verify once,
+route dependency        → require_principal(request)       ─┘  cache on scope
+                             │
+                             └→ caller_owner_id(principal) → owner-scoped calls
+```
+
+- `core/gateway_principal/` — the verifier and **our** DTOs for the wire shape.
+  The backend never imports gateway types (Rule 7 / §9); it projects.
+- `utils/gateway_principal_config.py` — env config.
+  **`AVERNET_PRINCIPAL_SIGNING_KEY` unset ⇒ everything 401s.** There is no dev
+  fallback key on this side on purpose (a committed shared secret is a committed
+  credential); single-box sets the same value both sides.
+- What gets rejected, all as an identical `401`: bad signature, `alg: none`, an
+  `aud` for another upstream, wrong `iss`, expired, a missing required claim, an
+  unknown `type` tag, a renamed contract field, an identity set that disagrees
+  about its tenant, and **a tenant claiming to be `teamclaw`** (that one would
+  hand an external caller every internal row).
+- The gateway's tenant id **is** the `avernet_tenant` value — no mapping table.
+  So a real external tenant reads an empty dataset until it has data; that is
+  isolation working, not a bug.
+
+**Two things you inherit if you own a Track B category:**
+
+1. **`app` and `access_key` callers currently 401.** Owner id is derived only from
+   a `user` or `bot` principal. The gateway's `app.owners` is free-text org
+   attribution and its access-key registry has no owner column, so neither names
+   a person to scope by — and guessing is a cross-account data bug. Since the
+   public API's callers are *external registered tenants*, this likely needs
+   settling before any category goes live.
+2. **A mapped error raised in a dependency is now enveloped too.** `@envelope_errors`
+   only wraps the handler, so the seam's 401 (raised in a dependency) escaped it;
+   the lookup now lives in `responses.py::mapped_error_response` and the app's
+   catch-all consults the same table. If you add a dependency that raises a
+   domain error, it already answers in the envelope.
 
 ---
 
@@ -415,8 +467,12 @@ rebuild it. Everything below is category-agnostic and lives in
    guard** (a foreign `{id}` must be a masked 404). Keep the internal suite
    unmodified and green.
 8. Own SDD (`spec.md`/`plan.md`/`tasks.md`) and own PR per category. Use
-   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` and
-   `openapi_v1/bots/router.py` as the worked reference.
+   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` +
+   `openapi_v1/bots/router.py` as the worked reference, and
+   `src/backend/specs/2026-07-30-openapi-v1-mcp-track-b/` +
+   `openapi_v1/mcp/router.py` for the second — the pattern for a category that
+   **extracts shared logic** out of a live internal router (recipe step 6) into
+   `core/mcp/` and proves the extraction by leaving the internal suite unmodified.
 
 > **Architecture gate:** `tests/community/architecture/` now also runs
 > `test_service_api_conformance.py` — the Service API gate that `api/README.md`
@@ -436,14 +492,17 @@ contract overview in **PR #363** (`docs/api-endpoints.zh-CN.md`, a Chinese
 endpoint reference by totalfrank — still open/draft as of 2026-07-29; kept here
 as reference).
 
-> ⚠️ **Path divergence — still open for the six stub groups.** The routers nest
-> every non-`bots` group under `/openapi/v1/bots/...` (e.g.
-> `/openapi/v1/bots/resources`, `/openapi/v1/bots/mcp`). PR #363's overview used
-> **top-level** paths (`/openapi/v1/resources`, `/openapi/v1/mcp`, …). The
-> **router is authoritative** for implementation — the paths below match it.
-> Owners: if the top-level shape is the intended public surface, change the
-> router `prefix` and update this section in the same PR. _(bots is unaffected:
-> it is `/openapi/v1/bots` under either reading, and shipped that way in #494.)_
+> ⚠️ **Path divergence — RESOLVED for `mcp` (PR #610), open for the remaining
+> stub groups.** The routers nest every non-`bots` group under
+> `/openapi/v1/bots/...` (e.g. `/openapi/v1/bots/resources`,
+> `/openapi/v1/bots/mcp`). PR #363's overview used **top-level** paths
+> (`/openapi/v1/resources`, `/openapi/v1/mcp`, …). **Ruling (mcp owner, PR #610):
+> the nested router shape stays** — the router is authoritative and the churn of
+> a re-prefix buys nothing while the surface is pre-auth. The remaining five
+> groups inherit this precedent unless their owner decides otherwise; if you do
+> want the top-level shape, change the router `prefix` and update this section in
+> the same PR. _(bots is unaffected: it is `/openapi/v1/bots` under either
+> reading, and shipped that way in #494.)_
 >
 > **Mount order is load-bearing.** `build_public_router()` includes the six
 > literal sub-groups **before** the bots group, so `/openapi/v1/bots/channels`
@@ -499,8 +558,11 @@ DingTalk (`dingding`) config CRUD + status toggle.
 _Note: the stub returns `Envelope[list[Channel]]` for list (not `Page`); PR #363
 showed `Page[Channel]`. Confirm which you want when you wire it._
 
-### 🟦 totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py`
-Marketplace + tenants + the caller's unified per-server config.
+### ✅ totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED (PR #610)**
+Marketplace + tenants + the caller's unified per-server config. All 6 wired to
+the internal MCP services through the shared `core/mcp/` flow (extracted from the
+internal router so both surfaces answer identically); owner-scoped via
+`caller_owner_id`, tenant-scoped by the Stage 5 guard.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/mcp/servers` | List marketplace servers (`keyword`, paged) | `Envelope[Page[McpServer]]` |
@@ -509,6 +571,14 @@ Marketplace + tenants + the caller's unified per-server config.
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | Caller's permission for a server | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Read caller's unified server config | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Write config (pushed to devices) | `Envelope[McpConfig]` |
+
+_Delivered decisions (PR #610): paths stay nested (`/openapi/v1/bots/mcp/...`);
+`sync_mode` dropped from the write body (no single-device push path — `extra=
+"forbid"` makes it a 422); a failed device push rolls the write back and answers
+502 (mirrors the internal surface); `endpoint_env`/`transport_protocol` are
+strict enums (`PROD`/`PRE`, `SSE`/`STREAMABLE_HTTP`). **Preserved fail-open:** a
+marketplace outage still reports the caller as permitted (advisory endpoint; the
+MCP server enforces) — pinned by a test so it reads as a decision, not a bug._
 
 ### 🟩 lucas-xzp · P1 — resources (9 endpoints) · `openapi_v1/resources/router.py`
 Unified file/link/folder abstraction; storage location never exposed.
@@ -595,17 +665,19 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 1. **Track A:** every data category (bots, resources, channels, skills, mcp,
    routines) carries `avernet_tenant` and is guarded, Stage-1 test shape green.
-   — _1 of 6 (bots ✅)._
+   — _2 of 6 (bots ✅, mcp ✅ PR #564)._
 2. Internal API unchanged throughout (no `to_dict()` leaks; internal suites
    unmodified). — _holding: full `tests/community` green at #494 (9171 passed,
    3 skipped)._
 3. **Track B:** the seven `/openapi/v1` categories' handlers implemented and
-   tenant-safe, each with its own tests + PR. — _1 of 7 (bots ✅)._
+   tenant-safe, each with its own tests + PR. — _2 of 7 (bots ✅, mcp ✅)._
 4. F2 tenant-leading indexes in place (mandatory policy). — _⬜_
 5. Background/scheduled work revisited for per-tenant correctness. — _⬜_
 6. `require_principal` / `resolve_avernet_tenant` wired to the real verifier
    (auth workstream) — the point at which a second tenant can safely hold real
-   data, and the point at which the public surface stops answering 401. — _⬜_
+   data, and the point at which the public surface stops answering 401.
+   — _🔧 backend half done; needs gateway [#599](https://github.com/inclusionAI/Avernet/pull/599) merged **and** a `route_security.yaml`
+   rule admitting this surface's real callers._
 7. **Cross-tenant external identity settled ([#556](https://github.com/inclusionAI/Avernet/issues/556))** — Passport, auth
    relationships and BCN carry a tenant axis, so the BCN sync can be re-enabled
    on the public path. — _⬜ (added 2026-07-29; gates enabling multi-tenancy)._
@@ -628,11 +700,12 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   index's name to its columns; create before drop so there's no index-less
   window). Leave low-cardinality (`idx_status`, `idx_is_delete`) and
   unique-lookup (`idx_binding_id`) indexes alone.
-- **Real caller-identity verifier.** Swap `require_principal`'s body to return
-  the gateway-forwarded principal, and `resolve_avernet_tenant`'s to return its
-  tenant. Both seams are ready, and `caller_owner_id` already accepts either a
-  bare id string or an object/dict with `user_id`, so handlers don't change.
-  **Until this lands the public surface answers 401 to everything.**
+- ~~**Real caller-identity verifier.**~~ **DONE on the backend side** — see **The
+  auth seam** above. `caller_owner_id`'s tolerance of an object exposing
+  `user_id` is what let this land with zero handler changes, exactly as intended.
+  What remains is upstream: gateway [#599](https://github.com/inclusionAI/Avernet/pull/599)
+  merged, a `route_security.yaml` rule for this surface's callers, and the
+  owner-semantics question for `app` / `access_key` callers.
 - **Background/scheduled work.** Resolves to the default tenant now (correct
   while all data is `teamclaw`); revisit before a 2nd tenant holds real data
   (scheduled scans, pollers, sync loops in skill_center / governance / dormant /
@@ -759,6 +832,44 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
      `with_loader_criteria` applies to join clauses. Verified, not assumed.
 - **2026-07-29** — **Channels deprioritized (not cancelled)**, Track A stage 3
   and Track B endpoints both parked with scope intact.
+- **2026-07-30** — **Track B mcp merged (PR #610) — second public category
+  implemented (2 of 7).** All 6 `/openapi/v1/bots/mcp` endpoints wired to the
+  internal MCP services through a **shared `core/mcp/` flow** extracted from the
+  internal `/api/mcp` router (masking / `extInfo` stripping / network-type
+  allowlist in `presentation.py`; the write→push→rollback + read in
+  `config_flow.py`; typed domain errors in `errors.py`), so both surfaces answer
+  identically. The internal router now calls that flow — proven behavior-
+  preserving by `test_mcp_config_internal_unchanged.py` + `test_mcp.py` passing
+  **unmodified**. Public handlers owner-scoped via `caller_owner_id`,
+  tenant-scoped by the Stage 5 guard (cross-tenant config invisible + un-
+  overwritable, proven against the real guard through the flow). Decisions:
+  nested paths (**resolves the path divergence for mcp**), `sync_mode` dropped
+  (`extra="forbid"` → 422), push-failure rolls back → 502, strict
+  `endpoint_env`/`transport_protocol` enums (no `DEV`). **Preserved fail-open**
+  permission on a marketplace outage (advisory endpoint), pinned by a test. Board
+  moved: Track B mcp → done; the "worked reference" list now points here as the
+  second example, specifically for the *extract-shared-logic* pattern.
+- **2026-07-30** — **Gateway principal verification landed (backend half).** The
+  two seams PR #456 placed are real: `require_principal` verifies the gateway's
+  signed `X-Avernet-Principal` (HS256, `aud=backend`, `principals[]`) and
+  `resolve_avernet_tenant` reads the tenant out of it — **no handler, router or
+  middleware changes**, which is what those seams were for. New
+  `core/gateway_principal/` (our DTOs + verifier, no gateway imports) and
+  `utils/gateway_principal_config.py` (env, **no dev fallback key** — unset means
+  401). Built against gateway PR
+  [#599](https://github.com/inclusionAI/Avernet/pull/599)'s contract without
+  waiting for it to merge, since #599 explicitly leaves the component verifier to
+  us. Deliberate guards: a wire tenant of `teamclaw` is refused, a disagreeing
+  identity set is refused, forwarded secrets are not projected, and 401 is
+  byte-identical for "no credential" and "bad credential". One necessary
+  side-fix: the mapped-error lookup moved into
+  `responses.py::mapped_error_response` and the app catch-all consults it, because
+  the seam raises in a *dependency* — without it an unauthenticated public request
+  would have answered 500 instead of 401. Board moved: the cross-cutting verifier
+  row and DoD item 6 → backend half done. **Still gated upstream** on #599 merging
+  and on `route_security.yaml` admitting this surface's real callers; and `app` /
+  `access_key` callers 401 until somebody rules on what they own. SDD:
+  `src/backend/specs/2026-07-30-gateway-principal-verifier/`.
 - **2026-07-30** — **Track C implemented (PR #630)** — all 16 engine-runtime
   endpoints across five groups, plus `core/engine_runtime/` (the relay and the
   connection service) and its Service API Protocols. Seven things worth knowing

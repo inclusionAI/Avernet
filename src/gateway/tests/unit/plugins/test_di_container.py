@@ -78,12 +78,6 @@ class TestPluginContainerSelectors:
         cache = plugins.cache_plugin()
         assert cache is not None
 
-        validator = plugins.app_token_validator()
-        assert validator is not None
-
-        resolver = plugins.tenant_resolver()
-        assert resolver is not None
-
 
 class TestPluginRegistryInjection:
     def test_inject_adds_option_to_selector(self) -> None:

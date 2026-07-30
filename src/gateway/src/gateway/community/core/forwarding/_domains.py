@@ -2,7 +2,7 @@
 
 The gateway routes by **domain**: the leading path segment after the version
 base (e.g. ``bots`` in ``/openapi/v1/bots/...``) selects the target server. The
-map is loaded from ``upstreams.yaml``; a request whose leading segment matches no
+map is loaded from the ``upstreams`` section in ``application.yaml``; a request whose leading segment matches no
 configured domain resolves to ``None`` (the caller denies — never an open proxy).
 
 No web framework here (Rule 7): this is pure resolution logic.

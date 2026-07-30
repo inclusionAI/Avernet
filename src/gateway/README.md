@@ -26,7 +26,7 @@ which exposes 6 **Selectors** that resolve the active implementation at runtime:
 | `tenant_resolver`     | `plugins.authn.tenant`       | `bare`                    | Multi-tenant resolution                  |
 
 Each Selector maps a config string to a `providers.Singleton` or `providers.Callable`.
-The active value is read from `user_config.plugins.*` in `application.yaml`.
+Runtime configuration is read from a single `application.yaml`; plugin selectors use `user_config.plugins.*`, while authn chains, route security, and upstream routing live in top-level sections of the same file.
 
 ```text
 application.yaml
@@ -93,7 +93,7 @@ This is called during `get_container()` before any providers are resolved.
 
 ```text
 src/gateway/
-├── configs/                    # Application YAML configurations
+├── configs/                    # Single application.yaml plus schema artifacts
 ├── docs/                       # OpenAPI docs
 ├── scripts/                    # CI and utility scripts
 ├── specs/                      # Architecture specifications
