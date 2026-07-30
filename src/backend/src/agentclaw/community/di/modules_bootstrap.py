@@ -88,7 +88,7 @@ def register_corp_modules(profile: DeployProfile) -> None:
     # via the default_env_bot.singlebox_overlay registry (B8). The corp
     # bootstrap call is guarded by ModuleNotFoundError so a community build
     # (Avernet CI) stays corp-free.
-    elif profile is DeployProfile.SINGLEBOX:
+    elif profile is DeployProfile.SINGLEBOX:  # pragma: no cover — corp bridge
         from importlib import import_module
 
         try:

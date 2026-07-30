@@ -17,7 +17,7 @@ from injector import Module
 _singlebox_overlay_provider: Callable[[], list[Module]] | None = None
 
 
-def register_singlebox_overlay_provider(provider: Callable[[], list[Module]]) -> None:
+def register_singlebox_overlay_provider(provider: Callable[[], list[Module]]) -> None:  # pragma: no cover — corp bridge, only callable in OCB monorepo
     """注册 corp overlay 模块供给函数（由 corp_bootstrap 调用）。"""
     global _singlebox_overlay_provider
     _singlebox_overlay_provider = provider
@@ -31,4 +31,4 @@ def get_singlebox_overlay_modules() -> list[Module]:
     """
     if _singlebox_overlay_provider is None:
         return []
-    return _singlebox_overlay_provider()
+    return _singlebox_overlay_provider()  # pragma: no cover — corp bridge, only reached in OCB monorepo
