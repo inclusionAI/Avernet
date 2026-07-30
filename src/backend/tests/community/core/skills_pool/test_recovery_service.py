@@ -298,6 +298,14 @@ class _ChangedBots:
         return None
 
 
+class _AICodingBots(_Bots):
+    def get_by_id_and_entity(
+        self, bot_id: str, entity_id: str
+    ) -> dict[str, object]:
+        value = super().get_by_id_and_entity(bot_id, entity_id)
+        return {**value, "active_engine": "aicoding"}
+
+
 class _Skills:
     local = [
         RegisteredSkillAsset(
@@ -592,3 +600,47 @@ async def test_rollback_post_cutover_sync_pending_is_retryable() -> None:
     assert result.retryable is True
     assert layouts.state.phase is SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING
     assert layouts.state.last_failure_retryable is True
+
+
+@pytest.mark.asyncio
+async def test_aicoding_rollback_resumes_after_active_repo_restoration() -> None:
+    layouts = _RollbackLayouts()
+    runtime = _RollbackRuntime()
+    runtime.publish_results = [True, True]
+    runtime.probe_result = RuntimeLayoutProbeResult(
+        status=RuntimeLayoutProbeStatus.INVALID,
+        engine="aicoding",
+        layout_contract_version=LAYOUT_CONTRACT_VERSION,
+        preparation_id="preparation-1",
+        evidence={
+            "reason": "active_repo_corpus_present",
+            "implementation_engine": "aicoding",
+            "physical_layout_engine": "aicoding",
+            "mapping_contract_version": MAPPING_CONTRACT_VERSION,
+        },
+    )
+
+    result = await SkillsPoolRollbackService(
+        bot_repository=_AICodingBots(),
+        layout_repository=layouts,
+        skill_repository=_Skills(),
+        runtime=runtime,
+        edit_guard=_EditGuard(),
+    ).rollback(
+        scope=SCOPE,
+        rollback_generation="rollback-1",
+        lease_owner="operator-task-1",
+        operator="oncall-1",
+        note="resume restored active repo",
+    )
+
+    assert result.outcome is SkillsPoolRollbackOutcome.LEGACY_ACTIVE
+    assert runtime.events == [
+        "probe",
+        "mapping",
+        "verify",
+        "rollback",
+        "mapping",
+        "verify",
+    ]
+    assert layouts.events == ["begin", "cutover", "database"]

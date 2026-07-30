@@ -31,4 +31,27 @@ def is_trusted_aicoding_repo_retirement_resume(
     )
 
 
-__all__ = ["is_trusted_aicoding_repo_retirement_resume"]
+def is_trusted_aicoding_repo_restoration_resume(
+    *,
+    state: BotSkillLayoutState,
+    engine: str,
+    probe: RuntimeLayoutProbeResult,
+) -> bool:
+    """Allow an identity-matched Legacy rollback to finish after restoration."""
+
+    return (
+        state.phase is SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING
+        and probe.status is RuntimeLayoutProbeStatus.INVALID
+        and probe.engine == engine
+        and probe.layout_contract_version == state.layout_contract_version
+        and probe.preparation_id == state.preparation_id
+        and probe.evidence.get("reason") == "active_repo_corpus_present"
+        and probe.evidence.get("implementation_engine") == "aicoding"
+        and probe.evidence.get("physical_layout_engine") == "aicoding"
+    )
+
+
+__all__ = [
+    "is_trusted_aicoding_repo_restoration_resume",
+    "is_trusted_aicoding_repo_retirement_resume",
+]
