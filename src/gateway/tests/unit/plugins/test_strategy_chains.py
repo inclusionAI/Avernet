@@ -30,7 +30,7 @@ def _bootstrap_db():
 
 
 def test_missing_config_routes_to_defaults(tmp_path, monkeypatch):
-    cfg = tmp_path / "identity_strategies.yaml"
+    cfg = tmp_path / "application.yaml"
     cfg.write_text(
         "identity_strategies:\n  user: [google]\n  bot: [bot_token]\n  app: [app_token]\n  access_key: [access_key_token]\n"
     )
@@ -46,7 +46,7 @@ def test_missing_config_routes_to_defaults(tmp_path, monkeypatch):
 
 
 def test_unknown_strategy_name_raises(tmp_path, monkeypatch):
-    cfg = tmp_path / "identity_strategies.yaml"
+    cfg = tmp_path / "application.yaml"
     cfg.write_text("identity_strategies:\n  user: [google, bogus_name]\n")
     monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
     with pytest.raises(KeyError, match="unknown strategy 'bogus_name'"):
@@ -54,7 +54,7 @@ def test_unknown_strategy_name_raises(tmp_path, monkeypatch):
 
 
 def test_unknown_identity_value_raises(tmp_path, monkeypatch):
-    cfg = tmp_path / "identity_strategies.yaml"
+    cfg = tmp_path / "application.yaml"
     cfg.write_text("identity_strategies:\n  alien: [google]\n")
     monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
     with pytest.raises(KeyError, match="unknown identity 'alien'"):
@@ -62,7 +62,7 @@ def test_unknown_identity_value_raises(tmp_path, monkeypatch):
 
 
 def test_empty_file_returns_defaults(tmp_path, monkeypatch):
-    cfg = tmp_path / "identity_strategies.yaml"
+    cfg = tmp_path / "application.yaml"
     cfg.write_text("")
     monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
     chains = _strategy_chains(
@@ -72,7 +72,7 @@ def test_empty_file_returns_defaults(tmp_path, monkeypatch):
 
 
 def test_chains_are_identity_chains(tmp_path, monkeypatch):
-    cfg = tmp_path / "identity_strategies.yaml"
+    cfg = tmp_path / "application.yaml"
     cfg.write_text(
         "identity_strategies:\n  user: [google]\n  bot: [bot_token]\n  app: [app_token]\n  access_key: [access_key_token]\n"
     )
@@ -86,22 +86,28 @@ def test_chains_are_identity_chains(tmp_path, monkeypatch):
         assert chain.name == ptype.value
 
 
-# ── fail-fast: missing config files ──────────────────────────────────────
+# ── single application.yaml config behaviour ───────────────────────────────
 
 
-def test_missing_identity_strategies_fails(tmp_path, monkeypatch):
+def test_missing_identity_strategies_uses_defaults(tmp_path, monkeypatch):
+    (tmp_path / "application.yaml").write_text("app_name: test\n")
     monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
-    with pytest.raises(FileNotFoundError, match="identity_strategies.yaml"):
-        _strategy_chains(_bootstrap_db(), StubAppTokenValidator(), StubTenantResolver())
+    chains = _strategy_chains(
+        _bootstrap_db(), StubAppTokenValidator(), StubTenantResolver()
+    )
+    assert PrincipalType.USER in chains
 
 
-def test_missing_route_security_fails(tmp_path, monkeypatch):
+def test_missing_route_security_uses_fail_closed_default(tmp_path, monkeypatch):
+    (tmp_path / "application.yaml").write_text("app_name: test\n")
     monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
-    with pytest.raises(FileNotFoundError, match="route_security.yaml"):
-        _load_route_security()
+    route_security = _load_route_security()
+    req = route_security.resolve("GET", "/anything")
+    assert req is not None
 
 
-def test_missing_upstreams_fails(tmp_path, monkeypatch):
+def test_missing_upstreams_section_fails(tmp_path, monkeypatch):
+    (tmp_path / "application.yaml").write_text("app_name: test\n")
     monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
-    with pytest.raises(FileNotFoundError, match="upstreams.yaml"):
-        _load_domain_map(tmp_path)
+    with pytest.raises(ValueError, match="application.yaml upstreams"):
+        _load_domain_map()

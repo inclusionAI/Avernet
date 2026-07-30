@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
@@ -87,3 +88,4 @@ class Config:
     module_config: ModuleConfig = field(default_factory=ModuleConfig)
     user_config: UserConfig = field(default_factory=UserConfig)
     raw: dict = field(default_factory=dict)
+    config_dir: Path | None = None
