@@ -476,6 +476,16 @@ def _finalize_active_root(
                     **error.evidence,
                 },
             )
+        except OSError as error:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_repo_retirement_failed",
+                    "retirement_reason": "active_repo_retirement_io_error",
+                    "error_type": type(error).__name__,
+                    "errno": error.errno,
+                },
+            )
         if active_repo.exists() or active_repo.is_symlink():
             return PoolActivationResult(
                 PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
