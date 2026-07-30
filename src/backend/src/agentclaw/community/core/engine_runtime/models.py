@@ -26,13 +26,34 @@ class EngineResult:
             **not**, hence ``None`` rather than ``0`` — "unknown" and "empty"
             are different, and a caller-visible ``total`` must not invent a
             number.
-        warning: the engine's caveat for a capability it declares as
-            supported-with-a-limitation. Empty when there is none.
+        limited: True when the engine served this with a declared limitation,
+            so the payload may be incomplete. Deliberately a **flag, not the
+            engine's message**: those strings are internal engineering text
+            ("teamclaw-aicoding-relay has no explicit sessions.create…") and
+            some are not English ("通过 mcporter 命令启动"), and this surface
+            promises fixed English messages that leak no internals. The adapter
+            renders the public wording; core carries only the fact.
     """
 
     data: Any = None
     total: int | None = None
-    warning: str = ""
+    limited: bool = False
+
+
+@dataclass(frozen=True)
+class BotFacts:
+    """The only bot fields a runtime handler needs.
+
+    Deliberately narrow. ``BotService.get_bot`` returns the full record with
+    ``device_binding`` attached — ``device_id``, ``device_provider``,
+    ``device_props`` — and handing that to public handlers puts device topology
+    one ``envelope(bot)`` away from an external caller, on the surface built to
+    stop publishing exactly that. Widen this only with a reason.
+    """
+
+    bot_id: str
+    bot_type: str
+    active_engine: str
 
 
 @dataclass(frozen=True)
@@ -67,4 +88,4 @@ class ConnectionResult:
     sockets: list[SocketInfo] = field(default_factory=list)
 
 
-__all__ = ["ConnectionResult", "EngineResult", "SocketInfo"]
+__all__ = ["BotFacts", "ConnectionResult", "EngineResult", "SocketInfo"]

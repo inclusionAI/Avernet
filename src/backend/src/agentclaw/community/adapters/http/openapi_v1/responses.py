@@ -82,16 +82,29 @@ def envelope(
     *,
     code: int = CODE_OK,
     message: str = "OK",
+    warning: str = "",
 ) -> Envelope[T]:
-    """Wrap ``data`` in the standard success envelope."""
+    """Wrap ``data`` in the standard success envelope.
+
+    ``warning`` is non-empty only when the engine served the request with a
+    declared limitation. It must be **fixed public wording** chosen by the
+    caller, never the engine's own text — that is internal engineering prose and
+    is not always English.
+    """
     return Envelope(
-        code=code, message=message, data=data, request_id=_trace_id(request)
+        code=code,
+        message=message,
+        data=data,
+        request_id=_trace_id(request),
+        warning=warning,
     )
 
 
-def page(total: int, items: list[T], request: Request) -> Envelope[Page[T]]:
+def page(
+    total: int, items: list[T], request: Request, *, warning: str = ""
+) -> Envelope[Page[T]]:
     """Wrap a page of ``items`` in the standard envelope."""
-    return envelope(Page(total=total, items=items), request)
+    return envelope(Page(total=total, items=items), request, warning=warning)
 
 
 def created(data: T, request: Request) -> Envelope[T]:

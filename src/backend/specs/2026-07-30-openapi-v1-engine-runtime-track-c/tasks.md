@@ -301,6 +301,25 @@ All paths are relative to `src/backend/`. Source package is
         skipped.
 - **Depends on:** Task 11
 
+## Task 12b: Add the singlebox E2E flow for engine_runtime
+- **Goal:** Remove the module's exemption from the E2E coverage gate.
+- **Files:**
+  - `tests/community/_flows/engine_runtime/api_lifecycle.py` (new)
+  - `tests/community/framework/flow_coverage.py`
+- **Done when:**
+  - [ ] A flow drives the public engine-runtime endpoints over
+        `InMemoryDeviceAdapterTransport`, the same seam
+        `tests/community/_flows/cron/api_lifecycle.py` already uses.
+  - [ ] `engine_runtime` is **removed** from `SINGLEBOX_E2E_EXEMPT`.
+- **Depends on:** Task 11
+- **Why this is a task and not an exemption:** the exemption written in Task 2
+  claimed singlebox has no transport to offer. That was wrong —
+  `di/modules/infrastructure/singlebox/devices.py` binds the in-memory
+  transport, and `cron` crosses the identical seam with a real flow. The only
+  genuine blocker is that the endpoints do not exist until Task 11. Exempting
+  permanently would leave the one module whose entire job is crossing into a
+  device outside the gate.
+
 ## Task 13: Tests & Verification
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.
 - **Files:** `docs/openapi-v1/README.md`, `docs/openapi-v1/README.zh-CN.md`
@@ -328,7 +347,7 @@ All paths are relative to `src/backend/`. Source package is
 - **Group C — Endpoint groups:** Tasks 7, 8, 9, 10
   - Theme: the 16 handlers. Each task is one coherent slice and can be reviewed
     on its own diff.
-- **Group D — Wiring and isolation:** Tasks 11, 12
+- **Group D — Wiring and isolation:** Tasks 11, 12, 12b
   - Theme: mount the surface, pin the `/bots` path invariant, and prove
     isolation on every route.
 - **Group E — Verification:** Task 13

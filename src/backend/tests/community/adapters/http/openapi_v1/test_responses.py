@@ -139,11 +139,8 @@ def test_envelope_warning_defaults_to_empty():
 
 
 def test_envelope_warning_round_trips_when_set():
-    env = envelope({"x": 1}, _request())
-    env.warning = "engine can only list the current session"
-    assert env.model_dump()["warning"] == (
-        "engine can only list the current session"
-    )
+    env = envelope({"x": 1}, _request(), warning="served with a limitation")
+    assert env.model_dump()["warning"] == "served with a limitation"
 
 
 def test_page_envelope_carries_the_warning_field():
@@ -163,16 +160,36 @@ def test_error_envelope_has_no_warning():
     assert "warning" not in ErrorEnvelope.model_fields
 
 
-def test_error_responses_document_501_and_504():
-    """The engine-runtime surface can return both; the schema must say so."""
+def test_501_and_504_are_scoped_to_the_engine_runtime_groups():
+    """Only the engine-runtime routes can return these, so only they document them.
+
+    ``ERROR_RESPONSES`` is applied surface-wide in ``build_public_router`` and
+    ``test_openapi_error_schema`` asserts every operation documents every status
+    in it. Putting 501/504 there would make the six already-shipped categories
+    advertise failures they cannot produce.
+    """
     from agentclaw.community.adapters.http.openapi_v1.contracts import (
+        ENGINE_RUNTIME_ERROR_RESPONSES,
         ERROR_RESPONSES,
         ErrorEnvelope,
     )
 
     for status in (501, 504):
-        assert status in ERROR_RESPONSES
-        assert ERROR_RESPONSES[status]["model"] is ErrorEnvelope
+        assert status not in ERROR_RESPONSES, (
+            f"{status} must not be surface-wide — shipped categories cannot return it"
+        )
+        assert ENGINE_RUNTIME_ERROR_RESPONSES[status]["model"] is ErrorEnvelope
+
+    # The per-group dict is a superset: engine-runtime routes still document
+    # everything the rest of the surface does.
+    assert set(ERROR_RESPONSES) <= set(ENGINE_RUNTIME_ERROR_RESPONSES)
+
+
+def test_envelope_builder_accepts_a_warning():
+    """The field needs a supported builder path, not attribute mutation."""
+    env = envelope({"x": 1}, _request(), warning="served with a limitation")
+    assert env.warning == "served with a limitation"
+    assert page(1, [{"x": 1}], _request(), warning="w").warning == "w"
 
 
 def test_error_body_matches_the_documented_error_model():

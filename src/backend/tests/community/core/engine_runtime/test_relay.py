@@ -22,6 +22,7 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
+    EngineResourceNotFoundError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
@@ -80,9 +81,23 @@ class _Transport:
         self._result = {"success": True, "data": {}} if result is _UNSET else result
         self._raises = raises
         self.calls: list[tuple[str, str]] = []
+        self.invocations: list[dict] = []
 
     async def invoke(self, conn_info, method, path, body=None, params=None, *, timeout=None):
         self.calls.append((method, path))
+        # Record everything: a test that only checked (method, path) would pass
+        # while _invoke silently dropped body / params / timeout — and timeout is
+        # what the 504 path depends on.
+        self.invocations.append(
+            {
+                "conn_info": conn_info,
+                "method": method,
+                "path": path,
+                "body": body,
+                "params": params,
+                "timeout": timeout,
+            }
+        )
         if self._raises is not None:
             raise self._raises
         return self._result
@@ -111,7 +126,9 @@ async def test_foreign_bot_raises_before_touching_the_device():
     have reached someone else's device.
     """
     resolver, transport = _Resolver(), _Transport()
-    relay = _relay(_BotService({}), resolver, transport)
+    # The default store holds BOT owned by OWNER; we ask as someone else, so this
+    # exercises "exists but not yours" rather than the weaker "nothing exists".
+    relay = _relay(_BotService(), resolver, transport)
 
     with pytest.raises(BotNotFoundError):
         await relay.call(bot_id=BOT, owner_id="someone-else", method="GET", path="/api/sessions")
@@ -163,7 +180,7 @@ async def test_success_envelope_is_normalised():
     )
     assert result.data == [{"id": "s1"}]
     assert result.total == 7
-    assert result.warning == "partial"
+    assert result.limited is True
 
 
 @pytest.mark.asyncio
@@ -176,11 +193,29 @@ async def test_absent_total_is_none_not_zero():
 
 
 @pytest.mark.asyncio
-async def test_absent_warning_is_empty_string():
+async def test_absent_warning_leaves_limited_false():
     result = await _relay(transport=_Transport({"success": True, "data": 1})).call(
         bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models"
     )
-    assert result.warning == ""
+    assert result.limited is False
+
+
+@pytest.mark.asyncio
+async def test_engine_warning_text_never_escapes_the_relay():
+    """The engine's caveat strings are internal prose, some not English.
+
+    e.g. claude_code declares SESSION_CREATE limited with
+    "teamclaw-aicoding-relay has no explicit sessions.create; OCB pre-allocates
+    the sessionKey…" and openclaw uses "通过 mcporter 命令启动". This surface
+    promises fixed English messages that leak no internals, so the relay keeps
+    only the fact that a limitation applied.
+    """
+    leak = "teamclaw-aicoding-relay has no explicit sessions.create"
+    result = await _relay(
+        transport=_Transport({"success": True, "data": {}, "warning": leak})
+    ).call(bot_id=BOT, owner_id=OWNER, method="POST", path="/api/sessions")
+    assert result.limited is True
+    assert leak not in repr(result)
 
 
 @pytest.mark.asyncio
@@ -194,10 +229,53 @@ async def test_success_false_inside_http_200_raises():
 
 
 @pytest.mark.asyncio
-async def test_missing_success_key_is_treated_as_failure():
+async def test_missing_success_key_is_a_failure_on_enveloped_routes():
+    """Only for routes that *do* use the envelope — see the raw-payload tests."""
     with pytest.raises(EngineUpstreamError):
         await _relay(transport=_Transport({"data": {}})).call(
             bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+        )
+
+
+# ── raw-payload routes (enveloped=False) ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_raw_payload_route_returns_the_whole_body_as_data():
+    """``GET /api/engine/status`` answers with no envelope at all.
+
+    It returns ``EngineManager.status()`` directly — ``{engine,
+    active_connections, process, transition}``, no ``success`` and no ``data``
+    wrapper. Treating it as enveloped would fail every call against a perfectly
+    healthy device.
+    """
+    status = {
+        "engine": "openclaw",
+        "active_connections": 2,
+        "process": {"running": True},
+        "transition": {},
+    }
+    result = await _relay(transport=_Transport(status)).call(
+        bot_id=BOT,
+        owner_id=OWNER,
+        method="GET",
+        path="/api/engine/status",
+        enveloped=False,
+    )
+    assert result.data == status
+    assert result.total is None
+    assert result.limited is False
+
+
+@pytest.mark.asyncio
+async def test_raw_payload_mode_still_rejects_a_non_dict_body():
+    with pytest.raises(EngineUpstreamError):
+        await _relay(transport=_Transport(result="nope")).call(
+            bot_id=BOT,
+            owner_id=OWNER,
+            method="GET",
+            path="/api/engine/status",
+            enveloped=False,
         )
 
 
@@ -231,11 +309,19 @@ async def test_501_becomes_capability_unsupported():
 
 
 @pytest.mark.asyncio
-async def test_endpoint_not_found_becomes_capability_unsupported():
+async def test_engine_404_is_not_found_not_capability_unsupported():
+    """The transport raises its not-found error for ANY adapter 404.
+
+    The engine returns 404 for an unknown session id, an unknown model id, an
+    unknown engine name — ordinary missing resources. Reporting those as
+    "capability unsupported" would tell a caller polling a deleted session that
+    its bot's engine lost the sessions capability. A capability the engine does
+    not declare arrives as HTTP 501 instead, covered separately above.
+    """
     transport = _Transport(raises=DeviceAdapterEndpointNotFoundError("no route"))
-    with pytest.raises(EngineCapabilityUnsupportedError):
+    with pytest.raises(EngineResourceNotFoundError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions/gone"
         )
 
 
@@ -260,9 +346,80 @@ async def test_timeout_propagates_unwrapped():
 
 
 @pytest.mark.asyncio
-async def test_method_and_path_are_forwarded_verbatim():
+async def test_every_argument_is_forwarded_verbatim():
+    """Covers body/params/timeout too — dropping any of them must fail a test."""
     transport = _Transport()
     await _relay(transport=transport).call(
-        bot_id=BOT, owner_id=OWNER, method="DELETE", path="/api/sessions/abc/messages"
+        bot_id=BOT,
+        owner_id=OWNER,
+        method="DELETE",
+        path="/api/sessions/abc/messages",
+        body={"b": 1},
+        params={"p": 2},
+        timeout=12.5,
     )
-    assert transport.calls == [("DELETE", "/api/sessions/abc/messages")]
+    assert transport.invocations[0] == {
+        "conn_info": {"url": "http://device"},
+        "method": "DELETE",
+        "path": "/api/sessions/abc/messages",
+        "body": {"b": 1},
+        "params": {"p": 2},
+        "timeout": 12.5,
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_forward_targets_the_device_resolved_for_that_bot():
+    """The isolation invariant is "the right device or no device".
+
+    Asserting only that *a* call happened would pass even if the relay reused a
+    stale or wrong conn_info, so pin the dialled connection to what the resolver
+    returned for this bot.
+    """
+
+    class _OtherResolver(_Resolver):
+        def resolve_for_bot(self, bot_id, user_id, *, device_uuid=None):
+            ctx = super().resolve_for_bot(bot_id, user_id, device_uuid=device_uuid)
+            return DeviceContext(
+                provider=ctx.provider,
+                conn_info={"url": f"http://device-for-{bot_id}"},
+                binding_id=ctx.binding_id,
+                bot_id=ctx.bot_id,
+                user_id=ctx.user_id,
+                bot_type=ctx.bot_type,
+            )
+
+    transport = _Transport()
+    await _relay(resolver=_OtherResolver(), transport=transport).call(
+        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+    )
+    assert transport.invocations[0]["conn_info"] == {"url": f"http://device-for-{BOT}"}
+
+
+# ── resolve_bot returns a narrow value object ────────────────────────────────
+
+
+def test_resolve_bot_does_not_hand_back_device_internals():
+    """``get_bot`` attaches device_binding (device_id / provider / props).
+
+    Handlers on a public surface built to stop publishing device topology must
+    not be one ``envelope(bot)`` away from shipping it.
+    """
+    bot_service = _BotService(
+        {
+            (BOT, OWNER): {
+                "bot_id": BOT,
+                "bot_type": "personal",
+                "active_engine": "openclaw",
+                "device_binding": {"device_id": "secret", "device_props": {"x": 1}},
+            }
+        }
+    )
+    facts = _relay(bot_service).resolve_bot(BOT, OWNER)
+    assert (facts.bot_id, facts.bot_type, facts.active_engine) == (
+        BOT,
+        "personal",
+        "openclaw",
+    )
+    assert "secret" not in repr(facts)
+    assert not hasattr(facts, "device_binding")

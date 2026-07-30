@@ -38,9 +38,10 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
+    EngineResourceNotFoundError,
     EngineUpstreamError,
 )
-from agentclaw.community.core.engine_runtime.models import EngineResult
+from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
@@ -73,8 +74,8 @@ class EngineRuntimeRelay:
 
     # ── resolution ────────────────────────────────────────────────────────
 
-    def resolve_bot(self, bot_id: str, owner_id: str) -> dict[str, Any]:
-        """Return the caller's bot record, or raise.
+    def resolve_bot(self, bot_id: str, owner_id: str) -> BotFacts:
+        """Return the few bot facts handlers need, or raise.
 
         **The isolation seam.** ``BotService.get_bot`` goes through
         ``get_by_id_and_owner``, so a bot belonging to someone else — or to
@@ -84,8 +85,19 @@ class EngineRuntimeRelay:
 
         ``owner_id`` must come from the authenticated principal. Passing a
         caller-supplied value turns this check into a formality.
+
+        Returns :class:`BotFacts`, **not** the raw record. ``get_bot`` attaches
+        ``device_binding`` — ``device_id``, ``device_provider``, ``device_props``
+        — and this is a public-surface entry point whose entire purpose is to
+        stop publishing device topology. A narrow value object makes leaking it
+        impossible rather than merely discouraged.
         """
-        return self._bot_service.get_bot(bot_id, owner_id)
+        bot = self._bot_service.get_bot(bot_id, owner_id)
+        return BotFacts(
+            bot_id=str(bot.get("bot_id") or bot_id),
+            bot_type=str(bot.get("bot_type") or ""),
+            active_engine=str(bot.get("active_engine") or ""),
+        )
 
     def _resolve_device(self, bot_id: str, owner_id: str) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
@@ -119,17 +131,27 @@ class EngineRuntimeRelay:
         body: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         timeout: float | None = None,
+        enveloped: bool = True,
     ) -> EngineResult:
         """Issue ``method path`` against the caller's bot's engine adapter.
 
         Resolution order is load-bearing: bot first (isolation), then device,
         then the forward. A handler that reverses it would touch a device for a
         bot the caller does not own.
+
+        ``enveloped`` declares whether this engine route answers with the
+        standard ``{success, data, …}`` envelope. Almost all do — but
+        ``GET /api/engine/status`` returns ``EngineManager.status()`` **raw**
+        (``src/engine/.../api/engine/router.py``), with no ``success`` and no
+        ``data`` wrapper. Callers of those routes pass ``enveloped=False`` and
+        the whole body becomes the payload. It is an explicit per-route fact
+        rather than sniffing for a ``success`` key, because a body that happens
+        to lack one is exactly the malformed case that must still fail.
         """
         self.resolve_bot(bot_id, owner_id)
         ctx = self._resolve_device(bot_id, owner_id)
         raw = await self._invoke(ctx, method, path, body, params, timeout)
-        return self._normalise(raw, bot_id=bot_id, path=path)
+        return self._normalise(raw, bot_id=bot_id, path=path, enveloped=enveloped)
 
     async def _invoke(
         self,
@@ -151,11 +173,13 @@ class EngineRuntimeRelay:
                 ctx.conn_info, method, path, body=body, params=params, timeout=timeout
             )
         except DeviceAdapterEndpointNotFoundError as exc:
-            # The runtime does not serve this path at all — indistinguishable,
-            # from a caller's side, from a capability the engine lacks.
-            raise EngineCapabilityUnsupportedError(
-                f"engine does not serve {path}"
-            ) from exc
+            # Any adapter 404, NOT just "this runtime has no such route" — the
+            # engine returns 404 for an unknown session id, an unknown model id,
+            # an unknown engine name. Mapping it to "capability unsupported"
+            # would tell a caller polling a deleted session that its bot lost
+            # the sessions capability. A capability the engine does not declare
+            # arrives as a 501 below, which is a different status entirely.
+            raise EngineResourceNotFoundError(f"engine returned 404 for {path}") from exc
         except DeviceAdapterHTTPStatusError as exc:
             if exc.status_code == _CAPABILITY_UNSUPPORTED_STATUS:
                 raise EngineCapabilityUnsupportedError(
@@ -168,7 +192,7 @@ class EngineRuntimeRelay:
     # ── normalisation ─────────────────────────────────────────────────────
 
     def _normalise(
-        self, raw: object, *, bot_id: str, path: str
+        self, raw: object, *, bot_id: str, path: str, enveloped: bool = True
     ) -> EngineResult:
         """Turn the engine's envelope into an :class:`EngineResult`.
 
@@ -192,6 +216,12 @@ class EngineRuntimeRelay:
             )
             raise EngineUpstreamError(f"engine returned a non-envelope body for {path}")
 
+        if not enveloped:
+            # A raw-payload route: the body *is* the data. No success flag to
+            # check, no total, and no warning — the engine only attaches those
+            # to its envelope.
+            return EngineResult(data=raw)
+
         if not raw.get("success", False):
             logger.warning(
                 "[engine_runtime] engine reported failure bot=%s path=%s message=%s",
@@ -205,7 +235,10 @@ class EngineRuntimeRelay:
         return EngineResult(
             data=raw.get("data"),
             total=total if isinstance(total, int) else None,
-            warning=raw.get("warning") or "",
+            # Flag only. The engine's warning text is internal engineering
+            # prose and sometimes not English; the adapter renders fixed public
+            # wording from this. See BotFacts/EngineResult docstrings.
+            limited=bool(raw.get("warning")),
         )
 
 

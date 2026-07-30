@@ -37,10 +37,10 @@ class Envelope[T](BaseModel):
     warning: str = Field(
         default="",
         description="Empty unless the request was served with a documented "
-        "limitation, in which case the payload may be incomplete. Only the "
-        "engine-runtime endpoints populate it today: an engine may declare a "
-        "capability as supported-with-a-caveat, and this relays that caveat "
-        "rather than dropping it.",
+        "limitation, in which case the payload may be incomplete. Fixed public "
+        "wording, never the upstream engine's own text. Only the engine-runtime "
+        "endpoints populate it today; the engine-capabilities endpoint says "
+        "which capabilities a given bot serves with a caveat.",
     )
 
 
@@ -86,13 +86,23 @@ ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     409: {"model": ErrorEnvelope, "description": "Conflicts with current state"},
     422: {"model": ErrorEnvelope, "description": "Request failed validation"},
     500: {"model": ErrorEnvelope, "description": "Internal error"},
+    502: {"model": ErrorEnvelope, "description": "Upstream service error"},
+}
+
+# Extra failures only the engine-runtime groups can produce. Attached to those
+# routers, NOT merged into ``ERROR_RESPONSES``: that dict is applied surface-wide
+# in ``build_public_router``, and ``test_openapi_error_schema`` asserts every
+# operation documents every status in it — so adding these there would make the
+# six already-shipped categories advertise a 501 they cannot return, pointing at
+# an endpoint unrelated to them, and generate dead branches in clients.
+ENGINE_RUNTIME_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    **ERROR_RESPONSES,
     501: {
         "model": ErrorEnvelope,
         "description": "Not supported for this bot — either its engine does not "
         "declare the capability (see the engine-capabilities endpoint) or the "
         "operation is not offered for this bot type",
     },
-    502: {"model": ErrorEnvelope, "description": "Upstream service error"},
     504: {"model": ErrorEnvelope, "description": "Upstream service timed out"},
 }
 

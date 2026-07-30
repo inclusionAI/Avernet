@@ -11,21 +11,21 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from agentclaw.community.core.engine_runtime.models import EngineResult
+from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
 
 
 @runtime_checkable
 class EngineRuntimeRelayProtocol(Protocol):
     """Forward one public runtime request to a bot's engine adapter."""
 
-    def resolve_bot(self, bot_id: str, owner_id: str) -> dict[str, Any]:
-        """Return the caller's bot record, or raise ``BotNotFoundError``.
+    def resolve_bot(self, bot_id: str, owner_id: str) -> BotFacts:
+        """Return the caller's bot facts, or raise ``BotNotFoundError``.
 
-        Exposed on the Protocol because handlers need the record itself — the
-        sessions group reads ``bot_type`` from it, and the connection endpoint
-        reads ``active_engine`` — not because callers should re-check ownership.
-        ``call`` already resolves the bot; this is for handlers that must branch
-        on bot facts *before* deciding whether to forward at all.
+        Exposed because handlers must branch on bot facts *before* deciding
+        whether to forward at all — the sessions group reads ``bot_type``, the
+        connection endpoint reads ``active_engine``. Returns a narrow value
+        object, not the raw record, so device binding internals cannot reach a
+        public handler by accident.
         """
         ...
 
@@ -39,8 +39,13 @@ class EngineRuntimeRelayProtocol(Protocol):
         body: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
         timeout: float | None = None,
+        enveloped: bool = True,
     ) -> EngineResult:
-        """Issue ``method path`` against the caller's bot's engine adapter."""
+        """Issue ``method path`` against the caller's bot's engine adapter.
+
+        ``enveloped=False`` for the one engine route that answers with a raw
+        payload instead of the standard envelope (``GET /api/engine/status``).
+        """
         ...
 
 

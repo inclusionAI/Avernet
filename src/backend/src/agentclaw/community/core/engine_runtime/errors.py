@@ -45,6 +45,21 @@ class EngineBotTypeNotSupportedError(EngineRuntimeError):
     """
 
 
+class EngineResourceNotFoundError(EngineRuntimeError):
+    """The engine answered 404 — the addressed resource does not exist.
+
+    Distinct from :class:`EngineCapabilityUnsupportedError`. The transport
+    raises its not-found error for *any* adapter 404, and the engine returns 404
+    for ordinary missing resources — an unknown session
+    (``api/session/router.py``), an unknown model id (``api/models/router.py``),
+    an unknown engine name. Folding those into "capability unsupported" would
+    tell a caller polling a deleted session that its bot lost the sessions
+    capability. A capability the engine does not declare comes back as **501**
+    from ``check_capability``, which is a different status and a different
+    error.
+    """
+
+
 class EngineUpstreamError(EngineRuntimeError):
     """The device answered, but not with a usable success.
 
@@ -59,5 +74,6 @@ __all__ = [
     "EngineBotTypeNotSupportedError",
     "EngineCapabilityUnsupportedError",
     "EngineDeviceNotReadyError",
+    "EngineResourceNotFoundError",
     "EngineUpstreamError",
 ]

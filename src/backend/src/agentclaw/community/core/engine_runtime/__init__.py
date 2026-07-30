@@ -4,20 +4,24 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
+    EngineResourceNotFoundError,
     EngineRuntimeError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.models import (
+    BotFacts,
     ConnectionResult,
     EngineResult,
     SocketInfo,
 )
 
 __all__ = [
+    "BotFacts",
     "ConnectionResult",
     "EngineBotTypeNotSupportedError",
     "EngineCapabilityUnsupportedError",
     "EngineDeviceNotReadyError",
+    "EngineResourceNotFoundError",
     "EngineResult",
     "EngineRuntimeError",
     "EngineUpstreamError",

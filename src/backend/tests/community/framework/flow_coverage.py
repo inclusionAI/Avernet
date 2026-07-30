@@ -64,11 +64,14 @@ _SESSION_RESOURCES_EXEMPT_REASON = (
 )
 
 _ENGINE_RUNTIME_EXEMPT_REASON = (
-    "Every path in this module ends in an HTTP call to a bot's engine adapter, "
-    "which singlebox has no container runtime to provide — the community "
-    "DeviceAdapterTransport is a no-op returning success:false. Covered instead "
-    "by relay unit tests over the in-memory transport plus endpoint and "
-    "cross-tenant isolation tests on the /openapi/v1 surface."
+    "TEMPORARY, and the weakest exemption in this dict: singlebox CAN drive this "
+    "module — it binds InMemoryDeviceAdapterTransport, and cron crosses the "
+    "identical relay seam with a real flow. The blocker is only that the public "
+    "/openapi/v1 engine-runtime endpoints a flow would drive do not exist yet "
+    "(Track C tasks 7-12). Covered for now by relay unit tests over a stub "
+    "transport. Add the flow when the endpoints land and delete this entry — do "
+    "not let it calcify; this is the one module whose entire job is crossing "
+    "into a device."
 )
 
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
