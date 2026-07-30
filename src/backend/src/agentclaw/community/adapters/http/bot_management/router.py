@@ -940,8 +940,17 @@ async def create_bot(
         # Passport 申请时透传 engine_type；未指定则落到 DEFAULT_ENGINE_TYPE
         passport_engine_type = data.get("engine_type") or DEFAULT_ENGINE_TYPE
         bot_type = data.get("bot_type")
+        requested_bot_type = bot_type or "personal"
+        use_first_passport = (
+            requested_bot_type == "personal"
+            and not bot_repo.exists_by_owner_and_bot_type(user_id, "personal")
+        )
 
-        logger.info(f"[bot_router.create_bot] Allocated bot_id={bot_id}, is_first_bot={is_first_bot}, engine_type={passport_engine_type}")
+        logger.info(
+            f"[bot_router.create_bot] Allocated bot_id={bot_id}, "
+            f"is_first_bot={is_first_bot}, use_first_passport={use_first_passport}, "
+            f"engine_type={passport_engine_type}"
+        )
 
         # ===== 1.1 创建前置校验：避免两段式授权后才发现不可创建 =====
         try:
@@ -978,7 +987,7 @@ async def create_bot(
         default_cli_items = get_default_cli_items(passport_engine_type, data.get("template_type"))
 
         try:
-            if is_first_bot:
+            if use_first_passport:
                 passport_result = passport_plugin.apply_first_agent_passport(
                     bot_id=bot_id,
                     owner_workno=user_id,

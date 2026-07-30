@@ -527,6 +527,22 @@ class BotRepository:
                 > 0
             )
 
+    def exists_by_owner_and_bot_type(
+        self, owner_id: str, bot_type: str
+    ) -> bool:
+        with self._db.orm_session() as db:
+            return (
+                db.query(self.Model)
+                .filter(
+                    self.Model.is_delete == 0,
+                    self.Model.owner_id == owner_id,
+                    self.Model.bot_type == bot_type,
+                    self._env(),
+                )
+                .count()
+                > 0
+            )
+
     def exists_by_bot_name(self, bot_name: str) -> bool:
         with self._db.orm_session() as db:
             return (

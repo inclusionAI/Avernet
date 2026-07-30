@@ -261,6 +261,38 @@ def test_count_by_owner_excludes_desktop(repo):
     assert repo.count_by_owner("emp1", exclude_bot_type="desktop") == 1
 
 
+def test_exists_by_owner_and_bot_type_filters_owner_deleted_and_env(repo, db):
+    personal = repo.insert(_data(bot_id="personal", bot_type="personal"))
+    repo.insert(
+        _data(
+            bot_id="other-owner",
+            owner_id="emp2",
+            creator_id="emp2",
+            bot_type="personal",
+        )
+    )
+    repo.insert(_data(bot_id="service", bot_type="service"))
+
+    assert repo.exists_by_owner_and_bot_type("emp1", "personal") is True
+    assert repo.exists_by_owner_and_bot_type("emp1", "service") is True
+    assert repo.exists_by_owner_and_bot_type("missing", "personal") is False
+
+    with db.orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == personal["id"]).update(
+            {BotModel.is_delete: 1}
+        )
+    assert repo.exists_by_owner_and_bot_type("emp1", "personal") is False
+
+    env_personal = repo.insert(
+        _data(bot_id="other-env-personal", bot_type="personal")
+    )
+    with db.orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == env_personal["id"]).update(
+            {BotModel.env: "other-env"}
+        )
+    assert repo.exists_by_owner_and_bot_type("emp1", "personal") is False
+
+
 # ── update_by_owner allowlist (adopt prod) ──────────────────────────
 
 def test_update_by_owner_allowlist_drops_non_allowlisted(repo):
