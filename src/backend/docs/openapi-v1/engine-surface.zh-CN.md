@@ -223,7 +223,7 @@ socket 也是干净的。
 | `api/routers/openclaw_http` | `/api/openclaw` | 3 | — | 🟡 **延后** | `test-connection` / `disconnect` / `config`。它在 proxypass 数组里写作 `'api/openclaw'` —— **没有前导斜杠**，因此 `url.startsWith()` 永远匹配不到 `/api/openclaw/...`，该条目按现状是死的（`requestConfig.ts:191`）。而且是 openclaw 专有的网关调试工具 |
 | `api/default_config` | `/api/openclaw` | 1 | — | 🟡 **延后** | 同一个失效前缀条目 |
 | `api/zero_check` | `/api/openclaw/zero-check` | 2 | — | 🟡 **延后** | 同一个失效前缀条目 |
-| `api/web_shell` | — | 2 | 1 | ⛔ **C3 / 非 v1** | `GET /terminal`、`/terminal/health`、`WS /ws/terminal`。当引擎声明 `WEB_SHELL_OPEN` 时，socket 可经 `…/connection` 触达；那两个 HTTP 路由是 shell 自身的引导 |
+| `api/web_shell` | — | 2 | 1 | ⛔ **C3 / 非 v1** | `GET /terminal`、`/terminal/health`、`WS /ws/terminal`。也**不能**经 `…/connection` 触达 —— 终端 socket 曾经实现过又被移除（见上文 connection 条目）；那两个 HTTP 路由是 shell 自身的引导 |
 | `api/routers/ws` | — | — | 1 | 🔌 **C3 —— 连接信息** | `/api/openclaw/ws` |
 | `api/routers/claude_code_ws` | `/api/claude_code` | — | 1 | 🔌 **C3 —— 连接信息** | `/api/claude_code/ws` |
 | `openclaw/router` | `/api/openclaw` | — | 1 | 🔌 **C3** | `/client` —— 网关侧 socket，不是租户 socket |
@@ -396,9 +396,18 @@ Track B 的坑：**基类放最后** —— `ENVELOPE_ERRORS` 按插入顺序第
 - **2026-07-30 —— `session-favorites` 与 `/api/openclaw` HTTP 三件套
   （外加 default-config、zero-check）延后**，不是取消。两者都是增量的：以后再加
   不会破坏任何已发布的契约。
-- **2026-07-30 —— sessions 组仅服务 `personal` bot**；`service` 返回 `501`。
-  `BotType` 是 `Literal["personal", "service"]`，而 PR #494 已经允许外部租户创建
-  两者之一，所以这是真实存在的情况，不是假设。其余四个组两种类型都服务。
+- **2026-07-30 —— sessions 组与 connection 端点仅服务 `personal` bot**；
+  `service` 返回 `501`。`BotType` 是 `Literal["personal", "service"]`，而 PR #494
+  已经允许外部租户创建两者之一，所以这是真实存在的情况，不是假设。其余三个组两种
+  类型都服务。
+
+  connection 是在评审过程中被纳入这条裁定的，理由来自 sessions 组，而非它自身。
+  它发布的 socket 不论标成什么，作用域都不止于对话：引擎的 WebSocket 服务端在
+  `hello` 中通告 `sessions.list`、`sessions.patch`、`sessions.delete`、
+  `sessions.reset` 以及 `exec.approvals` 系列方法，授予 `operator.admin`，并把
+  未处理的方法转发给当前引擎的 relay 插件。在 `service` bot 上发布它，等于通过
+  socket 交回 sessions 组正用 `501` 拦下的那批数据 —— 前门锁了，窗户还开着。
+  给 token 本身收窄作用域需要引擎侧改动；这个门禁才是本面负责的部分。
 - **2026-07-30 —— 对话仍然是 WebSocket。** 不做 `POST /chat`，不做 SSE。公共 API
   交还 URL 与 headers，socket 由调用方自己持有。
 

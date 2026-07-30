@@ -226,7 +226,10 @@ All paths are relative to `src/backend/`. Source package is
   - [x] History depth is capped at 5000 messages (`_MAX_HISTORY_DEPTH`). The
         tail-limited window grows with the page number, and `page` is unbounded
         above, so the cap keeps a page index from multiplying into a huge
-        upstream fetch. Pages past the cap return empty.
+        upstream fetch. A page whose window *ends* past the cap is refused with
+        `EngineHistoryDepthExceededError` → `422`, before any device call —
+        serving it short would collide with the `BoundedPage` contract, where a
+        short page means the history ended and the total is exact.
   - [x] `extra="forbid"`; `user_id`, `engine`, `agent_id` rejected → `422`.
   - [x] **Gated on `bot_type == "personal"`** (plan assumption 6). All seven
         routes raise `EngineBotTypeNotSupportedError` → `501` on a `service`

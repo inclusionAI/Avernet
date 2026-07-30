@@ -418,7 +418,11 @@ and matches how cron behaves today, but the tests must not assume a live device.
   reached. The engine's own `total` is preferred whenever it fills one. The
   engine-side cap survived in a different form — a 5000-message depth limit on
   history (`_MAX_HISTORY_DEPTH`), since the tail-limited fetch grows with the
-  page number. Revisit if/when the engine reports `total` or offers a cursor.
+  page number. A page reaching past that depth is refused with `422` rather
+  than served short, because the two signals would otherwise collide: a short
+  page is what tells the caller the total is now exact, so a page clipped by
+  the cap reported the cap as the size of the history. Revisit if/when the
+  engine reports `total` or offers a cursor.
 
 - **Risk: the connection endpoint needs two device calls** (capabilities, then
   connection), doubling its failure surface.

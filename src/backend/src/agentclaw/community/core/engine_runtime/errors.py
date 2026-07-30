@@ -45,6 +45,17 @@ class EngineBotTypeNotSupportedError(EngineRuntimeError):
     """
 
 
+class EngineHistoryDepthExceededError(EngineRuntimeError):
+    """The requested message page reaches past the history depth served.
+
+    A product rule like :class:`EngineBotTypeNotSupportedError`, not an engine
+    condition — the engine is never asked. Message history is tail-limited, so
+    the cost of a page is its whole window and the depth has a ceiling; a page
+    beyond it cannot be served short, because a short page is how this surface
+    signals the end of history and would report the ceiling as an exact total.
+    """
+
+
 class EngineResourceNotFoundError(EngineRuntimeError):
     """The engine answered 404 — the addressed resource does not exist.
 
@@ -74,6 +85,7 @@ __all__ = [
     "EngineBotTypeNotSupportedError",
     "EngineCapabilityUnsupportedError",
     "EngineDeviceNotReadyError",
+    "EngineHistoryDepthExceededError",
     "EngineResourceNotFoundError",
     "EngineUpstreamError",
 ]

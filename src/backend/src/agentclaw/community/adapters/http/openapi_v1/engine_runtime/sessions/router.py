@@ -38,6 +38,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
+    EngineHistoryDepthExceededError,
     EngineResourceNotFoundError,
 )
 from agentclaw.community.di import Injected
@@ -63,10 +64,11 @@ _LOOKAHEAD = 1
 #: How far back message history is served, in messages. The history fetch is
 #: tail-limited and its cost is the whole window, not the page — see
 #: :func:`_history_window` — so without a ceiling the page number alone
-#: multiplies into an arbitrarily large upstream request. Past this depth the
-#: endpoint returns an empty page, which is the documented end-of-history
-#: signal. Generous for a conversation; bounded enough that a page number
-#: cannot be turned into device load.
+#: multiplies into an arbitrarily large upstream request. A page reaching past
+#: this depth is refused rather than served short; see
+#: :func:`_require_within_depth` for why an empty page could not be used.
+#: Generous for a conversation; bounded enough that a page number cannot be
+#: turned into device load.
 _MAX_HISTORY_DEPTH = 5000
 
 
@@ -201,6 +203,42 @@ def _history_window(page_params: Any) -> dict[str, int]:
     return {"offset": 0, "limit": min(want, _MAX_HISTORY_DEPTH + _LOOKAHEAD)}
 
 
+def _require_within_depth(page_params: Any) -> None:
+    """Refuse a page that would reach past the served history depth.
+
+    The derived total is a lower bound while full pages keep coming and exact
+    once a short page arrives — that is the contract ``MessagePage.total``
+    publishes, and it is what makes the bound usable. A page clipped by
+    :data:`_MAX_HISTORY_DEPTH` breaks it: the window stops at the cap rather
+    than at the oldest message, so the page comes back short while more history
+    exists, and the caller reads the cap as an exact count. With 50 000
+    messages and ``page_size=100``, page 51 returned nothing and reported
+    ``total=5001``.
+
+    Serving those pages honestly is not possible here. "Truncated" cannot be
+    expressed in a required ``int``, and neither engine route exposes a count to
+    put there instead. Refusing is the one answer that is true: the request is
+    outside what this endpoint serves, which is a property of the endpoint
+    rather than of the data, so it is rejected before the device is touched and
+    the same page is rejected whatever the history holds.
+
+    The bound is the window's *end*, not its start. Rejecting only
+    ``offset >= depth`` would still admit a page straddling the cap —
+    ``page_size=3``, page 1667 starts at 4998 and returns two messages of three,
+    short, and therefore exact-looking for the same reason.
+
+    422 matches the surface: ``page_size=101`` is already a 422 from FastAPI's
+    own parameter validation, and this is the same class of out-of-range page
+    argument.
+    """
+    offset = (page_params.page - 1) * page_params.page_size
+    if offset + page_params.page_size > _MAX_HISTORY_DEPTH:
+        raise EngineHistoryDepthExceededError(
+            f"page window ends at {offset + page_params.page_size}, past the "
+            f"{_MAX_HISTORY_DEPTH}-message depth served"
+        )
+
+
 def _page(
     items: list[Any], page_params: Any, *, reported: int | None
 ) -> tuple[int, list[Any]]:
@@ -244,18 +282,19 @@ def _history_page(
     The total falls out of the same window and is stronger than the session
     list's: when the tail comes back short, it is the whole history, so the
     count is exact. While it comes back full, it is a lower bound — the same
-    contract ``MessagePage.total`` documents.
+    contract ``MessagePage.total`` documents. That equivalence only holds for
+    pages within the depth cap, which is why :func:`_require_within_depth`
+    rejects the rest rather than letting a clipped page look like the end.
     """
     size = page_params.page_size
     skip = (page_params.page - 1) * size
     n = len(items)
     end = n - skip
     # The lookahead item exists to prove more history remains; it must never be
-    # served as content. Within the cap that is automatic — the window is one
-    # longer than the pages consume. At the cap it is not: the clamped fetch
-    # stops at _MAX_HISTORY_DEPTH + 1, so the page that lands exactly on the
-    # boundary would otherwise return that single extra message as a short page,
-    # which also reads as "this is the whole history".
+    # served as content. _require_within_depth keeps every served page a whole
+    # page below the cap, so this floor no longer has a page to trim — it stays
+    # as the invariant's backstop, and still binds if a device ever returns more
+    # than the limit asked for.
     floor = max(0, n - _MAX_HISTORY_DEPTH)
     visible = items[max(floor, end - size) : end] if end > floor else []
     if reported is not None:
@@ -421,11 +460,13 @@ async def list_session_messages(
     Page 1 is the most recent messages; paging forward walks back through the
     history. Messages are chronological within a page.
 
-    History is served to a depth of 5000 messages. Pages past that depth come
-    back empty, the same signal as reaching the end of a shorter history.
+    History is served to a depth of 5000 messages. A page reaching past that
+    depth is rejected with 422 rather than returned empty, so an end of history
+    is never confused with the limit of what this endpoint serves.
     """
     owner_id = caller_owner_id(principal)
     _require_personal_bot(relay, bot_id, owner_id)
+    _require_within_depth(page)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="GET",
         path=f"/api/sessions/{session_id}/messages",

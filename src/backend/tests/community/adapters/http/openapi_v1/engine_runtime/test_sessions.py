@@ -256,16 +256,17 @@ def test_paging_past_the_start_of_history_is_empty(client, relay):
     assert data["items"] == []
 
 
-def test_the_history_window_is_capped_so_a_page_number_cannot_amplify(client, relay):
+def test_a_page_number_cannot_amplify_into_device_load(client, relay):
     """``page_size`` is capped at 100 but ``page`` is only ``ge=1``, and the
-    tail-limited window grows with the page number. Unclamped, this asked a
-    tenant's device for ~100M messages to answer with at most 100."""
+    tail-limited window grows with the page number. Unguarded, this asked a
+    tenant's device for ~100M messages to answer with at most 100. The depth
+    check now refuses it before the device is touched at all."""
     relay.results = [EngineResult(data=_messages(1))]
-    ok(client.get(
+    fails(client.get(
         f"{_base()}/{SESSION_ID}/messages",
         params={"page": 1000000, "page_size": 100},
-    ))
-    assert relay.calls[0]["params"] == {"offset": 0, "limit": 5001}
+    ), 422)
+    assert relay.calls == []
 
 
 def test_the_cap_does_not_bite_within_the_served_depth(client, relay):
@@ -277,31 +278,73 @@ def test_the_cap_does_not_bite_within_the_served_depth(client, relay):
     assert relay.calls[0]["params"] == {"offset": 0, "limit": 1001}
 
 
-def test_a_page_past_the_capped_depth_reads_as_end_of_history(client, relay):
-    """The clamp means the deepest fetch is bounded, so a page beyond it falls
-    off the front of the tail — the same empty page a short history gives."""
+def test_a_page_past_the_capped_depth_is_refused_not_served_empty(client, relay):
+    """An empty page is this endpoint's end-of-history signal, so it cannot also
+    mean "the cap stopped me" — that reported ``total=5001`` on a history of any
+    size. Past the depth the request is refused instead."""
     relay.results = [EngineResult(data=_messages(5001))]
-    data = ok(client.get(
+    fails(client.get(
         f"{_base()}/{SESSION_ID}/messages",
         params={"page": 1000, "page_size": 100},
-    ))
-    assert data["items"] == []
+    ), 422)
 
 
-def test_the_page_landing_on_the_cap_does_not_serve_the_lookahead(client, relay):
+def test_the_page_landing_on_the_cap_is_refused(client, relay):
     """The boundary page, which a far-past-the-end page skips clean over.
 
     The clamped fetch is ``_MAX_HISTORY_DEPTH + 1`` long, so page 51 at
-    ``page_size=100`` used to land with exactly one item left in the window —
-    the lookahead — and serve it as a short page, which also reads as an exact
-    total. The lookahead proves more history exists; it is never content.
+    ``page_size=100`` lands with exactly one item left in the window — the
+    lookahead, which is never content. Suppressing it left an empty page
+    reporting an exact ``total``; the page is refused instead.
     """
     relay.results = [EngineResult(data=_messages(5001))]
-    data = ok(client.get(
+    fails(client.get(
         f"{_base()}/{SESSION_ID}/messages",
         params={"page": 51, "page_size": 100},
+    ), 422)
+
+
+def test_a_page_straddling_the_cap_is_refused(client, relay):
+    """The bound is the window's *end*, not its start.
+
+    Rejecting only ``offset >= depth`` would still admit this page: at
+    ``page_size=3`` page 1667 starts at 4998, inside the depth, and returns two
+    messages of three. Short — and therefore exact-looking — while 45 000 more
+    messages exist behind the cap.
+    """
+    relay.results = [EngineResult(data=_messages(5001))]
+    fails(client.get(
+        f"{_base()}/{SESSION_ID}/messages",
+        params={"page": 1667, "page_size": 3},
+    ), 422)
+
+
+def test_the_depth_refusal_says_what_the_caller_hit(client, relay):
+    """The status alone is not actionable — ``page_size=101`` is also a 422.
+
+    The message has to be a mapped one: an unmapped exception reaching an
+    app-level handler is answered with the bare HTTP reason phrase, so a
+    ``HTTPException`` here would have told the caller only "Unprocessable
+    Entity" however well its detail was written.
+    """
+    body = fails(client.get(
+        f"{_base()}/{SESSION_ID}/messages",
+        params={"page": 51, "page_size": 100},
+    ), 422)
+    assert body["message"] == (
+        "Requested page is deeper than the message history this endpoint serves"
+    )
+
+
+def test_the_page_just_inside_the_cap_is_still_served_whole(client, relay):
+    """The guard must not cost a page the depth does cover: page 1666 at
+    ``page_size=3`` ends exactly on 4998 and is a full three messages."""
+    relay.results = [EngineResult(data=_messages(4999))]
+    data = ok(client.get(
+        f"{_base()}/{SESSION_ID}/messages",
+        params={"page": 1666, "page_size": 3},
     ))
-    assert data["items"] == []
+    assert len(data["items"]) == 3
 
 
 def test_the_last_page_within_the_cap_is_still_whole(client, relay):

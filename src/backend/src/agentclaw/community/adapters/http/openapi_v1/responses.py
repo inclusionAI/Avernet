@@ -59,6 +59,7 @@ from agentclaw.community.core.devices.services.device_context import (
 )
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
+    EngineHistoryDepthExceededError,
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
@@ -216,6 +217,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # Retryable: cold, dormant or restarting. Distinct from 404 (the bot IS the
     # caller's) and from 500 (nothing is broken).
     EngineDeviceNotReadyError: (409, "Bot device is not ready"),
+    # An out-of-range page argument, so it joins the 422 FastAPI already returns
+    # for page_size > 100 rather than inventing a status. Needs a mapped entry
+    # rather than a bare HTTPException: app-level handlers replace an unmapped
+    # message with the bare HTTP reason phrase, and "Unprocessable Entity" would
+    # not tell the caller a depth limit is what they hit.
+    EngineHistoryDepthExceededError: (
+        422,
+        "Requested page is deeper than the message history this endpoint serves",
+    ),
     # Byte-identical to the other 404s above, so an engine-side missing resource
     # cannot be distinguished from a bot that is not the caller's.
     EngineResourceNotFoundError: (404, "Not found"),
