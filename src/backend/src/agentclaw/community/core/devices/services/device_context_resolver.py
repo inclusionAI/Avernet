@@ -103,6 +103,53 @@ class DeviceContextResolver:
             bot_type=bot_type,
         )
 
+    def resolve_current_runtime_for_bot(
+        self,
+        bot_id: str,
+        user_id: str,
+        *,
+        device_uuid: str | None = None,
+    ) -> DeviceContext:
+        """Resolve the Bot's currently active runtime.
+
+        A restart can replace ``ac_bots.device_id`` before every legacy caller
+        has converged ``ac_bots.binding_id``. Runtime mutations must therefore
+        resolve the current device identity, not follow a historical binding
+        primary key. Only an ACTIVE binding is accepted so a released, failed,
+        or still-starting instance can never receive a cutover mutation.
+        """
+        bot = self._bot_repository.get_by_id_and_owner(bot_id, user_id)
+        device_id = str((bot or {}).get("device_id") or "").strip()
+        if not device_id:
+            raise DeviceNotBoundError(
+                f"DeviceContextResolver: no current runtime device for bot={bot_id}"
+            )
+
+        binding = self._binding_repository.get_by_device_id(device_id)
+        if binding is None or binding.status != "ACTIVE":
+            raise DeviceNotBoundError(
+                f"DeviceContextResolver: no active runtime binding for bot={bot_id}"
+            )
+
+        provider = binding.device_provider
+        if provider not in self._builders:
+            raise UnknownProviderError(
+                f"DeviceContextResolver: unknown provider={provider!r} for bot={bot_id}"
+            )
+
+        builder = self._builders[provider]
+        raw_conn_info = builder.build(binding, user_id, device_uuid=device_uuid)
+        conn_info = self._normalize_schema(raw_conn_info, provider)
+
+        return DeviceContext(
+            provider=provider,
+            conn_info=conn_info,
+            binding_id=binding.id,
+            bot_id=bot_id,
+            user_id=user_id,
+            bot_type=(bot or {}).get("bot_type") or "",
+        )
+
     def resolve_for_binding(
         self, binding_id: int, operator_id: str, *, bot_id: str,
         device_uuid: str | None = None,

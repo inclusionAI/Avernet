@@ -301,7 +301,7 @@ class SkillsPoolRuntime:
         path: str,
         body: dict[str, Any],
     ) -> dict[str, Any]:
-        context = self._resolver.resolve_for_bot(bot_id, user_id)
+        context = self._resolver.resolve_current_runtime_for_bot(bot_id, user_id)
         return await self._transport.invoke(
             context.conn_info,
             "POST",
