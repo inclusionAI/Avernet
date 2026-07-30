@@ -211,24 +211,60 @@ public is written until the extraction is green.
         reference, specifically for the extract-shared-logic pattern.
 - **Depends on:** Task 5
 
-## Task 9: [ ] Tests & Verification
+## Task 9: [x] Tests & Verification
 - **Goal:** Ensure the feature meets every `spec.md` acceptance criterion and
   the internal surface is untouched.
 - **Files:** — (runs the suites)
 - **Done when:**
-  - [ ] Every `spec.md` acceptance criterion maps to a passing test (marketplace,
-        permission, config read/write, isolation, error contract, internal
-        surface).
-  - [ ] The fail-open permission behavior is pinned by a test and noted in the
-        handler docstring, so it reads as a recorded decision (Open Question 1).
-  - [ ] The rollback-on-sync-failure path answers 502 and leaves the stored row
-        as it was (or absent, on a create).
-  - [ ] Raw API keys (long and short) appear nowhere in either surface's response
-        text.
-  - [ ] `test_mcp_config_internal_unchanged.py`, `test_mcp.py`,
-        `tests/community/architecture/`, and the full `tests/community` suite all
-        pass; no pre-existing test modified.
+  - [x] Every `spec.md` acceptance criterion maps to a passing test — see the
+        matrix below. Marketplace / permission / config read+write / isolation /
+        error contract / internal surface all covered.
+  - [x] The fail-open permission behavior is pinned by a test
+        (`test_permission_is_fail_open_by_decision` at the public layer +
+        `test_auth_service.test_check_mcp_permission_detail_mcp_center_failure`
+        at the service) and noted in the `check_mcp_permission` docstring.
+  - [x] The rollback-on-sync-failure path answers 502 and leaves the stored row
+        as it was / absent on create —
+        `test_put_config_sync_failure_is_502_and_rolls_back`,
+        `test_sync_failure_rolls_back_update_and_raises`,
+        `test_sync_failure_after_create_rolls_back_as_delete`.
+  - [x] Raw API keys (long + short) appear nowhere in a response —
+        `test_raw_key_never_appears_in_response_text`, masking tests both surfaces.
+  - [x] `test_mcp_config_internal_unchanged.py`, `test_mcp.py` pass UNMODIFIED
+        (confirmed via `git diff` — not in the changed-file set);
+        `tests/community/architecture/` 108 passed; MCP contract snapshots
+        (`test_rule16/17_mcp`, `test_mcp_center/auth`) 10 passed. Broad sweeps:
+        `tests/community/adapters/http/` 384, MCP+openapi+isolation suites 338.
+        `test_responses.py` is additions-only.
 - **Depends on:** Tasks 3, 5, 6, 7, 8
+
+### Acceptance criteria → test matrix
+| spec.md criterion | Test |
+|---|---|
+| List: page+total, keyword filters name/code | `test_list_servers_maps_fields_and_omits_tools`, `test_list_servers_forwards_keyword_and_paging` |
+| Only allowed network types visible; hidden==unknown 404 | `test_invisible_server_is_identical_404`, `test_unknown_server_is_404_not_found` |
+| Detail includes tools; internal `extInfo` stripped | `test_server_detail_strips_ext_info`, `test_presentation` |
+| List tenants (code/name/categories) | `test_list_tenants` |
+| Upstream marketplace failure → upstream error (502) | `test_list_servers_upstream_failure_is_502`, `test_tenants_upstream_failure_is_502` |
+| Permission: access + level + per-tool | `test_permission_shape` |
+| Permission is caller's own only (no id param) | `test_permission_uses_caller_identity_only` |
+| Local server permitted without external auth | inherited/unchanged: `test_auth_service` (service layer) |
+| Config read: env/transport/headers/has_config | `test_get_config_absent_reports_no_config`, `test_get_config_masks_long_key` |
+| API key masked, any length | `test_get_config_masks_long_key`, `test_get_config_masks_short_key`, `test_presentation` |
+| Never-configured → has_config:false not 404 | `test_get_config_absent_reports_no_config` |
+| Write stores + pushes + returns masked | `test_put_config_success_returns_reread_state` |
+| Omitted field unchanged (merge) | `test_write_forwards_params_for_merge_and_push` |
+| env/transport validated (bad → caller error) | `test_put_config_rejects_dev_endpoint_env_as_422`, `test_bad_endpoint_env_raises_before_any_write` |
+| Headers validated before storing | `test_invalid_headers_raise_before_any_write` |
+| Unknown server → 404, nothing stored | `test_put_config_unknown_server_is_404`, `test_unknown_server_raises_before_any_write` |
+| Push fail → rollback + fail | `test_put_config_sync_failure_is_502_and_rolls_back` (+ 2 flow rollback tests) |
+| Unknown/immutable field rejected (422) | `test_put_config_rejects_sync_mode_as_422` |
+| Reads/writes scoped to caller identity | `test_put_config_scopes_write_to_caller`, `test_permission_uses_caller_identity_only` |
+| Foreign tenant invisible + un-overwritable (real guard) | `test_mcp_tenant_isolation` (4 tests) |
+| Two tenants same user+server coexist | `test_two_tenants_same_user_and_server_coexist` |
+| Every failure enveloped, fixed message | `test_mcp_errors_map_to_status_and_fixed_message` |
+| Every domain error mapped (no generic 500 escape) | mapping test + Group B review verdict |
+| Internal API shapes unchanged, tests unmodified | `test_mcp_config_internal_unchanged.py` + `test_mcp.py` UNMODIFIED (16), contract snapshots (10) |
 
 ---
 

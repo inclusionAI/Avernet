@@ -207,6 +207,13 @@ async def check_mcp_permission(
     Always the caller's permission — the identity comes from the principal, never
     a caller-supplied id (the internal route takes a ``user_id`` query param; this
     one must not, or a caller could probe another identity's grants).
+
+    **Fail-open, by decision (spec Open Question 1).** When the marketplace
+    lookup errors, ``check_mcp_permission_detail`` reports the caller *as
+    permitted*. This surface preserves that rather than failing closed: the
+    endpoint is advisory — the MCP server itself is the enforcement point — so a
+    wrong "yes" during an upstream outage costs one failed call, whereas failing
+    closed would make a marketplace outage look like a permission revocation.
     """
     owner_id = caller_owner_id(principal)
     result = auth_service.check_mcp_permission_detail(owner_id, server_code)

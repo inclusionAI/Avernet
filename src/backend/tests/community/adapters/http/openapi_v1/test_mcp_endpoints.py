@@ -191,6 +191,25 @@ def test_permission_shape(client):
     assert data["tool_permissions"]["get"]["code"] == "AUTHORIZED"
 
 
+def test_permission_is_fail_open_by_decision(client, auth):
+    """The surface preserves the service's fail-open (spec Open Question 1).
+
+    On a marketplace outage the auth service reports the caller as permitted
+    (``has_permission: True``, empty access level — pinned at the service by
+    ``test_auth_service.test_check_mcp_permission_detail_mcp_center_failure``).
+    This public endpoint surfaces that verbatim rather than adding a fail-closed
+    gate of its own: it is advisory, and the MCP server enforces.
+    """
+    auth.check_mcp_permission_detail.return_value = {
+        "has_permission": True,  # the fail-open outcome
+        "access_level": "",
+        "tool_permissions": {},
+    }
+    data = _ok(client.get("/openapi/v1/bots/mcp/servers/mcp.weather/permissions"))
+    assert data["has_access"] is True
+    assert data["access_level"] == ""
+
+
 # ── config read ─────────────────────────────────────────────────────
 
 
