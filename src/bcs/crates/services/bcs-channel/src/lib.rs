@@ -433,8 +433,14 @@ impl BcsChannelService {
             {
                 let session_id = mapping.bcs_session_id.clone();
                 drop(guard);
-                self.send_state_machine_system(ctx, &session_id, "", "流程正在启动，请稍后再试。")
-                    .await?;
+                self.send_state_machine_system(
+                    ctx,
+                    &session_id,
+                    "",
+                    "流程正在启动，请稍后再试。",
+                    Some(&msg.msg_id),
+                )
+                .await?;
                 return Ok(());
             }
         }
@@ -559,7 +565,7 @@ impl BcsChannelService {
     async fn continue_state_machine_from_inbound(
         &self,
         ctx: &ResolvedInboundContext,
-        _msg: &InboundMessage,
+        msg: &InboundMessage,
         _actor_id: &str,
         run_id: &str,
         session_id: &str,
@@ -573,6 +579,7 @@ impl BcsChannelService {
             session_id,
             run_id,
             "流程当前没有可通过此会话回复的人工输入请求，消息未被接收。",
+            Some(&msg.msg_id),
         )
         .await
     }
@@ -583,6 +590,7 @@ impl BcsChannelService {
         session_id: &str,
         run_id: &str,
         text: &str,
+        source_im_message_id: Option<&str>,
     ) -> Result<(), ChannelUseCaseError> {
         self.try_outbound(OutboundMessage {
             group_id: ctx.group_id.clone(),
@@ -599,7 +607,7 @@ impl BcsChannelService {
                 "run_id": run_id,
             }),
             render_hint: ChannelRenderHint::Render,
-            source_im_message_id: None,
+            source_im_message_id: source_im_message_id.map(str::to_string),
             source_is_channel: false,
         })
         .await
@@ -692,6 +700,7 @@ impl BcsChannelService {
                         &request,
                         ChannelOutboundPurpose::HumanInputAck,
                         format!("【输入已接收】{}\n\n流程继续执行。", request.node_display_name),
+                        Some(&msg.msg_id),
                     )
                     .await
                     {
@@ -730,6 +739,7 @@ impl BcsChannelService {
         request: &HumanInputRequest,
         purpose: ChannelOutboundPurpose,
         text: String,
+        source_im_message_id: Option<&str>,
     ) -> Result<Option<String>, ChannelUseCaseError> {
         let binding = self
             .bindings
@@ -783,7 +793,7 @@ impl BcsChannelService {
                     "node_id": request.node_id,
                 }),
                 render_hint: ChannelRenderHint::Render,
-                source_im_message_id: None,
+                source_im_message_id: source_im_message_id.map(str::to_string),
             })
             .await?;
         if !result.delivered {
@@ -811,7 +821,12 @@ impl BcsChannelService {
             text.push_str(&format!("\n\n另有 {queued} 项等待处理。"));
         }
         match self
-            .deliver_human_input_event(request, ChannelOutboundPurpose::HumanInputRequest, text)
+            .deliver_human_input_event(
+                request,
+                ChannelOutboundPurpose::HumanInputRequest,
+                text,
+                None,
+            )
             .await
         {
             Ok(provider_message_ref) => {
@@ -1732,6 +1747,7 @@ impl SessionChannelOutboundPort for BcsChannelService {
                         format!(
                             "【待办队列更新】当前已有请求等待回复，另有 {queued} 项排队；完成当前项后会继续通知。"
                         ),
+                        None,
                     )
                     .await
                 {
@@ -1825,7 +1841,7 @@ impl SessionChannelOutboundPort for BcsChannelService {
         let mut errors = Vec::new();
         for request in requests {
             match self
-                .deliver_human_input_event(&request, purpose, text.clone())
+                .deliver_human_input_event(&request, purpose, text.clone(), None)
                 .await
             {
                 Ok(_) => delivered += 1,
@@ -4150,6 +4166,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inbound_state_machine_group_preserves_source_message_while_starting() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        harness
+            .session_repo
+            .create(
+                "group_sm",
+                NewSessionParams {
+                    id: Some("pending-session".to_string()),
+                    session_kind: SessionKind::ServiceInvocation,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "generated_id".to_string(),
+                im_conversation_id: "conv_sm".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::Conversation,
+                im_user_id: None,
+                bcs_session_id: "pending-session".to_string(),
+                last_active_at: 42,
+            })
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_sm",
+                "u1",
+                Some("张三"),
+                "msg_while_starting",
+                true,
+            ))
+            .await?;
+
+        assert!(harness.collaboration_runtime.starts.lock().await.is_empty());
+        let events = harness.delivery.events.lock().await;
+        let response = events.last().expect("state-machine starting response");
+        assert_eq!(response.purpose, ChannelOutboundPurpose::HumanInputAck);
+        assert_eq!(
+            response.source_im_message_id.as_deref(),
+            Some("msg_while_starting")
+        );
+        assert!(
+            response
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("流程正在启动"))
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn inbound_state_machine_group_reuses_active_run_and_routes_human_response() -> TestResult
     {
         let harness = TestHarness::new(state_machine_group("group_sm")).await?;
@@ -4226,6 +4313,17 @@ mod tests {
                 && conversation_id == "conv_sm"
                 && message_id == "msg_response"
         ));
+        drop(responses);
+        let events = harness.delivery.events.lock().await;
+        let acknowledgement = events.last().expect("HumanInput acknowledgement");
+        assert_eq!(
+            acknowledgement.purpose,
+            ChannelOutboundPurpose::HumanInputAck
+        );
+        assert_eq!(
+            acknowledgement.source_im_message_id.as_deref(),
+            Some("msg_response")
+        );
 
         Ok(())
     }
@@ -4257,6 +4355,12 @@ mod tests {
                 .is_some_and(|text| {
                     text.contains("没有可通过此会话回复") && text.contains("消息未被接收")
                 })
+        );
+        assert_eq!(
+            events
+                .last()
+                .and_then(|event| event.source_im_message_id.as_deref()),
+            Some("msg_response")
         );
 
         Ok(())
@@ -5748,13 +5852,13 @@ mod tests {
                     group_version: 1,
                     session_id: "state_session".to_string(),
                     created_by: None,
-                    status: StateMachineRunStatus::Completed,
+                    status: StateMachineRunStatus::Running,
                     input: serde_json::Value::Null,
                     output: None,
                     error: None,
                     created_at: 1,
                     updated_at: 2,
-                    completed_at: Some(2),
+                    completed_at: None,
                 },
             })
         }
