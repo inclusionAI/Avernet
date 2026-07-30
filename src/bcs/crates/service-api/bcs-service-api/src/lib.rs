@@ -212,7 +212,7 @@ pub use core::{
     ContextFusionRequest, ContextFusionResponse, ContextParticipantPerspective, DefaultDelivery,
     DeliveryType, DmActorSpec, DynamicStatusResponse, EnsureHumanResult, EnsureOwnerEdgesResult,
     FriendCoreService, FriendRequest, FriendRequestCoreService, FriendRequestDirection,
-    FriendRequestStatus, FusionCoreService, Group, GroupChatProposal, GroupCoreService, GroupKind,
+    FriendRequestStatus, Friendship, FusionCoreService, Group, GroupChatProposal, GroupCoreService, GroupKind,
     GroupMessage, GroupMessageType, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, MessageRole,
     Participant, ParticipantKind, ParticipantMode, ParticipantRole, ProposalCoreService,
     ProviderBotCoreService, ProviderCoreService, RegisterProviderBotParams, RegisteredBot,
@@ -233,7 +233,7 @@ pub use core::{
 
 pub use bcs_domain::{
     GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,
-    InviteTokenPayload, InviteTokenError,
+    InviteTargetType, InviteTokenPayload, InviteTokenError,
     MAX_GENERATED_GROUP_ID_CHARS, MAX_SESSION_ID_CHARS, channel_group_id,
     generated_group_id,
     invite_token_encode, invite_token_decode_and_verify, invite_token_decode_no_expiry,

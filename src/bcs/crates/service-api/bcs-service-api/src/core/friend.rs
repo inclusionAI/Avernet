@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use super::ServiceResult;
 
-pub use bcs_domain::{FriendRequest, FriendRequestDirection, FriendRequestStatus};
+pub use bcs_domain::{FriendRequest, FriendRequestDirection, FriendRequestStatus, Friendship};
 
 // ============================================================================
 // Friend Service Traits
@@ -50,6 +50,33 @@ pub trait FriendCoreService: Send + Sync {
     /// Returns the number of removed friendships.
     /// Idempotent: calling on a bot with no friends returns Ok(0).
     async fn remove_all_friendships(&self, bot_id: &str) -> ServiceResult<usize>;
+
+    /// List friendships of `bot_id` as symmetric [`Friendship`] projections.
+    ///
+    /// Ordered by `created_at` descending (`friend_bot_uuid` ascending
+    /// tie-breaker), with `offset`/`limit` pagination and a total count.
+    /// Default returns an empty page; `FriendCore` overrides to delegate to
+    /// [`FriendRepoPort::list_friendships_paginated`].
+    async fn list_friendships_paginated(
+        &self,
+        bot_id: &str,
+        offset: u64,
+        limit: u64,
+    ) -> ServiceResult<(Vec<Friendship>, u64)> {
+        let _ = (bot_id, offset, limit);
+        Ok((Vec::new(), 0))
+    }
+
+    /// Remove a single friendship pair symmetrically and idempotently.
+    ///
+    /// Returns `true` when a row was removed, `false` when the pair did not
+    /// exist. Default returns `Ok(false)`; `FriendCore` overrides to delegate
+    /// to [`FriendRepoPort::remove_friendship`] and clean up the relation
+    /// graph (mirroring `remove_all_friendships`' best-effort edge cleanup).
+    async fn remove_friendship(&self, bot_a: &str, bot_b: &str) -> ServiceResult<bool> {
+        let _ = (bot_a, bot_b);
+        Ok(false)
+    }
 }
 
 /// Service for friend request workflow (request → accept/reject).

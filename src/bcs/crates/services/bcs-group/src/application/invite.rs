@@ -83,6 +83,10 @@ impl InviteServiceImpl {
             v: 1,
             id: target_id.to_string(),
             exp,
+            // Legacy tokens carry no target_type; the field is omitted from the
+            // payload JSON so the HMAC and on-wire form stay byte-identical to
+            // pre-field tokens. V1 invite minting overrides this with Some(...).
+            target_type: None,
         };
         let token = invite_token_encode(&payload, &self.token_secret);
         (token, exp)
