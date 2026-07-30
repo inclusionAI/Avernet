@@ -186,7 +186,7 @@ async def test_hash_mismatch_removes_partial_file_and_reports_failure(tmp_path: 
 
 
 @pytest.mark.asyncio
-async def test_materialize_rejects_untrusted_device_path_escape(tmp_path: Path):
+async def test_materialize_rejects_untrusted_device_path_escape(tmp_path: Path, caplog):
     callback = _CallbackClient()
     service = ResourceMaterializationService(
         pull_client=_PullClient(b"x"),
@@ -204,6 +204,8 @@ async def test_materialize_rejects_untrusted_device_path_escape(tmp_path: Path):
     assert result.error_code == "invalid_device_path"
     assert callback.results == [result]
     assert not (tmp_path.parent / "outside/report.txt").exists()
+    assert "reason=device_path traversal is forbidden" in caplog.text
+    assert "../../outside/report.txt" not in caplog.text
 
 
 @pytest.mark.asyncio
