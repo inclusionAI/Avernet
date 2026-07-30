@@ -115,7 +115,7 @@ public is written until the extraction is green.
         behavior (`sync_mode`/`DEV` → 422) verified and covered by Task 5.
 - **Depends on:** —
 
-## Task 5: [ ] Wire the six public handlers
+## Task 5: [~] Wire the six public handlers
 - **Goal:** Replace the `NotImplementedError` stubs with real handlers on the
   shared flow, owner-scoped via the principal.
 - **Files:** `src/agentclaw/community/adapters/http/openapi_v1/mcp/router.py`
@@ -147,24 +147,27 @@ public is written until the extraction is green.
         401.
 - **Depends on:** Tasks 2, 4
 
-## Task 6: [ ] Map the MCP domain errors to envelopes
+## Task 6: [x] Map the MCP domain errors to envelopes
 - **Goal:** Every error these handlers raise answers in the envelope; nothing
   reaches the generic 500 fallback.
 - **Files:** `src/agentclaw/community/adapters/http/openapi_v1/responses.py`
 - **Done when:**
-  - [ ] `ENVELOPE_ERRORS` gains the five errors with fixed public messages:
+  - [x] `ENVELOPE_ERRORS` gains the five errors with fixed public messages:
         `McpServerNotFoundError`→404 "Not found",
         `McpHeadersInvalidError`→400 "Invalid MCP headers",
         `McpConfigValueError`→400 "Invalid MCP configuration",
         `McpSyncFailedError`→502 "Device sync failed",
         `McpMarketUnavailableError`→502 "MCP service error".
-  - [ ] They are placed above `BotServiceError` (they share no base with it, so
+  - [x] They are placed above `BotServiceError` (they share no base with it, so
         order among themselves is free); no message is `str(exc)`, and none
-        carries the validator's Chinese text.
-  - [ ] A test asserts every mapped error round-trips to its status + fixed
+        carries the validator's Chinese text. Trailing comment corrected — the
+        MCP entries are a separate hierarchy from `BotServiceError`.
+  - [x] A test asserts every mapped error round-trips to its status + fixed
         message, and that the 404 message is byte-identical to the not-found
-        the bots surface returns.
+        the bots surface returns. **18 passed** (test_responses + error_schema).
 - **Depends on:** Task 1
+- **Note:** Landed before Task 5 (its only dependency is Task 1) so Task 5's
+  endpoint tests exercise the mappings.
 
 ## Task 7: [ ] Cross-tenant isolation against the real Stage 5 guard
 - **Goal:** Prove a config in another tenant is invisible and un-overwritable
