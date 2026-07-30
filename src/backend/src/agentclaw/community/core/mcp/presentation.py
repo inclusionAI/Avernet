@@ -78,6 +78,29 @@ def strip_ext_info_from_list(result: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
+def normalize_network_types(mcp_data: dict[str, Any]) -> list[str]:
+    """A server's declared network types, from whichever shape the catalog uses.
+
+    The plural ``networkTypes`` list is the primary shape; when it is absent/empty
+    the singular ``networkType`` / ``network_type`` (scalar or list) is used — the
+    shape ``LocalMCPRegistry`` declares and *filters its list on* (it reads those
+    keys). Returns a flat list of strings (empty when none is declared).
+
+    One definition so visibility and the response projection read the same shape:
+    a server the catalog hides from the list on its network type must not resolve
+    by code through the detail route, nor serialize an empty ``network_types``
+    while carrying a known classification.
+    """
+    raw = mcp_data.get("networkTypes")
+    if not raw:
+        raw = mcp_data.get("networkType") or mcp_data.get("network_type") or []
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        return [nt for nt in raw if isinstance(nt, str)]
+    return []
+
+
 def is_network_type_visible(mcp_data: dict[str, Any]) -> bool:
     """Whether a server's network types make it visible on this surface.
 
@@ -85,18 +108,10 @@ def is_network_type_visible(mcp_data: dict[str, Any]) -> bool:
     declares types is visible only if at least one is in
     :data:`ALLOWED_NETWORK_TYPES`. Mirrors the internal detail route's rule.
 
-    The plural ``networkTypes`` list is the primary shape; when it is absent the
-    check falls back to the singular ``networkType`` / ``network_type`` (scalar
-    or list) that the local registry declares and *filters its list on*
-    (``LocalMCPRegistry`` reads those keys). Without the fallback a server the
-    catalog hides from the list on its network type would still resolve by code
-    through the detail route — a visibility rule the two paths must not split on.
+    Reads every shape via :func:`normalize_network_types`, so a server hidden
+    from the list on a singular ``networkType`` cannot resolve by code here.
     """
-    network_types = mcp_data.get("networkTypes")
-    if not network_types:
-        network_types = mcp_data.get("networkType") or mcp_data.get("network_type") or []
-    if isinstance(network_types, str):
-        network_types = [network_types]
+    network_types = normalize_network_types(mcp_data)
     if not network_types:
         return True
     return any(nt in ALLOWED_NETWORK_TYPES for nt in network_types)

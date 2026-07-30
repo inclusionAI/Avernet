@@ -174,6 +174,22 @@ def test_invisible_server_is_identical_404(client, market):
     assert r_unknown == r_hidden  # cannot probe existence
 
 
+def test_projection_reads_singular_network_type(client, market):
+    # A catalog entry declaring its type via the singular networkType (no plural
+    # networkTypes) — the shape LocalMCPRegistry accepts — must still serialize
+    # network_types on both the list and the detail, not an empty list.
+    singular = _server(networkType="INTERNET")
+    singular.pop("networkTypes")
+    market.get_mcp_detail.return_value = singular
+    market.get_mcp_list.return_value = {"success": True, "data": [singular], "total": 1}
+
+    detail = _ok(client.get("/openapi/v1/bots/mcp/servers/mcp.weather"))
+    assert detail["network_types"] == ["INTERNET"]
+
+    listed = _ok(client.get("/openapi/v1/bots/mcp/servers"))
+    assert listed["items"][0]["network_types"] == ["INTERNET"]
+
+
 # ── permission ──────────────────────────────────────────────────────
 
 

@@ -11,6 +11,7 @@ from agentclaw.community.core.mcp.presentation import (
     ALLOWED_NETWORK_TYPES,
     is_network_type_visible,
     mask_api_key,
+    normalize_network_types,
     strip_ext_info,
     strip_ext_info_from_list,
 )
@@ -113,3 +114,30 @@ class TestNetworkTypeVisibility:
 
     def test_allowlist_is_internet_and_office(self):
         assert ALLOWED_NETWORK_TYPES == ("INTERNET", "OFFICE")
+
+
+class TestNormalizeNetworkTypes:
+    def test_plural_list_returned_as_is(self):
+        assert normalize_network_types({"networkTypes": ["INTERNET", "OFFICE"]}) == [
+            "INTERNET",
+            "OFFICE",
+        ]
+
+    def test_singular_scalar_wrapped(self):
+        assert normalize_network_types({"networkType": "INTRANET"}) == ["INTRANET"]
+        assert normalize_network_types({"network_type": "OFFICE"}) == ["OFFICE"]
+
+    def test_singular_list_returned(self):
+        assert normalize_network_types({"networkType": ["INTERNET"]}) == ["INTERNET"]
+
+    def test_plural_takes_precedence_over_singular(self):
+        assert normalize_network_types(
+            {"networkTypes": ["OFFICE"], "networkType": "INTRANET"}
+        ) == ["OFFICE"]
+
+    def test_absent_or_empty_is_empty_list(self):
+        assert normalize_network_types({}) == []
+        assert normalize_network_types({"networkTypes": []}) == []
+
+    def test_non_string_members_dropped(self):
+        assert normalize_network_types({"networkTypes": ["OFFICE", None, 3]}) == ["OFFICE"]

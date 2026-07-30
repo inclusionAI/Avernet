@@ -51,6 +51,7 @@ from agentclaw.community.core.mcp.errors import McpServerNotFoundError
 from agentclaw.community.core.mcp.presentation import (
     ALLOWED_NETWORK_TYPES,
     is_network_type_visible,
+    normalize_network_types,
     strip_ext_info,
 )
 from agentclaw.community.di import Injected
@@ -83,7 +84,7 @@ def _to_server(data: dict[str, Any]) -> McpServer:
         server_code=data.get("serverCode") or data.get("server_code") or "",
         name=data.get("name") or "",
         description=data.get("description"),
-        network_types=data.get("networkTypes") or [],
+        network_types=normalize_network_types(data),
         transport_protocol=data.get("transportProtocol"),
     )
 
