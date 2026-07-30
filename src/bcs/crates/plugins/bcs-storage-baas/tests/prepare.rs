@@ -33,7 +33,7 @@ async fn prepare_single_returns_direct_url_and_transfer_id() {
     Mock::given(method("POST"))
         .and(path("/api/v1/sessions/teamclaw/sid/files/upload-url"))
         .and(body_partial_json(
-            json!({"filename":"f","file_size":5,"staging_subdir":null}),
+            json!({"filename":"f","file_size":5,"content_type":"application/octet-stream","staging_subdir":null}),
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "code":0,"message":"success","data":{
@@ -152,7 +152,7 @@ async fn prepare_passes_caller_as_operator() {
     Mock::given(method("POST"))
         .and(path("/api/v1/sessions/teamclaw/sid/files/upload-url"))
         .and(body_partial_json(
-            json!({"operator": "human:human_123"}),
+            json!({"operator": "human:human_123", "content_type": "application/octet-stream"}),
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "code":0,"message":"success","data":{
@@ -170,4 +170,23 @@ async fn prepare_passes_caller_as_operator() {
     });
     let r = p.prepare_upload(req(5), caller).await.unwrap();
     assert_eq!(r.handle.backend_handle["transfer_id"], "t-operator");
+}
+
+#[tokio::test]
+async fn prepare_passes_request_mime_type_as_content_type() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/sessions/teamclaw/sid/files/upload-url"))
+        .and(body_partial_json(json!({"content_type": "image/png"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "code":0,"data":{"upload_url":"https://oss/img","transfer_id":"t-png","http_method":"PUT","expires_at":"2026-07-23T12:00:00Z","type":"SINGLE"}
+        })))
+        .mount(&server)
+        .await;
+
+    let p = plugin(server.uri());
+    let mut r = req(5);
+    r.mime_type = "image/png".into();
+    let res = p.prepare_upload(r, None).await.unwrap();
+    assert_eq!(res.handle.backend_handle["transfer_id"], "t-png");
 }
