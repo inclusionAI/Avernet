@@ -1670,8 +1670,11 @@ class TestSelectDispatcherBcnSwitch:
         config_service.get_config.side_effect = get_config
 
         runner = _make_runner_with_config(
-            mock_selector, mock_run_repo, mock_bot_service_plugin,
-            config_service, [queue_d, task_d],
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
         )
         result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
         assert result is queue_d
@@ -1693,8 +1696,11 @@ class TestSelectDispatcherBcnSwitch:
         config_service.get_config.side_effect = get_config
 
         runner = _make_runner_with_config(
-            mock_selector, mock_run_repo, mock_bot_service_plugin,
-            config_service, [queue_d, task_d],
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
         )
         result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
         assert result is task_d
@@ -1716,8 +1722,11 @@ class TestSelectDispatcherBcnSwitch:
         config_service.get_config.side_effect = get_config
 
         runner = _make_runner_with_config(
-            mock_selector, mock_run_repo, mock_bot_service_plugin,
-            config_service, [queue_d, task_d],
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
         )
         result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
         assert result is task_d
@@ -1756,8 +1765,11 @@ class TestSelectDispatcherBcnSwitch:
         config_service.get_config.side_effect = get_config
 
         runner = _make_runner_with_config(
-            mock_selector, mock_run_repo, mock_bot_service_plugin,
-            config_service, [queue_d, task_d],
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
         )
         result = runner._select_dispatcher(
             "bot-1", metadata={"bot_options": {"lifecycle_stage": "online"}}
