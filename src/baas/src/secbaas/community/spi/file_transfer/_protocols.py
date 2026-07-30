@@ -250,11 +250,12 @@ class FileTransferBackend(Protocol):
         """Construct full OSS object key for Session file transfer staging.
 
         The Session Dispatcher calls this instead of hardcoding paths.
-        Pattern: ``{staging_root}/{env}/{tenant}/{session_id}/[{subdir}/]{transfer_id}/{filename}``
+        Pattern: ``{staging_root}/{tenant}/{session_id}/[{subdir}/]{transfer_id}/{filename}``
 
         Distinct from ``build_staging_path`` (Bot file transfer) because
-        Session staging includes ``session_id`` and ``env`` scoping with
-        no device-level component.
+        Session staging includes ``session_id`` scoping with
+        no device-level component. Environment isolation is provided by
+        the ``staging_root_path`` configuration value.
 
         Args:
             tenant: Tenant identifier for scoping.

@@ -214,7 +214,7 @@ def test_upload_staging_path_format(stub_oss_backend) -> None:
         filename="test.txt",
         subdir=None,
     )
-    # Path pattern: {root}/{env}/{tenant}/{session_id}/{transfer_id}/{filename}
+    # Path pattern: {root}/{tenant}/{session_id}/{transfer_id}/{filename}
     assert "t1" in path, f"tenant 't1' should appear in path: {path}"
     assert "sess-001" in path, f"session_id should appear in path: {path}"
     assert "tf-001" in path, f"transfer_id should appear in path: {path}"
