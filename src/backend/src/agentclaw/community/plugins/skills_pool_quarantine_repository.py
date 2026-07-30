@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import calendar
 import json
-from datetime import datetime
+from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import exists, func, or_, text
 
@@ -20,6 +22,29 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
+
+
+def _database_timestamp(
+    value: datetime,
+    *,
+    dialect_name: str,
+) -> object:
+    """Express an aware instant in the database session timezone.
+
+    MySQL ``TIMESTAMP`` columns are projected in the session timezone. Passing
+    a UTC-aware value through PyMySQL drops the timezone without converting
+    the wall clock, so compare and persist through ``FROM_UNIXTIME`` instead.
+    SQLite's clock is UTC and accepts the equivalent UTC-naive value directly.
+    """
+
+    if value.tzinfo is None:
+        return value
+    utc_value = value.astimezone(UTC)
+    if dialect_name in {"mysql", "mariadb"}:
+        epoch_seconds = Decimal(calendar.timegm(utc_value.utctimetuple()))
+        epoch_seconds += Decimal(utc_value.microsecond) / Decimal(1_000_000)
+        return func.from_unixtime(epoch_seconds)
+    return utc_value.replace(tzinfo=None)
 
 
 class SkillsPoolQuarantineRepositoryMixin:
@@ -193,20 +218,27 @@ class SkillsPoolQuarantineRepositoryMixin:
         status: RuntimeReconciliationStatus,
         evidence: dict[str, object],
     ) -> bool:
-        observed_at = observed_at.replace(tzinfo=None)
-        timestamp_order = (
-            SkillMigrationQuarantineModel.runtime_reconciled_at <= observed_at
-            if status is RuntimeReconciliationStatus.FAILED
-            else or_(
-                SkillMigrationQuarantineModel.runtime_reconciled_at < observed_at,
-                (SkillMigrationQuarantineModel.runtime_reconciled_at == observed_at)
-                & (
-                    SkillMigrationQuarantineModel.runtime_reconciliation_status
-                    == RuntimeReconciliationStatus.READY.value
-                ),
-            )
-        )
         with self._database.transactional_orm_session() as session:
+            observed_at_db = _database_timestamp(
+                observed_at,
+                dialect_name=session.bind.dialect.name,
+            )
+            timestamp_order = (
+                SkillMigrationQuarantineModel.runtime_reconciled_at <= observed_at_db
+                if status is RuntimeReconciliationStatus.FAILED
+                else or_(
+                    SkillMigrationQuarantineModel.runtime_reconciled_at
+                    < observed_at_db,
+                    (
+                        SkillMigrationQuarantineModel.runtime_reconciled_at
+                        == observed_at_db
+                    )
+                    & (
+                        SkillMigrationQuarantineModel.runtime_reconciliation_status
+                        == RuntimeReconciliationStatus.READY.value
+                    ),
+                )
+            )
             current = (
                 session.query(BotSkillLayoutStateModel.id)
                 .filter(
@@ -218,7 +250,7 @@ class SkillsPoolQuarantineRepositoryMixin:
                     == SkillLayoutPhase.POOL_ACTIVE.value,
                     BotSkillLayoutStateModel.migration_generation
                     == migration_generation,
-                    BotSkillLayoutStateModel.pool_activated_at < observed_at,
+                    BotSkillLayoutStateModel.pool_activated_at < observed_at_db,
                 )
                 .first()
             )
@@ -232,7 +264,7 @@ class SkillsPoolQuarantineRepositoryMixin:
                     SkillMigrationQuarantineModel.bot_id == scope.bot_id,
                     SkillMigrationQuarantineModel.migration_generation
                     == migration_generation,
-                    SkillMigrationQuarantineModel.pool_activated_at < observed_at,
+                    SkillMigrationQuarantineModel.pool_activated_at < observed_at_db,
                     SkillMigrationQuarantineModel.cleaned_at.is_(None),
                     SkillMigrationQuarantineModel.status != "cleaning",
                     or_(
@@ -242,7 +274,9 @@ class SkillsPoolQuarantineRepositoryMixin:
                 )
                 .update(
                     {
-                        SkillMigrationQuarantineModel.runtime_reconciled_at: observed_at,
+                        SkillMigrationQuarantineModel.runtime_reconciled_at: (
+                            observed_at_db
+                        ),
                         SkillMigrationQuarantineModel.runtime_reconciliation_status: (
                             status.value
                         ),
@@ -265,8 +299,11 @@ class SkillsPoolQuarantineRepositoryMixin:
         lease_seconds: int,
         eligible_before: datetime,
     ) -> bool:
-        eligible_before = eligible_before.replace(tzinfo=None)
         with self._database.transactional_orm_session() as session:
+            eligible_before_db = _database_timestamp(
+                eligible_before,
+                dialect_name=session.bind.dialect.name,
+            )
             current = (
                 session.query(BotSkillLayoutStateModel)
                 .filter(
@@ -293,7 +330,8 @@ class SkillsPoolQuarantineRepositoryMixin:
                     SkillMigrationQuarantineModel.migration_generation
                     == migration_generation,
                     SkillMigrationQuarantineModel.cleaned_at.is_(None),
-                    SkillMigrationQuarantineModel.pool_activated_at <= eligible_before,
+                    SkillMigrationQuarantineModel.pool_activated_at
+                    <= eligible_before_db,
                     SkillMigrationQuarantineModel.runtime_reconciled_at
                     > SkillMigrationQuarantineModel.pool_activated_at,
                     SkillMigrationQuarantineModel.runtime_reconciliation_status
