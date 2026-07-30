@@ -248,11 +248,25 @@ def _enum_schema(enum_cls) -> dict:
     return _Holder.model_json_schema()
 
 
+def _documenting_class(model: type[BaseModel]) -> type[BaseModel]:
+    """The class whose docstring describes ``model``.
+
+    Parametrising a generic model injects the concretisation (``Page[Session]``)
+    into the defining module with an empty ``__doc__`` — Pydantic does not copy
+    the generic's. Those concretisations are not separate published models; the
+    named subclass that uses one carries the description. So the docstring
+    requirement is checked against the generic origin, which keeps the gate
+    honest without demanding a docstring on a class no one can write one for.
+    """
+    origin = getattr(model, "__pydantic_generic_metadata__", {}).get("origin")
+    return origin or model
+
+
 def test_every_model_field_is_described():
     """A generated client is only usable if the fields carry documentation."""
     problems: list[str] = []
     for model in _public_models():
-        if not (model.__doc__ or "").strip():
+        if not (_documenting_class(model).__doc__ or "").strip():
             problems.append(f"{model.__name__}: no docstring (schema description)")
         for name, field in model.model_fields.items():
             if not (field.description or "").strip():

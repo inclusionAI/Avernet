@@ -754,11 +754,16 @@ class LocalDeviceService(DeviceService):
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection info.
 
         ``device_uuid`` targets a specific instance for multi-instance BaaS bots;
         local devices are single-instance and ignore it.
+
+        ``path`` is ignored here: this provider returns a bare routing target
+        (and an HTTP base URL), never a finished WebSocket URL, so the caller
+        appends the path itself. Accepted to keep the provider signatures equal.
         """
         record = self._repo.get_by_id(binding_id)
         if record is None:

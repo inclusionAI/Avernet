@@ -90,13 +90,34 @@ All bot-scoped under `/openapi/v1/bots/{bot_id}/…`, all returning the
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
-| GET | `…/sessions` | `GET /api/sessions` | `agent_id`, `session_key`, paged → `Envelope[Page[Session]]` |
+| GET | `…/sessions` | `GET /api/sessions` | `agent_id`, `session_key`, paged → `Envelope[SessionPage]` |
 | POST | `…/sessions` | `POST /api/sessions` | `201 Envelope[Session]` |
 | GET | `…/sessions/{session_id}` | `GET /api/sessions/{session_id}` | `Envelope[Session]` |
 | DELETE | `…/sessions/{session_id}` | `DELETE /api/sessions/{session_id}` | `Envelope[Deleted]` |
-| GET | `…/sessions/{session_id}/messages` | `GET …/messages` | paged → `Envelope[Page[Message]]` |
+| GET | `…/sessions/{session_id}/messages` | `GET …/messages` | paged → `Envelope[MessagePage]` |
 | DELETE | `…/sessions/{session_id}/messages` | `DELETE …/messages` | clear history → `Envelope[Deleted]` |
-| PATCH | `…/sessions/{session_id}` | `POST …/{session_id}/update` | **divergence:** partial update is `PATCH` on the resource publicly, not a `/update` sub-path |
+| PATCH | `…/sessions/{session_id}` | `POST …/{session_id}/update` | **divergence:** partial update is `PATCH` on the resource publicly, not a `/update` sub-path. Body is `title`/`model` only — see below |
+
+Two things about this group are not the shape a reader would assume:
+
+- **`total` is a lower bound, not a count.** Both paged routes answer with
+  `SessionPage` / `MessagePage` — `Page` subclasses whose `total` says *at least
+  this many exist*, exact once you reach a page shorter than `page_size`. The
+  engine reports no count for either collection, and the only way to compute one
+  is to read every record: for sessions that fans out a `chat.history` call per
+  session. A number that is honest about being a bound beats one that is wrong.
+  These are the only two list endpoints on the API that do not report an exact
+  total; every other category reads a database we own.
+- **The two paged routes need different `limit` semantics.** The session list
+  paginates a materialised list, so `limit` is a page size. The message history
+  bounds its *fetch* by `limit` and only then skips `offset`, so its limit must
+  cover the offset — a page-sized limit there slices out of a prefix too short
+  to contain the page, and every page but the first came back empty.
+- **`PATCH` accepts `title` and `model` only.** A working directory was offered
+  and withdrawn: of the two bundled engines one applies it and the other
+  discards it without saying so, which would make the same request succeed and
+  do nothing depending on which engine the bot runs. A caller still sending it
+  gets a 422 rather than a silent no-op. _Decided 2026-07-30._
 
 ### engine, read-only (3) — engine `/api/engine`
 
@@ -149,7 +170,7 @@ sockets, never proxypass topology:
 }
 ```
 
-`sockets` is a **list whose `kind` is an enum** (`chat` | `terminal`), not an
+`sockets` is a **list whose `kind` is an enum** (`chat` in v1), not an
 object keyed by kind. An enum-keyed object generates as `additionalProperties`
 plus `propertyNames`, which most client generators drop or flatten to an untyped
 map — the enum would then be documentation only. A list of records generates a
@@ -179,6 +200,16 @@ Rules this endpoint must hold:
   `{base}/proxypass/{target}` composition remains the fallback, and a deployment
   with no gateway to compose against is a named upstream error, not a 500.
   _Corrected 2026-07-30._
+- **A relayed URL is used verbatim, and the engine's path is requested up front.**
+  The provider builds the relay URL server-side *around a path it is given*, so
+  two things follow. Appending our own path to it would produce
+  `…/api/openclaw/ws/api/openclaw/ws`, which cannot connect. And the path it is
+  given must be the bot's own engine: the provider default is openclaw's, while
+  `/api/{engine}/ws` closes with code 4001 when the pinned engine is not the
+  active one — so a `claude_code` bot handed the default would be rejected on
+  connect. `get_device_connection` therefore takes a `path`, which only matters
+  on providers that return a complete URL; the ones that return a routing target
+  ignore it and the path is appended here. _Added 2026-07-30._
 - **`expires_at` is mandatory** so a caller knows to re-fetch rather than
   silently failing on an expired token. It is **the issuer's own value** wherever
   the issuer states one: the BaaS path documents that it *ignores* the requested
@@ -301,7 +332,7 @@ caller *why*.
 
 This is a public, generated contract, so a value set that is genuinely closed
 should reach a client generator as a real enum rather than a bare `str`. Four
-qualify — `SocketKind` (`chat` | `terminal`, ours), `ApprovalMode`
+qualify — `SocketKind` (`chat` in v1, ours), `ApprovalMode`
 (`approve` | `on-miss` | `never`), `MessageRole` (a `Literal` at
 `src/engine/.../core/session/models.py:46`), and `EngineName` (reuse the bots
 category's, don't redefine).

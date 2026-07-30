@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
-    Page,
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
@@ -22,8 +21,10 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schemas import (
     Message,
+    MessagePage,
     Session,
     SessionCreate,
+    SessionPage,
     SessionUpdate,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
@@ -54,9 +55,9 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 _SUPPORTED_BOT_TYPE = "personal"
 
 #: One extra item is requested beyond the page, purely to learn whether more
-#: exist. The session list route takes ``limit``/``offset`` but reports no
-#: total, and ``Page.total`` is required — so for that group the total is
-#: derived from the window rather than invented.
+#: exist. Neither engine route reports a total, and ``Page.total`` is required —
+#: so for this group the total is derived from the window rather than invented,
+#: and both paged routes answer with :class:`BoundedPage` to say so.
 _LOOKAHEAD = 1
 
 
@@ -137,16 +138,31 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
     return [d for d in raw if isinstance(d, dict)]
 
 
-def _window(page_params: Any) -> dict[str, int]:
+def _window(page_params: Any, *, limit_covers_offset: bool = False) -> dict[str, int]:
     """The engine query for exactly the requested page, plus one lookahead item.
 
     Asking the engine for the caller's window — rather than always fetching from
     offset 0 and slicing locally — is what makes pages past the first few
     hundred work at all. Fetching a fixed prefix left every later page empty and
     capped the reported total at the prefix length.
+
+    ``limit_covers_offset`` exists because the two engine routes paginate
+    differently, and one of them makes ``limit`` mean something else:
+
+    - The **session list** paginates a fully-materialised list
+      (``plugins/openclaw/_session.py``: ``raw_sessions[offset : offset+limit]``),
+      so ``limit`` really is a page size.
+    - The **message history** bounds the *fetch* by ``limit`` first and only
+      then slices from ``offset`` (``adapters/*/session.py``:
+      ``messages[offset : offset+limit]``). A page-sized limit there fetches
+      fewer messages than the offset skips, so every page but the first comes
+      back empty. Those callers must ask for enough to reach their offset.
     """
     offset = (page_params.page - 1) * page_params.page_size
-    return {"offset": offset, "limit": page_params.page_size + _LOOKAHEAD}
+    limit = page_params.page_size + _LOOKAHEAD
+    if limit_covers_offset:
+        limit += offset
+    return {"offset": offset, "limit": limit}
 
 
 def _page(
@@ -154,12 +170,17 @@ def _page(
 ) -> tuple[int, list[Any]]:
     """The requested page, plus the best total the engine allows.
 
-    ``reported`` is the engine's own count where it supplies one — the message
-    history does, the session list does not. Without it the total is derived
-    from the window: exact once the caller reaches the end (a short page proves
-    it), and a floor while full pages keep coming. That is the most this API can
-    say honestly until the engine reports a total for sessions; inventing a
-    larger number would advertise pages that return nothing.
+    ``reported`` is the engine's own count where it supplies one. Both bundled
+    engines return ``total=None`` for message history and the session list has
+    no total field at all, so in practice this is the derived branch — but a
+    corp engine that fills it is preferred over anything computed here.
+
+    Derived: exact once the caller reaches the end (a short page proves it), and
+    a lower bound while full pages keep coming. Neither engine route exposes a
+    count, and the only way to compute one would be to fetch every record —
+    which for sessions fans out a ``chat.history`` RPC per session. A bound that
+    is honest about being a bound beats advertising pages that return nothing;
+    the endpoints document it on the field.
     """
     offset = (page_params.page - 1) * page_params.page_size
     has_more = len(items) > page_params.page_size
@@ -169,7 +190,7 @@ def _page(
     return offset + len(visible) + (1 if has_more else 0), visible
 
 
-@router.get("", response_model=Envelope[Page[Session]])
+@router.get("", response_model=Envelope[SessionPage])
 @envelope_errors
 async def list_sessions(
     bot_id: str,
@@ -187,7 +208,7 @@ async def list_sessions(
         ),
     ] = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
-) -> Envelope[Page[Session]]:
+) -> Envelope[SessionPage]:
     """List the bot's sessions."""
     owner_id = caller_owner_id(principal)
     _require_personal_bot(relay, bot_id, owner_id)
@@ -312,7 +333,7 @@ async def delete_session(
     return deleted(request)
 
 
-@router.get("/{session_id}/messages", response_model=Envelope[Page[Message]])
+@router.get("/{session_id}/messages", response_model=Envelope[MessagePage])
 @envelope_errors
 async def list_session_messages(
     bot_id: str,
@@ -321,19 +342,22 @@ async def list_session_messages(
     principal: PrincipalDep,
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
-) -> Envelope[Page[Message]]:
+) -> Envelope[MessagePage]:
     """Read a session's message history."""
     owner_id = caller_owner_id(principal)
     _require_personal_bot(relay, bot_id, owner_id)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="GET",
         path=f"/api/sessions/{session_id}/messages",
-        params=_window(page),
+        # The history route bounds its fetch by ``limit`` *before* skipping
+        # ``offset``, so the limit has to cover the offset or a later page is
+        # sliced out of a prefix too short to contain it.
+        params=_window(page, limit_covers_offset=True),
     )
     mapped = [_map_message(d, session_id) for d in _as_list(result.data)]
-    # The message history *does* report a total, so it is exact — and now that
-    # the window follows the caller's page, a total larger than one page is
-    # actually reachable rather than advertising pages that return nothing.
+    # The engine's envelope carries a total field, so it is used when filled —
+    # but both bundled adapters return None for history, so this is normally the
+    # derived lower bound. See ``_page``.
     total, items = _page(mapped, page, reported=result.total)
     return page_envelope(total, items, request)
 

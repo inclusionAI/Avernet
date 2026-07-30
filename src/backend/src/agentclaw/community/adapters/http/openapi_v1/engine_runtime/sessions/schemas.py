@@ -4,9 +4,32 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentclaw.community.adapters.http.openapi_v1.contracts import Page
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     MessageRole,
 )
+
+
+# Why this exists, kept out of the docstring because a published model's
+# docstring becomes the caller-facing schema description:
+#
+# The two paged routes in this group read from a bot's own device. It reports no
+# count for either collection and offers no way to obtain one short of reading
+# every record — prohibitively expensive for a session list, where each record
+# costs an extra round trip to enrich. Rather than report a number that is
+# wrong, or one that quietly caps at some prefix length, `total` is documented
+# for what it is. Every other list endpoint on this API reads a database we own
+# and reports an exact `Page.total`; this subclass exists so the two are not
+# conflated by a client that trusts the shared description.
+class BoundedPage[T](Page[T]):
+    """A page of items whose total is a lower bound, not an exact count."""
+
+    total: int = Field(
+        description="Lower bound on the number of items matching the query — at "
+        "least this many exist. Becomes the exact count once you reach the last "
+        "page (identifiable by a page shorter than `page_size`). Paginate until "
+        "a short page rather than computing a page count from this value."
+    )
 
 
 class Message(BaseModel):
@@ -95,9 +118,35 @@ class SessionUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Only fields every engine on this surface actually applies. A working
+    # directory was offered here and withdrawn: one of the two bundled engines
+    # applies it and the other discards it without saying so, which would have
+    # made the same request succeed and do nothing depending on which engine the
+    # bot runs. `extra="forbid"` means a caller still sending `cwd` gets a 422
+    # rather than a silent no-op.
     title: str | None = Field(default=None, description="New session title.")
     model: str | None = Field(default=None, description="New model.")
-    cwd: str | None = Field(default=None, description="New working directory.")
 
 
-__all__ = ["Message", "Session", "SessionCreate", "SessionUpdate"]
+# Named concretisations rather than `BoundedPage[Session]` used inline. Pydantic
+# builds a parametrised generic with no `__doc__`, so the schema description —
+# the only place the lower-bound caveat is stated — would silently vanish from
+# the published document. Naming them also gives generated clients `SessionPage`
+# instead of a mangled generic name.
+class SessionPage(BoundedPage[Session]):
+    """A page of sessions whose total is a lower bound, not an exact count."""
+
+
+class MessagePage(BoundedPage[Message]):
+    """A page of messages whose total is a lower bound, not an exact count."""
+
+
+__all__ = [
+    "BoundedPage",
+    "Message",
+    "MessagePage",
+    "Session",
+    "SessionCreate",
+    "SessionPage",
+    "SessionUpdate",
+]

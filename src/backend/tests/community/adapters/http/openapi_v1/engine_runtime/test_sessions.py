@@ -127,6 +127,16 @@ def test_patch_omits_unset_fields(client, relay):
     assert relay.calls[0]["params"] == {"model": "m"}
 
 
+def test_patch_rejects_a_field_an_engine_would_silently_drop(client, relay):
+    """``cwd`` was offered and withdrawn: one bundled engine applies it and the
+    other discards it without saying so, which would make the same request
+    succeed and do nothing depending on the bot's engine. 422 beats a no-op
+    that reports 200."""
+    resp = client.patch(f"{_base()}/{SESSION_ID}", json={"cwd": "/work"})
+    assert resp.status_code == 422, resp.json()
+    assert relay.calls == []
+
+
 def test_message_total_prefers_the_engines_count(client, relay):
     """Unlike the session list, the history route does report a total."""
     relay.results = [EngineResult(data=[ENGINE_MESSAGE], total=1200)]
@@ -190,9 +200,20 @@ def test_pagination_total_is_a_floor_while_more_remain(client, relay):
     assert [i["session_id"] for i in data["items"]] == ["s0", "s1", "s2"]
 
 
-def test_message_window_follows_the_caller_page(client, relay):
+def test_message_window_asks_for_enough_to_reach_the_offset(client, relay):
+    """The history route bounds its *fetch* by ``limit`` and only then skips
+    ``offset``, so a page-sized limit slices out of a prefix too short to
+    contain the page — every page but the first came back empty."""
     relay.results = [EngineResult(data=[ENGINE_MESSAGE], total=1200)]
     ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 3, "page_size": 50}))
+    assert relay.calls[0]["params"] == {"offset": 100, "limit": 151}
+
+
+def test_the_session_window_stays_page_sized(client, relay):
+    """The session list paginates a materialised list, so ``limit`` there really
+    is a page size and must not grow with the offset."""
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+    ok(client.get(_base(), params={"page": 3, "page_size": 50}))
     assert relay.calls[0]["params"] == {"offset": 100, "limit": 51}
 
 

@@ -102,6 +102,7 @@ class EngineConnectionService:
             nick_name=owner_id,
             operator_name=owner_id,
         )
+        chat_path = self._chat_path(engine)
         info = self._device_service.get_device_connection(
             binding_id=ctx.binding_id,
             operator=operator,
@@ -114,16 +115,23 @@ class EngineConnectionService:
             # a URL. Asking once also keeps the URL and the token describing the
             # same mode.
             ws_conn_mode=_RELAY_MODE,
+            # The provider bakes this path *into* the relay URL, so it has to be
+            # the bot's own engine path. The provider default is openclaw's, and
+            # the engine closes a socket whose pinned engine is not the active
+            # one (code 4001) — a claude_code bot handed the default would be
+            # rejected on connect.
+            path=chat_path,
         )
         if not getattr(info, "available", True):
             raise EngineDeviceNotReadyError(f"device unavailable for bot={bot_id}")
 
-        base = self._ws_base(info)
         token = getattr(info, "token", "") or ""
         headers = {_PROXY_TOKEN_HEADER: token} if token else {}
 
         sockets = [
-            SocketInfo(kind="chat", url=base + self._chat_path(engine), headers=headers)
+            SocketInfo(
+                kind="chat", url=self._socket_url(info, chat_path), headers=headers
+            )
         ]
         return ConnectionResult(
             engine=engine, expires_at=self._expires_at(info), sockets=sockets
@@ -142,20 +150,32 @@ class EngineConnectionService:
             return _CHAT_WS_PATHS[engine]
         return f"/api/{engine}/ws" if engine else "/ws"
 
-    def _ws_base(self, info: object) -> str:
-        """URL prefix that a socket path is appended to.
+    def _socket_url(self, info: object, socket_path: str) -> str:
+        """The finished URL for ``socket_path``.
 
-        Three shapes, in order of preference:
+        Two shapes:
 
-        1. The provider already returned a WebSocket URL (BaaS relay mode) —
-           use its origin and routing verbatim rather than rebuilding it.
-        2. A local device — reach it directly.
-        3. Otherwise, the proxy gateway: ``{base}/proxypass/{target}``.
+        1. **The provider returned a WebSocket URL** (BaaS relay mode) — it is
+           already complete, built server-side *around the path we asked for*.
+           Used verbatim. Appending ``socket_path`` again would produce
+           ``…/api/openclaw/ws/api/openclaw/ws``, which cannot connect.
+        2. **The provider returned a routing target** — we compose, so the path
+           is appended here.
         """
         url = str(getattr(info, "url", "") or "")
         if url.startswith(("ws://", "wss://")):
-            return url.rstrip("/")
+            return url
 
+        return self._ws_base(info) + socket_path
+
+    def _ws_base(self, info: object) -> str:
+        """URL prefix a socket path is appended to, for providers that route.
+
+        Two shapes:
+
+        1. A local device — reach it directly.
+        2. Otherwise, the proxy gateway: ``{base}/proxypass/{target}``.
+        """
         target = str(getattr(info, "target", "") or "")
         if not target:
             raise EngineUpstreamError("device connection carries no routing target")

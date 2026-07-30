@@ -306,6 +306,30 @@ class TestGetDeviceConnection:
         assert result.bot_uuid == "BOT-1"
         assert result.url == ""
 
+    def test_the_requested_socket_path_reaches_ws_info(self):
+        """BaaS builds ``ws_url`` around this path, so relay callers that need a
+        specific engine's socket must be able to ask for it. Its own default is
+        openclaw's."""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), path="/api/claude_code/ws"
+        )
+
+        assert baas.get_ws_info.call_args.kwargs["path"] == "api/claude_code/ws"
+
+    def test_no_path_leaves_the_provider_default_alone(self):
+        """Passing None would blank the default rather than keep it."""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert "path" not in baas.get_ws_info.call_args.kwargs
+
     def test_server_issued_expiry_is_passed_through(self):
         """The ``ttl`` argument is ignored here — the server decides — so the
         only truthful expiry for the returned token is the one ws-info states.

@@ -666,16 +666,20 @@ class DeviceServiceRouter(DeviceService):
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ):
         """获取设备连接信息 - 根据 binding_id 路由.
 
         ``device_uuid`` 透传给 provider,BaaS provider 用它锁定多实例中的特定实例;
         不传则由 BaaS 自动选活跃实例(本地/非 BaaS provider 忽略)。
+
+        ``path`` 透传给 provider,仅对"由服务端拼出完整 URL"的链路(BaaS relay)
+        有意义;其余 provider 忽略。
         """
         service = self._get_provider_for_binding(binding_id)
         return service.get_device_connection(
             binding_id=binding_id, operator=operator, port=port, ttl=ttl,
-            device_uuid=device_uuid, ws_conn_mode=ws_conn_mode,
+            device_uuid=device_uuid, ws_conn_mode=ws_conn_mode, path=path,
         )
 
     @override

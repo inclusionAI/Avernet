@@ -109,12 +109,21 @@ def test_relay_mode_is_requested_so_the_provider_returns_a_finished_url():
     assert devices.kwargs["ws_conn_mode"] == "relay"
 
 
-def test_a_relayed_ws_url_is_used_verbatim():
-    devices = _Devices(url="wss://relay.example/wsrelay/session-1/")
+def test_the_engines_socket_path_is_requested_from_the_provider():
+    """The relay URL is built server-side *around* this path, so it has to be
+    the bot's own engine. The provider default is openclaw's, and the engine
+    closes a socket whose pinned engine is not the active one."""
+    devices = _Devices()
+    _build(_svc(bots=_Bots(engine="claude_code"), devices=devices))
+    assert devices.kwargs["path"] == "/api/claude_code/ws"
+
+
+def test_a_relayed_url_is_not_appended_to():
+    """It already ends in the path we asked for; appending again would give
+    ``…/api/openclaw/ws/api/openclaw/ws``, which cannot connect."""
+    devices = _Devices(url="wss://relay.example/wsrelay/s1/api/openclaw/ws")
     result = _build(_svc(devices=devices))
-    assert result.sockets[0].url == (
-        "wss://relay.example/wsrelay/session-1/api/openclaw/ws"
-    )
+    assert result.sockets[0].url == "wss://relay.example/wsrelay/s1/api/openclaw/ws"
 
 
 def test_a_deployment_without_a_proxy_gateway_is_an_upstream_error():
@@ -143,7 +152,7 @@ def test_proxy_url_is_composed_and_scheme_swapped():
 def test_a_provider_supplied_ws_url_is_used_verbatim():
     devices = _Devices(url="wss://relay.example/route/xyz")
     result = _build(_svc(devices=devices))
-    assert result.sockets[0].url == "wss://relay.example/route/xyz/api/openclaw/ws"
+    assert result.sockets[0].url == "wss://relay.example/route/xyz"
 
 
 def test_local_devices_are_reached_directly():

@@ -81,13 +81,30 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
-| GET | `…/sessions` | `GET /api/sessions` | `agent_id`、`session_key`、分页 → `Envelope[Page[Session]]` |
+| GET | `…/sessions` | `GET /api/sessions` | `agent_id`、`session_key`、分页 → `Envelope[SessionPage]` |
 | POST | `…/sessions` | `POST /api/sessions` | `201 Envelope[Session]` |
 | GET | `…/sessions/{session_id}` | `GET /api/sessions/{session_id}` | `Envelope[Session]` |
 | DELETE | `…/sessions/{session_id}` | `DELETE /api/sessions/{session_id}` | `Envelope[Deleted]` |
-| GET | `…/sessions/{session_id}/messages` | `GET …/messages` | 分页 → `Envelope[Page[Message]]` |
+| GET | `…/sessions/{session_id}/messages` | `GET …/messages` | 分页 → `Envelope[MessagePage]` |
 | DELETE | `…/sessions/{session_id}/messages` | `DELETE …/messages` | 清空历史 → `Envelope[Deleted]` |
-| PATCH | `…/sessions/{session_id}` | `POST …/{session_id}/update` | **差异：** 公共面上部分更新是资源上的 `PATCH`，不是 `/update` 子路径 |
+| PATCH | `…/sessions/{session_id}` | `POST …/{session_id}/update` | **差异：** 公共面上部分更新是资源上的 `PATCH`，不是 `/update` 子路径。请求体只有 `title`/`model`，见下 |
+
+这一组有两点不是读者会默认的形状：
+
+- **`total` 是下界，不是计数。** 两条分页路由返回 `SessionPage` / `MessagePage`
+  —— `Page` 的子类，其 `total` 语义是*至少有这么多*，当你翻到短于 `page_size`
+  的那一页时才是精确值。engine 对这两个集合都不报计数，而唯一能算出计数的办法
+  是读完每一条记录：对 sessions 而言那意味着每个 session 一次 `chat.history`
+  调用。一个诚实地承认自己是下界的数字，胜过一个错的数字。这也是本 API 上仅有
+  的两个不报精确 total 的列表端点；其余类别读的都是我们自己的库。
+- **两条分页路由的 `limit` 语义不同。** session 列表是在已物化的列表上分页，
+  `limit` 就是页大小；而消息历史先用 `limit` 限定**拉取量**、之后才跳过
+  `offset`，所以它的 limit 必须覆盖 offset —— 在那里用页大小的 limit 会从一段
+  短到装不下该页的前缀里切片，导致除第一页外全为空。
+- **`PATCH` 只接受 `title` 和 `model`。** 工作目录曾被提供又被撤回：两个内置引擎
+  中一个会应用它、另一个不声不响地丢弃，那会让同一个请求"成功但什么也没做"，
+  取决于该 bot 跑的是哪个引擎。仍然发送它的调用方会拿到 422，而不是一个静默的
+  空操作。_2026-07-30 决定。_
 
 ### engine，只读（3）—— engine `/api/engine`
 
@@ -138,7 +155,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 }
 ```
 
-`sockets` 是一个**以 `kind` 枚举为字段的列表**（`chat` | `terminal`），不是以
+`sockets` 是一个**以 `kind` 枚举为字段的列表**（v1 只有 `chat`），不是以
 kind 为键的对象。以枚举为键的对象会生成成 `additionalProperties` +
 `propertyNames`，而多数客户端生成器会直接丢弃它或摊平成无类型 map —— 那样枚举
 就只剩文档意义。列表形式在所有生成器里都能产出真正的类型化枚举，将来加第三个
@@ -163,6 +180,14 @@ socket 也是干净的。
   也保证了 URL 和 token 描述的是同一种模式。拿不到完整 URL 时仍回落到
   `{base}/proxypass/{target}` 拼接；而没有 gateway 可拼的部署是一个有名字的
   upstream 错误，不是 500。_2026-07-30 更正。_
+- **relay URL 原样使用，且引擎路径要提前告知 provider。** provider 是在服务端
+  **围绕它拿到的 path** 拼出 relay URL 的，由此有两点：再拼一次我们自己的 path 会
+  得到 `…/api/openclaw/ws/api/openclaw/ws`，根本连不上；而给它的 path 必须是该 bot
+  自己引擎的 —— provider 默认是 openclaw 的，而 `/api/{engine}/ws` 在 pinned 引擎
+  不是当前活跃引擎时会以 4001 关闭，所以 `claude_code` bot 拿到默认路径会在连接时
+  被拒。故 `get_device_connection` 增加 `path` 参数；它只对"返回完整 URL"的
+  provider 有意义，返回路由 target 的 provider 忽略它、由本层拼接。
+  _2026-07-30 新增。_
 - **`expires_at` 必填**，让调用方知道该重新获取，而不是在 token 过期后静默失败。
   只要签发方给出了过期时间，就以**签发方自己的值**为准：BaaS 链路明确文档化了
   它**忽略**传入的 TTL、由服务端决定，所以在那条链路上本地算出来的过期时间描述的
@@ -269,7 +294,7 @@ engine 的每个 handler 都会调用 `check_capability()`
 ### 5. 封闭值集合用枚举，开放的保持字符串
 
 这是一份对外的、会被生成工具消费的契约，所以真正封闭的值集合应当以真枚举而不是
-裸 `str` 抵达客户端生成器。有四个符合条件 —— `SocketKind`（`chat` | `terminal`，
+裸 `str` 抵达客户端生成器。有四个符合条件 —— `SocketKind`（v1 只有 `chat`，
 我们自己定义）、`ApprovalMode`（`approve` | `on-miss` | `never`）、`MessageRole`
 （`src/engine/.../core/session/models.py:46` 处真实的 `Literal`），以及
 `EngineName`（复用 bots 类别已有的，不要另立一份）。

@@ -755,6 +755,7 @@ class BaasDeviceService(DeviceService):
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ) -> DeviceConnectionInfo:
         """获取设备连接信息。
 
@@ -767,6 +768,8 @@ class BaasDeviceService(DeviceService):
             ttl: TTL（BaaS 层忽略，由服务端决定）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
             ws_conn_mode: WebSocket 连接模式透传（可选）；不传则不覆盖
+            path: 目标 in-device 路径（可选）。BaaS 用它拼 ``ws_url``，故 relay 下它
+                决定 URL 指向哪个引擎 socket；不传落到默认 ``api/openclaw/ws``。
 
         Returns:
             DeviceConnectionInfo: 设备连接信息
@@ -786,6 +789,8 @@ class BaasDeviceService(DeviceService):
                 device_affinity=operator.staff_id,
                 device_uuid=device_uuid,
                 ws_conn_mode=ws_conn_mode,
+                # Only override when asked; None would blank get_ws_info's default.
+                **({"path": path.lstrip("/")} if path else {}),
             )
         except BaasServiceError as e:
             logger.error(f"[BaasDeviceService.get_device_connection] BaaS error: {e}")
@@ -809,9 +814,7 @@ class BaasDeviceService(DeviceService):
             bot_uuid=ws_info.bot_uuid,
             tenant=ws_info.tenant,
             engine_port=ws_info.engine_port,
-            # 服务端签发的过期时间。上面的 ttl 入参被本层忽略（由服务端决定），
-            # 所以 caller 自己按 ttl 推算出来的过期时间必然与真 token 不符——
-            # 透传这个值，让 caller 有权威值可用。
+            # 服务端签发；ttl 入参本层忽略，caller 自行推算必然与真 token 不符。
             expires_at=ws_info.expires_at,
         )
 
