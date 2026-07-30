@@ -5,23 +5,26 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    Actor, ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
-    CollaborationGroupDetail, CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup,
-    CreateGroupOutcome, CreateGroupSpec, CreateParticipant, DeleteGroup, DeleteResult,
-    DirectMessageGroupDetail, DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter,
-    GroupService, GroupStatus, GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility,
-    HumanPrincipal, ListBotGroups, ManagerWorkerConfiguration, Membership, MembershipFilter,
-    NormalGroupSummary, Page, Participant as V1Participant, Principal, StateMachineConfiguration,
-    StateMachineDefinitionReference, StateMachineParticipantBinding, UpdateGroup,
+    Actor, AddGroupParticipant, ApplicationError, BotFinalDelivery, ChatConfiguration,
+    CollaborationConfiguration, CollaborationGroupDetail, CreateCollaborationGroup,
+    CreateDirectMessageGroup, CreateGroup, CreateGroupOutcome, CreateGroupSpec, CreateParticipant,
+    DeleteGroup, DeleteGroupParticipant, DeleteResult, DirectMessageGroupDetail,
+    DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter, GroupService, GroupStatus,
+    GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, HumanPrincipal, ListBotGroups,
+    ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
+    Participant as V1Participant, Principal, StateMachineConfiguration, StateMachineDefinitionReference,
+    StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, AuthenticatedHumanCaller, BotRegistryCoreService,
     CollaborationDefinitionRef, CollaborationRuntimeError, CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, DefaultDelivery, DmCreateCommand, FriendCoreService,
-    Group as DomainGroup, GroupCoreService, GroupCreateCommand, GroupCreateParticipantCommand,
-    GroupDeleteCommand, GroupKind, GroupManagementService, GroupMutableFieldsPatch, GroupStrategy,
-    GroupUseCaseError, RelationCoreService, RoutingMode, RoutingPolicy, RuntimeParticipantBinding,
-    ServiceError, SessionManagementService, StartStateMachineRunCommand,
+    Group as DomainGroup, GroupAddMemberCommand, GroupCoreService, GroupCreateCommand,
+    GroupCreateParticipantCommand, GroupDeleteCommand, GroupKind, GroupManagementService,
+    GroupMutableFieldsPatch, GroupParticipantModeCommand, GroupParticipantView,
+    GroupRemoveMemberCommand, GroupStrategy, GroupUseCaseError, ParticipantMode,
+    RelationCoreService, RoutingMode, RoutingPolicy, RuntimeParticipantBinding, ServiceError,
+    SessionManagementService, StartStateMachineRunCommand,
 };
 use serde_json::Value;
 
@@ -1150,6 +1153,130 @@ impl GroupService for GroupServiceImpl {
             deleted: result.deleted,
         })
     }
+
+    async fn add_participant(
+        &self,
+        command: AddGroupParticipant,
+    ) -> Result<V1Participant, ApplicationError> {
+        let group = self
+            .load_readable_group(&command.principal, &command.group_id)
+            .await?;
+        if !Self::can_manage_group(&command.principal, &group) {
+            return Err(ApplicationError::forbidden(
+                "Principal cannot manage the group",
+            ));
+        }
+        // `AddGroupParticipant` carries no `actor_kind`; resolve it from the
+        // registry so legacy `add_member` gets the right Bot/Human split.
+        let actor_kind = if self
+            .registry
+            .try_get(&command.actor_id)
+            .await
+            .map_err(map_service_error)?
+            .is_some()
+        {
+            ActorKind::Bot
+        } else {
+            ActorKind::Human
+        };
+        let (bot_id, human_actor_id) = match actor_kind {
+            ActorKind::Bot => (command.actor_id.clone(), None),
+            ActorKind::Human => (String::new(), Some(command.actor_id.clone())),
+        };
+        let result = self
+            .management
+            .add_member(GroupAddMemberCommand {
+                caller_actor_id: Some(command.principal.actor_id()),
+                human_actor_id,
+                group_id: command.group_id.clone(),
+                bot_id,
+                role: Some(role_name(command.role).to_string()),
+            })
+            .await
+            .map_err(map_group_error)?;
+        Ok(participant_view_to_v1(result.member))
+    }
+
+    async fn update_participant(
+        &self,
+        command: UpdateGroupParticipant,
+    ) -> Result<V1Participant, ApplicationError> {
+        let group = self
+            .load_readable_group(&command.principal, &command.group_id)
+            .await?;
+        if !Self::can_manage_group(&command.principal, &group) {
+            return Err(ApplicationError::forbidden(
+                "Principal cannot manage the group",
+            ));
+        }
+        self.management
+            .update_participant_mode(GroupParticipantModeCommand {
+                caller_actor_id: command.principal.actor_id(),
+                group_id: command.group_id.clone(),
+                actor_id: command.actor_id.clone(),
+                mode: command.mode,
+            })
+            .await
+            .map_err(map_group_error)?;
+        // Reload the group and project the updated participant via the shared
+        // domain Participant -> V1 Participant projection used by get/create.
+        let group = self
+            .groups
+            .try_get(&command.group_id)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "group_not_found",
+                    format!("Group '{}' was not found", command.group_id),
+                )
+            })?;
+        group
+            .participants
+            .iter()
+            .find(|p| p.bot_uuid == command.actor_id)
+            .map(project_participant)
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "participant_not_found",
+                    format!("Participant '{}' not found", command.actor_id),
+                )
+            })
+    }
+
+    async fn delete_participant(
+        &self,
+        command: DeleteGroupParticipant,
+    ) -> Result<DeleteResult, ApplicationError> {
+        let group = self
+            .load_readable_group(&command.principal, &command.group_id)
+            .await?;
+        if !Self::can_manage_group(&command.principal, &group) {
+            return Err(ApplicationError::forbidden(
+                "Principal cannot manage the group",
+            ));
+        }
+        // Phase one: target is a Bot actor (legacy `remove_member` uses bot_id).
+        // The V1 contract treats an already-removed/missing participant as
+        // idempotent success, so swallow `ParticipantNotFound` into
+        // `DeleteResult { deleted: false }` (mirroring the group-level `delete`
+        // facade's not-found handling) instead of surfacing a 404.
+        match self
+            .management
+            .remove_member(GroupRemoveMemberCommand {
+                caller_actor_id: Some(command.principal.actor_id()),
+                group_id: command.group_id.clone(),
+                bot_id: command.actor_id.clone(),
+            })
+            .await
+        {
+            Ok(_) => Ok(DeleteResult { deleted: true }),
+            Err(GroupUseCaseError::Service(ServiceError::ParticipantNotFound(_))) => {
+                Ok(DeleteResult { deleted: false })
+            }
+            Err(error) => Err(map_group_error(error)),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1173,6 +1300,32 @@ fn project_participant(participant: &bcs_service_api::Participant) -> V1Particip
         name: participant.bot_name.clone(),
         role: participant.role,
         mode: participant.effective_mode(),
+    }
+}
+
+/// Project a legacy `GroupParticipantView` (returned by `add_member`) into the
+/// V1 `Participant` shape. The view carries `role` as a wire string, so it is
+/// parsed back into the typed enum; a missing `mode` falls back to the
+/// kind-aware default, mirroring `Participant::effective_mode`.
+fn participant_view_to_v1(view: GroupParticipantView) -> V1Participant {
+    V1Participant {
+        actor_id: view.bot_uuid,
+        actor_kind: view.actor_kind,
+        name: view.bot_name,
+        role: parse_participant_role(&view.role),
+        mode: view
+            .mode
+            .unwrap_or_else(|| ParticipantMode::default_for(view.actor_kind)),
+    }
+}
+
+fn parse_participant_role(role: &str) -> bcs_service_api::ParticipantRole {
+    match role {
+        "driver" => bcs_service_api::ParticipantRole::Driver,
+        "manager" => bcs_service_api::ParticipantRole::Manager,
+        "worker" => bcs_service_api::ParticipantRole::Worker,
+        "observer" => bcs_service_api::ParticipantRole::Observer,
+        _ => bcs_service_api::ParticipantRole::Consultant,
     }
 }
 
@@ -1427,7 +1580,7 @@ mod tests {
         );
         assert_code(
             map_group_error(GroupUseCaseError::InvalidParticipantMode {
-                mode: bcs_service_api::ParticipantMode::Auto,
+                mode: ParticipantMode::Auto,
                 actor_kind: ActorKind::Human,
             }),
             "invalid_participant",
