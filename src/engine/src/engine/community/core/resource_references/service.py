@@ -85,11 +85,11 @@ class ResourceReferenceService:
             if canonical != root and root not in canonical.parents:
                 raise ResourceReferenceError("path_mismatch")
             if not canonical.is_file():
-                raise ResourceReferenceError("workspace_file_missing")
+                raise ResourceReferenceError("resource_missing")
             if canonical.stat().st_size != entry.size_bytes:
-                raise ResourceReferenceError("size_mismatch")
+                raise ResourceReferenceError("resource_changed")
             if self._sha256(canonical) != entry.content_hash:
-                raise ResourceReferenceError("content_hash_mismatch")
+                raise ResourceReferenceError("resource_changed")
             replacement = (
                 '<file-ref name="{}" path="{}"></file-ref>'.format(
                     html.escape(entry.filename, quote=True),

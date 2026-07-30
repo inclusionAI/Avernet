@@ -50,7 +50,7 @@ def _domain_error(exc: ValueError) -> HTTPException:
         return HTTPException(status_code=404, detail=code)
     if code in {"materialize_state_conflict", "transfer_id_mismatch"}:
         return HTTPException(status_code=409, detail=code)
-    if code in {"resource_not_ready", "resource_materializing"}:
+    if code in {"resource_not_ready", "resource_materializing", "resource_missing", "resource_changed"}:
         return HTTPException(status_code=409, detail=code)
     if code == "engine_content_unavailable":
         return HTTPException(status_code=502, detail=code)
@@ -153,7 +153,22 @@ async def materialize_status(
         raise _domain_error(exc) from exc
 
 
-@router.get("")
+@router.get("/pending")
+async def list_pending_session_resources(
+    bot_id: str,
+    session_key: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: SessionResourceServiceProtocol = Injected(SessionResourceServiceProtocol),
+) -> dict:
+    records = service.list_pending(
+        owner_id=user.staffId,
+        bot_id=bot_id,
+        session_key=session_key,
+    )
+    return {"files": [_resource(record) for record in records]}
+
+
+@router.get("", deprecated=True)
 async def list_session_resources(
     bot_id: str,
     session_key: str,
@@ -170,7 +185,7 @@ async def list_session_resources(
     return {"files": [_resource(record) for record in records]}
 
 
-@router.get("/referable-files")
+@router.get("/referable-files", deprecated=True)
 async def referable_files(
     bot_id: str,
     session_key: str,
@@ -186,7 +201,7 @@ async def referable_files(
     return {"files": [_resource(record) for record in records]}
 
 
-@router.post("/{resource_id}/reference")
+@router.post("/{resource_id}/reference", deprecated=True)
 async def create_reference(
     resource_id: str,
     body: ReferenceRequest,
@@ -205,7 +220,7 @@ async def create_reference(
     return {**reference, "insert_id": body.insert_id}
 
 
-@router.get("/{resource_id}/content")
+@router.get("/{resource_id}/content", deprecated=True)
 async def stream_content(
     resource_id: str,
     bot_id: str,
@@ -238,7 +253,7 @@ async def stream_content(
     return StreamingResponse(body(), headers=headers)
 
 
-@router.delete("/{resource_id}")
+@router.delete("/{resource_id}", deprecated=True)
 async def delete_resource(
     resource_id: str,
     bot_id: str,

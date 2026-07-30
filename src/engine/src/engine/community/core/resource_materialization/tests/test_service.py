@@ -86,7 +86,11 @@ async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Pa
     assert expected.read_bytes() == content
     assert pull.calls == 1
     assert callback.results == [result]
-    assert service.manifest_store.get("sr_001").status == "ready"
+    entry = service.manifest_store.get("sr_001")
+    assert entry.status == "ready"
+    assert entry.observed_size == len(content)
+    assert entry.observed_mtime_ns is not None
+    assert entry.observed_inode is not None
 
 
 @pytest.mark.asyncio
@@ -283,6 +287,22 @@ def test_open_content_rejects_missing_or_non_ready_manifest_file(tmp_path: Path)
 
     with pytest.raises(ResourceNotMaterializedError, match="resource_not_materialized"):
         service.open_content(resource_id="missing", disposition="inline")
+
+
+@pytest.mark.asyncio
+async def test_open_content_rejects_same_size_hash_changed_file(tmp_path: Path):
+    content = b"ready content"
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    await service.materialize(_request(content))
+    target = tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    target.write_bytes(b"changed bytes")
+
+    with pytest.raises(ResourceNotMaterializedError, match="resource_not_materialized"):
+        service.open_content(resource_id="sr_001", disposition="inline")
 
 
 @pytest.mark.asyncio
