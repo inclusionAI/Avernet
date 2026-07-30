@@ -148,6 +148,35 @@ def compute_gap(
     }
 
 
+def watchdog(node: Node) -> WatchdogAction:
+    """_watchdog 纯规则 (6.5, plan §3). 对一个 RUNNING node 按 tick 超时决定下一步。
+
+    bot 经 SKILL 完成后主动回投 (NODE_ACCEPTED/NODE_FAILED);但 bot 可能因指令遵从
+    或 LLM 服务不稳定 hang 住,故 scheduler 在 tick 上对长期 RUNNING 的 node 主动
+    探活 + 重驱。tick-based 超时(无 wall clock),状态读自 ``node.properties``:
+    ``running_ticks``(本窗口已等 tick 数)、``probe_count``(已探活次数)、
+    ``redrive_count``(已重驱次数)。scheduler 负责自增/重置这些计数,本函数只决策。
+
+    决策(优先级从高到低):
+    - 探活耗尽 (``probe_count >= MAX_PROBES``) 且重驱也耗尽 (``redrive_count >=
+      MAX_REDRIVES``) → ``ESCALATE``(标 FAILED → reroute/split)。
+    - 探活耗尽,重驱还有余量 → ``REDRIVE``(开新一轮窗口:scheduler 重驱 + 重置)。
+    - tick 超时 (``running_ticks >= PROBE_AFTER_TICKS``),探活还有余量 → ``PROBE``。
+    - 否则 → ``WAIT``(仍在 bot 自上报窗口内)。
+    """
+    running_ticks = int(node.properties.get("running_ticks", 0))
+    probe_count = int(node.properties.get("probe_count", 0))
+    redrive_count = int(node.properties.get("redrive_count", 0))
+
+    if probe_count >= MAX_PROBES:
+        if redrive_count >= MAX_REDRIVES:
+            return WatchdogAction.ESCALATE
+        return WatchdogAction.REDRIVE
+    if running_ticks >= PROBE_AFTER_TICKS:
+        return WatchdogAction.PROBE
+    return WatchdogAction.WAIT
+
+
 # --- predecessors ----------------------------------------------------------
 
 
