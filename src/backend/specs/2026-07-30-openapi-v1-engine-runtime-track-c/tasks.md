@@ -133,7 +133,7 @@ All paths are relative to `src/backend/`. Source package is
   `api/ → core/` import, so `api/README.md`'s Context Boundary needed the
   declaration or `test_module_boundaries` fails.
 
-## Task 5: Define the public enums and shared schemas
+## Task 5: Define the public enums and shared schemas  `[x]`
 - **Goal:** One module of enums plus the shared payload models, documented so a
   client generator produces usable types.
 - **Files:**
@@ -141,21 +141,29 @@ All paths are relative to `src/backend/`. Source package is
   - `…/adapters/http/openapi_v1/engine_runtime/enums.py` (new)
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_schema_docs.py` (new)
 - **Done when:**
-  - [ ] `SocketKind` (`chat`, `terminal`), `ApprovalMode`
+  - [x] `SocketKind` (`chat`, `terminal`), `ApprovalMode`
         (`approve`, `on-miss`, `never`), `MessageRole`
         (`user`, `assistant`, `system`, `tool_use`, `tool_result`) all subclass
         `str, Enum`.
-  - [ ] `EngineName` is **reused** from what the bots category already uses
-        (`…/core/workspace/constants.py`, see
-        `openapi_v1/bots/router.py:65-68`) — not redefined.
-  - [ ] Every enum carries `x-enum-descriptions` covering **every** member.
-  - [ ] `ApprovalMode` is referenced on request models only; no response model
+  - [x] `EngineName` is **not an enum at all** — see the correction below. The
+        bots category's runtime validation against `_get_engine_types()` is
+        reused instead.
+  - [x] Every enum carries `x-enum-descriptions` covering **every** member.
+  - [x] `ApprovalMode` is referenced on request models only; no response model
         annotates it (plan investigation finding 4 — the local stub returns
         `"auto"`).
-  - [ ] Schema test asserts: every enum is `str`-based, every member has an
+  - [x] Schema test asserts: every enum is `str`-based, every member has an
         `x-enum-descriptions` entry, every field of every model in this package
         has a non-empty `description`, every model has a schema `description`.
 - **Depends on:** —
+- **Corrected while implementing:** `EngineName` was planned as the fourth enum,
+  "reused from what the bots category already uses". Reading the source, what
+  bots uses is `_get_engine_types()`, which reads the **`ENGINE_TYPES`
+  environment variable** (`core/workspace/constants.py:17-30`) — deployment
+  configuration, not a closed set. A static enum would contradict any deployment
+  that configures its own list, and on a response field it would fail closed.
+  Engine names stay `str`, validated at runtime exactly as bots does. That makes
+  three enums, not four; a test asserts no `EngineName` is exported.
 
 ## Task 6: Map the engine's error surface onto the public envelope
 - **Goal:** Every failure this track can produce answers as an `Envelope`, in
