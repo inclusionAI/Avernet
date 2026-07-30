@@ -20,6 +20,7 @@ from agentclaw.community.core.task.protocols import RouteClass
 from agentclaw.community.core.task.services.bot_catalog import BotProfile
 from agentclaw.community.core.task.services.bot_discover_service import (
     BotDiscoverService,
+    _cover,
 )
 
 
@@ -191,3 +192,41 @@ def test_recommend_unknown_node_returns_c2():
         "t3", "missing"
     )
     assert rec.route_class is RouteClass.C2
+
+
+# --- singlebox 5-bot default catalog (gap ① closure) ------------------------
+
+
+def test_hyphenated_skill_matches_single_word_node_keyword():
+    """``code-review`` skill must match node keywords ``code`` and ``review``."""
+    bot = BotProfile(bot_id="x", summary="", skills=["code-review"])
+    assert _cover(["code"], bot) == 1.0
+    assert _cover(["review"], bot) == 1.0
+    assert _cover(["code", "review"], bot) == 1.0
+
+
+def test_singlebox_default_catalog_research_c1_full_cover():
+    """Default LocalBotCatalog = singlebox 5-bot set; a code/architecture-review
+    spec routes C1 to 研发 (gap ① closed: real bot surfaced)."""
+    from agentclaw.community.core.task.services.bot_catalog import LocalBotCatalog
+
+    svc = BotDiscoverService(task_repo=None, bot_catalog=LocalBotCatalog())
+    bots = svc._bot_catalog.list_bots()  # noqa: SLF001
+    assert {b.bot_id for b in bots} == {"CEO", "产品经理", "研发", "验证", "客服"}
+
+    rec = svc.recommend_for_spec("code review and architecture review")
+    assert rec.route_class is RouteClass.C1
+    assert rec.run_mode is RunMode.SINGLE_BOT
+    assert len(rec.candidates) == 1
+    assert rec.candidates[0].bot_id == "研发"
+    assert rec.confidence >= 1.0 - 1e-9
+
+
+def test_singlebox_default_catalog_verification_c1():
+    """test-design skill routes C1 to 验证."""
+    from agentclaw.community.core.task.services.bot_catalog import LocalBotCatalog
+
+    svc = BotDiscoverService(task_repo=None, bot_catalog=LocalBotCatalog())
+    rec = svc.recommend_for_spec("test design and coverage gap analysis")
+    assert rec.route_class is RouteClass.C1
+    assert rec.candidates[0].bot_id == "验证"

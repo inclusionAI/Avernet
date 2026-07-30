@@ -67,8 +67,20 @@ def _keywords(text: str) -> list[str]:
 
 
 def _bot_capability_tokens(bot: BotProfile) -> set[str]:
-    """A bot's capability vocabulary = skills + summary tokens."""
-    caps = {s.lower() for s in bot.skills if s}
+    """A bot's capability vocabulary = skills + summary tokens.
+
+    Skills are tokenized with the same splitter as node keywords so a
+    hyphenated multi-word skill (e.g. ``code-review``) matches single-word node
+    keywords (``code``, ``review``); bare lowercased skills are also kept for
+    exact single-token skills (e.g. ``python``).
+    """
+    caps: set[str] = set()
+    for s in bot.skills:
+        if not s:
+            continue
+        sl = s.lower()
+        caps.add(sl)
+        caps.update(_tokenize(sl))
     caps.update(_tokenize(bot.summary))
     return caps
 
