@@ -4023,14 +4023,11 @@ class BotService:
         )
 
         # resolved_template_config 已在 BCN 能力门控前读取，后续 BaaS restart 复用同一快照。
-        # 与 _allocate_device_async（create / arca-restart 路径）同口径构造 extra_envs
-        # 与 template_config，让 BaaS 原地重启也消费 BOT_TYPE / RELAY_DEFAULT_MODEL /
-        # RELAY_DEFAULT_RUNTIME / AIX_DEVFLOW_INFO / GIT_ADDRESSES 及 sandbox overrides。
-        # 不补这段则 applicationCoding bot 走 baas 重启后 upgrade 不带 envs，容器拿不到
-        # BOT_TYPE=model/runtime 即便在 update_bot 改过也不生效。引擎口径与 create_bot
-        # 对齐（claude_code + aicoding），门控不命中时 extra_envs/template_config 保持
-        # None，upgrade 行为与改动前完全一致（envs 退化为 AGENTCLAW_ENGINE 单值）。
-        device_template_config: Optional[Dict[str, Any]] = None
+        # 与 _allocate_device_async（create / arca-restart 路径）同口径构造
+        # extra_envs，并独立透传 template_config。extra_envs 提供引擎策略
+        # 变量（BOT_TYPE / RELAY_DEFAULT_* / AIX_DEVFLOW_INFO / GIT_ADDRESSES），
+        # template_config 提供沙箱覆写（envs / image / resource_spec）。两者
+        # 不能互相门控。
         extra_envs: Optional[Dict[str, Any]] = self._build_engine_extra_envs(
             bot_id=str(bot_id),
             owner_id=user_id,
@@ -4040,25 +4037,26 @@ class BotService:
             template_config=resolved_template_config,
             log_context="bot_service._restart_bot_baas",
         )
-        if extra_envs:
-            # 与 _allocate_device_async 对齐：附加 template_uid 上下文给 BaaS device 层。
-            # 解析失败仅记 warning 不阻断（_attach_template_uid_context 内部已兜底）。
-            try:
-                device_template_config = self._attach_template_uid_context(
-                    bot_id=str(bot_id),
-                    user_id=user_id,
-                    bot_type=bot.get("bot_type", ""),
-                    engine_type=active_engine,
-                    template_type=bot_template_type,
-                    template_config=resolved_template_config,
-                )
-            except Exception as e:
-                logger.warning(
-                    "[bot_service._restart_bot_baas] Failed to attach template uid context for bot %s: %s",
-                    bot_id, e,
-                )
-                device_template_config = resolved_template_config
-
+        # 与 _allocate_device_async 对齐：BaaS 原地重启也必须透传模板快照。
+        # template_config.envs / image / resource_spec 是独立的沙箱覆写能力，
+        # 不能被 extra_envs（引擎策略环境变量）是否命中门控影响。否则非
+        # coding 模板或仅配置 envs/image/spec 的模板在 restart -> /update 时会
+        # 退化成默认 envs，丢失创建 Bot 时使用的沙箱覆写。
+        try:
+            device_template_config = self._attach_template_uid_context(
+                bot_id=str(bot_id),
+                user_id=user_id,
+                bot_type=bot.get("bot_type", ""),
+                engine_type=active_engine,
+                template_type=bot_template_type,
+                template_config=resolved_template_config,
+            )
+        except Exception as e:
+            logger.warning(
+                "[bot_service._restart_bot_baas] Failed to attach template uid context for bot %s: %s",
+                bot_id, e,
+            )
+            device_template_config = resolved_template_config
 
         import uuid as _uuid
         request_id = _uuid.uuid4().hex
@@ -4076,8 +4074,8 @@ class BotService:
             "migration_path": mig,
             # 个人 Bot / 服务 Bot 草稿的普通重启不走发布产物迁移，但仍按 NAS home 目录运行。
             "mount_home_dir_storage": True,
-            # 门控命中时透传 envs / template_config，让容器拿到 BOT_TYPE / RELAY_DEFAULT_*
-            # 及 sandbox overrides；门控不命中保持 None，upgrade 行为与改动前一致。
+            # extra_envs 可能因引擎策略门控为 None；template_config 仍需透传，
+            # 以保留创建 Bot 时使用的 envs / image / resource_spec 沙箱覆写。
             "extra_envs": extra_envs,
             "template_config": device_template_config,
         }
