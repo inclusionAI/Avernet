@@ -682,6 +682,14 @@ class IdentityService:
         # round-trip (baas/arca = a network hop), so gathering instead of a
         # serial loop cuts this list endpoint's tail latency from 16× to ~1×.
         # Only bool(content) is needed; VALID_IDENTITY_FILES order is preserved.
+        #
+        # ⚠️ PUBLIC-READINESS GATE: openapi_v1 is NOT PUBLIC-READY today
+        # (require_principal=None → 401, zero real traffic). This is a 16-way
+        # device_fs fan-out PER call. Before exposing externally, confirm
+        # (a) the device_fs read path tolerates ≥16 concurrent reads per bot
+        # (arca HTTP connection pool / baas rate limit), and (b) prefer an
+        # existence probe over pulling each file's full content. If a per-call
+        # cap is needed, wrap the gather in asyncio.Semaphore.
         ordered = list(VALID_IDENTITY_FILES)
         contents = await asyncio.gather(
             *(
