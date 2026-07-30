@@ -264,15 +264,34 @@ def enrich_task_labels(
             break
 
 
-def load_bot_names(session: Any, bot_ids: set[str]) -> dict[str, str]:
-    """Batch-load active Bot names, degrading to an empty map on read failure."""
-    if not bot_ids:
+def _bot_identity(row: Any) -> tuple[str, str] | None:
+    """Return the Trace-owned identity used to resolve a Bot display name."""
+    user_id = getattr(row, "user_id", None)
+    bot_id = getattr(row, "bot_id", None)
+    if not user_id or not bot_id:
+        return None
+    return str(user_id), str(bot_id)
+
+
+def load_bot_names(
+    session: Any,
+    bot_identities: set[tuple[str, str]],
+) -> dict[tuple[str, str], str]:
+    """Batch-load active Bot names by Trace owner and Bot ID."""
+    if not bot_identities:
         return {}
     try:
+        identity_conditions = [
+            and_(
+                BotModel.entity_id == user_id,
+                BotModel.bot_id == bot_id,
+            )
+            for user_id, bot_id in bot_identities
+        ]
         rows = (
             session.query(BotModel)
             .filter(
-                BotModel.bot_id.in_(bot_ids),
+                or_(*identity_conditions),
                 BotModel.is_delete == 0,
                 BotModel.env == get_current_env(),
             )
@@ -286,19 +305,37 @@ def load_bot_names(session: Any, bot_ids: set[str]) -> dict[str, str]:
         )
         return {}
 
-    result: dict[str, str] = {}
+    result: dict[tuple[str, str], str] = {}
     for row in rows:
+        entity_id = getattr(row, "entity_id", None)
         row_bot_id = getattr(row, "bot_id", None)
         bot_name = getattr(row, "bot_name", None)
-        if row_bot_id and row_bot_id not in result and bot_name:
-            result[row_bot_id] = bot_name
+        identity = (
+            (str(entity_id), str(row_bot_id))
+            if entity_id and row_bot_id
+            else None
+        )
+        if identity and identity not in result and bot_name:
+            result[identity] = bot_name
     return result
+
+
+def enrich_bot_names(session: Any, rows: list[Any]) -> None:
+    """Batch-attach owner-scoped Bot names to detached Trace rows."""
+    identities = {
+        identity
+        for row in rows
+        if (identity := _bot_identity(row)) is not None
+    }
+    names = load_bot_names(session, identities)
+    for row in rows:
+        identity = _bot_identity(row)
+        row.bot_name = names.get(identity) if identity else None
 
 
 def enrich_trace_labels(session: Any, row: Any) -> Any:
     """Attach optional Bot, group, and task labels to one detached trace row."""
-    if row.bot_id:
-        row.bot_name = load_bot_names(session, {row.bot_id}).get(row.bot_id)
+    enrich_bot_names(session, [row])
     enrich_task_labels(session, [row])
     session_key = row.session_key
     if not session_key:
