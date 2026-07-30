@@ -321,6 +321,7 @@ dependencies = [
  "bcs-storage-baas",
  "bcs-storage-local",
  "bcs-system-message",
+ "bcs-test-support",
  "bcs-user-directory-api",
  "bcs-user-identity",
  "bcs-ws",

@@ -179,6 +179,7 @@ futures-util = "0.3"
 bcs = { path = ".", features = ["test-utils"] }
 bcs-cli = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
+bcs-test-support = { workspace = true }
 serial_test = "3"
 bcs-jwt = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
