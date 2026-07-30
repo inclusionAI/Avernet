@@ -96,7 +96,7 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 | 阶段 | 范围（数据） | 负责人 | 优先级 | 状态 | 完成判据 |
 |---|---|---|---|---|---|
 | 1 | 机器人记录（`ac_bots` / `BotModel`） | totalfrank | P1 | ✅ **DONE —— PR #456 已于 2026-07-27 合并** | —— |
-| 2 | 资源（`ac_resource`） | lucas-xzp | P1 | ⬜ TODO | 列 + 守卫 + 测试通过；内部 API 不变 |
+| 2 | 资源（`ac_resource`） | lucas-xzp | P1 | ✅ DONE —— Phase 0（分支 `rongzhi_0727`） | 列 + 守卫 + 测试通过；内部 API 不变 — 已验：to_dict 不含 tenant、guard 直接表达式非 lambda、Changelog 见下 |
 | 3 | 渠道（`ac_channel_config`） | totalfrank | 🅳 **已降级** | ⏸️ 已搁置 —— 范围保持不变，并非取消 | 同上（若重新启动） |
 | 4 | 技能（skill 相关表） | totalfrank + lucas-xzp | P3 | ⬜ TODO | 同上 |
 | 5 | MCP 配置（`ac_user_mcp_config` + `ac_bot_mcp_call_config`） | totalfrank | P1 | ✅ DONE —— **PR #564** | PR #564 合并后 |
@@ -111,10 +111,10 @@ _按优先级分层排序。_
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE —— PR #494 已于 2026-07-29 合并**（13/13 端点） | ~~Track A 阶段 1~~ ✅ |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(桩)* | ⬜ TODO —— **已解除阻塞** | ~~Track A 阶段 5~~ ✅（PR #564） |
-| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` *(桩)* | ⬜ TODO | Track A resources（lucas-xzp） |
-| routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(桩)* | ⬜ TODO | Track A routines（lucas-xzp） |
+| resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 9 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 9 端点接通 stub→service；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
+| routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | channels | totalfrank | 🅳 **已降级** | `openapi_v1/channels/router.py` *(桩)* | ⏸️ 已搁置 —— 范围保持不变，并非取消 | Track A 阶段 3（同样搁置） |
-| identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(桩)* | ⬜ TODO | bots 隔离（Stage 1 ✅） |
+| identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(桩)* | ⬜ TODO | Track A skills（共担） |
 
 ### 横切事项（非按阶段划分）
@@ -126,8 +126,12 @@ _按优先级分层排序。_
 | **Agent 身份标识在租户之间会撞车**（[#556](https://github.com/inclusionAI/Avernet/issues/556)） | ⬜ TODO（totalfrank） | Passport、授权关系、BCN、策略行都只用 `bot_id`/`owner_id` 作键，没有租户维度，而每个 owner 的第一个 bot 的 id 就是字符串 `"default"`。**应当成为开启多租户的前置闸口。** #494 里以公共更新路径上的 `sync_to_bcn=False` 做了临时止血 |
 | 异步创建出的 bot 可能不是被授权的那个（[#559](https://github.com/inclusionAI/Avernet/issues/559)） | ⬜ TODO（totalfrank） | pending 状态的创建规格从未被持久化，完成时是用轮询请求重建的。`dev` 上既有问题；当前潜伏（社区版 Passport 总是直接签发） |
 | 外部身份写入失败被吞掉（[#560](https://github.com/inclusionAI/Avernet/issues/560)） | ⬜ TODO（totalfrank） | 创建时的 owner 授权写入、更新时的 Passport 元数据写入都是"记日志然后继续"，违反 `AGENTS.md:203-204`。一次决策同时覆盖两处；建议做法是*报告部分成功* |
+| resources/routines/identity principal/tenant 真正接入 | ⬜ TODO | 三组 handler 已接通但仍依赖 gateway principal verifier 与 `resolve_avernet_tenant` 真正落地；对外开放前必须统一从 `require_principal`/`caller_owner_id` 消费调用者身份 |
+| 资源所有权/权限边界 403/404 | ⬜ TODO | 当前跨租户靠 ORM guard（Phase 0） + bot_id 必填；ownership/permission mismatch 显式 403/404 待对外开放前补 |
+| 上游/storage/provider 错误统一映射 | ⬜ TODO | handler 现按点抛 HTTPException（400/404/409/500）；对外开放前统一错误码映射 |
+| public contract docs + conformance tests | ⬜ TODO | served OpenAPI 已有；契约 conformance 测试（参数/响应/错误码/兼容性）待对外开放前补 |
 
-> 上面三条来自 #494 的评审，都是 `dev` 上的**既有问题**而非本次引入的回归 —— 记在这里
+> 上面 #556/#559/#560 三条来自 #494 的评审，都是 `dev` 上的**既有问题**而非本次引入的回归 —— 记在这里
 > 是因为它们是整个工作都要继承的决策，而不是 bots 独有的 bug。其中 #556 尤其必须在
 > 第二个租户持有真实数据之前定下来。
 | **阶段 5 对 `ac_user_mcp_config` 的唯一键替换** | ⬜ TODO（DDL 见下文） | **在第二个租户写入 MCP 配置之前**完成 —— 不必赶在发布之前 |
@@ -184,6 +188,8 @@ ALTER TABLE ac_user_mcp_config
 
 本地与 singlebox 运行时无需执行 DDL —— `Base.metadata.create_all` 会直接依据模型
 建表。
+>
+> ⚠️ **NOT PUBLIC-READY 总标记**：resources/routines/identity 三组 handler 已全接通并绿，**但当前判断为 NOT PUBLIC-READY** —— gateway principal verifier 与 `resolve_avernet_tenant` 仍未真正落地。**可阶段性合入 dev/分支**，但**不可对外开放**，需先完成上表 principal/tenant 接入等横切项后才能转 PUBLIC-READY。
 
 > **排序决定 —— 已定（2026-07-27）：** 采用按类别的**纵向切片**。每位负责人先隔离一个类别
 > （Track A），紧接着就实现它的端点（Track B），而不是先把整个 Track A 全部做完再做
@@ -420,7 +426,7 @@ _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #
 | GET | `/openapi/v1/bots/resources/{resource_id}/download` | 下载字节（**原始，不走信封**） | `application/octet-stream` |
 | GET | `/openapi/v1/bots/resources/{resource_id}/preview` | 预览 | `Envelope[Preview]` |
 
-_注：桩里的上传是原始 `octet-stream`；PR #363 描述的是 `multipart`。接线时二选一。_
+_注：upload 已定稿为原始 `application/octet-stream` body（非 multipart）。与 PR #363 总览的 multipart 描述不一致——实现以路由为准，若后续需改 multipart 是契约 PR。_
 
 ### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（7 个端点：桩里 5 个 + 提议新增 2 个 ★）· `openapi_v1/skills/router.py`
 目录在 `/openapi/v1/bots/skills`；某个 Agent 已安装的技能是 bot 的子资源。
@@ -563,6 +569,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 - **2026-07-27** —— **Track A Stage 1 已合并（PR #456）。** bots 带上了
   `avernet_tenant`；可复用机制（租户载体、守卫、中间件、`resolve_avernet_tenant` 接缝）
   已在 `dev` 上。bots 的共同闸口就此解除。
+- **2026-07-28** —— **Track A 阶段 2（ac_resource）DONE**（lucas-xzp，分支 `rongzhi_0727`，pending rebase/push）。把 PR #456 的 BotModel guard 工厂化到 `(BotModel, ResourceModel)`：单 Session read listener 链式 `with_loader_criteria`（直接表达式非 lambda）+ per-mapper `before_insert`。红→绿：resource tenant isolation/guard 以及 routines/identity 间接隔离测试。`to_dict()` 不暴露 tenant。**DDL（ac_resource ADD COLUMN）已由 lucas-xzp 在平台提交工单，部署前须先落地；`ac_bot_publish` 经核实本期 openapi_v1 handler 不读，留待 service_bot owner 或后续 verify/online 阶段。** 阶段 6（例程）保持 ⬜ TODO——无表，靠 ac_bots 间接隔离已由 Session 0 覆盖，真 DONE 留给 Track B routines handler 接通时。
 - **2026-07-29** —— **Track B bots 已合并（PR #494）—— 第一个落地的公共类别。**
   13 个 `/openapi/v1/bots` 端点全部接到内部服务，通过 `caller_owner_id` 做 owner 限定，
   并由 Track A 守卫做租户限定（别的租户的 `{bot_id}` → 被掩盖的 404，且是针对真实守卫
