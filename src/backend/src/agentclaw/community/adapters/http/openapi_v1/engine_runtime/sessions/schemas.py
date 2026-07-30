@@ -61,24 +61,23 @@ class Session(BaseModel):
     title: str = Field(description="Human-readable session title.")
     agent_id: str = Field(description="Agent the session belongs to; may be empty.")
     model: str = Field(description="Model the session is using; may be empty.")
+    # Typed `str`, not ApprovalMode: the engine's read path has no closed set.
     permission_mode: str = Field(
-        description="Approval mode in force for this session. A free string, not "
-        "the ApprovalMode enum: the engine's read path has no closed set — its "
-        "local stub answers 'auto', outside every documented value."
+        description="Approval mode in force for this session; empty if unset."
     )
     cwd: str = Field(description="Working directory on the device; may be empty.")
-    runtime: str = Field(description="Engine-specific runtime label; may be empty.")
+    runtime: str = Field(description="Runtime label reported by the bot; may be empty.")
     message_count: int = Field(description="Number of messages in the session.")
     gmt_create: str = Field(description="Creation time (ISO 8601); may be empty.")
     gmt_modified: str = Field(description="Last-modified time (ISO 8601); may be empty.")
 
 
 class SessionCreate(BaseModel):
-    """Create-a-session request body.
+    """Create-a-session request body."""
 
-    ``user_id`` and ``engine`` are deliberately absent and rejected: the caller
-    is the authenticated principal and the engine is the bot's active one.
-    """
+    # No user_id / engine fields: the caller is the authenticated principal and
+    # the engine is the bot's active one. extra="forbid" turns an attempt to
+    # supply either into a 422 rather than a silent drop.
 
     model_config = ConfigDict(extra="forbid")
 

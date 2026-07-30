@@ -20,11 +20,9 @@ class EngineStatus(BaseModel):
         }
     )
 
-    engine: str = Field(
-        description="The bot's active engine. A free string, not an enum: the "
-        "supported set is deployment configuration (the ENGINE_TYPES "
-        "environment variable), not a closed vocabulary."
-    )
+    # Typed `str`, not an enum: the supported set is deployment configuration
+    # (ENGINE_TYPES), not a closed vocabulary.
+    engine: str = Field(description="The bot's active engine.")
     active_connections: int = Field(
         description="Number of live connections the engine is currently serving."
     )
@@ -35,13 +33,16 @@ class EngineStatus(BaseModel):
 
 
 class EngineCapabilities(BaseModel):
-    """What the bot's engine can do — the discovery endpoint for this surface.
+    """What the bot's engine can do.
 
-    Capability names are strings, not an enum. The engine's own ``Capability``
-    enum is closed but explicitly documented as "adding new entries is safe", so
-    a strict enum on this response would turn a backward-compatible engine
-    release into a public 500.
+    Call this before relying on any other endpoint in this group: what a bot
+    supports depends on its engine, so the same request can succeed for one of
+    your bots and be refused for another.
     """
+
+    # Capability names are strings, not an enum: the engine's own Capability
+    # enum is closed but documented as "adding new entries is safe", so a strict
+    # enum here would break on a backward-compatible engine release.
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -53,17 +54,16 @@ class EngineCapabilities(BaseModel):
         }
     )
 
-    supported: list[str] = Field(
-        description="Capabilities the engine serves as documented."
-    )
+    supported: list[str] = Field(description="Capabilities the bot serves fully.")
+    # Names only: the engine's own explanation of each limitation is internal
+    # engineering text and is not published.
     limited: list[str] = Field(
-        description="Capabilities the engine serves with a documented "
-        "limitation; results may be incomplete. Names only — the engine's own "
-        "explanation is internal engineering text and is not published."
+        description="Capabilities the bot serves with a limitation; results for "
+        "these may be incomplete."
     )
     unavailable: list[str] = Field(
-        description="Capabilities the engine does not serve. Calling an endpoint "
-        "that needs one returns 501."
+        description="Capabilities this bot does not offer. An endpoint needing "
+        "one of these answers 501."
     )
 
 

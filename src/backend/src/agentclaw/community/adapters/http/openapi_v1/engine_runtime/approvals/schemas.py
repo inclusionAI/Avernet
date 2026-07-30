@@ -22,13 +22,11 @@ class ApprovalState(BaseModel):
     )
 
     session_key: str = Field(description="Session the mode applies to.")
+    # Typed `str`, not ApprovalMode: the engine's read path has no closed set.
     mode: str = Field(
-        description="Current approval mode. A free string rather than the "
-        "ApprovalMode enum, deliberately: the engine's read path has no closed "
-        "set — it accepts six spellings while advertising three, does not "
-        "canonicalise between them, and its local stub answers 'auto'. "
-        "Validating a response against the enum would turn that into a 500. "
-        "Values you set through this API are always one of the enum's members."
+        description="Current approval mode. A mode you set through this API is "
+        "always one of the documented values; a mode set by other means may "
+        "report differently."
     )
 
 
@@ -45,7 +43,7 @@ class ApprovalModeInfo(BaseModel):
         }
     )
 
-    value: ApprovalMode = Field(description="The value to send when setting a mode.")
+    value: ApprovalMode = Field(description="The value to send when setting this mode.")
     description: str = Field(description="What this mode does.")
 
 
@@ -55,11 +53,7 @@ class ApprovalModeSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_key: str = Field(description="Session to change the mode for.")
-    mode: ApprovalMode = Field(
-        description="The mode to set. Only the three advertised spellings are "
-        "accepted; the engine's undocumented aliases are not published, so one "
-        "mode never has two public spellings."
-    )
+    mode: ApprovalMode = Field(description="The mode to set.")
 
 
 __all__ = ["ApprovalModeInfo", "ApprovalModeSet", "ApprovalState"]

@@ -22,7 +22,40 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     SocketKind,
 )
 
-_ENUMS = [ApprovalMode, MessageRole, SocketKind]
+def _all_enums() -> list[type]:
+    """Every published enum, discovered rather than listed.
+
+    A hand-maintained list silently skips a fourth enum added later — and
+    ``_DocumentedEnum`` omits ``x-enum-descriptions`` entirely when
+    ``__descriptions__`` is empty, so an undocumented enum would ship green.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+        _DocumentedEnum,
+    )
+
+    found: dict[str, type] = {}
+    for info in pkgutil.walk_packages(pkg.__path__, pkg.__name__ + "."):
+        module = importlib.import_module(info.name)
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if (
+                issubclass(obj, _DocumentedEnum)
+                and obj is not _DocumentedEnum
+                and obj.__module__.startswith(pkg.__name__)
+            ):
+                found[obj.__name__] = obj
+    return list(found.values())
+
+
+_ENUMS = _all_enums()
+
+
+def test_enum_discovery_found_something():
+    """Guard the guard: a discovery bug must not silently disable the checks."""
+    assert {e.__name__ for e in _ENUMS} >= {
+        "ApprovalMode",
+        "MessageRole",
+        "SocketKind",
+    }
 
 
 def _public_models() -> list[type[BaseModel]]:
@@ -74,7 +107,16 @@ def test_enum_publishes_descriptions_into_its_schema(enum_cls):
     component = defs[enum_cls.__name__]
     assert component.get("type") == "string"
     assert set(component.get("enum", [])) == {m.value for m in enum_cls}
-    assert component.get("x-enum-descriptions") == dict(enum_cls.__descriptions__)
+    # Arrays positionally parallel to `enum` — the form openapi-generator reads.
+    # A map is ignored by it, which would make the extension decorative.
+    values = component["enum"]
+    assert component["x-enum-descriptions"] == [
+        enum_cls.__descriptions__[v] for v in values
+    ]
+    names = {m.value: m.name for m in enum_cls}
+    assert component["x-enum-varnames"] == [names[v] for v in values]
+    # NSwag reads a different key; emit it too so either generator carries docs.
+    assert component["x-enumNames"] == component["x-enum-varnames"]
 
 
 def test_approval_mode_publishes_only_the_advertised_spellings():
@@ -102,6 +144,79 @@ def test_no_engine_name_enum_exists():
 
 
 # ── models ────────────────────────────────────────────────────────────────────
+
+
+def test_model_discovery_found_something():
+    """``_public_models()`` returning [] would make the gate below vacuous."""
+    assert _public_models(), "no models discovered — the documentation gate is inert"
+
+
+# ── nothing internal reaches the published document ──────────────────────────
+#
+# Docstrings and Field descriptions are promoted verbatim into the OpenAPI
+# document external tenants read. Rationale therefore belongs in `#` comments.
+# These markers are things that leaked once and must not again.
+_FORBIDDEN_IN_PUBLISHED_TEXT = (
+    "src/engine",          # internal source paths
+    "singlebox",           # deployment tiers
+    "OCB",                 # internal component names
+    "teamclaw",
+    "mcporter",
+    "proxypass",
+    "stub",                # test/deployment scaffolding
+    "on_miss",             # unpublished alias spellings
+    "``",                  # RST markup renders literally in Swagger/Redoc
+    ":class:",
+)
+
+
+def _published_strings(schema: dict) -> list[tuple[str, str]]:
+    """Every description/title string in a generated schema, with its path."""
+    out: list[tuple[str, str]] = []
+
+    def walk(node, path: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in ("description", "title") and isinstance(value, str):
+                    out.append((f"{path}.{key}", value))
+                else:
+                    walk(value, f"{path}.{key}")
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                walk(value, f"{path}[{i}]")
+
+    walk(schema, "")
+    return out
+
+
+def test_published_text_contains_nothing_internal():
+    """The public API document is caller-facing prose only.
+
+    ``ApprovalMode``'s docstring once listed the very alias spellings the team
+    decided never to publish, named an internal engine route, and described an
+    unfixed upstream defect — all of it emitted into the schema.
+    """
+    problems: list[str] = []
+    for model in _public_models() + list(_ENUMS):
+        schema = (
+            model.model_json_schema()
+            if hasattr(model, "model_json_schema")
+            else _enum_schema(model)
+        )
+        for where, text in _published_strings(schema):
+            for marker in _FORBIDDEN_IN_PUBLISHED_TEXT:
+                if marker.lower() in text.lower():
+                    problems.append(f"{model.__name__}{where}: contains {marker!r}")
+    assert not problems, "internal detail in published schema text:\n  " + "\n  ".join(
+        problems
+    )
+
+
+def _enum_schema(enum_cls) -> dict:
+    class _Holder(BaseModel):
+        value: enum_cls  # type: ignore[valid-type]
+
+    return _Holder.model_json_schema()
 
 
 def test_every_model_field_is_described():

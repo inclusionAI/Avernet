@@ -212,7 +212,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # converts the first two; these are the backstop.
     DeviceAdapterTimeoutError: (504, "Engine request timed out"),
     DeviceAdapterEndpointNotFoundError: (404, "Not found"),
-    # Base of DeviceAdapterEndpointNotFoundError — LAST of its group.
+    # A sibling of the entry above, not its base — see the block comment. Order
+    # between these two is therefore free.
     DeviceAdapterHTTPStatusError: (502, "Engine service error"),
     # Base class LAST: every mapping above is a subclass of BotServiceError, and
     # the lookup returns on the first isinstance match in insertion order, so the

@@ -412,3 +412,37 @@ def test_resolve_bot_does_not_hand_back_device_internals():
     )
     assert "secret" not in repr(facts)
     assert not hasattr(facts, "device_binding")
+
+
+# ── transport failures outside the two named subclasses ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bare_value_error_from_the_transport_is_an_upstream_error():
+    """The transport contract documents a plain ValueError for HTTP failure.
+
+    Letting it escape would answer 500 "Internal Server Error" for what is
+    plainly an upstream problem.
+    """
+    transport = _Transport(raises=ValueError("connect failed"))
+    with pytest.raises(EngineUpstreamError):
+        await _relay(transport=transport).call(
+            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+        )
+
+
+@pytest.mark.asyncio
+async def test_non_json_body_does_not_surface_as_a_config_error():
+    """``httpx``'s ``.json()`` raises ``JSONDecodeError``, a ``ValueError``.
+
+    That class is already mapped surface-wide to "Malformed engine
+    configuration" — which would point a caller at their engine config when the
+    real fault is a device returning a non-JSON body.
+    """
+    import json
+
+    transport = _Transport(raises=json.JSONDecodeError("nope", "<<html>>", 0))
+    with pytest.raises(EngineUpstreamError):
+        await _relay(transport=transport).call(
+            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+        )

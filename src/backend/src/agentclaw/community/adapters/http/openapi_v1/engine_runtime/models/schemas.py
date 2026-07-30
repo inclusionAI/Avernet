@@ -21,12 +21,12 @@ class Model(BaseModel):
     )
 
     model_id: str = Field(
-        description="Normalised model identifier. Contains a slash for "
-        "provider-qualified models (e.g. 'openai/gpt-5.3'); pass it verbatim in "
-        "the path of the per-model endpoint."
+        description="Model identifier. Provider-qualified ids contain a slash "
+        "(e.g. 'openai/gpt-5.3'); pass the value verbatim in the path of the "
+        "single-model endpoint."
     )
-    name: str = Field(description="Display name; empty if the engine reports none.")
-    provider: str = Field(description="Provider name; empty if not reported.")
+    name: str = Field(description="Display name; may be empty.")
+    provider: str = Field(description="Provider name; may be empty.")
 
 
 __all__ = ["Model"]

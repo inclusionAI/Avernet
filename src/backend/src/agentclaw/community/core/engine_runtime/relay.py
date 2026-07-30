@@ -188,6 +188,20 @@ class EngineRuntimeRelay:
             raise EngineUpstreamError(
                 f"engine returned HTTP {exc.status_code} for {path}"
             ) from exc
+        except ValueError as exc:
+            # The transport contract documents a bare ``ValueError`` for
+            # transport/HTTP failure in the production implementation, and
+            # ``httpx``'s ``.json()`` raises ``JSONDecodeError`` — itself a
+            # ``ValueError`` — on a non-JSON body. Neither is engine-runtime
+            # specific, so without this they would escape to the app catch-all
+            # as a 500. Worse, ``JSONDecodeError`` is already mapped globally to
+            # "Malformed engine configuration", which would point a caller at
+            # their engine config when the real fault is a malfunctioning
+            # device. Both are upstream failures: 502.
+            #
+            # Listed after the two specific subclasses above, which are also
+            # ``ValueError``s and must keep their own meanings.
+            raise EngineUpstreamError(f"engine transport failed for {path}") from exc
 
     # ── normalisation ─────────────────────────────────────────────────────
 
