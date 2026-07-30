@@ -7,9 +7,13 @@
 pub mod authorization;
 pub mod error;
 pub mod group;
+pub mod message;
 pub mod principal;
+pub mod session;
 
 pub use authorization::{Action, AuthorizationService, ResourceRef};
 pub use error::ApplicationError;
 pub use group::*;
+pub use message::*;
 pub use principal::{AuthenticatedUser, BotPrincipal, HumanPrincipal, Principal};
+pub use session::*;

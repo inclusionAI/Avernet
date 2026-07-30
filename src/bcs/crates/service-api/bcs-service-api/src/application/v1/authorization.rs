@@ -12,6 +12,15 @@ pub enum Action {
     AddGroupParticipant,
     UpdateGroupParticipant,
     RemoveGroupParticipant,
+    CreateSession,
+    ReadSession,
+    UpdateSession,
+    DeleteSession,
+    CompleteSession,
+    ListSessionMessages,
+    AddSessionParticipant,
+    UpdateSessionParticipant,
+    RemoveSessionParticipant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
