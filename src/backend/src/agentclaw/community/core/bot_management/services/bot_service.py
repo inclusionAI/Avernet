@@ -65,7 +65,11 @@ from agentclaw.community.core.workspace.path_factory import (
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
+from agentclaw.community.utils.avernet_tenant import (
+    DEFAULT_AVERNET_TENANT,
+    bind_current_avernet_tenant,
+    get_current_avernet_tenant,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.devices.errors import (
     DeviceNotFoundError,
@@ -245,8 +249,25 @@ def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
     Generate bot_id based on owner's bot history.
 
     Rules:
-    - If user has no bot with id "default", return "default"
+    - In the default tenant, if the user has no bot with id "default", return
+      "default"
     - Otherwise, return "yyyymmdd_{random_8_chars}"
+
+    The ``"default"`` shortcut is confined to the default tenant on purpose.
+    ``bot_id`` is unique only per owner *per tenant*, and the read below goes
+    through the ``BotModel`` tenant guard — so a second tenant asking "does this
+    owner already have a 'default' bot?" cannot see the first tenant's row and
+    correctly answers no. Both tenants would then mint ``bot_id="default"`` for
+    the same owner, and the identities we derive from it are handed to systems
+    that have no tenant field to tell them apart: the passport service's
+    principal, keyed on ``(bot_id, owner)``; the ``agent_code`` it issues for
+    that principal; and the coordination-network record keyed on
+    ``"{bot_id}:{owner_id}"``.
+
+    A generated ``yyyymmdd_xxxxxxxx`` id is unique on its own, so restricting
+    the shortcut keeps every external identity collision-free without changing
+    a single external contract. Existing bots are unaffected: they all belong to
+    the default tenant and keep ``"default"``.
 
     Args:
         owner_id: Owner user ID
@@ -256,7 +277,10 @@ def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
         Bot ID as string ("default" or "yyyymmdd_xxxx")
     """
     # Check if owner already has a bot with id "default"
-    if not bot_repository.exists_by_owner_and_bot_id(owner_id, "default"):
+    if (
+        get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT
+        and not bot_repository.exists_by_owner_and_bot_id(owner_id, "default")
+    ):
         logger.info(f"[bot_service.generate_bot_id] Owner {owner_id} has no 'default' bot, using 'default' as bot_id")
         return "default"
 
@@ -265,7 +289,11 @@ def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
     # Generate 8 random lowercase letters and digits
     random_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
     bot_id = f"{date_part}_{random_part}"
-    logger.info(f"[bot_service.generate_bot_id] Owner {owner_id} already has 'default' bot, using generated bot_id: {bot_id}")
+    logger.info(
+        f"[bot_service.generate_bot_id] Owner {owner_id} is not eligible for the "
+        f"'default' bot_id (tenant={get_current_avernet_tenant()}), "
+        f"using generated bot_id: {bot_id}"
+    )
     return bot_id
 
 
@@ -792,17 +820,27 @@ class BotService:
             logger.error(f"[get_bot_by_ip_and_user] Error querying bot by IP {ip} and user {user_id}: {e}")
             return None
 
-    def _is_first_bot(self, user_id: str) -> bool:
+    def is_first_bot(self, user_id: str) -> bool:
         """
-        Check if this is the user's first bot (user has no bot with id "default").
+        Check whether the user has no bots yet.
+
+        Asks the repository how many bots the owner has rather than testing for
+        a bot with id ``"default"``. The id test was a proxy that only held while
+        every owner's first bot was ``"default"``; ``generate_bot_id`` confines
+        that shortcut to the default tenant, so in any other tenant a genuinely
+        first bot carries a generated id and the proxy would answer False —
+        sending the create flow down the non-first-bot Passport branch.
+
+        Must be called before the new bot's row is inserted; both call sites
+        (:meth:`_resolve_bot_name` and ``create_flow``) run pre-insert.
 
         Args:
             user_id: User ID to check
 
         Returns:
-            True if user has no "default" bot, False otherwise
+            True if the user owns no bots, False otherwise
         """
-        return not self._repository.exists_by_owner_and_bot_id(user_id, "default")
+        return self._repository.count_by_owner(user_id) == 0
 
     def _check_bot_count_limit(self, owner_id: str) -> None:
         """Enforce the per-owner bot count limit.
@@ -1045,7 +1083,7 @@ class BotService:
             return bot_name.strip()
 
         # Check if this is the first bot for the user
-        is_first = self._is_first_bot(user_id)
+        is_first = self.is_first_bot(user_id)
 
         if is_first:
             # First bot: use nick_name (花名) as default

@@ -19,6 +19,10 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.utils.avernet_tenant import (
+    DEFAULT_AVERNET_TENANT,
+    get_current_avernet_tenant,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -73,6 +77,20 @@ class CreateBotForOthersService:
         cookie: str,
     ) -> dict[str, Any]:
         """Create or repair one target user's default bot serially."""
+        # This service writes ``bot_id="default"`` directly rather than going
+        # through ``generate_bot_id``, so it is the one path that can still mint
+        # a colliding id. ``generate_bot_id`` confines "default" to the default
+        # tenant precisely because the Passport principal and BCN record derived
+        # from it carry no tenant field; creating one here for another tenant
+        # would reintroduce that collision. Fail closed instead: a non-default
+        # tenant has no "default" bots by construction, so the operation has no
+        # meaning there.
+        tenant = get_current_avernet_tenant()
+        if tenant != DEFAULT_AVERNET_TENANT:
+            raise CreateBotForOthersError(
+                "create-for-others is only available in the default tenant",
+                error_code=400,
+            )
         with self._target_locks_guard:
             lock_entry = self._target_locks.get(target_user_id)
             if lock_entry is None:
