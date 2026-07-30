@@ -167,6 +167,11 @@ clap = { version = "4", features = ["derive", "env"] }
 
 # URL encoding
 urlencoding = "2"
+
+# Charset detection for text uploads (so the stored Content-Type carries charset
+# and browsers preview Chinese text without mojibake).
+chardetng = "0.1"
+encoding_rs = "0.8"
 url = "2"
 
 # Secrets handling
