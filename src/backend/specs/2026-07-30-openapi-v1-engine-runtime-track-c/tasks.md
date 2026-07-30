@@ -333,23 +333,23 @@ All paths are relative to `src/backend/`. Source package is
   `_IncludedRouter` instead of flattening its endpoints, so walking `.routes`
   finds none of them — a test written that way passes vacuously.
 
-## Task 12: Cross-tenant and owner isolation across all 16 routes
+## Task 12: Cross-tenant and owner isolation across all 16 routes  `[x]`
 - **Goal:** Prove the isolation claim on every route, not a sample.
 - **Files:**
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_tenant_isolation.py` (new)
 - **Done when:**
-  - [ ] Parametrised over **all 16 routes**: a `bot_id` owned by another caller
+  - [x] Parametrised over **all 16 routes**: a `bot_id` owned by another caller
         returns a masked `404`, byte-identical to a non-existent bot.
-  - [ ] Same for a cross-tenant `bot_id`, against the **real** Track A guard —
+  - [x] Same for a cross-tenant `bot_id`, against the **real** Track A guard —
         mirror the shape of
         `tests/community/adapters/http/openapi_v1/test_bots_tenant_isolation.py`.
-  - [ ] Asserts the transport was **never invoked** for a bot the caller does
+  - [x] Asserts the transport was **never invoked** for a bot the caller does
         not own — not merely that the status was `404`. The Track A guard cannot
         see a device-side read, so a `404` alone does not prove the forward was
         skipped.
 - **Depends on:** Task 11
 
-## Task 12b: Add the singlebox E2E flow for engine_runtime
+## Task 12b: Add the singlebox E2E flow for engine_runtime  `[!]` BLOCKED
 - **Goal:** Remove the module's exemption from the E2E coverage gate.
 - **Files:**
   - `tests/community/_flows/engine_runtime/api_lifecycle.py` (new)
@@ -359,14 +359,18 @@ All paths are relative to `src/backend/`. Source package is
         `InMemoryDeviceAdapterTransport`, the same seam
         `tests/community/_flows/cron/api_lifecycle.py` already uses.
   - [ ] `engine_runtime` is **removed** from `SINGLEBOX_E2E_EXEMPT`.
-- **Depends on:** Task 11
-- **Why this is a task and not an exemption:** the exemption written in Task 2
-  claimed singlebox has no transport to offer. That was wrong —
-  `di/modules/infrastructure/singlebox/devices.py` binds the in-memory
-  transport, and `cron` crosses the identical seam with a real flow. The only
-  genuine blocker is that the endpoints do not exist until Task 11. Exempting
-  permanently would leave the one module whose entire job is crossing into a
-  device outside the gate.
+- **Depends on:** Task 11, **and the auth workstream**
+- **BLOCKED, and not for the reason recorded in Task 2.** That exemption claimed
+  singlebox had no transport to offer — wrong; it binds the in-memory transport
+  and `cron` has a real flow over the same seam. The second attempt blamed the
+  endpoints not existing — also now wrong; Task 11 mounted all 16.
+  The actual blocker: **`require_principal` is a stub returning `None`
+  (`openapi_v1/dependencies.py:21-23`), so every `/openapi/v1` route answers
+  401.** A flow could only assert 401s, which would prove nothing about this
+  module while looking like coverage. Unblocks with the gateway verifier — the
+  same event that unblocks the whole track's DoD. Coverage meanwhile: relay and
+  connection unit tests, endpoint tests per group, and the 16-route isolation
+  sweep in Task 12.
 
 ## Task 13: Tests & Verification
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.

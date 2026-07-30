@@ -64,14 +64,15 @@ _SESSION_RESOURCES_EXEMPT_REASON = (
 )
 
 _ENGINE_RUNTIME_EXEMPT_REASON = (
-    "TEMPORARY, and the weakest exemption in this dict: singlebox CAN drive this "
-    "module — it binds InMemoryDeviceAdapterTransport, and cron crosses the "
-    "identical relay seam with a real flow. The blocker is only that the public "
-    "/openapi/v1 engine-runtime endpoints a flow would drive do not exist yet "
-    "(Track C tasks 7-12). Covered for now by relay unit tests over a stub "
-    "transport. Add the flow when the endpoints land and delete this entry — do "
-    "not let it calcify; this is the one module whose entire job is crossing "
-    "into a device."
+    "TEMPORARY, blocked on the auth workstream — not on this module. Singlebox "
+    "can drive the seam (it binds InMemoryDeviceAdapterTransport, and cron has a "
+    "real flow over the same one) and the endpoints now exist, but every "
+    "/openapi/v1 route answers 401 while require_principal is a stub returning "
+    "None, so a flow could only assert 401s and would prove nothing. Covered "
+    "meanwhile by relay/connection unit tests, endpoint tests per group, and a "
+    "16-route cross-tenant isolation sweep. Delete this entry and add the flow "
+    "when the gateway verifier lands — the same event that unblocks the whole "
+    "track's definition of done."
 )
 
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
