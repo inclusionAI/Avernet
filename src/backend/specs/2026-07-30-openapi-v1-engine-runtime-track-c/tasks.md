@@ -43,8 +43,11 @@ All paths are relative to `src/backend/`. Source package is
   - `…/core/engine_runtime/models.py` (new)
   - `…/core/engine_runtime/errors.py` (new)
 - **Done when:**
-  - [x] `models.py` defines `EngineResult(data, total, warning)`,
-        `ConnectionResult`, `SocketInfo`.
+  - [x] `models.py` defines `EngineResult(data, total, limited)`, `BotFacts`,
+        `ConnectionResult`, `SocketInfo`. (`warning` became the `limited` flag
+        in review — the engine's warning text is internal prose and must not
+        reach a caller; `BotFacts` was added so the raw bot record, which
+        carries device binding internals, never reaches a public handler.)
   - [x] `errors.py` defines `EngineCapabilityUnsupportedError`,
         `EngineDeviceNotReadyError`, `EngineUpstreamError`,
         `EngineBotTypeNotSupportedError` — semantic state only, **no HTTP
@@ -55,8 +58,10 @@ All paths are relative to `src/backend/`. Source package is
   - [x] **Also required:** a new core package must be declared in the E2E
         coverage manifest (`tests/community/framework/flow_coverage.py`) or
         `test_e2e_module_coverage.py` fails — there is no third state between
-        covered and exempt. Exempt, with a specific reason: every path ends in
-        an HTTP call to a device singlebox cannot provide.
+        covered and exempt. Exempt **temporarily** — the first reason written
+        here was wrong (singlebox does bind the in-memory transport, and cron
+        crosses the same seam with a real flow); the real blocker is that the
+        endpoints do not exist until Task 11. Task 12b removes the exemption.
   - [x] `tests/community/architecture/` passes.
 - **Depends on:** —
 
@@ -84,7 +89,7 @@ All paths are relative to `src/backend/`. Source package is
         `EngineCapabilityUnsupportedError`; other non-2xx become
         `EngineUpstreamError`.
   - [x] Unit tests cover each translation above, including the
-        `success: false` case and the `warning`/`total` pass-through.
+        `success: false` case and the `limited`/`total` handling.
 - **Depends on:** Task 2
 - **Decided while implementing:** `UnknownProviderError` is **not** folded into
   `EngineDeviceNotReadyError`. A binding row naming a provider we don't know is
@@ -102,7 +107,7 @@ All paths are relative to `src/backend/`. Source package is
   - `tests/community/architecture/test_service_api_conformance.py`
 - **Done when:**
   - [x] `EngineRuntimeRelayProtocol` is `@runtime_checkable` with **real**
-        signatures for `call`, `capabilities`, `connection`.
+        signatures for `resolve_bot` and `call` (see the adjustment note below).
   - [x] `EngineRuntimeModule` binds concrete → singleton and aliases the
         Protocol, following `…/di/modules/cron_module.py:32-44`.
   - [x] Module registered in `…/di/container.py` alongside `CronModule`
