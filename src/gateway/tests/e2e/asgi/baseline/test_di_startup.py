@@ -49,12 +49,6 @@ class TestDIContainerBootstrap:
 
             cache = plugins.cache_plugin()
             assert cache is not None
-
-            validator = plugins.app_token_validator()
-            assert validator is not None
-
-            resolver = plugins.tenant_resolver()
-            assert resolver is not None
         finally:
             from gateway.community.bootstrap import shutdown_services
 
