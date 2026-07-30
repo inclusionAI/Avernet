@@ -97,9 +97,9 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 |---|---|---|---|---|---|
 | 1 | 机器人记录（`ac_bots` / `BotModel`） | totalfrank | P1 | ✅ **DONE —— PR #456 已于 2026-07-27 合并** | —— |
 | 2 | 资源（`ac_resource`） | lucas-xzp | P1 | ⬜ TODO | 列 + 守卫 + 测试通过；内部 API 不变 |
-| 3 | 渠道（`ac_channel_config`） | totalfrank | P2 | ⬜ TODO | 同上 |
+| 3 | 渠道（`ac_channel_config`） | totalfrank | 🅳 **已降级** | ⏸️ 已搁置 —— 范围保持不变，并非取消 | 同上（若重新启动） |
 | 4 | 技能（skill 相关表） | totalfrank + lucas-xzp | P3 | ⬜ TODO | 同上 |
-| 5 | MCP 配置 | totalfrank | P1 | ⬜ TODO | 同上 |
+| 5 | MCP 配置（`ac_user_mcp_config` + `ac_bot_mcp_call_config`） | totalfrank | P1 | ✅ DONE —— **PR #564** | PR #564 合并后 |
 | 6 | 例程（Routines） | lucas-xzp | P1 | ⬜ TODO | 同上 |
 
 > Stage 1 同时构建了后续每个阶段都会复制的**可复用机制**（见下文）。它是地基，
@@ -110,10 +110,10 @@ _按优先级分层排序。_
 | 类别 | 负责人 | 优先级 | 路由 | 状态 | 依赖 |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE —— PR #494 已于 2026-07-29 合并**（13/13 端点） | ~~Track A 阶段 1~~ ✅ |
-| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(桩)* | ⬜ TODO | Track A mcp（totalfrank） |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(桩)* | ⬜ TODO —— **已解除阻塞** | ~~Track A 阶段 5~~ ✅（PR #564） |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` *(桩)* | ⬜ TODO | Track A resources（lucas-xzp） |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(桩)* | ⬜ TODO | Track A routines（lucas-xzp） |
-| channels | totalfrank | P2 | `openapi_v1/channels/router.py` *(桩)* | ⬜ TODO | Track A channels（totalfrank） |
+| channels | totalfrank | 🅳 **已降级** | `openapi_v1/channels/router.py` *(桩)* | ⏸️ 已搁置 —— 范围保持不变，并非取消 | Track A 阶段 3（同样搁置） |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(桩)* | ⬜ TODO | bots 隔离（Stage 1 ✅） |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(桩)* | ⬜ TODO | Track A skills（共担） |
 
@@ -130,6 +130,60 @@ _按优先级分层排序。_
 > 上面三条来自 #494 的评审，都是 `dev` 上的**既有问题**而非本次引入的回归 —— 记在这里
 > 是因为它们是整个工作都要继承的决策，而不是 bots 独有的 bug。其中 #556 尤其必须在
 > 第二个租户持有真实数据之前定下来。
+| **阶段 5 对 `ac_user_mcp_config` 的唯一键替换** | ⬜ TODO（DDL 见下文） | **在第二个租户写入 MCP 配置之前**完成 —— 不必赶在发布之前 |
+
+> **⏸️ 渠道为何被搁置（2026-07-29）。** 目前产品并不需要渠道，因此它不应再以"下一个该
+> 动手的事项"的形式出现在看板上。这是一次**降级，而不是取消** —— 两行都保留完整范围，
+> 可以原样重新启动。如果渠道确实被取消，应当删除这两行，而不是让它们停留在搁置状态。
+
+---
+
+## 带外执行的库表变更（仓库内不放 migration 文件）
+
+按既定决策，租户隔离相关的库表变更一律在平台侧带外执行，因此**下列语句就是权威记录**。
+请把它们连同顺序约束一并交给执行 DDL 的同学。
+
+**阶段 1 —— `ac_bots`**（已执行）：
+
+```sql
+ALTER TABLE ac_bots
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+```
+
+**阶段 5 —— MCP 配置**（PR #564）。三条语句，**两个不同的时间点**：
+
+```sql
+-- 1. 加列。必须在代码发布之前执行：SELECT 一个不存在的列会直接报错，
+--    因此"先发代码"会让 MCP 配置的读取整体不可用。NOT NULL DEFAULT 会就地
+--    回填已有行，且对当前已部署的代码是惰性的，所以"先执行 DDL"是安全的。
+ALTER TABLE ac_user_mcp_config
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+ALTER TABLE ac_bot_mcp_call_config
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT 'data-isolation tenant; existing rows are the internal teamclaw tenant';
+
+-- 2. 唯一键替换。并不需要赶在代码发布之前：只有一个租户时，新旧两个键接受的
+--    行集合完全相同。它真正开始起作用，是在**第二个租户写入 MCP 配置**的那一刻 ——
+--    因为 (user_id, server_code, env) 会拒绝第二个租户为同一个用户工号写入的行，
+--    报的是一个针对它根本看不见的行的重复键错误。
+--    先建后删，确保唯一性约束不出现空窗。给唯一键前置一列只会放宽约束，
+--    因此所有已有行都仍然合法。
+ALTER TABLE ac_user_mcp_config
+  ADD UNIQUE KEY uix_user_mcp_config_tenant
+    (avernet_tenant, user_id, server_code, env) GLOBAL;
+ALTER TABLE ac_user_mcp_config
+  DROP INDEX uix_user_mcp_config;
+```
+
+`ac_bot_mcp_call_config` **不需要**改键：它的
+`(bot_pk, server_code, engine_type, env)` 以 `ac_bots.id` 这个全局主键打头，
+租户已由它函数式决定，上面那种冲突在这张表上根本无法表达。
+
+本地与 singlebox 运行时无需执行 DDL —— `Base.metadata.create_all` 会直接依据模型
+建表。
 
 > **排序决定 —— 已定（2026-07-27）：** 采用按类别的**纵向切片**。每位负责人先隔离一个类别
 > （Track A），紧接着就实现它的端点（Track B），而不是先把整个 Track A 全部做完再做
@@ -147,14 +201,25 @@ _按优先级分层排序。_
   （设置 + 保证重置），`bind_current_avernet_tenant(fn)`（把租户带入裸的
   `threading.Thread`/`ThreadPoolExecutor` 目标 —— `asyncio.to_thread`/`create_task`
   已会复制上下文，因此无需处理）。
-- `plugin_api/models.py` —— `BotModel` 上的**守卫模式（guard pattern）**：
-  - 在 `Session` 类上的 `do_orm_execute` **读守卫** →
-    `with_loader_criteria(Model, avernet_tenant == get_current_avernet_tenant(),
-    include_aliases=True)`；会跳过列/关系加载，并提供一个 `skip_avernet_tenant_guard`
-    选项。同时也约束 `Query.update()`/`Query.delete()`，因此写操作无需再加过滤。
-  - `before_insert` **插入守卫** → 未设置时打上标记，遇到显式冲突的租户时抛出
-    `CrossTenantInsertError`。
-  - 只注册一次，通过 `_AVERNET_TENANT_GUARDS_INSTALLED` 保证幂等。
+- `utils/avernet_tenant_guard.py` —— **守卫模式（guard pattern）**，自阶段 5 起
+  与具体模型解耦。模型在类定义之后紧跟一行 `register_avernet_tenant_guard(Model)`
+  即可接入；该模型必须声明
+  `avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")`。
+  - 在 `Session` 类上的 `do_orm_execute` **读守卫**（只安装一次）→ 为**每个已注册
+    模型**追加一个 `with_loader_criteria(Model, avernet_tenant ==
+    get_current_avernet_tenant(), include_aliases=True)`；会跳过列/关系加载，并提供
+    一个 `skip_avernet_tenant_guard` 选项。同时也约束
+    `Query.update()`/`Query.delete()`，因此写操作无需再加过滤。若某个选项指向的模型
+    并未出现在该语句中，它就是空操作 —— 这正是"一个监听器服务 N 个模型"成立的前提。
+  - 每个模型各自的 `before_insert` **插入守卫** → 未设置时打上标记，遇到显式冲突的
+    租户时抛出 `CrossTenantInsertError`。
+  - `register_avernet_tenant_guard` 校验的是 **mapper 的列**，而不是 `hasattr`：
+    否则一个把 `avernet_tenant` 声明成普通值的模型也能注册成功，而守卫会生成
+    `WHERE 1 = 1` —— 一次静默且彻底的隔离失效。
+  - 每个模型的注册是幂等的；`guarded_models()` 把注册表暴露给测试与诊断使用。
+  - 阶段 1 时这套守卫是焊死在 `plugin_api/models.py` 里的 `BotModel` 上的；阶段 5
+    将其抽出，使 `core/` 下的模型无需让 `plugin_api` 反向导入它们即可注册。
+    `plugin_api/models.py` 仍会重新导出 `CrossTenantInsertError`。
 - `adapters/http/middleware.py` —— `AvernetTenantMiddleware`，一个**纯 ASGI**
   中间件（**不是** `BaseHTTPMiddleware` —— 出于 ContextVar 的健壮性考虑）。它为每个请求
   设置租户。**已覆盖所有请求；Track A 阶段 2 及以后无需改动它。**
@@ -514,3 +579,21 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   **[#560](https://github.com/inclusionAI/Avernet/issues/560)** 外部身份写入失败被吞掉。三者都是 `dev` 上的既有问题。
   同时把**"认证落地前一律返回 401"**这一状态写到了文档开头 —— 公共界面虽已实现，但尚不可
   被真正调用。
+- **2026-07-29** —— **Track A 阶段 5（MCP 配置）完成 —— PR #564。** 隔离了两张表：
+  `ac_user_mcp_config` 与 `ac_bot_mcp_call_config`。Track B 的 `mcp` 已解除阻塞。
+  在照搬这个阶段之前，有四点值得先了解：
+  1. 阶段 1 的守卫现在是**与模型解耦**的 —— 即 `utils/avernet_tenant_guard`
+     配合 `register_avernet_tenant_guard(Model)`。后续阶段只需注册，不必重新实现。
+     `plugin_api/models.py` 中已不再保留守卫的实现体。
+  2. **先检查你的表上有没有包含被隔离维度的唯一键。** `ac_user_mcp_config` 上原本是
+     `UNIQUE (user_id, server_code, env)`，这会导致"两个租户、同一个用户工号"在**写入**
+     时报重复键错误 —— 哪怕读取侧的隔离完全正确。`ac_bots` 没有唯一键，所以阶段 1
+     从未遇到这个问题。该键必须以 `avernet_tenant` 打头。
+  3. 它的**上线时间点与加列不同**：加列必须赶在代码发布之前，而换键只需赶在第二个租户
+     写入之前。两者都记录在上文新增的"带外执行的库表变更"一节中。
+  4. **先摸清范围，再动手隔离。** 六个 `mcp` 端点里有四个其实是走 HTTP 调 MCP Center，
+     根本没有本地表；而配置写入链路确实会碰到的 `ac_entity_device_binding` 则不需要任何
+     改动 —— 因为那条查询是 JOIN 到 `ac_bots` 上的，而 `with_loader_criteria` 对 JOIN
+     子句同样生效。这是实测确认的，不是推断。
+- **2026-07-29** —— **渠道降级（并非取消）**，Track A 阶段 3 与 Track B 端点均已搁置，
+  范围保持不变。
