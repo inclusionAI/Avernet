@@ -101,12 +101,14 @@ def test_app_and_bot_principal_types() -> None:
             owner_id="org-1",
             token="tok",
             app_id=1,
+            agent_code="agent-1",
             tenant="t-bot",
         ),
     )
     assert bot.type == "bot"
     assert bot.bot.bot_uuid == "b-1"
     assert bot.bot.token == "tok"
+    assert bot.bot.agent_code == "agent-1"
 
 
 def test_bot_requires_token() -> None:

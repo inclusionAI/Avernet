@@ -23,7 +23,7 @@ def registry() -> BotRepository:
 async def test_known_token_resolves_seeded_bot(registry: BotRepository) -> None:
     bot = await registry.find_bot_by_token("bot-key")
     assert bot == RegisteredBot(
-        bot_uuid="bot-7", owner_id="owner-1", app_id=1, tenant="t"
+        bot_uuid="bot-7", owner_id="owner-1", app_id=1, agent_code="agent-1", tenant="t"
     )
 
 

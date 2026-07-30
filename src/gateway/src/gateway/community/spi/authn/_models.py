@@ -50,7 +50,8 @@ class Bot(BaseModel):
     ``bot_uuid`` is the bot's stable id; ``owner_id`` is the user who created it
     (the resource-ownership anchor); ``token`` is the presented/verified bot
     session token (a secret flowing downstream — components must treat it as
-    such); ``app_id`` is the app the bot belongs to; ``tenant`` is its tenant.
+    such); ``app_id`` is the app the bot belongs to; ``agent_code`` is the bot's
+    agent/engine code; ``tenant`` is its tenant.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -59,6 +60,7 @@ class Bot(BaseModel):
     owner_id: str  # creator/owner (resource-ownership anchor)
     token: str  # the presented/verified bot session token (secret)
     app_id: int  # the app the bot belongs to (avernet_application.id)
+    agent_code: str  # the bot's agent/engine code
     tenant: str  # the bot's tenant
 
 

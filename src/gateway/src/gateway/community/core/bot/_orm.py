@@ -4,8 +4,8 @@ The canonical :class:`BotRepository` resolves a presented session token to a bot
 row (surrogate ``id`` PK; ``session_token`` is the unique lookup key). Registered on the shared
 :class:`~gateway.community.spi.database.Base` so ``DataSourcePlugin.create_all()``
 creates the table. :meth:`BotRow.to_record` maps a row onto the SPI
-:class:`~gateway.community.spi.bot.RegisteredBot` (core fields only; ``env`` /
-``agent_code`` stay DB-side).
+:class:`~gateway.community.spi.bot.RegisteredBot` (core fields only; ``env`` stays
+DB-side).
 """
 
 from __future__ import annotations
@@ -37,5 +37,6 @@ class BotRow(Base):  # type: ignore[misc]
             bot_uuid=self.bot_uuid,
             owner_id=self.created_by,
             app_id=self.app_id,
+            agent_code=self.agent_code,
             tenant=self.tenant,
         )

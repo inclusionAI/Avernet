@@ -12,9 +12,9 @@ Token extraction:
 The strategy resolves the token itself in a **single** registry lookup:
 ``find_bot_by_token(token) → RegisteredBot | None``. There is no separate
 validator abstraction — the lookup lives here. The registry record's
-``bot_uuid`` / ``owner_id`` / ``app_id`` / ``tenant`` flow straight onto the SPI
-:class:`Bot` (plus the presented ``token``); ``owner_id`` is mapped from the DB
-``created_by`` column.
+``bot_uuid`` / ``owner_id`` / ``app_id`` / ``agent_code`` / ``tenant`` flow
+straight onto the SPI :class:`Bot` (plus the presented ``token``); ``owner_id``
+is mapped from the DB ``created_by`` column.
 """
 
 from __future__ import annotations
@@ -81,6 +81,7 @@ class BotTokenStrategy:
                 owner_id=bot.owner_id,
                 token=token,
                 app_id=bot.app_id,
+                agent_code=bot.agent_code,
                 tenant=bot.tenant,
             ),
         )
