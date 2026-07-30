@@ -2934,6 +2934,41 @@ impl BcsClient {
         Self::ensure_success(resp, "complete session file").await
     }
 
+    /// Infer a MIME type from a file name's extension. Covers common upload
+    /// types (text, JSON/HTML/XML, PDF, images, audio/video, archives); unknown
+    /// or missing extensions return `None` so callers fall back to the generic
+    /// `application/octet-stream`.
+    fn guess_mime_from_extension(file_name: &str) -> Option<String> {
+        let ext = std::path::Path::new(file_name)
+            .extension()?
+            .to_str()?
+            .to_ascii_lowercase();
+        Some(match ext.as_str() {
+            "txt" => "text/plain",
+            "md" => "text/markdown",
+            "csv" => "text/csv",
+            "json" => "application/json",
+            "xml" => "application/xml",
+            "pdf" => "application/pdf",
+            "zip" => "application/zip",
+            "gz" => "application/gzip",
+            "tar" => "application/x-tar",
+            "html" | "htm" => "text/html",
+            "css" => "text/css",
+            "js" => "text/javascript",
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "svg" => "image/svg+xml",
+            "wav" => "audio/wav",
+            "mp3" => "audio/mpeg",
+            "mp4" => "video/mp4",
+            "bin" => "application/octet-stream",
+            _ => return None,
+        }.to_string())
+    }
+
     /// High-level three-stage upload: prepare -> PUT (single or multipart) -> complete.
     /// Serial multipart PUTs (no parallelism for v1). Best-effort delete on failure.
     pub async fn upload_session_file(
@@ -2943,7 +2978,11 @@ impl BcsClient {
             .unwrap_or_else(|| std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string());
         let metadata = tokio::fs::metadata(path).await?;
         let size = metadata.len();
-        let mime = mime.unwrap_or("application/octet-stream").to_string();
+        let mime = match mime {
+            Some(m) => m.to_string(),
+            None => Self::guess_mime_from_extension(&file_name)
+                .unwrap_or_else(|| "application/octet-stream".to_string()),
+        };
         let prepared = self.prepare_session_file(sid, &file_name, size, &mime).await?;
         let mode = prepared["mode"].as_str().unwrap_or("single");
         let file_id = prepared["file_id"].as_str().context("missing file_id")?.to_string();
@@ -3073,6 +3112,26 @@ impl BcsClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guess_mime_from_extension_known_types() {
+        assert_eq!(BcsClient::guess_mime_from_extension("report.pdf"), Some("application/pdf".into()));
+        assert_eq!(BcsClient::guess_mime_from_extension("DATA.CSV"), Some("text/csv".into()));
+        assert_eq!(BcsClient::guess_mime_from_extension("pic.jpeg"), Some("image/jpeg".into()));
+        assert_eq!(BcsClient::guess_mime_from_extension("pic.jpg"), Some("image/jpeg".into()));
+        assert_eq!(BcsClient::guess_mime_from_extension("notes.md"), Some("text/markdown".into()));
+        assert_eq!(BcsClient::guess_mime_from_extension("data.json"), Some("application/json".into()));
+        assert_eq!(BcsClient::guess_mime_from_extension("archive.zip"), Some("application/zip".into()));
+        assert_eq!(BcsClient::guess_mime_from_extension("model.bin"), Some("application/octet-stream".into()));
+    }
+
+    #[test]
+    fn guess_mime_from_extension_unknown_returns_none() {
+        assert_eq!(BcsClient::guess_mime_from_extension("file.xyz"), None);
+        assert_eq!(BcsClient::guess_mime_from_extension("noext"), None);
+        assert_eq!(BcsClient::guess_mime_from_extension(""), None);
+        assert_eq!(BcsClient::guess_mime_from_extension(".hidden"), None);
+    }
 
     #[test]
     #[allow(unsafe_code)]
