@@ -14,6 +14,7 @@ under ``core/resources/models.py`` so there's exactly one source of truth
 ``core/resources/service.py`` and conforms structurally — it does NOT
 inherit the Protocol (the layering rule forbids ``core → api`` imports).
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
@@ -66,6 +67,10 @@ class ResourceServiceProtocol(Protocol):
     ) -> List[Resource]: ...
 
     def count_children(self, parent_path: str) -> int: ...
+
+    def count_resources(
+        self, *, resource_type: Optional[ResourceType] = None
+    ) -> int: ...
 
     async def create_url_resource(
         self,

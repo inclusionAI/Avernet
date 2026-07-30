@@ -8,6 +8,7 @@ This module owns the canonical schemas + constants for identity files;
 tests all import them from here so there is one place to change a field.
 """
 
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -677,18 +678,25 @@ class IdentityService:
         404 into an empty string (absent → ``exists=False``).
         """
         self.validate_entity_type(entity_type)
-        results: list[tuple[str, bool]] = []
-        for ft in VALID_IDENTITY_FILES:
-            content = await self.read_identity_file(
-                entity_type,
-                entity_id,
-                bot_id,
-                ft,
-                owner_id,
-                engine_type=engine_type,
+        # Probe all 16 identity files concurrently: each read is a device
+        # round-trip (baas/arca = a network hop), so gathering instead of a
+        # serial loop cuts this list endpoint's tail latency from 16× to ~1×.
+        # Only bool(content) is needed; VALID_IDENTITY_FILES order is preserved.
+        ordered = list(VALID_IDENTITY_FILES)
+        contents = await asyncio.gather(
+            *(
+                self.read_identity_file(
+                    entity_type,
+                    entity_id,
+                    bot_id,
+                    ft,
+                    owner_id,
+                    engine_type=engine_type,
+                )
+                for ft in ordered
             )
-            results.append((ft, bool(content)))
-        return results
+        )
+        return list(zip(ordered, [bool(c) for c in contents]))
 
     async def _read_from_publish_device(
         self,
