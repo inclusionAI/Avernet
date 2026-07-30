@@ -501,6 +501,13 @@ SessionMessageKind:
     - text
     - system
 
+MessageSenderKind:
+  type: string
+  enum:
+    - bot
+    - human
+    - system
+
 SessionParticipant:
   type: object
   additionalProperties: false
@@ -625,8 +632,8 @@ SessionMessage:
   required:
     - message_id
     - session_seq
-    - actor_id
-    - actor_kind
+    - sender_id
+    - sender_type
     - kind
     - content
     - created_at
@@ -636,12 +643,10 @@ SessionMessage:
     session_seq:
       type: integer
       minimum: 0
-    actor_id:
+    sender_id:
       type: string
-    actor_kind:
-      $ref: "#/ActorKind"
-    name:
-      type: string
+    sender_type:
+      $ref: "#/MessageSenderKind"
     kind:
       $ref: "#/SessionMessageKind"
     content:

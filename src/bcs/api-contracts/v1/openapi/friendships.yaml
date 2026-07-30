@@ -6,8 +6,6 @@ CreateFriendRequestRequest:
   properties:
     to_bot_uuid:
       type: string
-    message:
-      type: string
 
 ListFriendshipsPath:
   get:
