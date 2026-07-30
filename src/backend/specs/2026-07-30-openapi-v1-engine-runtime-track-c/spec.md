@@ -7,7 +7,7 @@ records: a tenant can create and manage a bot, but cannot talk to it. A bot's
 runtime — its conversation sessions, the approval mode governing what it may do
 unattended, the models it can reach, what the bot is currently capable of — runs
 on the bot's own device and has no public representation at all. This feature
-adds seventeen bot-scoped endpoints that expose that runtime through the public
+adds sixteen bot-scoped endpoints that expose that runtime through the public
 API, plus one endpoint that hands back a ready-to-use chat connection so a
 tenant can hold a live conversation with its bot.
 
@@ -59,9 +59,9 @@ proven path rather than inventing one.
 
 ## Acceptance Criteria
 
-- [ ] Seventeen endpoints are served, all scoped to a single bot the caller
+- [ ] Sixteen endpoints are served, all scoped to a single bot the caller
       owns: seven for sessions, three read-only for engine state, two for
-      models, three for approvals, one for nodes, and one for connection.
+      models, three for approvals, and one for connection.
 - [ ] Every response uses the public API's standard envelope, with list
       endpoints returning the standard page shape and an accurate total.
 - [ ] Every endpoint resolves the caller's identity from the request principal
@@ -85,7 +85,7 @@ proven path rather than inventing one.
 - [ ] An operation the bot's engine supports only partially still returns its
       result, and the caller is told the result may be incomplete.
 - [ ] A bot whose device is unreachable — cold, dormant, or restarting — is
-      answered with a single, consistent, retryable outcome across all seventeen
+      answered with a single, consistent, retryable outcome across all sixteen
       endpoints, distinct from both "not found" and "server error".
 - [ ] Error responses never expose internal identifiers, internal-language text,
       device addresses, or credentials.
@@ -101,11 +101,10 @@ proven path rather than inventing one.
 - Models: list, and read one by identifier.
 - Approvals: read the mode for a session, set the mode for a session, and list
   the modes that exist.
-- Nodes: list.
 - Connection: one endpoint returning usable socket connections for the bot.
 - A single, shared treatment of capability limits, device unreachability, and
   the mapping from the device's response shape to the public envelope, so all
-  six groups behave identically.
+  five groups behave identically.
 
 ## Out of Scope
 
@@ -128,6 +127,9 @@ proven path rather than inventing one.
 - **Session favourites and the engine-specific gateway diagnostics** (connection
   test, disconnect, gateway config, default config, zero-check). Deferred, not
   cancelled — each is additive and breaks no published contract if added later.
+- **Node inventory** (`GET /api/nodes`). The frontend does proxypass it, so the
+  scope rule would wrap it, but the product does not need node inventory on the
+  public surface. Dropped 2026-07-30 — additive later, breaks no contract.
 - **Product-specific runtime surfaces** that are not part of the tenant
   contract.
 - **Making the public surface callable.** Like every other public category, this
@@ -146,7 +148,7 @@ proven path rather than inventing one.
 2. **Unreachable-device behaviour.** Should an unreachable device be reported
    immediately as a retryable "not ready", or should the API attempt to wake the
    device and then retry before answering? This must be one choice for all
-   seventeen endpoints, and it determines whether these endpoints can block for
+   sixteen endpoints, and it determines whether these endpoints can block for
    seconds.
 3. **Connection lifetime.** What expiry should a returned chat connection carry,
    and may a caller request a shorter or longer one? A short expiry forces

@@ -2,10 +2,10 @@
 
 ## Approach
 
-One new core module, `core/engine_runtime/`, owns the single thing all six
+One new core module, `core/engine_runtime/`, owns the single thing all five
 groups do: resolve the caller's bot (owner-scoped), resolve its device, forward
 one HTTP call to the engine adapter, and normalise the engine's envelope into a
-typed result. Six thin routers under
+typed result. Five thin routers under
 `adapters/http/openapi_v1/engine_runtime/` each map their group's payload
 shapes and nothing else — the same division `openapi_v1/routines/router.py`
 already uses against `CronRelayService`.
@@ -16,7 +16,7 @@ point) and `DeviceAdapterTransport`. Track C generalises that path rather than
 adding a second one.
 
 The `connection` endpoint is the one handler that does not forward: it composes
-a socket map from the bot's active engine, the engine's declared capabilities,
+a socket list from the bot's active engine, the engine's declared capabilities,
 and the existing device connection service.
 
 ### Assumptions carried in from the spec's open questions
@@ -45,7 +45,7 @@ assumptions — overturning any of them changes this plan:
 - `src/backend/src/agentclaw/community/di/modules/engine_runtime_module.py`
   **(new)** — Protocol → concrete singleton alias.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/`
-  **(new)** — six routers + schemas.
+  **(new)** — five routers + schemas.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/contracts.py` —
   add `Envelope.warning`; add `501`/`504` to `ERROR_RESPONSES`.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py` —
@@ -66,15 +66,64 @@ assumptions — overturning any of them changes this plan:
 README's out-of-band DDL section. Track C stores nothing; every read is a
 pass-through to the device.
 
-Isolation therefore needs no Track A stage: the relay resolves `bot_id` through
-`BotService` scoped by `caller_owner_id(principal)`, and `BotModel` is already
-guarded (Stage 1, PR #456). A foreign or cross-tenant `bot_id` raises
-`BotNotFoundError`, already mapped to a masked `404` in `ENVELOPE_ERRORS`
-(`responses.py:118`).
+No Track A stage either: the relay resolves `bot_id` through `BotService` scoped
+by `caller_owner_id(principal)`, and `BotModel` is already guarded (Stage 1,
+PR #456). A foreign or cross-tenant `bot_id` raises `BotNotFoundError`, already
+mapped to a masked `404` in `ENVELOPE_ERRORS` (`responses.py:118`).
+
+## Isolation: what "just forwarding" does and does not get for free
+
+Schema work is genuinely zero. **Isolation work is not** — and the reason is
+precisely that these endpoints only forward. The mechanism is inherited, but
+three properties have to be actively preserved, and each is a place where a
+plausible-looking handler leaks.
+
+**1. The forward target is chosen by `bot_id`, so ownership must be resolved
+before the forward.** `DeviceContextResolver.resolve_for_bot(bot_id, user_id)`
+uses `get_active_by_bot_and_owner`, which returns `None` on an owner mismatch
+(`core/devices/repository/protocol.py:61-72`) — so it is safe *provided* the
+`user_id` passed in is the principal's. Pass a caller-supplied one and the check
+becomes a formality. This is why the relay owns bot resolution rather than each
+handler.
+
+**2. The engine has no tenant axis, and does not filter by user either.**
+This one is worse than expected and is the reason "just forwarding" is not
+automatically safe:
+
+- `GET /api/sessions` accepts `user_id`, **logs it, and drops it**.
+  `SessionListRequest.user_id` never reaches the port —
+  `sessions_list(token, offset, limit, agent_id, session_key)` has no `user_id`
+  parameter at all (`plugins/openclaw/_session.py:125-132`, adapter at
+  `core/adapters/openclaw/session.py:208-215`). The device returns **every**
+  session it holds, subject only to BCS/`agent_id`/`session_key` filters.
+- Session keys *do* embed the user (`session:<uuid>:user:<user_id>` —
+  `core/adapters/openclaw/session.py:252`), so per-user filtering is possible.
+  It simply is not done.
+
+For a personal bot this is contained: one owner, one device, so "every session
+on the device" and "the owner's sessions" are the same set. It stops being
+contained the moment a device serves more than one caller — which is exactly
+what service and public bots do, and why `expert_chat` provisions **per-caller
+containers** (`core/expert_chat/`, the `caller-connection` admin route). See the
+risk below; this needs a decision before the surface is enabled for those bot
+types.
+
+**3. The Track A guard cannot see any of this.** `with_loader_criteria` constrains
+SQLAlchemy statements. A leak that happens *on the device*, after a correctly
+authorised forward, involves no query and no guard. Nothing downstream will
+catch it, which is why the isolation test must assert **the transport was never
+invoked** for a bot the caller does not own — not merely that the response was
+`404`.
+
+**Net:** the work is *"don't undo the isolation we inherit"*, not *"build
+isolation"*. Concretely that is: owner-scoped resolve inside the relay (Task 3),
+`extra="forbid"` rejecting caller-supplied identity on every route (Tasks 7-10),
+and the never-invoked assertion across all 16 routes (Task 12). No schema, no
+guard registration, no DDL.
 
 ## API / Interface Changes
 
-### New public routes — 17
+### New public routes — 16
 
 > **Path invariant: every route begins `/openapi/v1/bots/`.** Not shorthand —
 > the literal prefix. Two reasons, both binding: it keeps Track C consistent
@@ -99,11 +148,10 @@ guarded (Stage 1, PR #456). A foreign or cross-tenant `bot_id` raises
 | GET | `/openapi/v1/bots/{bot_id}/approvals/mode` | `POST /api/approvals/mode/get` | `Envelope[ApprovalState]` |
 | PUT | `/openapi/v1/bots/{bot_id}/approvals/mode` | `POST /api/approvals/mode/set` | `Envelope[ApprovalState]` |
 | GET | `/openapi/v1/bots/{bot_id}/approvals/modes` | `GET /api/approvals/modes` | `Envelope[list[ApprovalModeInfo]]` |
-| GET | `/openapi/v1/bots/{bot_id}/nodes` | `GET /api/nodes` | `Envelope[Page[Node]]` |
 | GET | `/openapi/v1/bots/{bot_id}/connection` | *(none — composed)* | `Envelope[Connection]` |
 
 Router prefixes are therefore `/openapi/v1/bots/{bot_id}/sessions`,
-`…/engine`, `…/models`, `…/approvals`, `…/nodes`, and
+`…/engine`, `…/models`, `…/approvals`, and
 `/openapi/v1/bots/{bot_id}` for the single connection route.
 
 Query/body models all carry `extra="forbid"`. `user_id`, `engine`,
@@ -216,8 +264,6 @@ spelling and let the divergence stay visible upstream.
 **Deliberately left as strings**, because the source is an open vocabulary and a
 fabricated enum would be a lie that breaks on the first new value:
 
-- `Node.status` (`str = "online"`, no closed set — `core/node/models.py:29`) and
-  `Node.platform` (`str | None`).
 - `Session.permission_mode`, `Session.runtime`, `Session.model`.
 - `EngineStatus.process` and `.transition` — open dicts assembled at
   `manager.py:743-748`.
@@ -296,7 +342,7 @@ in `tests/community/architecture/test_service_api_conformance.py`.
   routers.
 - `…/engine_runtime/enums.py` — the four `str, Enum` types above, each with
   `x-enum-descriptions`. One module so no group redefines a shared enum.
-- `…/engine_runtime/{sessions,engine,models,approvals,nodes,connection}/router.py`
+- `…/engine_runtime/{sessions,engine,models,approvals,connection}/router.py`
   + `schemas.py`. Each handler: `@envelope_errors`, takes `request: Request`,
   `principal: PrincipalDep`, Injects `EngineRuntimeRelayProtocol`, calls
   `caller_owner_id(principal)`, and maps the payload. Mapping helpers live in
@@ -337,7 +383,7 @@ and matches how cron behaves today, but the tests must not assume a live device.
 
 ## Risks & Mitigations
 
-- **Risk: `Page.total` is unknowable for sessions/models/nodes.** The engine's
+- **Risk: `Page.total` is unknowable for sessions and models.** The engine's
   list handlers return a flat list and never populate `ApiResponse.total`
   (`src/engine/.../api/session/router.py:132`), but `Page.total` is a required
   `int` (`contracts.py:88`).
@@ -384,6 +430,21 @@ and matches how cron behaves today, but the tests must not assume a live device.
   clients to break. Assert the new key's presence in the existing
   `tests/.../test_responses.py` rather than letting it drift.
 
+- **Risk: `GET /sessions` returns every session on the device, not the caller's.**
+  The engine drops `user_id` (see *Isolation* §2). On a personal bot the two sets
+  coincide; on a bot whose device serves multiple callers — service bots, public
+  bots — the bot's owner would see other callers' sessions and message history
+  through the public API.
+  **Mitigation, and an open question for the owner:** v1 is owner-only, which
+  bounds the blast radius to "the owner of a shared bot sees its callers'
+  sessions" — not cross-tenant, but still a disclosure the caller did not
+  consent to. Two candidate answers: (a) restrict the sessions group to
+  `bot_type == "personal"` in v1 and 501 the rest, or (b) filter server-side on
+  the `user:<user_id>` suffix the session key already carries. **(a) is the
+  smaller, more honest v1**; (b) belongs in the engine, not in a backend filter
+  that could be bypassed. Do not ship the sessions group for shared bot types
+  until this is settled.
+
 - **Risk: capability answers differ per engine**, so the same public path
   behaves differently across two of a tenant's own bots.
   **Mitigation:** that is why `/engine/capabilities` ships in v1 rather than
@@ -396,7 +457,7 @@ and matches how cron behaves today, but the tests must not assume a live device.
   spelling; do not translate; do not paper over the upstream divergence.
 
 - **Risk: a strict enum on a response field is an availability risk.** If the
-  engine adds a capability, a node status, or an approval mode and the public
+  engine adds a capability or an approval mode and the public
   model validates strictly, serialization raises and the endpoint answers `500`
   for a change that was supposed to be additive.
   **Mitigation:** enums are used on **request** fields and on values we ourselves
@@ -417,7 +478,6 @@ and matches how cron behaves today, but the tests must not assume a live device.
   | sessions **create** | ✅ | ⚠️ **limited** — "OCB pre-allocates the sessionKey, first chat.send establishes it" |
   | approvals mode get/set | ✅ | ❌ **501** — declares neither capability, and no `fallback` message |
   | models | ✅ | ✅ |
-  | nodes | ✅ | ❌ **501** |
   | engine status / capabilities / available | ✅ (ungated) | ✅ (ungated) |
 
   **Mitigation:** this is exactly why `/engine/capabilities` ships in v1 and why
@@ -442,8 +502,8 @@ and matches how cron behaves today, but the tests must not assume a live device.
 - **One relay method per engine group** (`list_sessions`, `get_model`, …) on the
   Protocol, mirroring `CronRelayServiceProtocol`. Rejected: cron's per-verb
   Protocol exists because cron has real relay *logic* (multi-bot fan-out,
-  runtime-stage targeting). Track C is a pure forward, so seventeen Protocol
-  methods would be seventeen ways to spell `call()`. Rule 19
+  runtime-stage targeting). Track C is a pure forward, so sixteen Protocol
+  methods would be sixteen ways to spell `call()`. Rule 19
   (`arch.rules.md:569`) — abstract after two examples, not before.
 - **Six independent relays, one per group.** Rejected: the normalisation,
   isolation, and error mapping are identical; six copies would drift, which is
@@ -470,7 +530,7 @@ and matches how cron behaves today, but the tests must not assume a live device.
 - **Backwards compatibility:** the only shared change is the additive
   `Envelope.warning`. Internal `/api` routes are untouched.
 - Ship as one PR per the README's per-category convention, or split
-  `sessions + engine + connection` (P1) from `approvals + models + nodes`
+  `sessions + engine + connection` (P1) from `approvals + models`
   (P2/P3) if review size becomes the constraint. The shared relay must land in
   the first PR either way.
 
@@ -505,7 +565,7 @@ and matches how cron behaves today, but the tests must not assume a live device.
 
 **Endpoint** (per group, using the in-memory transport at
 `plugins/local/device_adapter_transport.py` so the relay runs end-to-end)
-- Every one of the 17 routes: success shape, `Envelope`/`Page` conformance.
+- Every one of the 16 routes: success shape, `Envelope`/`Page` conformance.
 - Each mapped error: `409` not-ready, `501` unsupported, `502` upstream,
   `504` timeout.
 - `extra="forbid"` rejection of `user_id`, `engine`, `binding_id`,
@@ -514,7 +574,7 @@ and matches how cron behaves today, but the tests must not assume a live device.
 **Isolation** (against the real Track A guard, mirroring
 `tests/.../test_bots_tenant_isolation.py`)
 - A `bot_id` owned by another caller → masked `404`, byte-identical to a
-  non-existent bot, on **all 17 routes**.
+  non-existent bot, on **all 16 routes**.
 - A cross-tenant `bot_id` → same masked `404`.
 - No device call is issued for a bot the caller does not own — assert the
   transport was never invoked, not merely that the status was 404.

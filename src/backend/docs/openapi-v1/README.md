@@ -62,7 +62,7 @@ The work therefore splits into **three tracks**:
 - **Track C — Engine (runtime) surface.** _Added 2026-07-30._ Wrap the engine
   adapter's client-facing HTTP behind `/openapi/v1/bots/{bot_id}/…`, and replace
   the `get_device_connection` hand-off with one sanitised socket-info endpoint.
-  **17 endpoints. Not started.**
+  **16 endpoints. Not started.**
 
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
@@ -149,7 +149,7 @@ _Ordered by priority tier._
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(stub)* | ⬜ TODO | Track A skills (shared) |
 
-### Track C — Engine (runtime) surface (0 of 6 groups done)
+### Track C — Engine (runtime) surface (0 of 5 groups done)
 _All groups depend only on **bots isolation (Stage 1 ✅)** — no Track A stage, no
 DDL. Full ruling and per-endpoint mapping in
 **[`engine-surface.md`](engine-surface.md)**._
@@ -161,7 +161,6 @@ DDL. Full ruling and per-endpoint mapping in
 | connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` *(not created)* | ⬜ TODO |
 | approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` *(not created)* | ⬜ TODO |
 | models | 2 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/models/` *(not created)* | ⬜ TODO |
-| nodes | 1 | ⬜ unassigned | P3 | `openapi_v1/engine_runtime/nodes/` *(not created)* | ⬜ TODO |
 
 > **Scope rule (why only these).** Wrap engine HTTP the frontend reaches
 > **directly** through proxypass (`src/frontend/src/requestConfig.ts:189-205`).
@@ -576,7 +575,7 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 | GET | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | Read one identity file | `Envelope[IdentityFile]` |
 | PUT | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | Overwrite one identity file (`content`) | `Envelope[IdentityFileRef]` |
 
-### ⬜ unassigned · Track C — engine runtime (17 endpoints)
+### ⬜ unassigned · Track C — engine runtime (16 endpoints)
 Not a Track B category — these wrap the **engine adapter** on the bot's device
 rather than a backend service. The per-endpoint checklist, the engine route each
 one maps to, and the ruling on the ~72 engine routes that are *not* wrapped live
@@ -588,7 +587,6 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 | engine | 3 | `…/engine/{status,capabilities,available}` |
 | models | 2 | `…/models`, `…/models/{model_id}` |
 | approvals | 3 | `…/approvals/mode` (GET/PUT), `…/approvals/modes` |
-| nodes | 1 | `…/nodes` |
 | connection | 1 | `…/connection` — WS URL + headers, replaces `get_device_connection` |
 
 ---
@@ -611,10 +609,10 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 7. **Cross-tenant external identity settled ([#556](https://github.com/inclusionAI/Avernet/issues/556))** — Passport, auth
    relationships and BCN carry a tenant axis, so the BCN sync can be re-enabled
    on the public path. — _⬜ (added 2026-07-29; gates enabling multi-tenancy)._
-8. **Track C:** the six engine-runtime groups (17 endpoints) implemented,
+8. **Track C:** the five engine-runtime groups (16 endpoints) implemented,
    owner-scoped and capability-aware, and `…/connection` returning socket URLs
    so no external caller ever sees a proxypass target or a raw device token.
-   — _⬜ 0 of 6 (added 2026-07-30)._
+   — _⬜ 0 of 5 (added 2026-07-30)._
 
 ---
 
@@ -767,11 +765,13 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   engine — never designed as a public contract — the surface an integrator codes
   against. Track C wraps the engine's client-facing HTTP behind
   `/openapi/v1/bots/{bot_id}/…` instead. Five things worth knowing:
-  1. **17 endpoints, not 89.** The engine serves 89 HTTP routes + 6 WS across 25
+  1. **16 endpoints, not 89.** The engine serves 89 HTTP routes + 6 WS across 25
      routers. The scope rule wraps only what the frontend reaches *directly*
-     (sessions 7, engine 3, models 2, approvals 3, nodes 1) plus one new
-     `…/connection`. Backend-mediated engine routes stay with the backend
-     contract that already fronts them.
+     (sessions 7, engine 3, models 2, approvals 3) plus one new `…/connection`.
+     Backend-mediated engine routes stay with the backend contract that already
+     fronts them, and **nodes was dropped** — the frontend proxypasses it, so
+     the rule would wrap it, but the product does not need node inventory
+     publicly.
   2. **`/api/cron` was already this.** Backend `/api/cron` →
      `CronRelayService` → `DeviceAdapterTransport` → engine has been in
      production all along, and the `routines` stub already imports

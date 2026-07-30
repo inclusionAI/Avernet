@@ -12,7 +12,7 @@ where the effort stands._
 ## Why Track C exists
 
 Tracks A and B assume the public API's data lives in **backend tables**. The
-bot's *runtime* doesn't. Sessions, chat, approvals, models, node inventory —
+bot's *runtime* doesn't. Sessions, chat, approvals, models —
 these live on the bot's device, served by the **engine adapter** (`src/engine`,
 port `20003`), and today the client reaches them **directly**:
 
@@ -64,7 +64,7 @@ frontend rewrites to the engine.
 
 ---
 
-## The public surface — 17 endpoints
+## The public surface — 16 endpoints
 
 All bot-scoped under `/openapi/v1/bots/{bot_id}/…`, all returning the
 `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
@@ -116,12 +116,6 @@ All bot-scoped under `/openapi/v1/bots/{bot_id}/…`, all returning the
 | GET | `…/approvals/mode` | `POST /api/approvals/mode/get` | **divergence:** a read is `GET` with `session_key` as a query param, not a `POST` |
 | PUT | `…/approvals/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}` |
 | GET | `…/approvals/modes` | `GET /api/approvals/modes` | static enum; note this is the one engine route with **no** capability gate |
-
-### nodes (1) — engine `/api/nodes`
-
-| Method | Public path | Engine route | Notes |
-|---|---|---|---|
-| GET | `…/nodes` | `GET /api/nodes` | `status`, `platform`, paged → `Envelope[Page[Node]]` |
 
 ### connection (1) — NEW, no engine counterpart
 
@@ -176,7 +170,7 @@ Rules this endpoint must hold:
 | `api/engine` | `/api/engine` | 5 | — | ✅ **C1 — wrap 3 of 5** | `switch`/`restart` excluded, see above |
 | `api/models` | `/api/models` | 2 | — | ✅ **C1 — wrap** | in the proxypass list |
 | `api/approvals` | `/api/approvals` | 3 | — | ✅ **C1 — wrap** | in the proxypass list |
-| `api/node` | `/api/nodes` | 1 | — | ✅ **C1 — wrap** | in the proxypass list |
+| `api/node` | `/api/nodes` | 1 | — | ⛔ **dropped 2026-07-30** | in the proxypass list, so C1 would wrap it — but the product does not need node inventory on the public surface. Additive later. |
 | `api/cron` | `/api/cron` | 10 | — | ⛔ **C2** | **already the `routines` category** — backend `/api/cron` → `CronRelayService` → engine. Explicitly commented out of the frontend proxypass list (`requestConfig.ts:195`) |
 | `api/file` | `/api/file` | 5 | — | ⛔ **C2** | backend calls `/api/file/{read,upload,list,remove,rmtree}` server-side; frontend never proxypasses it |
 | `api/skills` | `/api/skills` | 10 | — | ⛔ **C2** | backend `skills_pool` / `skill_center` drive layout, symlink and bindpath ops. Internal filesystem mechanics, no tenant-facing contract |
@@ -260,7 +254,7 @@ The same applies to the `engine=` override on `/api/sessions` and
 
 A cold, dormant or restarting device makes every engine call fail at the
 transport. Reuse `core/bot_management/readiness.py` (extracted in #494) rather
-than inventing a second policy, and settle **one** behavior for all 17
+than inventing a second policy, and settle **one** behavior for all 16
 endpoints: masked `409 device not ready` vs. auto-wake-then-retry. Whatever is
 chosen, `GET /openapi/v1/bots/{bot_id}/status` stays the endpoint that tells a
 caller *why*.
@@ -275,7 +269,7 @@ qualify — `SocketKind` (`chat` | `terminal`, ours), `ApprovalMode`
 category's, don't redefine).
 
 Equally important, these **stay strings** because the source is open and a
-fabricated enum would break on the first new value: `Node.status` / `.platform`,
+fabricated enum would break on the first new value:
 `Session.permission_mode` / `.runtime` / `.model`, the `process` and
 `transition` dicts in engine status, and **capability names** — the engine's
 `Capability` enum is closed but explicitly versioned as "adding new entries is
@@ -314,7 +308,6 @@ Two traps worth knowing before you write the enums:
 | sessions **create** | ✅ | ⚠️ limited — returns a real warning string |
 | approvals get/set | ✅ | ❌ 501, no `fallback` declared |
 | models | ✅ | ✅ |
-| nodes | ✅ | ❌ 501 |
 | engine status/capabilities/available | ✅ ungated | ✅ ungated |
 
 `claude_code`'s **limited** `SESSION_CREATE` is the live case that makes
@@ -354,7 +347,7 @@ on the first `isinstance` match in insertion order.
 
 ## Routing note
 
-The new groups sit at `/openapi/v1/bots/{bot_id}/{sessions,engine,models,approvals,nodes,connection}`
+The new groups sit at `/openapi/v1/bots/{bot_id}/{sessions,engine,models,approvals,connection}`
 — one segment **below** the `{bot_id}` wildcard, so they do not need the
 literal-subgroups-first ordering that `_SUBGROUPS` enforces in
 `openapi_v1/__init__.py:32-40`. They must still be registered so that
@@ -374,8 +367,10 @@ it (rule C2), but the two must never be merged by a later reader.
   reaches directly; leave backend-mediated engine calls to the backend contract
   that already fronts them; return connection info for sockets instead of
   relaying them; exclude aicoding.
-- **2026-07-30 — v1 surface fixed at 17 endpoints**: sessions 7, engine 3,
-  models 2, approvals 3, nodes 1, connection 1.
+- **2026-07-30 — v1 surface fixed at 16 endpoints**: sessions 7, engine 3,
+  models 2, approvals 3, connection 1. **Nodes dropped** — the frontend does
+  proxypass `/api/nodes`, so rule C1 would wrap it, but the product does not
+  need node inventory on the public surface. Additive later.
 - **2026-07-30 — `engine/switch` and `engine/restart` excluded**, to preserve
   #494's engine-immutability ruling and avoid two restart verbs.
 - **2026-07-30 — `session-favorites` and the `/api/openclaw` HTTP trio
@@ -392,7 +387,7 @@ it (rule C2), but the two must never be merged by a later reader.
    across all 17.
 3. **`model_id` with slashes** — `:path` converter or mandatory URL-encoding.
 4. **Pagination** — the engine takes `limit`/`offset`; the public `Page` shape
-   must map cleanly, including for `/api/models` and `/api/nodes`, which return
-   flat lists with no `total`.
+   must map cleanly, including for `/api/models`, which returns a flat list
+   with no `total`.
 5. **Timeouts** — `DeviceAdapterTransport.invoke()` takes a per-call timeout; the
    public surface needs one documented deadline per group.

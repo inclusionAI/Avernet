@@ -11,7 +11,7 @@ _[`README.zh-CN.md`](README.zh-CN.md) 的参考配套文档。README 是活的�
 ## Track C 为什么存在
 
 Track A 和 Track B 都假设公共 API 的数据在**后端库表**里。Bot 的**运行时**不在。
-会话、对话、审批、模型、节点清单 —— 这些都在 Bot 的设备上，由 **engine adapter**
+会话、对话、审批、模型 —— 这些都在 Bot 的设备上，由 **engine adapter**
 （`src/engine`，端口 `20003`）提供，而今天客户端是**直连**它们的：
 
 1. 前端调 `GET /api/v1/devices/bots/{bot_id}/connection`
@@ -58,7 +58,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 ---
 
-## 公共面 —— 17 个端点
+## 公共面 —— 16 个端点
 
 全部按 bot 收敛在 `/openapi/v1/bots/{bot_id}/…` 之下，全部返回
 `openapi_v1/contracts.py` 的 `Envelope[T]` / `Page[T]` 形状。
@@ -108,12 +108,6 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 | GET | `…/approvals/mode` | `POST /api/approvals/mode/get` | **差异：** 读操作用 `GET` + `session_key` query，不用 `POST` |
 | PUT | `…/approvals/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}` |
 | GET | `…/approvals/modes` | `GET /api/approvals/modes` | 静态枚举；注意这是 engine 侧唯一**没有**能力门禁的路由 |
-
-### nodes（1）—— engine `/api/nodes`
-
-| 方法 | 公共路径 | engine 路由 | 说明 |
-|---|---|---|---|
-| GET | `…/nodes` | `GET /api/nodes` | `status`、`platform`、分页 → `Envelope[Page[Node]]` |
 
 ### connection（1）—— 新增，engine 无对应物
 
@@ -165,7 +159,7 @@ socket 也是干净的。
 | `api/engine` | `/api/engine` | 5 | — | ✅ **C1 —— 5 取 3** | `switch`/`restart` 排除，见上文 |
 | `api/models` | `/api/models` | 2 | — | ✅ **C1 —— 包装** | 在 proxypass 列表中 |
 | `api/approvals` | `/api/approvals` | 3 | — | ✅ **C1 —— 包装** | 在 proxypass 列表中 |
-| `api/node` | `/api/nodes` | 1 | — | ✅ **C1 —— 包装** | 在 proxypass 列表中 |
+| `api/node` | `/api/nodes` | 1 | — | ⛔ **2026-07-30 移除** | 在 proxypass 列表中，按 C1 本应包装 —— 但产品并不需要在公共面上暴露节点清单。以后可增量加回。 |
 | `api/cron` | `/api/cron` | 10 | — | ⛔ **C2** | **已经是 `routines` 类别** —— 后端 `/api/cron` → `CronRelayService` → engine。在前端 proxypass 列表里被显式注释掉（`requestConfig.ts:195`） |
 | `api/file` | `/api/file` | 5 | — | ⛔ **C2** | 后端在服务端调用 `/api/file/{read,upload,list,remove,rmtree}`；前端从不 proxypass 它 |
 | `api/skills` | `/api/skills` | 10 | — | ⛔ **C2** | 后端 `skills_pool` / `skill_center` 驱动 layout、symlink、bindpath；属内部文件系统机制，没有面向租户的契约 |
@@ -242,7 +236,7 @@ engine 的每个 handler 都会调用 `check_capability()`
 
 冷启动、休眠或正在重启的设备会让每一次 engine 调用在传输层失败。请复用
 `core/bot_management/readiness.py`（#494 抽出的），而不是另造一套策略，并为全部
-17 个端点定下**同一种**行为：掩码 `409 device not ready`，还是自动唤醒后重试。
+16 个端点定下**同一种**行为：掩码 `409 device not ready`，还是自动唤醒后重试。
 无论选哪种，`GET /openapi/v1/bots/{bot_id}/status` 仍然是告诉调用方*原因*的端点。
 
 ### 5. 封闭值集合用枚举，开放的保持字符串
@@ -254,7 +248,7 @@ engine 的每个 handler 都会调用 `check_capability()`
 `EngineName`（复用 bots 类别已有的，不要另立一份）。
 
 同样重要的是，下面这些**保持字符串**，因为来源本身是开放的，硬造枚举会在出现第
-一个新值时炸掉：`Node.status` / `.platform`、`Session.permission_mode` /
+一个新值时炸掉：`Session.permission_mode` /
 `.runtime` / `.model`、engine status 里的 `process` 与 `transition` 字典，以及
 **能力名**（engine 的 `Capability` 枚举虽然封闭，但明确声明"新增条目是安全的"，
 因此在*响应*字段上用严格枚举，会把一次本应向后兼容的 engine 发布变成对外 500）。
@@ -287,7 +281,6 @@ engine 的每个 handler 都会调用 `check_capability()`
 | sessions **create** | ✅ | ⚠️ limited —— 会返回真实的 warning 文案 |
 | approvals get/set | ✅ | ❌ 501，且未声明 `fallback` |
 | models | ✅ | ✅ |
-| nodes | ✅ | ❌ 501 |
 | engine status/capabilities/available | ✅ 无门禁 | ✅ 无门禁 |
 
 `claude_code` 的 **limited** `SESSION_CREATE` 正是让 `Envelope.warning` 从"理论
@@ -325,7 +318,7 @@ Track B 的坑：**基类放最后** —— `ENVELOPE_ERRORS` 按插入顺序第
 
 ## 路由注意事项
 
-新组位于 `/openapi/v1/bots/{bot_id}/{sessions,engine,models,approvals,nodes,connection}`
+新组位于 `/openapi/v1/bots/{bot_id}/{sessions,engine,models,approvals,connection}`
 —— 比 `{bot_id}` 通配符**深一段**，因此不需要 `openapi_v1/__init__.py:32-40` 中
 `_SUBGROUPS` 强制的"字面子组优先"顺序。但仍必须保证注册后
 `/openapi/v1/bots/mcp`（字面市场组）继续先于 `/openapi/v1/bots/{bot_id}` 命中。
@@ -341,8 +334,10 @@ Track B 的坑：**基类放最后** —— `ENVELOPE_ERRORS` 按插入顺序第
 - **2026-07-30 —— 采纳范围规则（C1–C4）。** 包装前端直连的 engine HTTP；经由后端
   的 engine 调用交给已经在其之上的后端契约；socket 返回连接信息而不是转发；排除
   aicoding。
-- **2026-07-30 —— v1 面定为 17 个端点**：sessions 7、engine 3、models 2、
-  approvals 3、nodes 1、connection 1。
+- **2026-07-30 —— v1 面定为 16 个端点**：sessions 7、engine 3、models 2、
+  approvals 3、connection 1。**移除 nodes** —— 前端确实 proxypass 了
+  `/api/nodes`，按规则 C1 本应包装，但产品并不需要在公共面上暴露节点清单。
+  以后可增量加回。
 - **2026-07-30 —— 排除 `engine/switch` 与 `engine/restart`**，以保住 #494 的引擎
   不可变裁定，并避免出现两个重启动词。
 - **2026-07-30 —— `session-favorites` 与 `/api/openclaw` HTTP 三件套
@@ -355,9 +350,9 @@ Track B 的坑：**基类放最后** —— `ENVELOPE_ERRORS` 按插入顺序第
 
 1. **`Envelope` 上的 `warning`** —— 增加可选字段（推荐）、走响应头，还是丢弃该
    信号？涉及共享的 Track B 契约。
-2. **就绪行为** —— 掩码 `409` 还是自动唤醒后重试，17 个端点统一。
+2. **就绪行为** —— 掩码 `409` 还是自动唤醒后重试，16 个端点统一。
 3. **带斜杠的 `model_id`** —— `:path` 转换器还是强制 URL 编码。
 4. **分页** —— engine 收 `limit`/`offset`；公共 `Page` 形状必须干净映射，包括
-   `/api/models` 与 `/api/nodes` 这两个返回扁平列表、没有 `total` 的路由。
+   `/api/models` 这个返回扁平列表、没有 `total` 的路由。
 5. **超时** —— `DeviceAdapterTransport.invoke()` 支持逐调用超时；公共面需要为每组
    定一个写进文档的截止时间。

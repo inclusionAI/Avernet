@@ -51,7 +51,7 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
   隔离。**七个里已完成一个：bots（PR #494）。**
 - **Track C —— Engine（运行时）面。** _2026-07-30 新增。_ 把 engine adapter 面向
   客户端的 HTTP 包装到 `/openapi/v1/bots/{bot_id}/…` 之下，并用一个净化过的
-  socket 信息端点取代 `get_device_connection` 的移交。**17 个端点，尚未开始。**
+  socket 信息端点取代 `get_device_connection` 的移交。**16 个端点，尚未开始。**
 
 > ⚠️ **唯一需要避免的误解：** "隔离 Stage N 已完成"**并不**意味着任何 API 端点被实现了。
 > Track A 的每个阶段都只是底层管道（可复用机制 + 该类别的记录）。API 端点落在
@@ -130,7 +130,7 @@ _按优先级分层排序。_
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(桩)* | ⬜ TODO | Track A skills（共担） |
 
-### Track C —— Engine（运行时）面（6 组里已完成 0 组）
+### Track C —— Engine（运行时）面（5 组里已完成 0 组）
 _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶段，没有 DDL。
 完整裁定与逐端点映射见
 **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**。_
@@ -142,7 +142,6 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 | connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` *(未创建)* | ⬜ TODO |
 | approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` *(未创建)* | ⬜ TODO |
 | models | 2 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/models/` *(未创建)* | ⬜ TODO |
-| nodes | 1 | ⬜ 未分配 | P3 | `openapi_v1/engine_runtime/nodes/` *(未创建)* | ⬜ TODO |
 
 > **范围规则（为什么只有这些）。** 只包装前端经 proxypass **直连**的 engine HTTP
 > （`src/frontend/src/requestConfig.ts:189-205`）。前端**经由后端**触达的 engine
@@ -516,7 +515,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 | GET | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | 读取单个身份文件 | `Envelope[IdentityFile]` |
 | PUT | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | 覆写单个身份文件（`content`） | `Envelope[IdentityFileRef]` |
 
-### ⬜ 未分配 · Track C —— engine 运行时（17 个端点）
+### ⬜ 未分配 · Track C —— engine 运行时（16 个端点）
 这不是一个 Track B 类别 —— 它们包装的是 Bot 设备上的 **engine adapter**，
 而不是某个后端服务。逐端点清单、每个端点对应的 engine 路由，以及那约 72 条
 *不*包装的 engine 路由的裁定，都在
@@ -528,7 +527,6 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 | engine | 3 | `…/engine/{status,capabilities,available}` |
 | models | 2 | `…/models`、`…/models/{model_id}` |
 | approvals | 3 | `…/approvals/mode`（GET/PUT）、`…/approvals/modes` |
-| nodes | 1 | `…/nodes` |
 | connection | 1 | `…/connection` —— WS URL + headers，取代 `get_device_connection` |
 
 ---
@@ -548,9 +546,9 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 7. **跨租户的外部身份问题已定案（[#556](https://github.com/inclusionAI/Avernet/issues/556)）** —— Passport、授权关系与 BCN 都带上
    租户维度，从而可以在公共路径上重新打开 BCN 同步。—— _⬜（2026-07-29 新增；它是开启
    多租户的前置闸口）。_
-8. **Track C：** 六个 engine 运行时组（17 个端点）均已实现、按 owner 收敛且能力感知，
+8. **Track C：** 五个 engine 运行时组（16 个端点）均已实现、按 owner 收敛且能力感知，
    并且 `…/connection` 返回 socket URL，使任何外部调用方都看不到 proxypass target
-   或裸设备 token。—— _⬜ 6 个里完成 0 个（2026-07-30 新增）。_
+   或裸设备 token。—— _⬜ 5 个里完成 0 个（2026-07-30 新增）。_
 
 ---
 
@@ -673,10 +671,11 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   engine —— 一个从未被设计成公共契约的东西 —— 成为集成方直接编程的对象。Track C
   改为把 engine 面向客户端的 HTTP 包装到 `/openapi/v1/bots/{bot_id}/…` 之下。
   有五点值得知道：
-  1. **是 17 个端点，不是 89 个。** engine 在 25 个 router 中提供 89 条 HTTP 路由
+  1. **是 16 个端点，不是 89 个。** engine 在 25 个 router 中提供 89 条 HTTP 路由
      + 6 个 WS。范围规则只包装前端*直连*的那些（sessions 7、engine 3、models 2、
-     approvals 3、nodes 1），外加一个新增的 `…/connection`。经由后端的 engine
-     路由仍归已经在其之上的后端契约。
+     approvals 3），外加一个新增的 `…/connection`。经由后端的 engine 路由仍归
+     已经在其之上的后端契约；**nodes 已移除** —— 前端确实 proxypass 了它，按规则
+     本应包装，但产品并不需要在公共面上暴露节点清单。
   2. **`/api/cron` 早就是这个形状了。** 后端 `/api/cron` → `CronRelayService` →
      `DeviceAdapterTransport` → engine 一直在生产上跑，而 `routines` 的桩已经
      import 了 `CronRelayServiceProtocol`。Track C 是把既有形状一般化，不是发明

@@ -159,27 +159,31 @@ All paths are relative to `src/backend/`. Source package is
         `openapi_v1/routines/router.py:126-131`, with a documented cap on the
         engine-side request.
   - [ ] `extra="forbid"`; `user_id`, `engine`, `agent_id` rejected → `422`.
+  - [ ] **Shared-device disclosure settled before this ships.** The engine drops
+        `user_id` and returns every session on the device
+        (`plugins/openclaw/_session.py:125-132`), so on a bot whose device serves
+        multiple callers the owner would see their sessions. Either gate the
+        group on `bot_type == "personal"` or confirm the bot type cannot be
+        shared. See the plan's *Isolation* §2 and the matching risk.
   - [ ] Success + each mapped error covered, using the in-memory transport.
 - **Depends on:** Tasks 4, 5, 6
 
-## Task 8: Engine + models + nodes groups — 6 endpoints
-- **Goal:** Wrap the three read-only groups that share one shape.
+## Task 8: Engine + models groups — 5 endpoints
+- **Goal:** Wrap the two read-only groups that share one shape.
 - **Files:**
   - `…/adapters/http/openapi_v1/engine_runtime/engine/{__init__,router,schemas}.py` (new)
   - `…/adapters/http/openapi_v1/engine_runtime/models/{__init__,router,schemas}.py` (new)
-  - `…/adapters/http/openapi_v1/engine_runtime/nodes/{__init__,router,schemas}.py` (new)
-  - `tests/community/adapters/http/openapi_v1/engine_runtime/test_engine_models_nodes.py` (new)
+  - `tests/community/adapters/http/openapi_v1/engine_runtime/test_engine_models.py` (new)
 - **Done when:**
   - [ ] `…/engine/{status,capabilities,available}` served; `available` maps to
         the engine's `/api/engine/list`. **`switch` and `restart` are not
         exposed** (plan Out of Scope).
   - [ ] `…/models` and `…/models/{model_id:path}` served, the `:path` converter
         preserving ids containing `/`.
-  - [ ] `…/nodes` served; `status` and `platform` stay **strings**, not enums.
   - [ ] Capability names in the capabilities payload are `list[str]`, with the
         known vocabulary in the field description — not a validating enum.
-  - [ ] `501` covered for `nodes` on an engine that does not declare
-        `NODE_LIST` (claude_code).
+  - [ ] Engine-status `process` and `transition` stay **open dicts**, not
+        modelled — they are assembled ad hoc at `manager.py:743-748`.
 - **Depends on:** Tasks 4, 5, 6
 
 ## Task 9: Approvals group — 3 endpoints
@@ -235,30 +239,32 @@ All paths are relative to `src/backend/`. Source package is
   - `…/adapters/http/openapi_v1/__init__.py`
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_routing.py` (new)
 - **Done when:**
-  - [ ] All six routers added to `_SUBGROUPS` (`openapi_v1/__init__.py:33`),
+  - [ ] All five routers added to `_SUBGROUPS` (`openapi_v1/__init__.py:33`),
         above `bots_router`, so `/openapi/v1/bots/mcp` still resolves ahead of
         `/openapi/v1/bots/{bot_id}`.
-  - [ ] A test walks **every** route on the six routers and asserts the path
+  - [ ] A test walks **every** route on the five routers and asserts the path
         starts with the literal `/openapi/v1/bots/` — the gateway-routing
         invariant; a route mounted elsewhere is unreachable in production.
-  - [ ] A test asserts the total new route count is 17.
+  - [ ] A test asserts the total new route count is 16.
   - [ ] A test generates the OpenAPI document and asserts the enums appear as
         `type: string` with the expected `enum` lists — catching the case where
         a model annotates an enum but Pydantic emits a bare string.
 - **Depends on:** Tasks 7, 8, 9, 10
 
-## Task 12: Cross-tenant and owner isolation across all 17 routes
+## Task 12: Cross-tenant and owner isolation across all 16 routes
 - **Goal:** Prove the isolation claim on every route, not a sample.
 - **Files:**
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_tenant_isolation.py` (new)
 - **Done when:**
-  - [ ] Parametrised over **all 17 routes**: a `bot_id` owned by another caller
+  - [ ] Parametrised over **all 16 routes**: a `bot_id` owned by another caller
         returns a masked `404`, byte-identical to a non-existent bot.
   - [ ] Same for a cross-tenant `bot_id`, against the **real** Track A guard —
         mirror the shape of
         `tests/community/adapters/http/openapi_v1/test_bots_tenant_isolation.py`.
   - [ ] Asserts the transport was **never invoked** for a bot the caller does
-        not own — not merely that the status was `404`.
+        not own — not merely that the status was `404`. The Track A guard cannot
+        see a device-side read, so a `404` alone does not prove the forward was
+        skipped.
 - **Depends on:** Task 11
 
 ## Task 13: Tests & Verification
@@ -286,7 +292,7 @@ All paths are relative to `src/backend/`. Source package is
   - Theme: enums, schema-documentation rules, and the engine→envelope error
     mapping. Reviewable independently of any handler.
 - **Group C — Endpoint groups:** Tasks 7, 8, 9, 10
-  - Theme: the 17 handlers. Each task is one coherent slice and can be reviewed
+  - Theme: the 16 handlers. Each task is one coherent slice and can be reviewed
     on its own diff.
 - **Group D — Wiring and isolation:** Tasks 11, 12
   - Theme: mount the surface, pin the `/bots` path invariant, and prove
