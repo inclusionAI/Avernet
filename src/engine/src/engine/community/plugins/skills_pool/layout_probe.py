@@ -707,6 +707,17 @@ def inspect_runtime_layout(
                 reason="active_marker_contract_mismatch",
                 preparation_id=preparation_id,
             )
+        active_repo_corpus = layout.active_root / "skills-repo"
+        if engine == "aicoding" and (
+            active_repo_corpus.exists() or active_repo_corpus.is_symlink()
+        ):
+            return _invalid(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="active_repo_corpus_present",
+                preparation_id=preparation_id,
+            )
         if active_marker["activation_state"] == "active":
             retired_bridges = [("local", layout.local_bridge)]
             if engine in {"openclaw", "claude_code"} and not (

@@ -16,6 +16,10 @@ from engine.community.plugins.aicoding.layout_pool import (
     rollback_aicoding_pool,
     verify_aicoding_pool_mappings,
 )
+from engine.community.plugins.skills_pool.layout_activation import (
+    ActiveRepoRetirementError,
+    mapping_sources_use_pool,
+)
 
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
 
@@ -126,6 +130,40 @@ def test_aicoding_probe_uses_own_pool_and_stable_bridges(tmp_path: Path) -> None
     assert invalid.evidence["reason"] == "stable_repo_bridge_invalid"
 
 
+def test_aicoding_stable_repo_authority_follows_active_marker(
+    tmp_path: Path,
+) -> None:
+    home, _, _, repo_bridge, _, _ = _prepared_home(tmp_path)
+    source = repo_bridge / "business" / "shared"
+
+    assert not mapping_sources_use_pool(
+        engine="aicoding",
+        sources=[source],
+        home=home,
+    )
+
+    active_marker = (
+        home / ".aicoding" / "workspace" / "skills-pool" / ".pool-active"
+    )
+    active_marker.write_text(
+        json.dumps(
+            {
+                "engine": "aicoding",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "preparation_id": PREPARATION_ID,
+                "migration_generation": "generation-1",
+                "activation_state": "active",
+            }
+        )
+    )
+
+    assert mapping_sources_use_pool(
+        engine="aicoding",
+        sources=[source],
+        home=home,
+    )
+
+
 def test_aicoding_activation_switches_local_and_keeps_repo_namespace(
     tmp_path: Path,
 ) -> None:
@@ -172,6 +210,182 @@ def test_aicoding_activation_switches_local_and_keeps_repo_namespace(
     )
     assert ready.status is RuntimeLayoutInspectionStatus.READY
     assert ready.evidence["checks"]["stable_repo_bridge_valid"] is True
+
+
+def test_aicoding_activation_retires_full_corpus_from_active_root(
+    tmp_path: Path,
+) -> None:
+    (
+        home,
+        _,
+        local_bridge,
+        _,
+        pool_local,
+        pool_repo,
+    ) = _prepared_home(tmp_path)
+    active_repo = local_bridge.parent / "skills-repo"
+    (active_repo / "business" / "unactivated").mkdir(parents=True)
+    calls: list[tuple[str, str]] = []
+
+    def retire_active_repo(generation: str, preparation_id: str):
+        calls.append((generation, preparation_id))
+        marker = json.loads(
+            (
+                home / ".aicoding" / "workspace" / "skills-pool" / ".pool-active"
+            ).read_text()
+        )
+        assert marker["activation_state"] == "finalizing"
+        (active_repo / "business" / "unactivated").rmdir()
+        (active_repo / "business").rmdir()
+        active_repo.rmdir()
+        return {"status": "retired"}
+
+    result = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            SkillMapping(
+                source=str(pool_local / "handmade"),
+                target=str(local_bridge.parent / "handmade"),
+            )
+        ],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        retire_active_repo=retire_active_repo,
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert calls == [("generation-1", PREPARATION_ID)]
+    assert not active_repo.exists()
+
+
+def test_aicoding_activation_without_retirement_capability_stays_finalizing(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, _, _, pool_repo = _prepared_home(tmp_path)
+    active_repo = local_bridge.parent / "skills-repo"
+    active_repo.mkdir()
+
+    result = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert result.evidence["reason"] == "active_repo_retirement_required"
+    marker = json.loads(
+        (home / ".aicoding" / "workspace" / "skills-pool" / ".pool-active").read_text()
+    )
+    assert marker["activation_state"] == "finalizing"
+
+
+def test_aicoding_retirement_failure_stays_retryable_finalizing(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, _, _, pool_repo = _prepared_home(tmp_path)
+    active_repo = local_bridge.parent / "skills-repo"
+    active_repo.mkdir()
+
+    def reject_retirement(_generation: str, _preparation_id: str):
+        raise ActiveRepoRetirementError(
+            "active_repo_unmount_failed",
+            error_type="BusyMount",
+        )
+
+    result = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        retire_active_repo=reject_retirement,
+    )
+
+    assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert result.evidence["reason"] == "active_repo_retirement_failed"
+    assert result.evidence["retirement_reason"] == "active_repo_unmount_failed"
+    assert result.evidence["error_type"] == "BusyMount"
+    marker = json.loads(
+        (home / ".aicoding" / "workspace" / "skills-pool" / ".pool-active").read_text()
+    )
+    assert marker["activation_state"] == "finalizing"
+
+
+def test_aicoding_finalizing_retry_retires_active_repo_and_commits(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, _, _, pool_repo = _prepared_home(tmp_path)
+    active_repo = local_bridge.parent / "skills-repo"
+    active_repo.mkdir()
+
+    def fail_once(_generation: str, _preparation_id: str):
+        raise ActiveRepoRetirementError("active_repo_unmount_failed")
+
+    first = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        retire_active_repo=fail_once,
+    )
+    assert first.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+
+    calls = 0
+
+    def retire_on_retry(_generation: str, _preparation_id: str):
+        nonlocal calls
+        calls += 1
+        active_repo.rmdir()
+        return {"status": "retired"}
+
+    retry = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        retire_active_repo=retire_on_retry,
+    )
+
+    assert retry.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert calls == 1
+    marker = json.loads(
+        (home / ".aicoding" / "workspace" / "skills-pool" / ".pool-active").read_text()
+    )
+    assert marker["activation_state"] == "active"
+
+
+def test_aicoding_active_probe_rejects_full_corpus_in_active_root(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, _, _, pool_repo = _prepared_home(tmp_path)
+    activated = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+    (local_bridge.parent / "skills-repo").mkdir()
+
+    inspection = inspect_aicoding_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert inspection.status is RuntimeLayoutInspectionStatus.INVALID
+    assert inspection.evidence["reason"] == "active_repo_corpus_present"
 
 
 def test_aicoding_rollback_rebuilds_legacy_from_current_pool(
