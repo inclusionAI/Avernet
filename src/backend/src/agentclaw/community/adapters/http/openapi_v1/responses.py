@@ -56,6 +56,13 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.mcp.errors import (
+    McpConfigValueError,
+    McpHeadersInvalidError,
+    McpMarketUnavailableError,
+    McpServerNotFoundError,
+    McpSyncFailedError,
+)
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
@@ -158,7 +165,22 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
     InvalidIdentityFileTypeError: (400, "Invalid file type"),
-    # Base class LAST: every mapping above is a subclass of BotServiceError, and
+    # MCP category (Track B). These share no base with BotServiceError, so their
+    # order among themselves is free — but they must sit above the BotServiceError
+    # fallback like everything else. Fixed public messages: the header-validation
+    # and value errors carry internal-language text (the validator answers in
+    # Chinese), which is exactly what the fixed-message rule keeps from leaking.
+    # 404 message is byte-identical to the bots not-found so existence can't be
+    # probed. The two upstream failures are 502 (downstream problem), matching how
+    # PassportError / ConnInfoBuildError are mapped above.
+    McpServerNotFoundError: (404, "Not found"),
+    McpHeadersInvalidError: (400, "Invalid MCP headers"),
+    McpConfigValueError: (400, "Invalid MCP configuration"),
+    McpSyncFailedError: (502, "Device sync failed"),
+    McpMarketUnavailableError: (502, "MCP service error"),
+    # Base class LAST: the bot mappings above subclass BotServiceError (the
+    # resources, identity, and MCP entries are separate hierarchies that never
+    # match a bot error), and
     # the lookup returns on the first isinstance match in insertion order, so the
     # specific mappings still win. Services raise the bare base for device,
     # persistence, and downstream failures — without this the decorator would
