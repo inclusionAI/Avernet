@@ -1,6 +1,6 @@
 """Integration tests for the catch-all forwarding entrypoint.
 
-Wires the real streaming ``BareForwarder`` against a stub upstream ASGI app, a
+Wires the real streaming ``HttpxForwarder`` against a stub upstream ASGI app, a
 ``DomainMap``, and a fake authenticator, then drives it through ``TestClient``.
 """
 
@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
 from gateway.community.bootstrap._principal_signer import build_principal_signer
 from gateway.community.core.forwarding import DomainMap
-from gateway.community.plugins.forwarder.bare import BareForwarder
+from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.spi.auth import AuthError
 
 Scope = dict[str, Any]
@@ -99,9 +99,10 @@ def _build() -> tuple[FastAPI, _FakeAuth]:
         {
             "domains": {"bots": {"server": "up"}},
             "servers": {"up": {"base_url": "http://upstream"}},
-        }
+        },
+        variables={},
     )
-    app.state.forwarder = BareForwarder(client=client)
+    app.state.forwarder = HttpxForwarder(client=client)
     auth = _FakeAuth()
     app.state.authenticator = auth
     app.state.principal_signer = build_principal_signer()
@@ -195,9 +196,10 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
         {
             "domains": {"bots": {"server": "up"}},
             "servers": {"up": {"base_url": "http://upstream"}},
-        }
+        },
+        variables={},
     )
-    app.state.forwarder = BareForwarder(client=client)
+    app.state.forwarder = HttpxForwarder(client=client)
     app.state.authenticator = authenticator
     app.state.principal_signer = build_principal_signer()
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
@@ -227,9 +229,10 @@ def test_real_authenticator_rejects_missing_required_identity() -> None:
         {
             "domains": {"bots": {"server": "up"}},
             "servers": {"up": {"base_url": "http://upstream"}},
-        }
+        },
+        variables={},
     )
-    app.state.forwarder = BareForwarder(client=client)
+    app.state.forwarder = HttpxForwarder(client=client)
     app.state.authenticator = authenticator
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
 

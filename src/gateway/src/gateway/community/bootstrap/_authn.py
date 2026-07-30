@@ -24,7 +24,6 @@ from gateway.community.core.access_key import AccessKeyRepository, AccessKeyRow
 from gateway.community.core.app import AppRepository, AppRow
 from gateway.community.core.authn import Authenticator, IdentityChain, RouteSecurity
 from gateway.community.core.bot import BotRepository, BotRow
-from gateway.community.core.tenant import TenantRow
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
 from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
@@ -89,12 +88,10 @@ def _seed_authn(db: DataSourcePlugin) -> None:
                     env="dev",
                     created_by="owner-1",
                     agent_code="agent-1",
-                    app_id=1,
+                    app_id="app-1",
                     tenant="t",
                 )
             )
-        if session.scalar(select(TenantRow).where(TenantRow.name == "t")) is None:
-            session.add(TenantRow(name="t", description="demo", owner="org-1"))
         if (
             session.scalar(select(AccessKeyRow).where(AccessKeyRow.token == "ak-token"))
             is None
@@ -111,6 +108,7 @@ def _seed_authn(db: DataSourcePlugin) -> None:
             session.add(
                 AppRow(
                     token="app-key",
+                    app_id="app-1",
                     app_name="Demo App",
                     owners="org-1",
                     app_type="assistant",

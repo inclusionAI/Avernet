@@ -80,15 +80,15 @@ async def test_forward_signs_principal_with_server_audience(
     assert resp.status_code == 200
     assert forwarder.captured is not None
     token = forwarder.captured.headers[_PRINCIPAL_HEADER]
-    # `bots` domain -> server "agentclaw" (configs/upstreams.yaml).
+    # `bots` domain -> server "backend" (configs/upstreams.yaml).
     decoded = jwt.decode(
         token,
         _DEV_FALLBACK_KEY,
         algorithms=["HS256"],
-        audience="agentclaw",
+        audience="backend",
         issuer="gateway",
     )
-    assert decoded["aud"] == "agentclaw"
+    assert decoded["aud"] == "backend"
     assert len(decoded["principals"]) == 1
     assert decoded["principals"][0]["type"] == "app"
     assert decoded["principals"][0]["tenant"] == "t"
