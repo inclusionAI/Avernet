@@ -1170,6 +1170,83 @@ async def test_post_cutover_sync_pending_retries_finalization_before_mappings() 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("logical_engine", ["aicoding", "claude_code"])
+async def test_aicoding_finalizing_repo_retirement_invalid_probe_can_resume(
+    logical_engine: str,
+) -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            last_failure_code="POST_CUTOVER_SYNC_PENDING",
+        )
+    )
+    runtime = FakeRuntime(engine=logical_engine)
+    runtime.probe_result = RuntimeLayoutProbeResult(
+        status=RuntimeLayoutProbeStatus.INVALID,
+        engine=logical_engine,
+        layout_contract_version="skills-pool-p3-v1",
+        preparation_id=PREPARATION_ID,
+        evidence={
+            "reason": "active_repo_corpus_present",
+            "implementation_engine": "aicoding",
+            "physical_layout_engine": "aicoding",
+        },
+    )
+    runtime.cutover_result = PoolCutoverResult(
+        committed=True,
+        status=PoolCutoverStatus.ALREADY_COMMITTED,
+        evidence={"active_repo_retired": True},
+    )
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine=logical_engine,
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.events == ["probe", "cutover", "mapping", "verify"]
+    assert layouts.events == ["evidence", "database"]
+
+
+@pytest.mark.asyncio
+async def test_repo_retirement_invalid_probe_without_physical_identity_stops() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            phase=SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime(engine="aicoding")
+    runtime.probe_result = RuntimeLayoutProbeResult(
+        status=RuntimeLayoutProbeStatus.INVALID,
+        engine="aicoding",
+        layout_contract_version="skills-pool-p3-v1",
+        preparation_id=PREPARATION_ID,
+        evidence={"reason": "active_repo_corpus_present"},
+    )
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine="aicoding",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="worker-1",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert runtime.events == ["probe"]
+    assert layouts.events == ["post_failure"]
+
+
+@pytest.mark.asyncio
 async def test_finalizing_without_persisted_quarantine_uses_runtime_identity() -> None:
     quarantine = (
         "/home/admin/.aicoding/workspace/skills-pool/"
