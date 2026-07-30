@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from typing import Any
 
 import httpx
@@ -103,6 +104,29 @@ def _client_error_status(exc: BaseException) -> int | None:
     if isinstance(status, int) and 400 <= status < 500:
         return status
     return None
+
+
+def _exc_detail(exc: BaseException) -> str:
+    """Format ``exc`` with its underlying cause for diagnostics.
+
+    The deployed ``general`` client runs under a send-hook wrapper (outside this
+    repo) that re-wraps the real httpx transport error into an opaque
+    ``HttpxCallingException('Error in httpx send hook')``. The wrapped error
+    survives on ``__cause__`` / ``__context__``; the bare ``%r`` of the wrapper
+    hides whether the underlying failure was a ``ReadError``,
+    ``RemoteProtocolError``, ``ConnectTimeout``, etc. — so we surface the cause
+    chain (and any attached request URL) here to make retry failures actionable.
+    """
+    parts: list[str] = [f"{type(exc).__name__}: {exc}"]
+    cause = exc.__cause__ or exc.__context__
+    if cause is not None and cause is not exc:
+        parts.append(f"caused by {type(cause).__name__}: {cause}")
+    req = getattr(exc, "request", None)
+    if req is not None:
+        url = getattr(req, "url", None)
+        if url is not None:
+            parts.append(f"request={url}")
+    return " | ".join(parts)
 
 
 class LLM:
@@ -244,6 +268,7 @@ class LLM:
         Exhaustion returns the ``[llm disabled]`` sentinel so callers (parser /
         PatchPlanner) treat it uniformly as "LLM unavailable"."""
         budget = max_tokens
+        started = time.monotonic()
         for attempt in range(_MAX_RETRIES):
             body: dict[str, Any] = {
                 "model": self._model,
@@ -269,14 +294,16 @@ class LLM:
                     budget = _TIMEOUT_RETRY_MAX_TOKENS
                     delay = _retry_delay(attempt)
                     logger.warning(
-                        "[LLM] %s (attempt %d/%d), shrinking max_tokens=%d, retrying in %.1fs",
+                        "[LLM] %s (attempt %d/%d), shrinking max_tokens=%d, retrying in %.1fs: %s",
                         type(e).__name__, attempt + 1, _MAX_RETRIES, budget, delay,
+                        _exc_detail(e),
                     )
                     await asyncio.sleep(delay)
                     continue
                 logger.error(
-                    "[LLM] %s after timeout retries (max_tokens=%d): %r",
-                    type(e).__name__, budget, e,
+                    "[LLM] %s after timeout retries (max_tokens=%d, elapsed %.1fs, base_url=%s): %s",
+                    type(e).__name__, budget, time.monotonic() - started,
+                    self._base_url, _exc_detail(e),
                 )
                 break
             except Exception as e:
@@ -297,14 +324,16 @@ class LLM:
                     budget = _TIMEOUT_RETRY_MAX_TOKENS
                     delay = _retry_delay(attempt)
                     logger.warning(
-                        "[LLM] %s (attempt %d/%d), shrinking max_tokens=%d, retrying in %.1fs: %r",
-                        type(e).__name__, attempt + 1, _MAX_RETRIES, budget, delay, e,
+                        "[LLM] %s (attempt %d/%d), shrinking max_tokens=%d, retrying in %.1fs: %s",
+                        type(e).__name__, attempt + 1, _MAX_RETRIES, budget, delay,
+                        _exc_detail(e),
                     )
                     await asyncio.sleep(delay)
                     continue
                 logger.error(
-                    "[LLM] %s after timeout retries (max_tokens=%d): %r",
-                    type(e).__name__, budget, e,
+                    "[LLM] %s after timeout retries (max_tokens=%d, elapsed %.1fs, base_url=%s): %s",
+                    type(e).__name__, budget, time.monotonic() - started,
+                    self._base_url, _exc_detail(e),
                 )
                 break
         return "[llm disabled]"
@@ -317,13 +346,24 @@ class LLM:
         (potentially long) call does not block. The ``general`` client has an
         empty base_url, so we pass the full absolute URL."""
         url = f"{self._base_url}/v1/chat/completions"
-        resp = await asyncio.to_thread(
-            self._http.post,
-            url,
-            json=body,
-            headers=headers,
-            timeout=self._timeout_ms / 1000.0,
-        )
+        try:
+            resp = await asyncio.to_thread(
+                self._http.post,
+                url,
+                json=body,
+                headers=headers,
+                timeout=self._timeout_ms / 1000.0,
+            )
+        except Exception as e:
+            # The send-hook wrapper raises an opaque exception whose real cause
+            # (the underlying httpx transport error) is on __cause__/__context__.
+            # Log the full chain + URL here so the retry layer's type-only
+            # warning is paired with the actionable underlying failure.
+            logger.warning(
+                "[LLM] POST %s raised (max_tokens=%d): %s",
+                url, body.get("max_tokens"), _exc_detail(e),
+            )
+            raise
         resp.raise_for_status()
         data = resp.json()
 
