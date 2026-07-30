@@ -62,8 +62,29 @@ def _stack() -> tuple[TaskService, TaskScheduler]:
         _Discover([BotCandidate(bot_id="bot-1", fit_score=0.95)]),
         _Driver(),
         DecomposerService(repo),
+        _NoopExecution(),
     )
     return svc, sched
+
+
+class _NoopExecution:
+    """6.5: ExecutionPort double for the e2e stack — records nothing, the e2e
+    cases drive completion via explicit ``on_event`` 回投 (bot self-report)."""
+
+    def dispatch_single_bot(self, task_id, node_id, bot_id):
+        return DispatchResult(node_id=node_id, executor_id=bot_id, run_mode=RunMode.SINGLE_BOT)
+
+    def coop_group(self, task_id, node_id, bot_ids):
+        return DispatchResult(node_id=node_id, executor_id="", run_mode=RunMode.COOP_GROUP)
+
+    def redispatch_node(self, task_id, node_id, bot_id):
+        return DispatchResult(node_id=node_id, executor_id=bot_id, run_mode=RunMode.SINGLE_BOT)
+
+    def probe(self, task_id, node_id, bot_id):
+        return DispatchResult(node_id=node_id, executor_id=bot_id, run_mode=RunMode.SINGLE_BOT)
+
+    def bbs(self, task_id, node_id, reason=""):
+        return DispatchResult(node_id=node_id, executor_id="", run_mode=RunMode.BBS)
 
 
 def _planned(svc: TaskService, nodes=("n1",)) -> str:

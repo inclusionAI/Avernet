@@ -31,6 +31,7 @@ from injector import inject
 from agentclaw.community.core.task.protocols import (
     BotDiscoverPort,
     DecomposerPort,
+    ExecutionPort,
     RouteRecommendation,
     TaskDriverPort,
     TaskService,
@@ -227,11 +228,13 @@ class TaskScheduler:
         discover: BotDiscoverPort,
         driver: TaskDriverPort,
         decomposer: DecomposerPort,
+        execution: ExecutionPort,
     ) -> None:
         self._svc = task_service
         self._discover = discover
         self._driver = driver
         self._decomposer = decomposer
+        self._execution = execution
         self._no_progress = 0
         self._recompose_count = 0
 
@@ -280,6 +283,18 @@ class TaskScheduler:
                 dispatched = self._dispatch(task, n, recommendation, rc)
                 if dispatched:
                     progressed = True
+            # Reload so the watchdog + settle phases see RUNNING from claim_node
+            # (claim_node reloads+writes internally; the in-memory task is stale).
+            task = self._svc.get(task_id)
+            if task is not None and task.execution_graph is not None:
+                # 6.5 watchdog:探活/重驱 hung RUNNING nodes (bot may hang on
+                # instruction-following / LLM-service instability). Mutates
+                # node.properties + may FAIL a node; saves the task. Returns
+                # whether it acted (PROBE/REDRIVE/ESCALATE) — that counts as
+                # progress so the termination guard doesn't cut a hung node's
+                # probe/redispatch cycle short.
+                if self._watchdog(task):
+                    progressed = True
 
         settled = _all_settled(task)
         if settled:
@@ -311,28 +326,97 @@ class TaskScheduler:
         recommendation: RouteRecommendation,
         rc: RouteClass,
     ) -> bool:
-        """Recommend → dispatch → set RUNNING. Returns True if the node moved."""
+        """Recommend → dispatch → set RUNNING. Returns True if the node moved.
+
+        6.5: for C1/C3 (has candidates) the scheduler claims the lead bot AND
+        fires :class:`ExecutionPort` to actually launch it (single bot /
+        coop group) — completion is async (bot self-reports via ``on_event``);
+        the watchdog phase in :meth:`tick`探活/重驱 hung nodes. C5 escalates
+        to BBS via the Driver; the no-candidate fallback uses the Driver (Noop).
+        """
         task_id = task.id
         if rc is RouteClass.C5:
             self._driver.escalate_to_bbs(task_id, reason=f"node {node.node_id} C5")
             return False  # BBS escalation does not set RUNNING here
-        # Prefer claim via a recommended candidate; else Driver dispatch (Noop in Phase 3).
-        if recommendation.candidates:
-            bot_id = recommendation.candidates[0].bot_id
+        # No recommended executor — Driver fallback (Noop, Phase 3).
+        if not recommendation.candidates:
+            result = self._driver.dispatch_node(task_id, node.node_id)
+            if result is None:
+                return False
             try:
-                self._svc.claim_node(task_id, node.node_id, bot_id)
+                self._svc.set_node_status(task, node.node_id, NodeStatus.RUNNING)
+                self._svc._task_repo.save(task)  # noqa: SLF001
                 return True
             except IllegalTransitionError:
                 return False
-        result = self._driver.dispatch_node(task_id, node.node_id)
-        if result is None:
-            return False
+        # Has candidates → claim the lead bot, then fire ExecutionPort (real launch).
+        candidates = recommendation.candidates
+        lead_bot = candidates[0].bot_id
         try:
-            self._svc.set_node_status(task, node.node_id, NodeStatus.RUNNING)
-            self._svc._task_repo.save(task)  # noqa: SLF001
-            return True
+            self._svc.claim_node(task_id, node.node_id, lead_bot)
         except IllegalTransitionError:
             return False
+        if recommendation.run_mode is RunMode.COOP_GROUP:
+            self._execution.coop_group(
+                task_id, node.node_id, [c.bot_id for c in candidates]
+            )
+        else:
+            self._execution.dispatch_single_bot(task_id, node.node_id, lead_bot)
+        return True
+
+    def _watchdog(self, task: Task) -> bool:
+        """6.5: for each RUNNING node with an assignee, advance the tick-based
+        watchdog and act on the decision (:func:`watchdog`).
+
+        - WAIT: ``running_ticks`` was incremented (give the bot more time).
+        - PROBE: ping ``ExecutionPort.probe`` (ask bot to report status), bump
+          ``probe_count``, reset ``running_ticks`` (fresh wait-for-response window).
+        - REDRIVE: re-drive via ``ExecutionPort.redispatch_node``, bump
+          ``redrive_count``, reset ``running_ticks`` + ``probe_count``.
+        - ESCALATE: mark the node ``FAILED`` (the loop's termination guard then
+          forces VALIDATING; reroute/split on watchdog-escalation is a follow-up).
+
+        Returns True if any node was PROBED/REDISPATCHED/ESCALATED (acts as
+        ``progressed`` so the termination guard doesn't cut a hung node's
+        probe/redispatch cycle short). Mutates ``node.properties`` in-memory and
+        saves the task once. Nodes without an assignee (Driver fallback) are
+        skipped — the watchdog needs a bot id to probe/redispatch.
+        """
+        if task.execution_graph is None:
+            return False
+        changed = False
+        acted = False
+        for n in task.execution_graph.nodes:
+            if n.status is not NodeStatus.RUNNING or n.assignee is None:
+                continue
+            n.properties["running_ticks"] = int(n.properties.get("running_ticks", 0)) + 1
+            action = watchdog(n)
+            bot_id = n.assignee
+            if action is WatchdogAction.PROBE:
+                self._execution.probe(task.id, n.node_id, bot_id)
+                n.properties["probe_count"] = int(n.properties.get("probe_count", 0)) + 1
+                n.properties["running_ticks"] = 0
+                changed = True
+                acted = True
+            elif action is WatchdogAction.REDRIVE:
+                self._execution.redispatch_node(task.id, n.node_id, bot_id)
+                n.properties["redrive_count"] = int(n.properties.get("redrive_count", 0)) + 1
+                n.properties["running_ticks"] = 0
+                n.properties["probe_count"] = 0
+                changed = True
+                acted = True
+            elif action is WatchdogAction.ESCALATE:
+                try:
+                    self._svc.set_node_status(task, n.node_id, NodeStatus.FAILED)
+                except IllegalTransitionError:
+                    pass
+                changed = True
+                acted = True
+            else:  # WAIT — running_ticks already incremented.
+                changed = True
+        if changed:
+            self._svc._task_repo.save(task)  # noqa: SLF001
+        return acted
 
     def _advance(self, task: Task, target: TaskStatus) -> None:
         from agentclaw.community.core.task.domain.state_machine import (

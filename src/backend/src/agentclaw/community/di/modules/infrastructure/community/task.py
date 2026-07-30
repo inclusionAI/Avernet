@@ -106,9 +106,10 @@ class CommunityTaskModule(Module):
         discover: BotDiscoverPort,
         driver: TaskDriverPort,
         decomposer: DecomposerPort,
+        execution: ExecutionPort,
     ) -> TaskScheduler:
         from agentclaw.community.core.task.services import TaskScheduler as RealScheduler
-        return RealScheduler(task_service, discover, driver, decomposer)
+        return RealScheduler(task_service, discover, driver, decomposer, execution)
 
     # --- api-layer service-api bindings (adapters depend on these, not core) ---
     # Mirror of bot_management_module: bind the api Protocol (router-facing) to

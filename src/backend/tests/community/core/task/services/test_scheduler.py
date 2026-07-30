@@ -108,6 +108,38 @@ class FakeDecomposer:
         )
 
 
+class FakeExecution:
+    """Records ExecutionPort calls (6.5): dispatch_single_bot / coop_group /
+    redispatch_node / probe / bbs. Returns no-op DispatchResults."""
+
+    def __init__(self) -> None:
+        self.single_bots: list[tuple[str, str, str]] = []
+        self.coop_groups: list[tuple[str, str, list[str]]] = []
+        self.redispatches: list[tuple[str, str, str]] = []
+        self.probes: list[tuple[str, str, str]] = []
+        self.bbss: list[tuple[str, str, str]] = []
+
+    def dispatch_single_bot(self, task_id, node_id, bot_id):
+        self.single_bots.append((task_id, node_id, bot_id))
+        return DispatchResult(node_id=node_id, executor_id=bot_id, run_mode=RunMode.SINGLE_BOT)
+
+    def coop_group(self, task_id, node_id, bot_ids):
+        self.coop_groups.append((task_id, node_id, list(bot_ids)))
+        return DispatchResult(node_id=node_id, executor_id="", run_mode=RunMode.COOP_GROUP)
+
+    def redispatch_node(self, task_id, node_id, bot_id):
+        self.redispatches.append((task_id, node_id, bot_id))
+        return DispatchResult(node_id=node_id, executor_id=bot_id, run_mode=RunMode.SINGLE_BOT)
+
+    def probe(self, task_id, node_id, bot_id):
+        self.probes.append((task_id, node_id, bot_id))
+        return DispatchResult(node_id=node_id, executor_id=bot_id, run_mode=RunMode.SINGLE_BOT)
+
+    def bbs(self, task_id, node_id, reason=""):
+        self.bbss.append((task_id, node_id, reason))
+        return DispatchResult(node_id=node_id, executor_id="", run_mode=RunMode.BBS)
+
+
 def _scheduler(
     candidates=None,
     confidence=0.9,
@@ -116,7 +148,7 @@ def _scheduler(
     svc = TaskService(InMemoryTaskRepo(), InMemoryTaskEventRepo(), RecordingPanelPublisher())
     discover = FakeDiscover(candidates or [BotCandidate(bot_id="bot-1", fit_score=0.9)], confidence, route_class)
     driver = FakeDriver()
-    sched = TaskScheduler(svc, discover, driver, FakeDecomposer())
+    sched = TaskScheduler(svc, discover, driver, FakeDecomposer(), FakeExecution())
     return svc, sched, driver
 
 
@@ -284,6 +316,54 @@ def test_watchdog_priority_escalate_over_redrive_over_probe():
     # Even at tick 0 (a freshly-redriven node would reset ticks), if probe_count
     # somehow stayed at MAX the rule still drives REDRIVE/ESCALATE — defensive.
     assert watchdog(_wd_node(running_ticks=0, probe_count=MAX_PROBES, redrive_count=MAX_REDRIVES)) is WatchdogAction.ESCALATE
+
+
+def test_watchdog_drives_probe_redispatch_escalate_for_hung_node():
+    """6.5.3: a node whose bot never self-reports is driven through the full
+    tick-based watchdog cycle by ``tick`` — PROBE→PROBE→REDRIVE→…→ESCALATE —
+    with the node eventually ``FAILED``.
+
+    Verifies two things:
+    1. The watchdog is wired into the tick phase: ``ExecutionPort.probe`` and
+       ``redispatch_node`` actually fire (not just the pure rule).
+    2. The loop's termination guard (``MAX_NO_PROGRESS_TICKS``) does NOT cut the
+       cycle short: the node reaches ``FAILED``, which can only happen via
+       ESCALATE. If the guard had pre-empted, the node would still be ``RUNNING``
+       and the task forced to ``VALIDATING``.
+
+    Expected call Trace (PROBE_AFTER_TICKS=2, MAX_PROBES=2, MAX_REDRIVES=2):
+    start tick → dispatch (RUNNING); then WAIT/PROBE/PROBE/REDRIVE/… per window,
+    6 probes (2 × 3 windows: 2 redrives + 1 final escalate window) + 2 redispatches.
+    """
+    svc = TaskService(InMemoryTaskRepo(), InMemoryTaskEventRepo(), RecordingPanelPublisher())
+    discover = FakeDiscover([BotCandidate(bot_id="bot-1", fit_score=0.9)])
+    driver = FakeDriver()
+    execution = FakeExecution()
+    sched = TaskScheduler(svc, discover, driver, FakeDecomposer(), execution)
+
+    tid = _planned(svc, nodes=("n1",))
+    sched.start(tid)
+    task = svc.get(tid)
+    node = task.execution_graph.nodes[0]
+    assert node.status is NodeStatus.RUNNING
+    assert node.assignee == "bot-1"
+
+    # Bot-1 never self-reports → keep ticking until the watchdog ESCALATES.
+    for _ in range(40):
+        sched.tick(tid)
+        if svc.get(tid).execution_graph.nodes[0].status is NodeStatus.FAILED:
+            break
+
+    final_node = svc.get(tid).execution_graph.nodes[0]
+    assert final_node.status is NodeStatus.FAILED  # reached via ESCALATE only
+    # Ceilings hit exactly: 2 probes per window × 3 windows = 6; 2 redispatches.
+    assert len(execution.probes) == MAX_PROBES * (MAX_REDRIVES + 1)
+    assert len(execution.redispatches) == MAX_REDRIVES
+    # Real launch went through ExecutionPort (C1 with candidates), not the Driver
+    # fallback; BBS untouched (not a C5 route).
+    assert execution.single_bots == [(tid, "n1", "bot-1")]
+    assert driver.dispatched == []
+    assert execution.bbss == []
 
 
 # --- start ------------------------------------------------------------------

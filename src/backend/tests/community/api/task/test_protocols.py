@@ -99,6 +99,10 @@ class _NoopExecution:
     def redispatch_node(self, task_id: str, node_id: str, bot_id: str) -> Any:
         return None
 
+    def probe(self, task_id: str, node_id: str, bot_id: str) -> Any:
+        # 6.5: watchdog PROBE asks the executor to report its current status.
+        return None
+
     def bbs(self, task_id: str, node_id: str, reason: str = "") -> Any:
         return None
 

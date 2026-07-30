@@ -193,6 +193,8 @@ class NoopBcsCollaborationPort(BcsCollaborationProtocol):
 
 
 __all__ = [
+    "HangingBotExecutor",
+    "LocalBotExecutorPort",
     "NoopBcsCollaborationPort",
     "NoopBotDiscoverPort",
     "NoopDecomposerPort",
@@ -200,3 +202,12 @@ __all__ = [
     "NoopTaskDriverPort",
     "NoopTaskService",
 ]
+
+
+# 6.5.4: local in-process ExecutionPort doubles (well-behaved self-reporting
+# bot + hung bot for watchdog exercising). Imported at end of __all__ to keep the
+# Noop impls above as the primary reference; these are re-exported for DI/tests.
+from agentclaw.community.plugins.community.task.local_executor import (  # noqa: E402
+    HangingBotExecutor,
+    LocalBotExecutorPort,
+)
