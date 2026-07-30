@@ -1,9 +1,12 @@
 from pathlib import Path
 
 import pytest
-
+from engine.community.core.skills.exceptions import (
+    InvalidPoolMappingRequestError,
+)
 from engine.community.core.skills.layout_planner import (
     MAPPING_CONTRACT_VERSION,
+    SkillLayoutResolutionError,
 )
 from engine.community.plugins.skills_pool.layout_activation import (
     MappingSourceLayout,
@@ -154,7 +157,7 @@ def test_invalid_contract_shape_has_no_filesystem_side_effect(
 ) -> None:
     before = _snapshot(tmp_path)
 
-    with pytest.raises((TypeError, ValueError), match=message):
+    with pytest.raises(InvalidPoolMappingRequestError, match=message):
         resolve_mapping_payload(
             engine="openclaw",
             source_layout=MappingSourceLayout.POOL,
@@ -164,6 +167,36 @@ def test_invalid_contract_shape_has_no_filesystem_side_effect(
         )
 
     assert _snapshot(tmp_path) == before
+
+
+def test_internal_layout_resolution_error_is_not_reclassified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.skills_pool import mapping_contract
+
+    def fail_layout_resolution(*args: object, **kwargs: object) -> None:
+        raise SkillLayoutResolutionError("descriptor invariant failed")
+
+    monkeypatch.setattr(
+        mapping_contract,
+        "resolve_filesystem_skill_layout",
+        fail_layout_resolution,
+    )
+
+    with pytest.raises(
+        SkillLayoutResolutionError,
+        match="descriptor invariant failed",
+    ) as error:
+        resolve_mapping_payload(
+            engine="openclaw",
+            source_layout=MappingSourceLayout.POOL,
+            mapping_contract_version=MAPPING_CONTRACT_VERSION,
+            payload=[],
+            home=tmp_path,
+        )
+
+    assert not isinstance(error.value, InvalidPoolMappingRequestError)
 
 
 def test_legacy_no_version_physical_payload_remains_compatible(

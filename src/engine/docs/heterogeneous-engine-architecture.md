@@ -1104,6 +1104,12 @@ class SkillExecutionResult:
   home 投影物理 source/active target；publish/verify 返回
   `resolved_mappings`，activation/rollback 返回 `local_locators`。这些路径是
   Engine evidence，Backend 只能校验和持久化，不能按 engine 重建。
+- READY Probe 已进入 cutover evidence（存在 active marker）后，
+  `checks.stable_repo_bridge_valid` 只在 AICoding/Hermes 已进入 `active`
+  且稳定 repo bridge 已实际校验时存在并为 `true`。OpenClaw/Claude Code
+  的 active layout 以及仍为 `finalizing` 的恢复窗口不适用或尚未完成该
+  检查，必须省略此 key，不能用 `false` 或未经校验的 `true` 代替；
+  preparation/Legacy evidence 仍按各 Engine 拓扑报告其必需 bridge 检查。
 - 新 Backend 只有在 `/api/skills/layout/probe` 的 READY evidence 明确包含
   `"mapping_contract_version": "skills-pool-mapping-v2"` 后，才会在已通过
   rollout gate 且 migration claim 成功的 reconcile 中发送 v2。缺失或旧
@@ -1114,7 +1120,9 @@ class SkillExecutionResult:
 - 兼容窗口内，新 Engine 仍接受不带 `mapping_contract_version` 的 legacy
   physical item：`{"source": "...", "target": "..."}`。无版本 logical
   payload、带 v2 的 physical payload、logical/physical 混合 payload 和未知
-  version 均在任何文件系统 mutation 前拒绝。
+  version 均在任何文件系统 mutation 前以
+  `InvalidPoolMappingRequestError` 拒绝，HTTP delivery adapter 固定映射为
+  `400`；Engine layout descriptor/invariant 异常不归入该输入错误。
 - 消费者包括 Backend `SkillsPoolRuntimeProtocol`/
   `SkillsPoolReconcileService`、Engine `/api/skills` router 与
   `SkillsService`，以及 OpenClaw、Claude Code、AICoding、Hermes 的
