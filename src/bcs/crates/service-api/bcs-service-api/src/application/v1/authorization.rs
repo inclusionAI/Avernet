@@ -9,6 +9,9 @@ pub enum Action {
     ReadGroup,
     UpdateGroup,
     DeleteGroup,
+    AddGroupParticipant,
+    UpdateGroupParticipant,
+    RemoveGroupParticipant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
