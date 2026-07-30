@@ -4,15 +4,16 @@ Direct handler invocation (退路 B per task spec): bypasses FastAPI's
 dependency wiring and supplies a stub service. ``principal`` carries
 ``{"user_id": "u1"}`` so ``caller_owner_id`` resolves the caller. Handlers
 take a required ``request: Request`` (mirroring the bots router), so tests
-pass a ``SimpleNamespace`` stub: ``state.trace_id`` unset ⇒ empty
+pass a real ``fastapi.Request``: ``state.trace_id`` unset ⇒ empty
 ``request_id`` (the tracer middleware did not run), or set to a known value
 to assert it is threaded into the envelope via ``responses.envelope``.
 """
 
+import json
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_OK,
@@ -29,6 +30,10 @@ from agentclaw.community.adapters.http.openapi_v1.identity.schemas import (
     IdentityFileRef,
     IdentityFileType,
     IdentityFileWrite,
+)
+from agentclaw.community.core.services.identity import (
+    InvalidIdentityEntityTypeError,
+    InvalidIdentityFileTypeError,
 )
 
 
@@ -53,19 +58,34 @@ _ALL_IDENTITY_FILES = [
 ]
 
 
-def _request_without_trace() -> SimpleNamespace:
+def _request_scope() -> dict:
+    """Minimal ASGI scope for a stubbed http request (no live server)."""
+    return {
+        "type": "http",
+        "method": "GET",
+        "headers": [],
+        "path": "/",
+        "query_string": b"",
+    }
+
+
+def _request_without_trace() -> Request:
     """A request whose tracer middleware did not run — ``state.trace_id`` unset.
 
     ``responses._trace_id`` reads ``request.state.trace_id`` and falls back to
     ``""`` when absent, so the envelope's ``request_id`` is empty (mirrors the
-    prod path before the tracer middleware stamps the id).
+    prod path before the tracer middleware stamps the id). A real
+    ``fastapi.Request`` (not a ``SimpleNamespace``) so ``@envelope_errors``'
+    ``_find_request`` recognises it on the error path.
     """
-    return SimpleNamespace(state=SimpleNamespace())
+    return Request(_request_scope())
 
 
-def _request_with_trace(trace_id: str) -> SimpleNamespace:
+def _request_with_trace(trace_id: str) -> Request:
     """A request whose tracer middleware stamped ``trace_id`` on ``state``."""
-    return SimpleNamespace(state=SimpleNamespace(trace_id=trace_id))
+    req = Request(_request_scope())
+    req.state.trace_id = trace_id
+    return req
 
 
 class _StubIdentityService:
@@ -169,24 +189,23 @@ async def test_list_bot_identity_files_reads_trace_id_from_request_state():
 @pytest.mark.asyncio
 async def test_list_bot_identity_files_400_when_entity_type_invalid():
     # Service raises ValueError (invalid entity_type) → handler maps to 400.
-    from fastapi import HTTPException
 
     class _RaisingService:
         async def list_bot_files(
             self, entity_type, entity_id, bot_id, owner_id, *, engine_type=None
         ):
-            raise ValueError(f"Invalid entity_type: {entity_type}")
+            raise InvalidIdentityEntityTypeError(f"Invalid entity_type: {entity_type}")
 
     service = _RaisingService()
 
-    with pytest.raises(HTTPException) as exc:
-        await list_bot_identity_files(
-            bot_id="bot-x",
-            principal={"user_id": "u1"},
-            identity_service=service,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 400
+    resp = await list_bot_identity_files(
+        bot_id="bot-x",
+        principal={"user_id": "u1"},
+        identity_service=service,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 400
+    assert json.loads(resp.body)["message"] == "Invalid entity type"
 
 
 # ── get_bot_identity_file / update_bot_identity_file (Identity Task 2) ──
@@ -328,19 +347,18 @@ async def test_get_bot_identity_file_returns_content_and_path():
 @pytest.mark.asyncio
 async def test_get_bot_identity_file_400_on_value_error():
     service = _StubGetUpdateService(
-        raise_on_get=ValueError("Invalid file_type: BOGUS.md")
+        raise_on_get=InvalidIdentityFileTypeError("Invalid file_type: BOGUS.md")
     )
 
-    with pytest.raises(HTTPException) as exc:
-        await get_bot_identity_file(
-            bot_id="bot-x",
-            file_type=IdentityFileType.RULES,
-            principal={"user_id": "u1"},
-            identity_service=service,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 400
-    assert "Invalid file_type" in exc.value.detail
+    resp = await get_bot_identity_file(
+        bot_id="bot-x",
+        file_type=IdentityFileType.RULES,
+        principal={"user_id": "u1"},
+        identity_service=service,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 400
+    assert json.loads(resp.body)["message"] == "Invalid file type"
 
 
 @pytest.mark.asyncio
@@ -375,20 +393,19 @@ async def test_update_bot_identity_file_returns_ref():
 @pytest.mark.asyncio
 async def test_update_bot_identity_file_400_on_value_error():
     service = _StubGetUpdateService(
-        raise_on_update=ValueError("Invalid entity_type: bogus")
+        raise_on_update=InvalidIdentityEntityTypeError("Invalid entity_type: bogus")
     )
 
-    with pytest.raises(HTTPException) as exc:
-        await update_bot_identity_file(
-            bot_id="bot-x",
-            file_type=IdentityFileType.RULES,
-            body=IdentityFileWrite(content="x"),
-            principal={"user_id": "u1"},
-            identity_service=service,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 400
-    assert "Invalid entity_type" in exc.value.detail
+    resp = await update_bot_identity_file(
+        bot_id="bot-x",
+        file_type=IdentityFileType.RULES,
+        body=IdentityFileWrite(content="x"),
+        principal={"user_id": "u1"},
+        identity_service=service,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 400
+    assert json.loads(resp.body)["message"] == "Invalid entity type"
 
 
 @pytest.mark.asyncio

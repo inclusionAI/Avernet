@@ -46,6 +46,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     deleted as deleted_envelope,
     envelope,
+    envelope_errors,
     page as page_envelope,
 )
 from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -126,6 +127,7 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
 @router.get("", response_model=Envelope[Page[Resource]])
+@envelope_errors
 async def list_resources(
     page: PageParamsDep,
     principal: PrincipalDep,
@@ -157,6 +159,7 @@ async def list_resources(
 
 
 @router.get("/check-name", response_model=Envelope[NameCheck])
+@envelope_errors
 async def check_resource_name(
     name: str,
     principal: PrincipalDep,
@@ -195,6 +198,7 @@ async def check_resource_name(
 
 
 @router.post("", status_code=201, response_model=Envelope[Resource])
+@envelope_errors
 async def create_resource(
     body: ResourceCreate,
     principal: PrincipalDep,
@@ -225,24 +229,22 @@ async def create_resource(
 
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
-    try:
-        r = await service.create_url_resource(
-            name=body.name,
-            url=body.url,
-            # parent_path intentionally NOT forwarded: the openapi ResourceCreate
-            # schema carries `parent_id` (a pending follow-up — its ID-vs-path
-            # semantics aren't settled). Passing a half-defined value would risk
-            # a wrong-attribute write; link scoping by bot_id is sufficient now.
-            parent_path=None,
-        )
-    except ValueError as e:
-        # service raises ValueError on duplicate name → 409 Conflict (legacy
-        # parity: adapters/http/resources/router.py create_url_resource).
-        raise HTTPException(status_code=409, detail=str(e)) from e
+    # DuplicateResourceError propagates to @envelope_errors → 409 fixed message
+    # (no str(exc) leakage, unlike the prior hand-translation).
+    r = await service.create_url_resource(
+        name=body.name,
+        url=body.url,
+        # parent_path intentionally NOT forwarded: the openapi ResourceCreate
+        # schema carries `parent_id` (a pending follow-up — its ID-vs-path
+        # semantics aren't settled). Passing a half-defined value would risk
+        # a wrong-attribute write; link scoping by bot_id is sufficient now.
+        parent_path=None,
+    )
     return created(_to_openapi_resource(r), request)
 
 
 @router.post("/upload", status_code=201, response_model=Envelope[Resource])
+@envelope_errors
 async def upload_resource(
     principal: PrincipalDep,
     name: str,
@@ -276,21 +278,21 @@ async def upload_resource(
             user_id=owner_id,
             device_fs=device_fs,
         )
-    except ValueError as e:
-        # duplicate name → 409 Conflict (legacy + create parity).
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except Exception as e:
+    except ValueError:
+        # DuplicateResourceError propagates to @envelope_errors → 409.
+        raise
+    except Exception:
         # device_fs.write_file failure → 502 Bad Gateway. The slim service lets
         # the write exception bubble (no longer swallowed) so the handler is the
         # single translation point: file write failed, no DB record created.
+        # Fixed message (never str(exc)) so internal details don't leak.
         logger.exception("[upload_resource] device_fs write failed")
-        raise HTTPException(
-            status_code=502, detail=f"Upload storage failed: {e}"
-        ) from e
+        raise HTTPException(status_code=502, detail="Upload storage failed")
     return created(_to_openapi_resource(r), request)
 
 
 @router.get("/{resource_id}", response_model=Envelope[Resource])
+@envelope_errors
 async def get_resource(
     resource_id: str,
     principal: PrincipalDep,
@@ -310,6 +312,7 @@ async def get_resource(
 
 
 @router.put("/{resource_id}", response_model=Envelope[Resource])
+@envelope_errors
 async def update_resource(
     resource_id: str,
     body: ResourceUpdate,
@@ -326,18 +329,19 @@ async def update_resource(
     """
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
-    try:
-        r = await service.update_link_resource(
-            resource_id=resource_id,
-            name=body.name,
-            url=body.url,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+    # ResourceNotFoundError (404) / DuplicateResourceError (409) propagate to
+    # @envelope_errors with fixed messages — no str(exc) leakage. The prior
+    # hand-translation also wrongly mapped not-found → 409; this fixes that.
+    r = await service.update_link_resource(
+        resource_id=resource_id,
+        name=body.name,
+        url=body.url,
+    )
     return envelope(_to_openapi_resource(r), request)
 
 
 @router.delete("/{resource_id}", response_model=Envelope[Deleted])
+@envelope_errors
 async def delete_resource(
     resource_id: str,
     principal: PrincipalDep,
@@ -411,6 +415,7 @@ async def download_resource(
 
 
 @router.get("/{resource_id}/preview", response_model=Envelope[Preview])
+@envelope_errors
 async def preview_resource(
     resource_id: str,
     principal: PrincipalDep,
@@ -446,11 +451,9 @@ async def preview_resource(
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)
-    try:
-        result = await service.preview_resource(resource_id, device_fs=device_fs)
-    except ValueError as e:
-        # too large → 413 (legacy parity: "File too large for preview").
-        raise HTTPException(status_code=413, detail=str(e)) from e
+    # FileTooLargeError (413) propagates to @envelope_errors; a None result is
+    # not-found / not-a-file / read-failure, collapsed to 404 below.
+    result = await service.preview_resource(resource_id, device_fs=device_fs)
     if result is None:
         raise HTTPException(
             status_code=404,

@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+)
 from agentclaw.community.core.config_compose.teclaw_paths import IDENTITY_NS
 
 # Waiver (Rule 5 vs Rule 19): openapi_v1 injects the concrete IdentityService
@@ -39,6 +42,7 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
 @router.get("/bot/{bot_id}", response_model=Envelope[IdentityFileList])
+@envelope_errors
 async def list_bot_identity_files(
     bot_id: str,
     principal: PrincipalDep,
@@ -53,15 +57,12 @@ async def list_bot_identity_files(
     owner_id = caller_owner_id(principal)
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
-    try:
-        presence = await identity_service.list_bot_files(
-            entity_type,
-            entity_id,
-            bot_id,
-            owner_id,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    presence = await identity_service.list_bot_files(
+        entity_type,
+        entity_id,
+        bot_id,
+        owner_id,
+    )
     files = [
         IdentityFileInfo(
             type=IdentityFileType(ft.removesuffix(".md")),
@@ -77,6 +78,7 @@ async def list_bot_identity_files(
     "/bot/{bot_id}/{file_type}",
     response_model=Envelope[IdentityFile],
 )
+@envelope_errors
 async def get_bot_identity_file(
     bot_id: str,
     file_type: IdentityFileType,
@@ -97,16 +99,13 @@ async def get_bot_identity_file(
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
     file_type_md = f"{file_type.value}.md"
-    try:
-        resp = await identity_service.get_bot_file(
-            entity_type,
-            entity_id,
-            bot_id,
-            file_type_md,
-            owner_id,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    resp = await identity_service.get_bot_file(
+        entity_type,
+        entity_id,
+        bot_id,
+        file_type_md,
+        owner_id,
+    )
     # BotIdentityFileResponse → openapi IdentityFile. content/file_path are
     # guaranteed by the legacy response model; getattr is a defensive belt.
     return envelope(
@@ -124,6 +123,7 @@ async def get_bot_identity_file(
     "/bot/{bot_id}/{file_type}",
     response_model=Envelope[IdentityFileRef],
 )
+@envelope_errors
 async def update_bot_identity_file(
     bot_id: str,
     file_type: IdentityFileType,
@@ -142,17 +142,14 @@ async def update_bot_identity_file(
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
     file_type_md = f"{file_type.value}.md"
-    try:
-        resp = await identity_service.update_bot_file(
-            entity_type,
-            entity_id,
-            bot_id,
-            file_type_md,
-            body.content,
-            owner_id,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    resp = await identity_service.update_bot_file(
+        entity_type,
+        entity_id,
+        bot_id,
+        file_type_md,
+        body.content,
+        owner_id,
+    )
     return envelope(
         IdentityFileRef(
             type=file_type,

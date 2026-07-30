@@ -1,11 +1,12 @@
 """openapi_v1 resources handler unit tests: mapping + handler behavior."""
 
+import json
 from datetime import datetime
 from types import SimpleNamespace
 from typing import List
 
 import pytest
-from fastapi import HTTPException, Response
+from fastapi import HTTPException, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -41,6 +42,11 @@ from agentclaw.community.core.resources.models import (
     ResourceType as LegacyType,
     create_link_resource,
 )
+from agentclaw.community.core.resources.service import (
+    DuplicateResourceError,
+    FileTooLargeError,
+    ResourceNotFoundError,
+)
 
 
 def _legacy(**ov) -> Resource:
@@ -58,19 +64,34 @@ def _legacy(**ov) -> Resource:
     return Resource(**base)
 
 
-def _request_without_trace() -> SimpleNamespace:
+def _request_scope() -> dict:
+    """Minimal ASGI scope for a stubbed http request (no live server)."""
+    return {
+        "type": "http",
+        "method": "GET",
+        "headers": [],
+        "path": "/",
+        "query_string": b"",
+    }
+
+
+def _request_without_trace() -> Request:
     """A request whose tracer middleware did not run — ``state.trace_id`` unset.
 
     ``responses._trace_id`` reads ``request.state.trace_id`` and falls back to
     ``""`` when absent, so the envelope's ``request_id`` is empty (mirrors the
-    prod path before the tracer middleware stamps the id).
+    prod path before the tracer middleware stamps the id). A real
+    ``fastapi.Request`` (not a ``SimpleNamespace``) so ``@envelope_errors``'
+    ``_find_request`` recognises it on the error path.
     """
-    return SimpleNamespace(state=SimpleNamespace())
+    return Request(_request_scope())
 
 
-def _request_with_trace(trace_id: str) -> SimpleNamespace:
+def _request_with_trace(trace_id: str) -> Request:
     """A request whose tracer middleware stamped ``trace_id`` on ``state``."""
-    return SimpleNamespace(state=SimpleNamespace(trace_id=trace_id))
+    req = Request(_request_scope())
+    req.state.trace_id = trace_id
+    return req
 
 
 def test_to_openapi_resource_maps_basic_fields():
@@ -172,7 +193,7 @@ class _StubService:
             created_by=created_by,
         )
         if name == "taken":
-            raise ValueError(f"Resource '{name}' already exists")
+            raise DuplicateResourceError(f"Resource '{name}' already exists")
         # Return a LINK Resource with the url in attributes (matches how the
         # real create_url_resource populates it; _to_openapi_resource flattens
         # url/size out of attributes).
@@ -203,12 +224,12 @@ class _StubService:
             name=name,
         )
         # resource_id == "0" simulates a missing record (service raises
-        # ValueError → 409 Conflict per legacy + create parity).
+        # ResourceNotFoundError → 404 via @envelope_errors).
         if str(resource_id) == "0":
-            raise ValueError(f"LINK resource '{resource_id}' not found")
+            raise ResourceNotFoundError("Resource not found")
         # url == "conflict" simulates a URL uniqueness violation.
         if url == "conflict":
-            raise ValueError("URL already exists")
+            raise DuplicateResourceError("URL already exists")
         return Resource(
             id=int(resource_id),
             name=name or "r",
@@ -257,7 +278,7 @@ class _StubService:
         )
         self.last_call_device_fs = device_fs
         if filename == "taken":
-            raise ValueError(f"Resource '{filename}' already exists")
+            raise DuplicateResourceError(f"Resource '{filename}' already exists")
         return Resource(
             id=1,
             name=filename,
@@ -311,7 +332,9 @@ class _StubService:
         if str(resource_id) == "0":
             return None
         if str(resource_id) == "too-large":
-            raise ValueError(f"File too large for preview (max {max_size} bytes)")
+            raise FileTooLargeError(
+                f"File too large for preview (max {max_size} bytes)"
+            )
         return {"content": "preview body", "content_type": "text/plain", "size": 12}
 
 
@@ -688,15 +711,15 @@ async def test_create_link_duplicate_name_is_409():
     factory = _StubFactory(service)
     body = ResourceCreate(name="taken", type=OpenapiType.LINK, url="https://x.com")
 
-    with pytest.raises(HTTPException) as exc:
-        await create_resource(
-            body=body,
-            principal={"user_id": "u1"},
-            bot_id=None,
-            factory=factory,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 409
+    resp = await create_resource(
+        body=body,
+        principal={"user_id": "u1"},
+        bot_id=None,
+        factory=factory,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 409
+    assert json.loads(resp.body)["message"] == "Resource already exists"
 
 
 # ── update_resource (Phase 3 Task 1, LINK-only) ─────────────────────
@@ -744,18 +767,18 @@ async def test_update_link_raises_409_when_not_found():
     factory = _StubFactory(service)
     body = ResourceUpdate(name="x")
 
-    with pytest.raises(HTTPException) as exc:
-        await update_resource(
-            resource_id="0",
-            body=body,
-            principal={"user_id": "u1"},
-            bot_id=None,
-            factory=factory,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 409
-    # legacy "not found" message surfaces through ValueError → detail
-    assert "not found" in exc.value.detail
+    resp = await update_resource(
+        resource_id="0",
+        body=body,
+        principal={"user_id": "u1"},
+        bot_id=None,
+        factory=factory,
+        request=_request_without_trace(),
+    )
+    # not-found now maps to 404 (was wrongly 409 via hand-translation) with a
+    # fixed "Not found" message — cross-bot and missing are indistinguishable.
+    assert resp.status_code == 404
+    assert json.loads(resp.body)["message"] == "Not found"
 
 
 @pytest.mark.asyncio
@@ -764,16 +787,16 @@ async def test_update_link_raises_409_on_url_conflict():
     factory = _StubFactory(service)
     body = ResourceUpdate(url="conflict")
 
-    with pytest.raises(HTTPException) as exc:
-        await update_resource(
-            resource_id="1",
-            body=body,
-            principal={"user_id": "u1"},
-            bot_id=None,
-            factory=factory,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 409
+    resp = await update_resource(
+        resource_id="1",
+        body=body,
+        principal={"user_id": "u1"},
+        bot_id=None,
+        factory=factory,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 409
+    assert json.loads(resp.body)["message"] == "Resource already exists"
 
 
 @pytest.mark.asyncio
@@ -943,17 +966,18 @@ async def test_delete_raises_missing_principal_when_no_authenticated_caller():
     # NOT bot_repo.get_by_id — a None principal is fail-closed (bots parity).
     factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
 
-    with pytest.raises(MissingPrincipalError):
-        await delete_resource(
-            resource_id="1",
-            principal=None,
-            bot_id="ghost",
-            factory=factory,
-            bot_repo=bot_repo,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
+    resp = await delete_resource(
+        resource_id="1",
+        principal=None,
+        bot_id="ghost",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 401
+    assert json.loads(resp.body)["message"] == "Unauthorized"
 
 
 @pytest.mark.asyncio
@@ -1056,18 +1080,19 @@ async def test_upload_raises_missing_principal_when_no_authenticated_caller():
     # fail-closed (no silent bot_repo fallback), mirroring the bots router.
     factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
 
-    with pytest.raises(MissingPrincipalError):
-        await upload_resource(
-            name="hello.txt",
-            content=b"x",
-            principal=None,
-            bot_id="ghost",
-            factory=factory,
-            bot_repo=bot_repo,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
+    resp = await upload_resource(
+        name="hello.txt",
+        content=b"x",
+        principal=None,
+        bot_id="ghost",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 401
+    assert json.loads(resp.body)["message"] == "Unauthorized"
 
 
 @pytest.mark.asyncio
@@ -1076,21 +1101,19 @@ async def test_upload_raises_409_on_duplicate_name():
     service = _StubService([])
     factory, bot_repo, resolver, dispatcher, _ = _delete_deps(service=service)
 
-    with pytest.raises(HTTPException) as exc:
-        await upload_resource(
-            name="taken",
-            content=b"x",
-            principal={"user_id": "u1"},
-            bot_id="bot-a",
-            factory=factory,
-            bot_repo=bot_repo,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
-
-    assert exc.value.status_code == 409
-    assert "already exists" in exc.value.detail
+    resp = await upload_resource(
+        name="taken",
+        content=b"x",
+        principal={"user_id": "u1"},
+        bot_id="bot-a",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 409
+    assert json.loads(resp.body)["message"] == "Resource already exists"
 
 
 @pytest.mark.asyncio
@@ -1247,17 +1270,18 @@ async def test_preview_raises_missing_principal_when_no_authenticated_caller():
     # fail-closed (no silent bot_repo fallback), mirroring the bots router.
     factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
 
-    with pytest.raises(MissingPrincipalError):
-        await preview_resource(
-            resource_id="1",
-            principal=None,
-            bot_id="ghost",
-            factory=factory,
-            bot_repo=bot_repo,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
+    resp = await preview_resource(
+        resource_id="1",
+        principal=None,
+        bot_id="ghost",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 401
+    assert json.loads(resp.body)["message"] == "Unauthorized"
 
 
 @pytest.mark.asyncio
@@ -1291,23 +1315,18 @@ async def test_preview_raises_413_when_too_large():
     service = _StubService([])
     factory, bot_repo, resolver, dispatcher, _ = _delete_deps(service=service)
 
-    with pytest.raises(HTTPException) as exc:
-        await preview_resource(
-            resource_id="too-large",
-            principal={"user_id": "u1"},
-            bot_id="bot-a",
-            factory=factory,
-            bot_repo=bot_repo,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
-
-    assert exc.value.status_code == 413
-    assert "too large" in exc.value.detail
-    # The ValueError message surfaces through HTTPException.detail (legacy
-    # parity: "File too large for preview (max N bytes)").
-    assert "1" in exc.value.detail  # the cap value
+    resp = await preview_resource(
+        resource_id="too-large",
+        principal={"user_id": "u1"},
+        bot_id="bot-a",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 413
+    assert json.loads(resp.body)["message"] == "File too large for preview"
 
 
 # ── End-to-end integration (review #8) ──────────────────────────────
@@ -1582,20 +1601,19 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     # 8. duplicate-name upload surfaces ValueError → 409 through the REAL
     #    slim service's check_name_exists path (repo.list_resources really
     #    sees the prior FILE row).
-    with pytest.raises(HTTPException) as exc:
-        await upload_resource(
-            name="hello.txt",
-            content=b"dup",
-            principal={"user_id": "u1"},
-            bot_id="bot-x",
-            factory=factory,
-            bot_repo=bot_repo,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 409
-    assert "already exists" in exc.value.detail
+    resp = await upload_resource(
+        name="hello.txt",
+        content=b"dup",
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 409
+    assert json.loads(resp.body)["message"] == "Resource already exists"
 
 
 # ── Fix #1 (review round-2): enum mapping contract ──────────────────
@@ -1959,17 +1977,16 @@ async def test_upload_409_takes_precedence_over_502_path():
         }
     )
 
-    with pytest.raises(HTTPException) as exc:
-        await upload_resource(
-            name="hello.txt",
-            content=b"x",
-            principal={"user_id": "u1"},
-            bot_id="bot-x",
-            factory=factory,
-            bot_repo=bot_repo,
-            resolver=resolver,
-            device_fs_dispatcher=dispatcher,
-            request=_request_without_trace(),
-        )
-    assert exc.value.status_code == 409
-    assert "already exists" in exc.value.detail
+    resp = await upload_resource(
+        name="hello.txt",
+        content=b"x",
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        factory=factory,
+        bot_repo=bot_repo,
+        resolver=resolver,
+        device_fs_dispatcher=dispatcher,
+        request=_request_without_trace(),
+    )
+    assert resp.status_code == 409
+    assert json.loads(resp.body)["message"] == "Resource already exists"

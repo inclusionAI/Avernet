@@ -5,6 +5,7 @@ implemented here. File upload / directory sync / hard delete / etc.
 remain in the legacy `services/openclawserver/` until their own routers
 are migrated.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -17,7 +18,9 @@ from agentclaw.community.core.resources.models import (
     create_node_resource,
     create_url_resource,
 )
-from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
+from agentclaw.community.core.resources.repository.protocol import (
+    ResourceRepositoryProtocol,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -25,6 +28,19 @@ logger = get_logger()
 
 class DuplicateResourceError(ValueError):
     """Raised when a resource with the same (name, type, parent_path, user) exists."""
+
+
+class ResourceNotFoundError(ValueError):
+    """Raised when a resource is missing or owned by a different bot.
+
+    Cross-bot access collapses to the same error as not-found so a public caller
+    cannot distinguish "exists but not yours / other tenant" from "does not
+    exist" (parity with the bots 404 mapping in ``responses.ENVELOPE_ERRORS``).
+    """
+
+
+class FileTooLargeError(ValueError):
+    """Raised when a preview's content exceeds the configured max preview size."""
 
 
 class ResourceService:
@@ -100,7 +116,7 @@ class ResourceService:
         )
         resources = [_dict_to_resource(d) for d in items]
         if limit:
-            resources = resources[offset:offset + limit]
+            resources = resources[offset : offset + limit]
         return resources
 
     def count_children(self, parent_path: str) -> int:
@@ -159,7 +175,9 @@ class ResourceService:
             url=url,
             user_id=user_id,
         ):
-            raise DuplicateResourceError(f"LINK resource with URL '{url}' already exists")
+            raise DuplicateResourceError(
+                f"LINK resource with URL '{url}' already exists"
+            )
 
         resource = create_link_resource(
             name=name,
@@ -191,12 +209,12 @@ class ResourceService:
         """
         stored = self._repo.get_by_id(resource_id)
         if not stored:
-            raise ValueError(f"LINK resource '{resource_id}' not found")
+            raise ResourceNotFoundError("Resource not found")
 
         # Check bolt ownership
         stored_bolt = stored.get("bolt_id", "default")
         if stored_bolt != self._bot_id:
-            raise ValueError(f"Resource '{resource_id}' does not belong to this bot")
+            raise ResourceNotFoundError("Resource not found")
 
         attrs = dict(stored.get("attributes", {}))
         update_data: dict[str, object] = {
@@ -213,7 +231,9 @@ class ResourceService:
                 user_id=stored.get("user_id"),
                 exclude_id=str(resource_id),
             ):
-                raise ValueError(f"LINK resource with URL '{url}' already exists")
+                raise DuplicateResourceError(
+                    "LINK resource with this URL already exists"
+                )
             attrs["url"] = url
 
         if link_type is not None and link_type != attrs.get("link_type"):
@@ -319,9 +339,7 @@ class ResourceService:
             try:
                 await device_fs.delete_file(resource.path)
             except Exception as e:
-                logger.warning(
-                    "[delete_resource] device_fs delete failed: %s", e
-                )
+                logger.warning("[delete_resource] device_fs delete failed: %s", e)
         return self._repo.delete(resource_id)
 
     async def upload_file(
@@ -438,7 +456,7 @@ class ResourceService:
         if not content:
             return None
         if len(content) > max_size:
-            raise ValueError(
+            raise FileTooLargeError(
                 f"File too large for preview (max {max_size} bytes)"
             )
         content_type = resource.mime_type or "application/octet-stream"
