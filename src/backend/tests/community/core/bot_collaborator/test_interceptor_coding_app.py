@@ -1,7 +1,7 @@
 """Tests for CollaboratorPermissionInterceptor coding-app logic.
 
 Covers two changes from the session-lock feature branch:
-1. ``_is_coding_app()`` — detects coding applications by active_engine + template_type.
+1. ``_is_coding_app()`` — legacy helper name; delegates to engine-specific member-management capability.
 2. The ``skip_lock`` branch in ``before()`` — coding apps with collaborators skip
    bot-level lock enforcement (session-level locks are used instead), but
    collaborator permission is still checked.

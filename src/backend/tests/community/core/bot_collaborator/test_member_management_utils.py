@@ -3,18 +3,17 @@ from unittest.mock import Mock
 
 from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
     AICodingMemberManagementCapability,
+    get_template_ext,
+    has_member_management_enabled,
 )
 from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
     MemberManagementCapabilityService,
-    get_template_ext,
-    has_template_member_management_enabled,
 )
 
 
 def _capability_service(template_service=None):
     return MemberManagementCapabilityService(
-        template_service=template_service,
-        engine_capabilities=(AICodingMemberManagementCapability(),),
+        engine_capabilities=(AICodingMemberManagementCapability(template_service),),
     )
 
 
@@ -29,19 +28,19 @@ def test_aicoding_capability_matches_only_application_coding():
     ) is False
 
 
-def test_has_template_member_management_enabled_requires_boolean_true():
-    assert has_template_member_management_enabled(
+def test_has_member_management_enabled_requires_boolean_true():
+    assert has_member_management_enabled(
         {"bot_template_config": {"advanced_config": {"member_management": True}}}
     ) is True
-    assert has_template_member_management_enabled(
+    assert has_member_management_enabled(
         {"bot_template_config": {"advanced_config": {"member_management": "true"}}}
     ) is False
 
 
-def test_has_template_member_management_enabled_handles_malformed_template_ext():
-    assert has_template_member_management_enabled(None) is False
-    assert has_template_member_management_enabled({"bot_template_config": None}) is False
-    assert has_template_member_management_enabled(
+def test_has_member_management_enabled_handles_malformed_template_ext():
+    assert has_member_management_enabled(None) is False
+    assert has_member_management_enabled({"bot_template_config": None}) is False
+    assert has_member_management_enabled(
         {"bot_template_config": {"advanced_config": None}}
     ) is False
 

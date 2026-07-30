@@ -489,9 +489,10 @@ class CollaboratorPermissionInterceptor:
     ) -> bool:
         """判断目标 Bot 是否使用应用/成员管理语义。
 
-        具体规则通过 ``MemberManagementCapabilityService`` 协调：通用模板开关
-        加各引擎自己的 capability 实现。失败时保守返回 False（即按 Service Bot
-        原逻辑走 bot 级锁）。
+        具体规则通过 ``MemberManagementCapabilityService`` 协调：通用层只
+        依赖 engine capability interface，不解释任何引擎私有 schema；各引擎
+        的定制判断放在各自目录的 capability 实现中。失败时保守返回 False
+        （即按 Service Bot 原逻辑走 bot 级锁）。
         """
         if not bot_id or not owner_id or ctx.injector is None:
             return False

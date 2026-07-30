@@ -91,8 +91,7 @@ class BotCollaboratorModule(Module):
     ) -> MemberManagementCapabilityService:
         """Construct engine-agnostic member-management capability coordinator."""
         return MemberManagementCapabilityService(
-            template_service=template_service,
-            engine_capabilities=(AICodingMemberManagementCapability(),),
+            engine_capabilities=(AICodingMemberManagementCapability(template_service),),
         )
 
     @singleton

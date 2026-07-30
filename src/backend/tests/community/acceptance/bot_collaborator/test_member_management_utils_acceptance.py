@@ -7,11 +7,11 @@ import pytest
 
 from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
     AICodingMemberManagementCapability,
+    get_template_ext,
+    has_member_management_enabled,
 )
 from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
     MemberManagementCapabilityService,
-    get_template_ext,
-    has_template_member_management_enabled,
 )
 
 
@@ -49,12 +49,12 @@ def test_member_management_acceptance_rejects_malformed_or_truthy_values():
     assert service.uses_member_management_semantics(
         {"active_engine": "claude_code", "template_type": "chat"}
     ) is False
-    assert has_template_member_management_enabled(None) is False
-    assert has_template_member_management_enabled({"bot_template_config": None}) is False
-    assert has_template_member_management_enabled(
+    assert has_member_management_enabled(None) is False
+    assert has_member_management_enabled({"bot_template_config": None}) is False
+    assert has_member_management_enabled(
         {"bot_template_config": {"advanced_config": None}}
     ) is False
-    assert has_template_member_management_enabled(
+    assert has_member_management_enabled(
         {"bot_template_config": {"advanced_config": {"member_management": "true"}}}
     ) is False
     assert service.uses_member_management_semantics(

@@ -58,8 +58,7 @@ def service(collaborator_repo, bot_repo, template_service):
         resolver_provider=lambda: Mock(),
         device_fs_dispatcher_provider=lambda: Mock(),
         member_management_capability_service=MemberManagementCapabilityService(
-            template_service=template_service,
-            engine_capabilities=(AICodingMemberManagementCapability(),),
+            engine_capabilities=(AICodingMemberManagementCapability(template_service),),
         ),
     )
     # 隔离协作变更回调副作用（会反查协作者列表 / AgentPass），聚焦类型判断分支
