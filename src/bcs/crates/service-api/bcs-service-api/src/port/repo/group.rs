@@ -18,20 +18,6 @@ pub trait GroupRepoPort: Send + Sync {
         id: &str,
         patch: GroupMutableFieldsPatch,
     ) -> ServiceResult<()>;
-    /// Apply a field-scoped patch only when the persisted Group version still
-    /// matches the caller's snapshot, then return the persisted representation.
-    async fn patch_mutable_fields_if_version(
-        &self,
-        id: &str,
-        expected_version: i32,
-        patch: GroupMutableFieldsPatch,
-    ) -> ServiceResult<Group> {
-        let _ = (id, expected_version, patch);
-        Err(crate::ServiceError::InvalidOperation {
-            message: "versioned mutable Group patch is not configured".to_string(),
-            request_id: None,
-        })
-    }
     async fn get(&self, id: &str) -> Option<Group>;
     async fn try_get(&self, id: &str) -> ServiceResult<Option<Group>> {
         Ok(self.get(id).await)

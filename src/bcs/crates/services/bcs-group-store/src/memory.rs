@@ -106,47 +106,6 @@ impl GroupRepoPort for MemoryGroupRepo {
         Ok(())
     }
 
-    async fn patch_mutable_fields_if_version(
-        &self,
-        id: &str,
-        expected_version: i32,
-        patch: GroupMutableFieldsPatch,
-    ) -> ServiceResult<DomainGroup> {
-        let mut groups = self.groups.write().await;
-        let group = groups
-            .get_mut(id)
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-        if group.version != expected_version {
-            return Err(ServiceError::Conflict(format!(
-                "Group '{id}' changed while applying the patch"
-            )));
-        }
-        if let Some(label) = patch.label {
-            group.label = Some(label);
-        }
-        if let Some(context) = patch.context {
-            group.context = Some(context);
-        }
-        if let Some(visibility) = patch.visibility {
-            group.visibility = visibility;
-        }
-        if let Some(delivery) = patch.default_bot_final_delivery {
-            group
-                .routing_policy
-                .get_or_insert_with(Default::default)
-                .default_bot_final_delivery = delivery;
-        }
-        group.version = group
-            .version
-            .checked_add(1)
-            .ok_or_else(|| ServiceError::InternalError(format!("Group '{id}' version overflow")))?;
-        group.updated_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0);
-        Ok(group.clone())
-    }
-
     async fn get(&self, id: &str) -> Option<DomainGroup> {
         let groups = self.groups.read().await;
         groups.get(id).cloned()
@@ -212,10 +171,6 @@ impl GroupRepoPort for MemoryGroupRepo {
             });
         }
         group.participants.push(participant);
-        group.version = group
-            .version
-            .checked_add(1)
-            .ok_or_else(|| ServiceError::InternalError(format!("Group '{id}' version overflow")))?;
         group.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis() as u64)

@@ -949,7 +949,7 @@ impl GroupRepoPort for MySqlGroupStore {
         id: &str,
         patch: GroupMutableFieldsPatch,
     ) -> ServiceResult<()> {
-        if self.get(id).await.is_none() {
+        if self.try_get(id).await?.is_none() {
             return Err(ServiceError::GroupNotFound(id.to_string()));
         }
 
@@ -1004,78 +1004,10 @@ impl GroupRepoPort for MySqlGroupStore {
         // Invalidate instead of reconstructing the row so hidden routing fields
         // changed concurrently are always reloaded from the authoritative store.
         self.cache.write().await.remove(id);
-        if affected_rows == 0 && self.get(id).await.is_none() {
+        if affected_rows == 0 && self.try_get(id).await?.is_none() {
             return Err(ServiceError::GroupNotFound(id.to_string()));
         }
         Ok(())
-    }
-
-    async fn patch_mutable_fields_if_version(
-        &self,
-        id: &str,
-        expected_version: i32,
-        patch: GroupMutableFieldsPatch,
-    ) -> ServiceResult<Group> {
-        let mut assignments = Vec::new();
-        let mut params = Vec::new();
-        if let Some(label) = patch.label {
-            assignments.push("label = ?".to_string());
-            params.push(Value::from(label.as_str()));
-        }
-        if let Some(context) = patch.context {
-            assignments.push("context = ?".to_string());
-            params.push(Value::from(context.as_str()));
-        }
-        if let Some(visibility) = patch.visibility {
-            assignments.push("visibility = ?".to_string());
-            params.push(Value::from(visibility.as_str()));
-        }
-        if let Some(delivery) = patch.default_bot_final_delivery {
-            let expression = match self.flavor {
-                DbSqlFlavor::Mysql => {
-                    "routing_policy_json = JSON_SET(COALESCE(routing_policy_json, JSON_OBJECT()), '$.default_bot_final_delivery', ?)"
-                }
-                DbSqlFlavor::Sqlite => {
-                    "routing_policy_json = json_set(COALESCE(routing_policy_json, '{}'), '$.default_bot_final_delivery', ?)"
-                }
-            };
-            assignments.push(expression.to_string());
-            params.push(Value::from(match delivery {
-                DefaultDelivery::SendToDriver => "send_to_driver",
-                DefaultDelivery::InjectObservers => "inject_observers",
-            }));
-        }
-        assignments.push("version = version + 1".to_string());
-        assignments.push(self.flavor.set_modified_now().to_string());
-        params.push(Value::from(id));
-        params.push(Value::from(self.env.as_str()));
-        params.push(Value::from(expected_version));
-        let sql = format!(
-            "UPDATE bcs_groups SET {} WHERE group_id = ? AND env = ? AND version = ?",
-            assignments.join(", ")
-        );
-        let affected_rows = self
-            .db
-            .execute_with(&self.logical_db, &sql, params)
-            .await
-            .map_err(|error| {
-                ServiceError::InternalError(format!(
-                    "versioned mutable Group patch failed: {error}"
-                ))
-            })?;
-
-        self.cache.write().await.remove(id);
-        if affected_rows == 0 {
-            return match self.try_get(id).await? {
-                None => Err(ServiceError::GroupNotFound(id.to_string())),
-                Some(_) => Err(ServiceError::Conflict(format!(
-                    "Group '{id}' changed while applying the patch"
-                ))),
-            };
-        }
-        self.try_get(id)
-            .await?
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))
     }
 
     /// Get a session by ID (cache-first, fallback to DB).
@@ -1185,7 +1117,7 @@ impl GroupRepoPort for MySqlGroupStore {
         let mode = Self::mode_to_str(participant.effective_mode());
         let update_group = format!(
             "UPDATE bcs_groups \
-             SET version = version + 1, {} \
+             SET {} \
              WHERE group_id = ? AND env = ? AND (visibility <> 'public' OR ?) \
                AND NOT EXISTS ( \
                  SELECT 1 FROM bcs_group_participants \
@@ -3133,6 +3065,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mutable_patch_propagates_preflight_read_failures() {
+        let db = Arc::new(RecordingDbPlugin::failing_queries());
+        let repo = MySqlGroupStore::new(db, "local".to_string());
+
+        let error = repo
+            .patch_mutable_fields(
+                "group-1",
+                GroupMutableFieldsPatch {
+                    label: Some("Renamed".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("patch preflight read must fail");
+
+        assert!(error.to_string().contains("database unavailable"));
+    }
+
+    #[tokio::test]
     async fn delete_aborts_before_persistence_when_snapshot_read_fails() {
         let db = Arc::new(RecordingDbPlugin::failing_queries());
         let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
@@ -3325,39 +3276,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn versioned_mutable_patch_uses_compare_and_swap_sql() {
-        let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
-        let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
-
-        let _ = repo
-            .patch_mutable_fields_if_version(
-                "group-1",
-                7,
-                GroupMutableFieldsPatch {
-                    label: Some("Renamed".to_string()),
-                    ..Default::default()
-                },
-            )
-            .await;
-
-        let statements = db.execute_statements.lock().expect("execute statements");
-        assert_eq!(statements.len(), 1);
-        let sql = statements[0].sql();
-        assert!(sql.contains("version = version + 1"));
-        assert!(sql.contains("WHERE group_id = ? AND env = ? AND version = ?"));
-        assert_eq!(
-            statements[0].params(),
-            &[
-                Value::from("Renamed"),
-                Value::from("group-1"),
-                Value::from("local"),
-                Value::from(7_i32),
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn guarded_participant_insert_locks_visibility_with_the_group_version() {
+    async fn guarded_participant_insert_preserves_group_version() {
         let db = Arc::new(RecordingDbPlugin::with_first_execute_affected_rows(1));
         let repo = MySqlGroupStore::new(db.clone(), "local".to_string());
 
@@ -3371,7 +3290,7 @@ mod tests {
 
         let sql = db.transaction_sql.lock().expect("transaction sql");
         assert_eq!(sql.len(), 2);
-        assert!(sql[0].contains("version = version + 1"));
+        assert!(!sql[0].contains("version"));
         assert!(sql[0].contains("visibility <> 'public' OR ?"));
         assert!(sql[0].contains("NOT EXISTS"));
         assert!(sql[0].contains("bcs_group_participants"));

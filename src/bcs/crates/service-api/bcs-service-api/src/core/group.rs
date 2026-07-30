@@ -139,19 +139,6 @@ pub trait GroupCoreService: Send + Sync {
         })
     }
 
-    async fn patch_mutable_fields_if_version(
-        &self,
-        id: &str,
-        expected_version: i32,
-        patch: GroupMutableFieldsPatch,
-    ) -> ServiceResult<Group> {
-        let _ = (id, expected_version, patch);
-        Err(super::ServiceError::InvalidOperation {
-            message: "versioned mutable Group patch is not configured".to_string(),
-            request_id: None,
-        })
-    }
-
     /// Get a group by ID.
     async fn get(&self, id: &str) -> Option<Group>;
 

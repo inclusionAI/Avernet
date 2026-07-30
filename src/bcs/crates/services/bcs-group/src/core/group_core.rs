@@ -51,17 +51,6 @@ impl GroupCoreService for GroupCore {
         self.repo.patch_mutable_fields(id, patch).await
     }
 
-    async fn patch_mutable_fields_if_version(
-        &self,
-        id: &str,
-        expected_version: i32,
-        patch: GroupMutableFieldsPatch,
-    ) -> ServiceResult<Group> {
-        self.repo
-            .patch_mutable_fields_if_version(id, expected_version, patch)
-            .await
-    }
-
     async fn get(&self, id: &str) -> Option<Group> {
         self.repo.get(id).await
     }

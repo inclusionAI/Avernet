@@ -1719,6 +1719,7 @@ async fn update_preserves_hidden_legacy_routing_fields() {
         default_bot_final_delivery: DefaultDelivery::SendToDriver,
         sender_routes: sender_routes.clone(),
     });
+    let original_version = group.version;
     fixture.groups.upsert(group).await.expect("store group");
 
     let detail = fixture
@@ -1742,7 +1743,8 @@ async fn update_preserves_hidden_legacy_routing_fields() {
         panic!("expected collaboration detail");
     };
     assert_eq!(detail.updated_at, stored.updated_at);
-    assert_eq!(detail.version, stored.version);
+    assert_eq!(stored.version, original_version);
+    assert_eq!(detail.version, original_version);
     let policy = stored.routing_policy.expect("routing policy");
     assert_eq!(policy.mode, RoutingMode::Structured);
     assert_eq!(policy.sender_routes, sender_routes);

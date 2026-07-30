@@ -1015,7 +1015,6 @@ impl GroupService for GroupServiceImpl {
         let mut group = self
             .load_manageable_group(&command.principal, &command.group_id)
             .await?;
-        let expected_version = group.version;
         if group.group_kind == GroupKind::Dm {
             if command.patch.delivery_policy.is_some()
                 || command.patch.visibility == Some(GroupVisibility::Public)
@@ -1078,11 +1077,18 @@ impl GroupService for GroupServiceImpl {
         } else {
             None
         };
-        let persisted = self
-            .groups
-            .patch_mutable_fields_if_version(&command.group_id, expected_version, persistence_patch)
+        self.groups
+            .patch_mutable_fields(&command.group_id, persistence_patch)
             .await
             .map_err(map_service_error)?;
+        let persisted = self
+            .groups
+            .try_get(&command.group_id)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                map_service_error(ServiceError::GroupNotFound(command.group_id.clone()))
+            })?;
         self.project_detail_with_state_machine(persisted, state_machine_projection)
             .await
     }
