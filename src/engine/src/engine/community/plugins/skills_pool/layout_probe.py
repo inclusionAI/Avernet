@@ -783,7 +783,10 @@ def inspect_runtime_layout(
                 active_marker["activation_state"] == "active"
             ),
         }
-        if engine in {"aicoding", "hermes"}:
+        if (
+            engine in {"aicoding", "hermes"}
+            and active_marker["activation_state"] == "active"
+        ):
             active_checks["stable_repo_bridge_valid"] = True
         return RuntimeLayoutInspection(
             status=RuntimeLayoutInspectionStatus.READY,

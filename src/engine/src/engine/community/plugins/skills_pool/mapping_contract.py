@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from engine.community.core.skills.exceptions import (
+    InvalidPoolMappingRequestError,
+)
 from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
     MAPPING_CONTRACT_VERSION,
@@ -38,9 +41,11 @@ def _require_mapping_fields(
     contract_name: str,
 ) -> dict[str, object]:
     if not isinstance(item, dict):
-        raise TypeError(f"each {contract_name} mapping must be an object")
+        raise InvalidPoolMappingRequestError(
+            f"each {contract_name} mapping must be an object"
+        )
     if frozenset(item) != expected:
-        raise TypeError(
+        raise InvalidPoolMappingRequestError(
             f"{contract_name} mapping must contain exactly "
             f"{', '.join(sorted(expected))}"
         )
@@ -63,7 +68,7 @@ def resolve_mapping_payload(
     """
 
     if not isinstance(payload, list):
-        raise TypeError("mappings must be an array")
+        raise InvalidPoolMappingRequestError("mappings must be an array")
     if mapping_contract_version is None:
         physical: list[SkillMapping] = []
         for raw_item in payload:
@@ -75,11 +80,13 @@ def resolve_mapping_payload(
             source = item["source"]
             target = item["target"]
             if not isinstance(source, str) or not isinstance(target, str):
-                raise TypeError("legacy mapping source and target must be strings")
+                raise InvalidPoolMappingRequestError(
+                    "legacy mapping source and target must be strings"
+                )
             physical.append(SkillMapping(source=source, target=target))
         return ResolvedMappingPayload(tuple(physical))
     if mapping_contract_version != MAPPING_CONTRACT_VERSION:
-        raise SkillLayoutResolutionError(
+        raise InvalidPoolMappingRequestError(
             f"unsupported mapping contract: {mapping_contract_version}"
         )
 
@@ -98,13 +105,19 @@ def resolve_mapping_payload(
             or not isinstance(relative_path, str)
             or not isinstance(link_name, str)
         ):
-            raise TypeError(
+            raise InvalidPoolMappingRequestError(
                 "logical mapping corpus, relative_path and link_name "
                 "must be strings"
             )
+        try:
+            resolved_corpus = SkillCorpus(corpus)
+        except ValueError as error:
+            raise InvalidPoolMappingRequestError(
+                f"unknown Skill corpus: {corpus!r}"
+            ) from error
         logical.append(
             LogicalSkillMapping(
-                corpus=SkillCorpus(corpus),
+                corpus=resolved_corpus,
                 relative_path=relative_path,
                 link_name=link_name,
             )
@@ -127,12 +140,15 @@ def resolve_mapping_payload(
         if source_layout is MappingSourceLayout.POOL
         else plan.legacy_repo
     )
-    resolved = resolve_skill_mappings(
-        active_root=plan.active_root,
-        local_root=local_root,
-        repo_root=repo_root,
-        mappings=logical,
-    )
+    try:
+        resolved = resolve_skill_mappings(
+            active_root=plan.active_root,
+            local_root=local_root,
+            repo_root=repo_root,
+            mappings=logical,
+        )
+    except SkillLayoutResolutionError as error:
+        raise InvalidPoolMappingRequestError(str(error)) from error
     return ResolvedMappingPayload(
         mappings=tuple(
             SkillMapping(source=str(mapping.source), target=str(mapping.target))
