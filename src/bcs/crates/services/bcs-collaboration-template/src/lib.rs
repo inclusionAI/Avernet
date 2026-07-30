@@ -867,17 +867,20 @@ runtime:
             detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]["kind"],
             "human_input"
         );
-        assert_eq!(
-            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]["assignee"],
-            serde_json::json!({
-                "type": "runtime_actor",
-                "actor": "$authenticated_human",
-            })
+        assert!(
+            detail.definition["runtime"]["state_machine"]
+                .get("human_input_channel")
+                .is_none()
         );
-        assert_eq!(
-            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]["notification"]
-                ["mode"],
-            "direct_assignee"
+        assert!(
+            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]
+                .get("assignee")
+                .is_none()
+        );
+        assert!(
+            detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]
+                .get("notification")
+                .is_none()
         );
         assert_eq!(
             detail.definition["runtime"]["state_machine"]["nodes"]["human_review"]

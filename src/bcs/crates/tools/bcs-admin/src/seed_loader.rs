@@ -354,18 +354,20 @@ mod tests {
                 ["kind"],
             "human_input"
         );
-        assert_eq!(
-            human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
-                ["assignee"],
-            serde_json::json!({
-                "type": "runtime_actor",
-                "actor": "$authenticated_human",
-            })
+        assert!(
+            human_review.definition_json["runtime"]["state_machine"]
+                .get("human_input_channel")
+                .is_none()
         );
-        assert_eq!(
+        assert!(
             human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
-                ["notification"]["mode"],
-            "direct_assignee"
+                .get("assignee")
+                .is_none()
+        );
+        assert!(
+            human_review.definition_json["runtime"]["state_machine"]["nodes"]["human_review"]
+                .get("notification")
+                .is_none()
         );
 
         Ok(())

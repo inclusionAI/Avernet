@@ -48,4 +48,5 @@ Legacy seed.
 - Run collaboration template, admin seed-loader, and collaboration runtime
   tests.
 - Run the focused V1 Group tests that cover channel-enabled deferred startup.
-- Confirm the PR diff contains no `$authenticated_human` placeholder.
+- Confirm production, test, and seed paths contain no `$authenticated_human`
+  placeholder.

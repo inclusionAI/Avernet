@@ -163,13 +163,14 @@ Expected: all tests pass.
 Run:
 
 ```bash
-rg -n '\$authenticated_human|AUTHENTICATED_HUMAN_ASSIGNEE|resolve_authenticated_human_assignees' src/bcs
+rg -n '\$authenticated_human|AUTHENTICATED_HUMAN_ASSIGNEE|resolve_authenticated_human_assignees' \
+  src/bcs/crates src/bcs/seeds
 git diff --check
 git status --short
 ```
 
-Expected: no placeholder occurrences, no whitespace errors, and only intended
-files are modified.
+Expected: no placeholder occurrences in production, test, or seed paths; no
+whitespace errors; and only intended files are modified.
 
 **Step 3: Commit and push**
 

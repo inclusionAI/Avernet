@@ -802,59 +802,6 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
 }
 
 #[tokio::test]
-async fn authenticated_human_placeholder_binds_to_the_actual_runtime_actor() {
-    let group = Arc::new(GroupStore::new());
-    group.upsert(test_group()).await.expect("seed group");
-    let sessions = test_sessions();
-    let store = Arc::new(MemoryCollaborationStore::new());
-    let runtime = CollaborationRuntime::new(
-        store.clone(),
-        store.clone(),
-        store.clone(),
-        store.clone(),
-        group,
-        sessions,
-        Arc::new(RecordingDelivery::default()),
-        noop_judge(),
-    );
-
-    let started = runtime
-        .start_state_machine_run(StartStateMachineRunCommand {
-            group_id: "group-1".to_string(),
-            session_id: None,
-            definition_yaml: Some(human_input_yaml().replace("human_1001", "$authenticated_human")),
-            definition: None,
-            definition_ref: None,
-            participant_bindings: None,
-            input: json!({"proposal": "ship it"}),
-            caller_id: Some("human_2002".to_string()),
-            authenticated_human: Some(AuthenticatedHumanCaller {
-                actor_id: "human_2002".to_string(),
-                display_name: Some("Actual Reviewer".to_string()),
-            }),
-        })
-        .await
-        .expect("placeholder should resolve to the authenticated Human");
-
-    let pending = runtime
-        .list_pending_human_nodes(ListPendingHumanNodesCommand {
-            run_id: started.view.run.run_id,
-            caller_actor_id: "human_2002".to_string(),
-        })
-        .await
-        .expect("actual Human can access the pending node");
-    assert_eq!(pending.len(), 1);
-
-    let stored = StateMachineDefinitionRepoPort::get(&*store, "human_input_single", 1)
-        .await
-        .expect("read stored authoring definition")
-        .expect("inline definition was persisted");
-    let stored_yaml = serde_yaml::to_string(&stored).expect("encode stored definition");
-    assert!(stored_yaml.contains("$authenticated_human"));
-    assert!(!stored_yaml.contains("human_2002"));
-}
-
-#[tokio::test]
 async fn human_input_waits_without_bot_delivery_and_completes_from_natural_language() {
     let group = Arc::new(GroupStore::new());
     group

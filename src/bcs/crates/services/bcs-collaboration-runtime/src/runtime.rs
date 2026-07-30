@@ -60,7 +60,6 @@ use crate::definition::{
 };
 use crate::validation::validate_authoring_definition_yaml;
 
-const AUTHENTICATED_HUMAN_ASSIGNEE: &str = "$authenticated_human";
 const DEFAULT_JUDGE_TIMEOUT_MS: u64 = 90_000;
 const MAX_HUMAN_RESPONSE_BYTES: usize = 64 * 1024;
 const SESSION_STATE_MACHINE_POLICY_VERSION: &str = "session_state_machine_v1";
@@ -2068,22 +2067,13 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             }
         }
         let group_binding = self.bindings.get(&cmd.group_id).await?;
-        let mut resolved_definition = self
+        let resolved_definition = self
             .resolve_definition(&cmd, group_binding.as_ref())
             .await?;
         let should_upsert_definition = resolved_definition.source
             == ResolvedDefinitionSource::Inline
             && !is_one_shot_session_run;
-        let definition_for_upsert = if should_upsert_definition {
-            Some(validate_definition(resolved_definition.definition.clone())?.definition)
-        } else {
-            None
-        };
         let authenticated_human = cmd.authenticated_human.clone();
-        resolve_authenticated_human_assignees(
-            &mut resolved_definition.definition,
-            authenticated_human.as_ref(),
-        )?;
         let compiled = validate_definition(resolved_definition.definition)?;
         let definition = &compiled.definition;
         let has_human_input = compiled_has_human_input(&compiled);
@@ -2106,8 +2096,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 .as_ref()
                 .or(group_binding.as_ref()),
         )?;
-        if let Some(definition_for_upsert) = definition_for_upsert {
-            self.definitions.upsert(definition_for_upsert).await?;
+        if should_upsert_definition {
+            self.definitions.upsert(definition.clone()).await?;
         }
         let (session_id, session_title, mut session) = match cmd.session_id {
             Some(session_id) => {
@@ -4188,31 +4178,6 @@ fn compiled_has_human_input(compiled: &CompiledStateMachine) -> bool {
             .any(|node| node.kind == StateMachineNodeKind::HumanInput),
         _ => false,
     }
-}
-
-fn resolve_authenticated_human_assignees(
-    definition: &mut CollaborationDefinition,
-    authenticated_human: Option<&AuthenticatedHumanCaller>,
-) -> Result<(), CollaborationRuntimeError> {
-    let CollaborationRuntimeDefinition::StateMachine(state_machine) = &mut definition.runtime
-    else {
-        return Ok(());
-    };
-    for (node_id, node) in &mut state_machine.nodes {
-        let Some(StateMachineAssignee::RuntimeActor { actor }) = &mut node.assignee else {
-            continue;
-        };
-        if actor != AUTHENTICATED_HUMAN_ASSIGNEE {
-            continue;
-        }
-        let human = authenticated_human.ok_or_else(|| {
-            CollaborationRuntimeError::InvalidRequest(format!(
-                "human_input node '{node_id}' requires an authenticated Human caller"
-            ))
-        })?;
-        *actor = human.actor_id.clone();
-    }
-    Ok(())
 }
 
 fn human_input_assignees(compiled: &CompiledStateMachine) -> HashSet<String> {

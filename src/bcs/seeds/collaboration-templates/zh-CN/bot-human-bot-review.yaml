@@ -1,6 +1,6 @@
 # Bot-Human-Bot 三节点协作模板。
-# participants 只声明需要绑定实际 bot 的逻辑角色；Human 通过
-# 通过已认证的 runtime Human 指定，不需要额外的 participant binding。
+# participants 只声明需要绑定实际 bot 的逻辑角色；Human 由群内当前用户参与，
+# 因此 human_input 节点不配置 assignee，也不需要额外的 participant binding。
 
 api_version: bcs.collaboration/v1
 name: Bot-Human-Bot 三节点协作
@@ -19,8 +19,6 @@ runtime:
   state_machine:
     version: 1
     graph_mode: acyclic
-    human_input_channel:
-      channel_type: dingtalk
     nodes:
       generate_draft:
         kind: bot_task
@@ -37,11 +35,6 @@ runtime:
       human_review:
         kind: human_input
         display_name: 人工审核
-        assignee:
-          type: runtime_actor
-          actor: $authenticated_human
-        notification:
-          mode: direct_assignee
         instruction: 请审核 Bot 生成的初稿。可以直接表示同意，也可以提出具体修改意见。
         node_timeout_ms: 86400000
         judge:
