@@ -171,8 +171,18 @@ Rules this endpoint must hold:
   `type` and the bare `token` are *not* fields — they are what we are trying to
   stop publishing.
 - **`expires_at` is mandatory** so a caller knows to re-fetch rather than
-  silently failing on an expired token (the internal WS token TTL is 120 min —
-  `core/grt_chat/services/grt_chat_service.py:25`).
+  silently failing on an expired token. It is **the issuer's own value** wherever
+  the issuer states one: the BaaS path documents that it *ignores* the requested
+  TTL and decides server-side, so a locally computed expiry there describes a
+  token that does not exist. `DeviceConnectionInfo.expires_at` carries the stated
+  value, and it is filled only on the paths where it really describes the token
+  being returned — the local path normally hands back an HTTP token whose expiry
+  BaaS does not state, and fills the field only when it falls back to the WS
+  token. Where nothing is stated, the field falls back to the requested TTL
+  (120 min, mirroring `core/grt_chat/services/grt_chat_service.py:25`): a bound
+  of the right order beats omitting a mandatory field. Provider values are
+  normalised to UTC ISO 8601 so one shape reaches the wire either way.
+  _Corrected 2026-07-30._
 - The socket set is **capability-derived**, so this endpoint and
   `…/engine/capabilities` must never disagree.
 

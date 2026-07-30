@@ -230,10 +230,25 @@ class EngineRuntimeRelay:
             )
             raise EngineUpstreamError(f"engine returned a non-envelope body for {path}")
 
+        # An explicit ``success: false`` is a failure on EVERY route, enveloped
+        # or not. A raw-payload route simply has no ``success`` key at all — but
+        # a transport can still answer with a failure envelope for one (the
+        # community transport returns ``{"success": False, ...}`` for every
+        # call). Returning that dict as the payload made ``/engine/status``
+        # answer 200 with empty defaults instead of surfacing the upstream
+        # failure, so the check runs before the raw-payload branch.
+        if raw.get("success") is False:
+            logger.warning(
+                "[engine_runtime] engine reported failure bot=%s path=%s message=%s",
+                bot_id,
+                path,
+                raw.get("message"),
+            )
+            raise EngineUpstreamError(f"engine reported failure for {path}")
+
         if not enveloped:
-            # A raw-payload route: the body *is* the data. No success flag to
-            # check, no total, and no warning — the engine only attaches those
-            # to its envelope.
+            # A raw-payload route: the body *is* the data. No success flag, no
+            # total, no warning — the engine attaches those only to its envelope.
             return EngineResult(data=raw)
 
         if not raw.get("success", False):

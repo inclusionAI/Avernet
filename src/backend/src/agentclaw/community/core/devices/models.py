@@ -136,6 +136,15 @@ class DeviceConnectionInfo:
     expert_chat 等 3 处 caller 已用 `conn.get("url") or f"http://{conn['target']}"`
     模式优先取 url，保持现有调用方兼容。
     """
+    expires_at: str = ""
+    """``token`` 的过期时间（ISO 8601），由签发方给出；未知时为空串。
+
+    只在该值确实描述本对象返回的那个 ``token`` 时填充：BaaS 链路返回
+    ws-info 的 token，因此透传 ws-info 的 expires_at；LocalDeviceService
+    正常路径返回的是 http-info 的 token（BaaS 未给过期时间），只有在
+    http-info 失败回落到 ws-info token 时才填。空串表示"签发方没说"，
+    caller 不得据此推断"永不过期"。
+    """
 
 
 @dataclass

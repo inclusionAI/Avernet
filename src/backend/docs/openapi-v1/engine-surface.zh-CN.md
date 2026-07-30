@@ -156,9 +156,15 @@ socket 也是干净的。
   _2026-07-30 更正。_
 - **URL 是不透明且完整的。** 调用方不拼接任何东西。`target`、`type` 和裸 `token`
   **不是**字段 —— 它们正是我们要停止对外发布的东西。
-- **`expires_at` 必填**，让调用方知道该重新获取，而不是在 token 过期后静默失败
-  （内部 WS token TTL 为 120 分钟 ——
-  `core/grt_chat/services/grt_chat_service.py:25`）。
+- **`expires_at` 必填**，让调用方知道该重新获取，而不是在 token 过期后静默失败。
+  只要签发方给出了过期时间，就以**签发方自己的值**为准：BaaS 链路明确文档化了
+  它**忽略**传入的 TTL、由服务端决定，所以在那条链路上本地算出来的过期时间描述的
+  是一个并不存在的 token。`DeviceConnectionInfo.expires_at` 承载签发方声明的值，
+  且只在该值确实描述本次返回的那个 token 时才填 —— local 链路正常返回的是 BaaS
+  未声明过期时间的 HTTP token，只有回落到 WS token 时才填。签发方没给时才回落到
+  请求的 TTL（120 分钟，对齐 `core/grt_chat/services/grt_chat_service.py:25`）：
+  一个量级正确的上界胜过让必填字段缺失。签发方的值会归一化为 UTC ISO 8601，
+  保证两条分支产出同一种格式。_2026-07-30 更正。_
 - socket 集合是**由能力推导出来的**，因此本端点与 `…/engine/capabilities`
   永远不允许互相矛盾。
 

@@ -142,11 +142,42 @@ def test_clear_messages(client, relay):
     assert ok(client.delete(f"{_base()}/{SESSION_ID}/messages"))["deleted"] is True
 
 
-def test_pagination_reports_an_exact_total(client, relay):
-    relay.results = [EngineResult(data=[{**ENGINE_SESSION, "id": f"s{i}"} for i in range(7)])]
+def _sessions(n: int) -> list[dict]:
+    return [{**ENGINE_SESSION, "id": f"s{i}"} for i in range(n)]
+
+
+def test_a_late_page_is_fetched_from_the_engine_not_sliced_locally(client, relay):
+    """The engine query follows the caller's page.
+
+    Fetching a fixed prefix from offset 0 and slicing made every page past that
+    prefix come back empty; the window has to move with the caller.
+    """
+    relay.results = [EngineResult(data=_sessions(3))]
+    data = ok(client.get(_base(), params={"page": 400, "page_size": 3}))
+    assert relay.calls[0]["params"] == {"offset": 1197, "limit": 4}
+    assert [i["session_id"] for i in data["items"]] == ["s0", "s1", "s2"]
+
+
+def test_pagination_total_is_exact_once_the_caller_reaches_the_end(client, relay):
+    """A window shorter than the page proves nothing follows it."""
+    relay.results = [EngineResult(data=_sessions(2))]
+    data = ok(client.get(_base(), params={"page": 2, "page_size": 3}))
+    assert data["total"] == 5
+    assert len(data["items"]) == 2
+
+
+def test_pagination_total_is_a_floor_while_more_remain(client, relay):
+    """The lookahead item proves more exist without inventing a count."""
+    relay.results = [EngineResult(data=_sessions(4))]
     data = ok(client.get(_base(), params={"page": 2, "page_size": 3}))
     assert data["total"] == 7
-    assert [i["session_id"] for i in data["items"]] == ["s3", "s4", "s5"]
+    assert [i["session_id"] for i in data["items"]] == ["s0", "s1", "s2"]
+
+
+def test_message_window_follows_the_caller_page(client, relay):
+    relay.results = [EngineResult(data=[ENGINE_MESSAGE], total=1200)]
+    ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 3, "page_size": 50}))
+    assert relay.calls[0]["params"] == {"offset": 100, "limit": 51}
 
 
 # ── the personal-bots-only gate ──────────────────────────────────────────────

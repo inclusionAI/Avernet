@@ -53,15 +53,11 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 #: listing there would show the bot's owner other people's conversations.
 _SUPPORTED_BOT_TYPE = "personal"
 
-#: Upper bound on what we ask the engine for when building one page.
-#:
-#: The engine's list route takes ``limit``/``offset`` but never reports a total
-#: (``src/engine/.../api/session/router.py``), and ``Page.total`` is required.
-#: So we fetch once, slice locally, and report an exact total — the same shape
-#: ``openapi_v1/routines/router.py`` uses. The cap stops a bot with a very large
-#: history forcing an unbounded fetch; when it bites, ``total`` is a floor and
-#: the truncation is logged rather than silently presented as complete.
-_MAX_ENGINE_FETCH = 500
+#: One extra item is requested beyond the page, purely to learn whether more
+#: exist. The session list route takes ``limit``/``offset`` but reports no
+#: total, and ``Page.total`` is required — so for that group the total is
+#: derived from the window rather than invented.
+_LOOKAHEAD = 1
 
 
 def _require_personal_bot(
@@ -141,24 +137,36 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
     return [d for d in raw if isinstance(d, dict)]
 
 
-def _slice(
-    items: list[Any], page_params: Any, *, what: str, reported: int | None = None
-) -> tuple[int, list[Any]]:
-    """The requested page plus the best total available.
+def _window(page_params: Any) -> dict[str, int]:
+    """The engine query for exactly the requested page, plus one lookahead item.
 
-    ``reported`` is the engine's own count where it supplies one. Without it the
-    total is the number of items fetched, which the cap can understate — logged
-    when that happens rather than presented as complete.
+    Asking the engine for the caller's window — rather than always fetching from
+    offset 0 and slicing locally — is what makes pages past the first few
+    hundred work at all. Fetching a fixed prefix left every later page empty and
+    capped the reported total at the prefix length.
     """
-    if reported is None and len(items) >= _MAX_ENGINE_FETCH:
-        logger.warning(
-            "[engine_runtime] %s hit the %d-item fetch cap; total is a floor",
-            what,
-            _MAX_ENGINE_FETCH,
-        )
-    total = reported if reported is not None else len(items)
-    start = (page_params.page - 1) * page_params.page_size
-    return total, items[start : start + page_params.page_size]
+    offset = (page_params.page - 1) * page_params.page_size
+    return {"offset": offset, "limit": page_params.page_size + _LOOKAHEAD}
+
+
+def _page(
+    items: list[Any], page_params: Any, *, reported: int | None
+) -> tuple[int, list[Any]]:
+    """The requested page, plus the best total the engine allows.
+
+    ``reported`` is the engine's own count where it supplies one — the message
+    history does, the session list does not. Without it the total is derived
+    from the window: exact once the caller reaches the end (a short page proves
+    it), and a floor while full pages keep coming. That is the most this API can
+    say honestly until the engine reports a total for sessions; inventing a
+    larger number would advertise pages that return nothing.
+    """
+    offset = (page_params.page - 1) * page_params.page_size
+    has_more = len(items) > page_params.page_size
+    visible = items[: page_params.page_size]
+    if reported is not None:
+        return reported, visible
+    return offset + len(visible) + (1 if has_more else 0), visible
 
 
 @router.get("", response_model=Envelope[Page[Session]])
@@ -174,7 +182,7 @@ async def list_sessions(
     """List the bot's sessions."""
     owner_id = caller_owner_id(principal)
     _require_personal_bot(relay, bot_id, owner_id)
-    params: dict[str, Any] = {"limit": _MAX_ENGINE_FETCH, "offset": 0}
+    params: dict[str, Any] = _window(page)
     if agent_id:
         params["agent_id"] = agent_id
     result = await relay.call(
@@ -182,7 +190,8 @@ async def list_sessions(
         params=params,
     )
     mapped = [_map_session(d) for d in _as_list(result.data)]
-    total, items = _slice(mapped, page, what="sessions")
+    # The session list reports no total; derive it from the window.
+    total, items = _page(mapped, page, reported=result.total)
     return page_envelope(total, items, request)
 
 
@@ -305,13 +314,13 @@ async def list_session_messages(
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, method="GET",
         path=f"/api/sessions/{session_id}/messages",
-        params={"limit": _MAX_ENGINE_FETCH},
+        params=_window(page),
     )
     mapped = [_map_message(d, session_id) for d in _as_list(result.data)]
-    # Unlike the session list, the message history *does* report a total
-    # (``ApiResponse.total``). Prefer it: falling back to len(mapped) would
-    # understate a history longer than the fetch cap.
-    total, items = _slice(mapped, page, what="messages", reported=result.total)
+    # The message history *does* report a total, so it is exact — and now that
+    # the window follows the caller's page, a total larger than one page is
+    # actually reachable rather than advertising pages that return nothing.
+    total, items = _page(mapped, page, reported=result.total)
     return page_envelope(total, items, request)
 
 

@@ -809,6 +809,10 @@ class BaasDeviceService(DeviceService):
             bot_uuid=ws_info.bot_uuid,
             tenant=ws_info.tenant,
             engine_port=ws_info.engine_port,
+            # 服务端签发的过期时间。上面的 ttl 入参被本层忽略（由服务端决定），
+            # 所以 caller 自己按 ttl 推算出来的过期时间必然与真 token 不符——
+            # 透传这个值，让 caller 有权威值可用。
+            expires_at=ws_info.expires_at,
         )
 
         logger.info(

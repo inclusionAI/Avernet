@@ -161,10 +161,35 @@ def test_missing_proxy_base_is_an_upstream_error():
         _build(_svc(sandbox=_Sandbox(base="")))
 
 
-def test_expires_at_is_derived_from_the_requested_ttl():
+def test_expires_at_falls_back_to_the_ttl_when_the_provider_reports_none():
     from datetime import datetime, timedelta, timezone
 
     result = _build(_svc())
+    expires = datetime.fromisoformat(result.expires_at)
+    expected = datetime.now(timezone.utc) + timedelta(seconds=CONNECTION_TTL_SECONDS)
+    assert abs((expires - expected).total_seconds()) < 60
+
+
+def test_expires_at_prefers_the_providers_own_value():
+    """The BaaS path ignores the requested TTL and decides server-side, so a
+    locally computed expiry there describes a token that does not exist."""
+    devices = _Devices(expires_at="2031-05-06T07:08:09Z")
+    result = _build(_svc(devices=devices))
+    assert result.expires_at == "2031-05-06T07:08:09+00:00"
+
+
+def test_a_naive_provider_timestamp_is_read_as_utc():
+    devices = _Devices(expires_at="2031-05-06T07:08:09")
+    assert _build(_svc(devices=devices)).expires_at == "2031-05-06T07:08:09+00:00"
+
+
+def test_an_unparseable_provider_value_is_not_published_verbatim():
+    """``expires_at`` is contractually ISO 8601; garbage falls back to the
+    computed bound rather than shipping a string clients cannot parse."""
+    from datetime import datetime, timedelta, timezone
+
+    devices = _Devices(expires_at="soon-ish")
+    result = _build(_svc(devices=devices))
     expires = datetime.fromisoformat(result.expires_at)
     expected = datetime.now(timezone.utc) + timedelta(seconds=CONNECTION_TTL_SECONDS)
     assert abs((expires - expected).total_seconds()) < 60

@@ -112,7 +112,7 @@ class EngineConnectionService:
             SocketInfo(kind="chat", url=base + self._chat_path(engine), headers=headers)
         ]
         return ConnectionResult(
-            engine=engine, expires_at=self._expires_at(), sockets=sockets
+            engine=engine, expires_at=self._expires_at(info), sockets=sockets
         )
 
     # ── composition ───────────────────────────────────────────────────────
@@ -155,17 +155,49 @@ class EngineConnectionService:
         base = base.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
         return f"{base}/proxypass/{target}"
 
-    def _expires_at(self) -> str:
+    def _expires_at(self, info: object) -> str:
         """When the credential above stops working.
 
-        Computed from the TTL we requested. ``DeviceConnectionInfo`` carries no
-        expiry field, so there is no provider-reported value to prefer; if one
-        is added, prefer it — a computed expiry that disagrees with the real
-        token is worse than none.
+        The issuer's own value wins whenever it gives one. The TTL this service
+        requests is advisory — the BaaS path documents that it ignores it and
+        decides server-side — so a locally computed expiry there is a guess that
+        disagrees with the real token, and a caller that trusts it either
+        re-fetches early or keeps using a dead credential.
+
+        Falling back to the computed value covers the paths that report nothing
+        (a local device whose HTTP token carries no stated expiry): a bound of
+        the right order beats omitting a field the contract makes mandatory.
         """
+        reported = str(getattr(info, "expires_at", "") or "")
+        if reported:
+            normalised = self._as_utc_iso(reported)
+            if normalised:
+                return normalised
+            # Unparseable — publishing it verbatim would break the ISO 8601
+            # contract, so fall through to the computed bound instead.
+            logger.warning(
+                "[engine_runtime] provider expires_at is not ISO 8601: %r", reported
+            )
         return (
             datetime.now(timezone.utc) + timedelta(seconds=CONNECTION_TTL_SECONDS)
         ).isoformat()
+
+    @staticmethod
+    def _as_utc_iso(value: str) -> str:
+        """``value`` as a UTC ISO 8601 instant, or ``""`` if it is not one.
+
+        Providers spell UTC with a trailing ``Z``; the computed branch spells it
+        ``+00:00``. Normalising means one shape on the wire regardless of which
+        branch produced it. A naive timestamp is read as UTC — the field is
+        documented as UTC and every producer here emits UTC.
+        """
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
 
 
 __all__ = ["CONNECTION_TTL_SECONDS", "EngineConnectionService"]

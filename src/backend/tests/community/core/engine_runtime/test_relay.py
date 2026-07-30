@@ -446,3 +446,32 @@ async def test_non_json_body_does_not_surface_as_a_config_error():
         await _relay(transport=transport).call(
             bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
         )
+
+
+@pytest.mark.asyncio
+async def test_a_failure_envelope_on_a_raw_route_still_fails():
+    """A raw-payload route has no ``success`` key — but a transport can still
+    answer one with a failure envelope.
+
+    The community transport returns ``{"success": False, ...}`` for every call,
+    so treating the raw branch as unconditionally successful made
+    ``/api/engine/status`` answer 200 with empty defaults instead of surfacing
+    the upstream failure.
+    """
+    transport = _Transport({"success": False, "message": "no device adapter"})
+    with pytest.raises(EngineUpstreamError):
+        await _relay(transport=transport).call(
+            bot_id=BOT, owner_id=OWNER, method="GET",
+            path="/api/engine/status", enveloped=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_raw_payload_that_merely_lacks_success_is_still_accepted():
+    """The genuine raw shape has no ``success`` key; only an explicit False fails."""
+    status = {"engine": "openclaw", "active_connections": 1}
+    result = await _relay(transport=_Transport(status)).call(
+        bot_id=BOT, owner_id=OWNER, method="GET",
+        path="/api/engine/status", enveloped=False,
+    )
+    assert result.data == status
