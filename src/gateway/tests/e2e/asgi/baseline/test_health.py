@@ -41,6 +41,11 @@ class TestAppCreation:
         assert isinstance(app_no_lifespan, FA)
 
     def test_routes_registered(self, app_no_lifespan: FastAPI) -> None:
-        route_paths = {route.path for route in app_no_lifespan.routes}
+        # `app.routes` also contains `_IncludedRouter` wrappers (from
+        # `include_router`) which have no `.path`; only the concrete route
+        # objects do.
+        route_paths = {
+            route.path for route in app_no_lifespan.routes if hasattr(route, "path")
+        }
         for p in ("/health", "/api/test"):
             assert p in route_paths, f"Expected route {p} not found in {route_paths}"
