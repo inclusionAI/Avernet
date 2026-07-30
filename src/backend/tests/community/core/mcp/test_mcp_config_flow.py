@@ -185,3 +185,21 @@ def test_sync_failure_after_create_rolls_back_as_delete():
         _write(cfg=cfg, sync=sync)
     _, kw = cfg.rollback_unified_config.call_args
     assert kw["old_config"] is None
+
+
+def test_sync_raising_also_rolls_back_and_raises_sync_failure():
+    # The sync service contracts to return a failure dict, but if the push
+    # raises instead the freshly written row must still be rolled back — a
+    # stored-but-unpushed credential would violate the atomic write-and-push
+    # contract. The exception surfaces as McpSyncFailedError like any other
+    # push failure, so each surface maps it with the row already restored.
+    prior = {"api_key": "old", "headers": {}, "endpoint_env": "PROD"}
+    cfg = _config_service()
+    cfg.update_user_unified_config.return_value = prior
+    sync = MagicMock()
+    sync.sync_mcp_detail_to_all_bots = AsyncMock(side_effect=RuntimeError("boom"))
+    with pytest.raises(McpSyncFailedError, match="boom"):
+        _write(cfg=cfg, sync=sync)
+    cfg.rollback_unified_config.assert_called_once()
+    _, kw = cfg.rollback_unified_config.call_args
+    assert kw["old_config"] == prior

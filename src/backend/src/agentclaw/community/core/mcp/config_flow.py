@@ -168,24 +168,38 @@ async def write_unified_config(
         transport_protocol=normalized_tp,
     )
 
-    result = await sync_service.sync_mcp_detail_to_all_bots(
-        user_id=user_id,
-        server_code=server_code,
-        mcp_data=mcp_data,
-        entity_id=entity_id,
-        entity_type=entity_type,
-        api_key=api_key,
-        custom_headers=headers,
-        endpoint_env=endpoint_env,
-        transport_protocol=normalized_tp,
-    )
-
-    if not result["success"]:
+    def _roll_back() -> None:
         config_service.rollback_unified_config(
             user_id=user_id,
             server_code=server_code,
             old_config=old_config,
         )
+
+    try:
+        result = await sync_service.sync_mcp_detail_to_all_bots(
+            user_id=user_id,
+            server_code=server_code,
+            mcp_data=mcp_data,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            api_key=api_key,
+            custom_headers=headers,
+            endpoint_env=endpoint_env,
+            transport_protocol=normalized_tp,
+        )
+    except Exception as exc:
+        # The sync service contracts to *return* a failure dict rather than
+        # raise, but a device push that raises anyway (a dependency throwing,
+        # a future change) must not leave the freshly written credentials
+        # stored-but-unpushed — that is exactly the atomic write-and-push
+        # contract this function promises. Roll the row back and surface it as
+        # a sync failure, the same class a returned failure raises, so each
+        # surface maps it (internal 500 / public 502) with the row restored.
+        _roll_back()
+        raise McpSyncFailedError(str(exc)) from exc
+
+    if not result["success"]:
+        _roll_back()
         # Preserve the internal surface's exact 500 detail: the literal fallback
         # and ``.get(key, default)`` semantics (default only when the key is
         # absent). The public surface maps this error to a fixed message and
