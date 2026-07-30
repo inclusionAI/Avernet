@@ -671,8 +671,6 @@ async def test_aicoding_rollback_resumes_after_active_repo_restoration() -> None
     assert result.outcome is SkillsPoolRollbackOutcome.LEGACY_ACTIVE
     assert runtime.events == [
         "probe",
-        "mapping",
-        "verify",
         "rollback",
         "mapping",
         "verify",
