@@ -33,12 +33,17 @@ registered tenants**. It lives under
 category is implemented (PR #494); the other six are still **route definitions
 with stub handlers**.
 
-> 🔒 **The surface is not callable yet, by design.** `require_principal` is
-> still a stub returning `None`, so every real request to `/openapi/v1/...`
-> answers `401` — including the implemented bots endpoints. The real caller
-> authenticator is a separate workstream, and the DoD gates the public surface
-> on it. "bots is done" means the handlers, contracts and tests are done, not
-> that an external tenant can call them.
+> 🔒 **The surface is still not callable end-to-end, but no longer because of a
+> stub.** `require_principal` now really verifies the gateway's signed
+> `X-Avernet-Principal` token and `resolve_avernet_tenant` really reads the
+> tenant out of it (see **The auth seam** below). Two things upstream still stand
+> between an external tenant and a `200`: the gateway's signing PR
+> ([#599](https://github.com/inclusionAI/Avernet/pull/599)) is open, so on `dev`
+> nothing forwards the header yet; and the gateway's `route_security.yaml`
+> requires a `user` identity resolved by the Google chain, which an external
+> tenant presenting an access key cannot satisfy. Until both move, every real
+> request still answers `401` — now by denying rather than by stubbing. "bots is
+> done" still means handlers, contracts and tests are done.
 
 The catch: the internal `/api/...` surface and the public `/openapi/v1` surface
 share the **same tables, repositories, and services**. So a public endpoint
@@ -135,7 +140,7 @@ _Ordered by priority tier._
 ### Cross-cutting (not per-stage)
 | Item | State | Note |
 |---|---|---|
-| Real caller-identity verifier (auth workstream) | ⬜ TODO (other team) | swap `require_principal` + `resolve_avernet_tenant` bodies to read the gateway principal; **the whole public surface answers 401 until this lands** |
+| Real caller-identity verifier (auth workstream) | ✅ **BACKEND HALF DONE — PR #TBD** (gateway half: [#599](https://github.com/inclusionAI/Avernet/pull/599), open) | `require_principal` + `resolve_avernet_tenant` now verify the gateway's signed `X-Avernet-Principal` (HS256, `aud=backend`) and read tenant + owner from it. **The surface is still not callable end-to-end:** #599 must merge (until then nothing forwards the header) and the gateway's `route_security.yaml` must admit the public API's actual callers — see the two open questions below |
 | Tenant-leading indexes (F2, **MANDATORY** policy) | ⬜ TODO | before multi-tenant go-live |
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
 | **Bot identity keys collide across tenants** ([#556](https://github.com/inclusionAI/Avernet/issues/556)) | ⬜ TODO (totalfrank) | Passport, auth relationships, BCN, policy row are keyed on `bot_id`/`owner_id` with no tenant axis, and every owner's first bot is literally `"default"`. **Should gate enabling multi-tenancy.** Stopgapped in #494 by `sync_to_bcn=False` on the public update path |
@@ -253,13 +258,60 @@ Category-agnostic; reuse as-is. These files are **on `dev`** (PR #456):
   request's tenant. **Covers every request already; Track A stage 2+ does not
   touch it.**
 - `adapters/http/openapi_v1/dependencies.py` — `resolve_avernet_tenant(request)`:
-  the single seam. Returns the default tenant today; the auth workstream swaps
-  the body in place. Category-agnostic. _(This file holds both stubs today —
-  `require_principal` and `resolve_avernet_tenant`; the owner-side seam on top
-  of the former is `openapi_v1/principal.py::caller_owner_id`.)_
+  the single seam. Category-agnostic. **No longer a stub** — it and
+  `require_principal` both read the verified gateway principal; see **The auth
+  seam** below. The owner-side seam on top of the latter is
+  `openapi_v1/principal.py::caller_owner_id`.
 
 All paths are under
 `src/backend/src/agentclaw/community/`.
+
+---
+
+## The auth seam — how a caller becomes a tenant + an owner
+
+Both public seams read **one** header and verification happens **once** per
+request. SDD: `src/backend/specs/2026-07-30-gateway-principal-verifier/`.
+
+```
+gateway            verifies credentials → resolves identity set → signs it
+  │                (HS256, aud = the upstream's name, TTL 60s, principals[])
+  ▼  X-Avernet-Principal
+AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
+                                                            ├─ verify once,
+route dependency        → require_principal(request)       ─┘  cache on scope
+                             │
+                             └→ caller_owner_id(principal) → owner-scoped calls
+```
+
+- `core/gateway_principal/` — the verifier and **our** DTOs for the wire shape.
+  The backend never imports gateway types (Rule 7 / §9); it projects.
+- `utils/gateway_principal_config.py` — env config.
+  **`AVERNET_PRINCIPAL_SIGNING_KEY` unset ⇒ everything 401s.** There is no dev
+  fallback key on this side on purpose (a committed shared secret is a committed
+  credential); single-box sets the same value both sides.
+- What gets rejected, all as an identical `401`: bad signature, `alg: none`, an
+  `aud` for another upstream, wrong `iss`, expired, a missing required claim, an
+  unknown `type` tag, a renamed contract field, an identity set that disagrees
+  about its tenant, and **a tenant claiming to be `teamclaw`** (that one would
+  hand an external caller every internal row).
+- The gateway's tenant id **is** the `avernet_tenant` value — no mapping table.
+  So a real external tenant reads an empty dataset until it has data; that is
+  isolation working, not a bug.
+
+**Two things you inherit if you own a Track B category:**
+
+1. **`app` and `access_key` callers currently 401.** Owner id is derived only from
+   a `user` or `bot` principal. The gateway's `app.owners` is free-text org
+   attribution and its access-key registry has no owner column, so neither names
+   a person to scope by — and guessing is a cross-account data bug. Since the
+   public API's callers are *external registered tenants*, this likely needs
+   settling before any category goes live.
+2. **A mapped error raised in a dependency is now enveloped too.** `@envelope_errors`
+   only wraps the handler, so the seam's 401 (raised in a dependency) escaped it;
+   the lookup now lives in `responses.py::mapped_error_response` and the app's
+   catch-all consults the same table. If you add a dependency that raises a
+   domain error, it already answers in the envelope.
 
 ---
 
@@ -558,7 +610,9 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 5. Background/scheduled work revisited for per-tenant correctness. — _⬜_
 6. `require_principal` / `resolve_avernet_tenant` wired to the real verifier
    (auth workstream) — the point at which a second tenant can safely hold real
-   data, and the point at which the public surface stops answering 401. — _⬜_
+   data, and the point at which the public surface stops answering 401.
+   — _🔧 backend half done; needs gateway [#599](https://github.com/inclusionAI/Avernet/pull/599) merged **and** a `route_security.yaml`
+   rule admitting this surface's real callers._
 7. **Cross-tenant external identity settled ([#556](https://github.com/inclusionAI/Avernet/issues/556))** — Passport, auth
    relationships and BCN carry a tenant axis, so the BCN sync can be re-enabled
    on the public path. — _⬜ (added 2026-07-29; gates enabling multi-tenancy)._
@@ -576,11 +630,12 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
   index's name to its columns; create before drop so there's no index-less
   window). Leave low-cardinality (`idx_status`, `idx_is_delete`) and
   unique-lookup (`idx_binding_id`) indexes alone.
-- **Real caller-identity verifier.** Swap `require_principal`'s body to return
-  the gateway-forwarded principal, and `resolve_avernet_tenant`'s to return its
-  tenant. Both seams are ready, and `caller_owner_id` already accepts either a
-  bare id string or an object/dict with `user_id`, so handlers don't change.
-  **Until this lands the public surface answers 401 to everything.**
+- ~~**Real caller-identity verifier.**~~ **DONE on the backend side** — see **The
+  auth seam** above. `caller_owner_id`'s tolerance of an object exposing
+  `user_id` is what let this land with zero handler changes, exactly as intended.
+  What remains is upstream: gateway [#599](https://github.com/inclusionAI/Avernet/pull/599)
+  merged, a `route_security.yaml` rule for this surface's callers, and the
+  owner-semantics question for `app` / `access_key` callers.
 - **Background/scheduled work.** Resolves to the default tenant now (correct
   while all data is `teamclaw`); revisit before a 2nd tenant holds real data
   (scheduled scans, pollers, sync loops in skill_center / governance / dormant /
@@ -724,3 +779,24 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
   permission on a marketplace outage (advisory endpoint), pinned by a test. Board
   moved: Track B mcp → done; the "worked reference" list now points here as the
   second example, specifically for the *extract-shared-logic* pattern.
+- **2026-07-30** — **Gateway principal verification landed (backend half).** The
+  two seams PR #456 placed are real: `require_principal` verifies the gateway's
+  signed `X-Avernet-Principal` (HS256, `aud=backend`, `principals[]`) and
+  `resolve_avernet_tenant` reads the tenant out of it — **no handler, router or
+  middleware changes**, which is what those seams were for. New
+  `core/gateway_principal/` (our DTOs + verifier, no gateway imports) and
+  `utils/gateway_principal_config.py` (env, **no dev fallback key** — unset means
+  401). Built against gateway PR
+  [#599](https://github.com/inclusionAI/Avernet/pull/599)'s contract without
+  waiting for it to merge, since #599 explicitly leaves the component verifier to
+  us. Deliberate guards: a wire tenant of `teamclaw` is refused, a disagreeing
+  identity set is refused, forwarded secrets are not projected, and 401 is
+  byte-identical for "no credential" and "bad credential". One necessary
+  side-fix: the mapped-error lookup moved into
+  `responses.py::mapped_error_response` and the app catch-all consults it, because
+  the seam raises in a *dependency* — without it an unauthenticated public request
+  would have answered 500 instead of 401. Board moved: the cross-cutting verifier
+  row and DoD item 6 → backend half done. **Still gated upstream** on #599 merging
+  and on `route_security.yaml` admitting this surface's real callers; and `app` /
+  `access_key` callers 401 until somebody rules on what they own. SDD:
+  `src/backend/specs/2026-07-30-gateway-principal-verifier/`.

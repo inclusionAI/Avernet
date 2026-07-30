@@ -369,6 +369,21 @@ def _public_error_envelope(
     return unmapped_error_response(status, request, headers=headers)
 
 
+def _public_mapped_error(request: Request, exc: Exception) -> JSONResponse | None:
+    """The public envelope for ``exc`` if this surface maps it, else ``None``.
+
+    ``None`` for every internal ``/api`` request too: those keep the
+    ``{"detail": ...}`` shape their existing clients parse.
+    """
+    if not _is_public_api(request):
+        return None
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        mapped_error_response,
+    )
+
+    return mapped_error_response(exc, request)
+
+
 @app.exception_handler(DomainError)
 async def _domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status = _DOMAIN_ERROR_STATUS_MAP.get(type(exc), 500)
@@ -466,10 +481,37 @@ async def _data_proxy_error_handler(
 # Catch-all for unhandled non-DomainError exceptions. Returns the same
 # {"detail": ...} JSON shape (status 500) instead of Starlette's default
 # plain-text "Internal Server Error" body, so the wire format is uniform
-# across every error path. Always logs the traceback — by definition we
-# didn't expect this exception, so the trace is the only debug signal.
+# across every error path. Logs the traceback for anything genuinely
+# unexpected — by definition we didn't expect it, so the trace is the only
+# debug signal.
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # A mapped public error can still land here: @envelope_errors only wraps the
+    # handler, so an ENVELOPE_ERRORS type raised in a **dependency** — the auth
+    # seam every public route declares — is raised before the handler runs and
+    # arrives as an "unhandled" exception. Consulting the same table here is what
+    # makes an unauthenticated public request a 401 rather than a 500, wherever
+    # the error was raised. One table, two entry points.
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        # Expected client-side flow (missing/invalid credentials, bad input).
+        # A traceback per unauthenticated request would bury the real 5xx ones,
+        # so log at warning without one — matching how the DomainError handler
+        # treats 4xx.
+        if mapped.status_code < 500:
+            logger.warning(
+                "[Public %s] %s on %s %s",
+                mapped.status_code, type(exc).__name__, request.method,
+                request.url.path,
+            )
+            return mapped
+        logger.exception(
+            "[Public %s] %s on %s %s",
+            mapped.status_code, type(exc).__name__, request.method,
+            request.url.path,
+        )
+        return mapped
+
     logger.exception(
         "[Unhandled exception] %s on %s %s",
         type(exc).__name__, request.method, request.url.path,
