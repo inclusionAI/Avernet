@@ -17,9 +17,7 @@ from gateway.community.spi.bot import RegisteredBot
 class _FakeBotRegistry:
     """Resolves only ``bot-key`` → a fixed RegisteredBot; else None (soft miss)."""
 
-    _BOT = RegisteredBot(
-        bot_uuid="bot-7", owner_id="owner-1", app_id="app-1", tenant="t"
-    )
+    _BOT = RegisteredBot(bot_uuid="bot-7", owner_id="owner-1", app_id=1, tenant="t")
 
     async def find_bot_by_token(self, token: str) -> RegisteredBot | None:
         return self._BOT if token == "bot-key" else None
@@ -46,7 +44,7 @@ async def test_bearer_non_jwt_resolves_via_registry() -> None:
     assert result.tenant == "t"
     assert result.bot.bot_uuid == "bot-7"
     assert result.bot.owner_id == "owner-1"
-    assert result.bot.app_id == "app-1"
+    assert result.bot.app_id == 1
     assert result.bot.tenant == "t"
     assert result.bot.token == "bot-key"
 

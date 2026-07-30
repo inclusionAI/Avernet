@@ -58,7 +58,7 @@ class Bot(BaseModel):
     bot_uuid: str  # stable, provider-issued bot id
     owner_id: str  # creator/owner (resource-ownership anchor)
     token: str  # the presented/verified bot session token (secret)
-    app_id: str  # the app the bot belongs to
+    app_id: int  # the app the bot belongs to (avernet_application.id)
     tenant: str  # the bot's tenant
 
 

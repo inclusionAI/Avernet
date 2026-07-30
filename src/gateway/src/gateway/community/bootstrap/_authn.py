@@ -89,7 +89,7 @@ def _seed_authn(db: DataSourcePlugin) -> None:
                     env="dev",
                     created_by="owner-1",
                     agent_code="agent-1",
-                    app_id="app-1",
+                    app_id=1,
                     tenant="t",
                 )
             )

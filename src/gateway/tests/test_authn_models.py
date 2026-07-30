@@ -100,7 +100,7 @@ def test_app_and_bot_principal_types() -> None:
             bot_uuid="b-1",
             owner_id="org-1",
             token="tok",
-            app_id="app-x",
+            app_id=1,
             tenant="t-bot",
         ),
     )
