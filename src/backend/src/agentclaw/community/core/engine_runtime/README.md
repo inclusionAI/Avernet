@@ -19,6 +19,7 @@ consumes:
   - "DeviceService — connection info for the socket-composing endpoint"
 internal_dependencies:
   - agentclaw.community.core.bot_management.services.bot_service
+  - agentclaw.community.core.devices.errors
   - agentclaw.community.core.devices.services.device_context
   - agentclaw.community.core.devices.services.device_context_resolver
   - agentclaw.community.core.devices.services.device_service
