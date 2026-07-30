@@ -34,16 +34,21 @@ from agentclaw.community.core.task.domain.models import (
     RunMode,
     SubTaskSpec,
     TaskStatus,
+    WatchdogAction,
 )
 from agentclaw.community.core.task.domain.state_machine import (
     IllegalTransitionError,
 )
 from agentclaw.community.core.task.services import TaskScheduler, TaskService
 from agentclaw.community.core.task.services.task_scheduler import (
+    MAX_PROBES,
     MAX_RECOMPOSE,
+    MAX_REDRIVES,
+    PROBE_AFTER_TICKS,
     compute_gap,
     route,
     select_collab,
+    watchdog,
 )
 from agentclaw.community.plugins.community.task.in_memory_repos import (
     InMemoryTaskEventRepo,
@@ -220,6 +225,65 @@ def test_compute_gap_atomic_suppresses_split_at_ceiling():
     assert gap["atomic"] is True
     assert gap["need_split"] is False
     assert gap["need_reroute"] is True
+
+
+# --- watchdog (6.5) ---------------------------------------------------------
+
+
+def _wd_node(running_ticks: int = 0, probe_count: int = 0, redrive_count: int = 0) -> Node:
+    """A RUNNING node carrying watchdog state in its ``properties`` bag."""
+    return Node(
+        node_id="n",
+        spec="hung",
+        status=NodeStatus.RUNNING,
+        properties={
+            "retry_count": 0,
+            "max_attempts": 2,
+            "loop_round": 0,
+            "running_ticks": running_ticks,
+            "probe_count": probe_count,
+            "redrive_count": redrive_count,
+        },
+    )
+
+
+def test_watchdog_waits_within_probe_window():
+    """Below PROBE_AFTER_TICKS, probes/redispatches unused → WAIT."""
+    assert watchdog(_wd_node(running_ticks=0)) is WatchdogAction.WAIT
+    assert watchdog(_wd_node(running_ticks=PROBE_AFTER_TICKS - 1)) is WatchdogAction.WAIT
+
+
+def test_watchdog_probes_when_tick_threshold_reached():
+    """running_ticks >= PROBE_AFTER_TICKS, probes remaining → PROBE."""
+    assert watchdog(_wd_node(running_ticks=PROBE_AFTER_TICKS, probe_count=0)) is WatchdogAction.PROBE
+    assert watchdog(_wd_node(running_ticks=PROBE_AFTER_TICKS + 3, probe_count=MAX_PROBES - 1)) is WatchdogAction.PROBE
+
+
+def test_watchdog_redrives_when_probes_exhausted_redispatches_remain():
+    """probe_count >= MAX_PROBES, redrive_count < MAX_REDRIVES → REDRIVE."""
+    assert watchdog(_wd_node(running_ticks=0, probe_count=MAX_PROBES, redrive_count=0)) is WatchdogAction.REDRIVE
+    assert watchdog(_wd_node(running_ticks=99, probe_count=MAX_PROBES, redrive_count=MAX_REDRIVES - 1)) is WatchdogAction.REDRIVE
+
+
+def test_watchdog_escalates_when_probes_and_redispatches_both_exhausted():
+    """probe_count >= MAX_PROBES AND redrive_count >= MAX_REDRIVES → ESCALATE."""
+    assert watchdog(_wd_node(running_ticks=0, probe_count=MAX_PROBES, redrive_count=MAX_REDRIVES)) is WatchdogAction.ESCALATE
+    assert watchdog(_wd_node(running_ticks=99, probe_count=MAX_PROBES, redrive_count=MAX_REDRIVES)) is WatchdogAction.ESCALATE
+
+
+def test_watchdog_uses_defaults_when_properties_absent():
+    """A node with no watchdog state yet (fresh dispatch) → WAIT (ticks default 0)."""
+    fresh = Node(node_id="n", spec="just dispatched", status=NodeStatus.RUNNING)
+    assert watchdog(fresh) is WatchdogAction.WAIT
+
+
+def test_watchdog_priority_escalate_over_redrive_over_probe():
+    """probe_count dominates running_ticks: a probed-out node never WAITs/PROBEs
+    again — it's either REDRIVE or ESCALATE regardless of running_ticks."""
+    assert watchdog(_wd_node(running_ticks=0, probe_count=MAX_PROBES, redrive_count=0)) is WatchdogAction.REDRIVE
+    # Even at tick 0 (a freshly-redriven node would reset ticks), if probe_count
+    # somehow stayed at MAX the rule still drives REDRIVE/ESCALATE — defensive.
+    assert watchdog(_wd_node(running_ticks=0, probe_count=MAX_PROBES, redrive_count=MAX_REDRIVES)) is WatchdogAction.ESCALATE
 
 
 # --- start ------------------------------------------------------------------
