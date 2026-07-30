@@ -63,14 +63,37 @@ in this change.
 
 ### Schema changes (`openapi_v1/mcp/schemas.py`)
 
-- **All models gain `model_config = ConfigDict(extra="forbid")`.** Per the bots
-  slice's rule (`docs/openapi-v1/README.md`, Track B recipe step 5), an unknown
-  or unsupported field must be a 422, not a silent drop.
+- **All models gain `model_config = ConfigDict(extra="forbid")`** via a shared
+  module-level `_STRICT` constant, mirroring `bots/schemas.py:16` exactly. Per
+  the bots slice's rule (`docs/openapi-v1/README.md`, Track B recipe step 5), an
+  unknown or unsupported field must be a 422, not a silent drop — Pydantic's
+  default is to discard unknown keys and answer 200, so a caller who typos a
+  field name (or sends the now-removed `sync_mode`) would believe a setting took
+  when it did not.
 - **`McpConfigWrite.sync_mode` is removed** (`schemas.py:60`). Decision 3 in
-  `spec.md`: no single-device push path exists.
+  `spec.md`: no single-device push path exists. Works *together* with
+  `extra="forbid"` — the two make dropping the field honest (sending it → 422)
+  instead of a silent no-op.
+- **Frontend blast radius: none — audited 2026-07-30.** A sweep of
+  `src/frontend` found no `sync_mode`/`syncMode`, no `endpoint_env`/`endpointEnv`,
+  and no MCP config-write call at all; the frontend's only MCP strings are the
+  `/market/mcp` page route and a `mcporter.json` path, and it never calls the
+  public `/openapi/v1` surface. So `extra="forbid"` and the `sync_mode` removal
+  cannot break a live client on two independent grounds: no client sends those
+  fields, and `extra="forbid"` lands only on the public model. The MCP
+  unified-config feature (api_key/endpoint_env/headers) is not exercised by this
+  OSS frontend.
 - **`McpConfigWrite.endpoint_env`** becomes `Literal["PROD", "PRE"] | None` and
   **`transport_protocol`** `Literal["SSE", "STREAMABLE_HTTP"] | None`, matching
   the values the internal route validates at `adapters/http/mcp/router.py:251-258`.
+  `PROD`/`PRE` only — **no `DEV`** (owner-confirmed 2026-07-30). `endpoint_env`
+  selects which deployment of the third-party MCP *server* to hit; it is a
+  distinct axis from the `env` column on `ac_user_mcp_config`, which is the
+  Avernet deploy env (`dev`/`test`/`pre`/`prod`, set server-side from
+  `get_current_env()`, never caller-supplied). Nothing downstream — device_sync,
+  config_compose, the model's own `to_dict` doc (`core/models/mcp.py:125`) —
+  knows a `DEV` value for `endpoint_env`. The `| None` means "field omitted →
+  leave unchanged" (merge semantics), not a third environment.
   This deliberately moves enum validation into the request model so the caller
   gets a field-level 422 (already enveloped by the app-level handler, and
   already declared in `ERROR_RESPONSES`) instead of a fixed 400 string. It is
