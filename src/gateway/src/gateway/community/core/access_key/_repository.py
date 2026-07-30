@@ -2,7 +2,7 @@
 
 One ORM implementation behind the
 :class:`~gateway.community.spi.access_key.AccessKeyRegistry` SPI port. Resolves a
-presented access-key token via the ``baas_access_key_token`` table through the
+presented access-key token via the ``avernet_access_key_token`` table through the
 :data:`~gateway.community.spi.database.DataSourcePlugin`'s sync ``orm_session``,
 mapping the row to the SPI
 :class:`~gateway.community.spi.access_key.RegisteredAccessKey` via
@@ -25,7 +25,7 @@ from ._orm import AccessKeyRow
 
 
 class AccessKeyRepository(AccessKeyRegistry):
-    """Access-key table access (read + write) for ``baas_access_key_token``.
+    """Access-key table access (read + write) for ``avernet_access_key_token``.
 
     Resolves a presented token (read) and persists a freshly issued access key
     (write) — all DB touch lives here, never in the issuer.

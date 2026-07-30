@@ -1,6 +1,6 @@
 """AccessKeyIssuer — issue an access key: mint a JWT, delegate persistence, return the record.
 
-The issued JWT is stored as the ``token`` PK of ``baas_access_key_token`` via
+The issued JWT is stored as the ``token`` PK of ``avernet_access_key_token`` via
 :class:`AccessKeyRepository.store` (all DB touch lives in the repository); the
 authn ``access_key_token`` strategy resolves it by opaque DB lookup
 (``find_access_key_by_token``). The JWT's claims are for the caller / downstream
