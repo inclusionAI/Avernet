@@ -33,35 +33,40 @@ public is written until the extraction is green.
         **15 passed.**
 - **Depends on:** —
 
-## Task 2: [ ] Extract the config read/write flow
+## Task 2: [x] Extract the config read/write flow
 - **Goal:** Lift the internal write orchestration (validate → server-exists →
   write → push → rollback) into a FastAPI-free function both surfaces call.
 - **Files:**
   - `src/agentclaw/community/core/mcp/config_flow.py` (new)
   - `tests/community/core/mcp/test_mcp_config_flow.py` (new)
 - **Done when:**
-  - [ ] `read_unified_config(*, user_id, server_code, config_service) ->
+  - [x] `read_unified_config(*, user_id, server_code, config_service) ->
         UnifiedConfig` and async `write_unified_config(...)` exist, taking
         already-injected services, raising the Task 1 errors, and returning a
         frozen `UnifiedConfig` whose `api_key` is **already masked** (so no
         caller can reach the raw key).
-  - [ ] `write_unified_config` preserves the internal ordering from
+  - [x] `write_unified_config` preserves the internal ordering from
         `router.py:250-337` exactly: validate values → validate headers →
         `market_service.get_mcp_detail` (missing → `McpServerNotFoundError`,
         *before* any DB write) → `update_user_unified_config` keeping the old row
         → `sync_mcp_detail_to_all_bots` → on failure `rollback_unified_config`
         then raise `McpSyncFailedError`.
-  - [ ] `write_unified_config` returns the sync results alongside the config, so
+  - [x] `write_unified_config` returns the sync results alongside the config, so
         the internal adapter can keep populating `MCPUnifiedConfigData.sync_results`
         (the public handler ignores them).
-  - [ ] Header validation surfaces the validator's failure as
+  - [x] Header validation surfaces the validator's failure as
         `McpHeadersInvalidError`; the `endpoint_env`/`transport_protocol` value
         check remains as the internal path's backstop, raising
         `McpConfigValueError`.
-  - [ ] Tests (no HTTP): an omitted field is left unchanged (merge, not replace);
+  - [x] Tests (no HTTP): an omitted field is left unchanged (merge, not replace);
         an unknown server code never reaches `update_user_unified_config`;
         rollback restores the prior row on sync failure; rollback **deletes** the
-        row when it was newly created (`config_service.py:172-177`).
+        row when it was newly created (`config_service.py:172-177`). **9 passed.**
+  - [x] Also folded in `list_marketplace_servers` / `list_marketplace_tenants`
+        (raise `McpMarketUnavailableError` on upstream `success: False`) so the
+        internal list/tenant routes and the public handlers share the same
+        upstream-failure rule. *(Small addition beyond the plan's named
+        functions — same module, same pattern; flagged here.)*
 - **Depends on:** Task 1
 
 ## Task 3: [ ] Rewire the internal router onto the extracted code
