@@ -64,12 +64,14 @@ def register_corp_modules(profile: DeployProfile) -> None:
     - ``corp`` registers the full corp infrastructure column.
     - ``corp_test`` registers the corp-reuse subset the corp test column installs
       (it runs with corp deps present in the dev/CI venv).
-    - ``singlebox`` registers the corp overlay modules the singlebox column needs
-      (default-env-bot router + DI) so profile_modules.py stays corp-free.
+    - ``singlebox`` is a no-op in community builds — the singlebox overlay modules
+      are only needed when corp deps are present (OCB monorepo). In a community
+      CI the singlebox column stays corp-free; ``get_singlebox_overlay_modules``
+      returns an empty list.
     - ``test`` registers **nothing** — B11 (3.2) made that column corp-free.
 
     The corp branches live in the corp-only ``di.corp_bootstrap`` module, loaded
-    here via ``importlib`` (a string import, corp/corp_test/singlebox only) — so
+    here via ``importlib`` (a string import, corp/corp_test only) — so
     this shared file names **no** ``infrastructure.corp`` / ``config_corp`` module
     and a community boot (without ``corp`` present) imports it fine. The corp side
     calls the setter registries below back on this module (corp → community).
@@ -82,10 +84,18 @@ def register_corp_modules(profile: DeployProfile) -> None:
         from importlib import import_module
 
         import_module("agentclaw.corp.di.corp_bootstrap").install_test_corp_reuse_column()
+    # SINGLEBOX: corp overlay (default-env-bot router + DI) is only needed when
+    # the corp package is present (OCB monorepo). In a community build
+    # (Avernet CI) agentclaw.corp is absent — the import is silently skipped
+    # and get_singlebox_overlay_modules() returns an empty list, keeping the
+    # singlebox column corp-free.
     elif profile is DeployProfile.SINGLEBOX:
         from importlib import import_module
 
-        import_module("agentclaw.corp.di.corp_bootstrap").install_singlebox_overlay()
+        try:
+            import_module("agentclaw.corp.di.corp_bootstrap").install_singlebox_overlay()
+        except ModuleNotFoundError:
+            pass
 
 
 def get_corp_modules() -> list[Module]:
