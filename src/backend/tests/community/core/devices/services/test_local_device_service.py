@@ -128,6 +128,7 @@ def mock_baas():
     m.get_http_info.return_value = HttpConnectionInfo(
         http_url="http://10.0.0.1:20010",
         token="http-token-001",
+        target="LOCAL_bot-test-001--machine--user@2:20010",
     )
     return m
 
@@ -431,7 +432,9 @@ def test_do_release_approve_failure_does_not_block(local_device_service, mock_ba
 # ---------------------------------------------------------------------------
 
 
-def test_compose_conn_info_uses_baas_ws_info(local_device_service, mock_baas):
+def test_compose_conn_info_uses_http_info_when_available(
+    local_device_service, mock_baas
+):
     device = AllocatedDevice(
         device_id="bot-test-001",
         device_provider="local",
@@ -439,8 +442,10 @@ def test_compose_conn_info_uses_baas_ws_info(local_device_service, mock_baas):
     )
 
     conn = local_device_service._compose_device_conn_info(device=device)
-    assert conn.target == "127.0.0.1:18789"
-    # T07: http-info 成功时 token 由 http-info 覆盖（业务主走 HTTP）
+    # http-info 可用时，target/token/url 都来自 HTTP 链路（3 段 target），
+    # 与 JWT token 中的 target claim 对齐，proxy jwt_auth 才能校验通过。
+    assert conn.target == "LOCAL_bot-test-001--machine--user@2:20010"
+    # http-info 成功时 token 由 http-info 覆盖（业务主走 HTTP）
     assert conn.token == "http-token-001"
     assert conn.bot_uuid == "bot-test-001"
     mock_baas.get_ws_info.assert_called_once_with(
