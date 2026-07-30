@@ -5,7 +5,7 @@ row (surrogate ``id`` PK; ``session_token`` is the unique lookup key). Registere
 :class:`~gateway.community.spi.database.Base` so ``DataSourcePlugin.create_all()``
 creates the table. :meth:`BotRow.to_record` maps a row onto the SPI
 :class:`~gateway.community.spi.bot.RegisteredBot` (core fields only; ``env`` /
-``agent_code`` / ``app_id`` stay DB-side).
+``agent_code`` stay DB-side).
 """
 
 from __future__ import annotations
