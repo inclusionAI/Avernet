@@ -52,6 +52,11 @@ class UnifiedConfig:
     transport_protocol: str | None
     headers: dict[str, str] | None
     has_config: bool
+    # Whether a stored row exists at all — distinct from ``has_config`` (a row
+    # can exist while carrying no api_key/headers/transport). The internal GET
+    # message ("Config retrieved" vs "No config found") keys off this, not
+    # ``has_config``. Always ``True`` for a write result.
+    exists: bool = field(default=True)
     sync_results: list[dict[str, Any]] | None = field(default=None)
 
 
@@ -93,6 +98,7 @@ def read_unified_config(
             transport_protocol=None,
             headers={},
             has_config=False,
+            exists=False,
         )
     api_key = config.get("api_key")
     return UnifiedConfig(

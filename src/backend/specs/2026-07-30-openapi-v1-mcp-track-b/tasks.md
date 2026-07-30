@@ -69,27 +69,31 @@ public is written until the extraction is green.
         functions — same module, same pattern; flagged here.)*
 - **Depends on:** Task 1
 
-## Task 3: [ ] Rewire the internal router onto the extracted code
+## Task 3: [x] Rewire the internal router onto the extracted code
 - **Goal:** Make `/api/mcp` call the shared flow and helpers, with its HTTP
   contract byte-identical — this is the proof the extraction preserved behavior.
 - **Files:**
   - `src/agentclaw/community/adapters/http/mcp/router.py`
   - `src/agentclaw/community/core/mcp/README.md` (context boundary)
 - **Done when:**
-  - [ ] `_remove_ext_info_*` deleted from the router; `strip_ext_info*`,
+  - [x] `_remove_ext_info_*` deleted from the router; `strip_ext_info*`,
         `ALLOWED_NETWORK_TYPES`, `is_network_type_visible`, `mask_api_key`
-        imported from `core/mcp/presentation.py` (`router.py:58-85,108-115,
-        162-166,307-309,370-373`).
-  - [ ] `update_mcp_unified_config` (`:237-344`) becomes a thin adapter: call
+        imported from `core/mcp/presentation.py`.
+  - [x] `update_mcp_unified_config` becomes a thin adapter: call
         `write_unified_config`, catch each typed error and re-raise the identical
         `HTTPException` (same status, same `detail` string) it raised before;
-        `get_mcp_unified_config` (`:347-386`) calls `read_unified_config`.
-  - [ ] `core/mcp/README.md` `## Context Boundary` updated — `MCPMarketService`
-        added to `provides` (the flow now consumes it) and any new
-        `internal_dependencies` declared.
-  - [ ] **`tests/community/api/mcp/routers/test_mcp_config_internal_unchanged.py`
-        and `test_mcp.py` pass UNMODIFIED.** No edit to either file.
-  - [ ] `tests/community/architecture/` passes after the README edit.
+        `get_mcp_unified_config` calls `read_unified_config` (message keyed on
+        `exists`, not `has_config`, to preserve the empty-row case).
+  - [x] `core/mcp/README.md` `## Context Boundary` updated — `MCPMarketService`
+        added to `provides`. **No new `internal_dependencies`:** the flow
+        *receives* the market/config/sync services as parameters rather than
+        importing them, so the arch gate stayed green with no dependency edit
+        (the plan's predicted new import did not materialize — receiving beats
+        importing).
+  - [x] **`test_mcp_config_internal_unchanged.py` and `test_mcp.py` pass
+        UNMODIFIED** — 16 passed, neither file touched.
+  - [x] `tests/community/architecture/` passes (108 passed); full MCP api+core
+        suite 168 passed.
 - **Depends on:** Task 2
 
 ## Task 4: [ ] Public MCP request/response schemas

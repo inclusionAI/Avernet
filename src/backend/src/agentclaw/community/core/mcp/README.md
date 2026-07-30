@@ -10,6 +10,7 @@ provides:
   - "MCPConfigService"
   - "MCPAuthService"
   - "MCPSyncService"
+  - "MCPMarketService"
 consumes:
   - "BotRepository"
   - "DeviceMCPSyncPlugin"
