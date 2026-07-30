@@ -592,3 +592,37 @@ async def test_rollback_old_runtime_is_fenced_before_v2_mapping_request() -> Non
     assert layouts.events == ["begin", "failure"]
     assert layouts.state.phase is SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING
     assert layouts.state.last_failure_stage == "runtime_probe"
+
+
+@pytest.mark.asyncio
+async def test_rollback_post_cutover_sync_pending_is_retryable() -> None:
+    class _PendingRollbackRuntime(_RollbackRuntime):
+        async def rollback_to_legacy(self, **kwargs: object) -> PoolCutoverResult:
+            self.events.append("rollback")
+            return PoolCutoverResult(
+                committed=False,
+                status=PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING,
+                evidence={"reason": "active_repo_restoration_required"},
+            )
+
+    layouts = _RollbackLayouts()
+    runtime = _PendingRollbackRuntime()
+    runtime.publish_results = [True]
+    result = await SkillsPoolRollbackService(
+        bot_repository=_Bots(),
+        layout_repository=layouts,
+        skill_repository=_Skills(),
+        runtime=runtime,
+        edit_guard=_EditGuard(),
+    ).rollback(
+        scope=SCOPE,
+        rollback_generation="rollback-1",
+        lease_owner="operator-task-1",
+        operator="oncall-1",
+        note="runtime restoration pending",
+    )
+
+    assert result.outcome is SkillsPoolRollbackOutcome.ROLLBACK_FAILED
+    assert result.retryable is True
+    assert layouts.state.phase is SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING
+    assert layouts.state.last_failure_retryable is True
