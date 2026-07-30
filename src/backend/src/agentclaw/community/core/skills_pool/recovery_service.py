@@ -404,6 +404,7 @@ class SkillsPoolRollbackService:
                     # is safe to retry rather than guess filesystem truth.
                     retryable=cutover.status
                     in {
+                        PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING,
                         PoolCutoverStatus.TRANSIENT_ERROR,
                         PoolCutoverStatus.UNKNOWN,
                     },

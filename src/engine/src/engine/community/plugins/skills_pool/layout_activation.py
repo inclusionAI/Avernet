@@ -1820,6 +1820,16 @@ def _rollback_pool(
                         **error.evidence,
                     },
                 )
+            except OSError as error:
+                return PoolActivationResult(
+                    PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                    {
+                        "reason": "active_repo_restoration_failed",
+                        "restoration_reason": "active_repo_restoration_io_error",
+                        "error_type": type(error).__name__,
+                        "errno": error.errno,
+                    },
+                )
             if not active_repo.is_dir() or active_repo.is_symlink():
                 return PoolActivationResult(
                     PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
