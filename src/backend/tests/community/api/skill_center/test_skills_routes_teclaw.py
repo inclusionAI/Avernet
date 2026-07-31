@@ -294,3 +294,27 @@ def test_readme_route_numeric_id_falls_back_to_link_name_when_id_missing():
     read_svc.get_skill_readme.assert_awaited_once_with(
         "123", "u1", "teclaw-bot", device_owner_id="u1"
     )
+
+
+def test_readme_route_rejects_local_skill_when_owning_bot_is_missing():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "deleted-bot",
+    }
+    client, factory, _ = _app(lookup_svc)
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_by_id.return_value = None
+
+    resp = client.get("/api/skills/1/readme", params=_Q)
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Skill's owning bot was not found"
+    assert factory.create.call_count == 1
