@@ -87,6 +87,7 @@ class CollaboratorPermissionInterceptor:
         extractor_params: dict[str, str] | None = None,
         # 审计入库控制
         persist_audit_log: bool = True,
+        audit_excluded_params: set[str] | frozenset[str] | None = None,
         # 锁检查控制
         skip_lock_check: bool = False,
     ):
@@ -101,6 +102,7 @@ class CollaboratorPermissionInterceptor:
                 配合 params_extractor 使用，表达式解析后的值会作为参数传给回调函数
             persist_audit_log: 是否将操作审计记录到数据库，默认 True。
                 设置为 False 时，同时跳过锁检查（用于不需要审计的高频操作）。
+            audit_excluded_params: 审计日志中排除的请求参数名，用于敏感字段脱敏。
             skip_lock_check: 是否跳过锁检查，默认 False。
                 设置为 True 时，只检查协作者权限，不检查锁状态（用于抢锁等特殊操作）。
         """
@@ -110,6 +112,7 @@ class CollaboratorPermissionInterceptor:
         self.params_extractor = params_extractor
         self.extractor_params = extractor_params
         self.persist_audit_log = persist_audit_log
+        self.audit_excluded_params = frozenset(audit_excluded_params or ())
         self.skip_lock_check = skip_lock_check
         self.resolver = ExpressionResolver()
 
@@ -353,7 +356,7 @@ class CollaboratorPermissionInterceptor:
                 params = {}
                 for key, value in ctx.route_kwargs.items():
                     try:
-                        if key == "user":
+                        if key == "user" or key in self.audit_excluded_params:
                             continue
                         if hasattr(value, 'model_dump'):
                             params[key] = value.model_dump()

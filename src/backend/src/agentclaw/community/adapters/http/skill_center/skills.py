@@ -104,11 +104,16 @@ from agentclaw.community.core.config_compose.teclaw_paths import to_local_skill_
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceNotBoundError,
+)
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
+    InterceptedResponse,
+    InterceptorContext,
     with_interceptors,
 )
 from agentclaw.community.core.bot_collaborator.interceptor.extractors import PermissionParams
@@ -2105,13 +2110,153 @@ async def delete_skill(
 
 # ==================== Skill Parameters Endpoints (设备文件版) ====================
 
+
+class _SkillParameterPermissionInterceptor(CollaboratorPermissionInterceptor):
+    """Fail closed for owner-backed parameter access when auth is unavailable."""
+
+    async def before(
+        self,
+        ctx: InterceptorContext,
+    ) -> InterceptorContext | None:
+        result = await super().before(ctx)
+        if result is None:
+            return None
+        actor_id = ctx.metadata.get("_log_user_id")
+        owner_id = ctx.metadata.get("_log_owner_id")
+        if (
+            actor_id != owner_id
+            and not ctx.metadata.get("permission_level")
+        ):
+            ctx.response = InterceptedResponse(
+                success=False,
+                message="协作者权限服务暂不可用",
+                error_code=503,
+            )
+            return None
+        return result
+
+
+def _resolve_parameter_bot(
+    *,
+    skill: dict[str, Any],
+    requested_bot_id: str,
+    requested_entity_id: str,
+    bot_repo: BotRepository,
+) -> dict[str, Any]:
+    """Resolve the trusted Bot identity that owns a Skill parameter file.
+
+    ``SkillParameterServiceFactory`` uses its ``user_id`` argument to locate the
+    Bot's active device binding.  That identity must therefore be the Bot owner,
+    not the authenticated actor (who may be an ADMIN collaborator).
+
+    The requested Bot ID is used only as a lookup key; ownership always comes
+    from the Bot row. Bot-private Skills must agree with that identity. Shared
+    Git market Skills intentionally have no owner/Bot fields and remain usable
+    across Bots.
+    """
+
+    bot = bot_repo.get_by_id_and_entity(requested_bot_id, requested_entity_id)
+    if not isinstance(bot, dict):
+        raise HTTPException(status_code=404, detail="Bot not found")
+    bot_owner_id = str(bot.get("owner_id") or "")
+    if not bot_owner_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Bot ownership metadata is incomplete",
+        )
+
+    skill_bot_id = str(skill.get("bolt_id") or "")
+    skill_owner_id = str(skill.get("user_id") or "")
+    is_shared_git_skill = (
+        str(skill.get("git_path") or "").startswith("git://")
+        and not skill_owner_id
+    )
+    if is_shared_git_skill:
+        return bot
+
+    if not skill_bot_id or not skill_owner_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Skill ownership metadata is incomplete",
+        )
+    if requested_bot_id != skill_bot_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Skill does not belong to the requested Bot",
+        )
+
+    if bot_owner_id != skill_owner_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Skill and Bot ownership metadata are inconsistent",
+        )
+    return bot
+
+
+async def _extract_parameter_permission(
+    *,
+    bot_id: str,
+    entity_id: str,
+    ctx,
+):
+    """Resolve parameter authorization from the exact Bot identity scope."""
+
+    from agentclaw.community.core.bot_collaborator.interceptor.extractors import (
+        PermissionParams,
+    )
+
+    bot_repo = ctx.injector.get(BotRepository) if ctx.injector is not None else None
+    bot = (
+        bot_repo.get_by_id_and_entity(bot_id, entity_id)
+        if bot_repo is not None
+        else None
+    )
+    owner_id = (
+        str(bot.get("owner_id") or "")
+        if isinstance(bot, dict)
+        else ""
+    )
+    # A non-empty sentinel prevents the generic interceptor from falling back
+    # to its bot_id-only legacy lookup. The route will return the precise 404.
+    return PermissionParams(
+        bot_id=bot_id,
+        owner_id=owner_id or "__parameter_bot_not_found__",
+    )
+
+
+async def _create_skill_parameter_service(
+    *,
+    parameter_service_factory: SkillParameterServiceFactoryProtocol,
+    bot_id: str,
+    owner_id: str,
+):
+    """Create the device-backed parameter service with a structured no-binding error."""
+
+    try:
+        return await parameter_service_factory.create(
+            bot_id=bot_id,
+            user_id=owner_id,
+        )
+    except DeviceNotBoundError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Bot has no active device",
+        ) from exc
+
+
 @router.get("/{skill_id}/parameters", response_model=SkillParametersResponse)
+@with_interceptors(_SkillParameterPermissionInterceptor(
+    params_extractor=_extract_parameter_permission,
+    extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
+    persist_audit_log=False,
+))
 async def get_skill_parameters(
     skill_id: str,
     entity_id: str = Query(..., description="Entity ID (e.g., staff_xxx, proj_xxx)"),
     bot_id: str = Query(..., description="Bot ID"),
     engine_type: str = Query(..., description="Engine type (openclaw)"),
     ctx: RequestContext = Depends(get_request_context),
+    bot_repo: BotRepository = Injected(BotRepository),
     skill_repo: SkillRepository = Injected(SkillRepository),
     parameter_service_factory: SkillParameterServiceFactoryProtocol = Injected(SkillParameterServiceFactoryProtocol),
 ) -> SkillParametersResponse:
@@ -2121,11 +2266,19 @@ async def get_skill_parameters(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
+    bot = _resolve_parameter_bot(
+        skill=skill,
+        requested_bot_id=bot_id,
+        requested_entity_id=entity_id,
+        bot_repo=bot_repo,
+    )
     skill_name = skill.get('link_name') or skill.get('name')
 
     # 使用异步工厂函数获取参数服务
-    parameter_service = await parameter_service_factory.create(
-        bot_id=bot_id, user_id=ctx.user_id
+    parameter_service = await _create_skill_parameter_service(
+        parameter_service_factory=parameter_service_factory,
+        bot_id=str(bot["bot_id"]),
+        owner_id=str(bot["owner_id"]),
     )
     parameters = parameter_service.get_skill_parameters(skill_name)
 
@@ -2133,6 +2286,13 @@ async def get_skill_parameters(
 
 
 @router.post("/{skill_id}/parameters", response_model=SkillParametersResponse)
+@with_interceptors(_SkillParameterPermissionInterceptor(
+    params_extractor=_extract_parameter_permission,
+    extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
+    # Keep edit-lock enforcement and audit metadata, but never serialize
+    # credential-bearing parameter values.
+    audit_excluded_params={"request"},
+))
 async def save_skill_parameters(
     skill_id: str,
     request: SaveSkillParametersRequest,
@@ -2140,6 +2300,7 @@ async def save_skill_parameters(
     bot_id: str = Query(..., description="Bot ID"),
     engine_type: str = Query(..., description="Engine type (openclaw)"),
     ctx: RequestContext = Depends(get_request_context),
+    bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
     skill_repo: SkillRepository = Injected(SkillRepository),
@@ -2152,28 +2313,65 @@ async def save_skill_parameters(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
+    bot = _resolve_parameter_bot(
+        skill=skill,
+        requested_bot_id=bot_id,
+        requested_entity_id=entity_id,
+        bot_repo=bot_repo,
+    )
+    trusted_bot_id = str(bot["bot_id"])
+    trusted_owner_id = str(bot["owner_id"])
+    trusted_entity_id = str(bot.get("entity_id") or trusted_owner_id)
+    trusted_engine_type = str(bot.get("active_engine") or engine_type)
+    trusted_entity_type = str(bot.get("entity_type") or "staff")
     skill_name = skill.get('link_name') or skill.get('name')
 
     # Resolve is_desktop for path construction
-    _, _, _, _, is_desktop = _get_path_params(ctx, entity_id=entity_id, bot_id=bot_id, engine_type=engine_type)
+    is_desktop = bot.get("bot_type") == "desktop"
 
     # teclaw owns its local-skill files: parse SKILL.md from the container via
     # device_fs; non-teclaw keeps the host-FS read (byte-identical).
-    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(resolver, bot_id, entity_id)
+    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(
+        resolver,
+        trusted_bot_id,
+        trusted_owner_id,
+    )
 
     # 从 SKILL.md 实时解析 parameters 定义
     parameter_schema = []
     service = skill_service_factory.create(
-        active_dir=path_factory.get_bot_skills_dir(entity_id, bot_id, engine_type),
-        repo_dir=path_factory.get_bot_skills_repo_dir(entity_id, bot_id, engine_type, is_desktop=is_desktop),
-        local_dir=path_factory.get_bot_skills_local_dir(entity_id, bot_id, engine_type, is_desktop=is_desktop, is_teclaw=is_teclaw),
+        active_dir=path_factory.get_bot_skills_dir(
+            trusted_entity_id,
+            trusted_bot_id,
+            trusted_engine_type,
+            trusted_entity_type,
+        ),
+        repo_dir=path_factory.get_bot_skills_repo_dir(
+            trusted_entity_id,
+            trusted_bot_id,
+            trusted_engine_type,
+            trusted_entity_type,
+            is_desktop=is_desktop,
+        ),
+        local_dir=path_factory.get_bot_skills_local_dir(
+            trusted_entity_id,
+            trusted_bot_id,
+            trusted_engine_type,
+            trusted_entity_type,
+            is_desktop=is_desktop,
+            is_teclaw=is_teclaw,
+        ),
         local_skill_path_adapter=local_skill_adapter,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
+        entity_id=trusted_entity_id,
+        bot_id=trusted_bot_id,
+        engine_type=trusted_engine_type,
     )
     if is_teclaw:
-        skill_info = await service.parse_local_skill_config(skill.get('git_path', ''), bot_id, entity_id)
+        skill_info = await service.parse_local_skill_config(
+            skill.get('git_path', ''),
+            trusted_bot_id,
+            trusted_owner_id,
+        )
     else:
         skill_info = service._parse_skill_from_git(skill.get('git_path', ''))
     if skill_info:
@@ -2189,8 +2387,10 @@ async def save_skill_parameters(
                 )
 
     # 使用异步工厂函数获取参数服务
-    parameter_service = await parameter_service_factory.create(
-        bot_id=bot_id, user_id=ctx.user_id
+    parameter_service = await _create_skill_parameter_service(
+        parameter_service_factory=parameter_service_factory,
+        bot_id=trusted_bot_id,
+        owner_id=trusted_owner_id,
     )
     await parameter_service.save_skill_parameters(skill_name, request.parameters)
 
