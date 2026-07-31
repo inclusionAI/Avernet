@@ -1290,14 +1290,26 @@ class SkillService:
     # README 内容获取
     # ========================================================================
 
-    async def get_skill_readme(self, skill_id: str, user_id: str | None = None, bolt_id: str | None = None) -> str | None:
+    async def get_skill_readme(
+        self,
+        skill_id: str,
+        user_id: str | None = None,
+        bolt_id: str | None = None,
+        *,
+        device_owner_id: str | None = None,
+    ) -> str | None:
         """获取技能的 README/SKILL.md 内容
 
         通过 skill_id 查询数据库获取 skill 记录，然后使用记录中的 bolt_id 和 git_path
-        直接定位文件，不依赖前端传递的 bot_id。
+        直接定位文件，不依赖前端传递的 bot_id。``user_id`` 是当前操作者，
+        ``device_owner_id``（如传入）仅用于定位 Bot 的设备绑定。
         """
         try:
-            logger.info(f"[get_skill_readme] skill_id={skill_id}, user_id={user_id}, bolt_id={bolt_id}")
+            logger.info(
+                "[get_skill_readme] skill_id=%s, user_id=%s, bolt_id=%s, "
+                "device_owner_id=%s",
+                skill_id, user_id, bolt_id, device_owner_id,
+            )
             # 从数据库获取 skill 信息（优先用 ID 查询，其次用 link_name）
             skill = None
             if skill_id.isdigit():
@@ -1324,11 +1336,12 @@ class SkillService:
                 git_path = skill.get('git_path', '')
                 db_bolt_id = skill.get('bolt_id')
                 bolt_id = db_bolt_id or bolt_id
-                skill_user_id = skill.get('user_id') or user_id
+                skill_author_id = skill.get('user_id') or user_id
+                device_user_id = device_owner_id or skill_author_id
                 logger.info(
                     f"[get_skill_readme] DB found, git_path={git_path}, "
                     f"db_bolt_id={db_bolt_id}, effective_bolt_id={bolt_id}, "
-                    f"skill_user_id={skill_user_id}"
+                    f"skill_author_id={skill_author_id}, device_user_id={device_user_id}"
                 )
 
                 if git_path.startswith('local://'):
@@ -1338,7 +1351,7 @@ class SkillService:
                     logger.info(f"[get_skill_readme] Looking for local skill: {local_path}")
 
                     # 通过 DeviceFileSystem 读取，自动适配 local/arca/teclaw
-                    device_fs = self._device_fs_factory(bolt_id, skill_user_id)
+                    device_fs = self._device_fs_factory(bolt_id, device_user_id)
                     # teclaw: skills-local/<name> → workspace/skills-local/<name>;
                     # 非 teclaw: identity（主机路径原样）。
                     skill_base = self._local_skill_path_adapter(str(local_path))
