@@ -109,9 +109,10 @@ Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
   `POST /rollout/owners` 按 `(owner_id, engine)` 放开该员工全部未来认领；
   完成批次验收且无负对照后，可写入 `full_rollout_engines` 单独全量；
   所有已晋级引擎均满足条件后，可显式打开或关闭环境级 `enable_all`。
-  引擎按 OpenClaw、Claude Code、AICoding、Hermes 的固定
-  顺序人工晋级；每次扩大同引擎批次必须引用最近一次已冻结验收，除首个
-  引擎外，晋级还必须引用上一引擎已冻结的验收批次。配置写入使用完整旧值
+  OpenClaw、Claude Code、AICoding、Hermes 可独立人工晋级并并行测试；
+  `promoted_engines` 以该顺序保存唯一的规范子集。每次扩大同引擎批次必须
+  引用最近一次已冻结验收；晋级接口保留 `acceptance_batch_id` 参数以兼容旧
+  调用方，但不再将其作为跨引擎门禁或审计证据。配置写入使用完整旧值
   加逻辑 revision CAS，冲突 fail closed；缺少可选默认字段的旧配置按规范化
   语义参与 CAS，并在首次成功写入时原子升级为完整形状；配置和包含前后
   revision、原因及验收快照的独立审计事件在同一事务提交。
