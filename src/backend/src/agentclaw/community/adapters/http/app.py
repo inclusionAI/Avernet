@@ -20,9 +20,11 @@ implement :class:`agentclaw.community.kernel.lifecycle.Lifecycle`.
 import asyncio
 import logging
 import os
+from collections.abc import Iterable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from injector import Module
 
 # ─── DI container bootstrap ──────────────────────────────────────────────
 # Build the injector at module import time. Routers and services
@@ -55,7 +57,21 @@ register_config_provider(_deploy_profile)  # noqa: FLA010 — composition root, 
 # community / test / singlebox (B8).
 register_corp_modules(_deploy_profile)  # noqa: FLA010 — composition root, before build_injector
 
-injector = build_injector(profile=_deploy_profile)
+# Supply singlebox corp overlay modules via extra_modules (B8).
+# The singlebox profile must go through the community entry point
+# (LOCAL_MODE=true); corp modules are loaded via importlib so
+# the community import graph stays corp-free.
+_extra_modules: Iterable[Module] | None = None
+if _deploy_profile is DeployProfile.SINGLEBOX:
+    try:
+        from importlib import import_module
+        _extra_modules = import_module(
+            "agentclaw.corp.di.corp_bootstrap"
+        ).get_singlebox_overlay_modules()
+    except ModuleNotFoundError:
+        pass
+
+injector = build_injector(profile=_deploy_profile, extra_modules=_extra_modules)
 
 # Startup integrity check: resolve a small set of critical bindings
 # now so misconfiguration surfaces at boot instead of on first request.

@@ -64,10 +64,9 @@ def register_corp_modules(profile: DeployProfile) -> None:
     - ``corp`` registers the full corp infrastructure column.
     - ``corp_test`` registers the corp-reuse subset the corp test column installs
       (it runs with corp deps present in the dev/CI venv).
-    - ``singlebox`` delegates to :mod:`default_env_bot.singlebox_overlay`,
-      which registers corp overlay modules when corp deps are present (OCB
-      monorepo). In a community CI the singlebox column stays corp-free;
-      ``get_singlebox_overlay_modules`` returns an empty list.
+    - ``singlebox`` registers **nothing** — corp overlay modules are
+      supplied via ``extra_modules`` in the composition root (``app.py``)
+      so this file names no ``agentclaw.corp`` module (B8).
     - ``test`` registers **nothing** — B11 (3.2) made that column corp-free.
 
     The corp branches live in the corp-only ``di.corp_bootstrap`` module, loaded
@@ -84,17 +83,6 @@ def register_corp_modules(profile: DeployProfile) -> None:
         from importlib import import_module
 
         import_module("agentclaw.corp.di.corp_bootstrap").install_test_corp_reuse_column()
-    # SINGLEBOX: corp overlay (default-env-bot router + DI) is registered
-    # via the default_env_bot.singlebox_overlay registry (B8). The corp
-    # bootstrap call is guarded by ModuleNotFoundError so a community build
-    # (Avernet CI) stays corp-free.
-    elif profile is DeployProfile.SINGLEBOX:  # pragma: no cover
-        from importlib import import_module
-
-        try:  # pragma: no cover
-            import_module("agentclaw.corp.di.corp_bootstrap").install_singlebox_overlay()  # pragma: no cover
-        except ModuleNotFoundError:  # pragma: no cover
-            pass  # pragma: no cover
 
 
 def get_corp_modules() -> list[Module]:
@@ -147,12 +135,3 @@ def get_test_corp_modules() -> list[Module]:
     return _test_corp_reuse_provider()
 
 
-# ── Singlebox overlay ────────────────────────────────────────────────
-# The singlebox overlay registry lives in the ``default_env_bot`` package,
-# isolated from the production DI wiring. Re-exported here for backward
-# compatibility during the migration; new code should import from
-# ``agentclaw.community.di.default_env_bot.singlebox_overlay`` directly.
-from agentclaw.community.di.default_env_bot.singlebox_overlay import (  # noqa: F401
-    get_singlebox_overlay_modules,
-    register_singlebox_overlay_provider,
-)
