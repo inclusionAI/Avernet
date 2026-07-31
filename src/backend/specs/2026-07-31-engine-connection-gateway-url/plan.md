@@ -4,10 +4,11 @@
 
 `EngineConnectionService` keeps everything it does today — bot resolution, the
 personal-and-unshared gate, the relay-mode provider call, expiry normalisation —
-and changes only the two lines that decide what a caller receives. The published
-URL is composed against a new deployment-supplied gateway base under an `engine`
-prefix instead of the engine proxy's `/proxypass/`, and the credential moves from
-a response header into that URL's query string. `SocketInfo.headers` and
+and changes only what a caller receives. The provider still builds a finished
+relay URL around the engine path we ask it for; this endpoint re-addresses that
+URL onto the gateway, swapping the origin and the `/proxypass/` routing prefix
+for `/engine/` and carrying everything past that prefix through verbatim. The
+credential moves from a response header into that URL's query string. `SocketInfo.headers` and
 `Socket.headers` are deleted rather than left empty, so the credential has
 exactly one home.
 
@@ -177,12 +178,16 @@ Follows the established host-config pattern exactly; no new mechanism.
 - `connection.py:270-286` `_socket_url` — rewritten. Order of decisions:
   1. `type == "local"` → `ws://{target}{socket_path}`, **no credential in the
      URL**. A local device is reached directly and the gateway cannot route to
-     it. Preserves `test_local_devices_are_reached_directly:241`.
-  2. otherwise → `{gateway_ws_base}{_ENGINE_PREFIX}/{target}{socket_path}` plus
-     `?{_PROXY_TOKEN_PARAM}={quote(token)}` when a credential exists.
-  3. a provider URL present but not the `/proxypass/` shape → `EngineUpstreamError`.
-     A guard on the Risk 1 decision, not a supported path; it never fires for a
-     bot this endpoint serves.
+     it, and there is no relay URL to re-address. Composed, so target and path
+     are escaped here.
+  2. otherwise → `_readdress_onto_gateway`: `urlsplit` the provider's relay URL,
+     require the `/proxypass/` prefix, then publish
+     `{gateway_ws_base}{_ENGINE_PREFIX}/{tail}` where `tail` is everything past
+     that prefix, verbatim. The provider's query is preserved and the credential
+     appended to it with `&`, not assigned over it.
+  3. a provider URL that is missing, unparseable, not the `/proxypass/` shape,
+     carries a fragment, or is not UTF-8 encodable → `EngineUpstreamError`. A
+     guard on the Risk 1 decision, not a supported path.
 - `connection.py:288-313` `_ws_base` — replaced by `_gateway_ws_base()`: select
   `base_url_pre` / `base_url` by env, `rstrip("/")`, apply the existing
   `https→wss` / `http→ws` rewrite (`:312`), raise `EngineUpstreamError` when the
@@ -200,15 +205,19 @@ Follows the established host-config pattern exactly; no new mechanism.
   text.
 - `router.py:71` — `Socket(kind=s.kind, url=s.url)`.
 
-### Credential and target encoding
+### Encoding
 
-- **Target is not percent-encoded.** It carries `@` and `:` (e.g.
-  `ARCA_x@0:20003`); both are legal `pchar` in a path segment, and production
-  carries them unencoded today.
+- **The provider's path is never re-encoded.** It arrives already encoded by the
+  provider; encoding it a second time is its own bug, and it is the reason the
+  target is not touched either — the target reaches us inside that path. It is
+  only *checked*: `urlsplit` has already cut query and fragment away, so the tail
+  cannot end the path early whatever it holds.
 - **Credential is percent-encoded** with `quote(token, safe="")`. A JWT is
   base64url plus `.`, all query-safe, so this is defensive rather than required —
   but the value is provider-supplied and this endpoint should not assume its
   alphabet.
+- **The local branch still escapes** its composed target and path, since there is
+  no provider URL to inherit encoding from.
 
 ## Dependencies
 
@@ -285,12 +294,18 @@ is a different workstream's deliverable. See Rollout.
 
 ## Alternatives Considered
 
-- **Rewrite the provider's URL instead of composing our own** — take the
-  BaaS-returned `wss://{proxy}/proxypass/{target}{path}`, swap host and prefix.
-  Rejected: it makes this endpoint depend on parsing a shape BaaS is free to
-  change, and it does not solve Risk 1 anyway (the `wsrelay` shape has no
-  `/proxypass/` to swap). Composing from `target` + `chat_path` — both of which
-  we already hold — has no parsing step.
+- **Compose the URL from `target` + `chat_path` instead of re-addressing the
+  provider's** — no parsing of a shape BaaS owns. **Chosen first, then reversed
+  on 2026-07-31 at the bots owner's call.** Composing asserts our own grammar for
+  a URL the provider owns: it assumes the relay URL is exactly
+  `{origin}/proxypass/{target}` with our path appended and nothing else, so a
+  query the provider sets, an extra path segment, or its own encoding of the
+  target are all dropped silently. Worse, dropping a provider query and then
+  appending `?x-proxypass-token=` yields a socket missing what the provider
+  needed, with nothing pointing at why. The "no parsing step" argument also did
+  not survive contact with the code — the relay-shape guard already parses that
+  URL with `urlsplit`, so composing paid the parsing cost *and* kept the
+  assumption.
 - **Change the BaaS relay builder so it emits the gateway URL directly** —
   fewer moving parts on our side. Rejected: the internal console consumes the
   same builder, so this would drag the console's socket onto the gateway. Also
@@ -389,7 +404,8 @@ publishes an address that assumes them.
 |---|---|---|
 | Gateway address source | `user_config.gateway` block in `application.yaml`, `base_url` / `base_url_pre` selected by `get_current_env()`; corp values land in the cob overlay | 2026-07-31 |
 | Credential placement | Query parameter on the socket URL only; `headers` removed from the contract. HTTP keeps the header and gains no query form | 2026-07-31 |
-| `wsrelay` provider URLs (Risk 1) | Out of scope — tenant-facing personal bots cannot reach that platform. Compose from `target` + `chat_path`; guard with a named error if a non-`/proxypass/` URL ever appears | 2026-07-31 |
+| `wsrelay` provider URLs (Risk 1) | Out of scope — tenant-facing personal bots cannot reach that platform. Refused with a named error rather than published | 2026-07-31 |
+| How the published URL is built | **Re-address** the provider's relay URL — swap origin and routing prefix, carry everything past the prefix through verbatim — rather than compose it from parts | 2026-07-31 (reversed) |
 | `sandbox_client` on the constructor | Removed, not kept — dead once `_ws_base` goes, and DI fills `__init__` by `@inject` | 2026-07-31 |
 
 No open decisions remain. Ready for `tasks`.

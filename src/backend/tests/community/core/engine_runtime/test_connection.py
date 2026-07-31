@@ -77,11 +77,22 @@ class _Bindings:
 
 
 class _Devices:
+    """Stands in for the device provider.
+
+    Models the BaaS relay contract: ``url`` is a finished WebSocket URL the
+    provider builds *around the path it is asked for*, addressed to the hop
+    behind the gateway. Tests that care about the URL override it; the rest get
+    one built from the requested path, so the path this endpoint sends and the
+    path a caller ends up connecting to stay tied together the way they are in
+    production.
+    """
+
     def __init__(self, **overrides):
         defaults = dict(
-            type="remote", target="tgt", token="tok", url="", available=True
+            type="remote", target="tgt", token="tok", available=True
         )
-        self.info = SimpleNamespace(**{**defaults, **overrides})
+        self._url_override = overrides.pop("url", None)
+        self.info = SimpleNamespace(url="", **{**defaults, **overrides})
         self.kwargs = None
         self.raises: Exception | None = None
 
@@ -89,6 +100,11 @@ class _Devices:
         self.kwargs = kwargs
         if self.raises is not None:
             raise self.raises
+        if self._url_override is None:
+            target = self.info.target
+            self.info.url = f"wss://proxy.example/proxypass/{target}{kwargs['path']}"
+        else:
+            self.info.url = self._url_override
         return self.info
 
 
@@ -233,7 +249,7 @@ def test_a_gateway_base_without_a_scheme_is_an_upstream_error():
         _build(_svc(gateway=_gateway(base="gw.example")))
 
 
-def test_gateway_url_is_composed_and_scheme_swapped():
+def test_the_relay_url_is_readdressed_onto_the_gateway():
     result = _build(_svc())
     assert result.sockets[0].url == (
         "wss://gw.example/engine/tgt/api/openclaw/ws?x-proxypass-token=tok"
@@ -266,14 +282,36 @@ def test_a_trailing_slash_and_stray_whitespace_are_normalised():
     assert result.sockets[0].url.startswith("wss://gw.example/engine/")
 
 
-def test_a_target_carrying_url_delimiters_cannot_truncate_the_url():
-    """A raw ``#`` would end the path and strip the credential a browser sends;
-    a raw ``?`` would turn the rest of the URL into a query value."""
-    devices = _Devices(target="tgt#frag")
+def test_a_relay_url_carrying_a_fragment_is_refused():
+    """Everything after a ``#`` is a path we would silently drop, and a browser
+    never sends a fragment — so the URL is already broken upstream. Named rather
+    than re-addressed into something shorter that merely looks valid."""
+    devices = _Devices(url="wss://proxy.example/proxypass/tgt#/api/openclaw/ws")
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=devices))
+
+
+def test_a_provider_query_is_preserved_and_the_credential_appended():
+    """The provider owns this URL. Assigning our own query would drop whatever
+    it set and fail the socket with nothing pointing at why."""
+    devices = _Devices(
+        url="wss://proxy.example/proxypass/tgt/api/openclaw/ws?session=s1"
+    )
     url = _build(_svc(devices=devices)).sockets[0].url
     assert url == (
-        "wss://gw.example/engine/tgt%23frag/api/openclaw/ws?x-proxypass-token=tok"
+        "wss://gw.example/engine/tgt/api/openclaw/ws"
+        "?session=s1&x-proxypass-token=tok"
     )
+
+
+def test_the_provider_path_is_carried_through_verbatim():
+    """Whatever the provider put after its routing prefix is what a caller
+    connects to — this endpoint holds no opinion about that grammar."""
+    devices = _Devices(
+        url="wss://proxy.example/proxypass/tgt/v2/api/openclaw/ws"
+    )
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url.startswith("wss://gw.example/engine/tgt/v2/api/openclaw/ws?")
 
 
 @pytest.mark.parametrize("base", ["https://gw.example/#", "https://gw.example/?x=1"])
@@ -286,14 +324,21 @@ def test_a_gateway_base_carrying_url_delimiters_is_refused(base):
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
-    [("target", "tgt\ud800"), ("ws_token", "tok\ud800")],
+    "devices",
+    [
+        pytest.param(_Devices(ws_token="tok\ud800"), id="credential"),
+        pytest.param(_Devices(url="wss://p.example/proxypass/t\ud800/ws"), id="relay-url"),
+        pytest.param(
+            _Devices(type="local", target="127.0.0.1\ud800:20003"), id="local-target"
+        ),
+    ],
 )
-def test_an_unencodable_value_is_named_rather_than_a_500(field, value):
-    """``quote`` raises ``UnicodeEncodeError`` on a lone surrogate, which a
-    provider's JSON can carry. Unmapped, that is a 500 on a describable value."""
+def test_an_unencodable_value_is_named_rather_than_a_500(devices):
+    """A lone surrogate survives ``json.loads``, so a provider's response can
+    carry one. It would then fail either ``quote`` or the response serialiser —
+    a 500 on a value we can describe."""
     with pytest.raises(EngineUpstreamError):
-        _build(_svc(devices=_Devices(**{field: value})))
+        _build(_svc(devices=devices))
 
 
 def test_no_upstream_error_message_ever_carries_the_credential():
@@ -321,9 +366,9 @@ def test_a_provider_relay_url_of_an_unknown_shape_is_refused():
         _build(_svc(devices=devices))
 
 
-def test_a_proxypass_relay_url_is_accepted_and_recomposed():
-    """The shape the gateway *can* express. The provider's URL is not published
-    — the target and the path we asked for are recomposed against the gateway."""
+def test_only_the_origin_and_routing_prefix_change():
+    """Everything past the provider's routing prefix is carried through as the
+    provider wrote it; only the origin and that prefix are ours to change."""
     devices = _Devices(url="wss://proxy.example/proxypass/tgt/api/openclaw/ws")
     result = _build(_svc(devices=devices))
     assert result.sockets[0].url == (

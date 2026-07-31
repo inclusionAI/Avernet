@@ -211,14 +211,18 @@ Rules this endpoint must hold:
   that hop. A deployment that fronts no gateway — the community build's normal
   state — is a named upstream error, not a 500 and not a published address
   nothing serves. _Corrected 2026-07-31._
-- **The URL is composed here, not passed through.** The device connection is
+- **The provider's URL is re-addressed, not rebuilt.** The device connection is
   still requested in **`ws_conn_mode="relay"`**, and the provider still builds a
-  finished URL, but that URL addresses the hop behind the gateway and is not
-  what we publish; the target and the engine path we already hold are recomposed
-  against the gateway instead. A provider URL of a shape the `/engine` prefix
-  cannot express — BaaS's LOCAL platform answers `/wsrelay/{session_id}` and
-  ignores the path — is refused rather than published, so a wrong assumption
-  surfaces server-side instead of as a socket that will not open.
+  finished URL around the engine path it is given — that path passthrough is why
+  a `claude_code` bot is not handed openclaw's default and rejected with 4001 on
+  connect. Exactly two things then change: the origin becomes the gateway's, and
+  the hop's `/proxypass/` prefix becomes `/engine/`. Everything past that prefix
+  — target, engine path, any query the provider set — is carried through as the
+  provider wrote it, so this endpoint holds no opinion about a URL grammar it
+  does not own and cannot silently drop a part it did not anticipate. A provider
+  URL of a shape the `/engine` prefix cannot express — BaaS's LOCAL platform
+  answers `/wsrelay/{session_id}` — is refused rather than published, so a wrong
+  assumption surfaces server-side instead of as a socket that will not open.
   _Corrected 2026-07-31._
 - **`expires_at` is mandatory** so a caller knows to re-fetch rather than
   silently failing on an expired token. It is **the issuer's own value** wherever
