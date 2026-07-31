@@ -93,7 +93,7 @@ touched. The internal console must stay byte-for-byte unaffected.
         `test_chat_path_follows_the_engine:256`.
 - **Depends on:** Task 1
 
-## Task 3: Remove `headers` from the contract and retighten `expires_at`  `[ ]`
+## Task 3: Remove `headers` from the contract and retighten `expires_at`  `[x]`
 - **Goal:** Delete the socket `headers` field rather than publish it empty, and
   fix the expiry wording that reads as though a live socket dies at expiry.
 - **Files:**
@@ -103,20 +103,20 @@ touched. The internal console must stay byte-for-byte unaffected.
   - `tests/community/core/engine_runtime/test_connection.py`
   - `tests/community/adapters/http/openapi_v1/engine_runtime/test_connection.py`
 - **Done when:**
-  - [ ] `SocketInfo:86-96` has no `headers` field; the `field` import survives
+  - [x] `SocketInfo:86-96` has no `headers` field; the `field` import survives
         only if `ConnectionResult.sockets` still needs it.
-  - [ ] `Socket:28-30` has no `headers` field, and both examples
+  - [x] `Socket:28-30` has no `headers` field, and both examples
         (`:15-19`, `:42-47`) show a gateway URL carrying the query credential.
-  - [ ] `router.py:71` constructs `Socket(kind=…, url=…)`.
-  - [ ] `expires_at` in `schemas.py:53-57` states that it bounds **opening** a
+  - [x] `router.py:71` constructs `Socket(kind=…, url=…)`.
+  - [x] `expires_at` in `schemas.py:53-57` states that it bounds **opening** a
         socket, that an already-open socket survives it, that a caller fetches a
         fresh credential before connecting or reconnecting, and that a caller
         should not poll on a timer to keep a live socket alive. `models.py:107-109`
         says the same.
-  - [ ] A regression test asserts neither `SocketInfo` nor `Socket` has a
+  - [x] A regression test asserts neither `SocketInfo` nor `Socket` has a
         `headers` attribute, so the credential cannot quietly reappear in two
         places.
-  - [ ] `/openapi/v1/bots/{bot_id}/connection` is confirmed still absent from
+  - [x] `/openapi/v1/bots/{bot_id}/connection` is confirmed still absent from
         `src/gateway/configs/schemas/bots.openapi.json`, so the removal does not
         need `--allow-breaking`.
 - **Depends on:** Task 2

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from types import SimpleNamespace
 
 import pytest
@@ -378,6 +379,20 @@ def test_an_unparseable_provider_value_is_not_published_verbatim():
     expires = datetime.fromisoformat(result.expires_at)
     expected = datetime.now(timezone.utc) + timedelta(seconds=CONNECTION_TTL_SECONDS)
     assert abs((expires - expected).total_seconds()) < 60
+
+
+def test_neither_socket_model_carries_a_headers_field():
+    """The credential lives in the URL and only there. A ``headers`` field would
+    publish it twice and leave a caller guessing which copy the socket honours —
+    and a browser could not use that copy anyway."""
+    from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection.schemas import (  # noqa: E501
+        Socket,
+    )
+    from agentclaw.community.core.engine_runtime.models import SocketInfo
+
+    assert not hasattr(_build(_svc()).sockets[0], "headers")
+    assert {f.name for f in dataclasses.fields(SocketInfo)} == {"kind", "url"}
+    assert set(Socket.model_fields) == {"kind", "url"}
 
 
 def test_result_carries_no_target_type_or_bare_token():
