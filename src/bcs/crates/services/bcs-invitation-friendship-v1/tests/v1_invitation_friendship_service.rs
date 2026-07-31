@@ -586,6 +586,90 @@ async fn accept_invitation_session_target_joins() {
     assert!(session.participants.iter().any(|p| p.bot_uuid == "bot-b"));
 }
 
+#[tokio::test]
+async fn accept_invitation_target_group_deleted_returns_invitation_not_found() {
+    // V1 `acceptInvitation` 404 contract declares only `invitation_not_found`;
+    // when the invitation token points at a Group that no longer exists, the
+    // facade must NOT surface a `group_not_found` code (which would leak the
+    // target type and expose an undeclared error code).
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+
+    // Mint a V1 invitation token against a group id that was never stored,
+    // simulating "target deleted before accept".
+    let token = invite_token_encode(
+        &InviteTokenPayload {
+            v: 1,
+            id: "grp-deleted".to_string(),
+            exp: now_secs() + 3600,
+            target_type: Some(InviteTargetType::Group),
+        },
+        SECRET,
+    );
+
+    let error = fx
+        .service
+        .accept_invitation(AcceptInvitation {
+            principal: Fixture::bot_principal("bot-b"),
+            token,
+            bot_uuid: None,
+        })
+        .await
+        .expect_err("missing group target is invitation_not_found");
+
+    assert!(
+        matches!(error, ApplicationError::NotFound { .. }),
+        "expected ApplicationError::NotFound, got {error:?}",
+    );
+    assert_eq!(error.code(), "invitation_not_found");
+    // Regression guard: the old code path surfaced `group_not_found`. Ensure
+    // the target-type leak does not silently return.
+    assert_ne!(error.code(), "group_not_found");
+}
+
+#[tokio::test]
+async fn accept_invitation_target_session_deleted_returns_invitation_not_found() {
+    // V1 `acceptInvitation` 404 contract declares only `invitation_not_found`;
+    // when the invitation token points at a Session that no longer exists, the
+    // facade must NOT surface a `session_not_found` code (which would leak the
+    // target type and expose an undeclared error code).
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+
+    // Mint a V1 invitation token against a session id that was never stored,
+    // simulating "target deleted before accept".
+    let token = invite_token_encode(
+        &InviteTokenPayload {
+            v: 1,
+            id: "session-deleted".to_string(),
+            exp: now_secs() + 3600,
+            target_type: Some(InviteTargetType::Session),
+        },
+        SECRET,
+    );
+
+    let error = fx
+        .service
+        .accept_invitation(AcceptInvitation {
+            principal: Fixture::bot_principal("bot-b"),
+            token,
+            bot_uuid: None,
+        })
+        .await
+        .expect_err("missing session target is invitation_not_found");
+
+    assert!(
+        matches!(error, ApplicationError::NotFound { .. }),
+        "expected ApplicationError::NotFound, got {error:?}",
+    );
+    assert_eq!(error.code(), "invitation_not_found");
+    // Regression guard: the old code path surfaced `session_not_found`. Ensure
+    // the target-type leak does not silently return.
+    assert_ne!(error.code(), "session_not_found");
+}
+
 // ── FriendshipService ─────────────────────────────────────────────────
 
 #[tokio::test]

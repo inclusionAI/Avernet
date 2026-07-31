@@ -336,15 +336,25 @@ impl InvitationFriendshipServiceImpl {
         group_id: &str,
         joining_bot: &str,
     ) -> Result<InvitationAcceptResult, ApplicationError> {
+        // The V1 `acceptInvitation` 404 contract declares only
+        // `invitation_not_found`; map both a missing target (None) and a
+        // `GroupNotFound` storage error to that code so the contract stays
+        // clean and the target type existence is not leaked.
         let group = self
             .groups
             .try_get(group_id)
             .await
-            .map_err(map_service_error)?
+            .map_err(|e| match e {
+                ServiceError::GroupNotFound(_) => ApplicationError::not_found(
+                    "invitation_not_found",
+                    format!("Invitation target Group '{group_id}' was not found"),
+                ),
+                other => map_service_error(other),
+            })?
             .ok_or_else(|| {
                 ApplicationError::not_found(
-                    "group_not_found",
-                    format!("Group '{group_id}' was not found"),
+                    "invitation_not_found",
+                    format!("Invitation target Group '{group_id}' was not found"),
                 )
             })?;
         if group
@@ -377,15 +387,25 @@ impl InvitationFriendshipServiceImpl {
         session_id: &str,
         joining_bot: &str,
     ) -> Result<InvitationAcceptResult, ApplicationError> {
+        // The V1 `acceptInvitation` 404 contract declares only
+        // `invitation_not_found`; map both a missing target (None) and a
+        // `SessionUseCaseError::NotFound` to that code so the contract stays
+        // clean and the target type existence is not leaked.
         let session = self
             .sessions
             .get(session_id)
             .await
-            .map_err(map_session_error)?
+            .map_err(|e| match e {
+                SessionUseCaseError::NotFound(_) => ApplicationError::not_found(
+                    "invitation_not_found",
+                    format!("Invitation target Session '{session_id}' was not found"),
+                ),
+                other => map_session_error(other),
+            })?
             .ok_or_else(|| {
                 ApplicationError::not_found(
-                    "session_not_found",
-                    format!("Session '{session_id}' was not found"),
+                    "invitation_not_found",
+                    format!("Invitation target Session '{session_id}' was not found"),
                 )
             })?;
         if session
