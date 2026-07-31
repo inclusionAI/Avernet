@@ -94,6 +94,93 @@ async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_materialize_supports_filename_near_filesystem_segment_limit(
+    tmp_path: Path,
+):
+    content = b"long filename content"
+    filename = f"{'a' * 240}.txt"
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(
+        content,
+        filename=filename,
+        device_path=(
+            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
+            f"sr_001/{filename}"
+        ),
+    )
+
+    result = await service.materialize(request)
+
+    target = (
+        tmp_path
+        / ".teamclaw/session-files/scope_abc/session_abc/sr_001"
+        / filename
+    )
+    assert result.ready is True
+    assert target.read_bytes() == content
+    assert not list(target.parent.glob(".part-*"))
+
+
+@pytest.mark.asyncio
+async def test_materialize_supports_unicode_filename(tmp_path: Path):
+    content = b"unicode filename content"
+    filename = "\u4e2d\u6587\u62a5\u544a 2026.txt"
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(
+        content,
+        filename=filename,
+        device_path=(
+            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
+            f"sr_001/{filename}"
+        ),
+    )
+
+    result = await service.materialize(request)
+
+    target = (
+        tmp_path
+        / ".teamclaw/session-files/scope_abc/session_abc/sr_001"
+        / filename
+    )
+    assert result.ready is True
+    assert target.read_bytes() == content
+
+
+@pytest.mark.asyncio
+async def test_materialize_rejects_filename_exceeding_utf8_segment_limit(tmp_path: Path):
+    content = b"too long unicode filename"
+    filename = f"{'\u4e2d' * 86}.txt"
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=callback,
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(
+        content,
+        filename=filename,
+        device_path=(
+            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
+            f"sr_001/{filename}"
+        ),
+    )
+
+    result = await service.materialize(request)
+
+    assert result.ready is False
+    assert result.error_code == "invalid_device_path"
+    assert callback.results == [result]
+
+
+@pytest.mark.asyncio
 async def test_session_v2_materialization_never_persists_raw_session_id(tmp_path: Path):
     content = b"session v2 content"
     pull = _PullClient(content)

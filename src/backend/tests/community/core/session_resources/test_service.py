@@ -202,6 +202,39 @@ def test_upload_intent_uses_session_api_and_persists_encrypted_session_key():
     assert repo.value.transfer_api_version.value == "session_v2"
 
 
+def test_upload_intent_allows_unicode_filename_within_filesystem_limit():
+    service, repo, http = _service()
+
+    intent = service.create_upload_intent(
+        owner_id="owner-1",
+        bot_id="bot-1",
+        session_key="session/raw value",
+        scope_type="personal_bot_chat",
+        engine_type="openclaw",
+        filename="\u4e2d\u6587\u62a5\u544a 2026.txt",
+        size_bytes=4,
+    )
+
+    assert http.calls[0][1]["json"]["filename"] == "\u4e2d\u6587\u62a5\u544a 2026.txt"
+    assert repo.value.filename == "\u4e2d\u6587\u62a5\u544a 2026.txt"
+    assert intent.resource.workspace_relative_path.endswith("/\u4e2d\u6587\u62a5\u544a 2026.txt")
+
+
+def test_upload_intent_rejects_filename_exceeding_utf8_segment_limit():
+    service, _, _ = _service()
+
+    with pytest.raises(ValueError, match="invalid_filename"):
+        service.create_upload_intent(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            session_key="session/raw value",
+            scope_type="personal_bot_chat",
+            engine_type="openclaw",
+            filename=f"{'\u4e2d' * 86}.txt",
+            size_bytes=4,
+        )
+
+
 def test_upload_complete_requires_baas_done_then_queues_identity_only():
     queue = _Queue()
     service, repo, http = _service(queue)
