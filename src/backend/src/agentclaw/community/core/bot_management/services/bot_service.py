@@ -3161,15 +3161,15 @@ def _is_first_bot(self, user_id: str) -> bool:
             if not bot:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-            # default bot 是用户的常驻默认 Bot,不允许删除(重启请走 restart_bot)。
+            # 至少保留一个 Bot:删掉这只后归零则拒。
             # 必须在 release_device / destroy_passport 之前拦截,否则会误销毁
             # agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
             # 用 BotOperationNotAllowedError（BotServiceError 子类）表达"这是客户端
             # 不支持的操作"，而不是服务端故障：重试永远不会成功。内部路由的 except 链没有
             # 这一分支，仍落到 `except BotServiceError` → 500，行为不变；公共 API 则按
             # 4xx 映射。
-            if bot_id == "default":
-                raise BotOperationNotAllowedError("default bot 不允许删除")
+            if self._repository.count_by_owner(user_id) <= 1:
+                raise BotOperationNotAllowedError("至少保留一个 Bot，不能全部删除")
 
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")

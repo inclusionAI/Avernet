@@ -9,6 +9,9 @@ reports as a 500.
 This exercises the **real** method rather than a mocked service: an endpoint
 test that stubs ``delete_bot`` to raise the subclass proves only that the
 mapping works, not that the service ever produces it.
+
+The protection is count-based (refuse to delete the owner's last bot, keep ≥1);
+``count_by_owner`` is stubbed to 1 so the rejection path fires.
 """
 
 from __future__ import annotations
@@ -50,26 +53,28 @@ def _make_bot_service(repository) -> BotService:
     )
 
 
-def test_default_bot_delete_raises_operation_not_allowed():
+def test_last_bot_delete_raises_operation_not_allowed():
     """The specific subclass escapes — it must not be re-wrapped as the base."""
     repo = Mock()
     repo.get_by_id_and_owner.return_value = {
         "id": 1, "bot_id": "default", "owner_id": "u1",
         "status": "ACTIVE", "binding_id": None, "ext": {},
     }
+    repo.count_by_owner.return_value = 1  # 最后一只,触发保留≥1保护
     service = _make_bot_service(repo)
 
     with pytest.raises(BotOperationNotAllowedError):
         service.delete_bot("default", "u1")
 
 
-def test_default_bot_delete_does_not_release_device_or_passport(monkeypatch):
+def test_last_bot_delete_does_not_release_device_or_passport(monkeypatch):
     """The rejection happens before any destructive side effect."""
     repo = Mock()
     repo.get_by_id_and_owner.return_value = {
         "id": 1, "bot_id": "default", "owner_id": "u1",
         "status": "ACTIVE", "binding_id": "bind-1", "ext": {},
     }
+    repo.count_by_owner.return_value = 1  # 最后一只,触发保留≥1保护
     service = _make_bot_service(repo)
 
     with pytest.raises(BotOperationNotAllowedError):

@@ -59,6 +59,9 @@ def _make_bot(
 def _make_service() -> BotService:
     svc = BotService.__new__(BotService)
     svc._repository = MagicMock()
+    # Default count=2 so existing successful-delete tests pass (deletion allowed when >1 bot).
+    # Protection-path tests MUST override this to <=1 — a forgotten override here silently passes.
+    svc._repository.count_by_owner.return_value = 2
     svc._passport_plugin = MagicMock()
     svc._bot_publish_provider = lambda: MagicMock()
     svc._device_service_provider = lambda: MagicMock()
@@ -550,8 +553,8 @@ class TestDeleteBot:
             svc.delete_bot("bot001", "user001")
         svc._repository.soft_delete_by_owner.assert_not_called()
 
-    def test_default_bot_delete_is_forbidden(self):
-        """default bot 是用户的常驻默认 Bot,不允许删除(重启请走 restart_bot)。
+    def test_last_bot_delete_is_forbidden(self):
+        """删除 owner 最后一只 Bot 被拒(保留≥1),不再按 bot_id=='default' 拦截。
 
         拦截必须发生在 release_device / destroy_passport / soft_delete 之前,
         否则会误销毁 agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
@@ -559,8 +562,9 @@ class TestDeleteBot:
         svc = _make_service()
         bot = _make_bot(bot_id="default", binding_id=42)
         svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.count_by_owner.return_value = 1  # 最后一只
 
-        with pytest.raises(BotServiceError, match="default bot 不允许删除"):
+        with pytest.raises(BotServiceError, match="至少保留一个 Bot"):
             svc.delete_bot("default", "user001")
 
         # 许可证未销毁、设备未释放、bot 记录未删、脏数据未清理
@@ -592,6 +596,37 @@ class TestDeleteBot:
 
         result = svc.delete_bot("mybot", "user001")
         assert result is True
+
+
+# ===========================================================================
+# delete_bot — count-based protection (keep >= 1)
+# ===========================================================================
+
+
+class TestDeleteBotProtection:
+    """delete_bot 拒绝删除 owner 最后一只 bot (保留≥1),不再按 bot_id=='default'。"""
+
+    def _svc(self, count: int, bot: dict | None):
+        svc = _make_service()
+        svc._repository.count_by_owner.return_value = count
+        svc._repository.get_by_id_and_owner.return_value = bot or _make_bot()
+        return svc
+
+    def test_only_bot_rejected(self):
+        svc = self._svc(1, _make_bot(bot_id="20260731_abcd1234"))
+        with pytest.raises(BotServiceError):
+            svc.delete_bot(bot_id="20260731_abcd1234", user_id="user001")
+
+    def test_non_last_allowed(self):
+        svc = self._svc(3, _make_bot(binding_id=None))  # binding_id=None 避开 device 释放分支
+        svc.delete_bot(bot_id="x", user_id="user001")  # 不抛
+        svc._repository.soft_delete_by_owner.assert_called_once()
+
+    def test_default_bot_deletable_when_not_last(self):
+        # 行为变化:default 字面值不再受特殊保护;只要删完还剩≥1 即可
+        svc = self._svc(2, _make_bot(bot_id="default", binding_id=None))
+        svc.delete_bot(bot_id="default", user_id="user001")
+        svc._repository.soft_delete_by_owner.assert_called_once()
 
 
 # ===========================================================================
