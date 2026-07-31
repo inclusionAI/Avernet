@@ -1,3 +1,14 @@
+# Frozen debt log for the coverage gate — see framework/README.md.
+#
+# The 16 engine-runtime /openapi/v1 lines below (approvals, connection,
+# engine/*, models, sessions) are tracked by inclusionAI/Avernet#651. They are
+# here for the same reason as the other 49 /openapi/v1 entries: the case runner
+# authenticates with x-user-id, require_principal accepts only a gateway-signed
+# token, and the harness has no minter — so a case could assert nothing but a
+# 401. #651 covers the minter and the backfill for the whole surface.
+#
+# Comments survive hand edits; `python -m tests.community.framework.coverage_gate
+# --regen` rewrites the file and drops them.
 DELETE /api/bot-render-screens/{record_id}: missing [happy, error]
 DELETE /api/bots/{bot_id}: missing [happy, error]
 DELETE /api/desktop/bots/{bot_id}: missing [happy, error]
