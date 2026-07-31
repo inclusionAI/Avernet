@@ -94,7 +94,10 @@ def bootstrap_app() -> BootstrapResult:
 
     authenticator = container.authenticator()
     forwarding = container.forwarding()
-    principal_signer = build_principal_signer()
+    principal_signer = build_principal_signer(
+        user_config=container.user_config(),
+        secret_resolver=container.plugins().secret_resolver(),
+    )
     db = container.plugins().database()
     access_key_issuer = build_access_key_issuer(db, principal_signer)
     app_registrar = build_app_registrar(db, principal_signer)

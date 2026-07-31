@@ -12,6 +12,7 @@ from gateway.community.plugins.cache.in_memory import InMemoryCachePlugin
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
+from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
 
 
 def _default(value, fallback):
@@ -44,6 +45,17 @@ class PluginContainer(containers.DeclarativeContainer):
     auth = providers.Selector(
         config.plugins.auth,
         stub=providers.Singleton(StubAuthPlugin),
+    )
+
+    # SecretResolver — community flavor reads signing keys (and other creds)
+    # from the process environment. Enterprise registers a corp/KMS-backed
+    # option (e.g. "corp") via plugin_registry.register_plugin_option_provider
+    # and selects it with ``plugins.secret: "corp"`` in the config overlay.
+    secret_resolver = providers.Selector(
+        config.plugins.secret,
+        community=providers.Singleton(
+            CommunitySecretResolver, env_prefix=config.secret.env_prefix
+        ),
     )
 
     bot_registry = providers.Factory(BotRepository, db=database)

@@ -17,13 +17,27 @@ from fastapi.testclient import TestClient
 
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
 from gateway.community.bootstrap._principal_signer import build_principal_signer
+from gateway.community.config import ConfigLoader, UserConfig
 from gateway.community.core.forwarding import DomainMap
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
+from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
 from gateway.community.spi.auth import AuthError
 
 Scope = dict[str, Any]
 Receive = Callable[[], Awaitable[dict[str, Any]]]
 Send = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+def _load_user_config() -> UserConfig:
+    return ConfigLoader.load().user_config
+
+
+def _build_signer():
+    uc = _load_user_config()
+    return build_principal_signer(
+        user_config=uc,
+        secret_resolver=CommunitySecretResolver(env_prefix=uc.secret.env_prefix),
+    )
 
 
 async def _stub_upstream(scope: Scope, receive: Receive, send: Send) -> None:
@@ -105,7 +119,7 @@ def _build() -> tuple[FastAPI, _FakeAuth]:
     app.state.forwarder = HttpxForwarder(client=client)
     auth = _FakeAuth()
     app.state.authenticator = auth
-    app.state.principal_signer = build_principal_signer()
+    app.state.principal_signer = _build_signer()
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
     return app, auth
 
@@ -233,7 +247,7 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
     )
     app.state.forwarder = HttpxForwarder(client=client)
     app.state.authenticator = authenticator
-    app.state.principal_signer = build_principal_signer()
+    app.state.principal_signer = _build_signer()
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
 
     with TestClient(app) as c:

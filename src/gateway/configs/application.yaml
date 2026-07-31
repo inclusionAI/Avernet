@@ -32,12 +32,33 @@ user_config:
     forwarder: "httpx"
     schema_catalog: "file"
     cache: "stub"
+    auth: "stub"
+    # SecretResolver flavor. Community reads creds from env; enterprise overlays
+    # this with a corp/KMS-backed selector registered via the plugin_registry.
+    secret: "community"
     authn:
       app_token: "stub"
       tenant: "stub"
     database:
       plugin_database: "SQLITE_ORM"
       database_url: ""
+
+  # SecretResolver configuration. The community (env-backed) resolver reads
+  # ``{env_prefix}{NAME}_VALUE`` / ``_USER`` from the process environment.
+  # Enterprise overlays may swap the resolver implementation via the plugin
+  # registry (e.g. a corp secret store / KMS).
+  secret:
+    env_prefix: "AVERNET_SECRET_"
+
+  # PrincipalSigner (JWT client) config. The signing key is a secret and is
+  # resolved at runtime via the SecretResolver using ``secret_name``; the
+  # remaining fields are non-secret and live here. A missing/empty key falls
+  # back to a dev key (single-box/tests only — NOT for production).
+  principal_signer:
+    secret_name: "principal_signing_key"
+    kid: "bare"
+    issuer: "gateway"
+    ttl_seconds: 60
 
   # Values used to expand ${...} placeholders in upstreams.servers.*.base_url.
   upstream_vars:

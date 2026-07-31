@@ -4,22 +4,24 @@ Signs the resolved identity set as a short-lived JWT with ``iss/aud/iat/exp`` +
 a ``principals`` claim, keyed by a shared HMAC secret (kid in the JOSE header
 for rotation). NOT production-grade — sofa uses asymmetric signing + KMS
 (auth design §7.1).
+
+The signing key is resolved via the :class:`SecretResolver` SPI (community
+flavor reads it from the environment); ``kid`` / ``issuer`` / ``ttl_seconds``
+are non-secret and come from ``user_config.principal_signer``.
 """
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import jwt
 
+from gateway.community.config import PrincipalSignerPluginConfig
 from gateway.community.spi.authn import Principal, PrincipalType
+from gateway.community.spi.secret_resolver import SecretResolver
 
-_KID_ENV = "AVERNET_PRINCIPAL_SIGNING_KID"
-_KEY_ENV = "AVERNET_PRINCIPAL_SIGNING_KEY"
-_TTL_ENV = "AVERNET_PRINCIPAL_SIGNING_TTL"
 _DEV_FALLBACK_KEY = "avernet-dev-signing-key-NOT-FOR-PROD"
 
 
@@ -67,26 +69,44 @@ class BarePrincipalSigner:
         )
 
 
-def load_signer_config(
-    env: Mapping[str, str] | None = None,
-) -> PrincipalSignerConfig:
-    """Build :class:`PrincipalSignerConfig` from env, with a dev fallback key.
+def _resolve_signing_key(
+    signer_cfg: PrincipalSignerPluginConfig,
+    secret_resolver: SecretResolver,
+) -> str:
+    """Resolve the HMAC signing key via the SecretResolver, with a dev fallback.
 
-    A missing ``AVERNET_PRINCIPAL_SIGNING_KEY`` falls back to a fixed dev secret
-    and logs a warning — fine for single-box/tests, NOT for production. sofa
-    (asymmetric + KMS) is a separate workstream and will require a real key.
+    A missing secret (resolver returns ``None`` or an empty value) falls back to
+    a fixed dev secret and logs a warning — fine for single-box/tests, NOT for
+    production. sofa (asymmetric + KMS) resolves a real key through the same
+    SecretResolver seam.
     """
-    env = os.environ if env is None else env
-    key = env.get(_KEY_ENV, "")
-    kid = env.get(_KID_ENV, "") or "bare"
-    ttl_raw = env.get(_TTL_ENV, "")
-    ttl = int(ttl_raw) if ttl_raw.isdigit() else 60
+    material = secret_resolver.get_secret(signer_cfg.secret_name)
+    key = getattr(material, "secret_value", "") or ""
     if not key:
         from gateway.community.logger import get_logger
 
         get_logger("principal_signer").warning(
-            "AVERNET_PRINCIPAL_SIGNING_KEY unset — using dev fallback key "
-            "(NOT for production)."
+            "Principal signing key not found via SecretResolver (secret_name=%r) "
+            "— using dev fallback key (NOT for production).",
+            signer_cfg.secret_name,
         )
         key = _DEV_FALLBACK_KEY
-    return PrincipalSignerConfig(signing_key=key, kid=kid, ttl_seconds=ttl)
+    return key
+
+
+def load_signer_config(
+    signer_cfg: PrincipalSignerPluginConfig,
+    secret_resolver: SecretResolver,
+) -> PrincipalSignerConfig:
+    """Build :class:`PrincipalSignerConfig` from typed config + SecretResolver.
+
+    Non-secret fields (``kid`` / ``issuer`` / ``ttl_seconds``) come from the
+    ``user_config.principal_signer`` block; the signing key is resolved via
+    ``secret_resolver`` using ``signer_cfg.secret_name``.
+    """
+    return PrincipalSignerConfig(
+        signing_key=_resolve_signing_key(signer_cfg, secret_resolver),
+        kid=signer_cfg.kid,
+        issuer=signer_cfg.issuer,
+        ttl_seconds=signer_cfg.ttl_seconds,
+    )
