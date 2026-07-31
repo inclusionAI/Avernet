@@ -348,24 +348,7 @@ class BotChatService(OpenBotChatServiceMixin):
         return "db"
 
     def _check_bot_access(self, user_id: str, bot_id: str) -> bool:
-        """Check if user has access to the specified non-default bot.
-
-        Access is granted if the user is the bot owner (via ac_bots) or
-        a collaborator (via ac_bot_collaborator).
-
-        Args:
-            user_id: The user ID (staffId).
-            bot_id: The bot ID (non-default).
-
-        Returns:
-            True if access verified, False otherwise.
-        """
-        if (
-            bot_id == "default"
-            or bot_id == f"{user_id}_default"
-        ):
-            return True
-
+        """Check access: owner (ac_bots) or collaborator (ac_bot_collaborator)."""
         return self._db_repo.has_bot_access(user_id, bot_id)
 
     async def list_sessions(
