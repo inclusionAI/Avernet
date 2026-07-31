@@ -215,3 +215,58 @@ class TestRegisterExtraAuthnStrategy:
         inject_into_plugin_container(container)
         pool = container.plugins().authn_strategies()
         assert "google" in pool
+
+
+class TestRegisterSecretResolverOption:
+    """Enterprise registers a corp/KMS SecretResolver alongside the community one."""
+
+    def test_inject_corp_secret_resolver_via_provider_factory(self) -> None:
+        from dependency_injector import providers
+
+        from gateway.community.bootstrap._configs import init_container_config
+        from gateway.community.bootstrap._container import ApplicationContainer
+        from gateway.community.plugin_registry import inject_into_plugin_container
+        from gateway.community.spi.secret_resolver import SecretResolver
+
+        class CorpSecretResolver(SecretResolver):
+            """Stand-in for an enterprise KMS/corp-store resolver."""
+
+            def __init__(self, kms_endpoint: str) -> None:
+                self.kms_endpoint = kms_endpoint
+
+            def get_secret(self, secret_name: str):  # type: ignore[no-untyped-def]
+                return None
+
+        def provider_factory(root):
+            # Enterprise can read loaded config off the root container, e.g. a
+            # corp endpoint declared in the config overlay.
+            return providers.Singleton(
+                CorpSecretResolver, kms_endpoint="https://kms.corp.local"
+            )
+
+        register_plugin_option_provider("secret_resolver", "corp", provider_factory)
+        assert has_enterprise_plugins() is True
+
+        container = ApplicationContainer()
+        init_container_config(container)
+        container.config.plugins.secret.override("corp")
+
+        inject_into_plugin_container(container)
+
+        resolver = container.plugins().secret_resolver()
+        assert isinstance(resolver, CorpSecretResolver)
+        assert resolver.kms_endpoint == "https://kms.corp.local"
+
+    def test_community_secret_resolver_is_default(self) -> None:
+        from gateway.community.bootstrap._configs import init_container_config
+        from gateway.community.bootstrap._container import ApplicationContainer
+        from gateway.community.plugins.secret_resolver.community import (
+            CommunitySecretResolver,
+        )
+
+        container = ApplicationContainer()
+        init_container_config(container)
+
+        assert isinstance(
+            container.plugins().secret_resolver(), CommunitySecretResolver
+        )

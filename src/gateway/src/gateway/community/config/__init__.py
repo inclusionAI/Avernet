@@ -12,6 +12,8 @@ from ._models import (
     LogConfig,
     ModuleConfig,
     PluginConfig,
+    PrincipalSignerPluginConfig,
+    SecretConfig,
     UserConfig,
     WebConfig,
 )
@@ -24,6 +26,8 @@ __all__ = [
     "LogConfig",
     "ModuleConfig",
     "PluginConfig",
+    "PrincipalSignerPluginConfig",
+    "SecretConfig",
     "UserConfig",
     "WebConfig",
     "get_config",

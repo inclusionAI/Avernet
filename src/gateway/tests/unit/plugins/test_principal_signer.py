@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import time as _time
+from dataclasses import dataclass
 
 import jwt
 import pytest
 
+from gateway.community.config import PrincipalSignerPluginConfig
 from gateway.community.plugins.principal_signer.bare import (
     BarePrincipalSigner,
     PrincipalSignerConfig,
     load_signer_config,
 )
 from gateway.community.spi.authn import AppPrincipal, ThirdPartyApp
+from gateway.community.spi.secret_resolver import SecretResolver
 
 _PRINCIPAL_HEADER = "X-Avernet-Principal"  # noqa: F841  (documented contract)
 # Use the real wall clock so PyJWT's ``iat``/``exp`` validation (which checks
@@ -81,23 +84,49 @@ async def test_empty_principals_still_signs() -> None:
     assert decoded["principals"] == []
 
 
-def test_load_signer_config_reads_env() -> None:
+@dataclass(frozen=True)
+class _Secret:
+    secret_user: str
+    secret_value: str
+
+
+class _FakeResolver(SecretResolver):
+    def __init__(self, value: str | None) -> None:
+        self._value = value
+
+    def get_secret(self, secret_name: str) -> _Secret | None:
+        if self._value is None:
+            return None
+        return _Secret(secret_user="", secret_value=self._value)
+
+
+def _block(
+    *,
+    secret_name: str = "principal_signing_key",
+    kid: str = "bare",
+    issuer: str = "gateway",
+    ttl_seconds: int = 60,
+) -> PrincipalSignerPluginConfig:
+    return PrincipalSignerPluginConfig(
+        secret_name=secret_name, kid=kid, issuer=issuer, ttl_seconds=ttl_seconds
+    )
+
+
+def test_load_signer_config_reads_key_from_resolver_and_params_from_config() -> None:
     cfg = load_signer_config(
-        {
-            "AVERNET_PRINCIPAL_SIGNING_KEY": "envk",
-            "AVERNET_PRINCIPAL_SIGNING_KID": "k7",
-            "AVERNET_PRINCIPAL_SIGNING_TTL": "30",
-        }
+        _block(kid="k7", issuer="gw", ttl_seconds=30), _FakeResolver("envk")
     )
     assert cfg.signing_key == "envk"
     assert cfg.kid == "k7"
+    assert cfg.issuer == "gw"
     assert cfg.ttl_seconds == 30
 
 
-def test_load_signer_config_dev_fallback_when_unset() -> None:
-    cfg = load_signer_config({})
+def test_load_signer_config_dev_fallback_when_secret_absent() -> None:
+    cfg = load_signer_config(_block(), _FakeResolver(None))
     assert cfg.signing_key  # dev fallback present
     assert cfg.kid == "bare"
+    assert cfg.issuer == "gateway"
     assert cfg.ttl_seconds == 60
 
 
