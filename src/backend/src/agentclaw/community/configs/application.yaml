@@ -185,6 +185,7 @@ user_config:
     allow_origins:
       - "http://localhost"
       - "http://localhost:3000"
+      - "http://localhost:8000"
       - "http://localhost:8080"
       - "http://localhost:8888"
     allow_origin_regex: []

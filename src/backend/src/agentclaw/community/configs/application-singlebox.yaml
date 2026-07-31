@@ -46,6 +46,14 @@ user_config:
     device_admin:
       - "100000"
 
+  # CORS — singlebox 前端跑在 :8000(本机可能用 localhost 或 agentclaw-local.stable.
+  # alipay.net 等 /etc/hosts 域名)。base allow_origins 已含 localhost 系(含 8000);
+  # 这里补一条正则兜底任意 host 的 :8000 origin,避免在 shipped 配置里写 .alipay.net
+  # 字面量(test_shipped_config_no_corp_identifiers 守卫禁)。
+  cors:
+    allow_origin_regex:
+      - '^http://[^/]+:8000$'
+
   app:
     title: "AgentClaw Single Box"
     description: "Single Box mode — no external network."
