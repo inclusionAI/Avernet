@@ -21,12 +21,8 @@ from agentclaw.community.core.devices.errors import (
     DeviceDomainError,
     DeviceServiceError,
 )
-from agentclaw.community.core.devices.services.device_context import (
-    ConnInfoBuildError,
-    DeviceNotBoundError,
-)
-from agentclaw.community.core.devices.services.device_context_resolver import (
-    DeviceContextResolver,
+from agentclaw.community.core.devices.repository.protocol import (
+    DeviceBindingRepository,
 )
 from agentclaw.community.core.devices.models import OperatorContext
 from agentclaw.community.core.devices.services.device_service import DeviceService
@@ -107,12 +103,12 @@ class EngineConnectionService:
     def __init__(
         self,
         bot_service: BotService,
-        resolver: DeviceContextResolver,
+        binding_repository: DeviceBindingRepository,
         device_service: DeviceService,
         sandbox_client: SandboxRuntimeClient,
     ) -> None:
         self._bot_service = bot_service
-        self._resolver = resolver
+        self._binding_repository = binding_repository
         self._device_service = device_service
         self._sandbox_client = sandbox_client
 
@@ -130,10 +126,7 @@ class EngineConnectionService:
         _require_personal_bot(str(bot.get("bot_type") or ""), bot_id)
         engine = str(bot.get("active_engine") or "")
 
-        try:
-            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
-        except (DeviceNotBoundError, ConnInfoBuildError) as exc:
-            raise EngineDeviceNotReadyError(f"device not ready for bot={bot_id}") from exc
+        binding_id = self._active_binding_id(bot_id, owner_id)
 
         operator = OperatorContext(
             staff_id=owner_id,
@@ -143,7 +136,7 @@ class EngineConnectionService:
         )
         chat_path = self._chat_path(engine)
         try:
-            info = self._get_connection(ctx.binding_id, operator, chat_path)
+            info = self._get_connection(binding_id, operator, chat_path)
         except DeviceServiceError as exc:
             # The provider itself failed — a BaaS ws-info call that timed out or
             # answered an error. The bot's device may be perfectly healthy, so
@@ -177,6 +170,36 @@ class EngineConnectionService:
         return ConnectionResult(
             engine=engine, expires_at=self._expires_at(info), sockets=sockets
         )
+
+    def _active_binding_id(self, bot_id: str, owner_id: str) -> int:
+        """The bot's active binding id — and *only* the id.
+
+        Deliberately not ``DeviceContextResolver.resolve_for_bot``. That builds
+        full connection info, which on the BaaS path means a blocking
+        ``get_ws_info`` call with a 30-second timeout — and every field of it
+        was then discarded here except ``binding_id``, because
+        ``_get_connection`` immediately performs its own ``get_ws_info`` in
+        relay mode to obtain the URL and credential this endpoint publishes.
+        Every successful connection request therefore made two provider calls
+        for one answer, and a slow pair could burn nearly two 30-second
+        timeouts before either could fail.
+
+        The relay's rule that device resolution goes through the resolver is
+        about *choosing a provider and building conn info*, which this endpoint
+        does not do — the second lookup is the one that supplies the response,
+        and it takes a binding id. So this reads the binding directly and lets
+        the relay-mode lookup remain the only provider call.
+
+        Owner-scoped for the same reason ``resolve_for_bot`` was: the query is
+        ``(bot_id, owner_id)``, so another owner's binding cannot be returned
+        even though ownership was already established above.
+        """
+        binding = self._binding_repository.get_active_by_bot_and_owner(
+            bot_id, owner_id
+        )
+        if binding is None:
+            raise EngineDeviceNotReadyError(f"device not ready for bot={bot_id}")
+        return binding.id
 
     def _get_connection(
         self, binding_id: int, operator: OperatorContext, chat_path: str

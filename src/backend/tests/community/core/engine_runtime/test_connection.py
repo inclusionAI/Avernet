@@ -9,10 +9,6 @@ import pytest
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
-from agentclaw.community.core.devices.services.device_context import (
-    DeviceContext,
-    DeviceNotBoundError,
-)
 from agentclaw.community.core.engine_runtime.connection import (
     CONNECTION_TTL_SECONDS,
     EngineConnectionService,
@@ -44,17 +40,25 @@ class _Bots:
         }
 
 
-class _Resolver:
-    def __init__(self, raises=None):
-        self.raises = raises
+class _Bindings:
+    """Stands in for the binding repository's owner-scoped active lookup.
 
-    def resolve_for_bot(self, bot_id, user_id, *, device_uuid=None):
+    Counts calls: this endpoint must reach the device provider exactly once,
+    and the regression it guards is a second, redundant ``get_ws_info``.
+    """
+
+    def __init__(self, binding_id: int | None = 42, raises=None):
+        self._binding_id = binding_id
+        self.raises = raises
+        self.calls: list[tuple[str, str]] = []
+
+    def get_active_by_bot_and_owner(self, bot_id, owner_id):
+        self.calls.append((bot_id, owner_id))
         if self.raises:
             raise self.raises
-        return DeviceContext(
-            provider="arca", conn_info={}, binding_id=42,
-            bot_id=bot_id, user_id=user_id, bot_type="personal",
-        )
+        if self._binding_id is None:
+            return None
+        return SimpleNamespace(id=self._binding_id)
 
 
 class _Devices:
@@ -81,9 +85,9 @@ class _Sandbox:
         return self._base
 
 
-def _svc(bots=None, resolver=None, devices=None, sandbox=None):
+def _svc(bots=None, bindings=None, devices=None, sandbox=None):
     return EngineConnectionService(
-        bots or _Bots(), resolver or _Resolver(), devices or _Devices(),
+        bots or _Bots(), bindings or _Bindings(), devices or _Devices(),
         sandbox or _Sandbox(),
     )
 
@@ -93,9 +97,9 @@ def _build(svc):
 
 
 def test_foreign_bot_raises_before_resolving_a_device():
-    resolver = _Resolver(raises=AssertionError("must not be reached"))
+    bindings = _Bindings(raises=AssertionError("must not be reached"))
     with pytest.raises(BotNotFoundError):
-        _svc(resolver=resolver).build(bot_id=BOT, owner_id="someone-else")
+        _svc(bindings=bindings).build(bot_id=BOT, owner_id="someone-else")
 
 
 def test_the_resolved_owner_is_passed_as_the_operator():
@@ -248,7 +252,7 @@ def test_only_a_chat_socket_is_offered():
 
 def test_unbound_device_is_retryable_not_an_internal_error():
     with pytest.raises(EngineDeviceNotReadyError):
-        _build(_svc(resolver=_Resolver(raises=DeviceNotBoundError("none"))))
+        _build(_svc(bindings=_Bindings(binding_id=None)))
 
 
 def test_unavailable_device_is_not_ready():
@@ -318,9 +322,9 @@ def test_a_service_bot_is_refused_before_a_device_is_touched():
     would hand the owner over a socket precisely what the sessions group
     answers 501 to refuse over HTTP.
     """
-    resolver = _Resolver(raises=AssertionError("must not be reached"))
+    bindings = _Bindings(raises=AssertionError("must not be reached"))
     devices = _Devices()
-    svc = _svc(bots=_Bots(bot_type="service"), resolver=resolver, devices=devices)
+    svc = _svc(bots=_Bots(bot_type="service"), bindings=bindings, devices=devices)
 
     with pytest.raises(EngineBotTypeNotSupportedError):
         _build(svc)
@@ -341,3 +345,22 @@ def test_an_unknown_bot_type_is_refused_rather_than_assumed_personal():
 def test_a_personal_bot_still_gets_its_socket():
     result = _build(_svc(bots=_Bots(bot_type="personal")))
     assert [s.kind for s in result.sockets] == ["chat"]
+
+
+def test_the_provider_is_asked_exactly_once():
+    """One connection request must make one provider call.
+
+    Resolving through ``DeviceContextResolver`` built full connection info —
+    a blocking ``get_ws_info`` on the BaaS path — and then threw all of it away
+    except the binding id, because the relay-mode lookup below fetches the URL
+    and credential this endpoint actually publishes. Two 30-second timeouts for
+    one answer.
+    """
+    bindings, devices = _Bindings(), _Devices()
+    _build(_svc(bindings=bindings, devices=devices))
+
+    # The binding is read from the repository, not built by a provider call...
+    assert bindings.calls == [(BOT, OWNER)]
+    # ...leaving the relay-mode lookup as the only provider round trip.
+    assert devices.kwargs is not None
+    assert devices.kwargs["binding_id"] == 42

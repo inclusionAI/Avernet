@@ -389,19 +389,33 @@ All paths are relative to `src/backend/`. Source package is
   - [ ] A flow drives the public engine-runtime endpoints over
         `InMemoryDeviceAdapterTransport`, the same seam
         `tests/community/_flows/cron/api_lifecycle.py` already uses.
+  - [ ] The simulator answers the engine routes that flow exercises (it serves
+        only the skills-layout probe and `/api/cron` today), **or** the profile
+        binds a live transport.
   - [ ] `engine_runtime` is **removed** from `SINGLEBOX_E2E_EXEMPT`.
-- **Depends on:** Task 11, **and the auth workstream**
-- **BLOCKED, and not for the reason recorded in Task 2.** That exemption claimed
-  singlebox had no transport to offer — wrong; it binds the in-memory transport
-  and `cron` has a real flow over the same seam. The second attempt blamed the
-  endpoints not existing — also now wrong; Task 11 mounted all 16.
-  The actual blocker: **`require_principal` is a stub returning `None`
-  (`openapi_v1/dependencies.py:21-23`), so every `/openapi/v1` route answers
-  401.** A flow could only assert 401s, which would prove nothing about this
-  module while looking like coverage. Unblocks with the gateway verifier — the
-  same event that unblocks the whole track's DoD. Coverage meanwhile: relay and
-  connection unit tests, endpoint tests per group, and the 16-route isolation
-  sweep in Task 12.
+- **Depends on:** Task 11, **the auth workstream**, and a transport that can
+  answer engine routes in singlebox
+- **BLOCKED, and every recorded reason so far has been wrong or incomplete.**
+  Task 2's exemption claimed singlebox had no transport to offer — wrong; it
+  binds the in-memory transport and `cron` has a real flow over the same seam.
+  The second attempt blamed the endpoints not existing — also wrong once Task 11
+  mounted all 16. The third named `require_principal` as a stub returning `None`
+  — true when written, now stale: the gateway verifier has landed and it is
+  real. The fourth said auth was the only remaining blocker; review corrected
+  that too. There are **two** blockers:
+  1. **Auth.** The verifier accepts only a gateway-signed token and treats an
+     unset `AVERNET_PRINCIPAL_SIGNING_KEY` as deny; singlebox runs the backend
+     without a gateway, so every `/openapi/v1` route answers 401 and a flow
+     could only assert 401s. Same blocker and same ruling as
+     `_GATEWAY_PRINCIPAL_EXEMPT_REASON`.
+  2. **The simulator behind the seam.** `InMemoryDeviceAdapterTransport`
+     implements the skills-layout probe and the `/api/cron` family and falls
+     through to `{"success": False, "unhandled path"}` for everything else, so
+     even after a minter lands all 16 routes would relay a failure envelope and
+     answer 502 — coverage in name only.
+
+  Coverage meanwhile: relay and connection unit tests, endpoint tests per group,
+  and the 16-route isolation sweep in Task 12.
 
 ## Task 13: Tests & Verification  `[x]`
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.

@@ -17,10 +17,12 @@ consumes:
   - "DeviceContextResolver — bot -> DeviceContext (the repo's single provider-resolution point)"
   - "DeviceAdapterTransport — the one system boundary (HTTP to the bot's engine adapter)"
   - "DeviceService — connection info for the socket-composing endpoint"
+  - "DeviceBindingRepository — the active binding id, without building conn info"
   - "BotPublishRepository — a service bot's published runtime binding (ext.binding.online)"
 internal_dependencies:
   - agentclaw.community.core.bot_management.services.bot_service
   - agentclaw.community.core.devices.errors
+  - agentclaw.community.core.devices.repository.protocol
   - agentclaw.community.core.devices.services.device_context
   - agentclaw.community.core.devices.services.device_context_resolver
   - agentclaw.community.core.devices.services.device_service
