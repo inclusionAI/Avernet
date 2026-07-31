@@ -118,7 +118,7 @@ class _SkillsPortMixin:
     ) -> dict[str, Any]:
         result = await asyncio.to_thread(
             inspect_runtime_layout,
-            engine=params["engine"],
+            engine="openclaw",
             expected_contract_version=params["layout_contract_version"],
             mapping_contract_version=MAPPING_CONTRACT_VERSION,
         )
