@@ -72,7 +72,16 @@ def is_valid_rollout_config_value(value: Any) -> bool:
     if not isinstance(engines, list):
         return False
     promoted_engines = tuple(engines)
-    if promoted_engines != ENGINE_PROMOTION_ORDER[: len(promoted_engines)]:
+    if (
+        len(set(promoted_engines)) != len(promoted_engines)
+        or any(engine not in ENGINE_PROMOTION_ORDER for engine in promoted_engines)
+        or promoted_engines
+        != tuple(
+            engine
+            for engine in ENGINE_PROMOTION_ORDER
+            if engine in promoted_engines
+        )
+    ):
         return False
     full_rollout_engines = value.get("full_rollout_engines", [])
     if (

@@ -49,6 +49,40 @@ def test_legacy_rollout_entries_are_normalized_to_canonical_shape() -> None:
     }
 
 
+def test_promoted_engines_accept_only_canonical_supported_subsets() -> None:
+    assert normalize_rollout_config_value(
+        {
+            "enable_all": False,
+            "promoted_engines": ["openclaw", "aicoding"],
+            "whitelist": [],
+        }
+    ) == {
+        "enable_all": False,
+        "full_rollout_engines": [],
+        "full_rollout_owners": [],
+        "promoted_engines": ["openclaw", "aicoding"],
+        "whitelist": [],
+        "negative_controls": [],
+        "teclaw_controls": [],
+    }
+
+    for promoted_engines in (
+        ["aicoding", "openclaw"],
+        ["openclaw", "openclaw"],
+        ["unsupported"],
+    ):
+        assert (
+            normalize_rollout_config_value(
+                {
+                    "enable_all": False,
+                    "promoted_engines": promoted_engines,
+                    "whitelist": [],
+                }
+            )
+            is None
+        )
+
+
 class FakeCommonConfigService:
     def __init__(
         self,
