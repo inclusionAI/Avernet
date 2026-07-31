@@ -23,13 +23,22 @@ overturning either changes this plan:
 
 | # | Assumption | Where it lands |
 |---|---|---|
-| 1 | Gateway base URL comes from a deployment env var, with an explicit named failure when unset, following `data_proxy_service.py:231-255` | `connection.py` — new module constant + resolver |
+| 1 | Gateway base URL comes from the `user_config.gateway` block of `application.yaml`, as a `base_url` / `base_url_pre` pair selected by `get_current_env()` — the same shape `bcn`, `ecb` and `baas` already use. Community ships neutral values; the corp overlay is filled separately in the cob repo | `di/config.py`, `di/modules/config_module.py`, `configs/application-community.yaml`, `connection.py` |
 | 2 | A short-lived, target-bound credential in a URL query is acceptable, matching what the internal console already does against the same upstream | `connection.py:191-198` |
 
 ## Affected Components
 
 - `src/backend/src/agentclaw/community/core/engine_runtime/connection.py` — the
   service composing the published socket. Carries the whole behavioural change.
+- `src/backend/src/agentclaw/community/di/config.py` — new frozen
+  `GatewayConfig` dataclass alongside `BcnConfig:64-81` and `EcbConfig`.
+- `src/backend/src/agentclaw/community/di/modules/config_module.py` — new
+  `@singleton @provider` reading `_block("gateway")`, mirroring the `bcn` reader
+  at `:148-160` and the `ecb` reader at `:322-327`.
+- `src/backend/src/agentclaw/community/configs/application-community.yaml` — the
+  neutral `gateway` block, alongside `ecb:69-70`.
+- `src/backend/src/agentclaw/community/configs/application-singlebox.yaml` — the
+  singlebox placeholder, alongside `agentclawproxy.base_url:122-123`.
 - `src/backend/src/agentclaw/community/core/engine_runtime/models.py` — the
   transport-agnostic value objects. `SocketInfo` loses `headers`;
   `ConnectionResult`'s `expires_at` docstring is retightened.
@@ -103,11 +112,64 @@ no external caller.
 
 - `connection.py:51` — replace `_PROXY_TOKEN_HEADER` with
   `_PROXY_TOKEN_PARAM = "x-proxypass-token"` (same name, now a query key).
-- `connection.py` (new module constants, near `:48`):
-  - `GATEWAY_URL_ENV = "ENGINE_GATEWAY_URL"` — deployment-supplied gateway base.
+- `connection.py` (new module constant, near `:48`):
   - `_ENGINE_PREFIX = "/engine"` — the path segment the gateway routes on.
-  - a dev/local default, mirroring `data_proxy_service.py:65`, gated on
-    `SERVER_ENV in {dev, local}` exactly as that precedent does.
+
+### Gateway address — configuration
+
+Follows the established host-config pattern exactly; no new mechanism.
+
+- `di/config.py` (new, beside `BcnConfig:64-81`):
+  ```python
+  @dataclass(frozen=True)
+  class GatewayConfig:
+      """Public gateway host for the tenant-facing connection socket.
+
+      ``base_url`` is the prod gateway and ``base_url_pre`` overrides it when
+      env == 'pre'. Neutral empty defaults — the community build embeds no
+      gateway host; an empty value makes the connection endpoint report that
+      this deployment has no gateway rather than publish an unopenable URL.
+      """
+      base_url: str = ""
+      base_url_pre: str = ""
+  ```
+  Named `base_url` rather than `ws_base_url` to match the convention. It is
+  stored as `https://…` and rewritten to `wss://` at use, which is exactly what
+  `_ws_base:312` does today.
+- `di/modules/config_module.py` — new provider reading `_block("gateway")` with
+  the dataclass defaults, identical in shape to the `ecb` reader at `:322-327`.
+- `EngineConnectionService.__init__:120-133` — takes `gateway_config:
+  cfg.GatewayConfig` via the existing `@inject`. DI binds the service to itself
+  (`engine_runtime_module.py:33-35`), so no wiring change is needed.
+- Selection at use, matching `http_client_module.py:60`:
+  ```python
+  base = cfg.base_url_pre if get_current_env() == "pre" else cfg.base_url
+  ```
+  `get_current_env` from `agentclaw.community.utils.env_utils`.
+
+### YAML values
+
+- `application-community.yaml`, under `user_config:` beside `ecb:69-70`:
+  ```yaml
+  gateway:
+    base_url: ""
+    base_url_pre: ""
+  ```
+  Neutral empty, matching every other host block in the community build. The
+  endpoint then reports "no gateway in this deployment" — the same outcome
+  community gets today, where `proxy_base_url()` raises.
+- `application-singlebox.yaml`, beside `agentclawproxy:122-123`:
+  ```yaml
+  gateway:
+    base_url: "http://127.0.0.1:9999"
+  ```
+  Mirrors the existing singlebox `agentclawproxy` placeholder. Mostly moot in
+  practice — singlebox rewrites loopback BaaS connections to `local`
+  (`di/modules/infrastructure/singlebox/devices.py:91-116`), which takes the
+  direct branch and never reads this.
+- **Corp values are out of scope for this repo.** The pre and prod gateway hosts
+  are set in the cob repo's overlay by the bots owner, exactly as the `bcn` and
+  `baas` hosts already are.
 - `connection.py:191-198` — `token` extraction is unchanged
   (`info.ws_token or info.token or ""`; the ordering comment at `:187-190` stays,
   it is still the reason). Drop the `headers` dict; pass `token` into
@@ -119,12 +181,12 @@ no external caller.
   2. otherwise → `{gateway_ws_base}{_ENGINE_PREFIX}/{target}{socket_path}` plus
      `?{_PROXY_TOKEN_PARAM}={quote(token)}` when a credential exists.
   3. a provider URL that is not the proxypass shape → see Risk 1.
-- `connection.py:288-313` `_ws_base` — replaced by `_gateway_ws_base()`: read the
-  env var, `rstrip("/")`, apply the existing `https→wss` / `http→ws` rewrite
-  (`:312`), raise `EngineUpstreamError` when unset. The `sandbox_client`
-  dependency and its `SandboxRuntimeUnavailableError` handling
-  (`:303-311`) are removed from this path — the engine proxy's base URL is no
-  longer what this endpoint publishes.
+- `connection.py:288-313` `_ws_base` — replaced by `_gateway_ws_base()`: select
+  `base_url_pre` / `base_url` by env, `rstrip("/")`, apply the existing
+  `https→wss` / `http→ws` rewrite (`:312`), raise `EngineUpstreamError` when the
+  selected value is empty. The `sandbox_client` dependency and its
+  `SandboxRuntimeUnavailableError` handling (`:303-311`) go with it — the engine
+  proxy's base URL is no longer what this endpoint publishes.
 - `connection.py:9-11` — module docstring says "Nothing in `ConnectionResult`
   exposes a target, a connection type, or a bare token." Still true of the
   *fields*, but the URL now visibly carries both. Reword so it is not read as a
@@ -180,23 +242,39 @@ is a different workstream's deliverable. See Rollout.
   matching today's conditional exactly. The URL stays valid and the failure
   surfaces at the upstream as it does today.
 
-- **Risk 3 — a deployment that has not set the gateway URL.** Every published
+- **Risk 3 — a deployment whose `gateway` block is empty.** Every published
   socket would be unopenable.
-  **Mitigation:** `EngineUpstreamError` with a message naming the env var,
-  mirroring the existing `"no proxy gateway in this deployment"` (`:309`) and the
-  precedent's failure text (`data_proxy_service.py:248-255`). Already mapped to
-  a public status via `ENVELOPE_ERRORS`, so no adapter change.
+  **Mitigation:** `EngineUpstreamError` naming the config block and the selected
+  environment, mirroring the existing `"no proxy gateway in this deployment"`
+  (`:309`). Already mapped to a public status via `ENVELOPE_ERRORS`, so no
+  adapter change. Neutral-empty is also the *correct* community behaviour: it
+  reproduces exactly what community does today, where `proxy_base_url()` raises
+  (`plugins/community/sandbox_client.py:46-47`).
+
+- **Risk 3b — pre pointed at the prod gateway, or vice versa.** The `_pre`
+  suffix pattern exists precisely because this has bitten before: `bcn` carries
+  a comment that a pre provider token sent to the prod host is rejected
+  (`http_client_module.py:58-60`).
+  **Mitigation:** use the same `get_current_env() == "pre"` selection rather
+  than inventing a second convention, so the gateway pair behaves like every
+  other host pair in the build.
 
 - **Risk 4 — the gateway route does not exist yet.** This change publishes an
   address that assumes it.
-  **Mitigation:** see Rollout — the env var is the switch, and until a deployment
-  sets it the endpoint fails loudly rather than publishing a wrong address.
+  **Mitigation:** see Rollout — the `gateway` block is the switch, and until an
+  overlay fills it the endpoint fails loudly rather than publishing a wrong
+  address.
 
-- **Risk 5 — losing the `sandbox_client` dependency changes construction.**
-  `EngineConnectionService.__init__` (`:120-133`) takes it via `@inject`.
-  **Mitigation:** the constructor argument stays (removing it touches DI wiring
-  and the conformance test that pins the signature); only `_ws_base`'s use of it
-  goes. Revisit as cleanup once the endpoint ships, not in this change.
+- **Risk 5 — dropping `sandbox_client` from the constructor.**
+  `EngineConnectionService.__init__` (`:120-133`) takes it via `@inject`, and it
+  becomes dead once `_ws_base` goes; leaving it would be an unused dependency a
+  reviewer has to ask about.
+  **Mitigation:** remove it. DI binds the service to itself with `@inject`
+  (`engine_runtime_module.py:33-35`), so the injector simply stops supplying it —
+  no wiring edit. `test_service_api_conformance:54` pins the *Protocol* against
+  the class (`build`'s signature), not `__init__`, so it is unaffected. The only
+  other construction site is the `_svc` helper at `test_connection.py:103-109`,
+  which is being edited anyway.
 
 ## Alternatives Considered
 
@@ -222,14 +300,27 @@ is a different workstream's deliverable. See Rollout.
 - **Reuse `sandbox_client.proxy_base_url()` and repoint it at the gateway** — no
   new configuration. Rejected: it is shared with every other engine-proxy caller,
   so repointing it moves all of them, violating the spec's scope guardrail.
+- **Read the gateway URL from an environment variable**, following
+  `data_proxy_service.py:231-255`. Rejected by the user: host configuration in
+  this service belongs in `application.yaml`, where every other upstream host
+  already lives, and where the corp overlay can set pre and prod independently.
+  The env-var precedent is real but is the outlier, not the convention.
+- **A nested `gateway.host.{dev,pre,prod}` map**, as BaaS uses
+  (`src/baas/configs/application.yaml:146-152`). Rejected: the backend's own
+  convention is the flat `base_url` / `base_url_pre` pair, and matching the
+  neighbouring blocks matters more than matching another service.
 
 ## Rollout
 
-- **No feature flag.** `ENGINE_GATEWAY_URL` is the switch: a deployment that has
-  not set it cannot serve this endpoint, and says so by name.
-- **Ordering.** The gateway's `/engine` route must exist before any deployment
-  sets the variable. Until then this endpoint is the only consumer, and it is
-  not yet reachable — the public surface answers unauthenticated until the
+- **No feature flag.** The `user_config.gateway` block is the switch: a
+  deployment whose value is empty cannot serve this endpoint, and says so.
+- **Two-repo rollout.** This repo ships the neutral community values and the
+  reader. The pre and prod gateway hosts land separately in the cob repo's
+  overlay, owned by the bots owner — the same split `bcn`, `baas` and `ecb`
+  already follow. Merging here changes nothing in corp until that overlay lands.
+- **Ordering.** The gateway's `/engine` route must exist before the overlay is
+  filled. Until then this endpoint is the only consumer, and it is not yet
+  reachable — the public surface answers unauthenticated until the
   caller-authentication workstream lands, so no tenant is holding a URL from it.
 - **Backwards compatibility.** None owed. The endpoint is not in the published
   gateway schema and has no integrators. The internal console is untouched by
@@ -248,8 +339,9 @@ service takes injected fakes and makes no network call.
   and must survive verbatim.
 - `:227` `test_proxy_url_is_composed_and_scheme_swapped` — expects the gateway
   host, the `/engine` prefix, and the credential in the query.
-- `:212` and `:283` — the "no gateway configured" failures now come from the
-  unset env var, not from `sandbox_client`.
+- `:212` and `:283` — the "no gateway configured" failures now come from an empty
+  `gateway` block, not from `sandbox_client`. The `_svc` helper (`:103-109`) and
+  the `_Sandbox` stub (`:83`) lose `sandbox` and gain a `GatewayConfig`.
 - `:149` and `:235` — the verbatim-passthrough tests, per whichever way Risk 1 is
   decided.
 
@@ -263,8 +355,10 @@ service takes injected fakes and makes no network call.
 - A credential containing a character needing escaping is percent-encoded in the
   query.
 - The target's `@` and `:` survive **unencoded** in the path segment.
-- An unset `ENGINE_GATEWAY_URL` outside dev/local raises `EngineUpstreamError`,
-  naming the variable.
+- An empty `gateway` block raises `EngineUpstreamError` naming the config, and
+  does so *before* any credential is embedded in a URL.
+- `base_url_pre` is selected when `get_current_env()` is `pre`, and `base_url`
+  otherwise — the pre/prod pair is not silently collapsed to one host.
 
 **Unchanged and must still pass:** the bot-type and sharing gates (`:331-413`),
 `test_the_provider_is_asked_exactly_once:419`, the expiry tests (`:288-316`),
