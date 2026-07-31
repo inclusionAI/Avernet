@@ -37,9 +37,9 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::{
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
     FriendRequest as DomainFriendRequest, FriendRequestDirection as DomainFriendRequestDirection,
-    Friendship as DomainFriendship, Group as DomainGroup, GroupCoreService, GroupStrategy,
-    Participant, ParticipantRole, RegisteredBot, RelationCoreService, ServiceError,
-    SessionManagementService, SessionUseCaseError,
+    Friendship as DomainFriendship, Group as DomainGroup, GroupCoreService, GroupKind,
+    GroupStrategy, Participant, ParticipantRole, RegisteredBot, RelationCoreService,
+    ServiceError, SessionManagementService, SessionUseCaseError,
 };
 
 #[derive(Debug, Clone)]
@@ -255,8 +255,17 @@ impl InvitationService for InvitationFriendshipServiceImpl {
         &self,
         command: CreateGroupInvitation,
     ) -> Result<Invitation, ApplicationError> {
-        self.load_manageable_group(&command.principal, &command.group_id)
+        let group = self
+            .load_manageable_group(&command.principal, &command.group_id)
             .await?;
+        // VaGQI: DM (DirectMessage) groups are pairwise (participant_count=2);
+        // minting an invitation + accept would add a third participant. Mirror
+        // the legacy invite service, which rejects DM groups with Forbidden.
+        if group.group_kind == GroupKind::Dm {
+            return Err(ApplicationError::forbidden(
+                "Invitations are not available for direct-message groups",
+            ));
+        }
         Ok(self.mint_invitation(
             InvitationTargetType::Group,
             &command.group_id,

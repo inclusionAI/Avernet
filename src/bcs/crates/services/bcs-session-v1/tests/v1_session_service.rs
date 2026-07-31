@@ -21,10 +21,10 @@ use bcs_service_api::application::v1::{
     SessionInput, SessionMessageService, SessionParticipantInput, SessionService,
     SessionStatus as V1SessionStatus, UpdateSession, UpdateSessionParticipant,
 };
-use bcs_service_api::port::repo::{MessageRepoPort, SessionRepoPort};
+use bcs_service_api::port::repo::{MessageRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, Group, GroupCoreService, GroupStrategy, Participant,
-    ParticipantRole,
+    ParticipantRole, SessionKind,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -35,6 +35,7 @@ struct Fixture {
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
     message_repo: Arc<MemoryMessageRepo>,
+    session_repo: Arc<dyn SessionRepoPort>,
 }
 
 impl Fixture {
@@ -57,7 +58,7 @@ impl Fixture {
             bots.clone(),
             friends,
             relation,
-            session_repo,
+            session_repo.clone(),
             message_repo.clone(),
             SessionServiceConfig {
                 relation_env: "dev".to_string(),
@@ -68,6 +69,7 @@ impl Fixture {
             groups,
             bots,
             message_repo,
+            session_repo,
         }
     }
 
@@ -941,4 +943,121 @@ async fn update_participant_human_owner_succeeds_and_non_owner_forbidden() {
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
     ));
+}
+
+#[tokio::test]
+async fn complete_service_invocation_session_rejected() {
+    // VaGQN: ServiceInvocation sessions have their own callback/output
+    // lifecycle and must not be completed via this V1 endpoint (legacy
+    // handler rejects "service sessions cannot be completed via this
+    // endpoint"). Gate the CAS with a session_kind check.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+
+    // The V1 facade `create` hardcodes SessionKind::Chat, so seed a
+    // ServiceInvocation session directly via the repo.
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                session_kind: SessionKind::ServiceInvocation,
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
+                group_version: Some(group.version),
+                caller_id: Some("driver".to_string()),
+                caller_principal: Some("driver".to_string()),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed service invocation session");
+    assert_eq!(session.session_kind, SessionKind::ServiceInvocation);
+
+    let error = fixture
+        .service
+        .complete(CompleteSession {
+            principal: bot_principal("driver"),
+            session_id: session.id,
+        })
+        .await
+        .expect_err("service sessions cannot be completed via V1");
+
+    assert!(
+        matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::Conflict { .. }
+        ),
+        "expected Conflict, got {error:?}",
+    );
+    assert_eq!(error.code(), "conflict");
+}
+
+#[tokio::test]
+async fn session_only_participant_can_list_sessions() {
+    // VaGQQ: a Bot that is only a session participant (added to a session
+    // but NOT to group.participants) must still be able to list the group's
+    // sessions. The sibling bcs-group-v1 facade already permits this via
+    // `list_group_ids_by_session_participant`; the session-v1 facade's
+    // `can_read_group` must mirror that check.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert", "newcomer"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert", None)],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    // Add newcomer to the SESSION (not the group). newcomer is public so the
+    // collaboration-eligibility check passes; the driver is the manager.
+    fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            principal: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "newcomer".into(),
+            mode: Some(BotParticipantMode::Auto),
+        })
+        .await
+        .expect("add newcomer to session");
+
+    // Guard: newcomer must be session-only (not in group.participants).
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    assert!(
+        !group
+            .participants
+            .iter()
+            .any(|p| p.bot_uuid == "newcomer"),
+        "newcomer must be session-only (not in group.participants)"
+    );
+
+    // Session-only participant may list the group's sessions.
+    let page = SessionService::list(
+        &fixture.service,
+        ListSessions {
+            principal: bot_principal("newcomer"),
+            group_id: "g1".into(),
+            offset: 0,
+            limit: 10,
+            status: None,
+        },
+    )
+    .await
+    .expect("session-only participant may list sessions");
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].group_id, "g1");
 }

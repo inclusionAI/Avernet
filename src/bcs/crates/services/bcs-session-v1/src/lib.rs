@@ -117,14 +117,31 @@ impl SessionServiceImpl {
                 .is_some_and(|creator| creator == principal.actor_id())
     }
 
-    /// Read a group's sessions: group participant or group manager.
-    fn can_read_group(principal: &Principal, group: &DomainGroup) -> bool {
-        let actor_id = principal.actor_id();
-        Self::can_manage_group(principal, group)
+    /// Read a group's sessions: group participant, group manager, or a
+    /// session-only participant (a Bot added to a session but not to
+    /// `group.participants`). Mirrors `bcs-group-v1::can_read_group`
+    /// (lib.rs:180-199) so an invitation-accept that adds the Bot to the
+    /// session (not the group) still authorizes `list_sessions`.
+    async fn can_read_group(
+        &self,
+        principal: &Principal,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
+        let principal_actor_id = principal.actor_id();
+        if Self::can_manage_group(principal, group)
             || group
                 .participants
                 .iter()
-                .any(|p| p.bot_uuid == actor_id)
+                .any(|participant| participant.bot_uuid == principal_actor_id)
+        {
+            return Ok(true);
+        }
+        let session_group_ids = self
+            .sessions
+            .list_group_ids_by_session_participant(&principal_actor_id)
+            .await
+            .map_err(|error| ApplicationError::internal(error.to_string()))?;
+        Ok(session_group_ids.iter().any(|id| id == &group.id))
     }
 
     /// Read a specific session: session participant, group manager, or the
@@ -168,7 +185,7 @@ impl SessionServiceImpl {
         group_id: &str,
     ) -> Result<DomainGroup, ApplicationError> {
         let group = self.load_group(group_id).await?;
-        if !Self::can_read_group(principal, &group) {
+        if !self.can_read_group(principal, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Principal has no readable relation to this Group",
             ));
@@ -603,6 +620,16 @@ impl SessionService for SessionServiceImpl {
         let (session, _) = self
             .load_session_for_manage(&command.principal, &command.session_id)
             .await?;
+        // VaGQN: ServiceInvocation sessions have their own callback/output
+        // lifecycle and must not be completed via this V1 endpoint (legacy
+        // handler rejects "service sessions cannot be completed via this
+        // endpoint"). Gate the CAS with a `session_kind` check.
+        if session.session_kind == SessionKind::ServiceInvocation {
+            return Err(ApplicationError::conflict(
+                "conflict",
+                "Service sessions cannot be completed via this endpoint",
+            ));
+        }
         // If already Completed, return the stable completed state idempotently
         // without invoking the CAS. Otherwise attempt completion; a `None`
         // result means a concurrent caller completed it between our read and

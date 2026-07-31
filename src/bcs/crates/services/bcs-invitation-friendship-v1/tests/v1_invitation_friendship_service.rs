@@ -28,7 +28,7 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, FriendCoreService, Group, GroupCoreService,
-    GroupStrategy, Participant, ParticipantRole, SessionKind,
+    GroupKind, GroupStrategy, Participant, ParticipantRole, SessionKind,
 };
 use bcs_service_api::{
     FriendRequest as DomainFriendRequest, FriendRequestCoreService,
@@ -317,6 +317,48 @@ async fn create_group_invitation_non_manager_forbidden() {
         .expect_err("non-manager is forbidden");
 
     assert!(matches!(error, ApplicationError::Forbidden(_)));
+}
+
+#[tokio::test]
+async fn create_group_invitation_dm_group_rejected() {
+    // VaGQI: DM (DirectMessage) groups are pairwise (participant_count=2);
+    // minting an invitation would let a third participant join via accept, so
+    // the facade must reject the mint, mirroring the legacy invite service.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
+
+    // Seed a DM group whose driver is bot-a (the manager).
+    let mut group = Group::new(
+        "dm-1",
+        "bot-a",
+        vec![
+            Participant::bot("bot-a", ParticipantRole::Driver),
+            Participant::bot("bot-b", ParticipantRole::Consultant),
+        ],
+    );
+    group.originator = Some("bot-a".to_string());
+    group.label = Some("dm-1".to_string());
+    group.group_strategy = GroupStrategy::Chat;
+    group.group_kind = GroupKind::Dm;
+    fx.groups.upsert(group).await.expect("store dm group");
+
+    let error = fx
+        .service
+        .create_group_invitation(CreateGroupInvitation {
+            principal: Fixture::bot_principal("bot-a"),
+            group_id: "dm-1".to_string(),
+            expires_in_seconds: None,
+        })
+        .await
+        .expect_err("DM groups reject invitation minting");
+
+    // Legacy invite service rejects DM with Forbidden; V1 mirrors it.
+    assert!(
+        matches!(error, ApplicationError::Forbidden(_)),
+        "expected Forbidden, got {error:?}",
+    );
+    assert_eq!(error.code(), "forbidden");
 }
 
 #[tokio::test]
