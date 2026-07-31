@@ -891,6 +891,8 @@ class DefaultBotManagementService(BotManageService):
                 stored_config.sla_grade = bot_config.sla_grade
             if bot_config.auto_approve_publish is not None:
                 stored_config.auto_approve_publish = bot_config.auto_approve_publish
+            if bot_config.callback_timeout_seconds is not None:
+                stored_config.callback_timeout_seconds = bot_config.callback_timeout_seconds
 
             # Also update name on the current bot if provided
             update_kwargs_name: dict[str, Any] = {"modifier": operator}
@@ -1145,6 +1147,8 @@ class DefaultBotManagementService(BotManageService):
                 stored_config.sla_grade = config.sla_grade
             if config.auto_approve_publish is not None:
                 stored_config.auto_approve_publish = config.auto_approve_publish
+            if config.callback_timeout_seconds is not None:
+                stored_config.callback_timeout_seconds = config.callback_timeout_seconds
 
             # Persist merged config to bot record
             bot_repo.update_bot(
