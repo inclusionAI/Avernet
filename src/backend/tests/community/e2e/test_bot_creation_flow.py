@@ -344,11 +344,14 @@ class TestRouterLogic:
 
         mock_bot_service = MagicMock()
         mock_bot_service.check_create_bot_preflight.return_value = None
-        # The flow asks the service, not the bot_id, whether this is a first bot
-        # (see create_flow) — so the mock has to answer.
+        # Task 1 retired the "default" bot_id; generate_bot_id now always returns
+        # a globally-unique id. Task 2 derives is_first_bot from the owner's bot
+        # count via bot_service.is_first_bot (no longer bot_id == "default"), so
+        # the mock must stub it.
+        test_bot_id = "20260731_testbot12"
         mock_bot_service.is_first_bot.return_value = True
         mock_bot_service.create_bot.return_value = {
-            "bot_id": "default",
+            "bot_id": test_bot_id,
             "owner_id": "user_001",
             "status": "ACTIVE",
         }
@@ -361,7 +364,7 @@ class TestRouterLogic:
 
         mock_factory = MagicMock()
         mock_factory.create.return_value.get_bot_mcp_codes.return_value = ["mcp_1"]
-        with patch('agentclaw.community.adapters.http.bot_management.router.generate_bot_id', return_value="default"):
+        with patch('agentclaw.community.adapters.http.bot_management.router.generate_bot_id', return_value=test_bot_id):
             result = await create_bot(
                 mock_request,
                 mock_ctx,
@@ -373,7 +376,7 @@ class TestRouterLogic:
 
         # token 非空：create_bot 直接创建 Bot 并返回 success（保留原 frontend 契约）。
         assert result.success is True
-        assert result.data["bot"]["bot_id"] == "default"
+        assert result.data["bot"]["bot_id"] == test_bot_id
         assert result.data["passport"]["token"] == "passport_token_123"
         assert result.data["passport"]["is_first_bot"] is True
         # bot_name is passed so a taken name is rejected before the external
