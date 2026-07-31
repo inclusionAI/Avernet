@@ -16,7 +16,7 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::application::v1::{
     AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome,
     DeleteSession, DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
-    SessionCompletionResult, SessionDetail, SessionMessage, SessionMessageService,
+    SessionCompletionResult, SessionDetail, SessionMessagePage, SessionMessageService,
     SessionParticipant, SessionService, SessionSummary, UpdateSession,
     UpdateSessionParticipant,
 };
@@ -211,7 +211,7 @@ impl SessionMessageService for NoopSessionMessageService {
     async fn list(
         &self,
         _query: ListSessionMessages,
-    ) -> Result<Page<SessionMessage>, ApplicationError> {
+    ) -> Result<SessionMessagePage, ApplicationError> {
         Err(ApplicationError::internal("session messages not configured"))
     }
 }

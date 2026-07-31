@@ -6,8 +6,8 @@ use bcs_service_api::application::v1::{
     CompleteSession, CreateSession, CreateSessionOutcome, DeleteResult, DeleteSession,
     DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, MessageSenderKind,
     Page, Principal, SessionCompletionResult, SessionDetail, SessionMessage,
-    SessionMessageKind, SessionMessageService, SessionParticipant, SessionParticipantInput,
-    SessionService, SessionStatus, UpdateSession, UpdateSessionParticipant,
+    SessionMessageKind, SessionMessagePage, SessionMessageService, SessionParticipant,
+    SessionParticipantInput, SessionService, SessionStatus, UpdateSession, UpdateSessionParticipant,
 };
 
 struct NoopSessionService;
@@ -70,8 +70,12 @@ impl SessionMessageService for NoopSessionMessageService {
     async fn list(
         &self,
         _query: ListSessionMessages,
-    ) -> Result<Page<SessionMessage>, ApplicationError> {
-        Ok(Page::empty(0, 20))
+    ) -> Result<SessionMessagePage, ApplicationError> {
+        Ok(SessionMessagePage {
+            messages: Vec::new(),
+            next_cursor: None,
+            has_more: false,
+        })
     }
 }
 
@@ -228,7 +232,7 @@ fn human_principal_can_be_carried_in_session_command() {
     let command = ListSessionMessages {
         principal: human,
         session_id: "s1".into(),
-        offset: 0,
+        before: None,
         limit: 10,
     };
     assert_eq!(command.principal.actor_id(), "human_staff-1");

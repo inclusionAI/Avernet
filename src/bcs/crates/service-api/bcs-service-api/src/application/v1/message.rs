@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::group::Page;
 use super::{ApplicationError, Principal};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,8 +36,25 @@ pub struct SessionMessage {
 pub struct ListSessionMessages {
     pub principal: Principal,
     pub session_id: String,
-    pub offset: u64,
+    /// Exclusive `created_at` cursor for cursor-based pagination. Omit (or
+    /// pass `None`) on the first page; on subsequent pages pass the previous
+    /// response's `next_cursor`.
+    pub before: Option<u64>,
     pub limit: u64,
+}
+
+/// Cursor-based session message history page returned by the V1
+/// `list_session_messages` operation.
+///
+/// Replaces the legacy `Page<SessionMessage>` (`items/total/offset/limit`)
+/// with the legacy direct-read shape: `messages` in `created_at DESC,
+/// session_seq DESC` order, a `next_cursor` (`created_at` of the last returned
+/// message, present only when `has_more` is true), and `has_more`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionMessagePage {
+    pub messages: Vec<SessionMessage>,
+    pub next_cursor: Option<u64>,
+    pub has_more: bool,
 }
 
 /// Transport-independent session message use cases for BCN OpenAPI v1.
@@ -51,5 +67,5 @@ pub trait SessionMessageService: Send + Sync {
     async fn list(
         &self,
         query: ListSessionMessages,
-    ) -> Result<Page<SessionMessage>, ApplicationError>;
+    ) -> Result<SessionMessagePage, ApplicationError>;
 }

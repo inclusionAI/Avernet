@@ -114,8 +114,10 @@ pub struct ListSessionsQuery {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListSessionMessagesQuery {
+    /// Exclusive `created_at` cursor for cursor-based pagination. Omit on the
+    /// first page; pass the response's `next_cursor` to fetch the next page.
     #[serde(default)]
-    pub offset: u64,
+    pub before: Option<u64>,
     #[serde(default = "default_messages_limit")]
     pub limit: u64,
 }

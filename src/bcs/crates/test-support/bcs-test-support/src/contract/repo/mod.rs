@@ -1256,40 +1256,6 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
     assert_eq!(public_owner_page.messages.len(), 1);
     assert_eq!(public_owner_page.messages[0].owner_bot_id, None);
 
-    // list_session_messages_by_seq — ascending order + total + pagination.
-    // Session now has 9 messages (seq 1..9).
-    let (asc, total) = repo
-        .list_session_messages_by_seq(session_id, 0, 100, None, None)
-        .await
-        .expect("list_session_messages_by_seq full");
-    assert_eq!(total, 9);
-    assert_eq!(asc.len(), 9);
-    assert_eq!(
-        asc.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
-        (1..=9).collect::<Vec<_>>(),
-        "must be session_seq ASC"
-    );
-
-    // pagination: offset=2, limit=3 → seqs [3,4,5], total still 9
-    let (page_asc, page_total) = repo
-        .list_session_messages_by_seq(session_id, 2, 3, None, None)
-        .await
-        .expect("list_session_messages_by_seq paged");
-    assert_eq!(page_total, 9);
-    assert_eq!(page_asc.len(), 3);
-    assert_eq!(
-        page_asc.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
-        vec![3, 4, 5]
-    );
-
-    // unknown session → empty, total 0
-    let (none, none_total) = repo
-        .list_session_messages_by_seq("no-such-session", 0, 10, None, None)
-        .await
-        .expect("list_session_messages_by_seq unknown");
-    assert!(none.is_empty());
-    assert_eq!(none_total, 0);
-
     // list_session_history — legacy direct-read contract: `created_at DESC,
     // session_seq DESC` with cursor-based pagination + full `MessageOwnerFilter`.
     // env isolation (VUlao) is the store's responsibility: the MySQL/SQLite

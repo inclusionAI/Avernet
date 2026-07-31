@@ -518,7 +518,7 @@ async fn complete_is_idempotent() {
 }
 
 #[tokio::test]
-async fn list_messages_returns_ascending_with_total() {
+async fn list_messages_returns_descending_with_cursor() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "expert"] {
         fixture.add_bot(bot).await;
@@ -560,25 +560,30 @@ async fn list_messages_returns_ascending_with_total() {
         ListSessionMessages {
             principal: bot_principal("driver"),
             session_id: session_id.clone(),
-            offset: 0,
+            before: None,
             limit: 50,
         },
     )
     .await
     .expect("list messages");
 
-    assert_eq!(page.total, 3);
-    assert_eq!(page.items.len(), 3);
-    // session_seq ascending (chronological).
-    for window in page.items.windows(2) {
+    assert_eq!(page.messages.len(), 3);
+    // cursor-based page: no total/offset/limit round-trip.
+    assert!(!page.has_more);
+    assert!(page.next_cursor.is_none());
+    // created_at DESC, session_seq DESC (legacy direct-read order).
+    for window in page.messages.windows(2) {
         assert!(
-            window[0].session_seq < window[1].session_seq,
-            "messages must be ordered by session_seq ASC"
+            window[0].session_seq > window[1].session_seq,
+            "messages must be ordered by session_seq DESC"
         );
     }
-    assert_eq!(page.items[0].content, "msg-0");
-    assert_eq!(page.items[2].content, "msg-2");
-    assert_eq!(page.items[0].sender_type, bcs_service_api::application::v1::MessageSenderKind::Bot);
+    assert_eq!(page.messages[0].content, "msg-2");
+    assert_eq!(page.messages[2].content, "msg-0");
+    assert_eq!(
+        page.messages[0].sender_type,
+        bcs_service_api::application::v1::MessageSenderKind::Bot
+    );
 }
 
 #[tokio::test]

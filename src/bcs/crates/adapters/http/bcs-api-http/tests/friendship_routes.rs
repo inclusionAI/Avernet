@@ -14,7 +14,7 @@ use bcs_service_api::application::v1::{
     GetSession, GroupDetail, GroupService, GroupSummary, Invitation, InvitationAcceptResult,
     InvitationService, ListBotGroups, ListBotFriendRequests, ListBotFriendships, ListSessionMessages,
     ListSessions, Page, Principal, RejectFriendRequest, DeleteBotFriendship, SessionCompletionResult,
-    SessionDetail, SessionMessage, SessionMessageService, SessionParticipant, SessionService,
+    SessionDetail, SessionMessagePage, SessionMessageService, SessionParticipant, SessionService,
     SessionSummary, UpdateGroup, UpdateGroupParticipant, UpdateSession,
     UpdateSessionParticipant,
 };
@@ -184,7 +184,7 @@ impl SessionMessageService for NoopSessionMessageService {
     async fn list(
         &self,
         _query: ListSessionMessages,
-    ) -> Result<Page<SessionMessage>, ApplicationError> {
+    ) -> Result<SessionMessagePage, ApplicationError> {
         Err(ApplicationError::internal("session messages not configured"))
     }
 }

@@ -201,7 +201,7 @@ async fn list_session_messages(
         .list(ListSessionMessages {
             principal,
             session_id,
-            offset: query.offset,
+            before: query.before,
             limit: query.limit,
         })
         .await

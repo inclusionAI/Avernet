@@ -163,46 +163,6 @@ impl MessageRepoPort for MemoryMessageRepo {
         })
     }
 
-    /// List messages for a session ordered by `session_seq` ASCENDING with
-    /// offset/limit pagination, plus the total count for the session (before
-    /// pagination). Does NOT replace `query_messages` (compat).
-    ///
-    /// VSN7A/VHxMU: `visible_from_seq` + `owner_bot_id` are applied BEFORE
-    /// pagination so pages stay consistent and `total` is the filtered count.
-    async fn list_session_messages_by_seq(
-        &self,
-        session_id: &str,
-        offset: u64,
-        limit: u64,
-        visible_from_seq: Option<i64>,
-        owner_bot_id: Option<&str>,
-    ) -> ServiceResult<(Vec<PersistedMessage>, u64)> {
-        let sessions = self.sessions.read().await;
-        let entry = match sessions.get(session_id) {
-            Some(e) => e,
-            None => return Ok((Vec::new(), 0)),
-        };
-        // Clone then sort by session_seq ASCENDING so out-of-order storage
-        // (e.g. direct seeding in tests) still yields chronological order.
-        let mut filtered: Vec<PersistedMessage> = entry.messages.iter().cloned().collect();
-        filtered.sort_by(|a, b| a.session_seq.cmp(&b.session_seq));
-        // Apply visibility predicates before pagination + count so pages and
-        // `total` stay consistent with the viewer's scope.
-        if let Some(visible_from) = visible_from_seq {
-            filtered.retain(|m| m.session_seq >= visible_from);
-        }
-        if let Some(owner) = owner_bot_id {
-            filtered.retain(|m| m.owner_bot_id.as_deref() == Some(owner));
-        }
-        let total = filtered.len() as u64;
-        let paged = filtered
-            .into_iter()
-            .skip(offset as usize)
-            .take(limit as usize)
-            .collect();
-        Ok((paged, total))
-    }
-
     /// Direct-read session history with full visibility predicates + cursor
     /// pagination (legacy `created_at DESC, session_seq DESC` order).
     ///
@@ -334,72 +294,6 @@ mod tests {
             created_at: session_seq as u64 * 1000,
             run_id: String::new(),
         }
-    }
-
-    /// `list_session_messages_by_seq` must return messages ordered by
-    /// `session_seq` ASCENDING even when stored out of order, with the correct
-    /// total (pre-pagination) and offset/limit behavior.
-    #[tokio::test]
-    async fn list_session_messages_by_seq_orders_ascending_and_paginates() {
-        let repo = MemoryMessageRepo::new();
-        // Seed messages with out-of-order session_seq values directly so we can
-        // assert the method sorts ASC regardless of insertion order.
-        {
-            let mut sessions = repo.sessions.write().await;
-            let entry = sessions.entry("s1".to_string()).or_default();
-            entry.messages.push(make_msg("s1", "m1", 3));
-            entry.messages.push(make_msg("s1", "m2", 1));
-            entry.messages.push(make_msg("s1", "m3", 2));
-            entry.messages.push(make_msg("s1", "m4", 5));
-            entry.messages.push(make_msg("s1", "m5", 4));
-            entry.seq = 5;
-        }
-
-        // Full list, ASC order
-        let (msgs, total) = repo
-            .list_session_messages_by_seq("s1", 0, 100, None, None)
-            .await
-            .unwrap();
-        assert_eq!(total, 5);
-        assert_eq!(msgs.len(), 5);
-        assert_eq!(
-            msgs.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
-            vec![1, 2, 3, 4, 5]
-        );
-
-        // Pagination: offset=1, limit=2 → seqs [2, 3], total still 5
-        let (msgs, total) = repo
-            .list_session_messages_by_seq("s1", 1, 2, None, None)
-            .await
-            .unwrap();
-        assert_eq!(total, 5);
-        assert_eq!(msgs.len(), 2);
-        assert_eq!(msgs[0].session_seq, 2);
-        assert_eq!(msgs[1].session_seq, 3);
-
-        // offset beyond total → empty page, total still 5
-        let (msgs, total) = repo
-            .list_session_messages_by_seq("s1", 10, 5, None, None)
-            .await
-            .unwrap();
-        assert!(msgs.is_empty());
-        assert_eq!(total, 5);
-
-        // limit=0 → empty page, total still 5
-        let (msgs, total) = repo
-            .list_session_messages_by_seq("s1", 0, 0, None, None)
-            .await
-            .unwrap();
-        assert!(msgs.is_empty());
-        assert_eq!(total, 5);
-
-        // Unknown session → empty, total 0
-        let (msgs, total) = repo
-            .list_session_messages_by_seq("nope", 0, 10, None, None)
-            .await
-            .unwrap();
-        assert!(msgs.is_empty());
-        assert_eq!(total, 0);
     }
 
     /// `query_messages` (old compat API) must remain DESC-by-created_at and

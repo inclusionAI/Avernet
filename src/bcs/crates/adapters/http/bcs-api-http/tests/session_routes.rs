@@ -12,7 +12,7 @@ use bcs_service_api::application::v1::{
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
     GetGroup, GetSession, GroupDetail, GroupService, GroupSummary, ListBotGroups,
     ListSessionMessages, ListSessions, MessageSenderKind, Page, Principal, SessionCompletionResult,
-    SessionDetail, SessionMessage, SessionMessageKind, SessionMessageService, SessionParticipant,
+    SessionDetail, SessionMessage, SessionMessageKind, SessionMessagePage, SessionMessageService, SessionParticipant,
     SessionService, SessionStatus, SessionSummary, UpdateGroup, UpdateGroupParticipant,
     UpdateSession, UpdateSessionParticipant,
 };
@@ -323,10 +323,10 @@ impl SessionMessageService for FakeSessionMessageService {
     async fn list(
         &self,
         query: ListSessionMessages,
-    ) -> Result<Page<SessionMessage>, ApplicationError> {
+    ) -> Result<SessionMessagePage, ApplicationError> {
         *self.listed.lock().expect("list messages lock") = Some(query.clone());
-        Ok(Page {
-            items: vec![
+        Ok(SessionMessagePage {
+            messages: vec![
                 SessionMessage {
                     id: "msg-1".into(),
                     session_seq: 1,
@@ -346,9 +346,9 @@ impl SessionMessageService for FakeSessionMessageService {
                     created_at: 20,
                 },
             ],
-            total: 2,
-            offset: query.offset,
-            limit: query.limit,
+            // Cursor-based page shape: no total/offset/limit round-trip.
+            next_cursor: None,
+            has_more: false,
         })
     }
 }
@@ -625,7 +625,7 @@ async fn complete_session_returns_completion_result() {
 }
 
 #[tokio::test]
-async fn list_session_messages_returns_page_asc() {
+async fn list_session_messages_returns_cursor_page() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());
     let app = test_session_router(session, message.clone());
@@ -633,7 +633,7 @@ async fn list_session_messages_returns_page_asc() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/sessions/session-1/messages?offset=0&limit=50",
+            "/openapi/v1/sessions/session-1/messages?limit=50",
             Value::Null,
         ))
         .await
@@ -641,16 +641,15 @@ async fn list_session_messages_returns_page_asc() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
     assert_eq!(body["code"], 20_000);
-    assert_eq!(body["data"]["items"].as_array().unwrap().len(), 2);
-    assert_eq!(body["data"]["items"][0]["session_seq"], 1);
-    assert_eq!(body["data"]["items"][1]["session_seq"], 2);
-    assert_eq!(body["data"]["total"], 2);
+    assert_eq!(body["data"]["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(body["data"]["has_more"], false);
+    assert!(body["data"]["next_cursor"].is_null());
     {
         let listed = message.listed.lock().expect("list messages lock");
         let listed = listed.as_ref().expect("list messages command");
         assert_eq!(listed.principal.actor_id(), "bot-1");
         assert_eq!(listed.session_id, "session-1");
-        assert_eq!(listed.offset, 0);
+        assert_eq!(listed.before, None);
         assert_eq!(listed.limit, 50);
     }
 }

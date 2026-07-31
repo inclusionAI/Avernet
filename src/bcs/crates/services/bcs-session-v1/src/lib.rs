@@ -16,8 +16,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_domain::{PersistedMessage, SenderType};
+use bcs_message::MessageService;
 use bcs_service_api::application::v1::{
-    message::{ListSessionMessages, MessageSenderKind, SessionMessage, SessionMessageKind, SessionMessageService},
+    message::{
+        ListSessionMessages, MessageSenderKind, SessionMessage, SessionMessageKind,
+        SessionMessagePage, SessionMessageService,
+    },
     session::{
         AddSessionParticipant, BotParticipantMode, CompleteSession, CreateSession,
         CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
@@ -33,9 +37,9 @@ use bcs_service_api::application::session::{
 use bcs_service_api::port::repo::{MessageRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
     backfill_participant_names, ActorKind, ActorStatus, BotRegistryCoreService,
-    FriendCoreService, Group as DomainGroup, GroupCoreService, GroupStrategy, Participant,
-    ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, Session,
-    SessionKind, SessionStatus as DomainSessionStatus,
+    FriendCoreService, Group as DomainGroup, GroupCoreService, GroupStrategy, GroupUseCaseError,
+    Participant, ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService,
+    ServiceError, Session, SessionKind, SessionStatus as DomainSessionStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -732,7 +736,7 @@ impl SessionMessageService for SessionServiceImpl {
     async fn list(
         &self,
         query: ListSessionMessages,
-    ) -> Result<Page<SessionMessage>, ApplicationError> {
+    ) -> Result<SessionMessagePage, ApplicationError> {
         if query.limit == 0 || query.limit > 100 {
             return Err(ApplicationError::invalid(
                 "invalid_request",
@@ -742,30 +746,40 @@ impl SessionMessageService for SessionServiceImpl {
         let session = self
             .load_session_for_read(&query.principal, &query.session_id)
             .await?;
-        // VSN7A/VHxMU — apply the message-history visibility scope the viewer
-        // is authorized to read, mirroring `bcs-message`'s `MessageService`.
-        // The store applies both filters before pagination so pages + `total`
-        // stay consistent with the viewer scope.
+        // VSN7A/VUlai/VHxMU — reuse the legacy `bcs-message` visibility helper
+        // (single source of truth) so the V1 session list applies the EXACT
+        // same scoping the group history path does: the full 3-state
+        // `MessageOwnerFilter` (incl. ManagerWorker public-only `IsNull`) and
+        // the spec §5.2 new-participant `visible_from_seq` cutoff. The V1 facade
+        // no longer reimplements these predicates.
         let group = self.load_group(&session.group_id).await?;
-        let (visible_from_seq, owner_bot_id) =
-            compute_message_visibility(&query.principal, &group, &session);
-        let (messages, total) = self
+        let view_bot_id = query.principal.bot_uuid();
+        let (owner_filter, visible_from_seq) =
+            MessageService::compute_session_history_query(
+                &group,
+                &session,
+                view_bot_id,
+                NEW_PARTICIPANT_VISIBLE_LIMIT as u64,
+            )
+            .map_err(map_group_use_case_error)?;
+        // Cursor-based direct read (legacy `created_at DESC, session_seq DESC`);
+        // `has_more` + `next_cursor` replace the separate COUNT(*) estimate.
+        let page = self
             .message_repo
-            .list_session_messages_by_seq(
+            .list_session_history(
                 &query.session_id,
-                query.offset,
-                query.limit,
+                owner_filter,
                 visible_from_seq,
-                owner_bot_id.as_deref(),
+                query.before,
+                query.limit as u32,
             )
             .await
             .map_err(map_service_error)?;
-        let items = messages.iter().map(project_message).collect::<Vec<_>>();
-        Ok(Page {
-            items,
-            total,
-            offset: query.offset,
-            limit: query.limit,
+        let messages = page.messages.iter().map(project_message).collect::<Vec<_>>();
+        Ok(SessionMessagePage {
+            messages,
+            next_cursor: page.next_cursor,
+            has_more: page.has_more,
         })
     }
 }
@@ -774,72 +788,14 @@ impl SessionMessageService for SessionServiceImpl {
 
 /// Visibility window applied to message history for a viewer that joined
 /// late (spec §5.2: a participant sees at most the N messages preceding their
-/// join point). Mirrors the bootstrap default `new_participant_visible_limit`
+/// join point). Passed into the shared legacy `bcs-message`
+/// `MessageService::compute_session_history_query` helper so the V1 session
+/// list reuses the same scoping the group history path does; the V1 facade no
+/// longer reimplements the predicate math (VUlai). Mirrors the bootstrap
+/// default `new_participant_visible_limit`
 /// (`config.rs::default_new_participant_visible_limit`); kept as a const here
 /// because the V1 session facade does not (yet) own its own history config.
 const NEW_PARTICIPANT_VISIBLE_LIMIT: i64 = 100;
-
-/// Derive the message-history visibility predicates for a viewer, mirroring
-/// `bcs-message`'s `MessageService::get_session_history` new-message path so
-/// the V1 session list applies the same scoping the group history path does.
-///
-/// Returns `(visible_from_seq, owner_bot_id)`:
-/// - `ManagerWorker` strategy + the viewer's bot is a Worker participant →
-///   owner isolation: `(None, Some(worker_id))` so a worker only reads its
-///   own owned messages.
-/// - Otherwise (Chat, or ManagerWorker non-worker viewer) → all owners
-///   (`owner_bot_id = None`); the spec §5.2 new-participant `visible_from_seq`
-///   cutoff is derived from `session.participant_join_seq` /
-///   `session.current_msg_seq` relative to the viewer's `bot_uuid`. A Human
-///   viewer has no per-bot join map, so `visible_from_seq` is `None` (no
-///   cutoff) and the human reads the full visible scope.
-///
-/// Limitation: the `ManagerWorker` public-only (`owner_bot_id IS NULL`)
-/// isolation for non-worker viewers is NOT expressible with `Option<&str>` at
-/// the repo contract; the V1 session list returns all-owners for those
-/// viewers (deferred to the group history path which owns the full
-/// `MessageOwnerFilter` enum).
-fn compute_message_visibility(
-    principal: &Principal,
-    group: &DomainGroup,
-    session: &Session,
-) -> (Option<i64>, Option<String>) {
-    let view_bot_id: &str = match principal {
-        Principal::Bot(bot) => bot.bot_uuid.as_str(),
-        // Human viewer: no per-bot join map; the cutoff does not apply.
-        _ => "",
-    };
-
-    // ManagerWorker owner-isolation: a Worker participant only reads its own
-    // owned messages. Chat / non-worker viewers fall through to the cutoff
-    // path (all owners).
-    if group.group_strategy == GroupStrategy::ManagerWorker && !view_bot_id.is_empty() {
-        let is_worker = session
-            .participants
-            .iter()
-            .chain(group.participants.iter())
-            .any(|p| p.bot_uuid == view_bot_id && p.role == ParticipantRole::Worker);
-        if is_worker {
-            return (None, Some(view_bot_id.to_string()));
-        }
-    }
-
-    // Spec §5.2 new-participant join cutoff (Chat + ManagerWorker non-worker).
-    // No cutoff applies when the session has no recorded messages yet
-    // (current_msg_seq <= 0) — mirrors `compute_visible_from_seq`'s guard.
-    let visible_from_seq = if view_bot_id.is_empty() || session.current_msg_seq <= 0 {
-        None
-    } else {
-        let join_seq = session
-            .participant_join_seq
-            .as_ref()
-            .and_then(|jm| jm.get(view_bot_id))
-            .and_then(serde_json::Value::as_i64);
-        let base_seq = join_seq.unwrap_or(session.current_msg_seq);
-        Some((base_seq - NEW_PARTICIPANT_VISIBLE_LIMIT + 1).max(1))
-    };
-    (visible_from_seq, None)
-}
 
 fn build_participant(input: &SessionParticipantInput, role: ParticipantRole) -> Participant {
     let mode = map_v1_mode_to_domain(input.mode.unwrap_or(BotParticipantMode::Auto));
@@ -1002,6 +958,18 @@ fn map_service_error(error: ServiceError) -> ApplicationError {
             ApplicationError::invalid("invalid_request", message)
         }
         other => ApplicationError::internal(other.to_string()),
+    }
+}
+
+/// Map the legacy `GroupUseCaseError` returned by the shared
+/// `MessageService::compute_session_history_query` helper into the stable V1
+/// `ApplicationError` surface. The only realistic branch from the helper is
+/// `Service(InvalidOperation)` (a non-participant view_bot_id); everything else
+/// falls back to a generic `invalid_request`.
+fn map_group_use_case_error(error: GroupUseCaseError) -> ApplicationError {
+    match error {
+        GroupUseCaseError::Service(service_error) => map_service_error(service_error),
+        other => ApplicationError::invalid("invalid_request", other.to_string()),
     }
 }
 
