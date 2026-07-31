@@ -21,7 +21,7 @@ from gateway.community.core.authn import Authenticator as _Authn
 from gateway.community.core.forwarding import Forwarding as _Fwd
 from gateway.community.spi.principal_signer import PrincipalSigner
 
-from ._authn import build_authenticator, build_database
+from ._authn import build_authenticator
 from ._configs import DatabaseConfig, init_container_config, load_container_config
 from ._container import (
     ApplicationContainer,
@@ -29,6 +29,7 @@ from ._container import (
     shutdown_services,
 )
 from ._credential_issuance import build_access_key_issuer, build_app_registrar
+from ._database import initialize_database
 from ._forwarding import build_forwarding
 from ._principal_signer import build_principal_signer
 
@@ -93,7 +94,10 @@ def bootstrap_app() -> BootstrapResult:
 
     authenticator = container.authenticator()
     forwarding = container.forwarding()
-    principal_signer = build_principal_signer()
+    principal_signer = build_principal_signer(
+        user_config=container.user_config(),
+        secret_resolver=container.plugins().secret_resolver(),
+    )
     db = container.plugins().database()
     access_key_issuer = build_access_key_issuer(db, principal_signer)
     app_registrar = build_app_registrar(db, principal_signer)
@@ -111,13 +115,11 @@ def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
     try:
         from gateway.community.plugin_registry import (
             has_enterprise_plugins,
-            inject_extra_authn_strategies,
             inject_into_plugin_container,
         )
 
         if has_enterprise_plugins():
             inject_into_plugin_container(container)
-            inject_extra_authn_strategies()
     except ImportError:
         pass
 
@@ -147,9 +149,9 @@ __all__ = [
     "build_access_key_issuer",
     "build_app_registrar",
     "build_authenticator",
-    "build_database",
     "build_forwarding",
     "build_principal_signer",
+    "initialize_database",
     "get_container",
     "init_container_config",
     "initialize_services",

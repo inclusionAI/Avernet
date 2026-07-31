@@ -33,3 +33,13 @@ class BotRepository(BotRegistry):
                 select(self.Model).where(self.Model.session_token == token)
             )
             return None if row is None else row.to_record()
+
+    async def find_bot_by_agent_code(self, agent_code: str) -> RegisteredBot | None:
+        """Resolve a bot by its ``agent_code`` column (soft miss on unknown)."""
+        if not agent_code:
+            return None
+        with self._db.orm_session() as session:
+            row = session.scalar(
+                select(self.Model).where(self.Model.agent_code == agent_code)
+            )
+            return None if row is None else row.to_record()

@@ -174,8 +174,8 @@ DDL. Full ruling and per-endpoint mapping in
 > `/api/resource-materializations`, `/api/bash`, `/api/bot/config`,
 > `/api/work-items` — are already fronted by a backend contract and stay out.
 > AICoding-only routes stay out. **WebSockets are not wrapped**: the new
-> `…/connection` endpoint returns the socket URL + headers and the caller builds
-> the connection itself.
+> `…/connection` endpoint returns one complete socket URL, credential included,
+> and the caller builds the connection itself.
 >
 > `engine/switch` and `engine/restart` are deliberately excluded — wrapping
 > `switch` would be a back door around #494's `engine`-immutability ruling on
@@ -665,7 +665,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 | engine | 3 | `…/engine/{status,capabilities,available}` |
 | models | 2 | `…/models`, `…/models/{model_id}` |
 | approvals | 3 | `…/approvals/mode` (GET/PUT), `…/approvals/modes` |
-| connection | 1 | `…/connection` — WS URL + headers, replaces `get_device_connection` |
+| connection | 1 | `…/connection` — complete WS URL, replaces `get_device_connection` |
 
 ---
 
@@ -935,8 +935,8 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   3. **No Track A stage, no DDL** — the first track for which that's true by
      construction, not by luck. Added the caveat up top so nobody hunts for a
      stage that doesn't exist.
-  4. **WebSockets are not wrapped.** `…/connection` hands back a ready-to-use
-     `wss://` URL plus the headers to send; the caller owns the socket. No
+  4. **WebSockets are not wrapped.** `…/connection` hands back one ready-to-use
+     `wss://` URL with the credential in it; the caller owns the socket. No
      `POST /chat`, no SSE relay of the engine's frame format.
   5. **Two exclusions are contract decisions, not laziness.** `engine/switch`
      would be a back door around #494's `engine`-immutability ruling, and

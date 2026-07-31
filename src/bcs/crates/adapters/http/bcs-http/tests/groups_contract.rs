@@ -14,6 +14,7 @@ use bcs_http::{
 use bcs_service_api::{
     ActorKind, BotCapabilities, BotGroupListCommand, BotRegistryCoreService,
     CancelStateMachineRunCommand, CollaborationDefinition,
+    CollaborationDefinitionGraphNode, CollaborationDefinitionGraphPreview,
     CollaborationDefinitionParticipantSlot, CollaborationDefinitionValidationOutcome,
     CollaborationDefinitionValidationSummary, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
@@ -30,8 +31,9 @@ use bcs_service_api::{
     RoutingPolicy, SessionHistoryResult, SessionStateMachinePermissionCommand,
     SessionStateMachinePermissionView, Skill, StartSessionStateMachineRunCommand,
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
-    StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
-    StateMachineRunView, Workspace, ValidateCollaborationDefinitionYamlCommand,
+    StateMachineAssignee, StateMachineGraphMode, StateMachineNodeKind, StateMachineNodeRun,
+    StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, StateMachineRunView, Workspace,
+    ValidateCollaborationDefinitionYamlCommand,
 };
 use bcs_service_api::{
     CreateOrReactivateCommand, NewSessionParams, SessionKind, SessionManagementService,
@@ -125,6 +127,20 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                 required: true,
                 assigned: true,
             }],
+            graph: Some(CollaborationDefinitionGraphPreview {
+                graph_mode: StateMachineGraphMode::Acyclic,
+                nodes: vec![CollaborationDefinitionGraphNode {
+                    node_id: "answer".to_string(),
+                    display_name: "Answer".to_string(),
+                    kind: StateMachineNodeKind::BotTask,
+                    assignee: Some(StateMachineAssignee::BotBinding {
+                        binding: "writer".to_string(),
+                    }),
+                    final_output: true,
+                    judge: false,
+                }],
+                edges: Vec::new(),
+            }),
             definition: None,
         })
     }
@@ -677,6 +693,9 @@ async fn post_collaboration_definition_validate_delegates_to_runtime_service() {
     assert_eq!(json["valid"], true);
     assert_eq!(json["summary"]["nodes"], 1);
     assert_eq!(json["participants"][0]["binding"], "writer");
+    assert_eq!(json["graph"]["graph_mode"], "acyclic");
+    assert_eq!(json["graph"]["nodes"][0]["node_id"], "answer");
+    assert_eq!(json["graph"]["edges"], serde_json::json!([]));
     assert!(json.get("definition").is_none());
 
     let calls = collaboration_runtime.validation_calls.lock().await;

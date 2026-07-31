@@ -2,12 +2,15 @@ use std::collections::BTreeSet;
 
 use bcs_domain::{CollaborationDefinition, CollaborationRuntimeDefinition, StateMachineAssignee};
 use bcs_service_api::{
-    CollaborationDefinitionParticipantSlot, CollaborationDefinitionValidationDiagnostic,
-    CollaborationDefinitionValidationOutcome, CollaborationDefinitionValidationSummary,
-    MAX_COLLABORATION_DEFINITION_YAML_BYTES, ValidateCollaborationDefinitionYamlCommand,
+    CollaborationDefinitionGraphEdge, CollaborationDefinitionGraphNode,
+    CollaborationDefinitionGraphPreview, CollaborationDefinitionParticipantSlot,
+    CollaborationDefinitionValidationDiagnostic, CollaborationDefinitionValidationOutcome,
+    CollaborationDefinitionValidationSummary, MAX_COLLABORATION_DEFINITION_YAML_BYTES,
+    ValidateCollaborationDefinitionYamlCommand,
 };
 use serde_yaml::{Mapping, Value};
 
+use crate::definition::{DefinitionGraphProjection, project_definition_graph};
 use crate::{CompiledStateMachine, reject_explicit_participant_roles, validate_definition};
 
 pub fn validate_authoring_definition_yaml(
@@ -100,7 +103,41 @@ pub fn validate_authoring_definition_yaml(
         outcome.definition = None;
         return outcome;
     }
+    let projection = match project_definition_graph(&compiled) {
+        Ok(projection) => projection,
+        Err(error) => {
+            return invalid_outcome(diagnostic("INVALID_DEFINITION", "$", error.to_string()));
+        }
+    };
+    outcome.graph = Some(graph_preview(projection));
     outcome
+}
+
+fn graph_preview(projection: DefinitionGraphProjection) -> CollaborationDefinitionGraphPreview {
+    CollaborationDefinitionGraphPreview {
+        graph_mode: projection.graph_mode,
+        nodes: projection
+            .nodes
+            .into_iter()
+            .map(|node| CollaborationDefinitionGraphNode {
+                node_id: node.node_id,
+                display_name: node.display_name,
+                kind: node.kind,
+                assignee: node.assignee,
+                final_output: node.final_output,
+                judge: node.judge,
+            })
+            .collect(),
+        edges: projection
+            .edges
+            .into_iter()
+            .map(|edge| CollaborationDefinitionGraphEdge {
+                source: edge.source,
+                target: edge.target,
+                outcome: edge.outcome,
+            })
+            .collect(),
+    }
 }
 
 fn valid_outcome(compiled: &CompiledStateMachine) -> CollaborationDefinitionValidationOutcome {
@@ -149,6 +186,7 @@ fn valid_outcome(compiled: &CompiledStateMachine) -> CollaborationDefinitionVali
             },
         },
         participants,
+        graph: None,
         definition: Some(compiled.definition.clone()),
     }
 }
@@ -162,6 +200,7 @@ fn invalid_outcome(
         warnings: Vec::new(),
         summary: CollaborationDefinitionValidationSummary::default(),
         participants: Vec::new(),
+        graph: None,
         definition: None,
     }
 }

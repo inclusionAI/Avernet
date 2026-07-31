@@ -10,7 +10,6 @@ DB-side).
 
 from __future__ import annotations
 
-from sqlalchemy import BigInteger
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.community.spi.bot import RegisteredBot
@@ -28,15 +27,17 @@ class BotRow(Base):  # type: ignore[misc]
     env: Mapped[str] = mapped_column()
     created_by: Mapped[str] = mapped_column()
     agent_code: Mapped[str] = mapped_column()
-    app_id: Mapped[int] = mapped_column(BigInteger)
-    tenant: Mapped[str] = mapped_column()
+
+    # TODO
+    # app_id: Mapped[int] = mapped_column(BigInteger)
+    # tenant: Mapped[str] = mapped_column()
 
     def to_record(self) -> RegisteredBot:
         """Map this row onto the SPI :class:`RegisteredBot` (core fields only)."""
         return RegisteredBot(
             bot_uuid=self.bot_uuid,
             owner_id=self.created_by,
-            app_id=self.app_id,
+            app_id=-1,
             agent_code=self.agent_code,
-            tenant=self.tenant,
+            tenant="default",
         )

@@ -3,8 +3,8 @@
 # application.yaml in the gateway-enterprise package.
 #
 # This is the only runtime configuration file the gateway reads. Keep
-# gateway-specific sections (plugins, authn strategy chains, route security, and
-# upstream routing) in this file so startup has a single source of truth.
+# gateway-specific sections under user_config so startup has a single source of
+# truth for user-selectable Gateway behavior.
 
 app_name: "gateway"
 enable_sidecar: false
@@ -23,102 +23,126 @@ module_config:
     start: "gateway.community.adapters.web.app:app"
     enable_api_docs: true
 
-# Plugin selection — community-safe defaults (all stub/descriptive).
-# Enterprise overrides specific selectors via config overlay.
+# User-level Gateway config — plugin selectors, authn chains, route security,
+# upstream variable values, and routing all live here.
 user_config:
+  # Plugin selection — community-safe defaults (all stub/descriptive).
+  # Enterprise overrides specific selectors via config overlay.
   plugins:
     forwarder: "httpx"
     schema_catalog: "file"
     cache: "stub"
+    auth: "stub"
+    # SecretResolver flavor. Community reads creds from env; enterprise overlays
+    # this with a corp/KMS-backed selector registered via the plugin_registry.
+    secret: "community"
     authn:
       app_token: "stub"
       tenant: "stub"
     database:
       plugin_database: "SQLITE_ORM"
       database_url: ""
+
+  # SecretResolver configuration. The community (env-backed) resolver reads
+  # ``{env_prefix}{NAME}_VALUE`` / ``_USER`` from the process environment.
+  # Enterprise overlays may swap the resolver implementation via the plugin
+  # registry (e.g. a corp secret store / KMS).
+  secret:
+    env_prefix: "AVERNET_SECRET_"
+
+  # PrincipalSigner (JWT client) config. The signing key is a secret and is
+  # resolved at runtime via the SecretResolver using ``secret_name``; the
+  # remaining fields are non-secret and live here. A missing/empty key falls
+  # back to a dev key (single-box/tests only — NOT for production).
+  principal_signer:
+    secret_name: "principal_signing_key"
+    kid: "bare"
+    issuer: "gateway"
+    ttl_seconds: 60
+
   # Values used to expand ${...} placeholders in upstreams.servers.*.base_url.
-  upstreams:
+  upstream_vars:
     backend_server_url: backend.sample.com
     baas_server_url: baas.sample.com
 
-# Per-identity strategy chain (system-level config).
-# Each identity type runs its strategies in order; the first to recognise the
-# credential wins (design §5). Flavor-specific verification backends are wired
-# by PluginAccessor in the composition root.
-identity_strategies:
-  user: [google]
-  bot: [bot_token]
-  app: [app_token]
-  access_key: [access_key_token]
+  # Per-identity strategy chain (system-level config).
+  # Each identity type runs its strategies in order; the first to recognise the
+  # credential wins (design §5). Flavor-specific verification backends are wired
+  # by PluginAccessor in the composition root.
+  identity_strategies:
+    user: [google]
+    bot: [bot_token]
+    app: [app_token]
+    access_key: [access_key_token]
 
-# Route → identity-requirement table for the gateway (auth design §8, reshaped).
-#
-# Each value is ``{<identity-type>: required|optional}`` — the identities a
-# route accepts and whether each is mandatory. More specific rules override
-# more general ones; "/**" is the top-level default. The authoritative
-# per-operation source is each route's ``x-avernet-security`` marker; this file
-# stores the aggregated table the gateway resolves at request time.
-route_security:
-  # Top-level default: every route requires an authenticated user.
-  "/**":
-    user: required
+  # Route → identity-requirement table for the gateway (auth design §8, reshaped).
+  #
+  # Each value is ``{<identity-type>: required|optional}`` — the identities a
+  # route accepts and whether each is mandatory. More specific rules override
+  # more general ones; "/**" is the top-level default. The authoritative
+  # per-operation source is each route's ``x-avernet-security`` marker; this
+  # section stores the aggregated table the gateway resolves at request time.
+  route_security:
+    # Top-level default: every route requires an authenticated user.
+    "/**":
+      user: required
 
-  # Sample group — the bots endpoints (explicit, more-specific rule).
-  "/openapi/v1/bots/**":
-    user: required
+    # Sample group — the bots endpoints (explicit, more-specific rule).
+    "/openapi/v1/bots/**":
+      user: required
 
-# Domain → upstream-server map for the gateway.
-#
-# The leading path segment after `base_path` is the DOMAIN; it selects the
-# target server. A request whose leading segment is not a configured domain is
-# denied (the gateway forwards only into known domains — never an open proxy).
-#
-# `schema` tells the gateway where to read that domain's published OpenAPI
-# description for doc generation:
-#   source: file          → `path` (single-box; committed / local artifact)
-#   source: object_store  → `url`  (any deployed edition — corp or community;
-#                                    each upstream publishes its dumped doc to an
-#                                    object store on deploy, gateway auto-adopts
-#                                    the latest via background refresh)
-# "object_store" is vendor-neutral (S3 / MinIO / GCS / OSS / …); the reader is a
-# pluggable flavor of the SchemaCatalog SPI. The schema is a DOC-ONLY input —
-# routing/auth/forwarding never read it.
-upstreams:
-  base_path: /openapi/v1
+  # Domain → upstream-server map for the gateway.
+  #
+  # The leading path segment after `base_path` is the DOMAIN; it selects the
+  # target server. A request whose leading segment is not a configured domain is
+  # denied (the gateway forwards only into known domains — never an open proxy).
+  #
+  # `schema` tells the gateway where to read that domain's published OpenAPI
+  # description for doc generation:
+  #   source: file          → `path` (single-box; committed / local artifact)
+  #   source: object_store  → `url`  (any deployed edition — corp or community;
+  #                                    each upstream publishes its dumped doc to an
+  #                                    object store on deploy, gateway auto-adopts
+  #                                    the latest via background refresh)
+  # "object_store" is vendor-neutral (S3 / MinIO / GCS / OSS / …); the reader is
+  # a pluggable flavor of the SchemaCatalog SPI. The schema is a DOC-ONLY input —
+  # routing/auth/forwarding never read it.
+  upstreams:
+    base_path: /openapi/v1
 
-  domains:
-    bots:
-      server: backend
-      # Single-box default. A deployed edition overrides this with an object store:
-      #   schema:
-      #     source: object_store
-      #     url: "${BOTS_OPENAPI_URL}"   # e.g. https://<bucket>/bots/openapi-latest.json
-      #     refresh_seconds: 300
-      schema:
-        source: file
-        path: schemas/bots.openapi.json
-        refresh_seconds: 300
-    sessions:
-      server: baas
-      schema:
-        source: file
-        path: schemas/baas.openapi.json
-        refresh_seconds: 300
-    messages:
-      server: baas
-      schema:
-        source: file
-        path: schemas/baas.openapi.json
-        refresh_seconds: 300
-    runs:
-      server: baas
-      schema:
-        source: file
-        path: schemas/baas.openapi.json
-        refresh_seconds: 300
+    domains:
+      bots:
+        server: backend
+        # Single-box default. A deployed edition overrides this with an object store:
+        #   schema:
+        #     source: object_store
+        #     url: "${BOTS_OPENAPI_URL}"   # e.g. https://<bucket>/bots/openapi-latest.json
+        #     refresh_seconds: 300
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      sessions:
+        server: baas
+        schema:
+          source: file
+          path: schemas/baas.openapi.json
+          refresh_seconds: 300
+      messages:
+        server: baas
+        schema:
+          source: file
+          path: schemas/baas.openapi.json
+          refresh_seconds: 300
+      runs:
+        server: baas
+        schema:
+          source: file
+          path: schemas/baas.openapi.json
+          refresh_seconds: 300
 
-  servers:
-    backend:
-      base_url: "${backend_server_url}"
-    baas:
-      base_url: "${baas_server_url}"
+    servers:
+      backend:
+        base_url: "${backend_server_url}"
+      baas:
+        base_url: "${baas_server_url}"

@@ -1,8 +1,8 @@
 """Integration smoke for the real identity pipeline (runner + identity chains).
 
-Builds the real :func:`build_authenticator` (which inits+seeds the in-memory DB
-backing the bot/access-key/app registries), so the bot/access-key/app paths
-exercise the DB-backed registries end-to-end. The google path swaps the USER chain to a
+Builds the real :func:`build_authenticator` with an explicitly initialised
+SQLite plugin, so the bot/access-key/app paths exercise the DB-backed
+registries end-to-end. The google path swaps the USER chain to a
 ``GoogleUserStrategy`` with an ``httpx.MockTransport`` so no real network call.
 """
 
@@ -11,14 +11,26 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from gateway.community.bootstrap import initialize_database
 from gateway.community.bootstrap._authn import build_authenticator
+from gateway.community.bootstrap._configs import DatabaseConfig
+from gateway.community.config import UserConfig
+from gateway.community.core.access_key import AccessKeyRepository
+from gateway.community.core.app import AppRepository
 from gateway.community.core.authn import IdentityChain, authenticate
+from gateway.community.core.bot import BotRepository
+from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
+from gateway.community.plugins.authn.app_token import AppTokenStrategy
+from gateway.community.plugins.authn.bot_token import BotTokenStrategy
+from gateway.community.plugins.authn.google_token import GoogleUserStrategy
+from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import (
     CredentialBundle,
     Presence,
     PrincipalType,
 )
+from gateway.community.spi.database import DataSourcePlugin
 
 
 def _userinfo_handler(
@@ -33,15 +45,36 @@ def _userinfo_handler(
 _GOOGLE_BODY = {"sub": "g-1", "email": "a@example.com", "name": "A"}
 
 
+def _db() -> DataSourcePlugin:
+    return initialize_database(
+        SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
+    )
+
+
+def _strategy_pool(db: DataSourcePlugin):
+    return {
+        "google": GoogleUserStrategy(
+            token_header="x-avernet-google-token", default_tenant="default"
+        ),
+        "bot_token": BotTokenStrategy(registry=BotRepository(db)),
+        "app_token": AppTokenStrategy(registry=AppRepository(db)),
+        "access_key_token": AccessKeyTokenStrategy(registry=AccessKeyRepository(db)),
+    }
+
+
 def _strategies() -> dict[PrincipalType, IdentityChain]:
-    return build_authenticator().strategies
+    db = _db()
+    return build_authenticator(
+        strategies=_strategy_pool(db), user_config=UserConfig()
+    ).strategies
 
 
 def _google_strategies() -> dict[PrincipalType, IdentityChain]:
     """Strategies with a mock-google user strategy (no real network)."""
-    from gateway.community.plugins.authn.google_token import GoogleUserStrategy
-
-    strategies = build_authenticator().strategies
+    db = _db()
+    strategies = build_authenticator(
+        strategies=_strategy_pool(db), user_config=UserConfig()
+    ).strategies
     strategies[PrincipalType.USER] = IdentityChain(
         PrincipalType.USER,
         (

@@ -1,7 +1,10 @@
 use bcs_collaboration_runtime::{
     reject_explicit_participant_roles, validate_authoring_definition_yaml, validate_definition,
 };
-use bcs_domain::{CollaborationDefinition, CollaborationRuntimeDefinition, StateMachineGraphMode};
+use bcs_domain::{
+    CollaborationDefinition, CollaborationRuntimeDefinition, StateMachineGraphMode,
+    StateMachineNodeKind,
+};
 use bcs_service_api::ValidateCollaborationDefinitionYamlCommand;
 
 const AUTHORING_YAML: &str = r#"
@@ -72,6 +75,21 @@ fn authoring_validation_returns_binding_and_graph_summary() {
     assert_eq!(outcome.participants[0].binding, "writer");
     assert!(outcome.participants[0].required);
     assert!(outcome.participants[0].assigned);
+    let graph = outcome.graph.as_ref().expect("validated graph preview");
+    assert_eq!(graph.graph_mode, StateMachineGraphMode::Acyclic);
+    assert_eq!(graph.nodes.len(), 1);
+    assert_eq!(graph.nodes[0].node_id, "answer");
+    assert_eq!(graph.nodes[0].display_name, "Answer");
+    assert_eq!(graph.nodes[0].kind, StateMachineNodeKind::BotTask);
+    assert_eq!(
+        graph.nodes[0].assignee,
+        Some(bcs_domain::StateMachineAssignee::BotBinding {
+            binding: "writer".to_string(),
+        })
+    );
+    assert!(graph.nodes[0].final_output);
+    assert!(!graph.nodes[0].judge);
+    assert!(graph.edges.is_empty());
     assert!(outcome.definition.is_some());
 }
 
@@ -105,6 +123,15 @@ fn authoring_validation_accepts_direct_human_input_channel_without_binding_id() 
             .map(|channel| channel.channel_type.as_str()),
         Some("dingtalk")
     );
+    let graph = outcome.graph.expect("validated graph preview");
+    assert_eq!(graph.nodes[0].kind, StateMachineNodeKind::HumanInput);
+    assert_eq!(
+        graph.nodes[0].assignee,
+        Some(bcs_domain::StateMachineAssignee::RuntimeActor {
+            actor: "human_1001".to_string(),
+        })
+    );
+    assert!(!graph.nodes[0].final_output);
 }
 
 #[test]
@@ -147,17 +174,165 @@ fn authoring_validation_rejects_judge_when_server_has_no_judge_provider() {
 
     assert!(!outcome.valid);
     assert_eq!(outcome.errors[0].code, "UNAVAILABLE_FEATURE");
+    assert!(outcome.graph.is_none());
 }
 
 #[test]
 fn authoring_validation_accepts_judge_when_server_has_judge_provider() {
     let yaml = AUTHORING_YAML.replace(
         "        final_output: true",
-        "        judge:\n          type: llm\n          criteria: [quality]\n          outcomes: [approved]\n        transitions:\n          approved:\n            targets: [publish]\n      publish:\n        kind: bot_task\n        display_name: Publish\n        assignee:\n          type: bot_binding\n          binding: writer\n        instruction: Publish the answer.\n        final_output: true",
+        "        judge:\n          type: llm\n          criteria: [quality]\n          outcomes: [approved, revise]\n        transitions:\n          approved:\n            targets: [publish]\n          revise:\n            targets: [publish]\n      publish:\n        kind: bot_task\n        display_name: Publish\n        assignee:\n          type: bot_binding\n          binding: writer\n        instruction: Publish the answer.\n        final_output: true",
     );
     let outcome = validate_authoring(&yaml, true);
 
     assert!(outcome.valid, "{:?}", outcome.errors);
+    let graph = outcome.graph.expect("validated graph preview");
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .map(|node| node.node_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["answer", "publish"]
+    );
+    assert!(graph.nodes[0].judge);
+    assert!(!graph.nodes[1].judge);
+    assert_eq!(graph.edges.len(), 2);
+    assert_eq!(graph.edges[0].source, "answer");
+    assert_eq!(graph.edges[0].outcome, "approved");
+    assert_eq!(graph.edges[0].target, "publish");
+    assert_eq!(graph.edges[1].outcome, "revise");
+    assert_eq!(graph.edges[1].target, "publish");
+}
+
+#[test]
+fn authoring_graph_preview_preserves_deterministic_fan_out_target_order() {
+    let yaml = r#"
+name: Fan out and join
+participants:
+  writer:
+    display_name: Writer
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    graph_mode: acyclic
+    nodes:
+      start:
+        kind: bot_task
+        display_name: Start
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Start.
+        transitions:
+          complete:
+            targets: [beta, alpha]
+      alpha:
+        kind: bot_task
+        display_name: Alpha
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Alpha.
+        transitions:
+          complete:
+            targets: [finish]
+      beta:
+        kind: bot_task
+        display_name: Beta
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Beta.
+        transitions:
+          complete:
+            targets: [finish]
+      finish:
+        kind: bot_task
+        display_name: Finish
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Finish.
+        final_output: true
+"#;
+
+    let outcome = validate_authoring(yaml, false);
+
+    assert!(outcome.valid, "{:?}", outcome.errors);
+    let graph = outcome.graph.expect("validated graph preview");
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .map(|node| node.node_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "beta", "finish", "start"]
+    );
+    assert_eq!(
+        graph
+            .edges
+            .iter()
+            .map(|edge| {
+                (
+                    edge.source.as_str(),
+                    edge.outcome.as_str(),
+                    edge.target.as_str(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            ("alpha", "complete", "finish"),
+            ("beta", "complete", "finish"),
+            ("start", "complete", "beta"),
+            ("start", "complete", "alpha"),
+        ]
+    );
+}
+
+#[test]
+fn authoring_graph_preview_preserves_missing_human_input_assignee() {
+    let yaml = r#"
+name: Frontend human review
+participants:
+  writer:
+    display_name: Writer
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    graph_mode: acyclic
+    nodes:
+      draft:
+        kind: bot_task
+        display_name: Draft
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Draft.
+        transitions:
+          complete:
+            targets: [review]
+      review:
+        kind: human_input
+        display_name: Human review
+        instruction: Review.
+        node_timeout_ms: 60000
+"#;
+
+    let outcome = validate_authoring(yaml, false);
+
+    assert!(outcome.valid, "{:?}", outcome.errors);
+    let graph = outcome.graph.expect("validated graph preview");
+    let review = graph
+        .nodes
+        .iter()
+        .find(|node| node.node_id == "review")
+        .expect("human input node");
+    assert_eq!(review.kind, StateMachineNodeKind::HumanInput);
+    assert_eq!(review.assignee, None);
+    assert!(!review.final_output);
 }
 
 #[test]

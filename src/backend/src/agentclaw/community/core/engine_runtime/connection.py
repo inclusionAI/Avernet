@@ -6,13 +6,17 @@ our own backend, and wrong to hand an external tenant: it publishes routing
 topology and a raw device credential, both of which become things we cannot
 change without breaking integrators.
 
-This service returns **finished** socket URLs instead. Nothing in
-:class:`ConnectionResult` exposes a target, a connection type, or a bare token.
+This service returns **finished** socket URLs instead, addressed to the public
+gateway under ``/engine``. The target and the credential do travel *inside* that
+URL — a browser's WebSocket handshake can carry a credential nowhere else — but
+no field beside it hands a caller the pieces to assemble a different one, and
+nothing names the hop behind the gateway.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote, urlsplit
 
 from injector import inject
 
@@ -36,19 +40,31 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
 from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
+from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.sandbox_runtime import (
-    SandboxRuntimeClient,
-    SandboxRuntimeUnavailableError,
-)
 
 logger = get_logger()
 
 #: Lifetime requested for the proxy credential, mirroring the internal WS token.
 CONNECTION_TTL_SECONDS = 120 * 60
 
-#: Header the proxy gateway authenticates with.
-_PROXY_TOKEN_HEADER = "x-proxypass-token"
+#: Query parameter the proxy authenticates with. A *parameter* and not a header
+#: because the caller is a browser: ``new WebSocket(url, protocols)`` takes no
+#: headers, so a URL is the only place a credential can ride. The internal
+#: console already opens this socket the same way.
+_PROXY_TOKEN_PARAM = "x-proxypass-token"
+
+#: Path prefix the gateway routes on, directly after the host.
+_ENGINE_PREFIX = "/engine"
+
+#: The routing prefix the hop behind the gateway serves. Recognised, then swapped
+#: for :data:`_ENGINE_PREFIX` — see :meth:`_readdress_onto_gateway`.
+_PROXYPASS_PREFIX = "/proxypass/"
+
+#: WebSocket scheme for each scheme a gateway base url may be configured with.
+#: ``ws``/``wss`` are accepted so a deployment that spells the base out as a
+#: socket origin is not rejected for being explicit.
+_WS_SCHEMES = {"http": "ws", "https": "wss", "ws": "ws", "wss": "wss"}
 
 #: Connection mode requested from the device provider. See ``build``.
 _RELAY_MODE = "relay"
@@ -62,15 +78,32 @@ _CHAT_WS_PATHS = {
 
 # No terminal socket. The engine serves an interactive PTY and openclaw
 # declares the capability, but the spec excludes an interactive shell on a
-# tenant's device from v1 at any scope. (It would not have worked as published
-# either: the engine's terminal route authenticates a `token` *query* parameter,
-# which a header-only connection does not supply.)
+# tenant's device from v1 at any scope.
 
 
 #: The only bot type a socket is published for — the same rule, and the same
 #: reason, as the sessions group's gate. Necessary but not sufficient; the bot
 #: must also be unshared. See :func:`_require_private_personal_bot`.
 _SUPPORTED_BOT_TYPE = "personal"
+
+
+def _quote_or_reject(value: str, *, safe: str, what: str) -> str:
+    """Percent-encode ``value`` for a URL, or refuse it by name.
+
+    ``quote`` raises ``UnicodeEncodeError`` on a lone surrogate, which a
+    provider's JSON can carry (``json.loads`` decodes ``\\ud800`` happily). That
+    would leave this endpoint answering 500 on a value it can describe — the
+    same failure the relay-shape guard exists to avoid, one method along.
+
+    ``what`` names the part for the message; the value itself is never included,
+    since one of the three callers passes the credential.
+    """
+    try:
+        return quote(value, safe=safe)
+    except UnicodeEncodeError as exc:
+        raise EngineUpstreamError(
+            f"device connection carries an unencodable {what}"
+        ) from exc
 
 
 def _require_private_personal_bot(
@@ -123,13 +156,13 @@ class EngineConnectionService:
         bot_service: BotService,
         binding_repository: DeviceBindingRepository,
         device_service: DeviceService,
-        sandbox_client: SandboxRuntimeClient,
+        gateway: GatewayEndpoint,
         collaborator_repo: CollaboratorRepositoryProtocol,
     ) -> None:
         self._bot_service = bot_service
         self._binding_repository = binding_repository
         self._device_service = device_service
-        self._sandbox_client = sandbox_client
+        self._gateway = gateway
         self._collaborator_repo = collaborator_repo
 
     def build(self, *, bot_id: str, owner_id: str) -> ConnectionResult:
@@ -189,12 +222,9 @@ class EngineConnectionService:
         # ws-info's target — a mismatched pair. Providers that issue no separate
         # ws credential leave it empty and `token` is right there.
         token = getattr(info, "ws_token", "") or getattr(info, "token", "") or ""
-        headers = {_PROXY_TOKEN_HEADER: token} if token else {}
 
         sockets = [
-            SocketInfo(
-                kind="chat", url=self._socket_url(info, chat_path), headers=headers
-            )
+            SocketInfo(kind="chat", url=self._socket_url(info, chat_path, token))
         ]
         return ConnectionResult(
             engine=engine, expires_at=self._expires_at(info), sockets=sockets
@@ -239,18 +269,17 @@ class EngineConnectionService:
             operator=operator,
             ttl=CONNECTION_TTL_SECONDS,
             # Relay is the mode that yields a *finished* WebSocket URL, which is
-            # this endpoint's whole contract — callers concatenate nothing. The
-            # BaaS provider fills `url` only when relay is asked for; leaving the
-            # mode unset makes it hand back a bare routing target instead, and
-            # the community build has no proxy gateway to turn that target into
-            # a URL. Asking once also keeps the URL and the token describing the
-            # same mode.
+            # what this endpoint re-addresses onto the gateway. Leaving the mode
+            # unset makes the provider hand back a bare routing target instead,
+            # and there would be nothing to re-address. Asking once also keeps
+            # the URL and the credential describing the same mode.
             ws_conn_mode=_RELAY_MODE,
-            # The provider bakes this path *into* the relay URL, so it has to be
-            # the bot's own engine path. The provider default is openclaw's, and
-            # the engine closes a socket whose pinned engine is not the active
-            # one (code 4001) — a claude_code bot handed the default would be
-            # rejected on connect.
+            # The provider bakes this path *into* the relay URL, and that URL is
+            # what a caller ends up connecting to, so it has to be the bot's own
+            # engine path. The provider default is openclaw's, and the engine
+            # closes a socket whose pinned engine is not the active one (code
+            # 4001) — a claude_code bot handed the default would be rejected on
+            # connect.
             path=chat_path,
         )
 
@@ -267,50 +296,144 @@ class EngineConnectionService:
             return _CHAT_WS_PATHS[engine]
         return f"/api/{engine}/ws" if engine else "/ws"
 
-    def _socket_url(self, info: object, socket_path: str) -> str:
+    def _socket_url(self, info: object, socket_path: str, token: str) -> str:
         """The finished URL for ``socket_path``.
 
-        Two shapes:
-
-        1. **The provider returned a WebSocket URL** (BaaS relay mode) — it is
-           already complete, built server-side *around the path we asked for*.
-           Used verbatim. Appending ``socket_path`` again would produce
-           ``…/api/openclaw/ws/api/openclaw/ws``, which cannot connect.
-        2. **The provider returned a routing target** — we compose, so the path
-           is appended here.
-        """
-        url = str(getattr(info, "url", "") or "")
-        if url.startswith(("ws://", "wss://")):
-            return url
-
-        return self._ws_base(info) + socket_path
-
-    def _ws_base(self, info: object) -> str:
-        """URL prefix a socket path is appended to, for providers that route.
+        The provider builds a finished relay URL around the engine path we ask
+        it for. That URL addresses the hop *behind* the gateway, so we re-address
+        it — swapping the origin and the routing prefix — rather than rebuilding
+        it from parts. Rebuilding would mean asserting our own grammar for a URL
+        the provider owns, and silently dropping anything it put there that we
+        did not anticipate.
 
         Two shapes:
 
-        1. A local device — reach it directly.
-        2. Otherwise, the proxy gateway: ``{base}/proxypass/{target}``.
+        1. A local device — reached directly, with no credential. The gateway
+           routes to the hop behind it, which has no path to a device on the
+           caller's own machine, and there is no proxy to authenticate to. Its
+           ``url`` is not consulted at all: the local provider fills that field
+           from *http*-info (``local_device_service.py``), which was never a
+           relay URL and was never published here either.
+        2. Otherwise the gateway, re-addressed from the provider's relay URL.
         """
         target = str(getattr(info, "target", "") or "")
         if not target:
             raise EngineUpstreamError("device connection carries no routing target")
 
         if str(getattr(info, "type", "") or "") == "local":
-            return f"ws://{target}"
+            # Composed, because there is no relay URL to re-address. This target
+            # is an *authority*, so ``@``, ``:`` and the brackets of an IPv6 host
+            # all have to survive — singlebox reclassifies a ``::1`` binding as
+            # local, and ``ws://%5B::1%5D:20003`` is not a valid authority.
+            # Anything else is escaped so it cannot end the path early.
+            segment = _quote_or_reject(target, safe="@:[]", what="routing target")
+            return f"ws://{segment}{_quote_or_reject(socket_path, safe='/', what='socket path')}"
 
+        return self._readdress_onto_gateway(info, token)
+
+    def _readdress_onto_gateway(self, info: object, token: str) -> str:
+        """The provider's relay URL, re-pointed at the gateway.
+
+        Exactly two things change: the origin becomes the gateway's, and the
+        hop's ``/proxypass/`` routing prefix becomes ``/engine/``. Everything
+        past that prefix — the target, the engine path, any query the provider
+        set — is carried through as the provider wrote it, so this endpoint
+        holds no opinion about a URL grammar it does not own.
+
+        Refused rather than published when the provider's URL is missing,
+        unparseable, or not the ``/proxypass/`` shape: BaaS's LOCAL platform
+        answers ``/wsrelay/{session_id}``, which the gateway's rewrite cannot
+        express. No bot this endpoint serves produces one, so this is a guard on
+        that assumption rather than a supported path. Falling back to the
+        provider's own URL is not the alternative — that publishes the hop behind
+        the gateway, the one thing this surface must not do.
+        """
+        url = str(getattr(info, "url", "") or "")
         try:
-            base = self._sandbox_client.proxy_base_url() or ""
-        except SandboxRuntimeUnavailableError as exc:
-            # Deployments without a proxy gateway (the community build) raise
-            # here rather than returning "". Letting it out would be a 500 on a
-            # condition we can name: there is no way to reach this device.
-            raise EngineUpstreamError("no proxy gateway in this deployment") from exc
+            parts = urlsplit(url)
+        except ValueError:
+            # Unparseable is no more re-addressable than the wrong shape, and
+            # letting it out would be the 500 this guard exists to prevent.
+            parts = None
+        if parts is None or not parts.path.startswith(_PROXYPASS_PREFIX):
+            raise EngineUpstreamError(
+                "device connection carries no relay url this endpoint can "
+                "re-address onto the gateway"
+            )
+        if parts.fragment:
+            # A fragment is never sent on the wire, so a relay URL carrying one
+            # is already broken upstream and everything after the ``#`` is a
+            # path we would silently drop. Named here rather than re-addressed
+            # into something shorter that merely looks valid.
+            raise EngineUpstreamError(
+                "device connection relay url carries a fragment"
+            )
+        try:
+            # Not re-encoded — the provider already encoded this and doing it
+            # twice is its own bug. Only checked: a lone surrogate would survive
+            # ``urlsplit`` and fail when the response is serialised, turning a
+            # describable provider fault into a 500.
+            url.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise EngineUpstreamError(
+                "device connection carries an unencodable relay url"
+            ) from exc
+
+        # ``urlsplit`` has already cut the query and fragment away, so the tail
+        # cannot end the path early no matter what it holds. The fragment is
+        # dropped rather than carried: a browser never sends one, so keeping it
+        # would publish a component that cannot reach the upstream.
+        tail = parts.path[len(_PROXYPASS_PREFIX) :]
+        query = parts.query
+        if token:
+            # Appended, not assigned — a provider query would otherwise be lost,
+            # and the socket would fail with nothing pointing at why. Absent
+            # stays absent: an empty ``?x-proxypass-token=`` fails the handshake
+            # just as opaquely.
+            credential = _quote_or_reject(token, safe="", what="credential")
+            separator = "&" if query else ""
+            query = f"{query}{separator}{_PROXY_TOKEN_PARAM}={credential}"
+
+        url = f"{self._gateway_ws_base()}{_ENGINE_PREFIX}/{tail}"
+        return f"{url}?{query}" if query else url
+
+    def _gateway_ws_base(self) -> str:
+        """WebSocket origin of the gateway.
+
+        Which environment's gateway this is was decided by the composition root
+        (:class:`~agentclaw.community.di.config.GatewayEndpoint`); this only
+        rewrites the scheme, so one configured value serves both.
+        """
+        base = self._gateway.base_url.strip().rstrip("/")
         if not base:
-            raise EngineUpstreamError("no proxy base url configured")
-        base = base.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
-        return f"{base}/proxypass/{target}"
+            # A deployment that fronts no gateway cannot publish a socket. Named
+            # rather than allowed out as a 500: this is a configuration state we
+            # can describe, and it is the community build's normal one.
+            raise EngineUpstreamError(
+                "no gateway configured for this deployment (user_config.gateway)"
+            )
+
+        # Anchored on the scheme rather than substituted anywhere in the string:
+        # a host or path that happens to contain ``http://`` must not be rewritten
+        # too. Schemes are case-insensitive, and a value carrying none at all is
+        # refused rather than published as a URL nothing can open.
+        scheme, separator, rest = base.partition("://")
+        ws_scheme = _WS_SCHEMES.get(scheme.lower(), "") if separator else ""
+        if not ws_scheme:
+            raise EngineUpstreamError(
+                f"gateway base url has no usable scheme: {base!r}"
+            )
+        # A bare origin is all this may be. A path would push ``/engine`` off the
+        # root — ``https://gw.example/api`` publishes ``/api/engine/…``, which the
+        # gateway's rewrite is not rooted at, so the socket is unopenable rather
+        # than misconfigured-and-named. A ``#`` or ``?`` is worse still: it ends
+        # the path before the prefix is even appended, putting the credential
+        # somewhere a browser never sends.
+        if any(delimiter in rest for delimiter in "/#?") or not rest:
+            raise EngineUpstreamError(
+                f"gateway base url is not a bare origin: {base!r}"
+            )
+        return f"{ws_scheme}://{rest}"
 
     def _expires_at(self, info: object) -> str:
         """When the credential above stops working.

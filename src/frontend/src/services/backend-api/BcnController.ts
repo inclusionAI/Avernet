@@ -90,6 +90,50 @@ export interface CollaborationDefinitionValidationSummary {
   final_output_node?: string;
 }
 
+export type CollaborationDefinitionGraphMode =
+  | 'acyclic'
+  | 'cyclic'
+  | 'event_driven'
+  | 'hierarchical';
+
+export type CollaborationDefinitionGraphNodeKind =
+  | 'bot_task'
+  | 'group_chat'
+  | 'human_input'
+  | 'tool_action'
+  | 'sub_state_machine';
+
+export type CollaborationDefinitionGraphAssignee =
+  | {
+      type: 'bot_binding';
+      binding: string;
+    }
+  | {
+      type: 'runtime_actor';
+      actor: string;
+    };
+
+export interface CollaborationDefinitionGraphNode {
+  node_id: string;
+  display_name: string;
+  kind: CollaborationDefinitionGraphNodeKind;
+  assignee?: CollaborationDefinitionGraphAssignee;
+  final_output: boolean;
+  judge: boolean;
+}
+
+export interface CollaborationDefinitionGraphEdge {
+  source: string;
+  target: string;
+  outcome: string;
+}
+
+export interface CollaborationDefinitionGraphPreview {
+  graph_mode: CollaborationDefinitionGraphMode;
+  nodes: CollaborationDefinitionGraphNode[];
+  edges: CollaborationDefinitionGraphEdge[];
+}
+
 /** 自定义协作 YAML 校验响应 */
 export interface CollaborationDefinitionValidationResponse {
   valid: boolean;
@@ -97,6 +141,7 @@ export interface CollaborationDefinitionValidationResponse {
   warnings?: CollaborationDefinitionValidationDiagnostic[];
   summary: CollaborationDefinitionValidationSummary;
   participants?: CollaborationDefinitionParticipantSlot[];
+  graph?: CollaborationDefinitionGraphPreview;
 }
 
 /** 创建群聊响应 */

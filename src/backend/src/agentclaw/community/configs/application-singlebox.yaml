@@ -123,6 +123,12 @@ user_config:
   agentclawproxy:
     base_url: "http://127.0.0.1:9999"
 
+  # Mirrors the agentclawproxy placeholder above. Rarely read in practice —
+  # singlebox rewrites loopback BaaS connections to `local`, which the
+  # connection endpoint reaches directly instead of through a gateway.
+  gateway:
+    base_url: "http://127.0.0.1:9999"
+
   # BaaS — singlebox 模式下唯一的真本机依赖
   # template/tenant relocated from the (now-neutral) application.yaml base — value
   # preserved as-is (pre-existing: singlebox never overrode these; out of scope

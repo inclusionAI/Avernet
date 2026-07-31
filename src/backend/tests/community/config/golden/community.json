@@ -67,6 +67,10 @@
       "enable_metrics": false,
       "max_connections": 100
     },
+    "gateway": {
+      "base_url": "",
+      "base_url_pre": ""
+    },
     "git_sync": {
       "bolt_shared_dir_name": "bolt_shared",
       "enable_oss_sync": true
@@ -183,6 +187,10 @@
       "action_link_pattern": ""
     },
     "ecb": {
+      "base_url": "",
+      "base_url_pre": ""
+    },
+    "gateway": {
       "base_url": "",
       "base_url_pre": ""
     },

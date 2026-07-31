@@ -14,19 +14,20 @@ class Socket(BaseModel):
         json_schema_extra={
             "example": {
                 "kind": "chat",
-                "url": "wss://gateway.example/route/abc/api/openclaw/ws",
-                "headers": {"x-proxypass-token": "…"},
+                "url": (
+                    "wss://gateway.example/engine/abc/api/openclaw/ws"
+                    "?x-proxypass-token=…"
+                ),
             }
         }
     )
 
     kind: SocketKind = Field(description="Which socket this is.")
     url: str = Field(
-        description="Complete WebSocket URL. Open it as given — do not append "
-        "to it or rebuild it."
-    )
-    headers: dict[str, str] = Field(
-        description="Headers to send on the upgrade request."
+        description="Complete WebSocket URL, credential included. Open it as "
+        "given — do not append to it, rebuild it, or move any part of it into "
+        "a header; a browser cannot set headers on a WebSocket handshake, "
+        "which is why everything needed is in the URL."
     )
 
 
@@ -41,8 +42,10 @@ class Connection(BaseModel):
                 "sockets": [
                     {
                         "kind": "chat",
-                        "url": "wss://gateway.example/route/abc/api/openclaw/ws",
-                        "headers": {"x-proxypass-token": "…"},
+                        "url": (
+                            "wss://gateway.example/engine/abc/api/openclaw/ws"
+                            "?x-proxypass-token=…"
+                        ),
                     }
                 ],
             }
@@ -51,9 +54,12 @@ class Connection(BaseModel):
 
     engine: str = Field(description="The bot's active engine.")
     expires_at: str = Field(
-        description="When every URL and credential here stops working (ISO "
-        "8601). Request this endpoint again before then; an expired socket "
-        "fails to connect rather than reporting why."
+        description="Deadline for *opening* the sockets here (ISO 8601). It "
+        "bounds the handshake only: a socket you already opened stays open "
+        "past this instant, because the credential is checked once at connect "
+        "time. Request this endpoint again before connecting or reconnecting — "
+        "not on a timer to keep a live socket alive. An expired credential "
+        "fails the handshake rather than reporting why."
     )
     sockets: list[Socket] = Field(
         description="Exactly the sockets this bot offers. A kind absent from "

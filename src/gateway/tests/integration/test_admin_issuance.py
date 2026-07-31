@@ -6,7 +6,7 @@ import jwt
 from httpx import ASGITransport, AsyncClient
 
 from gateway.community.adapters.web.app import create_app
-from gateway.community.bootstrap._authn import build_database
+from gateway.community.bootstrap import get_container
 from gateway.community.core.access_key import AccessKeyRepository
 from gateway.community.core.app import AppRepository
 from gateway.community.plugins.principal_signer.bare._plugin import _DEV_FALLBACK_KEY
@@ -34,7 +34,9 @@ async def test_issue_access_key_via_http() -> None:
     assert decoded["typ"] == "access_key"
     assert decoded["sub"] == "ak-http"
 
-    rec = await AccessKeyRepository(build_database()).find_access_key_by_token(token)
+    rec = await AccessKeyRepository(
+        get_container().plugins().database()
+    ).find_access_key_by_token(token)
     assert rec is not None
     assert rec.access_key == "ak-http"
 
@@ -65,7 +67,9 @@ async def test_register_app_via_http() -> None:
     assert decoded["sub"] == "Http App"
     assert "exp" not in decoded
 
-    rec = await AppRepository(build_database()).find_app_by_token(token)
+    rec = await AppRepository(get_container().plugins().database()).find_app_by_token(
+        token
+    )
     assert rec is not None
     assert rec.app_name == "Http App"
     assert rec.id == body["id"]

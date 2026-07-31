@@ -77,6 +77,8 @@ def _log_container_components(container: containers.DeclarativeContainer) -> Non
 
 class ApplicationContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
+    loaded_config = providers.Dependency()
+    user_config = providers.Dependency()
     plugins = providers.Container(PluginContainer, config=config)
 
     authenticator = providers.Dependency()
@@ -115,17 +117,25 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
 
     logger.info("Building authenticator …")
     plugins = container.plugins()
-    from ._authn import build_authenticator, build_database
+    from ._authn import build_authenticator
+    from ._configs import DatabaseConfig
+    from ._database import initialize_database
 
-    # create_all + seed the container's DB so the DB-backed strategies
-    # (bot/app/access-key token) and the credential issuer/registrar share one
-    # initialised, seeded DataSourcePlugin.
-    build_database(plugins.database())
+    # Initialise the DI-selected database plugin so DB-backed auth strategies
+    # and credential issuer/registrar share one ready DataSourcePlugin.
+    initialize_database(
+        plugins.database(),
+        DatabaseConfig(
+            plugin_type=container.config.plugins.database.plugin_database(),
+            db_url=container.config.plugins.database.database_url(),
+        ),
+    )
 
     container.authenticator.override(
         providers.Singleton(
             build_authenticator,
-            db=plugins.providers["database"],
+            strategies=plugins.providers["authn_strategies"],
+            user_config=container.user_config,
         )
     )
 

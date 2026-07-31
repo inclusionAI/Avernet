@@ -86,14 +86,15 @@ class BotFacts:
 class SocketInfo:
     """One WebSocket a caller may open against a bot.
 
-    ``url`` is complete and opaque — the caller opens it verbatim. Nothing here
-    exposes the proxypass target, the connection type, or a bare token; that
-    hand-off is exactly what the public surface replaces.
+    ``url`` is complete and opaque — the caller opens it verbatim, appending
+    nothing and rebuilding nothing. It is also the *only* field: the credential
+    travels inside it, because a browser's WebSocket handshake can carry one
+    nowhere else, and publishing it a second time alongside would leave a caller
+    guessing which one the socket honours.
     """
 
     kind: str
     url: str
-    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -104,9 +105,15 @@ class ConnectionResult:
     generates a real typed enum on ``SocketInfo.kind`` in every client
     generator; an enum-keyed object degrades to an untyped map in most.
 
-    ``expires_at`` is an ISO 8601 UTC instant. Mandatory: without it a caller
-    cannot tell a stale connection from a broken one, and would retry the socket
-    instead of re-fetching the credential.
+    ``expires_at`` is an ISO 8601 UTC instant bounding when a socket here can be
+    *opened*, not how long one stays open. The credential is checked once, at
+    the handshake, so a socket already open outlives it. A caller re-fetches
+    before connecting or reconnecting; a caller that polls on a timer to keep a
+    live socket alive has misread it.
+
+    Mandatory: without it a caller cannot tell a credential that has aged out
+    from a device that is refusing, and would retry the socket instead of
+    re-fetching.
     """
 
     engine: str

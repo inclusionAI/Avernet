@@ -160,6 +160,10 @@
       "base_url": "",
       "base_url_pre": ""
     },
+    "gateway": {
+      "base_url": "",
+      "base_url_pre": ""
+    },
     "kb": {
       "base_url": "",
       "function_name": "",
