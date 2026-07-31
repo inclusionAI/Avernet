@@ -65,7 +65,7 @@ def test_schema_source_parsed() -> None:
 
 def test_shipped_config_loads() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
-    dm = DomainMap.from_config(raw["upstreams"], variables=_VARS)
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
     assert dm.domain_for("/openapi/v1/bots") is not None
 
 
@@ -164,3 +164,37 @@ def test_from_config_missing_variable_raises() -> None:
             },
             variables={"baas_server_url": "http://baas:9090"},
         )
+
+
+def test_from_yaml_loads_upstreams(tmp_path) -> None:
+    cfg = tmp_path / "application.yaml"
+    cfg.write_text(
+        "user_config:\n"
+        "  upstreams:\n"
+        "    base_path: /openapi/v1\n"
+        "    domains:\n"
+        "      bots:\n"
+        "        server: backend\n"
+        "        schema:\n"
+        "          source: file\n"
+        "          path: schemas/bots.openapi.json\n"
+        "    servers:\n"
+        "      backend:\n"
+        "        base_url: http://backend:8080\n"
+    )
+    dm = DomainMap.from_yaml(cfg, variables={})
+    assert dm.resolve("/openapi/v1/bots/123") is not None
+
+
+def test_from_yaml_non_dict_root_uses_empty(tmp_path) -> None:
+    cfg = tmp_path / "application.yaml"
+    cfg.write_text("- just a list")
+    dm = DomainMap.from_yaml(cfg, variables={})
+    assert dm.resolve("/openapi/v1/bots/123") is None
+
+
+def test_from_yaml_user_config_not_dict_uses_empty(tmp_path) -> None:
+    cfg = tmp_path / "application.yaml"
+    cfg.write_text("user_config: not-a-dict\n")
+    dm = DomainMap.from_yaml(cfg, variables={})
+    assert dm.resolve("/openapi/v1/bots/123") is None

@@ -11,7 +11,6 @@ from ._models import (
     Config,
     LogConfig,
     ModuleConfig,
-    PluginConfig,
     UserConfig,
     WebConfig,
 )
@@ -49,8 +48,20 @@ def _load_yaml(path: Path | None) -> dict:
     return data
 
 
+def _explicit_config_path() -> str:
+    """Return the explicit config path, preferring the gateway env var.
+
+    ``GATEWAY_CONFIG_PATH`` is the public gateway contract. ``SOFAPY_CONFIG_PATH``
+    is accepted as a compatibility alias for deployments that still set it.
+    """
+    return (
+        os.getenv("GATEWAY_CONFIG_PATH", "").strip()
+        or os.getenv("SOFAPY_CONFIG_PATH", "").strip()
+    )
+
+
 def _resolve_base_path() -> Path | None:
-    explicit = os.getenv("GATEWAY_CONFIG_PATH", "").strip()
+    explicit = _explicit_config_path()
     if explicit:
         p = Path(explicit)
         if p.is_dir():
@@ -64,7 +75,7 @@ def _resolve_base_path() -> Path | None:
 
 
 def _resolve_overlay_path(env: str) -> Path | None:
-    explicit = os.getenv("GATEWAY_CONFIG_PATH", "").strip()
+    explicit = _explicit_config_path()
     if explicit:
         d = Path(explicit)
         if d.is_dir():
@@ -101,10 +112,9 @@ def _parse_config(raw: dict, *, config_dir: Path | None = None) -> Config:
         log_dir=log_raw.get("log_dir", ""),
     )
     user_raw = raw.get("user_config") or {}
-    plugins_raw = user_raw.pop("plugins", {}) if isinstance(user_raw, dict) else {}
-    user_raw = user_raw if isinstance(user_raw, dict) else {}
-    plugin_config = PluginConfig.model_validate(plugins_raw)
-    user_config = UserConfig(plugins=plugin_config, **user_raw)
+    user_config = UserConfig.model_validate(
+        user_raw if isinstance(user_raw, dict) else {}
+    )
     return Config(
         app_name=raw.get("app_name", "gateway"),
         enable_sidecar=bool(raw.get("enable_sidecar", False)),

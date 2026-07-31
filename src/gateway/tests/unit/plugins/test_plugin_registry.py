@@ -11,6 +11,7 @@ import gateway.community.plugin_registry as registry_mod
 from gateway.community.plugin_registry import (
     has_enterprise_plugins,
     register_plugin_option,
+    register_plugin_option_provider,
 )
 
 
@@ -18,8 +19,12 @@ from gateway.community.plugin_registry import (
 def _reset_registry() -> None:
     """Clear the global registry before and after each test."""
     registry_mod._extra_options.clear()
+    registry_mod._plugin_option_providers.clear()
+    registry_mod._authn_strategy_providers.clear()
     yield
     registry_mod._extra_options.clear()
+    registry_mod._plugin_option_providers.clear()
+    registry_mod._authn_strategy_providers.clear()
 
 
 class TestRegisterPluginOption:
@@ -73,61 +78,140 @@ class TestRegisterPluginOption:
         assert call_count == 1
 
 
+class TestRegisterPluginOptionProvider:
+    def test_register_provider_factory(self) -> None:
+        def provider_factory(_root):
+            return object()
+
+        register_plugin_option_provider("cache_plugin", "sofa", provider_factory)
+
+        assert has_enterprise_plugins() is True
+        assert (
+            registry_mod._plugin_option_providers["cache_plugin"]["sofa"]
+            is provider_factory
+        )
+
+    def test_inject_provider_factory_receives_root_container(self) -> None:
+        from dependency_injector import providers
+
+        from gateway.community.bootstrap._configs import init_container_config
+        from gateway.community.bootstrap._container import ApplicationContainer
+        from gateway.community.plugin_registry import inject_into_plugin_container
+
+        seen = []
+
+        def provider_factory(root):
+            seen.append(root)
+            return providers.Object("configured-cache")
+
+        register_plugin_option_provider("cache_plugin", "configured", provider_factory)
+        container = ApplicationContainer()
+        init_container_config(container)
+        container.config.plugins.cache.override("configured")
+
+        inject_into_plugin_container(container)
+
+        assert seen == [container]
+        assert container.plugins().cache_plugin() == "configured-cache"
+
+    def test_inject_provider_skips_unknown_selector(self) -> None:
+        from dependency_injector import providers
+
+        from gateway.community.bootstrap._configs import init_container_config
+        from gateway.community.bootstrap._container import ApplicationContainer
+        from gateway.community.plugin_registry import inject_into_plugin_container
+
+        register_plugin_option_provider(
+            "nonexistent_selector", "sofa", lambda _root: providers.Object("x")
+        )
+        container = ApplicationContainer()
+        init_container_config(container)
+
+        # Should not raise
+        inject_into_plugin_container(container)
+
+    def test_inject_provider_skips_existing_option_name(self) -> None:
+        from dependency_injector import providers
+
+        from gateway.community.bootstrap._configs import init_container_config
+        from gateway.community.bootstrap._container import ApplicationContainer
+        from gateway.community.plugin_registry import inject_into_plugin_container
+
+        call_count = 0
+
+        def provider_factory(_root):
+            nonlocal call_count
+            call_count += 1
+            return providers.Object("should-not-be-used")
+
+        # "stub" already exists on cache_plugin selector
+        register_plugin_option_provider("cache_plugin", "stub", provider_factory)
+        container = ApplicationContainer()
+        init_container_config(container)
+
+        inject_into_plugin_container(container)
+
+        # factory not called because "stub" already exists
+        assert call_count == 0
+
+
 class TestRegisterExtraAuthnStrategy:
     def test_register_and_inject(self) -> None:
-        import gateway.community.bootstrap.plugins._registry as reg_mod
+        from dependency_injector import providers
 
-        reg_mod._authn_registry = None  # reset singleton
+        from gateway.community.bootstrap._configs import init_container_config
+        from gateway.community.bootstrap._container import ApplicationContainer
+        from gateway.community.plugin_registry import (
+            inject_into_plugin_container,
+            register_authn_strategy_provider,
+        )
 
         result_obj = object()
 
-        def factory() -> object:
-            return result_obj
-
-        from gateway.community.plugin_registry import (
-            inject_extra_authn_strategies,
-            register_extra_authn_strategy,
+        register_authn_strategy_provider(
+            "agentpass", lambda _plugins: providers.Object(result_obj)
         )
+        assert "agentpass" in registry_mod._authn_strategy_providers
 
-        register_extra_authn_strategy("agentpass", factory)
-        # Factory should not be called on register
-        assert "authn_strategies" in registry_mod._extra_options
+        container = ApplicationContainer()
+        init_container_config(container)
+        inject_into_plugin_container(container)
 
-        # Inject should call factory and register into AuthnStrategyRegistry
-        inject_extra_authn_strategies()
-        pool = reg_mod.get_authn_registry().resolve_all()
+        pool = container.plugins().authn_strategies()
         assert pool["agentpass"] is result_obj
 
     def test_inject_idempotent(self) -> None:
-        import gateway.community.bootstrap.plugins._registry as reg_mod
+        from dependency_injector import providers
 
-        reg_mod._authn_registry = None
-
+        from gateway.community.bootstrap._configs import init_container_config
+        from gateway.community.bootstrap._container import ApplicationContainer
         from gateway.community.plugin_registry import (
-            inject_extra_authn_strategies,
-            register_extra_authn_strategy,
+            inject_into_plugin_container,
+            register_authn_strategy_provider,
         )
 
-        register_extra_authn_strategy("x", lambda: "result")
-        inject_extra_authn_strategies()
-        pool_before = reg_mod.get_authn_registry().resolve_all()
+        register_authn_strategy_provider(
+            "x", lambda _plugins: providers.Object("result")
+        )
+        container = ApplicationContainer()
+        init_container_config(container)
 
-        # Second inject: _extra_options is already popped, should be no-op
-        inject_extra_authn_strategies()
-        pool_after = reg_mod.get_authn_registry().resolve_all()
+        inject_into_plugin_container(container)
+        keys_before = set(container.plugins().authn_strategies().keys())
+        inject_into_plugin_container(container)
+        keys_after = set(container.plugins().authn_strategies().keys())
 
-        # Both resolve the same factory, but factories produce different
-        # instances each call. Check keys match instead.
-        assert set(pool_before) == set(pool_after) == {"x"}
+        assert keys_before == keys_after
+        assert "x" in keys_after
 
     def test_inject_with_no_strategies_is_safe(self) -> None:
-        import gateway.community.bootstrap.plugins._registry as reg_mod
+        from gateway.community.bootstrap._configs import init_container_config
+        from gateway.community.bootstrap._container import ApplicationContainer
+        from gateway.community.plugin_registry import inject_into_plugin_container
 
-        reg_mod._authn_registry = None
+        container = ApplicationContainer()
+        init_container_config(container)
 
-        from gateway.community.plugin_registry import inject_extra_authn_strategies
-
-        # No strategies registered — should not raise
-        inject_extra_authn_strategies()
-        pool = reg_mod.get_authn_registry().resolve_all()
-        assert pool == {}
+        inject_into_plugin_container(container)
+        pool = container.plugins().authn_strategies()
+        assert "google" in pool

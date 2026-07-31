@@ -14,7 +14,7 @@ _CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
 
 def test_shipped_config_loads_and_requires_user() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
-    rs = RouteSecurity.from_table(raw["route_security"])
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
     req = rs.resolve("GET", "/openapi/v1/bots/abc")
     assert req is not None
     assert req[PrincipalType.USER] is Presence.REQUIRED
@@ -62,3 +62,33 @@ def test_param_segment_matches_one_segment() -> None:
 def test_unmatched_route_is_fail_closed() -> None:
     rs = RouteSecurity.from_table({"/openapi/v1/bots/**": {"user": "required"}})
     assert rs.resolve("GET", "/openapi/v1/channels") is None
+
+
+def test_from_yaml_loads_route_security(tmp_path) -> None:
+    cfg = tmp_path / "application.yaml"
+    cfg.write_text("user_config:\n  route_security:\n    /**:\n      user: required\n")
+    rs = RouteSecurity.from_yaml(cfg)
+    req = rs.resolve("GET", "/anything")
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.REQUIRED
+
+
+def test_from_yaml_empty_file_uses_empty_table(tmp_path) -> None:
+    cfg = tmp_path / "application.yaml"
+    cfg.write_text("")
+    rs = RouteSecurity.from_yaml(cfg)
+    assert rs.resolve("GET", "/anything") is None
+
+
+def test_from_yaml_non_dict_root_uses_empty_table(tmp_path) -> None:
+    cfg = tmp_path / "application.yaml"
+    cfg.write_text("- just a list")
+    rs = RouteSecurity.from_yaml(cfg)
+    assert rs.resolve("GET", "/anything") is None
+
+
+def test_from_yaml_user_config_not_dict_uses_empty_table(tmp_path) -> None:
+    cfg = tmp_path / "application.yaml"
+    cfg.write_text("user_config: not-a-dict\n")
+    rs = RouteSecurity.from_yaml(cfg)
+    assert rs.resolve("GET", "/anything") is None

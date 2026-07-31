@@ -2,8 +2,9 @@
 
 The gateway routes by **domain**: the leading path segment after the version
 base (e.g. ``bots`` in ``/openapi/v1/bots/...``) selects the target server. The
-map is loaded from the ``upstreams`` section in ``application.yaml``; a request whose leading segment matches no
-configured domain resolves to ``None`` (the caller denies — never an open proxy).
+map is loaded from the ``user_config.upstreams`` section in
+``application.yaml``; a request whose leading segment matches no configured
+domain resolves to ``None`` (the caller denies — never an open proxy).
 
 No web framework here (Rule 7): this is pure resolution logic.
 """
@@ -65,6 +66,8 @@ class DomainMap:
         raw = yaml.safe_load(Path(path).read_text()) or {}
         if not isinstance(raw, dict):
             raw = {}
+        user_config = raw.get("user_config", {})
+        raw = user_config.get("upstreams", {}) if isinstance(user_config, dict) else {}
         return cls.from_config(raw, variables=variables)
 
     @classmethod
@@ -105,7 +108,7 @@ def _parse_servers(raw: dict[str, Any], variables: dict[str, str]) -> dict[str, 
             raise ValueError(
                 f"upstream server {name!r}: base_url {raw_base_url!r} resolved to "
                 f"empty — add '{_var_name(raw_base_url)}' to application.yaml "
-                f"user_config.upstreams"
+                f"user_config.upstream_vars"
             )
         servers[name] = Server(name=name, base_url=base_url)
     return servers

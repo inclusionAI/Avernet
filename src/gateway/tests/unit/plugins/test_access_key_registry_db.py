@@ -6,7 +6,8 @@ from datetime import datetime
 
 import pytest
 
-from gateway.community.bootstrap._authn import build_database
+from gateway.community.bootstrap import initialize_database
+from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.access_key import AccessKeyRepository
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.access_key import RegisteredAccessKey
@@ -14,7 +15,7 @@ from gateway.community.spi.access_key import RegisteredAccessKey
 
 def _make_db():
     db = SqliteDatabasePlugin()
-    return build_database(db)
+    return initialize_database(db, DatabaseConfig(plugin_type="SQLITE_ORM", db_url=""))
 
 
 @pytest.fixture(scope="module")
