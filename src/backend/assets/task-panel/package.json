@@ -1,0 +1,28 @@
+{
+  "name": "task-panel-asset",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source task execution workflow side-panel component, bundled as a UMD asset. Consumes TaskGraphView from GET /api/tasks/{task_id}/graph. Render format mirrors bcsPanel.StateMachineRunView.",
+  "type": "module",
+  "main": "dist/index.umd.js",
+  "files": [
+    "dist/index.umd.js",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^8.1.0"
+  },
+  "repository": "https://code.alipay.com/mirrors/Avernet.git"
+}

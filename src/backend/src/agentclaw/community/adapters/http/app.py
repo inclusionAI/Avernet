@@ -590,3 +590,22 @@ for _r in injector.get(OptionalRouters).routers:
 # adapters/http/openapi_v1). Handlers are stubs until the implementation lands.
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router  # noqa: E402
 app.include_router(build_public_router())
+
+# 4. Static assets — serve open-source side-panel UMD bundles (and other
+# backend-owned assets) so the frontend can load them via the generic UmdPanel
+# without any frontend-code change. The task-recognition skill emits an
+# ``<AixUI type="panel" component="taskPanel.TaskWorkflowView" cdn=".../assets/..."
+# entry="TaskWorkflowView" .../>`` tag; the SDK routes the cdn URL here.
+# Guarded so a checkout without the built dist (or without the assets dir) does
+# not crash boot — the panel simply 404s until ``npm run build`` lands dist/.
+from pathlib import Path as _AssetsPath  # noqa: E402
+
+_assets_root = _AssetsPath(__file__).resolve().parents[5] / "assets"
+if _assets_root.is_dir():
+    from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_assets_root), check_dir=False),
+        name="backend-assets",
+    )
