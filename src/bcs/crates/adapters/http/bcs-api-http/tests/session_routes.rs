@@ -687,6 +687,33 @@ async fn list_session_messages_passes_opaque_before_cursor_through() {
 }
 
 #[tokio::test]
+async fn list_session_messages_passes_view_bot_id_through() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session, message.clone());
+
+    // The optional `view_bot_id` query param must be forwarded verbatim to the
+    // `ListSessionMessages` command field; the route layer must not interpret
+    // or strip it (the V1 facade owns the Principal-based authz resolution).
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/sessions/session-1/messages?limit=50&view_bot_id=bot-xyz",
+            Value::Null,
+        ))
+        .await
+        .expect("list messages response");
+    assert_eq!(response.status(), StatusCode::OK);
+    {
+        let listed = message.listed.lock().expect("list messages lock");
+        let listed = listed.as_ref().expect("list messages command");
+        assert_eq!(listed.session_id, "session-1");
+        assert_eq!(listed.limit, 50);
+        assert_eq!(listed.view_bot_id.as_deref(), Some("bot-xyz"));
+    }
+}
+
+#[tokio::test]
 async fn list_session_messages_surfaces_next_cursor_when_has_more() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());

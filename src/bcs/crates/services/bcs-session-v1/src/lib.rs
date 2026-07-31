@@ -865,12 +865,44 @@ impl SessionMessageService for SessionServiceImpl {
         // the spec §5.2 new-participant `visible_from_seq` cutoff. The V1 facade
         // no longer reimplements these predicates.
         let group = self.load_group(&session.group_id).await?;
-        let view_bot_id = query.principal.bot_uuid();
+        // view_bot_id authz (design §8.7 visibility scoping): the optional
+        // `view_bot_id` query param is resolved to the `Option<&str>` cutoff
+        // identity passed into the legacy helper.
+        // - Bot Principal: omit → auto-derive self; explicit → must equal self.
+        // - Human Principal: omit → None (manager god-view, no cutoff);
+        //   `"human_<self>"` → own participant cutoff; any other Bot UUID →
+        //   ownership verified via `is_owned_bot` (`created_by` or creator
+        //   relation edge), else forbidden. Reuses the same Human→Bot ownership
+        //   path as `update_participant`/`delete_participant` (VYQHN).
+        let view_bot_id: Option<String> = match &query.principal {
+            Principal::Bot(bot) => match &query.view_bot_id {
+                None => Some(bot.bot_uuid.clone()),
+                Some(explicit) if explicit == &bot.bot_uuid => Some(bot.bot_uuid.clone()),
+                Some(_) => {
+                    return Err(ApplicationError::forbidden(
+                        "Bot Principal may only view as self",
+                    ));
+                }
+            },
+            Principal::Human(human) => match &query.view_bot_id {
+                None => None,
+                Some(vid) if vid == &format!("human_{}", human.subject.id) => Some(vid.clone()),
+                Some(vid) => {
+                    let owned = self.is_owned_bot(human, vid.as_str()).await?;
+                    if !owned {
+                        return Err(ApplicationError::forbidden(
+                            "Human Principal may only view as self or an owned Bot",
+                        ));
+                    }
+                    Some(vid.clone())
+                }
+            },
+        };
         let (owner_filter, visible_from_seq) =
             MessageService::compute_session_history_query(
                 &group,
                 &session,
-                view_bot_id,
+                view_bot_id.as_deref(),
                 NEW_PARTICIPANT_VISIBLE_LIMIT as u64,
             )
             .map_err(map_group_use_case_error)?;

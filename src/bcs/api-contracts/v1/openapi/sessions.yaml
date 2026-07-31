@@ -408,6 +408,16 @@ SessionMessagesPath:
           minimum: 1
           maximum: 100
           default: 50
+      - name: view_bot_id
+        in: query
+        description: >-
+          Optional viewer identity for message history visibility scoping.
+          Bot callers: omit (defaults to self) or pass self bot_uuid.
+          Human callers: omit for full manager-view; pass "human_<staff_no>"
+          for own participant cutoff; or pass an owned Bot's UUID for that
+          Bot's perspective (ownership verified server-side).
+        schema:
+          type: string
     responses:
       "200":
         description: >-

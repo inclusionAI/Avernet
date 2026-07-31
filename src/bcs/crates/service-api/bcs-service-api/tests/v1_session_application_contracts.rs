@@ -234,6 +234,7 @@ fn human_principal_can_be_carried_in_session_command() {
         session_id: "s1".into(),
         before: None,
         limit: 10,
+        view_bot_id: None,
     };
     assert_eq!(command.principal.actor_id(), "human_staff-1");
     assert_eq!(command.session_id, "s1");

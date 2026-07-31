@@ -88,14 +88,55 @@ impl Fixture {
     }
 
     async fn store_group(&self, group_id: &str, driver: &str, context: Option<&str>) {
+        self.store_group_with_originator(group_id, driver, driver, context)
+            .await;
+    }
+
+    /// Like `store_group` but lets the caller name a distinct group
+    /// `originator` — used by the Human-view authz tests where the Human must
+    /// be a group manager (originator) to pass `can_read_session` before the
+    /// `view_bot_id` authz runs.
+    async fn store_group_with_originator(
+        &self,
+        group_id: &str,
+        driver: &str,
+        originator: &str,
+        context: Option<&str>,
+    ) {
         let mut group = Group::new(
             group_id,
             driver,
             vec![Participant::bot(driver, ParticipantRole::Driver)],
         );
-        group.originator = Some(driver.to_string());
+        group.originator = Some(originator.to_string());
         group.label = Some(group_id.to_string());
         group.group_strategy = GroupStrategy::Chat;
+        group.context = context.map(str::to_string);
+        self.groups.upsert(group).await.expect("store group");
+    }
+
+    /// Store a ManagerWorker group whose `originator` is the given actor id
+    /// and whose roster seeds the driver (Driver) plus each worker (Worker).
+    /// Used by the view_bot_id authz tests: the ManagerWorker owner-filter
+    /// scoping (`IsNull` public vs `Eq(worker)`) is deterministic in the memory
+    /// fixture, unlike the Chat `visible_from_seq` cutoff which needs a
+    /// `current_msg_seq` bump only the MySQL store performs.
+    async fn store_manager_worker_group_with_originator(
+        &self,
+        group_id: &str,
+        driver: &str,
+        workers: &[&str],
+        originator: &str,
+        context: Option<&str>,
+    ) {
+        let mut participants = vec![Participant::bot(driver, ParticipantRole::Driver)];
+        for &worker in workers {
+            participants.push(Participant::bot(worker, ParticipantRole::Worker));
+        }
+        let mut group = Group::new(group_id, driver, participants);
+        group.originator = Some(originator.to_string());
+        group.label = Some(group_id.to_string());
+        group.group_strategy = GroupStrategy::ManagerWorker;
         group.context = context.map(str::to_string);
         self.groups.upsert(group).await.expect("store group");
     }
@@ -150,6 +191,29 @@ async fn create_session(
         })
         .await
         .expect("create session")
+}
+
+/// Append a single message owned by `owner` (Some = worker-private, None =
+/// public) into `session_id`. `created_at` is passed through so multi-message
+/// DESC ordering is deterministic; the repo assigns `session_seq` in append
+/// order (1, 2, 3, ...).
+async fn seed_message(fixture: &Fixture, session_id: &str, owner: Option<&str>, created_at: u64) {
+    fixture
+        .message_repo
+        .append_message(NewMessage {
+            group_id: "g1".into(),
+            session_id: session_id.to_string(),
+            sender_id: "driver".into(),
+            sender_type: SenderType::Bot,
+            message_type: "text".into(),
+            content: serde_json::Value::String(format!("msg-{created_at}")),
+            client_msg_id: None,
+            owner_bot_id: owner.map(str::to_string),
+            created_at,
+            run_id: String::new(),
+        })
+        .await
+        .expect("append message");
 }
 
 #[tokio::test]
@@ -577,6 +641,7 @@ async fn list_messages_returns_descending_with_cursor() {
             session_id: session_id.clone(),
             before: None,
             limit: 50,
+            view_bot_id: None,
         },
     )
     .await
@@ -651,6 +716,7 @@ async fn list_messages_composite_cursor_no_skip_tied_created_at() {
             session_id: session_id.clone(),
             before: None,
             limit: 2,
+            view_bot_id: None,
         },
     )
     .await
@@ -670,6 +736,7 @@ async fn list_messages_composite_cursor_no_skip_tied_created_at() {
             session_id: session_id.clone(),
             before: page.next_cursor,
             limit: 2,
+            view_bot_id: None,
         },
     )
     .await
@@ -689,6 +756,7 @@ async fn list_messages_composite_cursor_no_skip_tied_created_at() {
             session_id,
             before: page.next_cursor,
             limit: 2,
+            view_bot_id: None,
         },
     )
     .await
@@ -726,6 +794,7 @@ async fn list_messages_rejects_malformed_before_cursor() {
             session_id: outcome.session.session_id.clone(),
             before: Some("not-a-cursor".to_string()),
             limit: 10,
+            view_bot_id: None,
         },
     )
     .await
@@ -1206,4 +1275,314 @@ async fn create_session_duplicate_participant_rejected() {
     .await
     .expect("list sessions");
     assert_eq!(page.total, 0, "no session should be persisted on rejection");
+}
+
+// ── view_bot_id authz (Principal-based visibility scoping) ──────────────
+//
+// The optional `view_bot_id` query param on `list_session_messages` is
+// resolved by the V1 facade into the `Option<&str>` cutoff identity passed
+// to the legacy `compute_session_history_query` helper. Authz rules:
+// - Bot Principal: omit → self; explicit → must equal self; else forbidden.
+// - Human Principal (must be a group manager/originator to read the session):
+//   omit → None (manager view); `"human_<self>"` → own view; any other Bot
+//   UUID → ownership verified via `is_owned_bot` (`created_by` or creator
+//   relation edge), else forbidden.
+//
+// These tests use a ManagerWorker group + owner-tagged messages so the
+// `MessageOwnerFilter` scoping (`IsNull` public vs `Eq(worker)`) is the
+// observable signal that the right `view_bot_id` was resolved. The Chat
+// `visible_from_seq` cutoff is NOT observable in the memory fixture: the
+// MemoryMessageRepo never bumps `session.current_msg_seq` (only the MySQL
+// store does), so `compute_visible_from_seq` always returns `None` here.
+
+/// Build the ManagerWorker session used by every view_bot_id authz test: a
+/// Chat-kind session seeded with three owner-tagged messages — public at
+/// seq 1, worker-a's at seq 2, worker-b's at seq 3. Callers must first store
+/// the group (ManagerWorker, with worker-a / worker-b as Worker participants)
+/// and register the bots.
+async fn setup_manager_worker_session(fixture: &Fixture) -> String {
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("worker-a", ParticipantRole::Worker),
+                    Participant::bot("worker-b", ParticipantRole::Worker),
+                ],
+                group_version: Some(group.version),
+                caller_id: Some("driver".to_string()),
+                caller_principal: Some("driver".to_string()),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed manager-worker session");
+    let session_id = session.id.clone();
+    seed_message(fixture, &session_id, None, 10).await;
+    seed_message(fixture, &session_id, Some("worker-a"), 20).await;
+    seed_message(fixture, &session_id, Some("worker-b"), 30).await;
+    session_id
+}
+
+#[tokio::test]
+async fn bot_view_session_messages_defaults_to_self() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a", "worker-b"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a", "worker-b"],
+            "driver",
+            None,
+        )
+        .await;
+    let session_id = setup_manager_worker_session(&fixture).await;
+
+    let page = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: bot_principal("worker-a"),
+            session_id: session_id.clone(),
+            before: None,
+            limit: 100,
+            view_bot_id: None,
+        },
+    )
+    .await
+    .expect("list messages");
+
+    // Omitted view_bot_id auto-derives self ("worker-a"); as a Worker this
+    // resolves to owner_filter=Eq("worker-a") → only worker-a's message.
+    assert_eq!(page.messages.len(), 1);
+    assert!(!page.has_more);
+    assert_eq!(page.messages[0].session_seq, 2);
+}
+
+#[tokio::test]
+async fn bot_view_session_messages_explicitly_self() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a", "worker-b"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a", "worker-b"],
+            "driver",
+            None,
+        )
+        .await;
+    let session_id = setup_manager_worker_session(&fixture).await;
+
+    let page = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: bot_principal("worker-a"),
+            session_id: session_id.clone(),
+            before: None,
+            limit: 100,
+            view_bot_id: Some("worker-a".to_string()),
+        },
+    )
+    .await
+    .expect("list messages");
+
+    // Explicit self == omitted self: same Eq("worker-a") scoping.
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(page.messages[0].session_seq, 2);
+}
+
+#[tokio::test]
+async fn bot_view_session_messages_as_other_bot_forbidden() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a", "worker-b"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a", "worker-b"],
+            "driver",
+            None,
+        )
+        .await;
+    let session_id = setup_manager_worker_session(&fixture).await;
+
+    let error = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: bot_principal("worker-a"),
+            session_id,
+            before: None,
+            limit: 100,
+            view_bot_id: Some("worker-b".to_string()),
+        },
+    )
+    .await
+    .expect_err("bot impersonating another bot should be forbidden");
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+}
+
+#[tokio::test]
+async fn human_view_session_messages_god_view_no_cutoff() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a", "worker-b"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a", "worker-b"],
+            "human_staff-1",
+            None,
+        )
+        .await;
+    let session_id = setup_manager_worker_session(&fixture).await;
+
+    let page = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: human_principal("staff-1"),
+            session_id: session_id.clone(),
+            before: None,
+            limit: 100,
+            view_bot_id: None,
+        },
+    )
+    .await
+    .expect("list messages");
+
+    // Omitted → None → manager god-view: ManagerWorker Public (IsNull) →
+    // only the public message (worker-private messages are hidden from the
+    // unscoped manager view, distinct from the worker-a bot view above).
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(page.messages[0].session_seq, 1);
+}
+
+#[tokio::test]
+async fn human_view_session_messages_as_self_human() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a", "worker-b"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a", "worker-b"],
+            "human_staff-1",
+            None,
+        )
+        .await;
+    let session_id = setup_manager_worker_session(&fixture).await;
+
+    let page = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: human_principal("staff-1"),
+            session_id: session_id.clone(),
+            before: None,
+            limit: 100,
+            view_bot_id: Some("human_staff-1".to_string()),
+        },
+    )
+    .await
+    .expect("list messages");
+
+    // `"human_<self>"` → resolved Some; `manager_worker_history_view`
+    // special-cases the `human_` prefix to Public → IsNull → public message.
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(page.messages[0].session_seq, 1);
+}
+
+#[tokio::test]
+async fn human_view_session_messages_as_owned_bot() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a", "worker-b"] {
+        fixture.add_bot(bot).await;
+    }
+    // worker-a is owned by Human staff-1 via created_by.
+    fixture
+        .bots
+        .save_created_by("worker-a", "staff-1", true)
+        .await
+        .expect("save owner");
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a", "worker-b"],
+            "human_staff-1",
+            None,
+        )
+        .await;
+    let session_id = setup_manager_worker_session(&fixture).await;
+
+    let page = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: human_principal("staff-1"),
+            session_id: session_id.clone(),
+            before: None,
+            limit: 100,
+            view_bot_id: Some("worker-a".to_string()),
+        },
+    )
+    .await
+    .expect("human views as owned bot");
+
+    // Ownership verified → Some("worker-a"); worker-a is a Worker →
+    // owner_filter=Eq("worker-a") → worker-a's message.
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(page.messages[0].session_seq, 2);
+}
+
+#[tokio::test]
+async fn human_view_session_messages_as_unowned_bot_forbidden() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a", "worker-b"] {
+        fixture.add_bot(bot).await;
+    }
+    // worker-b is registered but NOT owned by staff-1 (created_by stays None).
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a", "worker-b"],
+            "human_staff-1",
+            None,
+        )
+        .await;
+    let session_id = setup_manager_worker_session(&fixture).await;
+
+    let error = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: human_principal("staff-1"),
+            session_id,
+            before: None,
+            limit: 100,
+            view_bot_id: Some("worker-b".to_string()),
+        },
+    )
+    .await
+    .expect_err("human viewing as unowned bot should be forbidden");
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
 }

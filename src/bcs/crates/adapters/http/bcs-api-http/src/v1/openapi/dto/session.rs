@@ -121,4 +121,8 @@ pub struct ListSessionMessagesQuery {
     pub before: Option<String>,
     #[serde(default = "default_messages_limit")]
     pub limit: u64,
+    /// Optional viewer identity for message history visibility scoping. The
+    /// V1 facade applies Principal-based authz; see `ListSessionMessages`.
+    #[serde(default)]
+    pub view_bot_id: Option<String>,
 }

@@ -43,6 +43,12 @@ pub struct ListSessionMessages {
     /// previous response's `next_cursor`.
     pub before: Option<String>,
     pub limit: u64,
+    /// Optional viewer identity for message history visibility scoping. The
+    /// V1 facade applies Principal-based authz: a Bot Principal may omit
+    /// (auto-derives self) or pass self; a Human Principal may omit (manager
+    /// god-view, no cutoff), pass `"human_<staff_no>"` for self cutoff, or
+    /// pass an owned Bot's UUID (ownership verified via `is_owned_bot`).
+    pub view_bot_id: Option<String>,
 }
 
 /// Cursor-based session message history page returned by the V1

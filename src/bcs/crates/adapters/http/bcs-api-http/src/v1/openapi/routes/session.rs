@@ -203,6 +203,7 @@ async fn list_session_messages(
             session_id,
             before: query.before,
             limit: query.limit,
+            view_bot_id: query.view_bot_id,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
