@@ -103,6 +103,23 @@ class GatewayConfig:
 
 
 @dataclass(frozen=True)
+class GatewayEndpoint:
+    """The gateway origin selected for the environment this process runs in.
+
+    :class:`GatewayConfig` holds both hosts; this holds the one that applies.
+    Separate because the choice is environment-driven wiring, which belongs to
+    the composition root — a core service reading ``SERVER_ENV`` for itself
+    would put deployment selection inside domain logic (``AGENTS.md``: raw
+    environment access belongs in configuration loading, bootstrap, composition
+    roots, or tests).
+
+    Empty when this deployment fronts no gateway.
+    """
+
+    base_url: str = ""
+
+
+@dataclass(frozen=True)
 class KbConfig:
     """Internal knowledge-base config for the D-TOOLS-002 diagnostic (the ``kb``
     user_config block).

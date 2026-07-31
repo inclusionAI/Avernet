@@ -19,7 +19,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineUpstreamError,
 )
-from agentclaw.community.di.config import GatewayConfig
+from agentclaw.community.di.config import GatewayEndpoint
 
 OWNER = "owner-1"
 BOT = "bot-1"
@@ -27,9 +27,10 @@ BOT = "bot-1"
 
 @pytest.fixture(autouse=True)
 def _pinned_env(monkeypatch):
-    """Most tests here use a gateway with no ``base_url_pre``, so an ambient
-    ``SERVER_ENV=pre`` on the runner would select an empty host and fail them.
-    Pinned rather than assumed; the two env-selection tests set it themselves."""
+    """This service no longer reads the environment — the composition root hands
+    it an already-resolved endpoint — but the device and bot stubs below reach
+    code that still does. Pinned so a runner with ``SERVER_ENV`` set cannot make
+    these outcomes depend on where they ran."""
     monkeypatch.delenv("SERVER_ENV", raising=False)
     monkeypatch.delenv("REAL_SERVER_ENV", raising=False)
     monkeypatch.delenv("ALIPAY_APP_ENV", raising=False)
@@ -108,8 +109,12 @@ class _Devices:
         return self.info
 
 
-def _gateway(base="https://gw.example", base_pre=""):
-    return GatewayConfig(base_url=base, base_url_pre=base_pre)
+def _gateway(base="https://gw.example"):
+    """The endpoint the composition root resolved for this environment.
+
+    Which of the configured hosts that is, is decided in DI — see
+    ``test_config_module`` for the pre/prod selection itself."""
+    return GatewayEndpoint(base_url=base)
 
 
 class _CollaboratorRepo:
@@ -271,10 +276,16 @@ def test_a_gateway_base_already_spelled_as_a_socket_origin_is_kept():
     assert result.sockets[0].url.startswith("wss://gw.example/engine/")
 
 
-def test_the_scheme_rewrite_is_anchored_to_the_scheme():
-    """A substring rewrite would corrupt a base whose path repeats the scheme."""
-    result = _build(_svc(gateway=_gateway(base="https://gw.example/http://x")))
-    assert result.sockets[0].url.startswith("wss://gw.example/http://x/engine/")
+@pytest.mark.parametrize(
+    "base", ["https://gw.example/api", "https://gw.example/http://x"]
+)
+def test_a_gateway_base_carrying_a_path_is_refused(base):
+    """``/engine`` has to sit at the root — that is where the gateway's rewrite
+    is anchored. A base with a path would publish ``/api/engine/…``, which the
+    gateway does not route, so the socket would be unopenable rather than
+    named."""
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(gateway=_gateway(base=base)))
 
 
 def test_a_trailing_slash_and_stray_whitespace_are_normalised():
@@ -415,22 +426,13 @@ def test_the_target_segment_is_not_percent_encoded():
     assert "/engine/ARCA_ARCA-SANDBOX-abc@0:20003/api/openclaw/ws" in url
 
 
-def test_the_pre_gateway_is_used_on_pre(monkeypatch):
-    """pre and prod are separate hosts; collapsing them sends a pre credential
-    to the prod gateway."""
-    monkeypatch.setenv("SERVER_ENV", "pre")
-    gateway = _gateway(base="https://gw.example", base_pre="https://gw-pre.example")
-    assert _build(_svc(gateway=gateway)).sockets[0].url.startswith(
-        "wss://gw-pre.example/engine/"
-    )
-
-
-def test_the_prod_gateway_is_used_off_pre(monkeypatch):
-    monkeypatch.setenv("SERVER_ENV", "prod")
-    gateway = _gateway(base="https://gw.example", base_pre="https://gw-pre.example")
-    assert _build(_svc(gateway=gateway)).sockets[0].url.startswith(
-        "wss://gw.example/engine/"
-    )
+def test_a_local_ipv6_target_keeps_its_brackets():
+    """``[::1]:20003`` is an authority, not a path segment — percent-encoding the
+    brackets yields something no URL parser accepts. Singlebox reclassifies a
+    ``::1`` binding as local, so this branch really does see one."""
+    devices = _Devices(type="local", target="[::1]:20003")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url == "ws://[::1]:20003/api/openclaw/ws"
 
 
 @pytest.mark.parametrize(

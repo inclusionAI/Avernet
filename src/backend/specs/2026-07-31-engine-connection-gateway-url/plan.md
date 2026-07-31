@@ -136,17 +136,22 @@ Follows the established host-config pattern exactly; no new mechanism.
   ```
   Named `base_url` rather than `ws_base_url` to match the convention. It is
   stored as `https://…` and rewritten to `wss://` at use, which is exactly what
-  `_ws_base:312` does today.
+  `_ws_base:312` does today. It must be a **bare origin** — a path component
+  would push `/engine` off the root the gateway's rewrite is anchored at, so one
+  is refused rather than published.
 - `di/modules/config_module.py` — new provider reading `_block("gateway")` with
   the dataclass defaults, identical in shape to the `ecb` reader at `:322-327`.
-- `EngineConnectionService.__init__:120-133` — takes `gateway_config:
-  cfg.GatewayConfig` via the existing `@inject`. DI binds the service to itself
-  (`engine_runtime_module.py:33-35`), so no wiring change is needed.
-- Selection at use, matching `http_client_module.py:60`:
-  ```python
-  base = cfg.base_url_pre if get_current_env() == "pre" else cfg.base_url
-  ```
-  `get_current_env` from `agentclaw.community.utils.env_utils`.
+- **The pre/prod selection happens in DI, not in the service.** `di/config.py`
+  also defines `GatewayEndpoint(base_url)` — the one host that applies — and
+  `config_module.gateway_endpoint` resolves it from `GatewayConfig` using
+  `get_current_env()`, the same way `http_client_module.py:60` does. Selecting a
+  deployment is composition-root work, and `AGENTS.md:72-73` puts raw
+  environment access in configuration loading, bootstrap, composition roots or
+  tests — not in a core service.
+- `EngineConnectionService.__init__:120-133` — takes `gateway: GatewayEndpoint`
+  via the existing `@inject`, and reads no environment itself. DI binds the
+  service to itself (`engine_runtime_module.py:33-35`), so no wiring change is
+  needed.
 
 ### YAML values
 

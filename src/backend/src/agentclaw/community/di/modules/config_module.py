@@ -21,10 +21,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from injector import Module, provider, singleton
+from injector import Module, inject, provider, singleton
 
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 logger = get_logger()
@@ -329,13 +330,33 @@ class ConfigModule(Module):
     @singleton
     @provider
     def gateway(self) -> cfg.GatewayConfig:
-        """Public API gateway host (neutral empty; corp env overlays set the
+        """Public API gateway hosts (neutral empty; corp env overlays set the
         ``gateway`` yaml block)."""
         block = _block("gateway")
         defaults = cfg.GatewayConfig()
         return cfg.GatewayConfig(
             base_url=block.get("base_url", defaults.base_url),
             base_url_pre=block.get("base_url_pre", defaults.base_url_pre),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def gateway_endpoint(self, gateway: cfg.GatewayConfig) -> cfg.GatewayEndpoint:
+        """The gateway host for this environment, resolved here rather than by
+        the consumer — selecting a deployment is composition-root work, and it
+        keeps ``SERVER_ENV`` out of the core service (see ``GatewayEndpoint``).
+
+        Same pre/prod selection every other host pair in this build uses
+        (``http_client_module.py``); pre and prod are distinct gateways, so a
+        credential issued for one is not accepted by the other.
+        """
+        return cfg.GatewayEndpoint(
+            base_url=(
+                gateway.base_url_pre
+                if get_current_env() == "pre"
+                else gateway.base_url
+            )
         )
 
     @singleton

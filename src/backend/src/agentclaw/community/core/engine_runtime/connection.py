@@ -40,9 +40,8 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
 from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
-from agentclaw.community.di.config import GatewayConfig
+from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.log import get_logger
-from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -157,13 +156,13 @@ class EngineConnectionService:
         bot_service: BotService,
         binding_repository: DeviceBindingRepository,
         device_service: DeviceService,
-        gateway_config: GatewayConfig,
+        gateway: GatewayEndpoint,
         collaborator_repo: CollaboratorRepositoryProtocol,
     ) -> None:
         self._bot_service = bot_service
         self._binding_repository = binding_repository
         self._device_service = device_service
-        self._gateway_config = gateway_config
+        self._gateway = gateway
         self._collaborator_repo = collaborator_repo
 
     def build(self, *, bot_id: str, owner_id: str) -> ConnectionResult:
@@ -322,10 +321,12 @@ class EngineConnectionService:
             raise EngineUpstreamError("device connection carries no routing target")
 
         if str(getattr(info, "type", "") or "") == "local":
-            # Composed, because there is no relay URL to re-address. ``@`` and
-            # ``:`` are legal in a path segment and a device target carries both;
-            # anything else is escaped so it cannot end the path early.
-            segment = _quote_or_reject(target, safe="@:", what="routing target")
+            # Composed, because there is no relay URL to re-address. This target
+            # is an *authority*, so ``@``, ``:`` and the brackets of an IPv6 host
+            # all have to survive — singlebox reclassifies a ``::1`` binding as
+            # local, and ``ws://%5B::1%5D:20003`` is not a valid authority.
+            # Anything else is escaped so it cannot end the path early.
+            segment = _quote_or_reject(target, safe="@:[]", what="routing target")
             return f"ws://{segment}{_quote_or_reject(socket_path, safe='/', what='socket path')}"
 
         return self._readdress_onto_gateway(info, token)
@@ -397,18 +398,13 @@ class EngineConnectionService:
         return f"{url}?{query}" if query else url
 
     def _gateway_ws_base(self) -> str:
-        """WebSocket origin of the gateway, for the environment we run in.
+        """WebSocket origin of the gateway.
 
-        The pre gateway is a separate host from prod's, and the pair is selected
-        the same way every other host pair in this build is. Held as an HTTP
-        origin and rewritten here, so one value serves both schemes.
+        Which environment's gateway this is was decided by the composition root
+        (:class:`~agentclaw.community.di.config.GatewayEndpoint`); this only
+        rewrites the scheme, so one configured value serves both.
         """
-        configured = (
-            self._gateway_config.base_url_pre
-            if get_current_env() == "pre"
-            else self._gateway_config.base_url
-        )
-        base = configured.strip().rstrip("/")
+        base = self._gateway.base_url.strip().rstrip("/")
         if not base:
             # A deployment that fronts no gateway cannot publish a socket. Named
             # rather than allowed out as a 500: this is a configuration state we
@@ -427,11 +423,13 @@ class EngineConnectionService:
             raise EngineUpstreamError(
                 f"gateway base url has no usable scheme: {base!r}"
             )
-        # An origin is all this may be. A ``#`` or ``?`` here would end the path
-        # before the engine prefix is even appended, putting the credential in a
-        # fragment a browser never sends — the same silent harm escaping the
-        # target closes, reached through the other half of the URL.
-        if any(delimiter in rest for delimiter in "#?"):
+        # A bare origin is all this may be. A path would push ``/engine`` off the
+        # root — ``https://gw.example/api`` publishes ``/api/engine/…``, which the
+        # gateway's rewrite is not rooted at, so the socket is unopenable rather
+        # than misconfigured-and-named. A ``#`` or ``?`` is worse still: it ends
+        # the path before the prefix is even appended, putting the credential
+        # somewhere a browser never sends.
+        if any(delimiter in rest for delimiter in "/#?") or not rest:
             raise EngineUpstreamError(
                 f"gateway base url is not a bare origin: {base!r}"
             )
