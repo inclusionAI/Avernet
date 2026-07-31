@@ -136,17 +136,26 @@ user_config:
   # Secret-registry key NAMES the app resolves via SecretResolver. Left unset:
   # the dormant-token feature uses a local fallback and git-sync degrades to its
   # on-disk source when no repo-URL secret name is configured.
-  # TODO(community): if you provision these secrets, register their names here
-  # (matching the keys your CommunitySecretResolver / env-var scheme expects):
+  # TODO(community): if you provision these secrets, register their names here.
+  # A registered name is the BARE key, with no env prefix: CommunitySecretResolver
+  # uppercases it and prepends `secret.env_prefix` itself, so a name already
+  # spelled "AGENTCLAW_SECRET_..." would be looked up as
+  # AGENTCLAW_SECRET_AGENTCLAW_SECRET_..._VALUE and never resolve.
+  #
   #   secret_names:
-  #     dormant_internal_token: "AGENTCLAW_SECRET_..."   # gates /api/internal/dormant/*
-  #     aiworkbench_repo_url: "AGENTCLAW_SECRET_..."      # skills source repo URL
-  #     gateway_principal_signing_key: "AGENTCLAW_SECRET_..."  # gates /openapi/v1/*
+  #     dormant_internal_token: "dormant_internal_token"   # gates /api/internal/dormant/*
+  #     aiworkbench_repo_url: "aiworkbench_repo_url"       # skills source repo URL
+  #     gateway_principal_signing_key: "gateway_principal_signing_key"  # gates /openapi/v1/*
+  #
+  # ...each read from "{env_prefix}{NAME}_VALUE", so with the prefix above:
+  #     AGENTCLAW_SECRET_DORMANT_INTERNAL_TOKEN_VALUE
+  #     AGENTCLAW_SECRET_AIWORKBENCH_REPO_URL_VALUE
+  #     AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE
   #
   # gateway_principal_signing_key is the HMAC secret the gateway signs the
-  # X-Avernet-Principal token with. Register a name here and export its value as
-  # "{env_prefix}{NAME}_VALUE" (matching the gateway's own
-  # AVERNET_PRINCIPAL_SIGNING_KEY), or the public API answers 401 to everything.
+  # X-Avernet-Principal token with, so its value must match the gateway's own
+  # AVERNET_PRINCIPAL_SIGNING_KEY. Unregistered or unset, the public API answers
+  # 401 to everything.
 
   # MCP catalog — consumed by the community CommunityMCPCenter.
   # Optional path to a local MCP-server catalog file (same shape as
