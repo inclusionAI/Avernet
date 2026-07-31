@@ -82,6 +82,27 @@ class BcnConfig:
 
 
 @dataclass(frozen=True)
+class GatewayConfig:
+    """Public API gateway host (the ``gateway`` user_config block).
+
+    ``base_url`` is the prod gateway and ``base_url_pre`` overrides it when
+    env=='pre'. Held as an ``https://`` origin; the one consumer rewrites the
+    scheme when it publishes a WebSocket URL.
+
+    This is the host an external tenant is given, which is why it is separate
+    from ``agentclawproxy``: the engine proxy stays the internal hop behind the
+    gateway, and every other caller keeps addressing it directly.
+
+    Neutral empty defaults — the community build fronts no gateway. Empty ⇒ the
+    connection endpoint reports that this deployment has no gateway rather than
+    publishing an address nothing serves.
+    """
+
+    base_url: str = ""
+    base_url_pre: str = ""
+
+
+@dataclass(frozen=True)
 class KbConfig:
     """Internal knowledge-base config for the D-TOOLS-002 diagnostic (the ``kb``
     user_config block).

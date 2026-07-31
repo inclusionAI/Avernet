@@ -12,7 +12,7 @@ touched. The internal console must stay byte-for-byte unaffected.
 
 ---
 
-## Task 1: Add the `gateway` host configuration  `[ ]`
+## Task 1: Add the `gateway` host configuration  `[x]`
 - **Goal:** Give the backend a place to learn where the gateway is, following
   the same pattern as every other upstream host in this service. Nothing
   consumes it yet.
@@ -22,18 +22,18 @@ touched. The internal console must stay byte-for-byte unaffected.
   - `…/configs/application-community.yaml`
   - `…/configs/application-singlebox.yaml`
 - **Done when:**
-  - [ ] `GatewayConfig` is a frozen dataclass beside `BcnConfig:64-81`, with
+  - [x] `GatewayConfig` is a frozen dataclass beside `BcnConfig:64-81`, with
         `base_url: str = ""` and `base_url_pre: str = ""`. Its docstring says
         what an empty value means: this deployment has no gateway.
-  - [ ] A `@singleton @provider` in `config_module.py` reads `_block("gateway")`
+  - [x] A `@singleton @provider` in `config_module.py` reads `_block("gateway")`
         with the dataclass defaults, shaped like the `ecb` reader at `:322-327`.
-  - [ ] `application-community.yaml` carries a neutral `gateway` block (both
+  - [x] `application-community.yaml` carries a neutral `gateway` block (both
         values `""`) under `user_config:`, beside `ecb:69-70`.
-  - [ ] `application-singlebox.yaml` carries `gateway.base_url:
+  - [x] `application-singlebox.yaml` carries `gateway.base_url:
         "http://127.0.0.1:9999"`, beside `agentclawproxy:122-123`.
-  - [ ] No corp pre/prod hosts appear anywhere in this repo — those land in the
+  - [x] No corp pre/prod hosts appear anywhere in this repo — those land in the
         cob overlay, owned separately.
-  - [ ] Existing config tests pass unmodified; the golden singlebox config
+  - [x] Existing config tests pass unmodified; the golden singlebox config
         snapshot is regenerated if it pins the `user_config` tree.
 - **Depends on:** —
 

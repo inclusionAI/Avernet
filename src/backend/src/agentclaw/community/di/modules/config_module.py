@@ -328,6 +328,18 @@ class ConfigModule(Module):
 
     @singleton
     @provider
+    def gateway(self) -> cfg.GatewayConfig:
+        """Public API gateway host (neutral empty; corp env overlays set the
+        ``gateway`` yaml block)."""
+        block = _block("gateway")
+        defaults = cfg.GatewayConfig()
+        return cfg.GatewayConfig(
+            base_url=block.get("base_url", defaults.base_url),
+            base_url_pre=block.get("base_url_pre", defaults.base_url_pre),
+        )
+
+    @singleton
+    @provider
     def baas(self) -> cfg.BaasConfig:
         block = _block("baas")
         defaults = cfg.BaasConfig()
