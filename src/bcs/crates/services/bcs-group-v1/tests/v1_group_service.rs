@@ -1884,7 +1884,7 @@ async fn manager_worker_manager_can_update_and_delete_group() {
 }
 
 #[tokio::test]
-async fn delete_does_not_reveal_group_existence_to_unrelated_principal() {
+async fn delete_group_unauthorized_principal_forbidden() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "outsider"] {
         fixture.add_public_bot(bot).await;
@@ -1901,17 +1901,22 @@ async fn delete_does_not_reveal_group_existence_to_unrelated_principal() {
         .await
         .expect("store group");
 
-    for group_id in ["group-1", "missing"] {
-        let result = fixture
-            .service
-            .delete(DeleteGroup {
-                principal: bot_principal("outsider"),
-                group_id: group_id.into(),
-            })
-            .await
-            .expect("existence-safe idempotent delete");
-        assert!(!result.deleted);
-    }
+    // An unauthorized principal must not receive the idempotent
+    // `deleted:false` mask when the group exists; the facade rejects the
+    // call with 403 forbidden instead. Idempotent `deleted:false` is reserved
+    // for an authorized caller whose target is already absent.
+    let err = fixture
+        .service
+        .delete(DeleteGroup {
+            principal: bot_principal("outsider"),
+            group_id: "group-1".into(),
+        })
+        .await
+        .expect_err("non-manager delete must be forbidden, not idempotent");
+    assert!(
+        matches!(err, ApplicationError::Forbidden(_)),
+        "expected forbidden, got {err:?}"
+    );
 }
 
 #[tokio::test]

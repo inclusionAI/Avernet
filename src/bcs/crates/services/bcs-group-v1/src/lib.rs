@@ -1118,9 +1118,9 @@ impl GroupService for GroupServiceImpl {
             });
         };
         if !Self::can_manage_group(&command.principal, &group) {
-            return Ok(DeleteResult {
-                deleted: false,
-            });
+            return Err(ApplicationError::forbidden(
+                "Principal cannot delete the group",
+            ));
         }
         let state_machine_runtime = if group.group_strategy == GroupStrategy::StateMachine {
             Some(self.collaboration_runtime.as_ref().ok_or_else(|| {
