@@ -1225,29 +1225,33 @@ async def get_skill_readme(
             logger.warning(f"[skills.get_skill_readme] SkillCenter file-content failed: {e}")
         raise HTTPException(status_code=404, detail="Skill or README not found")
 
-    # The request's resolved entity identifies the Bot owner and therefore the
-    # device that owns local files. ``skill.user_id`` is the Skill author and can
-    # be a collaborator, so it must not be used for device routing.
+    # A Skill may be read while the caller is operating another Bot.  Its DB
+    # ``bolt_id`` is the authoritative target; derive owner, entity type and
+    # engine from that Bot instead of trusting the caller's route parameters.
+    # ``skill.user_id`` is only the Skill author and can be a collaborator.
     read_bot_id = (skill or {}).get("bolt_id") or effective_bot_id
-    read_owner_id = effective_entity_id
-    read_entity_type = effective_entity_type
+    target_bot = None
+    try:
+        target_bot = bot_repo.get_by_id(read_bot_id)
+    except Exception as e:
+        logger.warning(
+            "[skills.get_skill_readme] target bot lookup failed for bot_id=%s: %s",
+            read_bot_id,
+            e,
+        )
+
+    read_owner_id = (target_bot or {}).get("owner_id") or effective_entity_id
+    read_entity_type = (target_bot or {}).get("entity_type") or effective_entity_type
+    # Do not honour a caller-provided engine override for a Skill owned by a
+    # different Bot: it points at a different on-device workspace.
     read_engine = resolve_engine_for_bot(
         bot_id=read_bot_id,
         owner_id=read_owner_id,
-        override=engine_type,
         bot_repo=bot_repo,
     )
     read_is_desktop = False
-    try:
-        bot = bot_repo.get_by_id_and_owner(read_bot_id, read_owner_id)
-        if bot and bot.get("bot_type") == "desktop":
-            read_is_desktop = True
-    except Exception as e:
-        logger.warning(
-            "[skills.get_skill_readme] bot_type lookup failed for bot_id=%s "
-            "owner=%s: %s — defaulting is_desktop=False",
-            read_bot_id, read_owner_id, e,
-        )
+    if target_bot:
+        read_is_desktop = target_bot.get("bot_type") == "desktop"
 
     read_is_teclaw, read_local_skill_adapter = _resolve_teclaw_local_skill(
         resolver, read_bot_id, read_owner_id
