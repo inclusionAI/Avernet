@@ -639,24 +639,28 @@ class TestResolveOwnerId:
     def setup_method(self):
         self.user = AuthenticatedIdentity(id="1", operatorName="test", staffId="user_001")
 
-    def test_resolves_default_bot_to_current_user(self):
-        """bot_id 为 "default" 时返回当前用户 ID。"""
+    def test_historical_default_bot_id_resolves_via_repo(self):
+        """历史的 bot_id="default" 不再短路,统一走 repo.get_by_id 解析 owner。"""
+        interceptor = CollaboratorPermissionInterceptor()
+        ctx = InterceptorContext(
+            user=self.user, route_kwargs={}, injector=MagicMock(),
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"owner_id": "ownerA"}
+        ctx.injector.get.return_value = mock_repo
+
+        owner = interceptor._resolve_owner_id(ctx, "default", "user001")
+        assert owner == "ownerA"
+        mock_repo.get_by_id.assert_called_once_with("default")
+
+    def test_missing_bot_id_returns_current_user(self):
+        """bot_id 缺失(None/空) → 返回当前 user_id(语义=我的 bot),保持短路。"""
         interceptor = CollaboratorPermissionInterceptor()
         ctx = InterceptorContext(user=self.user, route_kwargs={})
 
-        result = interceptor._resolve_owner_id(ctx, "default", "user_001")
-        assert result == "user_001"
-
-    def test_resolves_empty_bot_id_to_current_user(self):
-        """bot_id 为空时返回当前用户 ID。"""
-        interceptor = CollaboratorPermissionInterceptor()
-        ctx = InterceptorContext(user=self.user, route_kwargs={})
-
-        result = interceptor._resolve_owner_id(ctx, None, "user_001")
-        assert result == "user_001"
-
-        result = interceptor._resolve_owner_id(ctx, "", "user_001")
-        assert result == "user_001"
+        assert interceptor._resolve_owner_id(ctx, None, "user_001") == "user_001"
+        assert interceptor._resolve_owner_id(ctx, "", "user_001") == "user_001"
 
     def test_resolves_bot_id_via_repo(self):
         """通过 BotRepository.get_by_id 解析 bot 归属。"""

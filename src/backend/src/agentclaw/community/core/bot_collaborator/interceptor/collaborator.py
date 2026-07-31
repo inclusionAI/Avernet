@@ -431,16 +431,17 @@ class CollaboratorPermissionInterceptor:
         """当请求未提供 owner_id 时，主动解析 Bot 归属。
 
         解析策略：
-        1. bot_id 缺失或为 "default" → 返回当前 user_id（语义=我的 bot）
-        2. bot_id 有值 → 通过 BotRepository.get_by_id 查询 bot 记录，
-           返回 bot.owner_id
+        1. bot_id 缺失 → 返回当前 user_id（语义=我的 bot）
+        2. bot_id 有值（含历史的 "default"）→ 通过 BotRepository.get_by_id
+           查询 bot 记录，返回 bot.owner_id
         3. BotRepository 不可用 或 bot 不存在 → 返回 None（回退到 skip）
 
         返回 None 表示无法解析，调用方应回退到跳过权限检查
         （让业务层返回更具体的错误如 404，而非拦截器一刀切 403）。
         """
-        if not bot_id or bot_id == "default":
+        if not bot_id:
             return user_id
+        # 历史的 bot_id=="default" 不再短路;统一走 repo 解析 owner
 
         if ctx.injector is None:
             logger.warning(
