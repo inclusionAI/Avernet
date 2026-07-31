@@ -1204,7 +1204,10 @@ impl GroupService for GroupServiceImpl {
         let group = self
             .load_readable_group(&command.principal, &command.group_id)
             .await?;
-        if !Self::can_manage_group(&command.principal, &group) {
+        // Design §8.7: the target Actor may update its own participant mode
+        // (self-service) in addition to the driver/originator/manager path.
+        let is_self = command.principal.actor_id() == command.actor_id;
+        if !is_self && !Self::can_manage_group(&command.principal, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal cannot manage the group",
             ));
@@ -1251,7 +1254,12 @@ impl GroupService for GroupServiceImpl {
         let group = self
             .load_readable_group(&command.principal, &command.group_id)
             .await?;
-        if !Self::can_manage_group(&command.principal, &group) {
+        // Design §8.7: the target Actor may leave the group (self-service
+        // delete) in addition to the driver/originator/manager path. The legacy
+        // `remove_member` still rejects driver/originator removal, preserving
+        // the role invariant; non-driver self-leave proceeds.
+        let is_self = command.principal.actor_id() == command.actor_id;
+        if !is_self && !Self::can_manage_group(&command.principal, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal cannot manage the group",
             ));

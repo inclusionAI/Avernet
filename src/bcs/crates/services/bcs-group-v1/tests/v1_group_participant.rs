@@ -236,3 +236,80 @@ async fn delete_participant_is_idempotent_for_bot() {
         .expect("second delete is idempotent");
     assert!(!second.deleted);
 }
+
+#[tokio::test]
+async fn participant_can_update_own_mode() {
+    let fixture = seed().await;
+    // Design §8.7: a plain (non-manager) participant may update its own mode
+    // via self-service. The V1 facade must not gate self-update behind
+    // `can_manage_group`; the legacy `update_participant_mode` still allows the
+    // caller-as-actor path and enforces `mode.is_valid_for(actor_kind)`.
+    let updated = fixture
+        .service
+        .update_participant(UpdateGroupParticipant {
+            principal: bot_principal("bot-a"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-a".into(),
+            mode: ParticipantMode::Muted,
+        })
+        .await
+        .expect("plain participant can update own mode");
+    assert_eq!(updated.actor_id, "bot-a");
+    assert_eq!(updated.mode, ParticipantMode::Muted);
+}
+
+#[tokio::test]
+async fn participant_can_leave_via_delete() {
+    let fixture = seed().await;
+    // Design §8.7: a plain (non-manager) participant may leave by deleting
+    // itself via self-service. The V1 facade must not gate self-leave behind
+    // `can_manage_group`; the legacy `remove_member` permits self-removal for
+    // non-driver/non-originator actors and still rejects driver removal.
+    let result = fixture
+        .service
+        .delete_participant(DeleteGroupParticipant {
+            principal: bot_principal("bot-a"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-a".into(),
+        })
+        .await
+        .expect("plain participant can leave via delete");
+    assert!(result.deleted);
+
+    // The participant is no longer a member of the group.
+    let group = fixture
+        .groups
+        .try_get(GROUP_ID)
+        .await
+        .expect("group present")
+        .expect("group found");
+    assert!(
+        !group
+            .participants
+            .iter()
+            .any(|p| p.bot_uuid == "bot-a"),
+        "bot-a should have left the group"
+    );
+}
+
+#[tokio::test]
+async fn participant_cannot_update_others() {
+    let fixture = seed().await;
+    // Self-service is only for self: a plain participant may NOT PATCH a
+    // different participant (here the driver). The V1 facade must reject with
+    // 403 before reaching the legacy layer.
+    let err = fixture
+        .service
+        .update_participant(UpdateGroupParticipant {
+            principal: bot_principal("bot-a"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-driver".into(),
+            mode: ParticipantMode::Muted,
+        })
+        .await
+        .expect_err("plain participant cannot update another participant");
+    assert!(
+        matches!(err, ApplicationError::Forbidden(_)),
+        "expected forbidden, got {err:?}"
+    );
+}
