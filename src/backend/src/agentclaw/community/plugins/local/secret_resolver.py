@@ -45,9 +45,36 @@ class LocalSecretResolver(MockSeam, SecretResolver):
     # (agentclaw/community/configs). parents[2] is agentclaw/community from this file
     # (plugins/local/secret_resolver.py). Was parents[4] — off by two since the
     # community/ subtree was introduced, so this had been silently missing the file.
+    # This is the *bundled* copy — see ``_active_singlebox_config_path``, which
+    # prefers a deployed runtime overlay over it.
     _SINGLEBOX_CONFIG_PATH = (
         Path(__file__).resolve().parents[2] / "configs" / "application-singlebox.yaml"
     )
+
+    def _active_singlebox_config_path(self) -> Path:
+        """The overlay the app actually booted from.
+
+        ``YamlConfigProvider._load_yaml_configs`` searches ``cwd/configs`` before
+        the bundled subtree, and takes the first directory holding **both**
+        ``application.yaml`` and the overlay. A deployed singlebox assembles its
+        runtime ``configs/`` in the working directory, so reading only the
+        bundled copy would resolve secrets from a file the operator never edits
+        — they would set ``gateway_principal.signing_key`` in the active config
+        and still get 401 everywhere. Mirror that search order exactly, pairing
+        rule included, so both reads land on the same file.
+
+        Falls back to the bundled path when no directory holds the pair, which
+        keeps a test that points ``_SINGLEBOX_CONFIG_PATH`` at a lone fixture
+        working.
+        """
+        for config_dir in (
+            Path.cwd() / "configs",
+            self._SINGLEBOX_CONFIG_PATH.parent,
+        ):
+            overlay = config_dir / self._SINGLEBOX_CONFIG_PATH.name
+            if (config_dir / "application.yaml").exists() and overlay.exists():
+                return overlay
+        return self._SINGLEBOX_CONFIG_PATH
 
     def get_secret(self, secret_name: str) -> Any | None:
         if secret_name == _AIWORKBENCH_REPO_URL_SECRET_NAME:
@@ -74,7 +101,7 @@ class LocalSecretResolver(MockSeam, SecretResolver):
             logger.info(
                 "[LocalMock] no gateway_principal.signing_key in %s — the "
                 "public API will answer 401",
-                self._SINGLEBOX_CONFIG_PATH,
+                self._active_singlebox_config_path(),
             )
             return None
 
@@ -94,7 +121,7 @@ class LocalSecretResolver(MockSeam, SecretResolver):
         if not repo_url:
             logger.warning(
                 "[LocalMock] aiworkbench repo URL missing in %s",
-                self._SINGLEBOX_CONFIG_PATH,
+                self._active_singlebox_config_path(),
             )
             return None
 
@@ -121,15 +148,16 @@ class LocalSecretResolver(MockSeam, SecretResolver):
         a missing value as "this secret is absent", which is the Protocol's
         ``None`` outcome.
         """
+        config_path = self._active_singlebox_config_path()
         try:
             import yaml
 
-            with self._SINGLEBOX_CONFIG_PATH.open(encoding="utf-8") as f:
+            with config_path.open(encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
         except Exception as exc:
             logger.warning(
                 "[LocalMock] failed to read singlebox config %s: %s",
-                self._SINGLEBOX_CONFIG_PATH,
+                config_path,
                 exc,
             )
             return {}

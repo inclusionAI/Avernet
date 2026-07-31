@@ -6,6 +6,13 @@
 - Counterpart: gateway PR #599 (`feat/principal-signer`) — the signing half
 - Related: `docs/2026-07-21-auth-design.md` §7.1; the cross-cutting "Real
   caller-identity verifier" row in `src/backend/docs/openapi-v1/README.md`
+- **Superseded in part**: how the verifier is *configured* changed in PR #670.
+  The signing key is a credential, so it now resolves through `SecretResolver`
+  instead of `AVERNET_PRINCIPAL_SIGNING_KEY`, and `aud`/`iss` became constants
+  rather than env vars. Everything else below — the wire contract, what gets
+  rejected, and every decision in the Decisions section — still holds. See
+  **Configuration (as of PR #670)** below for the current contract and the
+  migration a deployment needs.
 
 ## Problem
 
@@ -39,9 +46,36 @@ From `plugins/principal_signer/bare/_plugin.py` and `_forward.py` in PR #599:
 | `iat`/`exp` | short TTL, default 60s |
 | `principals` | a **list** of `Principal.model_dump(mode="json")`, tagged by `type` |
 
-Gateway env names, reused verbatim so one secret has one vocabulary:
+~~Gateway env names, reused verbatim so one secret has one vocabulary:
 `AVERNET_PRINCIPAL_SIGNING_KEY`, plus our `AVERNET_PRINCIPAL_AUDIENCE` and
-`AVERNET_PRINCIPAL_ISSUER`.
+`AVERNET_PRINCIPAL_ISSUER`.~~ **Superseded by PR #670** — see below.
+
+## Configuration (as of PR #670)
+
+The backend no longer reads any `AVERNET_PRINCIPAL_*` variable. The gateway
+still reads `AVERNET_PRINCIPAL_SIGNING_KEY` on the *signing* side; the two sides
+no longer share a vocabulary, only a value.
+
+| What | Where it comes from now |
+| --- | --- |
+| signing key | `SecretResolver`, under the name registered as `secret_names.gateway_principal_signing_key` |
+| `aud` | a constant, `backend` — the gateway signs it from the upstream server's own name and never made it configurable |
+| `iss` | a constant, `gateway` — likewise hardcoded on the signing side |
+
+Per profile, the key's value resolves from: the corp secret store (corp);
+`{env_prefix}{NAME}_VALUE` (community, via `CommunitySecretResolver`); or
+`gateway_principal.signing_key` in the active `application-singlebox.yaml`
+(singlebox/test, via `LocalSecretResolver`).
+
+**Migration.** A deployment that set `AVERNET_PRINCIPAL_SIGNING_KEY` on the
+backend must move that value, or the public surface answers 401 after the
+upgrade. There is deliberately no env fallback: silently honouring the old
+variable would keep a credential in the environment, which is the thing this
+change exists to stop, and a fallback that works is a fallback nobody migrates
+off. Failing closed makes the missed step visible immediately rather than
+leaving a credential-shaped hole open. Concretely — register a name under
+`secret_names.gateway_principal_signing_key`, then provision the value where
+that profile's resolver reads it.
 
 ## Solution
 
@@ -73,7 +107,8 @@ placed the seams.
    committed dev secret with a warning; we deliberately do not mirror it. A
    committed shared secret is a committed credential, and on this side "no key"
    fails safe: every public request answers 401, which is precisely the state
-   this replaces. Single-box sets the same env var on both sides.
+   this replaces. Single-box sets the same value on both sides (since PR #670,
+   from `gateway_principal.signing_key` here and the env var on the gateway).
 2. **Tenant passes through verbatim.** The gateway's tenant id *is* the
    `avernet_tenant` isolation key — no translation table. Consequence worth
    knowing: a gateway tenant must be spelled exactly as the column stores it,
@@ -138,8 +173,9 @@ placed the seams.
   verification per request, 401 parity between "no credential" and "bad
   credential", and `test_public_routes_require_principal`, which pins the
   property that makes the tenant fallback safe.
-- `tests/community/utils/test_gateway_principal_config.py` — the env contract,
-  including that no fallback key is invented.
+- `tests/community/utils/test_gateway_principal_config.py` — the configuration
+  contract (the `SecretResolver` path since PR #670), including that no fallback
+  key is invented.
 - Existing suites unmodified and green, including `test_bots_endpoints.py` and
   `test_mcp_endpoints.py`, whose `require_principal` overrides keep working
   because `caller_owner_id`'s tolerated shapes did not change.

@@ -112,6 +112,58 @@ def test_principal_signing_key_missing_block_resolves_to_none(tmp_path, monkeypa
     assert LocalSecretResolver().get_secret(_PRINCIPAL_SIGNING_KEY_SECRET_NAME) is None
 
 
+def test_runtime_overlay_wins_over_the_bundled_config(tmp_path, monkeypatch):
+    """A deployed singlebox assembles configs/ in cwd; that is the live file.
+
+    ``YamlConfigProvider`` boots from ``cwd/configs`` when it holds both
+    ``application.yaml`` and the overlay, so an operator editing that copy must
+    be the one this resolver reads — otherwise they set the key exactly as
+    instructed and still get 401 everywhere.
+    """
+    runtime = tmp_path / "configs"
+    runtime.mkdir()
+    (runtime / "application.yaml").write_text("user_config: {}\n", encoding="utf-8")
+    (runtime / "application-singlebox.yaml").write_text(
+        'user_config:\n  gateway_principal:\n    signing_key: "from-the-runtime-overlay"\n',
+        encoding="utf-8",
+    )
+    bundled = _write_config(
+        tmp_path,
+        monkeypatch,
+        """
+user_config:
+  gateway_principal:
+    signing_key: "from-the-bundled-copy"
+""",
+    )
+    assert bundled.parent != runtime, "the two copies must be distinct files"
+    monkeypatch.chdir(tmp_path)
+
+    secret = LocalSecretResolver().get_secret(_PRINCIPAL_SIGNING_KEY_SECRET_NAME)
+
+    assert secret is not None
+    assert secret.secret_value == "from-the-runtime-overlay"
+
+
+def test_bundled_config_is_used_when_no_runtime_overlay_exists(tmp_path, monkeypatch):
+    """The monorepo case: no assembled cwd/configs, so the subtree copy is live."""
+    _write_config(
+        tmp_path,
+        monkeypatch,
+        """
+user_config:
+  gateway_principal:
+    signing_key: "from-the-bundled-copy"
+""",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    secret = LocalSecretResolver().get_secret(_PRINCIPAL_SIGNING_KEY_SECRET_NAME)
+
+    assert secret is not None
+    assert secret.secret_value == "from-the-bundled-copy"
+
+
 def test_shipped_singlebox_config_registers_the_name_but_no_key():
     """The real shipped file: wiring live, value absent, nothing committed."""
     import yaml
