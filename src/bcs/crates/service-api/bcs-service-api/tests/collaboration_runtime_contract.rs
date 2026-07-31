@@ -1,11 +1,13 @@
 use bcs_service_api::{
-    AuthenticatedHumanCaller, CollaborationDefinitionParticipantSlot,
+    AuthenticatedHumanCaller, CollaborationDefinitionGraphNode,
+    CollaborationDefinitionGraphPreview, CollaborationDefinitionParticipantSlot,
     CollaborationDefinitionValidationOutcome, CollaborationDefinitionValidationSummary,
     CollaborationRuntimeError, CollaborationRuntimeService, HumanResponseSource,
-    HumanRunAccessCommand, ListPendingHumanNodesCommand, RespondHumanNodeCommand,
-    ServiceResult, SessionStateMachinePermissionCommand, StartSessionStateMachineRunCommand,
-    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
-    StateMachineRunAccessCommand, ValidateCollaborationDefinitionYamlCommand,
+    HumanRunAccessCommand, ListPendingHumanNodesCommand, RespondHumanNodeCommand, ServiceResult,
+    SessionStateMachinePermissionCommand, StartSessionStateMachineRunCommand, StateMachineAssignee,
+    StateMachineGraphMode, StateMachineNodeKind, StateMachineResultPublishCommand,
+    StateMachineResultPublisherPort, StateMachineRunAccessCommand,
+    ValidateCollaborationDefinitionYamlCommand,
 };
 use bcs_test_support::{
     NoopCollaborationRuntimeService,
@@ -220,15 +222,55 @@ fn validation_outcome_serializes_without_internal_definition() {
             required: true,
             assigned: true,
         }],
+        graph: Some(CollaborationDefinitionGraphPreview {
+            graph_mode: StateMachineGraphMode::Acyclic,
+            nodes: vec![CollaborationDefinitionGraphNode {
+                node_id: "answer".to_string(),
+                display_name: "Answer".to_string(),
+                kind: StateMachineNodeKind::BotTask,
+                assignee: Some(StateMachineAssignee::BotBinding {
+                    binding: "writer".to_string(),
+                }),
+                final_output: true,
+                judge: false,
+            }],
+            edges: Vec::new(),
+        }),
         definition: None,
     };
 
     let wire = serde_json::to_value(outcome).unwrap();
     assert_eq!(wire["valid"], true);
     assert_eq!(wire["participants"][0]["binding"], "writer");
+    assert_eq!(wire["graph"]["graph_mode"], "acyclic");
+    assert_eq!(wire["graph"]["nodes"][0]["node_id"], "answer");
     assert!(wire.get("definition").is_none());
     assert!(wire.get("errors").is_none());
     assert!(wire.get("warnings").is_none());
+}
+
+#[test]
+fn invalid_validation_outcome_omits_graph() {
+    let outcome = CollaborationDefinitionValidationOutcome {
+        valid: false,
+        errors: vec![
+            bcs_service_api::CollaborationDefinitionValidationDiagnostic {
+                code: "INVALID_DEFINITION".to_string(),
+                path: "$".to_string(),
+                message: "invalid definition".to_string(),
+                hint: None,
+            },
+        ],
+        warnings: Vec::new(),
+        summary: CollaborationDefinitionValidationSummary::default(),
+        participants: Vec::new(),
+        graph: None,
+        definition: None,
+    };
+
+    let wire = serde_json::to_value(outcome).unwrap();
+    assert_eq!(wire["valid"], false);
+    assert!(wire.get("graph").is_none());
 }
 
 #[derive(Default)]

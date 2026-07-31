@@ -56,7 +56,8 @@ pub use application::session_files::{
 };
 pub use application::collaboration_runtime::{
     AuthenticatedHumanCaller, CancelStateMachineRunCommand,
-    CollaborationDefinitionParticipantSlot,
+    CollaborationDefinitionGraphEdge, CollaborationDefinitionGraphNode,
+    CollaborationDefinitionGraphPreview, CollaborationDefinitionParticipantSlot,
     CollaborationDefinitionValidationDiagnostic, CollaborationDefinitionValidationOutcome,
     CollaborationDefinitionValidationSummary, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
