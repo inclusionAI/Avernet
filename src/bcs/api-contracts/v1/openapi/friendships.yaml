@@ -9,7 +9,7 @@ CreateFriendRequestRequest:
 
 ListFriendshipsPath:
   get:
-    operationId: list_friendships
+    operationId: list_bot_friendships
     summary: List a Bot's friendships.
     x-avernet-security:
       principal: required
@@ -74,7 +74,7 @@ ListFriendshipsPath:
 
 FriendshipPath:
   delete:
-    operationId: remove_friendship
+    operationId: delete_bot_friendship
     summary: Remove a friendship symmetrically and idempotently.
     x-avernet-security:
       principal: required
@@ -125,7 +125,7 @@ FriendshipPath:
 
 BotFriendRequestsPath:
   post:
-    operationId: create_friend_request
+    operationId: create_bot_friend_request
     summary: Send a friend request from the path Bot to a target Bot.
     x-avernet-security:
       principal: required
@@ -191,7 +191,7 @@ BotFriendRequestsPath:
         $ref: ../shared.yaml#/InternalErrorResponse
 
   get:
-    operationId: list_friend_requests
+    operationId: list_bot_friend_requests
     summary: List friend requests sent by or received by a Bot.
     x-avernet-security:
       principal: required

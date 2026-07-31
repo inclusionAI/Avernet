@@ -59,7 +59,7 @@ pub struct FriendRequest {
 
 /// List a bot's friendships, ordered by `created_at` descending.
 #[derive(Debug, Clone)]
-pub struct ListFriendships {
+pub struct ListBotFriendships {
     pub principal: Principal,
     pub bot_uuid: String,
     pub offset: u64,
@@ -68,7 +68,7 @@ pub struct ListFriendships {
 
 /// Remove a friendship symmetrically and idempotently.
 #[derive(Debug, Clone)]
-pub struct RemoveFriendship {
+pub struct DeleteBotFriendship {
     pub principal: Principal,
     pub bot_uuid: String,
     pub friend_bot_uuid: String,
@@ -77,7 +77,7 @@ pub struct RemoveFriendship {
 /// Send a friend request from `bot_uuid` (the path target whose identity is
 /// used) to `to_bot_uuid` (the receiver).
 #[derive(Debug, Clone)]
-pub struct CreateFriendRequest {
+pub struct CreateBotFriendRequest {
     pub principal: Principal,
     pub bot_uuid: String,
     pub to_bot_uuid: String,
@@ -85,7 +85,7 @@ pub struct CreateFriendRequest {
 
 /// List friend requests sent by or received by `bot_uuid`.
 #[derive(Debug, Clone)]
-pub struct ListFriendRequests {
+pub struct ListBotFriendRequests {
     pub principal: Principal,
     pub bot_uuid: String,
     pub direction: FriendRequestDirection,
@@ -114,24 +114,24 @@ pub struct RejectFriendRequest {
 /// object-safe so an `Arc<dyn FriendshipService>` can be shared across routes.
 #[async_trait]
 pub trait FriendshipService: Send + Sync {
-    async fn list_friendships(
+    async fn list_bot_friendships(
         &self,
-        command: ListFriendships,
+        command: ListBotFriendships,
     ) -> Result<Page<Friendship>, ApplicationError>;
 
-    async fn remove_friendship(
+    async fn delete_bot_friendship(
         &self,
-        command: RemoveFriendship,
+        command: DeleteBotFriendship,
     ) -> Result<DeleteResult, ApplicationError>;
 
-    async fn create_friend_request(
+    async fn create_bot_friend_request(
         &self,
-        command: CreateFriendRequest,
+        command: CreateBotFriendRequest,
     ) -> Result<FriendRequest, ApplicationError>;
 
-    async fn list_friend_requests(
+    async fn list_bot_friend_requests(
         &self,
-        command: ListFriendRequests,
+        command: ListBotFriendRequests,
     ) -> Result<Page<FriendRequest>, ApplicationError>;
 
     async fn accept_friend_request(

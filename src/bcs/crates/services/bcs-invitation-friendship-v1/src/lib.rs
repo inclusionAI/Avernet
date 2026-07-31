@@ -28,10 +28,11 @@ use bcs_domain::{
 use bcs_service_api::application::v1::{
     friendship::FriendRequestDirection,
     invitation::InvitationState,
-    AcceptFriendRequest, AcceptInvitation, ApplicationError, CreateFriendRequest,
-    CreateGroupInvitation, CreateSessionInvitation, DeleteResult, FriendshipService,
-    InvitationAcceptResult, InvitationService, InvitationTargetType, Invitation,
-    ListFriendRequests, ListFriendships, Page, Principal, RejectFriendRequest, RemoveFriendship,
+    AcceptFriendRequest, AcceptInvitation, ApplicationError, CreateBotFriendRequest,
+    CreateGroupInvitation, CreateSessionInvitation, DeleteBotFriendship, DeleteResult,
+    FriendshipService, InvitationAcceptResult, InvitationService, InvitationTargetType,
+    Invitation, ListBotFriendRequests, ListBotFriendships, Page, Principal,
+    RejectFriendRequest,
 };
 use bcs_service_api::{
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
@@ -415,9 +416,9 @@ impl InvitationFriendshipServiceImpl {
 
 #[async_trait]
 impl FriendshipService for InvitationFriendshipServiceImpl {
-    async fn list_friendships(
+    async fn list_bot_friendships(
         &self,
-        command: ListFriendships,
+        command: ListBotFriendships,
     ) -> Result<Page<Friendship>, ApplicationError> {
         self.ensure_bot_resource(&command.principal, &command.bot_uuid)
             .await?;
@@ -441,9 +442,9 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         })
     }
 
-    async fn remove_friendship(
+    async fn delete_bot_friendship(
         &self,
-        command: RemoveFriendship,
+        command: DeleteBotFriendship,
     ) -> Result<DeleteResult, ApplicationError> {
         self.ensure_bot_resource(&command.principal, &command.bot_uuid)
             .await?;
@@ -455,9 +456,9 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         Ok(DeleteResult { deleted })
     }
 
-    async fn create_friend_request(
+    async fn create_bot_friend_request(
         &self,
-        command: CreateFriendRequest,
+        command: CreateBotFriendRequest,
     ) -> Result<FriendRequest, ApplicationError> {
         self.ensure_bot_resource(&command.principal, &command.bot_uuid)
             .await?;
@@ -469,9 +470,9 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         Ok(project_friend_request(&request))
     }
 
-    async fn list_friend_requests(
+    async fn list_bot_friend_requests(
         &self,
-        command: ListFriendRequests,
+        command: ListBotFriendRequests,
     ) -> Result<Page<FriendRequest>, ApplicationError> {
         self.ensure_bot_resource(&command.principal, &command.bot_uuid)
             .await?;

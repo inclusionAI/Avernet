@@ -202,10 +202,9 @@ AcceptInvitationPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "409":
-        description: Target is completed or otherwise not joinable.
+        description: Target is otherwise not joinable.
         x-error-codes:
           - conflict
-          - session_completed
         content:
           application/json:
             schema:

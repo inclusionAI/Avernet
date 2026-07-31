@@ -18,11 +18,11 @@ use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
 use bcs_service_api::application::session::{CreateOrReactivateCommand, SessionManagementService};
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedUser, CreateFriendRequest,
+    AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedUser, CreateBotFriendRequest,
     CreateGroupInvitation, CreateSessionInvitation, DeleteResult, FriendshipService,
     FriendRequest, FriendRequestDirection, FriendRequestStatus, Friendship, InvitationService,
-    InvitationState, InvitationTargetType, ListFriendRequests, ListFriendships, Page, Principal,
-    RejectFriendRequest, RemoveFriendship,
+    InvitationState, InvitationTargetType, ListBotFriendRequests, ListBotFriendships, Page, Principal,
+    RejectFriendRequest, DeleteBotFriendship,
 };
 use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
@@ -522,7 +522,7 @@ async fn list_friendships_sorted_desc_with_pagination() {
 
     let page = fx
         .service
-        .list_friendships(ListFriendships {
+        .list_bot_friendships(ListBotFriendships {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             offset: 0,
@@ -538,7 +538,7 @@ async fn list_friendships_sorted_desc_with_pagination() {
 
     let page_two = fx
         .service
-        .list_friendships(ListFriendships {
+        .list_bot_friendships(ListBotFriendships {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             offset: 1,
@@ -559,7 +559,7 @@ async fn list_friendships_non_owner_forbidden() {
 
     let error = fx
         .service
-        .list_friendships(ListFriendships {
+        .list_bot_friendships(ListBotFriendships {
             principal: Fixture::bot_principal("bot-x"),
             bot_uuid: "bot-a".to_string(),
             offset: 0,
@@ -583,7 +583,7 @@ async fn remove_friendship_is_idempotent() {
 
     let first = fx
         .service
-        .remove_friendship(RemoveFriendship {
+        .delete_bot_friendship(DeleteBotFriendship {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             friend_bot_uuid: "bot-b".to_string(),
@@ -594,7 +594,7 @@ async fn remove_friendship_is_idempotent() {
 
     let second = fx
         .service
-        .remove_friendship(RemoveFriendship {
+        .delete_bot_friendship(DeleteBotFriendship {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             friend_bot_uuid: "bot-b".to_string(),
@@ -612,7 +612,7 @@ async fn create_friend_request_bot_self() {
 
     let request = fx
         .service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
@@ -634,7 +634,7 @@ async fn create_friend_request_cannot_add_self() {
 
     let error = fx
         .service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-a".to_string(),
@@ -652,7 +652,7 @@ async fn create_friend_request_duplicate_is_conflict() {
     fx.add_protected_bot("bot-c").await;
 
     fx.service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
@@ -662,7 +662,7 @@ async fn create_friend_request_duplicate_is_conflict() {
 
     let error = fx
         .service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
@@ -680,7 +680,7 @@ async fn create_friend_request_unknown_target_is_not_found() {
 
     let error = fx
         .service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-ghost".to_string(),
@@ -699,7 +699,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
     fx.add_protected_bot("bot-c").await;
 
     fx.service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
@@ -708,7 +708,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
         .expect("a -> b");
     tokio::time::sleep(Duration::from_millis(25)).await;
     fx.service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
@@ -719,7 +719,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
     // bot-a's sent: two requests, newest first (bot-c before bot-b).
     let sent = fx
         .service
-        .list_friend_requests(ListFriendRequests {
+        .list_bot_friend_requests(ListBotFriendRequests {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             direction: FriendRequestDirection::Sent,
@@ -736,7 +736,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
     // bot-b's received: one request.
     let received = fx
         .service
-        .list_friend_requests(ListFriendRequests {
+        .list_bot_friend_requests(ListBotFriendRequests {
             principal: Fixture::bot_principal("bot-b"),
             bot_uuid: "bot-b".to_string(),
             direction: FriendRequestDirection::Received,
@@ -752,7 +752,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
     // Pagination: first page of size 1 returns only the newest.
     let paged = fx
         .service
-        .list_friend_requests(ListFriendRequests {
+        .list_bot_friend_requests(ListBotFriendRequests {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             direction: FriendRequestDirection::Sent,
@@ -775,7 +775,7 @@ async fn accept_friend_request_receiver_ok() {
 
     let created = fx
         .service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
@@ -805,7 +805,7 @@ async fn accept_friend_request_non_receiver_forbidden() {
 
     let created = fx
         .service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
@@ -833,7 +833,7 @@ async fn accept_friend_request_cannot_accept_rejected() {
 
     let created = fx
         .service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
@@ -869,7 +869,7 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
 
     let created = fx
         .service
-        .create_friend_request(CreateFriendRequest {
+        .create_bot_friend_request(CreateBotFriendRequest {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
@@ -910,7 +910,7 @@ async fn friendship_page_shape_is_identity_projected() {
 
     let page: Page<Friendship> = fx
         .service
-        .list_friendships(ListFriendships {
+        .list_bot_friendships(ListBotFriendships {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             offset: 0,
@@ -926,7 +926,7 @@ async fn friendship_page_shape_is_identity_projected() {
     // DeleteResult + FriendRequest are reachable and shaped as expected.
     let del = fx
         .service
-        .remove_friendship(RemoveFriendship {
+        .delete_bot_friendship(DeleteBotFriendship {
             principal: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             friend_bot_uuid: "bot-b".to_string(),

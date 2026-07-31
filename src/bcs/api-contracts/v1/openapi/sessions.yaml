@@ -281,10 +281,9 @@ SessionPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "409":
-        description: Completed session rejects mutable operations.
+        description: Session update conflicts with current state.
         x-error-codes:
           - conflict
-          - session_completed
         content:
           application/json:
             schema:
@@ -507,7 +506,6 @@ AddSessionParticipantPath:
         x-error-codes:
           - conflict
           - participant_already_exists
-          - session_completed
         content:
           application/json:
             schema:
@@ -571,10 +569,9 @@ SessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "409":
-        description: Completed session rejects participant changes.
+        description: Participant update conflicts with current state.
         x-error-codes:
           - conflict
-          - session_completed
         content:
           application/json:
             schema:
@@ -629,10 +626,9 @@ SessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "409":
-        description: Driver invariant or completed session prevents removal.
+        description: Driver invariant prevents removal.
         x-error-codes:
           - conflict
-          - session_completed
         content:
           application/json:
             schema:

@@ -5,8 +5,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, ListFriendRequests, ListFriendships, Principal, RejectFriendRequest,
-    RemoveFriendship,
+    AcceptFriendRequest, DeleteBotFriendship, ListBotFriendRequests, ListBotFriendships,
+    Principal, RejectFriendRequest,
 };
 
 use crate::v1::common::{
@@ -20,15 +20,15 @@ pub fn router() -> Router<ApiState> {
     Router::new()
         .route(
             "/openapi/v1/bots/collaboration/{bot_uuid}/friendships",
-            get(list_friendships),
+            get(list_bot_friendships),
         )
         .route(
             "/openapi/v1/bots/collaboration/{bot_uuid}/friendships/{friend_bot_uuid}",
-            delete(remove_friendship),
+            delete(delete_bot_friendship),
         )
         .route(
             "/openapi/v1/bots/collaboration/{bot_uuid}/friend-requests",
-            post(create_friend_request).get(list_friend_requests),
+            post(create_bot_friend_request).get(list_bot_friend_requests),
         )
         .route(
             "/openapi/v1/friend-requests/{request_id}/accept",
@@ -40,7 +40,7 @@ pub fn router() -> Router<ApiState> {
         )
 }
 
-async fn list_friendships(
+async fn list_bot_friendships(
     State(state): State<ApiState>,
     Extension(principal): Extension<Principal>,
     Extension(request_id): Extension<RequestId>,
@@ -51,7 +51,7 @@ async fn list_friendships(
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .friendship_service
-        .list_friendships(ListFriendships {
+        .list_bot_friendships(ListBotFriendships {
             principal,
             bot_uuid,
             offset: query.offset,
@@ -66,7 +66,7 @@ async fn list_friendships(
         .into_response())
 }
 
-async fn remove_friendship(
+async fn delete_bot_friendship(
     State(state): State<ApiState>,
     Extension(principal): Extension<Principal>,
     Extension(request_id): Extension<RequestId>,
@@ -76,7 +76,7 @@ async fn remove_friendship(
         path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .friendship_service
-        .remove_friendship(RemoveFriendship {
+        .delete_bot_friendship(DeleteBotFriendship {
             principal,
             bot_uuid,
             friend_bot_uuid,
@@ -90,7 +90,7 @@ async fn remove_friendship(
         .into_response())
 }
 
-async fn create_friend_request(
+async fn create_bot_friend_request(
     State(state): State<ApiState>,
     Extension(principal): Extension<Principal>,
     Extension(request_id): Extension<RequestId>,
@@ -101,7 +101,7 @@ async fn create_friend_request(
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .friendship_service
-        .create_friend_request(body.into_command(principal, bot_uuid))
+        .create_bot_friend_request(body.into_command(principal, bot_uuid))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
@@ -111,7 +111,7 @@ async fn create_friend_request(
         .into_response())
 }
 
-async fn list_friend_requests(
+async fn list_bot_friend_requests(
     State(state): State<ApiState>,
     Extension(principal): Extension<Principal>,
     Extension(request_id): Extension<RequestId>,
@@ -122,7 +122,7 @@ async fn list_friend_requests(
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .friendship_service
-        .list_friend_requests(ListFriendRequests {
+        .list_bot_friend_requests(ListBotFriendRequests {
             principal,
             bot_uuid,
             direction: query.direction.unwrap_or_default(),

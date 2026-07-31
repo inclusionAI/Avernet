@@ -2,11 +2,11 @@ use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedUser, CreateFriendRequest,
+    AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedUser, CreateBotFriendRequest,
     CreateGroupInvitation, CreateSessionInvitation, DeleteResult, Friendship, FriendshipService,
     FriendRequest, FriendRequestDirection, FriendRequestStatus, Invitation, InvitationAcceptResult,
-    InvitationService, InvitationState, InvitationTargetType, ListFriendRequests, ListFriendships,
-    Page, Principal, RejectFriendRequest, RemoveFriendship,
+    InvitationService, InvitationState, InvitationTargetType, ListBotFriendRequests, ListBotFriendships,
+    Page, Principal, RejectFriendRequest, DeleteBotFriendship,
 };
 
 struct NoopInvitationService;
@@ -39,30 +39,30 @@ struct NoopFriendshipService;
 
 #[async_trait]
 impl FriendshipService for NoopFriendshipService {
-    async fn list_friendships(
+    async fn list_bot_friendships(
         &self,
-        _command: ListFriendships,
+        _command: ListBotFriendships,
     ) -> Result<Page<Friendship>, ApplicationError> {
         Ok(Page::empty(0, 20))
     }
 
-    async fn remove_friendship(
+    async fn delete_bot_friendship(
         &self,
-        _command: RemoveFriendship,
+        _command: DeleteBotFriendship,
     ) -> Result<DeleteResult, ApplicationError> {
         Ok(DeleteResult { deleted: false })
     }
 
-    async fn create_friend_request(
+    async fn create_bot_friend_request(
         &self,
-        _command: CreateFriendRequest,
+        _command: CreateBotFriendRequest,
     ) -> Result<FriendRequest, ApplicationError> {
         Err(ApplicationError::internal("not implemented"))
     }
 
-    async fn list_friend_requests(
+    async fn list_bot_friend_requests(
         &self,
-        _command: ListFriendRequests,
+        _command: ListBotFriendRequests,
     ) -> Result<Page<FriendRequest>, ApplicationError> {
         Ok(Page::empty(0, 20))
     }
@@ -130,23 +130,23 @@ fn invitation_commands_carry_principal_and_no_raw_credentials() {
 #[test]
 fn friendship_commands_carry_principal_and_no_raw_credentials() {
     let principal = Principal::bot("bot-1", "tenant-a", BTreeSet::new());
-    let list_friendships = ListFriendships {
+    let list_bot_friendships = ListBotFriendships {
         principal: principal.clone(),
         bot_uuid: "bot-1".into(),
         offset: 0,
         limit: 25,
     };
-    let remove = RemoveFriendship {
+    let remove = DeleteBotFriendship {
         principal: principal.clone(),
         bot_uuid: "bot-1".into(),
         friend_bot_uuid: "bot-2".into(),
     };
-    let create_req = CreateFriendRequest {
+    let create_req = CreateBotFriendRequest {
         principal: principal.clone(),
         bot_uuid: "bot-1".into(),
         to_bot_uuid: "bot-2".into(),
     };
-    let list_reqs = ListFriendRequests {
+    let list_reqs = ListBotFriendRequests {
         principal: principal.clone(),
         bot_uuid: "bot-1".into(),
         direction: FriendRequestDirection::Sent,
@@ -163,7 +163,7 @@ fn friendship_commands_carry_principal_and_no_raw_credentials() {
         request_id: "req-1".into(),
     };
     for cmd in [
-        &list_friendships.principal as &Principal,
+        &list_bot_friendships.principal as &Principal,
         &remove.principal,
         &create_req.principal,
         &list_reqs.principal,
@@ -173,7 +173,7 @@ fn friendship_commands_carry_principal_and_no_raw_credentials() {
         let s = format!("{cmd:?}");
         assert!(!s.contains("Cookie") && !s.contains("Bearer") && !s.contains("sender"));
     }
-    assert_eq!(list_friendships.bot_uuid, "bot-1");
+    assert_eq!(list_bot_friendships.bot_uuid, "bot-1");
     assert_eq!(remove.friend_bot_uuid, "bot-2");
     assert_eq!(create_req.to_bot_uuid, "bot-2");
     assert_eq!(list_reqs.direction, FriendRequestDirection::Sent);

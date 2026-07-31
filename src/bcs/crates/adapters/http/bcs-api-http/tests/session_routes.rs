@@ -17,10 +17,10 @@ use bcs_service_api::application::v1::{
     UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, CreateFriendRequest, CreateGroupInvitation,
+    AcceptFriendRequest, AcceptInvitation, CreateBotFriendRequest, CreateGroupInvitation,
     CreateSessionInvitation, Friendship, FriendshipService, FriendRequest, Invitation,
-    InvitationAcceptResult, InvitationService, ListFriendRequests, ListFriendships,
-    RejectFriendRequest, RemoveFriendship,
+    InvitationAcceptResult, InvitationService, ListBotFriendRequests, ListBotFriendships,
+    RejectFriendRequest, DeleteBotFriendship,
 };
 use bcs_service_api::{ActorKind, ParticipantRole};
 use serde_json::{Value, json};
@@ -155,30 +155,30 @@ struct NoopFriendshipService;
 
 #[async_trait]
 impl FriendshipService for NoopFriendshipService {
-    async fn list_friendships(
+    async fn list_bot_friendships(
         &self,
-        _command: ListFriendships,
+        _command: ListBotFriendships,
     ) -> Result<Page<Friendship>, ApplicationError> {
         Err(ApplicationError::internal("friendship not configured"))
     }
 
-    async fn remove_friendship(
+    async fn delete_bot_friendship(
         &self,
-        _command: RemoveFriendship,
+        _command: DeleteBotFriendship,
     ) -> Result<DeleteResult, ApplicationError> {
         Err(ApplicationError::internal("friendship not configured"))
     }
 
-    async fn create_friend_request(
+    async fn create_bot_friend_request(
         &self,
-        _command: CreateFriendRequest,
+        _command: CreateBotFriendRequest,
     ) -> Result<FriendRequest, ApplicationError> {
         Err(ApplicationError::internal("friendship not configured"))
     }
 
-    async fn list_friend_requests(
+    async fn list_bot_friend_requests(
         &self,
-        _command: ListFriendRequests,
+        _command: ListBotFriendRequests,
     ) -> Result<Page<FriendRequest>, ApplicationError> {
         Err(ApplicationError::internal("friendship not configured"))
     }

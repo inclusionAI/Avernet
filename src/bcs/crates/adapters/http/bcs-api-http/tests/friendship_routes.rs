@@ -7,13 +7,13 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
-    ApplicationError, CompleteSession, CreateFriendRequest, CreateGroup, CreateGroupInvitation,
+    ApplicationError, CompleteSession, CreateBotFriendRequest, CreateGroup, CreateGroupInvitation,
     CreateSession, CreateSessionInvitation, CreateSessionOutcome, DeleteGroup,
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, Friendship,
     FriendshipService, FriendRequest, FriendRequestDirection, FriendRequestStatus, GetGroup,
     GetSession, GroupDetail, GroupService, GroupSummary, Invitation, InvitationAcceptResult,
-    InvitationService, ListBotGroups, ListFriendRequests, ListFriendships, ListSessionMessages,
-    ListSessions, Page, Principal, RejectFriendRequest, RemoveFriendship, SessionCompletionResult,
+    InvitationService, ListBotGroups, ListBotFriendRequests, ListBotFriendships, ListSessionMessages,
+    ListSessions, Page, Principal, RejectFriendRequest, DeleteBotFriendship, SessionCompletionResult,
     SessionDetail, SessionMessage, SessionMessageService, SessionParticipant, SessionService,
     SessionSummary, UpdateGroup, UpdateGroupParticipant, UpdateSession,
     UpdateSessionParticipant,
@@ -221,19 +221,19 @@ impl InvitationService for NoopInvitationService {
 
 #[derive(Default)]
 struct FakeFriendshipService {
-    listed_friendships: Mutex<Option<ListFriendships>>,
-    removed_friendship: Mutex<Option<RemoveFriendship>>,
-    created_friend_request: Mutex<Option<CreateFriendRequest>>,
-    listed_friend_requests: Mutex<Option<ListFriendRequests>>,
+    listed_friendships: Mutex<Option<ListBotFriendships>>,
+    removed_friendship: Mutex<Option<DeleteBotFriendship>>,
+    created_friend_request: Mutex<Option<CreateBotFriendRequest>>,
+    listed_friend_requests: Mutex<Option<ListBotFriendRequests>>,
     accepted_friend_request: Mutex<Option<AcceptFriendRequest>>,
     rejected_friend_request: Mutex<Option<RejectFriendRequest>>,
 }
 
 #[async_trait]
 impl FriendshipService for FakeFriendshipService {
-    async fn list_friendships(
+    async fn list_bot_friendships(
         &self,
-        command: ListFriendships,
+        command: ListBotFriendships,
     ) -> Result<Page<Friendship>, ApplicationError> {
         let offset = command.offset;
         let limit = command.limit;
@@ -246,17 +246,17 @@ impl FriendshipService for FakeFriendshipService {
         })
     }
 
-    async fn remove_friendship(
+    async fn delete_bot_friendship(
         &self,
-        command: RemoveFriendship,
+        command: DeleteBotFriendship,
     ) -> Result<DeleteResult, ApplicationError> {
         *self.removed_friendship.lock().expect("remove friendship lock") = Some(command);
         Ok(DeleteResult { deleted: true })
     }
 
-    async fn create_friend_request(
+    async fn create_bot_friend_request(
         &self,
-        command: CreateFriendRequest,
+        command: CreateBotFriendRequest,
     ) -> Result<FriendRequest, ApplicationError> {
         *self
             .created_friend_request
@@ -273,9 +273,9 @@ impl FriendshipService for FakeFriendshipService {
         })
     }
 
-    async fn list_friend_requests(
+    async fn list_bot_friend_requests(
         &self,
-        command: ListFriendRequests,
+        command: ListBotFriendRequests,
     ) -> Result<Page<FriendRequest>, ApplicationError> {
         let offset = command.offset;
         let limit = command.limit;

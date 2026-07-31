@@ -7,13 +7,13 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
-    ApplicationError, CompleteSession, CreateFriendRequest, CreateGroup, CreateGroupInvitation,
+    ApplicationError, CompleteSession, CreateBotFriendRequest, CreateGroup, CreateGroupInvitation,
     CreateSession, CreateSessionInvitation, CreateSessionOutcome, DeleteGroup,
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
     Friendship, FriendshipService, FriendRequest, GetGroup, GetSession, GroupDetail, GroupService,
     GroupSummary, Invitation, InvitationAcceptResult, InvitationService, InvitationState,
-    InvitationTargetType, ListBotGroups, ListFriendRequests, ListFriendships, ListSessionMessages,
-    ListSessions, Page, Principal, RejectFriendRequest, RemoveFriendship, SessionCompletionResult,
+    InvitationTargetType, ListBotGroups, ListBotFriendRequests, ListBotFriendships, ListSessionMessages,
+    ListSessions, Page, Principal, RejectFriendRequest, DeleteBotFriendship, SessionCompletionResult,
     SessionDetail, SessionMessage, SessionMessageService, SessionParticipant, SessionService,
     SessionSummary, UpdateGroup, UpdateGroupParticipant, UpdateSession,
     UpdateSessionParticipant,
@@ -193,30 +193,30 @@ struct NoopFriendshipService;
 
 #[async_trait]
 impl FriendshipService for NoopFriendshipService {
-    async fn list_friendships(
+    async fn list_bot_friendships(
         &self,
-        _command: ListFriendships,
+        _command: ListBotFriendships,
     ) -> Result<Page<Friendship>, ApplicationError> {
         Err(ApplicationError::internal("friendship not configured"))
     }
 
-    async fn remove_friendship(
+    async fn delete_bot_friendship(
         &self,
-        _command: RemoveFriendship,
+        _command: DeleteBotFriendship,
     ) -> Result<DeleteResult, ApplicationError> {
         Err(ApplicationError::internal("friendship not configured"))
     }
 
-    async fn create_friend_request(
+    async fn create_bot_friend_request(
         &self,
-        _command: CreateFriendRequest,
+        _command: CreateBotFriendRequest,
     ) -> Result<FriendRequest, ApplicationError> {
         Err(ApplicationError::internal("friendship not configured"))
     }
 
-    async fn list_friend_requests(
+    async fn list_bot_friend_requests(
         &self,
-        _command: ListFriendRequests,
+        _command: ListBotFriendRequests,
     ) -> Result<Page<FriendRequest>, ApplicationError> {
         Err(ApplicationError::internal("friendship not configured"))
     }
