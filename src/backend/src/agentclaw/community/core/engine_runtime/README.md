@@ -50,8 +50,12 @@ are load-bearing and must survive any refactor:
    `ac_bots.binding_id`.** That column holds the pre-publication draft — on the
    BaaS path, the owner's own device — so the by-bot entry point sends a
    published bot's traffic to the wrong box. The live binding is the publish
-   record's `ext.binding.online`. Device resolution is also blocking network
-   I/O and must stay off the event loop; `call()` runs it in a worker thread.
+   record's `ext.binding.online`, and that record **must be looked up by the
+   `ac_bots` primary key**: `bot_id` is not unique across owners, so a lookup
+   keyed on it can return another owner's runtime and forward the caller there.
+   Owner-scoped bot resolution does not constrain a query that never names the
+   row it authorised. Device resolution is also blocking network I/O and must
+   stay off the event loop; `call()` runs it in a worker thread.
 
 Adding a group means adding a router, not a relay method: `call()` is a generic
 forward on purpose.

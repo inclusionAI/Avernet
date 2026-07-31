@@ -341,7 +341,10 @@ in `tests/community/architecture/test_service_api_conformance.py`.
     goes through its **published** runtime binding instead — the publish
     record's `ext.binding.online` via `select_stage_bind_id`, then
     `resolve_for_binding_invoke()` — because `ac_bots.binding_id` is the
-    pre-publication draft. Wrap `DeviceNotBoundError` / `ConnInfoBuildError` →
+    pre-publication draft. That publish lookup is keyed on the `ac_bots`
+    **primary key** from the already-authorised row, not on `bot_id`, which is
+    not unique across owners and would let the query select another owner's
+    published runtime. Wrap `DeviceNotBoundError` / `ConnInfoBuildError` →
     `EngineDeviceNotReadyError`; a bot with no published runtime raises the
     same rather than falling back to the draft. Runs in a worker thread: the
     provider leg is a blocking 30-second `httpx` call.

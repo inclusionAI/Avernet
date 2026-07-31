@@ -87,6 +87,11 @@ All paths are relative to `src/backend/`. Source package is
         `resolve_for_binding_invoke`), never `ac_bots.binding_id`, which holds
         the pre-publication draft. No fallback to the draft: no published
         runtime is `EngineDeviceNotReadyError`.
+  - [x] That publish lookup is keyed on the `ac_bots` **primary key** carried by
+        `BotFacts`, never on `bot_id` — `bot_id` is not unique across owners, so
+        a `(bot_id, env)` lookup could return another owner's published runtime
+        and forward the caller there. Missing pk is `EngineDeviceNotReadyError`,
+        not a fallback.
   - [x] `call(...)` runs `_resolve_device` in a worker thread —
         resolution is synchronous and its provider leg is a blocking 30-second
         `httpx` call, so inline it would park the event loop.

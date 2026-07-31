@@ -100,15 +100,20 @@ class _PublishRecord:
 
 
 class _PublishRepo:
-    """Stands in for the publish repository's latest-success lookup."""
+    """Stands in for the publish repository, keyed by ``ac_bots`` primary key.
 
-    def __init__(self, record: object | None = None) -> None:
-        self._record = record
-        self.calls: list[tuple[str, str]] = []
+    Keyed by pk rather than returning a single record, because "which row does
+    this lookup select" is the property under test — a stub that ignores its
+    key could not fail the cross-owner case.
+    """
 
-    def get_latest_success_by_source_bot_id(self, source_bot_id, env):
-        self.calls.append((source_bot_id, env))
-        return self._record
+    def __init__(self, by_pk: dict[int, list] | None = None) -> None:
+        self._by_pk = by_pk or {}
+        self.calls: list[tuple[int, str]] = []
+
+    def list_by_source_bot(self, source_bot_pk, env):
+        self.calls.append((source_bot_pk, env))
+        return list(self._by_pk.get(source_bot_pk, []))
 
 
 _UNSET = object()
@@ -157,8 +162,10 @@ def _relay(
     )
 
 
-def _service_bot_service() -> _BotService:
-    return _BotService({(BOT, OWNER): {"bot_id": BOT, "bot_type": "service"}})
+def _service_bot_service(bot_pk: int = 100) -> _BotService:
+    return _BotService(
+        {(BOT, OWNER): {"bot_id": BOT, "bot_type": "service", "id": bot_pk}}
+    )
 
 
 # ── isolation: bot resolution precedes any device work ────────────────────────
@@ -537,9 +544,11 @@ async def test_service_bot_resolves_through_its_published_binding():
     approval calls to the wrong box while the bot they addressed runs elsewhere.
     """
     resolver = _Resolver()
-    repo = _PublishRepo(_PublishRecord({"binding": {"online": 42, "verify": 41}}))
+    repo = _PublishRepo(
+        {100: [_PublishRecord({"binding": {"online": 42, "verify": 41}})]}
+    )
     relay = _relay(
-        bot_service=_service_bot_service(), resolver=resolver, publish_repo=repo
+        bot_service=_service_bot_service(100), resolver=resolver, publish_repo=repo
     )
 
     await relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
@@ -547,6 +556,56 @@ async def test_service_bot_resolves_through_its_published_binding():
     assert resolver.binding_calls == [(42, OWNER, BOT)]
     # The by-bot entry point — the draft binding — must not be consulted at all.
     assert resolver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_another_owners_publish_record_is_never_selected():
+    """``bot_id`` is not unique across owners, so the lookup must not use it.
+
+    The column carries no unique constraint and ``create_bot_for_others`` gives
+    every user a bot called ``default``, so a lookup keyed on ``(bot_id, env)``
+    returns whichever owner published most recently — which would forward this
+    caller's request to *another owner's* running device. The owner-scoped bot
+    resolution does not constrain a second query that never mentions the row it
+    authorised; the ``ac_bots`` primary key does.
+
+    Here the caller's bot is pk 100 and a different owner's same-named bot is
+    pk 200, published later. Selecting by name would pick 999.
+    """
+    resolver = _Resolver()
+    repo = _PublishRepo(
+        {
+            100: [_PublishRecord({"binding": {"online": 42}})],
+            200: [_PublishRecord({"binding": {"online": 999}}, record_id=8)],
+        }
+    )
+
+    await _relay(
+        bot_service=_service_bot_service(100), resolver=resolver, publish_repo=repo
+    ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+
+    assert repo.calls and all(pk == 100 for pk, _ in repo.calls)
+    assert resolver.binding_calls == [(42, OWNER, BOT)]
+
+
+@pytest.mark.asyncio
+async def test_only_a_successful_publish_record_is_used():
+    """Newest-first, but the newest *successful* record is the running one."""
+    resolver = _Resolver()
+    repo = _PublishRepo(
+        {
+            100: [
+                _PublishRecord({"binding": {"online": 77}}, status="building"),
+                _PublishRecord({"binding": {"online": 42}}, status="success"),
+            ]
+        }
+    )
+
+    await _relay(
+        bot_service=_service_bot_service(100), resolver=resolver, publish_repo=repo
+    ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+
+    assert resolver.binding_calls == [(42, OWNER, BOT)]
 
 
 @pytest.mark.asyncio
@@ -575,9 +634,9 @@ async def test_service_bot_without_a_published_runtime_is_not_ready():
     transport = _Transport()
     with pytest.raises(EngineDeviceNotReadyError):
         await _relay(
-            bot_service=_service_bot_service(),
+            bot_service=_service_bot_service(100),
             transport=transport,
-            publish_repo=_PublishRepo(None),
+            publish_repo=_PublishRepo({}),
         ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
 
     assert transport.calls == []
@@ -589,21 +648,40 @@ async def test_service_bot_with_no_stage_binding_is_not_ready():
     resolver = _Resolver()
     with pytest.raises(EngineDeviceNotReadyError):
         await _relay(
-            bot_service=_service_bot_service(),
+            bot_service=_service_bot_service(100),
             resolver=resolver,
-            publish_repo=_PublishRepo(_PublishRecord({"binding": {}})),
+            publish_repo=_PublishRepo({100: [_PublishRecord({"binding": {}})]}),
         ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
 
     assert resolver.binding_calls == []
 
 
 @pytest.mark.asyncio
+async def test_service_bot_without_a_primary_key_is_not_ready():
+    """Without the pk there is no safe key, so refuse rather than guess.
+
+    Falling back to a ``bot_id`` lookup here would reopen the cross-owner hole
+    on exactly the path that cannot prove which row it is reading.
+    """
+    repo = _PublishRepo({100: [_PublishRecord({"binding": {"online": 42}})]})
+    with pytest.raises(EngineDeviceNotReadyError):
+        await _relay(
+            bot_service=_BotService(
+                {(BOT, OWNER): {"bot_id": BOT, "bot_type": "service"}}
+            ),
+            publish_repo=repo,
+        ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
 async def test_publish_ext_is_read_when_it_arrives_as_json_text():
     """``ext`` is normally a parsed dict; the str form is handled the same."""
     resolver = _Resolver()
-    repo = _PublishRepo(_PublishRecord(json.dumps({"binding": {"online": 9}})))
+    repo = _PublishRepo({100: [_PublishRecord(json.dumps({"binding": {"online": 9}}))]})
     await _relay(
-        bot_service=_service_bot_service(), resolver=resolver, publish_repo=repo
+        bot_service=_service_bot_service(100), resolver=resolver, publish_repo=repo
     ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
 
     assert resolver.binding_calls == [(9, OWNER, BOT)]

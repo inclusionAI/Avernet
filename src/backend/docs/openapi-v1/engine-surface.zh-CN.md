@@ -420,11 +420,19 @@ Track B 的坑：**基类放最后** —— `ENVELOPE_ERRORS` 按插入顺序第
   所以 by-bot 入口会把已发布 bot 的 engine / models / approvals 调用发到错误的设备
   上；或者在 draft binding 被释放后，明明发布态 bot 是健康的，却报“设备未就绪”。真正
   在跑的 binding 是发布单的 `ext.binding.online`，用公共的 `select_stage_bind_id`
-  选取，再经 `resolve_for_binding_invoke` 解析 —— 与 `DeviceInstanceService` 和 cron
-  运行态链路的取法完全一致。**不回落到 draft**：没有发布态运行绑定的 bot 一律按“设备
-  未就绪”处理，跟未开通的 personal bot 同一个答案，因为回落到 draft 正是这里要修掉的
-  缺陷。发布单查询刻意不按 owner 过滤（组织 bot 的 `entity_id` 不一定等于创建者工号）；
-  这样做是安全的，因为 relay 在此之前已经按 owner 作用域解析过该 bot。
+  选取，再经 `resolve_for_binding_invoke` 解析。**不回落到 draft**：没有发布态运行
+  绑定的 bot 一律按“设备未就绪”处理，跟未开通的 personal bot 同一个答案，因为回落到
+  draft 正是这里要修掉的缺陷。
+
+  **该查询以 `ac_bots` 主键为键，而不是 `bot_id`。** 这是紧接上一轮的评审发现的，也是
+  这条裁定中更关键的一半。`bot_id` 在不同 owner 之间**并不唯一** —— 该列没有唯一约束，
+  且 `create_bot_for_others` 会给每个用户建一个叫 `default` 的 bot —— 所以按
+  `(bot_id, env)` 查会选中“环境内最近一次发布成功”的那条记录，可能把这个调用方的请求
+  转发到**另一个 owner 正在运行的设备**上。先按 owner 作用域解析 bot，并不能约束一条
+  根本没提到那一行的后续查询，因此把那一行的主键通过 `BotFacts` 透传下来作为查询键。
+  改成按 `owner_id` 过滤同样能堵住这个洞，但会重新引入
+  `get_latest_success_by_source_bot_id` 记录的那个漏查问题 —— 组织 bot 的发布单可能
+  是在另一个工号下创建的。用主键则两个问题都没有。
 - **2026-07-31 —— 设备解析绝不在事件循环上执行。** 它是同步的，且 provider 那一段是
   阻塞式网络 I/O —— BaaS 链路的 bot 要经 `BaasService.get_ws_info`，那是一个超时 30
   秒的同步 `httpx` 调用 —— 所以一次慢查询就会占住 worker 的事件循环，拖垮该 worker 上

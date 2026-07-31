@@ -47,7 +47,10 @@ from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResul
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
     BotPublishRepositoryProtocol,
 )
-from agentclaw.community.core.service_bot.repository.models import select_stage_bind_id
+from agentclaw.community.core.service_bot.repository.models import (
+    PublishStatus,
+    select_stage_bind_id,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.plugin_api.device_adapter_transport import (
@@ -110,10 +113,11 @@ class EngineRuntimeRelay:
             bot_id=str(bot.get("bot_id") or bot_id),
             bot_type=str(bot.get("bot_type") or ""),
             active_engine=str(bot.get("active_engine") or ""),
+            bot_pk=int(bot.get("id") or 0),
         )
 
     def _resolve_device(
-        self, bot_id: str, owner_id: str, bot_type: str
+        self, bot_id: str, owner_id: str, facts: BotFacts
     ) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
 
@@ -131,8 +135,8 @@ class EngineRuntimeRelay:
         timeout — so :meth:`call` runs it in a worker thread.
         """
         try:
-            if bot_type == _SERVICE_BOT_TYPE:
-                return self._resolve_published_device(bot_id, owner_id)
+            if facts.bot_type == _SERVICE_BOT_TYPE:
+                return self._resolve_published_device(facts, owner_id)
             return self._resolver.resolve_for_bot(bot_id, owner_id)
         except (DeviceNotBoundError, ConnInfoBuildError) as exc:
             raise EngineDeviceNotReadyError(
@@ -141,7 +145,9 @@ class EngineRuntimeRelay:
         except UnknownProviderError:
             raise
 
-    def _resolve_published_device(self, bot_id: str, owner_id: str) -> DeviceContext:
+    def _resolve_published_device(
+        self, facts: BotFacts, owner_id: str
+    ) -> DeviceContext:
         """Resolve a ``service`` bot through its **published** runtime binding.
 
         A service bot's ``ac_bots.binding_id`` is the pre-publication draft — on
@@ -153,24 +159,49 @@ class EngineRuntimeRelay:
         bot a caller actually addressed runs elsewhere, or fail as "not ready"
         once the draft binding is released while the published bot is healthy.
 
-        The live binding is the publish record's ``ext.binding.online``, reached
-        the same way ``DeviceInstanceService._resolve_binding_id_by_bot_id`` and
-        ``CronRuntimeTargetMixin`` reach it. ``select_stage_bind_id`` is the
-        shared selector for that choice rather than a second copy of the rule;
-        on the ``success`` records looked up here it yields ``online``.
+        The live binding is the publish record's ``ext.binding.online``, and
+        ``select_stage_bind_id`` is the shared selector for that choice rather
+        than a second copy of the rule; on a ``success`` record it yields
+        ``online``.
 
-        The lookup is deliberately **owner-agnostic** — an org bot's publish
-        record carries an ``entity_id`` that need not equal the creating staff
-        id, and filtering by owner would silently miss it. That costs nothing
-        here: :meth:`call` has already resolved the bot owner-scoped, so the
-        caller's claim to this ``bot_id`` is proven before this runs.
+        **Keyed on the bot's primary key, never on ``bot_id``.** ``bot_id`` is
+        not unique across owners — the column carries no unique constraint, and
+        ``create_bot_for_others`` gives every user a bot called ``default`` — so
+        a lookup by ``(bot_id, env)`` alone selects whichever owner published
+        most recently, and could hand one caller another owner's running device.
+        The owner-scoped bot resolution in :meth:`call` does not constrain a
+        second query that does not mention the row it authorised, which is why
+        the ``ac_bots`` primary key is threaded through :class:`BotFacts` and
+        used here. Filtering by ``owner_id`` instead would also be safe, but it
+        re-introduces the false negative
+        ``get_latest_success_by_source_bot_id`` warns about — an org bot whose
+        record was created under a different staff id. The primary key has
+        neither problem: it is the identity of the exact row ownership was
+        proven against.
 
         No fallback to the draft binding. Serving the draft is the defect this
         replaces, so a bot with no published runtime is "not ready" — the same
         answer an unprovisioned personal bot gets.
         """
+        bot_id = facts.bot_id
+        if not facts.bot_pk:
+            raise DeviceNotBoundError(
+                f"EngineRuntimeRelay: no bot primary key for bot={bot_id}; "
+                "cannot resolve a published runtime without one"
+            )
+
         env = get_current_env()
-        record = self._publish_repo.get_latest_success_by_source_bot_id(bot_id, env)
+        # Records come back newest-first; the newest *successful* one is the
+        # published runtime. Scoped to this bot row, so "newest" cannot mean
+        # "some other owner's".
+        record = next(
+            (
+                r
+                for r in self._publish_repo.list_by_source_bot(facts.bot_pk, env)
+                if r.status == PublishStatus.SUCCESS.value
+            ),
+            None,
+        )
         if record is None:
             raise DeviceNotBoundError(
                 f"EngineRuntimeRelay: no published runtime for bot={bot_id} env={env}"
@@ -246,7 +277,7 @@ class EngineRuntimeRelay:
         """
         facts = self.resolve_bot(bot_id, owner_id)
         ctx = await asyncio.to_thread(
-            self._resolve_device, bot_id, owner_id, facts.bot_type
+            self._resolve_device, bot_id, owner_id, facts
         )
         raw = await self._invoke(ctx, method, path, body, params, timeout)
         return self._normalise(raw, bot_id=bot_id, path=path, enveloped=enveloped)

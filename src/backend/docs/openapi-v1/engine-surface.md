@@ -514,13 +514,23 @@ it (rule C2), but the two must never be merged by a later reader.
   wrong device, or reports "not ready" once the draft binding is released while
   the published bot is healthy. The live binding is the publish record's
   `ext.binding.online`, selected with the shared `select_stage_bind_id` and
-  reached through `resolve_for_binding_invoke`, exactly as `DeviceInstanceService`
-  and the cron runtime path reach it. There is **no fallback to the draft**: a
-  bot with no published runtime is "not ready", the same answer an unprovisioned
-  personal bot gets, because serving the draft is the defect this replaces. The
-  publish lookup is owner-agnostic by design (an org bot's `entity_id` need not
-  equal the creating staff id); it is safe because the relay has already
-  resolved the bot owner-scoped before it runs.
+  reached through `resolve_for_binding_invoke`. There is **no fallback to the
+  draft**: a bot with no published runtime is "not ready", the same answer an
+  unprovisioned personal bot gets, because serving the draft is the defect this
+  replaces.
+
+  **That lookup is keyed on the `ac_bots` primary key, not on `bot_id`.** Review
+  caught this in the round after the one above, and it is the sharper half of
+  the ruling. `bot_id` is *not* unique across owners — the column carries no
+  unique constraint, and `create_bot_for_others` gives every user a bot called
+  `default` — so a lookup by `(bot_id, env)` selects whichever owner published
+  most recently and can forward one caller's request to another owner's running
+  device. Resolving the bot owner-scoped first does not constrain a second query
+  that never mentions the row it authorised, so the primary key of that row is
+  threaded through `BotFacts` and used as the key. Filtering by `owner_id`
+  instead would also close the hole, but re-introduces the false negative
+  `get_latest_success_by_source_bot_id` documents — an org bot whose record was
+  created under a different staff id. The primary key has neither problem.
 - **2026-07-31 — device resolution never runs on the event loop.** It is
   synchronous and its provider leg is blocking network I/O — a BaaS-backed bot
   resolves through `BaasService.get_ws_info`, a sync `httpx` call with a

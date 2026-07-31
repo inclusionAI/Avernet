@@ -50,6 +50,14 @@ class BotFacts:
     bot_id: str
     bot_type: str
     active_engine: str
+    #: ``ac_bots`` primary key of the row ownership was just proven against.
+    #: Internal, never published — it exists because ``bot_id`` is **not**
+    #: unique across owners (no unique constraint on the column, and
+    #: ``create_bot_for_others`` gives every user a bot called ``default``), so
+    #: any second query keyed on ``bot_id`` alone could select a different
+    #: owner's row. This is the discriminator that keeps the service-bot
+    #: publish lookup on the bot the caller actually owns.
+    bot_pk: int = 0
 
 
 @dataclass(frozen=True)
