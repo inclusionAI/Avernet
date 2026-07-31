@@ -36,3 +36,15 @@ class BotRegistry(Protocol):
     """
 
     async def find_bot_by_token(self, token: str) -> RegisteredBot | None: ...
+
+    async def find_bot_by_agent_code(
+        self, agent_code: str
+    ) -> RegisteredBot | None:
+        """Resolve a bot by its ``agent_code`` (Provider-facing agent/engine code).
+
+        Returns ``None`` for an unknown ``agent_code`` (soft miss — not
+        applicable); never raises on an unknown code. Used by the agentpass
+        agent_code fallback path to map an Agent Server SDK-resolved
+        ``agent_code`` to a registered bot.
+        """
+        ...
