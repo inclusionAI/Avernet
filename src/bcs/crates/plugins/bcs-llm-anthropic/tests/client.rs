@@ -41,9 +41,16 @@ fn builds_anthropic_json_schema_request() {
     assert_eq!(body["stream"], false);
     assert!(body.get("temperature").is_none());
     assert_eq!(body["system"], "Return JSON only.");
-    assert_eq!(body["messages"].as_array().map(Vec::len), Some(1));
+    assert_eq!(body["messages"].as_array().map(Vec::len), Some(3));
     assert_eq!(body["messages"][0]["role"], "user");
     assert_eq!(body["messages"][0]["content"], "Judge the candidate.");
+    assert_eq!(body["messages"][1]["role"], "assistant");
+    assert_eq!(
+        body["messages"][1]["content"],
+        "I will evaluate the candidate against the criteria."
+    );
+    assert_eq!(body["messages"][2]["role"], "user");
+    assert_eq!(body["messages"][2]["content"], "Return the final outcome now.");
     assert_eq!(body["output_config"]["format"]["type"], "json_schema");
     assert_eq!(
         body["output_config"]["format"]["schema"]["properties"]["outcome"]["enum"],
@@ -473,6 +480,14 @@ fn test_request(response_format: serde_json::Value) -> LlmChatCompletionRequest 
             LlmChatMessage {
                 role: "user".to_string(),
                 content: json!("Judge the candidate."),
+            },
+            LlmChatMessage {
+                role: "assistant".to_string(),
+                content: json!("I will evaluate the candidate against the criteria."),
+            },
+            LlmChatMessage {
+                role: "user".to_string(),
+                content: json!("Return the final outcome now."),
             },
         ],
         response_format: Some(response_format),

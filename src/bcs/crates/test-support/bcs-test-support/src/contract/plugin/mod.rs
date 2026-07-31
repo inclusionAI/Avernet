@@ -48,7 +48,11 @@ where
                 },
                 LlmChatMessage {
                     role: "assistant".to_string(),
-                    content: json!("The result is "),
+                    content: json!("I will evaluate the candidate against the criteria."),
+                },
+                LlmChatMessage {
+                    role: "user".to_string(),
+                    content: json!("Return the final outcome now."),
                 },
             ],
             response_format: Some(json!({
