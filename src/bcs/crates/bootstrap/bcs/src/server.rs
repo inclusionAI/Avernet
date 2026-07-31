@@ -1489,13 +1489,6 @@ impl Default for BcsServerState {
             crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
             outbound_url_guard.clone(),
         );
-        let _state_machine_timeout_handle = crate::state_machine_timeout_scanner::spawn(
-            services.collaboration_runtime.clone(),
-            crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
-            crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
-            crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
-        );
-
         // Start JWT token expiry scanner
         let _token_expiry_handle = crate::token_expiry_scanner::spawn(
             bot_connections.clone(),
@@ -2657,13 +2650,6 @@ impl BcsServer {
             crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
             callback_url_guard.clone(),
         );
-        let _state_machine_timeout_handle = crate::state_machine_timeout_scanner::spawn(
-            services.collaboration_runtime.clone(),
-            crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
-            crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
-            crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
-        );
-
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
 
@@ -3214,13 +3200,6 @@ impl BcsServer {
             crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
             outbound_url_guard.clone(),
         );
-        let _state_machine_timeout_handle =
-            crate::state_machine_timeout_scanner::spawn_if_leader(
-                leader_election.as_ref(),
-                services.collaboration_runtime.clone(),
-            )
-            .await?;
-
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
 
@@ -3450,6 +3429,16 @@ impl BcsServer {
             })
     }
 
+    fn spawn_state_machine_timeout_scanner(&self) -> tokio::task::JoinHandle<()> {
+        crate::state_machine_timeout_scanner::spawn(
+            self.state.leader_election.clone(),
+            self.state.services.collaboration_runtime.clone(),
+            crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
+            crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
+            crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
+        )
+    }
+
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
         let addr: SocketAddr = format!("{}:{}", self.config.bind, self.config.port)
@@ -3457,6 +3446,7 @@ impl BcsServer {
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
 
         self.initialize_lifecycle().await?;
+        let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
 
         // Spawn async chat-run TTL cleanup loop.
         {
@@ -3567,6 +3557,7 @@ impl BcsServer {
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
 
         self.initialize_lifecycle().await?;
+        let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
 
         let app = self.build_router().await;
 
