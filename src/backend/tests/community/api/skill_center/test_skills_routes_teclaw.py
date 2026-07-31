@@ -33,7 +33,7 @@ def _app(skill_service):
     bot_repo = MagicMock()
     default_bot = {
         "bot_id": "b1", "owner_id": "u1", "active_engine": "openclaw",
-        "bot_type": "service", "status": "ACTIVE",
+        "entity_type": "staff", "bot_type": "service", "status": "ACTIVE",
     }
     bot_repo.get_by_id_and_owner.return_value = default_bot
     bot_repo.get_by_id.return_value = default_bot
@@ -126,7 +126,7 @@ def test_readme_route_teclaw_branch():
     assert path_factory.get_bot_skills_local_dir.call_args.kwargs["is_teclaw"] is True
 
 
-def test_readme_route_uses_request_owner_context_for_teclaw():
+def test_readme_route_uses_skill_bot_context_not_request_context_for_teclaw():
     lookup_svc = MagicMock()
     lookup_svc.get_skill.return_value = {
         "id": "1",
@@ -141,10 +141,23 @@ def test_readme_route_uses_request_owner_context_for_teclaw():
 
     client, factory, path_factory = _app(lookup_svc)
     factory.create.side_effect = [lookup_svc, read_svc]
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_by_id.return_value = {
+        "bot_id": "teclaw-bot",
+        "owner_id": "skill-owner-u",
+        "entity_type": "staff",
+        "active_engine": "openclaw",
+        "bot_type": "service",
+    }
 
     resp = client.get(
         "/api/skills/1/readme",
-        params={"entity_id": "owner-u", "bot_id": "default", "engine_type": "openclaw"},
+        params={"entity_id": "wrong-request-owner", "bot_id": "default", "engine_type": "hermes"},
     )
 
     assert resp.status_code == 200
@@ -152,14 +165,14 @@ def test_readme_route_uses_request_owner_context_for_teclaw():
     assert factory.create.call_count == 2
     assert factory.create.call_args.kwargs["local_skill_path_adapter"] is not None
     assert path_factory.get_bot_skills_local_dir.call_args.args[:4] == (
-        "owner-u",
+        "skill-owner-u",
         "teclaw-bot",
         "openclaw",
         "staff",
     )
     assert path_factory.get_bot_skills_local_dir.call_args.kwargs["is_teclaw"] is True
     read_svc.get_skill_readme.assert_awaited_once_with(
-        "1", "u1", "teclaw-bot", device_owner_id="owner-u"
+        "1", "u1", "teclaw-bot", device_owner_id="skill-owner-u"
     )
 
 
@@ -182,6 +195,19 @@ def test_readme_route_link_name_falls_back_to_global_lookup():
 
     client, factory, _ = _app(lookup_svc)
     factory.create.side_effect = [lookup_svc, read_svc]
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_by_id.return_value = {
+        "bot_id": "teclaw-bot",
+        "owner_id": "owner-u",
+        "entity_type": "staff",
+        "active_engine": "openclaw",
+        "bot_type": "service",
+    }
 
     resp = client.get(
         "/api/skills/x/readme",
@@ -228,6 +254,7 @@ def test_readme_route_handles_duplicate_link_name_scopes_and_desktop_bot():
         "bot_type": "desktop",
         "status": "ACTIVE",
     }
+    bot_repo.get_by_id.return_value = bot_repo.get_by_id_and_owner.return_value
 
     resp = client.get(
         "/api/skills/x/readme",
