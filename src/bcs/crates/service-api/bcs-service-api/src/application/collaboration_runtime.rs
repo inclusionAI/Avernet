@@ -707,6 +707,18 @@ pub trait CollaborationRuntimeService: Send + Sync {
         ))
     }
 
+    /// Abort every active StateMachine run associated with one Session.
+    async fn cancel_session_runs(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let _ = (session_id, reason);
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "session run cancellation is not implemented".to_string(),
+        ))
+    }
+
     /// Remove the Group runtime binding and its sessions after the Group row
     /// has been deleted. Implementations must be idempotent so a DELETE retry
     /// can finish cleanup after an earlier partial failure.

@@ -140,6 +140,7 @@ pub trait SessionManagementService: Send + Sync {
         bot_uuid: &str,
     ) -> Result<Vec<String>, SessionUseCaseError>;
 
+    /// Abort active StateMachine runs before deleting the Session.
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError>;
 
     // ── session collection (收藏) ──────────────────────────────
