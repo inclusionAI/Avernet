@@ -4596,7 +4596,14 @@ def _is_first_bot(self, user_id: str) -> bool:
         logger.info(f"[bot_service.refresh_passport_token] Starting refresh for bot_id={bot_id}, user_id={user_id}")
 
         # 1. 获取 bot 并校验权限
-        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+        # 回调走 /api 前缀 → AvernetTenantMiddleware 套 DEFAULT 租户 teamclaw,
+        # 但外部租户 bot 的 passport 刷新需跨租户直查。(bot_id, owner_workno)
+        # 全局唯一,跨租户直查安全。
+        bot = self._repository.get_by_id_and_owner(
+            bot_id,
+            user_id,
+            execution_options={"skip_avernet_tenant_guard": True},
+        )
         if not bot:
             logger.warning(f"[bot_service.refresh_passport_token] Bot not found: bot_id={bot_id}, user_id={user_id}")
             raise BotNotFoundError(f"Bot not found: {bot_id}")

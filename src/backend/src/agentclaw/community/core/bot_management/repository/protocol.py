@@ -25,8 +25,22 @@ class BotRepository(Protocol):
         """Create a new bot record."""
         ...
 
-    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> Optional[Dict[str, Any]]:
-        """Get bot by bot_id and owner_id."""
+    def get_by_id_and_owner(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        execution_options: dict | None = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get bot by bot_id and owner_id.
+
+        ``execution_options`` is forwarded to the SQLAlchemy query via
+        ``Query.execution_options`` so callers can opt out of cross-cutting
+        guards (e.g. ``{"skip_avernet_tenant_guard": True}`` for the
+        refresh-token callback, which is served under ``/api`` and thus runs
+        under the DEFAULT tenant but must resolve an external-tenant bot).
+        ``None`` means no override — preserves existing behavior.
+        """
         ...
 
     def get_live_by_id_owner_and_env(
