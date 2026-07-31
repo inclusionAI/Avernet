@@ -1225,13 +1225,11 @@ async def get_skill_readme(
             logger.warning(f"[skills.get_skill_readme] SkillCenter file-content failed: {e}")
         raise HTTPException(status_code=404, detail="Skill or README not found")
 
-    # The DB row is the source of truth for the bot/owner that owns local files.
-    # Keep this explicit so README reads do not regress to request-context-only
-    # resolution after REL20260710 rebases.
-    # This is especially important for TEClaw requests whose HTTP context can be
-    # default/openclaw even though the local skill belongs to a TEClaw bot.
+    # The request's resolved entity identifies the Bot owner and therefore the
+    # device that owns local files. ``skill.user_id`` is the Skill author and can
+    # be a collaborator, so it must not be used for device routing.
     read_bot_id = (skill or {}).get("bolt_id") or effective_bot_id
-    read_owner_id = (skill or {}).get("user_id") or effective_entity_id
+    read_owner_id = effective_entity_id
     read_entity_type = effective_entity_type
     read_engine = resolve_engine_for_bot(
         bot_id=read_bot_id,
@@ -1293,7 +1291,12 @@ async def get_skill_readme(
         "skill_id=%s, user_id=%s, bot_id=%s",
         skill_id, read_owner_id, read_bot_id,
     )
-    readme = await read_service.get_skill_readme(skill_id, read_owner_id, read_bot_id)
+    readme = await read_service.get_skill_readme(
+        skill_id,
+        ctx.user_id,
+        read_bot_id,
+        device_owner_id=read_owner_id,
+    )
     if readme is None:
         raise HTTPException(status_code=404, detail="Skill or README not found")
     logger.info(f"[skills.get_skill_readme] Success: skill_id={skill_id}")
