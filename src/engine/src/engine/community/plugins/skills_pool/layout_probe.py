@@ -772,30 +772,30 @@ def inspect_runtime_layout(
                         reason="stable_repo_bridge_invalid",
                         preparation_id=preparation_id,
                     )
-            try:
-                active_entries_failure_reason = _active_entries_failure_reason(
-                    layout,
-                    engine=engine,
-                )
-            except PermissionError:
-                active_entries_failure_reason = "active_managed_entry_invalid"
-            except OSError as error:
-                return _transient(
-                    engine=engine,
-                    contract_version=expected_contract_version,
-                    layout=layout,
-                    reason="active_entries_temporarily_unavailable",
-                    error=error,
-                    preparation_id=preparation_id,
-                )
-            if active_entries_failure_reason is not None:
-                return _invalid(
-                    engine=engine,
-                    contract_version=expected_contract_version,
-                    layout=layout,
-                    reason=active_entries_failure_reason,
-                    preparation_id=preparation_id,
-                )
+        try:
+            active_entries_failure_reason = _active_entries_failure_reason(
+                layout,
+                engine=engine,
+            )
+        except PermissionError:
+            active_entries_failure_reason = "active_managed_entry_invalid"
+        except OSError as error:
+            return _transient(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="active_entries_temporarily_unavailable",
+                error=error,
+                preparation_id=preparation_id,
+            )
+        if active_entries_failure_reason is not None:
+            return _invalid(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason=active_entries_failure_reason,
+                preparation_id=preparation_id,
+            )
         active_checks = {
             "marker_valid": True,
             "active_marker_valid": True,
