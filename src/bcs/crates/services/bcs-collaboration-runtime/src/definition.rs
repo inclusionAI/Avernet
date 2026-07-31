@@ -14,6 +14,70 @@ pub struct CompiledStateMachine {
     pub initial_nodes: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DefinitionGraphProjection {
+    pub graph_mode: StateMachineGraphMode,
+    pub nodes: Vec<DefinitionGraphNodeProjection>,
+    pub edges: Vec<DefinitionGraphEdgeProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DefinitionGraphNodeProjection {
+    pub node_id: String,
+    pub display_name: String,
+    pub kind: StateMachineNodeKind,
+    pub assignee: Option<StateMachineAssignee>,
+    pub final_output: bool,
+    pub judge: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DefinitionGraphEdgeProjection {
+    pub source: String,
+    pub target: String,
+    pub outcome: String,
+    pub guard: Option<String>,
+}
+
+pub(crate) fn project_definition_graph(
+    compiled: &CompiledStateMachine,
+) -> Result<DefinitionGraphProjection, CollaborationRuntimeError> {
+    let state_machine = match &compiled.definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+        _ => return invalid("runtime.kind must be state_machine"),
+    };
+    let nodes = state_machine
+        .nodes
+        .iter()
+        .map(|(node_id, node)| DefinitionGraphNodeProjection {
+            node_id: node_id.clone(),
+            display_name: node.display_name.clone(),
+            kind: node.kind,
+            assignee: node.assignee.clone(),
+            final_output: node.final_output,
+            judge: node.judge.is_some(),
+        })
+        .collect();
+    let mut edges = Vec::new();
+    for (source, node) in &state_machine.nodes {
+        for (outcome, transition) in &node.transitions {
+            for target in &transition.targets {
+                edges.push(DefinitionGraphEdgeProjection {
+                    source: source.clone(),
+                    target: target.clone(),
+                    outcome: outcome.clone(),
+                    guard: transition.guard.clone(),
+                });
+            }
+        }
+    }
+    Ok(DefinitionGraphProjection {
+        graph_mode: state_machine.graph_mode,
+        nodes,
+        edges,
+    })
+}
+
 pub fn validate_definition(
     mut definition: CollaborationDefinition,
 ) -> Result<CompiledStateMachine, CollaborationRuntimeError> {

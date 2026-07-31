@@ -32,6 +32,8 @@ pub struct CollaborationDefinitionValidationOutcome {
     pub summary: CollaborationDefinitionValidationSummary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub participants: Vec<CollaborationDefinitionParticipantSlot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph: Option<CollaborationDefinitionGraphPreview>,
     #[serde(skip_serializing)]
     pub definition: Option<CollaborationDefinition>,
 }
@@ -64,6 +66,31 @@ pub struct CollaborationDefinitionParticipantSlot {
     pub description: Option<String>,
     pub required: bool,
     pub assigned: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollaborationDefinitionGraphPreview {
+    pub graph_mode: StateMachineGraphMode,
+    pub nodes: Vec<CollaborationDefinitionGraphNode>,
+    pub edges: Vec<CollaborationDefinitionGraphEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollaborationDefinitionGraphNode {
+    pub node_id: String,
+    pub display_name: String,
+    pub kind: StateMachineNodeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<StateMachineAssignee>,
+    pub final_output: bool,
+    pub judge: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollaborationDefinitionGraphEdge {
+    pub source: String,
+    pub target: String,
+    pub outcome: String,
 }
 
 #[derive(Debug, thiserror::Error)]

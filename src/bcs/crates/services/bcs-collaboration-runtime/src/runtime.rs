@@ -56,7 +56,8 @@ use uuid::Uuid;
 const RUNTIME_CLEANUP_SESSION_LIMIT: u64 = i64::MAX as u64;
 
 use crate::definition::{
-    CompiledStateMachine, reject_explicit_participant_roles, validate_definition,
+    CompiledStateMachine, project_definition_graph, reject_explicit_participant_roles,
+    validate_definition,
 };
 use crate::validation::validate_authoring_definition_yaml;
 
@@ -4293,16 +4294,17 @@ fn run_graph_view(
         .iter()
         .map(|node| (node.node_id.as_str(), node))
         .collect::<BTreeMap<_, _>>();
-    let nodes = state_machine
+    let projection = project_definition_graph(compiled)?;
+    let nodes = projection
         .nodes
-        .iter()
-        .map(|(node_id, node)| {
-            let run_node = node_runs_by_id.get(node_id.as_str()).copied();
+        .into_iter()
+        .map(|node| {
+            let run_node = node_runs_by_id.get(node.node_id.as_str()).copied();
             StateMachineGraphNodeView {
-                node_id: node_id.clone(),
-                display_name: node.display_name.clone(),
+                node_id: node.node_id,
+                display_name: node.display_name,
                 kind: node.kind,
-                assignee: node.assignee.clone(),
+                assignee: node.assignee,
                 final_output: node.final_output,
                 status: run_node.map(|node| node.status),
                 attempt: run_node.map(|node| node.attempt),
@@ -4313,19 +4315,16 @@ fn run_graph_view(
             }
         })
         .collect();
-    let mut edges = Vec::new();
-    for (source, node) in &state_machine.nodes {
-        for (outcome, transition) in &node.transitions {
-            for target in &transition.targets {
-                edges.push(StateMachineGraphEdgeView {
-                    source: source.clone(),
-                    outcome: outcome.clone(),
-                    target: target.clone(),
-                    guard: transition.guard.clone(),
-                });
-            }
-        }
-    }
+    let edges = projection
+        .edges
+        .into_iter()
+        .map(|edge| StateMachineGraphEdgeView {
+            source: edge.source,
+            outcome: edge.outcome,
+            target: edge.target,
+            guard: edge.guard,
+        })
+        .collect();
     Ok(StateMachineRunGraphView {
         run,
         definition: StateMachineGraphDefinitionView {
