@@ -243,7 +243,7 @@ def test_device_live_baas_provider_lifecycle(live_backend):
                 },
             )
         )["data"]
-        assert bootstrap_auth["agent_code"] == f"local_{bot['bot_id']}"
+        assert bootstrap_auth["agent_code"] == bot["ext"]["passport"]["agent_code"]
 
         invalid_alive = client.post(
             "/api/v1/devices/callback/alive",
