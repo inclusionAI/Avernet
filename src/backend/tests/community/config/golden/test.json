@@ -186,7 +186,7 @@
     "secret_names": {
       "aiworkbench_repo_url": "",
       "dormant_internal_token": "",
-      "gateway_principal_signing_key": ""
+      "gateway_principal_signing_key": "gateway_principal_signing_key"
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",

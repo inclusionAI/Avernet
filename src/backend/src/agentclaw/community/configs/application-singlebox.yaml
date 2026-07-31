@@ -259,11 +259,11 @@ user_config:
 
   # Secret-registry key names. dormant token left unset -> local fallback token.
   # The aiworkbench name matches LocalSecretResolver's key so git-sync resolves
-  # the skills repo URL from this file's openclaw.skills_repo_url; likewise the
-  # principal key name resolves gateway_principal.signing_key below.
+  # the skills repo URL from this file's openclaw.skills_repo_url. The principal
+  # signing key needs no entry: its name defaults in SecretNamesConfig, so this
+  # box configures only the value below.
   secret_names:
     aiworkbench_repo_url: "other_manual_agentclaw_aiworkbench_repo_url"
-    gateway_principal_signing_key: "gateway_principal_signing_key"
 
   # The HMAC secret this box shares with the gateway, which signs the
   # X-Avernet-Principal token every /openapi/v1 request carries.

@@ -164,17 +164,35 @@ user_config:
     assert secret.secret_value == "from-the-bundled-copy"
 
 
-def test_shipped_singlebox_config_registers_the_name_but_no_key():
-    """The real shipped file: wiring live, value absent, nothing committed."""
+def test_shipped_singlebox_config_carries_the_block_but_no_key():
+    """The real shipped file: one knob, present and empty, nothing committed."""
     import yaml
 
     with LocalSecretResolver._SINGLEBOX_CONFIG_PATH.open(encoding="utf-8") as f:
         user_config = yaml.safe_load(f)["user_config"]
 
-    assert (
-        user_config["secret_names"]["gateway_principal_signing_key"]
-        == _PRINCIPAL_SIGNING_KEY_SECRET_NAME
-    ), "the name must be registered or the resolver is never consulted"
+    assert "signing_key" in user_config["gateway_principal"], (
+        "the block must exist so an operator has somewhere to put the key"
+    )
     assert not user_config["gateway_principal"]["signing_key"], (
         "no signing key may be committed to the repository"
+    )
+    assert "gateway_principal_signing_key" not in user_config.get("secret_names", {}), (
+        "the name defaults in SecretNamesConfig — registering it here is the "
+        "second config entry this shape exists to avoid"
+    )
+
+
+def test_the_default_secret_name_is_what_this_resolver_answers_to():
+    """The two halves of the one-knob shape must agree.
+
+    Nothing else links ``SecretNamesConfig``'s default to the constant this
+    resolver matches on, so if either moves the lookup silently stops resolving
+    and every /openapi/v1 request answers 401.
+    """
+    from agentclaw.community.di.config import SecretNamesConfig
+
+    assert (
+        SecretNamesConfig().gateway_principal_signing_key
+        == _PRINCIPAL_SIGNING_KEY_SECRET_NAME
     )

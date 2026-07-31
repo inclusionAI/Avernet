@@ -151,20 +151,23 @@ user_config:
   #   secret_names:
   #     dormant_internal_token: "dormant_internal_token"   # gates /api/internal/dormant/*
   #     aiworkbench_repo_url: "aiworkbench_repo_url"       # skills source repo URL
-  #     gateway_principal_signing_key: "gateway_principal_signing_key"  # gates /openapi/v1/*
   #
   # ...each read from "{env_prefix}{NAME}_VALUE", so with the prefix above:
   #     AGENTCLAW_SECRET_DORMANT_INTERNAL_TOKEN_VALUE
   #     AGENTCLAW_SECRET_AIWORKBENCH_REPO_URL_VALUE
+  #
+  # The gateway principal signing key needs NO entry here — its name already
+  # defaults in SecretNamesConfig, so a community deployment only exports the
+  # value:
   #     AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE
   #
-  # gateway_principal_signing_key is the HMAC secret the gateway signs the
-  # X-Avernet-Principal token with, so its value must match what the gateway
-  # resolves for its own principal_signer.secret_name (since #673 the gateway
-  # goes through a SecretResolver too; its community flavor reads
+  # That is the HMAC secret the gateway signs the X-Avernet-Principal token
+  # with, so it must match what the gateway resolves for its own
+  # principal_signer.secret_name (since #673 the gateway goes through a
+  # SecretResolver too; its community flavor reads
   # AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE). The two registries are separate
-  # — only the value has to agree. Unregistered or unset, the public API answers
-  # 401 to everything.
+  # — only the value has to agree. Unset, the public API answers 401 to
+  # everything.
 
   # MCP catalog — consumed by the community CommunityMCPCenter.
   # Optional path to a local MCP-server catalog file (same shape as

@@ -165,11 +165,20 @@ class SecretNamesConfig:
     them stay off / permissive, or fall back to the local path). This keeps
     the shipped source free of ``*_manual_*`` secret references while letting
     the name legitimately differ per deployment.
+
+    ``gateway_principal_signing_key`` is the exception, and deliberately so. It
+    defaults to a **generic** name rather than empty — not a corp registry key,
+    so it keeps the shipped source clean either way — because every profile
+    needs *some* name for the lookup to happen at all. With an empty default,
+    each profile had to register a name it would then never vary, so the value
+    and the name were two config entries for one secret. Defaulting it means a
+    deployment configures only the value, wherever its resolver reads that
+    from; corp env overlays still override the name with the real Mist key.
     """
 
     dormant_internal_token: str = ""
     aiworkbench_repo_url: str = ""
-    gateway_principal_signing_key: str = ""
+    gateway_principal_signing_key: str = "gateway_principal_signing_key"
 
 
 def _default_cors_origins() -> list[str]:

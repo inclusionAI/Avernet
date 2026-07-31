@@ -177,8 +177,7 @@
     },
     "oss_mount_root": "/aidesktop",
     "secret_names": {
-      "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
-      "gateway_principal_signing_key": "gateway_principal_signing_key"
+      "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url"
     },
     "skill": {
       "oss": {

@@ -14,11 +14,12 @@ module keeps no reverse dependency on the composition root.
 What comes from where:
 
 - **The signing key** — the HMAC secret shared with the gateway — is resolved
-  through :class:`SecretResolver` under the name registered in
-  ``SecretNamesConfig.gateway_principal_signing_key`` (the ``secret_names``
-  ``user_config`` block). Corp env overlays point that name at the corp secret
-  store; community resolves it from the environment via
-  ``CommunitySecretResolver``; singlebox reads it from
+  through :class:`SecretResolver` under
+  ``SecretNamesConfig.gateway_principal_signing_key``. That name **defaults**,
+  so a deployment configures only the *value*, wherever its resolver reads that
+  from: the corp secret store (corp env overlays also override the name with the
+  real registry key); ``AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE``
+  via ``CommunitySecretResolver``; or ``gateway_principal.signing_key`` in
   ``application-singlebox.yaml`` via ``LocalSecretResolver``.
 
   **In ``pre``/``prod`` an unresolvable key fails the boot** — see ``strict`` on
