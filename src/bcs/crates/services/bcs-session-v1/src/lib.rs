@@ -32,15 +32,17 @@ use bcs_service_api::application::session::{
 };
 use bcs_service_api::port::repo::{MessageRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
-    backfill_participant_names, ActorKind, BotRegistryCoreService, Group as DomainGroup,
-    GroupCoreService, GroupStrategy, Participant, ParticipantMode, ParticipantRole, ServiceError,
-    Session, SessionKind, SessionStatus as DomainSessionStatus,
+    backfill_participant_names, ActorKind, ActorStatus, BotRegistryCoreService,
+    FriendCoreService, Group as DomainGroup, GroupCoreService, GroupStrategy, Participant,
+    ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, Session,
+    SessionKind, SessionStatus as DomainSessionStatus,
 };
 
 #[derive(Debug, Clone)]
 pub struct SessionServiceConfig {
     /// Relation environment tag retained for parity with the sibling Group V1
-    /// facade; reserved for future creator-edge session authorization.
+    /// facade; used by the collaboration-eligibility creator-edge check
+    /// (`ensure_collaboration_eligible`).
     pub relation_env: String,
 }
 
@@ -54,11 +56,10 @@ pub struct SessionServiceImpl {
     sessions: Arc<dyn SessionManagementService>,
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    friends: Arc<dyn FriendCoreService>,
+    relation: Arc<dyn RelationCoreService>,
     session_repo: Arc<dyn SessionRepoPort>,
     message_repo: Arc<dyn MessageRepoPort>,
-    /// Reserved for future relation-scoped session authorization, mirroring
-    /// the sibling Group V1 facade's `relation_env`. Not read in phase one.
-    #[allow(dead_code)]
     config: SessionServiceConfig,
 }
 
@@ -68,6 +69,8 @@ impl SessionServiceImpl {
         sessions: Arc<dyn SessionManagementService>,
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
+        friends: Arc<dyn FriendCoreService>,
+        relation: Arc<dyn RelationCoreService>,
         session_repo: Arc<dyn SessionRepoPort>,
         message_repo: Arc<dyn MessageRepoPort>,
         config: SessionServiceConfig,
@@ -76,6 +79,8 @@ impl SessionServiceImpl {
             sessions,
             groups,
             registry,
+            friends,
+            relation,
             session_repo,
             message_repo,
             config,
@@ -219,7 +224,10 @@ impl SessionServiceImpl {
         Ok(session)
     }
 
-    async fn load_bot(&self, bot_uuid: &str) -> Result<(), ApplicationError> {
+    async fn load_bot(
+        &self,
+        bot_uuid: &str,
+    ) -> Result<RegisteredBot, ApplicationError> {
         self.registry
             .try_get(bot_uuid)
             .await
@@ -229,8 +237,99 @@ impl SessionServiceImpl {
                     "bot_not_found",
                     format!("Bot '{bot_uuid}' was not found"),
                 )
+            })
+    }
+
+    /// VSN7B: Mirror `bcs-group-v1`'s `ensure_collaboration_eligible`. A
+    /// caller may add a Bot to a session only when that Bot is
+    /// collaboration-eligible for the caller:
+    /// - the target must be a Bot Actor that is not Hidden; AND
+    /// - the caller IS the target bot; OR the target is `public`; OR (for a
+    ///   Human caller) the caller owns the target via `created_by` or a
+    ///   creator relation edge; OR the caller and target are friends.
+    ///
+    /// Called for the session driver, every participant in `create`, and in
+    /// `add_participant` so a manager cannot pull a hidden / protected Bot
+    /// into a session without the required relation.
+    async fn ensure_collaboration_eligible(
+        &self,
+        principal: &Principal,
+        bot_uuid: &str,
+        field_name: &str,
+    ) -> Result<(), ApplicationError> {
+        let bot = self.load_bot(bot_uuid).await?;
+        if bot.actor_kind != ActorKind::Bot {
+            return Err(ApplicationError::invalid(
+                "invalid_participant",
+                format!("{field_name} must identify a Bot Actor"),
+            ));
+        }
+        if bot.status == ActorStatus::Hidden {
+            return Err(ApplicationError::forbidden(format!(
+                "Bot '{bot_uuid}' is hidden and cannot collaborate"
+            )));
+        }
+        let principal_actor_id = principal.actor_id();
+        if principal_actor_id == bot_uuid || bot.capabilities.visibility == "public" {
+            return Ok(());
+        }
+
+        if let Principal::Human(human) = principal {
+            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
+                return Ok(());
+            }
+            let creator_edge = self
+                .relation
+                .get_edge(&principal_actor_id, bot_uuid, &self.config.relation_env)
+                .await
+                .map_err(map_service_error)?;
+            if creator_edge.is_some_and(|edge| edge.is_creator) {
+                return Ok(());
+            }
+        }
+
+        if self
+            .friends
+            .try_are_friends(&principal_actor_id, bot_uuid)
+            .await
+            .map_err(map_service_error)?
+        {
+            return Ok(());
+        }
+
+        Err(ApplicationError::forbidden(format!(
+            "Bot '{bot_uuid}' is not collaboration-eligible for this Principal"
+        )))
+    }
+
+    /// Load a session and its parent group, authorizing read access only.
+    /// Used by participant mutation endpoints that permit self-service (the
+    /// target Bot updating its own participant mode / leaving) in addition to
+    /// the manage path (VSN7L): the caller first proves a readable relation,
+    /// then checks `is_self || can_manage_session` itself.
+    async fn load_session_and_group_for_read(
+        &self,
+        principal: &Principal,
+        session_id: &str,
+    ) -> Result<(Session, DomainGroup), ApplicationError> {
+        let session = self
+            .sessions
+            .get(session_id)
+            .await
+            .map_err(map_session_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "session_not_found",
+                    format!("Session '{session_id}' was not found"),
+                )
             })?;
-        Ok(())
+        let group = self.load_group(&session.group_id).await?;
+        if !Self::can_read_session(principal, &session, &group) {
+            return Err(ApplicationError::forbidden(
+                "Principal has no readable relation to this Session",
+            ));
+        }
+        Ok((session, group))
     }
 
     // ── projections ────────────────────────────────────────────────────
@@ -290,7 +389,15 @@ impl SessionService for SessionServiceImpl {
         // from the parent group (legacy semantics); `driver_bot_uuid` is
         // validated and injected into the participant roster as the Driver so
         // the session carries a lead responder.
-        self.load_bot(&command.driver_bot_uuid).await?;
+        // VSN7B: the driver and every participant must be collaboration-eligible
+        // for the caller (visible + friend/creator relation) before the session
+        // is materialized, mirroring the sibling Group V1 facade.
+        self.ensure_collaboration_eligible(
+            &command.principal,
+            &command.driver_bot_uuid,
+            "driver_bot_uuid",
+        )
+        .await?;
 
         if command.participants.is_empty() {
             return Err(ApplicationError::invalid(
@@ -299,7 +406,12 @@ impl SessionService for SessionServiceImpl {
             ));
         }
         for input in &command.participants {
-            self.load_bot(&input.bot_uuid).await?;
+            self.ensure_collaboration_eligible(
+                &command.principal,
+                &input.bot_uuid,
+                "participants",
+            )
+            .await?;
         }
 
         // Wrap the V1 SessionInput into the legacy arbitrary-JSON `input`. When
@@ -506,7 +618,10 @@ impl SessionService for SessionServiceImpl {
         let (session, _) = self
             .load_session_for_manage(&command.principal, &command.session_id)
             .await?;
-        self.load_bot(&command.bot_uuid).await?;
+        // VSN7B: the added Bot must be collaboration-eligible for the caller
+        // (visible + friend/creator relation), not merely registered.
+        self.ensure_collaboration_eligible(&command.principal, &command.bot_uuid, "bot_uuid")
+            .await?;
         if session
             .participants
             .iter()
@@ -544,8 +659,18 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: UpdateSessionParticipant,
     ) -> Result<SessionParticipant, ApplicationError> {
-        self.load_session_for_manage(&command.principal, &command.session_id)
+        // VSN7L: the target Actor may update its own participant mode
+        // (self-service) in addition to the driver/originator/manager path,
+        // mirroring the sibling Group V1 facade's participant self-service.
+        let (session, group) = self
+            .load_session_and_group_for_read(&command.principal, &command.session_id)
             .await?;
+        let is_self = command.principal.actor_id() == command.bot_uuid;
+        if !is_self && !Self::can_manage_session(&command.principal, &session, &group) {
+            return Err(ApplicationError::forbidden(
+                "Principal may not manage this Session's participants",
+            ));
+        }
         let domain_mode = map_v1_mode_to_domain(command.mode);
         let mut updated = self
             .sessions
@@ -572,9 +697,18 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: DeleteSessionParticipant,
     ) -> Result<DeleteResult, ApplicationError> {
-        let (session, _) = self
-            .load_session_for_manage(&command.principal, &command.session_id)
+        // VSN7L: the target Actor may leave the session (self-service delete)
+        // in addition to the driver/originator/manager path, mirroring the
+        // sibling Group V1 facade's participant self-leave.
+        let (session, group) = self
+            .load_session_and_group_for_read(&command.principal, &command.session_id)
             .await?;
+        let is_self = command.principal.actor_id() == command.bot_uuid;
+        if !is_self && !Self::can_manage_session(&command.principal, &session, &group) {
+            return Err(ApplicationError::forbidden(
+                "Principal may not manage this Session's participants",
+            ));
+        }
         // Idempotent: if the target is not a current participant, return
         // `deleted: false` without invoking the legacy removal (which would
         // surface a `SessionInvalidParams` "not in session" error otherwise).

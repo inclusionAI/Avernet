@@ -11,8 +11,10 @@ use std::time::Duration;
 
 use bcs_bot::BotCore;
 use bcs_domain::{NewMessage, SenderType};
+use bcs_friend::FriendCore;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_message_store::MemoryMessageRepo;
+use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
     AddSessionParticipant, BotParticipantMode, CompleteSession, CreateSession, DeleteSession,
     DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionInput,
@@ -41,6 +43,8 @@ impl Fixture {
             Arc::new(MemoryGroupRepo::new());
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
         let bots = Arc::new(BotCore::memory());
+        let relation = Arc::new(RelationCore::memory());
+        let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
         let session_repo: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
         let message_repo = Arc::new(MemoryMessageRepo::new());
         let sessions = Arc::new(SessionManagementServiceImpl::new(
@@ -51,6 +55,8 @@ impl Fixture {
             sessions,
             groups.clone(),
             bots.clone(),
+            friends,
+            relation,
             session_repo,
             message_repo.clone(),
             SessionServiceConfig {
