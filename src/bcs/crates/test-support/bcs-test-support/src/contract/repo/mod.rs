@@ -1289,6 +1289,98 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
         .expect("list_session_messages_by_seq unknown");
     assert!(none.is_empty());
     assert_eq!(none_total, 0);
+
+    // list_session_history — legacy direct-read contract: `created_at DESC,
+    // session_seq DESC` with cursor-based pagination + full `MessageOwnerFilter`.
+    // env isolation (VUlao) is the store's responsibility: the MySQL/SQLite
+    // store filters reads by its own `env`; the memory store does not track env.
+    let history = repo
+        .list_session_history(session_id, MessageOwnerFilter::Any, None, None, 3)
+        .await
+        .expect("list_session_history first page");
+    assert!(history.has_more);
+    assert!(history.next_cursor.is_some());
+    assert_eq!(
+        history.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![9, 8, 7],
+        "must be created_at DESC, session_seq DESC"
+    );
+
+    // follow the cursor: next_cursor is the created_at of seq 7 (5000), so the
+    // next page is rows with created_at < 5000 → seqs 6,5,4 (still has_more).
+    let history_next = repo
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::Any,
+            None,
+            history.next_cursor,
+            3,
+        )
+        .await
+        .expect("list_session_history next page");
+    assert!(history_next.has_more);
+    assert_eq!(
+        history_next
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![6, 5, 4]
+    );
+
+    // IsNull → only NULL-owned messages (seqs 9,6,5,4,3,2,1) in DESC order.
+    let public_only = repo
+        .list_session_history(session_id, MessageOwnerFilter::IsNull, None, None, 100)
+        .await
+        .expect("list_session_history IsNull");
+    assert_eq!(
+        public_only
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![9, 6, 5, 4, 3, 2, 1]
+    );
+    assert!(!public_only.has_more);
+
+    // Eq → only the given owner's messages (seq 8 is workerA).
+    let worker_only = repo
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::Eq("workerA".to_string()),
+            None,
+            None,
+            100,
+        )
+        .await
+        .expect("list_session_history Eq");
+    assert_eq!(
+        worker_only
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![8]
+    );
+
+    // visible_from_seq cutoff: only seqs >= 4 survive, DESC.
+    let cutoff = repo
+        .list_session_history(session_id, MessageOwnerFilter::Any, Some(4), None, 100)
+        .await
+        .expect("list_session_history visible_from_seq");
+    assert_eq!(
+        cutoff.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![9, 8, 7, 6, 5, 4]
+    );
+
+    // unknown session → empty page, no more.
+    let empty_history = repo
+        .list_session_history("no-such-session", MessageOwnerFilter::Any, None, None, 10)
+        .await
+        .expect("list_session_history unknown session");
+    assert!(empty_history.messages.is_empty());
+    assert!(!empty_history.has_more);
+    assert!(empty_history.next_cursor.is_none());
 }
 
 fn now_ms() -> u64 {

@@ -669,24 +669,24 @@ SessionMessagePage:
   type: object
   additionalProperties: false
   required:
-    - items
-    - total
-    - offset
-    - limit
+    - messages
+    - next_cursor
+    - has_more
   properties:
-    items:
+    messages:
       type: array
       items:
         $ref: "#/SessionMessage"
-    total:
+    next_cursor:
       type: integer
       minimum: 0
-    offset:
-      type: integer
-      minimum: 0
-    limit:
-      type: integer
-      minimum: 1
+      nullable: true
+      description: >-
+        created_at cursor for the next page. Present (non-null) only when
+        has_more is true; pass it as the `before` query param to fetch the
+        next page. Null when there are no more messages.
+    has_more:
+      type: boolean
 
 SessionCompletionResult:
   type: object

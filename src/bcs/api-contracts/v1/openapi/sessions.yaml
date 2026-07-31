@@ -384,17 +384,20 @@ SessionCompletionPath:
 SessionMessagesPath:
   get:
     operationId: list_session_messages
-    summary: List session message history sorted by session_seq.
+    summary: List session message history (cursor-based).
     x-avernet-security:
       principal: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
-      - name: offset
+      - name: before
         in: query
+        description: >-
+          created_at cursor (exclusive). When set, only messages with
+          created_at strictly less than this value are returned. Omit on the
+          first page; pass the response's next_cursor to fetch the next page.
         schema:
           type: integer
           minimum: 0
-          default: 0
       - name: limit
         in: query
         schema:
@@ -405,8 +408,8 @@ SessionMessagesPath:
     responses:
       "200":
         description: >-
-          Messages ordered by session_seq ascending, paginated with
-          offset/limit.
+          Messages ordered by created_at descending, session_seq descending
+          (legacy behavior); cursor-based pagination.
         content:
           application/json:
             schema:

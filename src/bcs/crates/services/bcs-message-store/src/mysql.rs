@@ -491,6 +491,100 @@ impl MessageRepoPort for MySqlMessageStore {
         );
         Ok((messages, total))
     }
+
+    /// Direct-read session history with full visibility predicates + cursor
+    /// pagination. Sort is the legacy `created_at DESC, session_seq DESC`
+    /// (newest first); `before` is an exclusive `created_at` cursor.
+    ///
+    /// VUlao: filters reads by the store's own `env` so one env cannot leak
+    /// another env's messages (matches the INSERT-time env tagging).
+    async fn list_session_history(
+        &self,
+        session_id: &str,
+        owner_filter: MessageOwnerFilter,
+        visible_from_seq: Option<i64>,
+        before: Option<u64>,
+        limit: u32,
+    ) -> ServiceResult<MessagePage> {
+        let limit = limit as usize;
+
+        let mut params: Vec<DbValue> = vec![
+            DbValue::from(session_id.to_string()),
+            DbValue::from(self.env.clone()),
+        ];
+        let mut conditions = vec![
+            "session_id = ?".to_string(),
+            "env = ?".to_string(),
+        ];
+
+        match &owner_filter {
+            MessageOwnerFilter::Any => {}
+            MessageOwnerFilter::IsNull => {
+                conditions.push("owner_bot_id IS NULL".to_string());
+            }
+            MessageOwnerFilter::Eq(owner) => {
+                conditions.push("owner_bot_id = ?".to_string());
+                params.push(DbValue::from(owner.clone()));
+            }
+        }
+
+        if let Some(visible_from) = visible_from_seq {
+            conditions.push("session_seq >= ?".to_string());
+            params.push(DbValue::from(visible_from));
+        }
+
+        if let Some(cursor) = before {
+            conditions.push("created_at < ?".to_string());
+            params.push(DbValue::from(cursor));
+        }
+
+        // Fetch limit+1 to detect has_more.
+        let fetch_limit = (limit + 1) as u64;
+        let sql = format!(
+            "SELECT {SELECT_COLS} FROM bcs_messages WHERE {} ORDER BY created_at DESC, session_seq DESC LIMIT ?",
+            conditions.join(" AND ")
+        );
+        params.push(DbValue::from(fetch_limit));
+
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(|e| {
+                ServiceError::InternalError(format!("list_session_history query: {e}"))
+            })?;
+
+        let has_more = rows.len() > limit;
+        let rows = if has_more { &rows[..limit] } else { &rows[..] };
+
+        let mut messages = Vec::with_capacity(rows.len());
+        for row in rows {
+            messages.push(row_to_message(row).map_err(|e| {
+                ServiceError::InternalError(format!("list_session_history row: {e}"))
+            })?);
+        }
+
+        let next_cursor = if has_more {
+            messages.last().map(|m| m.created_at)
+        } else {
+            None
+        };
+
+        info!(
+            session_id = %session_id,
+            count = messages.len(),
+            has_more,
+            visible_from_seq = ?visible_from_seq,
+            owner_filter = ?owner_filter,
+            backend = %self.backend_label(),
+            "session history listed"
+        );
+        Ok(MessagePage {
+            messages,
+            next_cursor,
+            has_more,
+        })
+    }
 }
 
 #[cfg(test)]

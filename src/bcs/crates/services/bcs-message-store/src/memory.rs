@@ -203,6 +203,84 @@ impl MessageRepoPort for MemoryMessageRepo {
         Ok((paged, total))
     }
 
+    /// Direct-read session history with full visibility predicates + cursor
+    /// pagination (legacy `created_at DESC, session_seq DESC` order).
+    ///
+    /// `env` is a no-op here because [`MemoryMessageRepo`] does not tag
+    /// messages with an env; the MySQL store enforces env isolation on read
+    /// where the column exists (VUlao).
+    async fn list_session_history(
+        &self,
+        session_id: &str,
+        owner_filter: MessageOwnerFilter,
+        visible_from_seq: Option<i64>,
+        before: Option<u64>,
+        limit: u32,
+    ) -> ServiceResult<MessagePage> {
+        let sessions = self.sessions.read().await;
+        let entry = match sessions.get(session_id) {
+            Some(e) => e,
+            None => {
+                return Ok(MessagePage {
+                    messages: Vec::new(),
+                    next_cursor: None,
+                    has_more: false,
+                });
+            }
+        };
+
+        let limit = limit as usize;
+        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().collect();
+
+        if let Some(visible_from) = visible_from_seq {
+            filtered.retain(|m| m.session_seq >= visible_from);
+        }
+
+        match &owner_filter {
+            MessageOwnerFilter::Any => {}
+            MessageOwnerFilter::IsNull => {
+                filtered.retain(|m| m.owner_bot_id.is_none());
+            }
+            MessageOwnerFilter::Eq(owner) => {
+                filtered.retain(|m| m.owner_bot_id.as_deref() == Some(owner.as_str()));
+            }
+        }
+
+        if let Some(cursor) = before {
+            filtered.retain(|m| m.created_at < cursor);
+        }
+
+        // Legacy order: created_at DESC, session_seq DESC.
+        filtered.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then(b.session_seq.cmp(&a.session_seq))
+        });
+
+        let has_more = filtered.len() > limit;
+        if has_more {
+            filtered.truncate(limit);
+        }
+        let next_cursor = if has_more {
+            filtered.last().map(|m| m.created_at)
+        } else {
+            None
+        };
+
+        let count = filtered.len();
+        info!(
+            session_id = %session_id,
+            count,
+            has_more,
+            "session history listed (memory)"
+        );
+        Ok(MessagePage {
+            messages: filtered.into_iter().cloned().collect(),
+            next_cursor,
+            has_more,
+        })
+    }
+
     async fn get_message_by_id(
         &self,
         session_id: &str,
@@ -357,5 +435,134 @@ mod tests {
             page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
             vec![3, 2, 1]
         );
+    }
+
+    /// `list_session_history` must mirror the legacy direct-read contract:
+    /// `created_at DESC, session_seq DESC` order, the full 3-state
+    /// `MessageOwnerFilter` (incl. `IsNull`), `visible_from_seq` cutoff, an
+    /// exclusive `before` created_at cursor, and `has_more` + `next_cursor`
+    /// instead of a count estimate.
+    #[tokio::test]
+    async fn list_session_history_desc_cutoff_and_cursor() {
+        let repo = MemoryMessageRepo::new();
+        // Seed: seq 1..5, created_at = seq * 1000 so order is unambiguous.
+        // Mix owner_bot_id: odd seqs are NULL-owned, even seqs owned by "bot-w".
+        {
+            let mut sessions = repo.sessions.write().await;
+            let entry = sessions.entry("s3".to_string()).or_default();
+            for seq in 1..=5i64 {
+                let mut m = make_msg("s3", &format!("h{seq}"), seq);
+                m.created_at = seq as u64 * 1000;
+                m.owner_bot_id = if seq % 2 == 0 {
+                    Some("bot-w".to_string())
+                } else {
+                    None
+                };
+                entry.messages.push(m);
+            }
+            entry.seq = 5;
+        }
+
+        // Plain list: DESC by created_at (= seq DESC), all 5, no more.
+        let page = repo
+            .list_session_history("s3", MessageOwnerFilter::Any, None, None, 50)
+            .await
+            .unwrap();
+        assert!(!page.has_more);
+        assert!(page.next_cursor.is_none());
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![5, 4, 3, 2, 1]
+        );
+
+        // IsNull filter: only NULL-owned (odd seqs) survive, still DESC.
+        let page = repo
+            .list_session_history("s3", MessageOwnerFilter::IsNull, None, None, 50)
+            .await
+            .unwrap();
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![5, 3, 1]
+        );
+
+        // Eq filter: only bot-w-owned (even seqs) survive.
+        let page = repo
+            .list_session_history(
+                "s3",
+                MessageOwnerFilter::Eq("bot-w".to_string()),
+                None,
+                None,
+                50,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![4, 2]
+        );
+
+        // visible_from_seq=3: drop seqs 1,2; DESC → [5,4,3].
+        let page = repo
+            .list_session_history("s3", MessageOwnerFilter::Any, Some(3), None, 50)
+            .await
+            .unwrap();
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![5, 4, 3]
+        );
+
+        // before=3000 (exclusive created_at): only created_at < 3000 → [2,1].
+        let page = repo
+            .list_session_history("s3", MessageOwnerFilter::Any, None, Some(3000), 50)
+            .await
+            .unwrap();
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+
+        // limit=2 with has_more + next_cursor = last.created_at (2000).
+        let page = repo
+            .list_session_history("s3", MessageOwnerFilter::Any, None, None, 2)
+            .await
+            .unwrap();
+        assert!(page.has_more);
+        assert_eq!(page.next_cursor, Some(4000));
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![5, 4]
+        );
+
+        // Follow the cursor: before=4000 → [3,2], still has_more (1 left).
+        let page = repo
+            .list_session_history("s3", MessageOwnerFilter::Any, None, Some(4000), 2)
+            .await
+            .unwrap();
+        assert!(page.has_more);
+        assert_eq!(page.next_cursor, Some(2000));
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![3, 2]
+        );
+
+        // Final page: before=2000 → [1], no more.
+        let page = repo
+            .list_session_history("s3", MessageOwnerFilter::Any, None, Some(2000), 2)
+            .await
+            .unwrap();
+        assert!(!page.has_more);
+        assert!(page.next_cursor.is_none());
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![1]
+        );
+
+        // Unknown session → empty page.
+        let page = repo
+            .list_session_history("nope", MessageOwnerFilter::Any, None, None, 10)
+            .await
+            .unwrap();
+        assert!(page.messages.is_empty());
+        assert!(!page.has_more);
     }
 }
