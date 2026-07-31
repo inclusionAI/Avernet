@@ -338,17 +338,36 @@ route dependency        → require_principal(request)       ─┘  cache on sc
 - `core/gateway_principal/` — the verifier and **our** DTOs for the wire shape.
   The backend never imports gateway types (Rule 7 / §9); it projects.
 - `utils/gateway_principal_config.py` — resolves the shared key through
-  `SecretResolver`, under the name registered as
-  `secret_names.gateway_principal_signing_key` (corp: the corp secret store;
-  community: `{env_prefix}…_VALUE`; singlebox: `application-singlebox.yaml`).
-  **Anything short of a real key ⇒ everything 401s** — no name registered, no
-  such secret, an empty value, or a resolver that raises. There is no dev
-  fallback key on this side on purpose (a committed shared secret is a committed
-  credential); single-box sets the same value both sides. `aud` and `iss` are
-  fixed in code, not configurable — the gateway doesn't make them configurable
-  either, so a knob on only the verifying side could only break the contract.
-  The key is resolved once per process, so rotating it needs a restart on both
-  sides.
+  `SecretResolver` under `SecretNamesConfig.gateway_principal_signing_key`.
+  That name **defaults**, so a deployment configures only the *value*: the corp
+  secret store (corp overlays also override the name),
+  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` (community), or
+  `gateway_principal.signing_key` in the active `application-singlebox.yaml`
+  (singlebox). There is no dev fallback key on this side on purpose — a
+  committed shared secret is a committed credential; single-box sets the same
+  value on both sides. The key is resolved once at boot, so rotating it needs a
+  restart on both sides.
+
+  **An unresolvable key behaves differently by environment**, and the
+  difference is the whole point:
+
+  | Environment | No usable key ⇒ |
+  | --- | --- |
+  | `pre` / `prod` | **the process refuses to boot** — `init_principal_verifier_config` raises, so a rollout fails loudly instead of serving a surface that 401s while looking healthy |
+  | local / dev / singlebox | **every `/openapi/v1` request answers 401** — these legitimately have no key, so they stay bootable and deny instead |
+
+  Either way the trigger is the same: no such secret, an empty value, or a
+  resolver that raises.
+
+- `aud` and `iss` are fixed in code here, not configurable — one wire contract,
+  one spelling. They are **not** symmetric on the signing side, though:
+  - `aud` is not configurable there either (the gateway signs it from the
+    upstream server's own name), so a knob here could only break the contract.
+  - `iss` **is** configurable there — `user_config.principal_signer.issuer`,
+    since gateway #673. Its default is `gateway`, which this constant matches,
+    so the contract holds as shipped. **Changing the gateway's `issuer`
+    requires changing the backend constant in the same release**, or every
+    request 401s. Same unenforced coupling as the `aud` ↔ `servers:` name.
 - What gets rejected, all as an identical `401`: bad signature, `alg: none`, an
   `aud` for another upstream, wrong `iss`, expired, a missing required claim, an
   unknown `type` tag, a renamed contract field, an identity set that disagrees

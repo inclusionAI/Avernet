@@ -67,7 +67,7 @@ the backend answers 401 to everything and looks configured.
 
 | What | Where it comes from now |
 | --- | --- |
-| signing key | `SecretResolver`, under the name registered as `secret_names.gateway_principal_signing_key` |
+| signing key | `SecretResolver`, under `SecretNamesConfig.gateway_principal_signing_key` — which **defaults**, so a deployment configures only the value |
 | `aud` | a constant, `backend` — the gateway signs it from the upstream server's own name, which it never made configurable |
 | `iss` | a constant, `gateway` — matching the **default** of the gateway's `principal_signer.issuer`, which since #673 *is* configurable there |
 
@@ -81,14 +81,25 @@ Per profile, the key's value resolves from: the corp secret store (corp);
 (singlebox/test, via `LocalSecretResolver`).
 
 **Migration.** A deployment that set `AVERNET_PRINCIPAL_SIGNING_KEY` on the
-backend must move that value, or the public surface answers 401 after the
-upgrade. There is deliberately no env fallback: silently honouring the old
-variable would keep a credential in the environment, which is the thing this
-change exists to stop, and a fallback that works is a fallback nobody migrates
-off. Failing closed makes the missed step visible immediately rather than
-leaving a credential-shaped hole open. Concretely — register a name under
-`secret_names.gateway_principal_signing_key`, then provision the value where
-that profile's resolver reads it.
+backend must move that value. The secret *name* needs no action — it defaults —
+so this is only about provisioning the value where that profile's resolver reads
+it (see the table above).
+
+What a missed migration looks like depends on the environment:
+
+- **`pre` / `prod` fail to boot.** `init_principal_verifier_config` is called
+  with `strict=True` and raises, so the process never starts. The rollout fails
+  visibly rather than deploying a surface that 401s while reporting healthy.
+- **local / dev / singlebox keep booting and answer 401** on every
+  `/openapi/v1` request. Those environments legitimately have no key —
+  singlebox ships `gateway_principal.signing_key` empty on purpose — so failing
+  the boot there would brick local development and the singlebox coverage gate.
+
+There is deliberately no env fallback: silently honouring the old variable would
+keep a credential in the environment, which is the thing this change exists to
+stop, and a fallback that works is a fallback nobody migrates off. Failing —
+loudly in strict environments, closed everywhere else — makes the missed step
+visible instead of leaving a credential-shaped hole open.
 
 ## Solution
 

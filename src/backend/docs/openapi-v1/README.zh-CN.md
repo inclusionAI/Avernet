@@ -305,14 +305,32 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 
 - `core/gateway_principal/` —— 验证器与**我们自己**的线上格式 DTO。后端从不 import
   网关类型（Rule 7 / §9），而是做投影（project）。
-- `utils/gateway_principal_config.py` —— 通过 `SecretResolver` 解析共享密钥，密钥名
-  注册在 `secret_names.gateway_principal_signing_key`（corp：公司密钥库；community：
-  `{env_prefix}…_VALUE`；单盒：`application-singlebox.yaml`）。
-  **只要拿不到真正的密钥就一律 401** —— 未注册密钥名、密钥不存在、值为空，或解析器抛错。
+- `utils/gateway_principal_config.py` —— 通过 `SecretResolver` 按
+  `SecretNamesConfig.gateway_principal_signing_key` 解析共享密钥。该密钥名**自带默认
+  值**，因此部署只需配置「值」：公司密钥库（corp，overlay 同时覆盖密钥名）、
+  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE`（community），或当前生效的
+  `application-singlebox.yaml` 里的 `gateway_principal.signing_key`（单盒）。
   这一侧故意**不带** dev 兜底密钥（提交进仓库的共享密钥就是提交进仓库的凭据）；单盒需要
-  两侧设成同一个值。`aud` 与 `iss` 固定写在代码里，不做成配置项 —— 网关那侧同样不可配，
-  只在验证侧加开关无法改变契约，只会把它弄坏。密钥每进程只解析一次，因此轮换密钥需要两侧
-  都重启。
+  两侧设成同一个值。密钥只在启动时解析一次，因此轮换密钥需要两侧都重启。
+
+  **拿不到密钥时的行为按环境区分**，这个区别正是要点：
+
+  | 环境 | 拿不到可用密钥时 |
+  | --- | --- |
+  | `pre` / `prod` | **进程拒绝启动** —— `init_principal_verifier_config` 抛错，让发布明确失败，而不是让一个「看起来健康、实际全 401」的服务上线 |
+  | local / dev / 单盒 | **每个 `/openapi/v1` 请求返回 401** —— 这些环境本就没有密钥，因此保持可启动、只拒绝请求 |
+
+  两种情况的触发条件相同：密钥不存在、值为空，或解析器抛错。
+
+- `aud` 与 `iss` 在后端固定写在代码里，不做成配置项 —— 一份线上契约只保留一种写法。但
+  签名侧并不对称：
+  - `aud` 在网关那侧同样不可配（网关用上游 server 自己的名字签发），所以只在验证侧加开关
+    无法改变契约，只会把它弄坏。
+  - `iss` 在网关那侧**是可配的** —— 自 gateway #673 起为
+    `user_config.principal_signer.issuer`，默认值 `gateway` 正好与这里的常量一致，因此
+    出厂状态契约成立。**一旦改动网关的 `issuer`，必须在同一个版本里同步改后端常量**，
+    否则所有请求都会 401。这与 `aud` ↔ `servers:` 名字之间的耦合一样，没有任何机制强制
+    校验。
 - 会被拒绝的情形，全部返回**完全一致**的 `401`：签名错误、`alg: none`、`aud` 指向别的
   上游、`iss` 不对、已过期、缺少必需 claim、未知的 `type` tag、契约字段被改名、身份集合
   内部租户不一致，以及**声称自己是 `teamclaw` 的租户**（后者会把全部内部数据交给外部
