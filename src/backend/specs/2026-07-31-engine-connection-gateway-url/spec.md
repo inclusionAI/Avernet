@@ -66,30 +66,30 @@ loop or, worse, tear down healthy connections on a timer.
 
 ## Acceptance Criteria
 
-- [ ] The socket URL published by the connection endpoint addresses the gateway,
+- [x] The socket URL published by the connection endpoint addresses the gateway,
       not the internal engine proxy.
-- [ ] The published URL carries an `engine` path prefix directly after the host,
+- [x] The published URL carries an `engine` path prefix directly after the host,
       and does not contain the internal proxy's routing prefix anywhere.
-- [ ] The credential is carried as a query parameter on the published URL, under
+- [x] The credential is carried as a query parameter on the published URL, under
       the same parameter name the upstream already accepts.
-- [ ] The response no longer carries a headers field for a socket. The field is
+- [x] The response no longer carries a headers field for a socket. The field is
       removed from the contract rather than published empty, so that there is
       exactly one place a caller can find the credential.
-- [ ] The URL is complete and opaque: a caller opens it verbatim, appending
+- [x] The URL is complete and opaque: a caller opens it verbatim, appending
       nothing and rebuilding nothing.
-- [ ] A socket is published only where one is published today. The bot-type and
+- [x] A socket is published only where one is published today. The bot-type and
       sharing gates, the choice of engine path, and the set of socket kinds are
       unchanged by this feature.
-- [ ] Where no credential is available, the endpoint's behaviour is unchanged
+- [x] Where no credential is available, the endpoint's behaviour is unchanged
       from today rather than publishing a URL carrying an empty credential.
-- [ ] The published expiry is documented as bounding the *opening* of a socket
+- [x] The published expiry is documented as bounding the *opening* of a socket
       only, stating explicitly that an already-open socket survives expiry, that
       a caller should fetch a fresh credential before connecting or
       reconnecting, and that a caller should not poll on a timer to keep a live
       socket alive.
-- [ ] A deployment that has not been told where the gateway is fails with a
+- [x] A deployment that has not been told where the gateway is fails with a
       named, diagnosable error rather than publishing an unusable address.
-- [ ] The internal console's socket is byte-for-byte unaffected: no component
+- [x] The internal console's socket is byte-for-byte unaffected: no component
       shared with it changes behaviour.
 
 ## In Scope
@@ -119,23 +119,34 @@ loop or, worse, tear down healthy connections on a timer.
   neither gains a second mechanism.
 - **Waking or repairing an unreachable device.** Unchanged.
 
-## Open Questions
+## Resolved Questions
 
-1. **Where the gateway's address comes from.** The backend has no existing
-   configuration path for the gateway — the only proxy address it can resolve
-   today is the engine proxy's, which is precisely what we are moving off. A new
-   source is needed. The codebase already has a precedent for exactly this shape
-   of setting: a deployment-supplied entry-point URL, read from the environment,
-   with an explicit failure when a deployment has not set it.
-   **Recommendation: follow that precedent** — it keeps the failure mode
-   diagnosable and matches how the neighbouring service resolves the same class
-   of value. Confirm the setting's name and whether a local-development default
-   is wanted.
+1. **Where the gateway's address comes from.** *Resolved 2026-07-31:* it is host
+   configuration, so it lives where every other upstream host in this service
+   already does — a `gateway` block in `application.yaml`, with separate pre and
+   prod values selected by the running environment. The community build ships
+   neutral empty values, which reproduce today's behaviour exactly: a deployment
+   that fronts no gateway says so by name rather than publishing an address
+   nothing serves. Corp values land in a separate overlay, owned outside this
+   repository. (This supersedes the original recommendation of an
+   environment-variable setting; the env-var precedent exists in this codebase
+   but is the outlier, not the convention.)
 
-2. **Whether the credential in a URL is acceptable in this deployment.** A query
-   parameter is visible to anything that logs request lines, including the
-   gateway's own access log. The exposure is bounded — the credential is short-
-   lived and bound to a single target — and the internal console already accepts
-   this trade-off for the same credential against the same upstream. Flagged so
-   the decision is recorded rather than inherited by accident.
-   **Recommendation: accept**, matching the console.
+   *Consequence worth recording:* a developer running the community profile
+   locally now gets the named "no gateway" error from this endpoint until they
+   set a value by hand. That is correct — community genuinely fronts no gateway —
+   but it is a change from the env-var draft, which carried a localhost default.
+
+2. **Whether the credential in a URL is acceptable in this deployment.**
+   *Resolved 2026-07-31: accepted.* The exposure is bounded — the credential is
+   short-lived and bound to a single target — and the internal console already
+   makes the same trade for the same credential against the same upstream.
+   Recorded here so it is a decision rather than something inherited by accident.
+
+3. **Whether a provider can hand back a relay URL this endpoint cannot
+   re-address.** *Resolved 2026-07-31:* no — a tenant-facing personal bot cannot
+   be served by the platform that answers with a session-keyed relay URL instead
+   of the routing-target shape. The URL is therefore composed from the target and
+   engine path directly. A guard refuses any other shape rather than trusting the
+   assumption silently, so if it ever stops holding it surfaces as a named
+   server-side error instead of a socket that will not open.

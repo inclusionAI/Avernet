@@ -121,18 +121,18 @@ touched. The internal console must stay byte-for-byte unaffected.
         need `--allow-breaking`.
 - **Depends on:** Task 2
 
-## Task 4: Verification against the spec  `[ ]`
+## Task 4: Verification against the spec  `[x]`
 - **Goal:** Confirm the feature meets every spec acceptance criterion, and that
   the console is untouched.
 - **Files:** none (verification only); `spec.md` checkboxes are ticked.
 - **Done when:**
-  - [ ] All ten `spec.md` acceptance criteria are checked off, each against an
+  - [x] All ten `spec.md` acceptance criteria are checked off, each against an
         observable behaviour or a named test.
-  - [ ] `git diff dev --stat` touches no path under `src/baas/`,
+  - [x] `git diff dev --stat` touches no path under `src/baas/`,
         `…/core/grt_chat/`, `…/core/devices/`, or `src/frontend/` — the
         console-unaffected criterion, checked rather than asserted.
-  - [ ] The backend module gates pass (`AGENTS.md` pre-push contract).
-  - [ ] The published example in `schemas.py` is a URL a caller could actually
+  - [x] The backend module gates pass (`AGENTS.md` pre-push contract).
+  - [x] The published example in `schemas.py` is a URL a caller could actually
         open — gateway host, `/engine` prefix, query credential, no `headers`.
 - **Depends on:** Tasks 1, 2, 3
 
