@@ -50,7 +50,7 @@ Track C 并不包装其中的大多数。四条规则逐个裁定：
 |---|---|---|
 | **C1** | **前端 → engine 直连（HTTP）** → **包装。** | 这些端点今天在后端没有对应表示。公共调用方没有别的路径可走，所以公共 API 必须提供一条。 |
 | **C2** | **前端 → 后端 → engine** → **不在范围内。** | 后端已经为它们提供了对外契约；再包一层 engine 路由会造出第二条、并且会漂移的路径。`/api/cron` 是最清楚的例子 —— 它已经就是 `routines` 类别。 |
-| **C3** | **WebSocket** → **不包装。** | 公共 API 返回 socket URL 与需要携带的 headers，由调用方自己建连。转发帧等于把 engine 内部帧格式发布成公共契约。 |
+| **C3** | **WebSocket** → **不包装。** | 公共 API 返回一条完整的 socket URL（凭据在其中），由调用方自己建连。转发帧等于把 engine 内部帧格式发布成公共契约。 |
 | **C4** | **仅 AICoding** → **不在范围内。** | 产品专有面，不属于租户契约。 |
 
 C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypass 前缀
@@ -148,8 +148,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
   "sockets": [
     {
       "kind": "chat",
-      "url": "wss://<host>/proxypass/<target>/api/openclaw/ws",
-      "headers": { "x-proxypass-token": "<scoped token>" }
+      "url": "wss://<gateway>/engine/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
     }
   ]
 }
@@ -167,27 +166,28 @@ socket 也是干净的。
   `/api/claude_code/ws`，并回退到通用的 `/api/{engine}/ws`（`api/app.py:310`），
   这样新增引擎也依然可达。**没有 `terminal` socket** —— 它曾被实现又被移除：
   `spec.md` 把"在租户设备上执行任意命令与交互式 shell……在任何范围内"都排除在
-  v1 之外，而本参考文档此前与之矛盾。（按原样发布也不会work —— engine 的终端
-  路由校验的是 `token` **query** 参数，而只带 header 的连接并不会提供它。）
+  v1 之外，而本参考文档此前与之矛盾。
   `SocketKind` 仍保持为列表上的枚举，将来加第二个 socket 是增量的。
   _2026-07-30 更正。_
-- **URL 是不透明且完整的。** 调用方不拼接任何东西。`target`、`type` 和裸 `token`
-  **不是**字段 —— 它们正是我们要停止对外发布的东西。正因如此，获取设备连接时
-  显式请求 **`ws_conn_mode="relay"`**：relay 是 provider 会返回**完整** WebSocket
-  URL 的模式。不传这个模式，BaaS 只会给回一个裸路由 target，而它只有 proxy
-  gateway 才能补全 —— 没有 sandbox runtime 的构建（community 构建）根本没有
-  gateway，于是端点会直接失败，尽管 relay URL 本来就拿得到。只请求一种模式，
-  也保证了 URL 和 token 描述的是同一种模式。拿不到完整 URL 时仍回落到
-  `{base}/proxypass/{target}` 拼接；而没有 gateway 可拼的部署是一个有名字的
-  upstream 错误，不是 500。_2026-07-30 更正。_
-- **relay URL 原样使用，且引擎路径要提前告知 provider。** provider 是在服务端
-  **围绕它拿到的 path** 拼出 relay URL 的，由此有两点：再拼一次我们自己的 path 会
-  得到 `…/api/openclaw/ws/api/openclaw/ws`，根本连不上；而给它的 path 必须是该 bot
-  自己引擎的 —— provider 默认是 openclaw 的，而 `/api/{engine}/ws` 在 pinned 引擎
-  不是当前活跃引擎时会以 4001 关闭，所以 `claude_code` bot 拿到默认路径会在连接时
-  被拒。故 `get_device_connection` 增加 `path` 参数；它只对"返回完整 URL"的
-  provider 有意义，返回路由 target 的 provider 忽略它、由本层拼接。
-  _2026-07-30 新增。_
+- **URL 不透明、完整，且凭据就在其中。** 调用方不拼接任何东西。`target`、`type`
+  和裸 `token` **不是**字段 —— 把拼地址的零件交出去，正是本端点要终止的事。凭据
+  放在 URL 的 query 而不是配套的 header 里，是因为消费者是浏览器：
+  `new WebSocket(url, protocols)` 不接受 header，URL 是它唯一能承载凭据的位置。
+  内部 console 打开同一条 socket 用的就是同样的方式。_2026-07-31 更正。_
+- **地址是网关的，不是它背后那一跳的。** 对外发布的 origin 取自 `gateway` 配置块
+  （`base_url` / `base_url_pre`，按环境选择），前缀是 `/engine/{target}{path}`，
+  由网关改写到那一跳上。前面没有网关的部署 —— 也就是 community 构建的常态 ——
+  是一个有名字的 upstream 错误，不是 500，也不是发布一个没人服务的地址。
+  _2026-07-31 更正。_
+- **provider 给的 URL 是被改写地址，不是被重新拼装。** 获取设备连接时仍然请求
+  **`ws_conn_mode="relay"`**，provider 也仍然围绕我们给它的引擎 path 拼出一条完整
+  URL —— 正是这个 path 透传，才让 `claude_code` bot 不会拿到 openclaw 的默认路径、
+  在连接时被 4001 拒掉。之后只改两处：origin 换成网关的，`/proxypass/` 前缀换成
+  `/engine/`。该前缀之后的一切 —— target、引擎 path、provider 自己带的 query ——
+  原封不动透传，因此本端点对一套并不属于它的 URL 语法不持任何假设，也不会悄悄丢掉
+  没预料到的部分。若 provider 给回的形状是 `/engine` 前缀无法表达的 —— BaaS 的
+  LOCAL 平台返回 `/wsrelay/{session_id}` —— 则直接拒绝而不是发布，这样错误的假设会在
+  服务端暴露，而不是变成一条连不上的 socket。_2026-07-31 更正。_
 - **`expires_at` 必填**，让调用方知道该重新获取，而不是在 token 过期后静默失败。
   只要签发方给出了过期时间，就以**签发方自己的值**为准：BaaS 链路明确文档化了
   它**忽略**传入的 TTL、由服务端决定，所以在那条链路上本地算出来的过期时间描述的

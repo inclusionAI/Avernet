@@ -152,7 +152,7 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 > 路由 —— `/api/cron`（已经是 `routines` 类别）、`/api/file`、`/api/skills`、
 > `/api/mcp`、`/api/resource-materializations`、`/api/bash`、`/api/bot/config`、
 > `/api/work-items` —— 已经有后端契约在其之上，不纳入。仅 aicoding 的路由不纳入。
-> **WebSocket 不包装**：新的 `…/connection` 端点返回 socket URL + headers，
+> **WebSocket 不包装**：新的 `…/connection` 端点返回一条完整的 socket URL（凭据在其中），
 > 由调用方自己建连。
 >
 > `engine/switch` 与 `engine/restart` 刻意排除 —— 包装 `switch` 等于给 #494 在
@@ -586,7 +586,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 | engine | 3 | `…/engine/{status,capabilities,available}` |
 | models | 2 | `…/models`、`…/models/{model_id}` |
 | approvals | 3 | `…/approvals/mode`（GET/PUT）、`…/approvals/modes` |
-| connection | 1 | `…/connection` —— WS URL + headers，取代 `get_device_connection` |
+| connection | 1 | `…/connection` —— 完整 WS URL，取代 `get_device_connection` |
 
 ---
 
@@ -798,9 +798,9 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
      一个新的。
   3. **没有 Track A 阶段，没有 DDL** —— 这是第一条在构造上就成立（而非碰巧成立）
      的主线。已在开头加了提示，免得有人去找一个不存在的阶段。
-  4. **WebSocket 不包装。** `…/connection` 交还可直接使用的 `wss://` URL 以及需要
-     携带的 headers，socket 由调用方自己持有。不做 `POST /chat`，也不转发 engine
-     的帧格式。
+  4. **WebSocket 不包装。** `…/connection` 交还一条可直接使用的 `wss://` URL，
+     凭据就在 URL 里，socket 由调用方自己持有。不做 `POST /chat`，也不转发
+     engine 的帧格式。
   5. **两处排除是契约决策，不是偷懒。** 包装 `engine/switch` 会成为绕过 #494
      `engine` 不可变裁定的后门；包装 `engine/restart` 会让同一个 bot 有两个重启动词。
 

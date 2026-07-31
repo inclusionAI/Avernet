@@ -69,6 +69,12 @@ user_config:
   ecb:
     base_url: ""
 
+  # Public API gateway host, published to tenants by the connection endpoint
+  # (empty = this deployment fronts no gateway, so that endpoint reports so).
+  gateway:
+    base_url: ""
+    base_url_pre: ""
+
   # Dormant-bot recycle: dry-run by default (never mutates without opt-in).
   dormant:
     dry_run: true

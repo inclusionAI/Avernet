@@ -68,7 +68,7 @@ async def get_connection(
             engine=result.engine,
             expires_at=result.expires_at,
             sockets=[
-                Socket(kind=s.kind, url=s.url, headers=s.headers)
+                Socket(kind=s.kind, url=s.url)
                 for s in result.sockets
             ],
         ),

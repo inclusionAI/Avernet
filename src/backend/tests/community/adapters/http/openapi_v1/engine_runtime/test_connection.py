@@ -46,8 +46,10 @@ class FakeConnections:
         sockets = [
             SocketInfo(
                 kind="chat",
-                url="wss://gw.example/proxypass/tgt/api/openclaw/ws",
-                headers={"x-proxypass-token": "tok"},
+                url=(
+                    "wss://gw.example/engine/tgt/api/openclaw/ws"
+                    "?x-proxypass-token=tok"
+                ),
             )
         ]
         return ConnectionResult(
@@ -107,7 +109,10 @@ def test_payload_never_exposes_routing_internals(client, relay):
     data = ok(client.get(URL))
     assert set(data) == {"engine", "expires_at", "sockets"}
     for socket in data["sockets"]:
-        assert set(socket) == {"kind", "url", "headers"}
+        # ``url`` is the only field. The credential rides inside it — a browser
+        # can carry one nowhere else on a handshake — and a second copy in a
+        # ``headers`` field would leave a caller guessing which one is honoured.
+        assert set(socket) == {"kind", "url"}
         assert "target" not in socket and "type" not in socket
         assert "token" not in socket
 

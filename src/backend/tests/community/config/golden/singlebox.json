@@ -152,6 +152,9 @@
       "enable_metrics": false,
       "max_connections": 100
     },
+    "gateway": {
+      "base_url": "http://127.0.0.1:9999"
+    },
     "git_sync": {
       "bolt_shared_dir_name": "bolt_shared",
       "enable_oss_sync": false
@@ -288,6 +291,10 @@
     },
     "ecb": {
       "base_url": "https://ecb-pre.teamclaw.com",
+      "base_url_pre": ""
+    },
+    "gateway": {
+      "base_url": "http://127.0.0.1:9999",
       "base_url_pre": ""
     },
     "kb": {
