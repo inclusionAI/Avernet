@@ -43,6 +43,7 @@ from agentclaw.community.core.service_bot.services.deploy.provider_resolver impo
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan, EngineSandboxProvider, EngineSandboxRegistry
+from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bot_dir,
@@ -226,7 +227,13 @@ class BotBuildService:
         entity_type = bot.get("entity_type", "staff")
         device_id = bot.get("device_id")
         provider = self._resolve_sandbox_provider(bot)
-        build_plan = provider.get_build_plan()
+
+        # 从 bot.ext 解析 build_rsync_excludes 配置
+        ext = bot.get("ext")
+        rsync_append = parse_build_rsync_excludes_from_ext(ext)
+
+        # 传递 Bot 级别追加项（合并模式）
+        build_plan = provider.get_build_plan(build_rsync_excludes_append=rsync_append)
         engine_type = build_plan.engine_type
         logger.info(
             f"[BotBuildService.build] Starting build: "
@@ -1178,7 +1185,13 @@ class BotBuildService:
         Only versioned ``migration_path`` artifacts participate in this operation.
         """
         provider = self._resolve_sandbox_provider(bot)
-        build_plan = provider.get_build_plan()
+
+        # 从 bot.ext 解析 build_rsync_excludes 配置
+        ext = bot.get("ext")
+        rsync_append = parse_build_rsync_excludes_from_ext(ext)
+
+        # 传递 Bot 级别追加项（合并模式）
+        build_plan = provider.get_build_plan(build_rsync_excludes_append=rsync_append)
         deadline = time.monotonic() + _DRAFT_RESTORE_TIMEOUT_SECONDS
 
         def remaining_timeout() -> float:

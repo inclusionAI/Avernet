@@ -49,16 +49,21 @@ _OPENCLAW_DEFAULT_RULES = [
 ]
 
 
-_OPENCLAW_BUILD_PLAN = EngineBuildPlan(
-    engine_type="openclaw",
-    source_root_name=".openclaw",
-    migration_subpath="openclaw",
-    workspace_subdir="workspace",
-    mcp_config_relpath="workspace/config/mcporter.json",
-    skill_source_relpath="workspace/skills",
-    skill_target_relpath="workspace/skills",
-    rsync_excludes=list(_OPENCLAW_RSYNC_EXCLUDES),
-)
+def _make_openclaw_build_plan(rsync_excludes: list[str]) -> EngineBuildPlan:
+    """Factory function to create build plan with given excludes."""
+    return EngineBuildPlan(
+        engine_type="openclaw",
+        source_root_name=".openclaw",
+        migration_subpath="openclaw",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=rsync_excludes,
+    )
+
+
+_OPENCLAW_BUILD_PLAN = _make_openclaw_build_plan(list(_OPENCLAW_RSYNC_EXCLUDES))
 
 
 class OpenClawSandboxProvider:
@@ -86,8 +91,18 @@ class OpenClawSandboxProvider:
     def get_default_read_only_rules(self) -> list[ReadOnlyRule]:
         return list(_OPENCLAW_DEFAULT_RULES)
 
-    def get_build_plan(self) -> EngineBuildPlan:
-        return _OPENCLAW_BUILD_PLAN
+    def get_build_plan(
+        self,
+        build_rsync_excludes_append: list[str] | None = None,
+    ) -> EngineBuildPlan:
+        # 合并模式：默认值 + 自定义项（去重）
+        excludes = list(_OPENCLAW_RSYNC_EXCLUDES)
+        if build_rsync_excludes_append:
+            # 合并并去重，保持顺序：默认值在前，自定义项追加
+            for item in build_rsync_excludes_append:
+                if item not in excludes:
+                    excludes.append(item)
+        return _make_openclaw_build_plan(excludes)
 
     def _normalize_sub_path(self, sub_path: str) -> str:
         if not sub_path:
