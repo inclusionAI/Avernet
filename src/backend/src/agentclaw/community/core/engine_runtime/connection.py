@@ -88,6 +88,25 @@ _CHAT_WS_PATHS = {
 _SUPPORTED_BOT_TYPE = "personal"
 
 
+def _quote_or_reject(value: str, *, safe: str, what: str) -> str:
+    """Percent-encode ``value`` for a URL, or refuse it by name.
+
+    ``quote`` raises ``UnicodeEncodeError`` on a lone surrogate, which a
+    provider's JSON can carry (``json.loads`` decodes ``\\ud800`` happily). That
+    would leave this endpoint answering 500 on a value it can describe — the
+    same failure the relay-shape guard exists to avoid, one method along.
+
+    ``what`` names the part for the message; the value itself is never included,
+    since one of the three callers passes the credential.
+    """
+    try:
+        return quote(value, safe=safe)
+    except UnicodeEncodeError as exc:
+        raise EngineUpstreamError(
+            f"device connection carries an unencodable {what}"
+        ) from exc
+
+
 def _require_private_personal_bot(
     bot_type: str, bot_id: str, *, is_shared: bool
 ) -> None:
@@ -312,15 +331,18 @@ class EngineConnectionService:
 
         # ``@`` and ``:`` stay raw — both are legal in a path segment and the hop
         # behind the gateway matches the target verbatim. Everything else is
-        # escaped: a ``?`` or ``#`` in a target would otherwise end the path and
-        # silently strip the credential off the URL we publish.
+        # escaped: a ``?`` or ``#`` anywhere in the path would otherwise end it
+        # and silently strip the credential off the URL we publish.
         base = self._gateway_ws_base()
-        url = f"{base}{_ENGINE_PREFIX}/{quote(target, safe='@:')}{socket_path}"
+        segment = _quote_or_reject(target, safe="@:", what="routing target")
+        path = _quote_or_reject(socket_path, safe="/", what="socket path")
+        url = f"{base}{_ENGINE_PREFIX}/{segment}{path}"
         # Only when there is one. An empty ``?x-proxypass-token=`` would fail the
         # handshake with nothing to diagnose from, so absent is published as
         # absent — exactly as it was when this was a header.
         if token:
-            url = f"{url}?{_PROXY_TOKEN_PARAM}={quote(token, safe='')}"
+            credential = _quote_or_reject(token, safe="", what="credential")
+            url = f"{url}?{_PROXY_TOKEN_PARAM}={credential}"
         return url
 
     def _reject_unroutable_provider_url(self, info: object) -> None:
@@ -384,6 +406,14 @@ class EngineConnectionService:
         if not ws_scheme:
             raise EngineUpstreamError(
                 f"gateway base url has no usable scheme: {base!r}"
+            )
+        # An origin is all this may be. A ``#`` or ``?`` here would end the path
+        # before the engine prefix is even appended, putting the credential in a
+        # fragment a browser never sends — the same silent harm escaping the
+        # target closes, reached through the other half of the URL.
+        if any(delimiter in rest for delimiter in "#?"):
+            raise EngineUpstreamError(
+                f"gateway base url is not a bare origin: {base!r}"
             )
         return f"{ws_scheme}://{rest}"
 

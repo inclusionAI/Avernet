@@ -276,6 +276,35 @@ def test_a_target_carrying_url_delimiters_cannot_truncate_the_url():
     )
 
 
+@pytest.mark.parametrize("base", ["https://gw.example/#", "https://gw.example/?x=1"])
+def test_a_gateway_base_carrying_url_delimiters_is_refused(base):
+    """A ``#`` here ends the path before the engine prefix is appended, putting
+    the credential in a fragment a browser never sends — the same silent harm
+    escaping the target closes, reached through the other half of the URL."""
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(gateway=_gateway(base=base)))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("target", "tgt\ud800"), ("ws_token", "tok\ud800")],
+)
+def test_an_unencodable_value_is_named_rather_than_a_500(field, value):
+    """``quote`` raises ``UnicodeEncodeError`` on a lone surrogate, which a
+    provider's JSON can carry. Unmapped, that is a 500 on a describable value."""
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=_Devices(**{field: value})))
+
+
+def test_no_upstream_error_message_ever_carries_the_credential():
+    """One of these messages interpolates configuration, so the rule that none
+    of them interpolates the credential is worth pinning rather than assuming."""
+    for gateway in (_gateway(base=""), _gateway(base="gw.example")):
+        with pytest.raises(EngineUpstreamError) as excinfo:
+            _build(_svc(devices=_Devices(ws_token="secret-tok"), gateway=gateway))
+        assert "secret-tok" not in str(excinfo.value)
+
+
 def test_a_malformed_provider_url_is_named_rather_than_a_500():
     """``urlsplit`` raises on this. The guard exists to produce a named error,
     so letting the parse failure out would defeat its whole purpose."""
