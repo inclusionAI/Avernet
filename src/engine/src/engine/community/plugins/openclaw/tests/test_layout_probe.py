@@ -12,6 +12,7 @@ from engine.community.plugins.openclaw.layout_probe import (
     RuntimeLayoutInspectionStatus,
     inspect_runtime_layout,
 )
+from engine.community.plugins.skills_pool import layout_probe as shared_layout_probe
 
 
 def _ready_home(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
@@ -171,6 +172,32 @@ def test_finalizing_marker_allows_concurrent_skill_deactivation(tmp_path):
     )
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
+
+
+def test_finalizing_marker_rejects_unreadable_active_entries(
+    tmp_path, monkeypatch
+):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    _write_active_marker(home, activation_state="finalizing")
+
+    def raise_permission_error(*_args, **_kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(
+        shared_layout_probe,
+        "_active_entries_failure_reason",
+        raise_permission_error,
+    )
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "active_managed_entry_invalid"
 
 
 def test_active_marker_allows_normal_skill_activation(tmp_path):
