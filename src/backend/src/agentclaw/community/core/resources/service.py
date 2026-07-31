@@ -123,6 +123,17 @@ class ResourceService:
         """Count children under a directory path."""
         return self._repo.count_resources(parent_path=parent_path, bolt_id=self._bot_id)
 
+    def count_resources(self, *, resource_type: Optional[ResourceType] = None) -> int:
+        """Total resource count for this bot matching ``resource_type``.
+
+        A repo-level count (no Resource materialisation) for pagination
+        ``total`` — pairs with ``list_resources(limit, offset)``.
+        """
+        return self._repo.count_resources(
+            resource_type=resource_type.value if resource_type else None,
+            bolt_id=self._bot_id,
+        )
+
     # -- Mutations ---------------------------------------------------------
     async def create_url_resource(
         self,
