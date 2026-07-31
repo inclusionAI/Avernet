@@ -12,8 +12,8 @@
  */
 
 import { useExt } from '@/capabilities';
+import { Button } from '@/components';
 import BotAvatar from '@/components/BotAvatar';
-import Button from '@/components/Button';
 import GoldBadge from '@/components/GoldBadge';
 import {
   Tooltip,
@@ -74,12 +74,19 @@ import type {
   GroupMemberRole,
   GroupStrategy,
 } from '../types';
+import { shouldUseCompactCollaborationFlow } from '../utils/collaborationFlowLayout';
+import {
+  buildCollaborationBindingViews,
+  type CollaborationBindingView,
+} from '../utils/collaborationGraphLayout';
 import {
   buildCollaborationParticipantDefinitions,
   formatCollaborationValidationErrors,
   getCollaborationParticipantLabel,
   type CollaborationParticipantDefinition,
 } from '../utils/collaborationValidation';
+import CollaborationFlowPreviewLoader from './CollaborationFlowPreviewLoader';
+import CollaborationFlowWorkspace from './CollaborationFlowWorkspace';
 import PrivateBotHint from './PrivateBotHint';
 
 /** 最大可选成员 Bot 数量 */
@@ -90,6 +97,8 @@ type MemberTab = 'friends' | 'collaborate';
 
 /** 二层 Tab 类型（仅在可协作Bot下显示）：按名称筛选 / 按画像筛选 */
 type FilterMode = 'name' | 'profile';
+
+type CollaborationAuthoringStage = 'yaml' | 'bindings';
 
 type InviteCandidateStatus = {
   dynamic_status?: DynamicStatus;
@@ -252,8 +261,26 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     useState('');
   const [validatedCollaborationYaml, setValidatedCollaborationYaml] =
     useState('');
-  const [isEditingCollaborationYaml, setIsEditingCollaborationYaml] =
-    useState(true);
+  const [validatedCollaborationGraph, setValidatedCollaborationGraph] =
+    useState<BcnController.CollaborationDefinitionGraphPreview | null>(null);
+  const [validatedCollaborationSummary, setValidatedCollaborationSummary] =
+    useState<BcnController.CollaborationDefinitionValidationSummary | null>(
+      null,
+    );
+  const [collaborationAuthoringStage, setCollaborationAuthoringStage] =
+    useState<CollaborationAuthoringStage>('yaml');
+  const [selectedCollaborationNodeId, setSelectedCollaborationNodeId] =
+    useState<string>();
+  const [isCompactCollaborationFlowOpen, setIsCompactCollaborationFlowOpen] =
+    useState(false);
+  const [
+    isCompactCollaborationFlowLayout,
+    setIsCompactCollaborationFlowLayout,
+  ] = useState(
+    () =>
+      typeof window === 'undefined' ||
+      shouldUseCompactCollaborationFlow(window.innerWidth),
+  );
   const [participantDefinitions, setParticipantDefinitions] = useState<
     CollaborationParticipantDefinition[]
   >([]);
@@ -281,6 +308,19 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   const collaborationDefinitionYamlRef = useRef('');
   const participantTabsRef = useRef<HTMLDivElement>(null);
   const participantTabButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  useEffect(() => {
+    const updateCollaborationFlowLayout = () => {
+      const compact = shouldUseCompactCollaborationFlow(window.innerWidth);
+      setIsCompactCollaborationFlowLayout(compact);
+      if (!compact) setIsCompactCollaborationFlowOpen(false);
+    };
+
+    updateCollaborationFlowLayout();
+    window.addEventListener('resize', updateCollaborationFlowLayout);
+    return () =>
+      window.removeEventListener('resize', updateCollaborationFlowLayout);
+  }, []);
 
   // 埋点 tracker - 弹窗打开时创建，关闭后失效
   const trackerRef = useRef<BotRecommendTracker | null>(null);
@@ -1084,7 +1124,11 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     setCollaborationTemplateDropdownOpen(false);
     setCollaborationDefinitionYaml('');
     setValidatedCollaborationYaml('');
-    setIsEditingCollaborationYaml(true);
+    setValidatedCollaborationGraph(null);
+    setValidatedCollaborationSummary(null);
+    setCollaborationAuthoringStage('yaml');
+    setSelectedCollaborationNodeId(undefined);
+    setIsCompactCollaborationFlowOpen(false);
     setParticipantDefinitions([]);
     setActiveParticipantKey('');
     setParticipantBindings({});
@@ -1118,9 +1162,44 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
   const getBotName = (botId: string) => getBotInfo(botId)?.bot_name || botId;
 
+  const collaborationBindingViews: Record<string, CollaborationBindingView> =
+    buildCollaborationBindingViews(
+      participantDefinitions,
+      participantBindings,
+      (botId) => getBotInfo(botId)?.bot_name,
+    );
+
+  const handleCollaborationNodeSelect = (nodeId: string) => {
+    setSelectedCollaborationNodeId(nodeId);
+    const node = validatedCollaborationGraph?.nodes.find(
+      (candidate) => candidate.node_id === nodeId,
+    );
+    if (!node?.assignee || node.assignee.type !== 'bot_binding') return;
+
+    const binding = node.assignee.binding;
+    if (
+      !participantDefinitions.some((participant) => participant.key === binding)
+    ) {
+      console.warn(
+        `[CreateGroupModal] Collaboration graph references unknown participant binding: ${binding}`,
+      );
+      return;
+    }
+
+    setActiveParticipantKey(binding);
+    window.requestAnimationFrame(() => {
+      participantTabButtonRefs.current.get(binding)?.focus();
+    });
+  };
+
   const clearCollaborationYamlBindingState = useCallback(() => {
     cancelCollaborationYamlValidation();
     setValidatedCollaborationYaml('');
+    setValidatedCollaborationGraph(null);
+    setValidatedCollaborationSummary(null);
+    setCollaborationAuthoringStage('yaml');
+    setSelectedCollaborationNodeId(undefined);
+    setIsCompactCollaborationFlowOpen(false);
     setParticipantDefinitions([]);
     setActiveParticipantKey('');
     setParticipantBindings({});
@@ -1130,7 +1209,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     if (!canCreateStateMachineGroup && groupStrategy === 'state_machine') {
       setGroupStrategy('chat');
       clearCollaborationYamlBindingState();
-      setIsEditingCollaborationYaml(true);
       setError('');
     }
   }, [
@@ -1164,7 +1242,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       setCollaborationDefinitionYaml('');
       setCollaborationTemplateDropdownOpen(false);
       clearCollaborationYamlBindingState();
-      setIsEditingCollaborationYaml(true);
       setIsLoadingCollaborationYaml(true);
       setError('');
 
@@ -1276,7 +1353,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     setCollaborationDefinitionYaml('');
     setCollaborationTemplateDropdownOpen(false);
     clearCollaborationYamlBindingState();
-    setIsEditingCollaborationYaml(true);
     setError('');
 
     const firstTemplate = collaborationTemplateList[0];
@@ -1304,7 +1380,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       setCollaborationDefinitionYaml('');
       setCollaborationTemplateDropdownOpen(false);
       clearCollaborationYamlBindingState();
-      setIsEditingCollaborationYaml(true);
       setIsLoadingCollaborationYaml(false);
       setError('');
       return;
@@ -1354,7 +1429,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
       if (!response.valid) {
         clearCollaborationYamlBindingState();
-        setIsEditingCollaborationYaml(true);
         setError(formatCollaborationValidationErrors(response.errors));
         return;
       }
@@ -1364,7 +1438,6 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       );
       if (!definitions.length) {
         clearCollaborationYamlBindingState();
-        setIsEditingCollaborationYaml(true);
         setError('YAML 校验通过，但未返回可绑定的 participant');
         return;
       }
@@ -1383,14 +1456,22 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           : definitions[0].key,
       );
       setValidatedCollaborationYaml(definitionYaml);
-      setIsEditingCollaborationYaml(false);
+      setValidatedCollaborationGraph(response.graph ?? null);
+      setValidatedCollaborationSummary(response.summary);
+      setSelectedCollaborationNodeId(undefined);
+      setIsCompactCollaborationFlowOpen(false);
+      setCollaborationAuthoringStage('bindings');
+      if (!response.graph) {
+        console.warn(
+          '[CreateGroupModal] Valid collaboration response omitted graph; falling back to bindings',
+        );
+      }
       setError('');
     } catch (err) {
       if (collaborationDefinitionYamlRef.current !== definitionYaml) {
         return;
       }
       clearCollaborationYamlBindingState();
-      setIsEditingCollaborationYaml(true);
       setError(err instanceof Error ? err.message : 'YAML 校验请求失败');
     }
   };
@@ -1798,8 +1879,13 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       {/* 弹窗内容：自适应高度，最大高度为视口高度减去边距 */}
       <div
         className={cn(
-          'relative w-full bg-white rounded-xl shadow-xl flex flex-col h-[calc(100vh-2rem)] min-h-[400px] max-h-[760px]',
-          'max-w-2xl',
+          'relative bg-white rounded-xl shadow-xl flex flex-col h-[calc(100vh-2rem)] min-h-[400px] max-h-[760px] transition-[width,max-width]',
+          groupStrategy === 'state_machine' &&
+            validatedCollaborationGraph &&
+            collaborationAuthoringStage === 'bindings' &&
+            !isCompactCollaborationFlowLayout
+            ? 'w-[92vw] max-w-[1440px]'
+            : 'w-full max-w-2xl',
         )}
       >
         {/* 头部 */}
@@ -1823,188 +1909,112 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
           </button>
         </div>
 
-        {/* 上方：固定表单（名称 + 群主） */}
-        <div className="px-6 pt-3 pb-2 flex-shrink-0 border-b border-slate-100">
-          {/* 第一行：协作室名称 + 协作目标 */}
-          <div className="flex gap-4 mb-2">
-            {/* 协作室名称 */}
-            <div className="flex-[1]">
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                协作群名称
-              </label>
-              <input
-                type="text"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="留空则自动用 Bot 名称生成"
-                autoFocus
-                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
+        <CollaborationFlowWorkspace
+          className="rounded-none bg-white"
+          compact={isCompactCollaborationFlowLayout}
+          compactPanelOpen={isCompactCollaborationFlowOpen}
+          onCompactPanelOpenChange={setIsCompactCollaborationFlowOpen}
+          panelMeta={
+            validatedCollaborationGraph &&
+            collaborationAuthoringStage === 'bindings' ? (
+              <span className="text-xs text-slate-400">
+                {validatedCollaborationGraph.nodes.length} 个节点
+              </span>
+            ) : null
+          }
+          panel={
+            validatedCollaborationGraph &&
+            collaborationAuthoringStage === 'bindings' ? (
+              <CollaborationFlowPreviewLoader
+                key={validatedCollaborationYaml}
+                graph={validatedCollaborationGraph}
+                initialNodes={
+                  validatedCollaborationSummary?.initial_nodes ?? []
+                }
+                bindingViews={collaborationBindingViews}
+                selectedNodeId={selectedCollaborationNodeId}
+                highlightedBinding={activeParticipantKey}
+                onNodeSelect={handleCollaborationNodeSelect}
               />
+            ) : null
+          }
+        >
+          {/* 上方：固定表单（名称 + 群主） */}
+          <div className="px-6 pt-3 pb-2 flex-shrink-0 border-b border-slate-100">
+            {/* 第一行：协作室名称 + 协作目标 */}
+            <div className="flex gap-4 mb-2">
+              {/* 协作室名称 */}
+              <div className="flex-[1]">
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  协作群名称
+                </label>
+                <input
+                  type="text"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  placeholder="留空则自动用 Bot 名称生成"
+                  autoFocus
+                  className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
+                />
+              </div>
+
+              {/* 协作目标 */}
+              <div className="flex-[1.5]">
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  协作目标
+                  {groupStrategy === 'state_machine' && (
+                    <span className="text-red-500 ml-0.5">*</span>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="描述协作目标，用于智能推荐"
+                  required={groupStrategy === 'state_machine'}
+                  className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
+                />
+              </div>
             </div>
 
-            {/* 协作目标 */}
-            <div className="flex-[1.5]">
+            {/* 协作群类型选择 */}
+            <div className="mt-2">
               <label className="block text-sm font-medium text-slate-700 mb-1">
-                协作目标
-                {groupStrategy === 'state_machine' && (
-                  <span className="text-red-500 ml-0.5">*</span>
-                )}
+                协作群类型
               </label>
-              <input
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="描述协作目标，用于智能推荐"
-                required={groupStrategy === 'state_machine'}
-                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
-              />
-            </div>
-          </div>
-
-          {/* 协作群类型选择 */}
-          <div className="mt-2">
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              协作群类型
-            </label>
-            <div
-              className={cn(
-                'grid grid-cols-1 gap-2',
-                canCreateStateMachineGroup
-                  ? 'sm:grid-cols-3'
-                  : 'sm:grid-cols-2',
-              )}
-            >
-              <label
+              <div
                 className={cn(
-                  'flex items-center gap-2 px-3 py-1.5 border rounded-lg cursor-pointer transition-all group min-w-0',
-                  groupStrategy === 'chat'
-                    ? 'border-lavender-400 bg-lavender-50/50 shadow-sm shadow-lavender-100'
-                    : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50',
+                  'grid grid-cols-1 gap-2',
+                  canCreateStateMachineGroup
+                    ? 'sm:grid-cols-3'
+                    : 'sm:grid-cols-2',
                 )}
               >
-                {/* 自定义圆形 Radio 指示器 */}
-                <div
-                  className={cn(
-                    'w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all',
-                    groupStrategy === 'chat'
-                      ? 'border-lavender-500'
-                      : 'border-slate-300 group-hover:border-slate-400',
-                  )}
-                >
-                  {groupStrategy === 'chat' && (
-                    <div className="w-1.5 h-1.5 rounded-full bg-lavender-500" />
-                  )}
-                </div>
-                <MessagesSquare
-                  className={cn(
-                    'w-3.5 h-3.5 flex-shrink-0 transition-colors',
-                    groupStrategy === 'chat'
-                      ? 'text-lavender-500'
-                      : 'text-slate-400',
-                  )}
-                />
-                <span
-                  className={cn(
-                    'text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0',
-                    groupStrategy === 'chat'
-                      ? 'text-lavender-700'
-                      : 'text-slate-800',
-                  )}
-                >
-                  自由聊天型
-                </span>
-                <span className="text-[11px] text-slate-400 truncate">
-                  开放交流、灵活讨论
-                </span>
-                <input
-                  type="radio"
-                  name="groupStrategy"
-                  value="chat"
-                  checked={groupStrategy === 'chat'}
-                  onChange={() => {
-                    setGroupStrategy('chat');
-                    setMasterBot('');
-                    setMasterBotDropdownOpen(false);
-                  }}
-                  className="sr-only"
-                />
-              </label>
-              <label
-                className={cn(
-                  'flex items-center gap-2 px-3 py-1.5 border rounded-lg cursor-pointer transition-all group min-w-0',
-                  groupStrategy === 'manager_worker'
-                    ? 'border-lavender-400 bg-lavender-50/50 shadow-sm shadow-lavender-100'
-                    : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50',
-                )}
-              >
-                {/* 自定义圆形 Radio 指示器 */}
-                <div
-                  className={cn(
-                    'w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all',
-                    groupStrategy === 'manager_worker'
-                      ? 'border-lavender-500'
-                      : 'border-slate-300 group-hover:border-slate-400',
-                  )}
-                >
-                  {groupStrategy === 'manager_worker' && (
-                    <div className="w-1.5 h-1.5 rounded-full bg-lavender-500" />
-                  )}
-                </div>
-                <Network
-                  className={cn(
-                    'w-3.5 h-3.5 flex-shrink-0 transition-colors',
-                    groupStrategy === 'manager_worker'
-                      ? 'text-lavender-500'
-                      : 'text-slate-400',
-                  )}
-                />
-                <span
-                  className={cn(
-                    'text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0',
-                    groupStrategy === 'manager_worker'
-                      ? 'text-lavender-700'
-                      : 'text-slate-800',
-                  )}
-                >
-                  任务协作型
-                </span>
-                <span className="text-[11px] text-slate-400 truncate">
-                  主从模式
-                </span>
-                <input
-                  type="radio"
-                  name="groupStrategy"
-                  value="manager_worker"
-                  checked={groupStrategy === 'manager_worker'}
-                  onChange={() => setGroupStrategy('manager_worker')}
-                  className="sr-only"
-                />
-              </label>
-              {canCreateStateMachineGroup && (
                 <label
                   className={cn(
                     'flex items-center gap-2 px-3 py-1.5 border rounded-lg cursor-pointer transition-all group min-w-0',
-                    groupStrategy === 'state_machine'
+                    groupStrategy === 'chat'
                       ? 'border-lavender-400 bg-lavender-50/50 shadow-sm shadow-lavender-100'
                       : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50',
                   )}
                 >
+                  {/* 自定义圆形 Radio 指示器 */}
                   <div
                     className={cn(
                       'w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all',
-                      groupStrategy === 'state_machine'
+                      groupStrategy === 'chat'
                         ? 'border-lavender-500'
                         : 'border-slate-300 group-hover:border-slate-400',
                     )}
                   >
-                    {groupStrategy === 'state_machine' && (
+                    {groupStrategy === 'chat' && (
                       <div className="w-1.5 h-1.5 rounded-full bg-lavender-500" />
                     )}
                   </div>
-                  <Workflow
+                  <MessagesSquare
                     className={cn(
                       'w-3.5 h-3.5 flex-shrink-0 transition-colors',
-                      groupStrategy === 'state_machine'
+                      groupStrategy === 'chat'
                         ? 'text-lavender-500'
                         : 'text-slate-400',
                     )}
@@ -2012,127 +2022,423 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   <span
                     className={cn(
                       'text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0',
-                      groupStrategy === 'state_machine'
+                      groupStrategy === 'chat'
                         ? 'text-lavender-700'
                         : 'text-slate-800',
                     )}
                   >
-                    自定义协作
+                    自由聊天型
                   </span>
                   <span className="text-[11px] text-slate-400 truncate">
-                    状态机编排
+                    开放交流、灵活讨论
                   </span>
                   <input
                     type="radio"
                     name="groupStrategy"
-                    value="state_machine"
-                    checked={groupStrategy === 'state_machine'}
+                    value="chat"
+                    checked={groupStrategy === 'chat'}
                     onChange={() => {
-                      setGroupStrategy('state_machine');
+                      setGroupStrategy('chat');
                       setMasterBot('');
                       setMasterBotDropdownOpen(false);
                     }}
                     className="sr-only"
                   />
                 </label>
+                <label
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-1.5 border rounded-lg cursor-pointer transition-all group min-w-0',
+                    groupStrategy === 'manager_worker'
+                      ? 'border-lavender-400 bg-lavender-50/50 shadow-sm shadow-lavender-100'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50',
+                  )}
+                >
+                  {/* 自定义圆形 Radio 指示器 */}
+                  <div
+                    className={cn(
+                      'w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all',
+                      groupStrategy === 'manager_worker'
+                        ? 'border-lavender-500'
+                        : 'border-slate-300 group-hover:border-slate-400',
+                    )}
+                  >
+                    {groupStrategy === 'manager_worker' && (
+                      <div className="w-1.5 h-1.5 rounded-full bg-lavender-500" />
+                    )}
+                  </div>
+                  <Network
+                    className={cn(
+                      'w-3.5 h-3.5 flex-shrink-0 transition-colors',
+                      groupStrategy === 'manager_worker'
+                        ? 'text-lavender-500'
+                        : 'text-slate-400',
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      'text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0',
+                      groupStrategy === 'manager_worker'
+                        ? 'text-lavender-700'
+                        : 'text-slate-800',
+                    )}
+                  >
+                    任务协作型
+                  </span>
+                  <span className="text-[11px] text-slate-400 truncate">
+                    主从模式
+                  </span>
+                  <input
+                    type="radio"
+                    name="groupStrategy"
+                    value="manager_worker"
+                    checked={groupStrategy === 'manager_worker'}
+                    onChange={() => setGroupStrategy('manager_worker')}
+                    className="sr-only"
+                  />
+                </label>
+                {canCreateStateMachineGroup && (
+                  <label
+                    className={cn(
+                      'flex items-center gap-2 px-3 py-1.5 border rounded-lg cursor-pointer transition-all group min-w-0',
+                      groupStrategy === 'state_machine'
+                        ? 'border-lavender-400 bg-lavender-50/50 shadow-sm shadow-lavender-100'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50',
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        'w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all',
+                        groupStrategy === 'state_machine'
+                          ? 'border-lavender-500'
+                          : 'border-slate-300 group-hover:border-slate-400',
+                      )}
+                    >
+                      {groupStrategy === 'state_machine' && (
+                        <div className="w-1.5 h-1.5 rounded-full bg-lavender-500" />
+                      )}
+                    </div>
+                    <Workflow
+                      className={cn(
+                        'w-3.5 h-3.5 flex-shrink-0 transition-colors',
+                        groupStrategy === 'state_machine'
+                          ? 'text-lavender-500'
+                          : 'text-slate-400',
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        'text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0',
+                        groupStrategy === 'state_machine'
+                          ? 'text-lavender-700'
+                          : 'text-slate-800',
+                      )}
+                    >
+                      自定义协作
+                    </span>
+                    <span className="text-[11px] text-slate-400 truncate">
+                      状态机编排
+                    </span>
+                    <input
+                      type="radio"
+                      name="groupStrategy"
+                      value="state_machine"
+                      checked={groupStrategy === 'state_machine'}
+                      onChange={() => {
+                        setGroupStrategy('state_machine');
+                        setMasterBot('');
+                        setMasterBotDropdownOpen(false);
+                      }}
+                      className="sr-only"
+                    />
+                  </label>
+                )}
+              </div>
+              {groupStrategy === 'manager_worker' && (
+                <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-2 text-[11px] leading-5 text-amber-700">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
+                  <div className="min-w-0">
+                    <p className="font-medium">
+                      {MANAGER_WORKER_ENGINE_SUPPORT_TIP}
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
-            {groupStrategy === 'manager_worker' && (
-              <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50/70 px-2.5 py-2 text-[11px] leading-5 text-amber-700">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-500" />
-                <div className="min-w-0">
-                  <p className="font-medium">
-                    {MANAGER_WORKER_ENGINE_SUPPORT_TIP}
-                  </p>
+
+            {groupStrategy === 'chat' ? (
+              /* 自由聊天型：群主 Bot + 自动回复 */
+              <div className="flex gap-4 mt-2">
+                {/* 群主 Bot（可下拉选择） */}
+                <div className="flex-[1] min-w-0">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    群主 Bot
+                  </label>
+                  <div ref={driverBotDropdownRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDriverBotDropdownOpen(!driverBotDropdownOpen)
+                      }
+                      className={cn(
+                        'w-full h-[46px] flex items-center gap-2 px-3 py-1.5 text-sm bg-white border rounded-lg transition-all text-left',
+                        driverBotDropdownOpen
+                          ? 'ring-2 ring-lavender-500/20 border-lavender-400'
+                          : 'border-slate-200 hover:border-slate-300',
+                      )}
+                    >
+                      {driverBotId ? (
+                        <>
+                          <BotAvatar
+                            type="assistant"
+                            size="sm"
+                            name={
+                              driverBotId === originator?.bot_uuid
+                                ? originator?.bot_name
+                                : getBotName(driverBotId)
+                            }
+                            botId={driverBotId?.split(':')[0]}
+                            avatarUrl={
+                              driverBotId === originator?.bot_uuid
+                                ? originator?.avatar_url
+                                : getBotInfo(driverBotId)?.avatar_url
+                            }
+                          />
+                          <span className="flex-1 truncate font-medium text-slate-700 min-w-0">
+                            {driverBotId === originator?.bot_uuid
+                              ? originator?.bot_name
+                              : getBotName(driverBotId)}
+                          </span>
+                          {driverBotId === originator?.bot_uuid && (
+                            <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
+                              当前
+                            </span>
+                          )}
+                          {/* 当前 Bot 作为群主时的在线状态 */}
+                          {driverBotId === originator?.bot_uuid ? (
+                            isOriginatorUnreachable ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="flex items-center gap-0.5 text-xs text-amber-500">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      连接异常
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent
+                                    side="top"
+                                    className="text-xs"
+                                  >
+                                    {COMMUNICATION_WARNING_TEXT}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : isOriginatorOnline ? (
+                              <span className="flex items-center gap-0.5 text-xs text-green-500">
+                                <Globe className="w-3 h-3" />
+                                在线
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-0.5 text-xs text-slate-400">
+                                <EyeOff className="w-3 h-3" />
+                                隐身
+                              </span>
+                            )
+                          ) : null}
+                        </>
+                      ) : (
+                        <span className="text-slate-400">选择群主 Bot</span>
+                      )}
+                      <svg
+                        className={cn(
+                          'w-4 h-4 text-slate-400 flex-shrink-0 transition-transform ml-auto',
+                          driverBotDropdownOpen && 'rotate-180',
+                        )}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
+                    </button>
+                    {driverBotDropdownOpen && (
+                      <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-[240px] overflow-y-auto">
+                        {/* 当前 Tab Bot（发起者）— human 模式下不显示（human 不能当 driver） */}
+                        {actorKind === 'bot' && originator?.bot_uuid && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDriverBotId(originator.bot_uuid);
+                              setDriverBotDropdownOpen(false);
+                            }}
+                            className={cn(
+                              'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-slate-50',
+                              driverBotId === originator.bot_uuid &&
+                                'bg-lavender-50/70',
+                            )}
+                          >
+                            <BotAvatar
+                              type="assistant"
+                              size="sm"
+                              name={originator.bot_name}
+                              botId={originator.bot_uuid?.split(':')[0]}
+                              avatarUrl={originator.avatar_url}
+                            />
+                            <span className="flex-1 truncate text-sm font-medium text-slate-700 min-w-0">
+                              {originator.bot_name}
+                            </span>
+                            <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
+                              当前
+                            </span>
+                            {driverBotId === originator.bot_uuid && (
+                              <Check className="w-4 h-4 text-lavender-500 flex-shrink-0" />
+                            )}
+                          </button>
+                        )}
+                        {/* 分隔线 */}
+                        {consultantBots.length > 0 &&
+                          actorKind === 'bot' &&
+                          originator?.bot_uuid && (
+                            <div className="border-t border-slate-100" />
+                          )}
+                        {/* 已选成员 Bot（排除 human 类型） */}
+                        {consultantBots
+                          .filter((botId) => !botId.startsWith('human_'))
+                          .map((botId) => {
+                            const bot = getBotInfo(botId);
+                            return (
+                              <button
+                                key={botId}
+                                type="button"
+                                onClick={() => {
+                                  setDriverBotId(botId);
+                                  setDriverBotDropdownOpen(false);
+                                }}
+                                className={cn(
+                                  'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-slate-50',
+                                  driverBotId === botId && 'bg-lavender-50/70',
+                                )}
+                              >
+                                <BotAvatar
+                                  type="assistant"
+                                  size="sm"
+                                  name={getBotName(botId)}
+                                  botId={botId?.split(':')[0]}
+                                  avatarUrl={bot?.avatar_url}
+                                />
+                                <span className="flex-1 truncate text-sm font-medium text-slate-700 min-w-0">
+                                  {getBotName(botId)}
+                                </span>
+                                {driverBotId === botId && (
+                                  <Check className="w-4 h-4 text-lavender-500 flex-shrink-0" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        {(actorKind === 'human' || !originator?.bot_uuid) &&
+                          consultantBots.filter(
+                            (id) => !id.startsWith('human_'),
+                          ).length === 0 && (
+                            <div className="px-3 py-3 text-xs text-slate-400 text-center">
+                              请先选择成员 Bot
+                            </div>
+                          )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 自动回复开关 */}
+                <div className="flex-[1.5] min-w-0">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    自动回复
+                  </label>
+                  <div className="flex items-center gap-3 h-[46px] px-3 pl-1 min-w-0 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setAutoReply(!autoReply)}
+                      className={cn(
+                        'relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0',
+                        autoReply ? 'bg-lavender-500' : 'bg-slate-200',
+                      )}
+                      data-aspm-click="ca114903.da194174"
+                      data-aspm-desc="GroupChat-切换自动回复"
+                      data-aspm-param={``}
+                      data-aspm-expo
+                    >
+                      <span
+                        className={cn(
+                          'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
+                          autoReply ? 'translate-x-5' : 'translate-x-0.5',
+                        )}
+                      />
+                    </button>
+                    <span className="text-xs text-slate-500 flex-1 truncate">
+                      {autoReply
+                        ? '群主 Bot 将默认回复每一条消息'
+                        : '群主 Bot 仅在被@时或上下文语境高度关联时答复'}
+                    </span>
+                  </div>
                 </div>
               </div>
-            )}
-          </div>
-
-          {groupStrategy === 'chat' ? (
-            /* 自由聊天型：群主 Bot + 自动回复 */
-            <div className="flex gap-4 mt-2">
-              {/* 群主 Bot（可下拉选择） */}
-              <div className="flex-[1] min-w-0">
+            ) : groupStrategy === 'manager_worker' ? (
+              /* 任务协作型：主节点（Manager Bot）独占一行，不显示群主 Bot */
+              <div className="mt-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  群主 Bot
+                  主节点（Manager Bot）
                 </label>
-                <div ref={driverBotDropdownRef} className="relative">
+                <div ref={masterBotDropdownRef} className="relative">
                   <button
                     type="button"
                     onClick={() =>
-                      setDriverBotDropdownOpen(!driverBotDropdownOpen)
+                      setMasterBotDropdownOpen(!masterBotDropdownOpen)
                     }
                     className={cn(
                       'w-full h-[46px] flex items-center gap-2 px-3 py-1.5 text-sm bg-white border rounded-lg transition-all text-left',
-                      driverBotDropdownOpen
+                      masterBotDropdownOpen
                         ? 'ring-2 ring-lavender-500/20 border-lavender-400'
                         : 'border-slate-200 hover:border-slate-300',
                     )}
                   >
-                    {driverBotId ? (
+                    {masterBot ? (
                       <>
                         <BotAvatar
                           type="assistant"
                           size="sm"
                           name={
-                            driverBotId === originator?.bot_uuid
+                            masterBot === originator?.bot_uuid
                               ? originator?.bot_name
-                              : getBotName(driverBotId)
+                              : getBotName(masterBot)
                           }
-                          botId={driverBotId?.split(':')[0]}
+                          botId={masterBot?.split(':')[0]}
                           avatarUrl={
-                            driverBotId === originator?.bot_uuid
+                            masterBot === originator?.bot_uuid
                               ? originator?.avatar_url
-                              : getBotInfo(driverBotId)?.avatar_url
+                              : getBotInfo(masterBot)?.avatar_url
                           }
                         />
                         <span className="flex-1 truncate font-medium text-slate-700 min-w-0">
-                          {driverBotId === originator?.bot_uuid
+                          {masterBot === originator?.bot_uuid
                             ? originator?.bot_name
-                            : getBotName(driverBotId)}
+                            : getBotName(masterBot)}
                         </span>
-                        {driverBotId === originator?.bot_uuid && (
+                        {masterBot === originator?.bot_uuid && (
                           <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
-                            当前
+                            群主
                           </span>
                         )}
-                        {/* 当前 Bot 作为群主时的在线状态 */}
-                        {driverBotId === originator?.bot_uuid ? (
-                          isOriginatorUnreachable ? (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="flex items-center gap-0.5 text-xs text-amber-500">
-                                    <AlertTriangle className="w-3 h-3" />
-                                    连接异常
-                                  </span>
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="text-xs">
-                                  {COMMUNICATION_WARNING_TEXT}
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          ) : isOriginatorOnline ? (
-                            <span className="flex items-center gap-0.5 text-xs text-green-500">
-                              <Globe className="w-3 h-3" />
-                              在线
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-0.5 text-xs text-slate-400">
-                              <EyeOff className="w-3 h-3" />
-                              隐身
-                            </span>
-                          )
-                        ) : null}
                       </>
                     ) : (
-                      <span className="text-slate-400">选择群主 Bot</span>
+                      <span className="text-slate-400">Manager Bot</span>
                     )}
                     <svg
                       className={cn(
                         'w-4 h-4 text-slate-400 flex-shrink-0 transition-transform ml-auto',
-                        driverBotDropdownOpen && 'rotate-180',
+                        masterBotDropdownOpen && 'rotate-180',
                       )}
                       fill="none"
                       stroke="currentColor"
@@ -2146,19 +2452,19 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                       />
                     </svg>
                   </button>
-                  {driverBotDropdownOpen && (
+                  {masterBotDropdownOpen && (
                     <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-[240px] overflow-y-auto">
-                      {/* 当前 Tab Bot（发起者）— human 模式下不显示（human 不能当 driver） */}
+                      {/* 群主 Bot 选项（仅 bot 模式显示） */}
                       {actorKind === 'bot' && originator?.bot_uuid && (
                         <button
                           type="button"
                           onClick={() => {
-                            setDriverBotId(originator.bot_uuid);
-                            setDriverBotDropdownOpen(false);
+                            setMasterBot(originator.bot_uuid);
+                            setMasterBotDropdownOpen(false);
                           }}
                           className={cn(
                             'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-slate-50',
-                            driverBotId === originator.bot_uuid &&
+                            masterBot === originator.bot_uuid &&
                               'bg-lavender-50/70',
                           )}
                         >
@@ -2173,20 +2479,20 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                             {originator.bot_name}
                           </span>
                           <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
-                            当前
+                            群主
                           </span>
-                          {driverBotId === originator.bot_uuid && (
+                          {masterBot === originator.bot_uuid && (
                             <Check className="w-4 h-4 text-lavender-500 flex-shrink-0" />
                           )}
                         </button>
                       )}
-                      {/* 分隔线 */}
-                      {consultantBots.length > 0 &&
+                      {/* 成员 Bot 选项（排除 human） */}
+                      {consultantBots.filter((id) => !id.startsWith('human_'))
+                        .length > 0 &&
                         actorKind === 'bot' &&
                         originator?.bot_uuid && (
                           <div className="border-t border-slate-100" />
                         )}
-                      {/* 已选成员 Bot（排除 human 类型） */}
                       {consultantBots
                         .filter((botId) => !botId.startsWith('human_'))
                         .map((botId) => {
@@ -2196,12 +2502,12 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                               key={botId}
                               type="button"
                               onClick={() => {
-                                setDriverBotId(botId);
-                                setDriverBotDropdownOpen(false);
+                                setMasterBot(botId);
+                                setMasterBotDropdownOpen(false);
                               }}
                               className={cn(
                                 'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-slate-50',
-                                driverBotId === botId && 'bg-lavender-50/70',
+                                masterBot === botId && 'bg-lavender-50/70',
                               )}
                             >
                               <BotAvatar
@@ -2214,15 +2520,15 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                               <span className="flex-1 truncate text-sm font-medium text-slate-700 min-w-0">
                                 {getBotName(botId)}
                               </span>
-                              {driverBotId === botId && (
+                              {masterBot === botId && (
                                 <Check className="w-4 h-4 text-lavender-500 flex-shrink-0" />
                               )}
                             </button>
                           );
                         })}
-                      {(actorKind === 'human' || !originator?.bot_uuid) &&
-                        consultantBots.filter((id) => !id.startsWith('human_'))
-                          .length === 0 && (
+                      {consultantBots.filter((id) => !id.startsWith('human_'))
+                        .length === 0 &&
+                        (actorKind === 'human' || !originator?.bot_uuid) && (
                           <div className="px-3 py-3 text-xs text-slate-400 text-center">
                             请先选择成员 Bot
                           </div>
@@ -2230,1382 +2536,1235 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     </div>
                   )}
                 </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  {MANAGER_WORKER_DEFAULT_WORKER_TIP}
+                </p>
               </div>
-
-              {/* 自动回复开关 */}
-              <div className="flex-[1.5] min-w-0">
+            ) : (
+              /* 结构化协同：展示发起方 Bot */
+              <div className="mt-2">
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  自动回复
+                  发起方 Bot
                 </label>
-                <div className="flex items-center gap-3 h-[46px] px-3 pl-1 min-w-0 overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setAutoReply(!autoReply)}
-                    className={cn(
-                      'relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0',
-                      autoReply ? 'bg-lavender-500' : 'bg-slate-200',
-                    )}
-                    data-aspm-click="ca114903.da194174"
-                    data-aspm-desc="GroupChat-切换自动回复"
-                    data-aspm-param={``}
-                    data-aspm-expo
-                  >
-                    <span
-                      className={cn(
-                        'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
-                        autoReply ? 'translate-x-5' : 'translate-x-0.5',
-                      )}
-                    />
-                  </button>
-                  <span className="text-xs text-slate-500 flex-1 truncate">
-                    {autoReply
-                      ? '群主 Bot 将默认回复每一条消息'
-                      : '群主 Bot 仅在被@时或上下文语境高度关联时答复'}
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200/60 rounded-lg min-w-0">
+                  <BotAvatar
+                    type="assistant"
+                    size="sm"
+                    name={originator?.bot_name}
+                    botId={originator?.bot_uuid?.split(':')[0]}
+                    avatarUrl={originator?.avatar_url}
+                  />
+                  <span className="text-sm text-slate-700 font-medium flex-1 truncate min-w-0">
+                    {originator?.bot_name || '暂无可用 Bot'}
                   </span>
-                </div>
-              </div>
-            </div>
-          ) : groupStrategy === 'manager_worker' ? (
-            /* 任务协作型：主节点（Manager Bot）独占一行，不显示群主 Bot */
-            <div className="mt-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                主节点（Manager Bot）
-              </label>
-              <div ref={masterBotDropdownRef} className="relative">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setMasterBotDropdownOpen(!masterBotDropdownOpen)
-                  }
-                  className={cn(
-                    'w-full h-[46px] flex items-center gap-2 px-3 py-1.5 text-sm bg-white border rounded-lg transition-all text-left',
-                    masterBotDropdownOpen
-                      ? 'ring-2 ring-lavender-500/20 border-lavender-400'
-                      : 'border-slate-200 hover:border-slate-300',
-                  )}
-                >
-                  {masterBot ? (
-                    <>
-                      <BotAvatar
-                        type="assistant"
-                        size="sm"
-                        name={
-                          masterBot === originator?.bot_uuid
-                            ? originator?.bot_name
-                            : getBotName(masterBot)
-                        }
-                        botId={masterBot?.split(':')[0]}
-                        avatarUrl={
-                          masterBot === originator?.bot_uuid
-                            ? originator?.avatar_url
-                            : getBotInfo(masterBot)?.avatar_url
-                        }
-                      />
-                      <span className="flex-1 truncate font-medium text-slate-700 min-w-0">
-                        {masterBot === originator?.bot_uuid
-                          ? originator?.bot_name
-                          : getBotName(masterBot)}
-                      </span>
-                      {masterBot === originator?.bot_uuid && (
-                        <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
-                          群主
-                        </span>
-                      )}
-                    </>
+                  {isOriginatorUnreachable ? (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="flex items-center gap-0.5 text-xs text-amber-500"
+                            aria-label={COMMUNICATION_WARNING_TEXT}
+                          >
+                            <AlertTriangle className="w-3 h-3" />
+                            连接异常
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">
+                          {COMMUNICATION_WARNING_TEXT}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  ) : isOriginatorOnline ? (
+                    <span className="flex items-center gap-0.5 text-xs text-green-500">
+                      <Globe className="w-3 h-3" />
+                      在线
+                    </span>
                   ) : (
-                    <span className="text-slate-400">Manager Bot</span>
+                    <span className="flex items-center gap-0.5 text-xs text-slate-400">
+                      <EyeOff className="w-3 h-3" />
+                      隐身
+                    </span>
                   )}
-                  <svg
-                    className={cn(
-                      'w-4 h-4 text-slate-400 flex-shrink-0 transition-transform ml-auto',
-                      masterBotDropdownOpen && 'rotate-180',
-                    )}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                </button>
-                {masterBotDropdownOpen && (
-                  <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-[240px] overflow-y-auto">
-                    {/* 群主 Bot 选项（仅 bot 模式显示） */}
-                    {actorKind === 'bot' && originator?.bot_uuid && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMasterBot(originator.bot_uuid);
-                          setMasterBotDropdownOpen(false);
-                        }}
-                        className={cn(
-                          'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-slate-50',
-                          masterBot === originator.bot_uuid &&
-                            'bg-lavender-50/70',
-                        )}
-                      >
-                        <BotAvatar
-                          type="assistant"
-                          size="sm"
-                          name={originator.bot_name}
-                          botId={originator.bot_uuid?.split(':')[0]}
-                          avatarUrl={originator.avatar_url}
-                        />
-                        <span className="flex-1 truncate text-sm font-medium text-slate-700 min-w-0">
-                          {originator.bot_name}
-                        </span>
-                        <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
-                          群主
-                        </span>
-                        {masterBot === originator.bot_uuid && (
-                          <Check className="w-4 h-4 text-lavender-500 flex-shrink-0" />
-                        )}
-                      </button>
-                    )}
-                    {/* 成员 Bot 选项（排除 human） */}
-                    {consultantBots.filter((id) => !id.startsWith('human_'))
-                      .length > 0 &&
-                      actorKind === 'bot' &&
-                      originator?.bot_uuid && (
-                        <div className="border-t border-slate-100" />
-                      )}
-                    {consultantBots
-                      .filter((botId) => !botId.startsWith('human_'))
-                      .map((botId) => {
-                        const bot = getBotInfo(botId);
-                        return (
-                          <button
-                            key={botId}
-                            type="button"
-                            onClick={() => {
-                              setMasterBot(botId);
-                              setMasterBotDropdownOpen(false);
-                            }}
-                            className={cn(
-                              'w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-slate-50',
-                              masterBot === botId && 'bg-lavender-50/70',
-                            )}
-                          >
-                            <BotAvatar
-                              type="assistant"
-                              size="sm"
-                              name={getBotName(botId)}
-                              botId={botId?.split(':')[0]}
-                              avatarUrl={bot?.avatar_url}
-                            />
-                            <span className="flex-1 truncate text-sm font-medium text-slate-700 min-w-0">
-                              {getBotName(botId)}
-                            </span>
-                            {masterBot === botId && (
-                              <Check className="w-4 h-4 text-lavender-500 flex-shrink-0" />
-                            )}
-                          </button>
-                        );
-                      })}
-                    {consultantBots.filter((id) => !id.startsWith('human_'))
-                      .length === 0 &&
-                      (actorKind === 'human' || !originator?.bot_uuid) && (
-                        <div className="px-3 py-3 text-xs text-slate-400 text-center">
-                          请先选择成员 Bot
-                        </div>
-                      )}
-                  </div>
-                )}
-              </div>
-              <p className="mt-1.5 text-[11px] text-slate-400">
-                {MANAGER_WORKER_DEFAULT_WORKER_TIP}
-              </p>
-            </div>
-          ) : (
-            /* 结构化协同：展示发起方 Bot */
-            <div className="mt-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                发起方 Bot
-              </label>
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200/60 rounded-lg min-w-0">
-                <BotAvatar
-                  type="assistant"
-                  size="sm"
-                  name={originator?.bot_name}
-                  botId={originator?.bot_uuid?.split(':')[0]}
-                  avatarUrl={originator?.avatar_url}
-                />
-                <span className="text-sm text-slate-700 font-medium flex-1 truncate min-w-0">
-                  {originator?.bot_name || '暂无可用 Bot'}
-                </span>
-                {isOriginatorUnreachable ? (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          className="flex items-center gap-0.5 text-xs text-amber-500"
-                          aria-label={COMMUNICATION_WARNING_TEXT}
-                        >
-                          <AlertTriangle className="w-3 h-3" />
-                          连接异常
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs">
-                        {COMMUNICATION_WARNING_TEXT}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ) : isOriginatorOnline ? (
-                  <span className="flex items-center gap-0.5 text-xs text-green-500">
-                    <Globe className="w-3 h-3" />
-                    在线
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-0.5 text-xs text-slate-400">
-                    <EyeOff className="w-3 h-3" />
-                    隐身
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 下方：Bot 选择区（flex-1，撑满剩余空间） */}
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-6 py-2">
-          {groupStrategy === 'state_machine' ? (
-            <div className="flex-1 min-h-0 flex flex-col gap-3">
-              {isCollaborationYamlValidated && !isEditingCollaborationYaml ? (
-                <div className="flex items-center justify-between px-3 py-2 border border-slate-200/60 rounded-xl bg-white flex-shrink-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-medium text-slate-700">
-                      协同剧本
-                    </span>
-                    <span className="text-xs px-2 py-0.5 rounded-full text-green-600 bg-green-50">
-                      已解析 {participantDefinitions.length} 个角色
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingCollaborationYaml(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all border bg-white text-lavender-600 hover:bg-lavender-50 border-lavender-200"
-                  >
-                    重新编辑
-                  </button>
                 </div>
-              ) : (
-                <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0 min-w-0">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <label className="text-sm font-medium text-slate-700 whitespace-nowrap">
+              </div>
+            )}
+          </div>
+
+          {/* 下方：Bot 选择区（flex-1，撑满剩余空间） */}
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-6 py-2">
+            {groupStrategy === 'state_machine' ? (
+              <div className="flex-1 min-h-0 flex flex-col gap-3">
+                {isCollaborationYamlValidated &&
+                collaborationAuthoringStage !== 'yaml' ? (
+                  <div className="flex flex-shrink-0 items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-white px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="text-sm font-medium text-slate-700">
                         协同剧本
-                        <span className="text-red-500 ml-0.5">*</span>
-                      </label>
-                      <div className="flex items-center bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCollaborationYamlTemplateChange(
-                              FREE_COLLABORATION_TEMPLATE_ID,
-                            )
-                          }
-                          className={cn(
-                            'px-2.5 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap',
-                            isFreeCollaborationTemplateSelected
-                              ? 'bg-white text-slate-800 shadow-sm'
-                              : 'text-slate-500 hover:text-slate-700',
-                          )}
-                        >
-                          自由编辑
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCollaborationTemplateModeClick}
-                          className={cn(
-                            'px-2.5 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap',
-                            isCollaborationTemplateMode
-                              ? 'bg-white text-slate-800 shadow-sm'
-                              : 'text-slate-500 hover:text-slate-700',
-                          )}
-                        >
-                          模板
-                        </button>
-                      </div>
-                      {isCollaborationTemplateMode && (
-                        <div
-                          ref={collaborationTemplateDropdownRef}
-                          className="relative min-w-[180px] max-w-[280px] flex-1"
-                        >
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded-full text-green-600 bg-green-50">
+                        已解析{' '}
+                        {validatedCollaborationGraph?.nodes.length ??
+                          validatedCollaborationSummary?.nodes ??
+                          0}{' '}
+                        个节点、{participantDefinitions.length} 个角色
+                      </span>
+                    </div>
+                    <div className="flex flex-shrink-0 items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        soft
+                        size="sm"
+                        onClick={() => {
+                          clearCollaborationYamlBindingState();
+                          setError('');
+                        }}
+                      >
+                        重新编辑
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0 min-w-0">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <label className="text-sm font-medium text-slate-700 whitespace-nowrap">
+                          协同剧本
+                          <span className="text-red-500 ml-0.5">*</span>
+                        </label>
+                        <div className="flex items-center bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
                           <button
                             type="button"
-                            onClick={() => {
-                              if (
-                                hasLoadedCollaborationTemplates &&
-                                !collaborationTemplates &&
-                                !isLoadingCollaborationTemplates
-                              ) {
-                                void loadCollaborationTemplates();
-                              }
-                              setCollaborationTemplateDropdownOpen(
-                                !collaborationTemplateDropdownOpen,
-                              );
-                            }}
+                            onClick={() =>
+                              handleCollaborationYamlTemplateChange(
+                                FREE_COLLABORATION_TEMPLATE_ID,
+                              )
+                            }
                             className={cn(
-                              'w-full h-8 flex items-center gap-2 px-2.5 text-left bg-white border rounded-lg transition-all',
-                              collaborationTemplateDropdownOpen
-                                ? 'ring-2 ring-lavender-500/20 border-lavender-400'
-                                : 'border-slate-200 hover:border-slate-300',
+                              'px-2.5 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap',
+                              isFreeCollaborationTemplateSelected
+                                ? 'bg-white text-slate-800 shadow-sm'
+                                : 'text-slate-500 hover:text-slate-700',
                             )}
                           >
-                            {selectedCollaborationTemplate ? (
-                              <div className="min-w-0 flex-1 flex items-center gap-1.5">
-                                <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
-                                  {selectedCollaborationTemplate.name}
+                            自由编辑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCollaborationTemplateModeClick}
+                            className={cn(
+                              'px-2.5 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap',
+                              isCollaborationTemplateMode
+                                ? 'bg-white text-slate-800 shadow-sm'
+                                : 'text-slate-500 hover:text-slate-700',
+                            )}
+                          >
+                            模板
+                          </button>
+                        </div>
+                        {isCollaborationTemplateMode && (
+                          <div
+                            ref={collaborationTemplateDropdownRef}
+                            className="relative min-w-[180px] max-w-[280px] flex-1"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (
+                                  hasLoadedCollaborationTemplates &&
+                                  !collaborationTemplates &&
+                                  !isLoadingCollaborationTemplates
+                                ) {
+                                  void loadCollaborationTemplates();
+                                }
+                                setCollaborationTemplateDropdownOpen(
+                                  !collaborationTemplateDropdownOpen,
+                                );
+                              }}
+                              className={cn(
+                                'w-full h-8 flex items-center gap-2 px-2.5 text-left bg-white border rounded-lg transition-all',
+                                collaborationTemplateDropdownOpen
+                                  ? 'ring-2 ring-lavender-500/20 border-lavender-400'
+                                  : 'border-slate-200 hover:border-slate-300',
+                              )}
+                            >
+                              {selectedCollaborationTemplate ? (
+                                <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
+                                    {selectedCollaborationTemplate.name}
+                                  </span>
+                                  <div className="hidden md:flex items-center gap-1 flex-shrink-0">
+                                    {selectedCollaborationTemplate.tags
+                                      .slice(0, 2)
+                                      .map((tag) => (
+                                        <span
+                                          key={tag}
+                                          className={cn(
+                                            'max-w-[60px] truncate rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none',
+                                            getCollaborationTagColorClass(tag),
+                                          )}
+                                        >
+                                          {getCollaborationTagLabel(tag)}
+                                        </span>
+                                      ))}
+                                  </div>
+                                </div>
+                              ) : isLoadingCollaborationTemplates ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 flex-shrink-0" />
+                                  <span className="flex-1 truncate text-xs text-slate-400">
+                                    加载模板...
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="flex-1 truncate text-xs text-slate-400">
+                                  选择模板
                                 </span>
-                                <div className="hidden md:flex items-center gap-1 flex-shrink-0">
-                                  {selectedCollaborationTemplate.tags
-                                    .slice(0, 2)
-                                    .map((tag) => (
-                                      <span
-                                        key={tag}
+                              )}
+                              <ChevronDown
+                                className={cn(
+                                  'w-4 h-4 text-slate-400 flex-shrink-0 transition-transform',
+                                  collaborationTemplateDropdownOpen &&
+                                    'rotate-180',
+                                )}
+                              />
+                            </button>
+                            {collaborationTemplateDropdownOpen && (
+                              <div className="absolute z-50 mt-1 w-[360px] max-w-[calc(100vw-3rem)] max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                                {isLoadingCollaborationTemplates ? (
+                                  <div className="flex items-center justify-center gap-2 px-3 py-4 text-xs text-slate-400">
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    加载模板...
+                                  </div>
+                                ) : collaborationTemplateList.length > 0 ? (
+                                  collaborationTemplateList.map((template) => {
+                                    const isActive =
+                                      template.id === collaborationYamlTemplate;
+                                    return (
+                                      <button
+                                        key={template.id}
+                                        type="button"
+                                        onClick={() =>
+                                          handleCollaborationYamlTemplateChange(
+                                            template.id,
+                                          )
+                                        }
                                         className={cn(
-                                          'max-w-[60px] truncate rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none',
-                                          getCollaborationTagColorClass(tag),
+                                          'w-full px-3 py-2.5 text-left transition-colors hover:bg-slate-50',
+                                          isActive && 'bg-lavender-50/70',
                                         )}
                                       >
-                                        {getCollaborationTagLabel(tag)}
-                                      </span>
-                                    ))}
-                                </div>
-                              </div>
-                            ) : isLoadingCollaborationTemplates ? (
-                              <>
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 flex-shrink-0" />
-                                <span className="flex-1 truncate text-xs text-slate-400">
-                                  加载模板...
-                                </span>
-                              </>
-                            ) : (
-                              <span className="flex-1 truncate text-xs text-slate-400">
-                                选择模板
-                              </span>
-                            )}
-                            <ChevronDown
-                              className={cn(
-                                'w-4 h-4 text-slate-400 flex-shrink-0 transition-transform',
-                                collaborationTemplateDropdownOpen &&
-                                  'rotate-180',
-                              )}
-                            />
-                          </button>
-                          {collaborationTemplateDropdownOpen && (
-                            <div className="absolute z-50 mt-1 w-[360px] max-w-[calc(100vw-3rem)] max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                              {isLoadingCollaborationTemplates ? (
-                                <div className="flex items-center justify-center gap-2 px-3 py-4 text-xs text-slate-400">
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  加载模板...
-                                </div>
-                              ) : collaborationTemplateList.length > 0 ? (
-                                collaborationTemplateList.map((template) => {
-                                  const isActive =
-                                    template.id === collaborationYamlTemplate;
-                                  return (
-                                    <button
-                                      key={template.id}
-                                      type="button"
-                                      onClick={() =>
-                                        handleCollaborationYamlTemplateChange(
-                                          template.id,
-                                        )
-                                      }
-                                      className={cn(
-                                        'w-full px-3 py-2.5 text-left transition-colors hover:bg-slate-50',
-                                        isActive && 'bg-lavender-50/70',
-                                      )}
-                                    >
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <span className="min-w-0 truncate text-sm font-medium text-slate-700">
-                                          {template.name}
-                                        </span>
-                                        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
-                                          {template.tags.map((tag) => (
-                                            <span
-                                              key={tag}
-                                              className={cn(
-                                                'max-w-[76px] flex-shrink-0 truncate rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none',
-                                                getCollaborationTagColorClass(
-                                                  tag,
-                                                ),
-                                              )}
-                                            >
-                                              {getCollaborationTagLabel(tag)}
-                                            </span>
-                                          ))}
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className="min-w-0 truncate text-sm font-medium text-slate-700">
+                                            {template.name}
+                                          </span>
+                                          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+                                            {template.tags.map((tag) => (
+                                              <span
+                                                key={tag}
+                                                className={cn(
+                                                  'max-w-[76px] flex-shrink-0 truncate rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none',
+                                                  getCollaborationTagColorClass(
+                                                    tag,
+                                                  ),
+                                                )}
+                                              >
+                                                {getCollaborationTagLabel(tag)}
+                                              </span>
+                                            ))}
+                                          </div>
+                                          {isActive && (
+                                            <Check className="w-4 h-4 text-lavender-500 flex-shrink-0" />
+                                          )}
                                         </div>
-                                        {isActive && (
-                                          <Check className="w-4 h-4 text-lavender-500 flex-shrink-0" />
+                                        {template.description && (
+                                          <div className="mt-1.5 line-clamp-2 text-xs leading-5 text-slate-400">
+                                            {template.description}
+                                          </div>
                                         )}
-                                      </div>
-                                      {template.description && (
-                                        <div className="mt-1.5 line-clamp-2 text-xs leading-5 text-slate-400">
-                                          {template.description}
-                                        </div>
-                                      )}
-                                    </button>
-                                  );
-                                })
-                              ) : (
-                                <div className="px-3 py-4 text-center text-xs text-slate-400">
-                                  暂无后端模板
-                                </div>
-                              )}
-                            </div>
+                                      </button>
+                                    );
+                                  })
+                                ) : (
+                                  <div className="px-3 py-4 text-center text-xs text-slate-400">
+                                    暂无后端模板
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {bcnCollaborationDocUrl && (
+                          <a
+                            href={bcnCollaborationDocUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-medium text-lavender-600 hover:text-lavender-700 whitespace-nowrap"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            查看文档
+                          </a>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {participantDefinitions.length > 0 &&
+                          !isCollaborationYamlValidated && (
+                            <span className="text-xs px-2 py-0.5 rounded-full text-amber-600 bg-amber-50">
+                              YAML 已变更，请重新校验
+                            </span>
                           )}
-                        </div>
-                      )}
-                      {bcnCollaborationDocUrl && (
-                        <a
-                          href={bcnCollaborationDocUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-xs font-medium text-lavender-600 hover:text-lavender-700 whitespace-nowrap"
+                        <button
+                          type="button"
+                          onClick={() => void handleValidateCollaborationYaml()}
+                          disabled={
+                            isLoadingCollaborationYaml ||
+                            isValidatingCollaborationYaml ||
+                            !collaborationDefinitionYaml.trim()
+                          }
+                          className={cn(
+                            'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all border',
+                            !isLoadingCollaborationYaml &&
+                              !isValidatingCollaborationYaml &&
+                              collaborationDefinitionYaml.trim()
+                              ? 'bg-lavender-50 text-lavender-600 hover:bg-lavender-100 border-lavender-200'
+                              : 'bg-slate-100 text-slate-400 cursor-not-allowed border-transparent',
+                          )}
                         >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          查看文档
-                        </a>
-                      )}
+                          {isValidatingCollaborationYaml ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Check className="w-3.5 h-3.5" />
+                          )}
+                          {isValidatingCollaborationYaml
+                            ? '校验中...'
+                            : '校验 YAML'}
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {participantDefinitions.length > 0 &&
-                        !isCollaborationYamlValidated && (
-                          <span className="text-xs px-2 py-0.5 rounded-full text-amber-600 bg-amber-50">
-                            YAML 已变更，请重新校验
-                          </span>
-                        )}
-                      <button
-                        type="button"
-                        onClick={() => void handleValidateCollaborationYaml()}
-                        disabled={
-                          isLoadingCollaborationYaml ||
-                          isValidatingCollaborationYaml ||
-                          !collaborationDefinitionYaml.trim()
-                        }
-                        className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all border',
-                          !isLoadingCollaborationYaml &&
-                            !isValidatingCollaborationYaml &&
-                            collaborationDefinitionYaml.trim()
-                            ? 'bg-lavender-50 text-lavender-600 hover:bg-lavender-100 border-lavender-200'
-                            : 'bg-slate-100 text-slate-400 cursor-not-allowed border-transparent',
-                        )}
-                      >
-                        {isValidatingCollaborationYaml ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Check className="w-3.5 h-3.5" />
-                        )}
-                        {isValidatingCollaborationYaml
-                          ? '校验中...'
-                          : '校验 YAML'}
-                      </button>
+                    <div className="flex-1 min-h-0 border border-slate-200/60 rounded-xl overflow-hidden bg-white">
+                      {isLoadingCollaborationYaml ? (
+                        <div className="flex items-center justify-center h-full min-h-[240px] text-slate-400 gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span className="text-sm">加载模板内容...</span>
+                        </div>
+                      ) : (
+                        <React.Suspense
+                          fallback={
+                            <div className="flex items-center justify-center h-full min-h-[240px] text-slate-400 gap-2">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span className="text-sm">加载编辑器...</span>
+                            </div>
+                          }
+                        >
+                          <LazyCodeMirror
+                            value={collaborationDefinitionYaml}
+                            height="100%"
+                            placeholder={YAML_EDITOR_PLACEHOLDER}
+                            extensions={yamlEditorExtensions}
+                            onChange={handleCollaborationYamlChange}
+                            basicSetup={{
+                              lineNumbers: true,
+                              foldGutter: true,
+                              highlightActiveLine: true,
+                              highlightActiveLineGutter: true,
+                              bracketMatching: true,
+                            }}
+                            theme="light"
+                            style={{
+                              height: '100%',
+                              fontSize: 13,
+                            }}
+                            className="h-full text-sm"
+                          />
+                        </React.Suspense>
+                      )}
                     </div>
                   </div>
-                  <div className="flex-1 min-h-0 border border-slate-200/60 rounded-xl overflow-hidden bg-white">
-                    {isLoadingCollaborationYaml ? (
-                      <div className="flex items-center justify-center h-full min-h-[240px] text-slate-400 gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="text-sm">加载模板内容...</span>
+                )}
+
+                {collaborationAuthoringStage === 'bindings' && (
+                  <div className="flex-1 min-h-0 flex flex-col border border-slate-200/60 rounded-xl overflow-hidden bg-white">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 flex-shrink-0">
+                      <div className="text-sm font-medium text-slate-700">
+                        角色绑定
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {validatedCollaborationGraph &&
+                          isCompactCollaborationFlowLayout && (
+                            <Button
+                              variant="secondary"
+                              soft
+                              size="sm"
+                              leftIcon={<Workflow className="h-3.5 w-3.5" />}
+                              onClick={() =>
+                                setIsCompactCollaborationFlowOpen(true)
+                              }
+                            >
+                              协作流程预览
+                            </Button>
+                          )}
+                        {participantDefinitions.length > 0 &&
+                          !isOriginatorBoundToParticipant && (
+                            <span className="text-xs font-medium px-2 py-0.5 rounded-full text-amber-600 bg-amber-50">
+                              发起方未绑定
+                            </span>
+                          )}
+                        {boundParticipantCount > 0 && (
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full text-lavender-600 bg-lavender-50">
+                            已绑定 {boundParticipantCount} /{' '}
+                            {participantDefinitions.length} 个角色，共{' '}
+                            {allBoundBotIds.length} 个 Bot
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {participantDefinitions.length === 0 ? (
+                      <div className="flex-1 min-h-0 flex items-center justify-center px-6 text-center text-sm text-slate-400">
+                        校验 YAML 后在这里绑定 participants
                       </div>
                     ) : (
-                      <React.Suspense
-                        fallback={
-                          <div className="flex items-center justify-center h-full min-h-[240px] text-slate-400 gap-2">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span className="text-sm">加载编辑器...</span>
-                          </div>
-                        }
-                      >
-                        <LazyCodeMirror
-                          value={collaborationDefinitionYaml}
-                          height="100%"
-                          placeholder={YAML_EDITOR_PLACEHOLDER}
-                          extensions={yamlEditorExtensions}
-                          onChange={handleCollaborationYamlChange}
-                          basicSetup={{
-                            lineNumbers: true,
-                            foldGutter: true,
-                            highlightActiveLine: true,
-                            highlightActiveLineGutter: true,
-                            bracketMatching: true,
-                          }}
-                          theme="light"
-                          style={{
-                            height: '100%',
-                            fontSize: 13,
-                          }}
-                          className="h-full text-sm"
-                        />
-                      </React.Suspense>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {!isEditingCollaborationYaml && (
-                <div className="flex-1 min-h-0 flex flex-col border border-slate-200/60 rounded-xl overflow-hidden bg-white">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 flex-shrink-0">
-                    <div className="text-sm font-medium text-slate-700">
-                      角色绑定
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {participantDefinitions.length > 0 &&
-                        !isOriginatorBoundToParticipant && (
-                          <span className="text-xs font-medium px-2 py-0.5 rounded-full text-amber-600 bg-amber-50">
-                            发起方未绑定
-                          </span>
-                        )}
-                      {boundParticipantCount > 0 && (
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full text-lavender-600 bg-lavender-50">
-                          已绑定 {boundParticipantCount} /{' '}
-                          {participantDefinitions.length} 个角色，共{' '}
-                          {allBoundBotIds.length} 个 Bot
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {participantDefinitions.length === 0 ? (
-                    <div className="flex-1 min-h-0 flex items-center justify-center px-6 text-center text-sm text-slate-400">
-                      校验 YAML 后在这里绑定 participants
-                    </div>
-                  ) : (
-                    <>
-                      <div className="p-2 border-b border-slate-100 flex-shrink-0">
-                        <div className="relative">
-                          <button
-                            type="button"
-                            aria-label="查看上一组角色"
-                            title="上一组角色"
-                            disabled={!canScrollParticipantTabsLeft}
-                            onClick={() => scrollParticipantTabs('previous')}
-                            className={cn(
-                              'absolute left-0 inset-y-0 z-10 w-8 rounded-lg border flex items-center justify-center backdrop-blur-[1px] transition-colors',
-                              canScrollParticipantTabsLeft
-                                ? 'bg-white/70 border-slate-200 text-slate-500 hover:bg-white/90 hover:text-slate-700'
-                                : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed',
-                            )}
-                          >
-                            <ChevronLeft className="w-4 h-4" />
-                          </button>
-                          <div
-                            ref={participantTabsRef}
-                            onScroll={updateParticipantTabsScrollState}
-                            className="hide-scrollbar flex min-w-0 gap-1.5 overflow-x-auto overscroll-x-contain px-9"
-                            role="group"
-                            aria-label="协作角色"
-                          >
-                            {participantDefinitions.map((definition) => {
-                              const boundCount = (
-                                participantBindings[definition.key] || []
-                              ).slice(0, 1).length;
-                              const isActive =
-                                definition.key === activeParticipantKey;
-                              const needsBinding =
-                                (definition.required || definition.assigned) &&
-                                boundCount === 0;
-                              const requiresBinding =
-                                definition.required || definition.assigned;
-                              return (
-                                <button
-                                  key={definition.key}
-                                  ref={(node) => {
-                                    if (node) {
-                                      participantTabButtonRefs.current.set(
-                                        definition.key,
-                                        node,
-                                      );
-                                    } else {
-                                      participantTabButtonRefs.current.delete(
-                                        definition.key,
-                                      );
-                                    }
-                                  }}
-                                  type="button"
-                                  title={definition.name}
-                                  aria-pressed={isActive}
-                                  onClick={() =>
-                                    setActiveParticipantKey(definition.key)
-                                  }
-                                  className={cn(
-                                    'flex items-center gap-2 w-44 flex-shrink-0 px-2 py-1.5 rounded-lg border text-left transition-all',
-                                    isActive
-                                      ? 'border-lavender-300 bg-lavender-50'
-                                      : needsBinding
-                                      ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50'
-                                      : 'border-slate-100 hover:bg-slate-50',
-                                  )}
-                                >
-                                  <span className="flex-1 min-w-0 truncate text-xs font-medium text-slate-700">
-                                    {getCollaborationParticipantLabel(
-                                      definition,
-                                    )}
-                                  </span>
-                                  <span
-                                    className={cn(
-                                      'flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full',
-                                      requiresBinding
-                                        ? needsBinding
-                                          ? 'bg-amber-100 text-amber-700'
-                                          : 'bg-green-50 text-green-600'
-                                        : 'bg-slate-100 text-slate-500',
-                                    )}
-                                  >
-                                    {boundCount > 0
-                                      ? '已绑定'
-                                      : requiresBinding
-                                      ? '需绑定'
-                                      : '可选'}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                          <button
-                            type="button"
-                            aria-label="查看下一组角色"
-                            title="下一组角色"
-                            disabled={!canScrollParticipantTabsRight}
-                            onClick={() => scrollParticipantTabs('next')}
-                            className={cn(
-                              'absolute right-0 inset-y-0 z-10 w-8 rounded-lg border flex items-center justify-center backdrop-blur-[1px] transition-colors',
-                              canScrollParticipantTabsRight
-                                ? 'bg-white/70 border-slate-200 text-slate-500 hover:bg-white/90 hover:text-slate-700'
-                                : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed',
-                            )}
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex-1 min-h-0 flex flex-col p-2">
-                        {activeBindingBotIds.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mb-2 flex-shrink-0 max-h-16 overflow-y-auto">
-                            {activeBindingBotIds.map((botId) => {
-                              const bot = getBotInfo(botId);
-                              return (
-                                <div
-                                  key={botId}
-                                  className={cn(
-                                    'flex items-center gap-1.5 pl-1 pr-1.5 py-0.5 border rounded-full text-xs',
-                                    bot?.dynamic_status?.status === 'offline' &&
-                                      !bot?.is_friend
-                                      ? 'bg-amber-50 border-amber-200 text-amber-700'
-                                      : 'bg-lavender-50 border-lavender-200 text-lavender-700',
-                                  )}
-                                >
-                                  <BotAvatar
-                                    type="assistant"
-                                    size="xs"
-                                    name={getBotName(botId)}
-                                    botId={botId?.split(':')[0]}
-                                    avatarUrl={bot?.avatar_url}
-                                    className="w-4 h-4 rounded-full"
-                                  />
-                                  <span className="max-w-[84px] truncate font-medium">
-                                    {getBotName(botId)}
-                                  </span>
+                      <>
+                        <div className="p-2 border-b border-slate-100 flex-shrink-0">
+                          <div className="relative">
+                            <button
+                              type="button"
+                              aria-label="查看上一组角色"
+                              title="上一组角色"
+                              disabled={!canScrollParticipantTabsLeft}
+                              onClick={() => scrollParticipantTabs('previous')}
+                              className={cn(
+                                'absolute left-0 inset-y-0 z-10 w-8 rounded-lg border flex items-center justify-center backdrop-blur-[1px] transition-colors',
+                                canScrollParticipantTabsLeft
+                                  ? 'bg-white/70 border-slate-200 text-slate-500 hover:bg-white/90 hover:text-slate-700'
+                                  : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed',
+                              )}
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <div
+                              ref={participantTabsRef}
+                              onScroll={updateParticipantTabsScrollState}
+                              className="hide-scrollbar flex min-w-0 gap-1.5 overflow-x-auto overscroll-x-contain px-9"
+                              role="group"
+                              aria-label="协作角色"
+                            >
+                              {participantDefinitions.map((definition) => {
+                                const boundCount = (
+                                  participantBindings[definition.key] || []
+                                ).slice(0, 1).length;
+                                const isActive =
+                                  definition.key === activeParticipantKey;
+                                const needsBinding =
+                                  (definition.required ||
+                                    definition.assigned) &&
+                                  boundCount === 0;
+                                const requiresBinding =
+                                  definition.required || definition.assigned;
+                                return (
                                   <button
+                                    key={definition.key}
+                                    ref={(node) => {
+                                      if (node) {
+                                        participantTabButtonRefs.current.set(
+                                          definition.key,
+                                          node,
+                                        );
+                                      } else {
+                                        participantTabButtonRefs.current.delete(
+                                          definition.key,
+                                        );
+                                      }
+                                    }}
                                     type="button"
-                                    onClick={() => toggleBot(botId)}
-                                    className="hover:opacity-70 transition-opacity flex-shrink-0"
+                                    title={definition.name}
+                                    aria-pressed={isActive}
+                                    onClick={() => {
+                                      setActiveParticipantKey(definition.key);
+                                      setSelectedCollaborationNodeId(undefined);
+                                    }}
+                                    className={cn(
+                                      'flex items-center gap-2 w-44 flex-shrink-0 px-2 py-1.5 rounded-lg border text-left transition-all',
+                                      isActive
+                                        ? 'border-lavender-300 bg-lavender-50'
+                                        : needsBinding
+                                        ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50'
+                                        : 'border-slate-100 hover:bg-slate-50',
+                                    )}
                                   >
-                                    <X className="w-3 h-3" />
+                                    <span className="flex-1 min-w-0 truncate text-xs font-medium text-slate-700">
+                                      {getCollaborationParticipantLabel(
+                                        definition,
+                                      )}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        'flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full',
+                                        requiresBinding
+                                          ? needsBinding
+                                            ? 'bg-amber-100 text-amber-700'
+                                            : 'bg-green-50 text-green-600'
+                                          : 'bg-slate-100 text-slate-500',
+                                      )}
+                                    >
+                                      {boundCount > 0
+                                        ? '已绑定'
+                                        : requiresBinding
+                                        ? '需绑定'
+                                        : '可选'}
+                                    </span>
                                   </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-2 mb-2 flex-shrink-0 min-w-0 overflow-x-auto">
-                          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setMemberTab('friends')}
-                              className={cn(
-                                'px-3 py-1 text-xs font-medium rounded-md transition-all',
-                                memberTab === 'friends'
-                                  ? 'bg-white text-slate-800 shadow-sm'
-                                  : 'text-slate-500 hover:text-slate-700',
-                              )}
-                            >
-                              {actorKind === 'human' ? '我的 Bot' : '我的好友'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setMemberTab('collaborate')}
-                              className={cn(
-                                'px-3 py-1 text-xs font-medium rounded-md transition-all',
-                                memberTab === 'collaborate'
-                                  ? 'bg-white text-slate-800 shadow-sm'
-                                  : 'text-slate-500 hover:text-slate-700',
-                              )}
-                            >
-                              可协作Bot
-                            </button>
-                          </div>
-
-                          {memberTab === 'collaborate' && (
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-                              <span className="text-[11px] font-medium text-slate-400 whitespace-nowrap">
-                                筛选方式
-                              </span>
-                              <div className="flex items-center bg-slate-50 rounded-lg p-0.5 border border-slate-100">
-                                <button
-                                  type="button"
-                                  onClick={() => setFilterMode('name')}
-                                  className={cn(
-                                    'px-2.5 py-1 text-xs rounded-md transition-all whitespace-nowrap',
-                                    filterMode === 'name'
-                                      ? 'bg-white text-slate-800 shadow-sm'
-                                      : 'text-slate-500 hover:text-slate-700',
-                                  )}
-                                >
-                                  按名称筛选
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setFilterMode('profile')}
-                                  className={cn(
-                                    'px-2.5 py-1 text-xs rounded-md transition-all whitespace-nowrap',
-                                    filterMode === 'profile'
-                                      ? 'bg-white text-slate-800 shadow-sm'
-                                      : 'text-slate-500 hover:text-slate-700',
-                                  )}
-                                >
-                                  按画像筛选
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="relative mb-2 flex-shrink-0">
-                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                          <input
-                            type="text"
-                            value={botSearch}
-                            onChange={(e) => setBotSearch(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (
-                                e.key === 'Enter' &&
-                                botSearch.trim() &&
-                                memberTab === 'collaborate' &&
-                                filterMode === 'profile'
-                              ) {
-                                lastEnterSearchRef.current = botSearch;
-                                handleSmartSearch(botSearch);
-                                isFirstSmartSearch.current = false;
-                              }
-                            }}
-                            placeholder={
-                              memberTab === 'collaborate' &&
-                              filterMode === 'profile'
-                                ? '输入关键词，智能匹配推荐 Bot'
-                                : '搜索 Bot 名称或描述...'
-                            }
-                            className="w-full pl-8 pr-3.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
-                          />
-                          {((memberTab === 'collaborate' &&
-                            filterMode === 'name' &&
-                            isLoadingNameSearch) ||
-                            (memberTab === 'collaborate' &&
-                              filterMode === 'profile' &&
-                              isLoadingSmartSearch)) && (
-                            <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                              <Loader2 className="w-3.5 h-3.5 animate-spin text-lavender-500" />
-                            </div>
-                          )}
-                        </div>
-
-                        <div
-                          ref={listRef}
-                          onScroll={handleListScroll}
-                          className="flex-1 min-h-[120px] border border-slate-200/60 rounded-xl overflow-auto scroll-pb-6"
-                        >
-                          {actorKind === 'bot' &&
-                          (!originator?.is_online ||
-                            originator?.dynamic_status?.status ===
-                              'offline') ? (
-                            <PrivateBotHint
-                              visibility={originator?.visibility}
-                              dynamicStatus={originator?.dynamic_status}
-                            />
-                          ) : isLoadingBots ? (
-                            <div className="flex items-center justify-center h-full min-h-[160px] text-slate-400 gap-2">
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              <span className="text-sm">加载 Bot 列表...</span>
-                            </div>
-                          ) : stateMachineFilteredBots.length === 0 ? (
-                            <div className="flex items-center justify-center h-full min-h-[160px] text-sm text-slate-400">
-                              {botSearch.trim()
-                                ? '未找到匹配的 Bot'
-                                : '暂无可选 Bot'}
-                            </div>
-                          ) : (
-                            <div className="divide-y divide-slate-100 pb-6">
-                              {stateMachineFilteredBots.map((bot, index) => {
-                                const isSelected = activeBindingBotIds.includes(
-                                  bot.bot_uuid,
                                 );
-                                const isAvailable = isBotOnline(bot);
-                                const unavailableTip =
-                                  getUnavailableBotTip(bot);
+                              })}
+                            </div>
+                            <button
+                              type="button"
+                              aria-label="查看下一组角色"
+                              title="下一组角色"
+                              disabled={!canScrollParticipantTabsRight}
+                              onClick={() => scrollParticipantTabs('next')}
+                              className={cn(
+                                'absolute right-0 inset-y-0 z-10 w-8 rounded-lg border flex items-center justify-center backdrop-blur-[1px] transition-colors',
+                                canScrollParticipantTabsRight
+                                  ? 'bg-white/70 border-slate-200 text-slate-500 hover:bg-white/90 hover:text-slate-700'
+                                  : 'bg-white border-slate-100 text-slate-300 cursor-not-allowed',
+                              )}
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
 
-                                return !isAvailable ? (
-                                  <TooltipProvider
-                                    key={bot.bot_uuid}
-                                    delayDuration={100}
-                                  >
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <div className="w-full flex items-center gap-2.5 px-3 py-1 text-left transition-colors opacity-60 cursor-not-allowed">
-                                          <BotAvatar
-                                            type="assistant"
-                                            size="sm"
-                                            name={bot.bot_name}
-                                            botId={bot.bot_uuid?.split(':')[0]}
-                                            avatarUrl={bot.avatar_url}
-                                          />
-                                          <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium text-slate-800 truncate">
-                                              {bot.bot_name}
-                                            </p>
-                                            {bot.summary && (
-                                              <p className="text-xs text-slate-400 truncate leading-tight">
-                                                {bot.summary}
-                                              </p>
-                                            )}
-                                          </div>
-                                          <div className="w-5 h-5 rounded-full border border-slate-300 flex items-center justify-center flex-shrink-0">
-                                            <Plus className="w-3 h-3 text-slate-400" />
-                                          </div>
-                                        </div>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top">
-                                        <span>{unavailableTip}</span>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                ) : (
-                                  <button
-                                    key={bot.bot_uuid}
-                                    type="button"
-                                    onClick={() =>
-                                      toggleBot(bot.bot_uuid, index)
-                                    }
+                        <div className="flex-1 min-h-0 flex flex-col p-2">
+                          {activeBindingBotIds.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mb-2 flex-shrink-0 max-h-16 overflow-y-auto">
+                              {activeBindingBotIds.map((botId) => {
+                                const bot = getBotInfo(botId);
+                                return (
+                                  <div
+                                    key={botId}
                                     className={cn(
-                                      'w-full flex items-center gap-2.5 px-3 py-1 text-left transition-colors',
-                                      isSelected
-                                        ? 'bg-lavender-50/70'
-                                        : 'hover:bg-slate-50',
+                                      'flex items-center gap-1.5 pl-1 pr-1.5 py-0.5 border rounded-full text-xs',
+                                      bot?.dynamic_status?.status ===
+                                        'offline' && !bot?.is_friend
+                                        ? 'bg-amber-50 border-amber-200 text-amber-700'
+                                        : 'bg-lavender-50 border-lavender-200 text-lavender-700',
                                     )}
                                   >
                                     <BotAvatar
                                       type="assistant"
-                                      size="sm"
-                                      name={bot.bot_name}
-                                      botId={bot.bot_uuid?.split(':')[0]}
-                                      avatarUrl={bot.avatar_url}
+                                      size="xs"
+                                      name={getBotName(botId)}
+                                      botId={botId?.split(':')[0]}
+                                      avatarUrl={bot?.avatar_url}
+                                      className="w-4 h-4 rounded-full"
                                     />
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2">
-                                        <p className="text-sm font-medium text-slate-800 truncate">
-                                          {bot.bot_name}
-                                        </p>
-                                        <GoldBadge botInfo={bot as any} />
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-50 text-green-600">
-                                          在线
-                                        </span>
-                                        {bot.bot_uuid ===
-                                          originator?.bot_uuid && (
-                                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
-                                            发起方
-                                          </span>
-                                        )}
-                                      </div>
-                                      {bot.summary && (
-                                        <p className="text-xs text-slate-400 truncate leading-tight">
-                                          {bot.summary}
-                                        </p>
-                                      )}
-                                    </div>
-                                    <div
-                                      className={cn(
-                                        'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all',
-                                        isSelected
-                                          ? 'bg-lavender-500 text-white'
-                                          : 'border border-slate-300',
-                                      )}
+                                    <span className="max-w-[84px] truncate font-medium">
+                                      {getBotName(botId)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleBot(botId)}
+                                      className="hover:opacity-70 transition-opacity flex-shrink-0"
                                     >
-                                      {isSelected ? (
-                                        <Check className="w-3 h-3" />
-                                      ) : (
-                                        <Plus className="w-3 h-3 text-slate-400" />
-                                      )}
-                                    </div>
-                                  </button>
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
                                 );
                               })}
-
-                              {memberTab === 'collaborate' &&
-                                filterMode === 'name' &&
-                                isLoadingMoreBots && (
-                                  <div className="flex items-center justify-center py-3 text-slate-400 gap-2">
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    <span className="text-xs">加载更多...</span>
-                                  </div>
-                                )}
                             </div>
                           )}
+
+                          <div className="flex items-center gap-2 mb-2 flex-shrink-0 min-w-0 overflow-x-auto">
+                            <div className="flex items-center bg-slate-100 rounded-lg p-0.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setMemberTab('friends')}
+                                className={cn(
+                                  'px-3 py-1 text-xs font-medium rounded-md transition-all',
+                                  memberTab === 'friends'
+                                    ? 'bg-white text-slate-800 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700',
+                                )}
+                              >
+                                {actorKind === 'human'
+                                  ? '我的 Bot'
+                                  : '我的好友'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setMemberTab('collaborate')}
+                                className={cn(
+                                  'px-3 py-1 text-xs font-medium rounded-md transition-all',
+                                  memberTab === 'collaborate'
+                                    ? 'bg-white text-slate-800 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700',
+                                )}
+                              >
+                                可协作Bot
+                              </button>
+                            </div>
+
+                            {memberTab === 'collaborate' && (
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                                <span className="text-[11px] font-medium text-slate-400 whitespace-nowrap">
+                                  筛选方式
+                                </span>
+                                <div className="flex items-center bg-slate-50 rounded-lg p-0.5 border border-slate-100">
+                                  <button
+                                    type="button"
+                                    onClick={() => setFilterMode('name')}
+                                    className={cn(
+                                      'px-2.5 py-1 text-xs rounded-md transition-all whitespace-nowrap',
+                                      filterMode === 'name'
+                                        ? 'bg-white text-slate-800 shadow-sm'
+                                        : 'text-slate-500 hover:text-slate-700',
+                                    )}
+                                  >
+                                    按名称筛选
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setFilterMode('profile')}
+                                    className={cn(
+                                      'px-2.5 py-1 text-xs rounded-md transition-all whitespace-nowrap',
+                                      filterMode === 'profile'
+                                        ? 'bg-white text-slate-800 shadow-sm'
+                                        : 'text-slate-500 hover:text-slate-700',
+                                    )}
+                                  >
+                                    按画像筛选
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="relative mb-2 flex-shrink-0">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                            <input
+                              type="text"
+                              value={botSearch}
+                              onChange={(e) => setBotSearch(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (
+                                  e.key === 'Enter' &&
+                                  botSearch.trim() &&
+                                  memberTab === 'collaborate' &&
+                                  filterMode === 'profile'
+                                ) {
+                                  lastEnterSearchRef.current = botSearch;
+                                  handleSmartSearch(botSearch);
+                                  isFirstSmartSearch.current = false;
+                                }
+                              }}
+                              placeholder={
+                                memberTab === 'collaborate' &&
+                                filterMode === 'profile'
+                                  ? '输入关键词，智能匹配推荐 Bot'
+                                  : '搜索 Bot 名称或描述...'
+                              }
+                              className="w-full pl-8 pr-3.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
+                            />
+                            {((memberTab === 'collaborate' &&
+                              filterMode === 'name' &&
+                              isLoadingNameSearch) ||
+                              (memberTab === 'collaborate' &&
+                                filterMode === 'profile' &&
+                                isLoadingSmartSearch)) && (
+                              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-lavender-500" />
+                              </div>
+                            )}
+                          </div>
+
+                          <div
+                            ref={listRef}
+                            onScroll={handleListScroll}
+                            className="flex-1 min-h-[120px] border border-slate-200/60 rounded-xl overflow-auto scroll-pb-6"
+                          >
+                            {actorKind === 'bot' &&
+                            (!originator?.is_online ||
+                              originator?.dynamic_status?.status ===
+                                'offline') ? (
+                              <PrivateBotHint
+                                visibility={originator?.visibility}
+                                dynamicStatus={originator?.dynamic_status}
+                              />
+                            ) : isLoadingBots ? (
+                              <div className="flex items-center justify-center h-full min-h-[160px] text-slate-400 gap-2">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span className="text-sm">
+                                  加载 Bot 列表...
+                                </span>
+                              </div>
+                            ) : stateMachineFilteredBots.length === 0 ? (
+                              <div className="flex items-center justify-center h-full min-h-[160px] text-sm text-slate-400">
+                                {botSearch.trim()
+                                  ? '未找到匹配的 Bot'
+                                  : '暂无可选 Bot'}
+                              </div>
+                            ) : (
+                              <div className="divide-y divide-slate-100 pb-6">
+                                {stateMachineFilteredBots.map((bot, index) => {
+                                  const isSelected =
+                                    activeBindingBotIds.includes(bot.bot_uuid);
+                                  const isAvailable = isBotOnline(bot);
+                                  const unavailableTip =
+                                    getUnavailableBotTip(bot);
+
+                                  return !isAvailable ? (
+                                    <TooltipProvider
+                                      key={bot.bot_uuid}
+                                      delayDuration={100}
+                                    >
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <div className="w-full flex items-center gap-2.5 px-3 py-1 text-left transition-colors opacity-60 cursor-not-allowed">
+                                            <BotAvatar
+                                              type="assistant"
+                                              size="sm"
+                                              name={bot.bot_name}
+                                              botId={
+                                                bot.bot_uuid?.split(':')[0]
+                                              }
+                                              avatarUrl={bot.avatar_url}
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                              <p className="text-sm font-medium text-slate-800 truncate">
+                                                {bot.bot_name}
+                                              </p>
+                                              {bot.summary && (
+                                                <p className="text-xs text-slate-400 truncate leading-tight">
+                                                  {bot.summary}
+                                                </p>
+                                              )}
+                                            </div>
+                                            <div className="w-5 h-5 rounded-full border border-slate-300 flex items-center justify-center flex-shrink-0">
+                                              <Plus className="w-3 h-3 text-slate-400" />
+                                            </div>
+                                          </div>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top">
+                                          <span>{unavailableTip}</span>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  ) : (
+                                    <button
+                                      key={bot.bot_uuid}
+                                      type="button"
+                                      onClick={() =>
+                                        toggleBot(bot.bot_uuid, index)
+                                      }
+                                      className={cn(
+                                        'w-full flex items-center gap-2.5 px-3 py-1 text-left transition-colors',
+                                        isSelected
+                                          ? 'bg-lavender-50/70'
+                                          : 'hover:bg-slate-50',
+                                      )}
+                                    >
+                                      <BotAvatar
+                                        type="assistant"
+                                        size="sm"
+                                        name={bot.bot_name}
+                                        botId={bot.bot_uuid?.split(':')[0]}
+                                        avatarUrl={bot.avatar_url}
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <p className="text-sm font-medium text-slate-800 truncate">
+                                            {bot.bot_name}
+                                          </p>
+                                          <GoldBadge botInfo={bot as any} />
+                                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-50 text-green-600">
+                                            在线
+                                          </span>
+                                          {bot.bot_uuid ===
+                                            originator?.bot_uuid && (
+                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
+                                              发起方
+                                            </span>
+                                          )}
+                                        </div>
+                                        {bot.summary && (
+                                          <p className="text-xs text-slate-400 truncate leading-tight">
+                                            {bot.summary}
+                                          </p>
+                                        )}
+                                      </div>
+                                      <div
+                                        className={cn(
+                                          'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all',
+                                          isSelected
+                                            ? 'bg-lavender-500 text-white'
+                                            : 'border border-slate-300',
+                                        )}
+                                      >
+                                        {isSelected ? (
+                                          <Check className="w-3 h-3" />
+                                        ) : (
+                                          <Plus className="w-3 h-3 text-slate-400" />
+                                        )}
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+
+                                {memberTab === 'collaborate' &&
+                                  filterMode === 'name' &&
+                                  isLoadingMoreBots && (
+                                    <div className="flex items-center justify-center py-3 text-slate-400 gap-2">
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <span className="text-xs">
+                                        加载更多...
+                                      </span>
+                                    </div>
+                                  )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <>
-              {/* 标题行 */}
-              <div className="flex items-center justify-between mb-2 flex-shrink-0">
-                <label className="text-sm font-medium text-slate-700">
-                  成员 Bot
-                </label>
-                {consultantBots.length > 0 && (
-                  <span
-                    className={cn(
-                      'text-xs font-medium px-2 py-0.5 rounded-full',
-                      consultantBots.length >= MAX_MEMBER_BOTS
-                        ? 'text-amber-600 bg-amber-50'
-                        : 'text-lavender-600 bg-lavender-50',
+                      </>
                     )}
-                  >
-                    已选 {consultantBots.length}/{MAX_MEMBER_BOTS} 个
-                  </span>
+                  </div>
                 )}
               </div>
+            ) : (
+              <>
+                {/* 标题行 */}
+                <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                  <label className="text-sm font-medium text-slate-700">
+                    成员 Bot
+                  </label>
+                  {consultantBots.length > 0 && (
+                    <span
+                      className={cn(
+                        'text-xs font-medium px-2 py-0.5 rounded-full',
+                        consultantBots.length >= MAX_MEMBER_BOTS
+                          ? 'text-amber-600 bg-amber-50'
+                          : 'text-lavender-600 bg-lavender-50',
+                      )}
+                    >
+                      已选 {consultantBots.length}/{MAX_MEMBER_BOTS} 个
+                    </span>
+                  )}
+                </div>
 
-              {/* 已选 Bot chips */}
-              {consultantBots.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2 flex-shrink-0 max-h-20 overflow-y-auto">
-                  {consultantBots.map((botId) => {
-                    const bot = getBotInfo(botId);
-                    return (
-                      <div
-                        key={botId}
-                        className={cn(
-                          'flex items-center gap-1.5 pl-1 pr-1.5 py-0.5 border rounded-full text-xs',
-                          bot?.dynamic_status?.status === 'offline' &&
-                            !bot?.is_friend
-                            ? 'bg-amber-50 border-amber-200 text-amber-700'
-                            : 'bg-lavender-50 border-lavender-200 text-lavender-700',
-                        )}
-                      >
-                        <BotAvatar
-                          type="assistant"
-                          size="xs"
-                          name={getBotName(botId)}
-                          botId={botId?.split(':')[0]}
-                          avatarUrl={bot?.avatar_url}
-                          className="w-4 h-4 rounded-full"
-                        />
-                        <span className="max-w-[72px] truncate font-medium">
-                          {getBotName(botId)}
-                        </span>
-                        {bot?.dynamic_status?.status === 'offline' &&
-                          !bot?.is_friend && (
-                            <Lock className="w-3 h-3 text-amber-500" />
+                {/* 已选 Bot chips */}
+                {consultantBots.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2 flex-shrink-0 max-h-20 overflow-y-auto">
+                    {consultantBots.map((botId) => {
+                      const bot = getBotInfo(botId);
+                      return (
+                        <div
+                          key={botId}
+                          className={cn(
+                            'flex items-center gap-1.5 pl-1 pr-1.5 py-0.5 border rounded-full text-xs',
+                            bot?.dynamic_status?.status === 'offline' &&
+                              !bot?.is_friend
+                              ? 'bg-amber-50 border-amber-200 text-amber-700'
+                              : 'bg-lavender-50 border-lavender-200 text-lavender-700',
                           )}
-                        <button
-                          type="button"
-                          // position 会从 currentBotsRef 中查找
-                          onClick={() => toggleBot(botId)}
-                          className="hover:opacity-70 transition-opacity flex-shrink-0"
-                          data-aspm-click="ca114903.da194175"
-                          data-aspm-desc="GroupChat-移除已选Bot"
-                          data-aspm-param={``}
-                          data-aspm-expo
                         >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                          <BotAvatar
+                            type="assistant"
+                            size="xs"
+                            name={getBotName(botId)}
+                            botId={botId?.split(':')[0]}
+                            avatarUrl={bot?.avatar_url}
+                            className="w-4 h-4 rounded-full"
+                          />
+                          <span className="max-w-[72px] truncate font-medium">
+                            {getBotName(botId)}
+                          </span>
+                          {bot?.dynamic_status?.status === 'offline' &&
+                            !bot?.is_friend && (
+                              <Lock className="w-3 h-3 text-amber-500" />
+                            )}
+                          <button
+                            type="button"
+                            // position 会从 currentBotsRef 中查找
+                            onClick={() => toggleBot(botId)}
+                            className="hover:opacity-70 transition-opacity flex-shrink-0"
+                            data-aspm-click="ca114903.da194175"
+                            data-aspm-desc="GroupChat-移除已选Bot"
+                            data-aspm-param={``}
+                            data-aspm-expo
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
-              {/* 一层 Tab：我的好友 / 可协作Bot + 智能推荐按钮 */}
-              <div className="flex items-center justify-between mb-2 flex-shrink-0">
-                <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setMemberTab('friends')}
-                    className={cn(
-                      'px-4 py-1.5 text-xs font-medium rounded-md transition-all',
-                      memberTab === 'friends'
-                        ? 'bg-white text-slate-800 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-700',
-                    )}
-                    data-aspm-click="ca114903.da194176"
-                    data-aspm-desc="GroupChat-切换我的好友Tab"
-                    data-aspm-param={``}
-                    data-aspm-expo
-                  >
-                    {actorKind === 'human' ? '我的 Bot' : '我的好友'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMemberTab('collaborate')}
-                    className={cn(
-                      'px-4 py-1.5 text-xs font-medium rounded-md transition-all',
-                      memberTab === 'collaborate'
-                        ? 'bg-white text-slate-800 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-700',
-                    )}
-                    data-aspm-click="ca114903.da194177"
-                    data-aspm-desc="GroupChat-切换可协作BotTab"
-                    data-aspm-param={``}
-                    data-aspm-expo
-                  >
-                    可协作Bot
-                  </button>
-                </div>
-                {/* 智能推荐按钮（始终显示） */}
-                <button
-                  type="button"
-                  onClick={handleSmartRecommend}
-                  disabled={
-                    !(description.trim() || topic.trim()) || isRecommending
-                  }
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all',
-                    (description.trim() || topic.trim()) && !isRecommending
-                      ? 'bg-lavender-50 text-lavender-600 hover:bg-lavender-100 border border-lavender-200'
-                      : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-transparent',
-                  )}
-                  title={
-                    !(description.trim() || topic.trim())
-                      ? '请先输入协作目标或协作群名称'
-                      : '根据协作目标智能推荐 Bot'
-                  }
-                  data-aspm-click="ca114903.da194178"
-                  data-aspm-desc="GroupChat-智能推荐Bot"
-                  data-aspm-param={``}
-                  data-aspm-expo
-                >
-                  {isRecommending ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5" />
-                  )}
-                  {isRecommending ? '推荐中...' : '智能推荐'}
-                </button>
-              </div>
-
-              {/* 二层 Tab + 搜索框（仅在可协作Bot下显示，且在同一行） */}
-              {memberTab === 'collaborate' ? (
-                <div className="flex items-center gap-2 mb-2 flex-shrink-0">
-                  {/* 二层 Tab：按名称筛选 / 按画像筛选 */}
-                  <div className="flex items-center bg-slate-50 rounded-lg p-0.5 border border-slate-100 flex-shrink-0">
+                {/* 一层 Tab：我的好友 / 可协作Bot + 智能推荐按钮 */}
+                <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                  <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
                     <button
                       type="button"
-                      onClick={() => setFilterMode('name')}
+                      onClick={() => setMemberTab('friends')}
                       className={cn(
-                        'px-3 py-1 text-xs rounded-md transition-all whitespace-nowrap',
-                        filterMode === 'name'
+                        'px-4 py-1.5 text-xs font-medium rounded-md transition-all',
+                        memberTab === 'friends'
                           ? 'bg-white text-slate-800 shadow-sm'
                           : 'text-slate-500 hover:text-slate-700',
                       )}
-                      data-aspm-click="ca114903.da194179"
-                      data-aspm-desc="GroupChat-按名称筛选"
+                      data-aspm-click="ca114903.da194176"
+                      data-aspm-desc="GroupChat-切换我的好友Tab"
                       data-aspm-param={``}
                       data-aspm-expo
                     >
-                      按名称筛选
+                      {actorKind === 'human' ? '我的 Bot' : '我的好友'}
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFilterMode('profile')}
+                      onClick={() => setMemberTab('collaborate')}
                       className={cn(
-                        'px-3 py-1 text-xs rounded-md transition-all whitespace-nowrap',
-                        filterMode === 'profile'
+                        'px-4 py-1.5 text-xs font-medium rounded-md transition-all',
+                        memberTab === 'collaborate'
                           ? 'bg-white text-slate-800 shadow-sm'
                           : 'text-slate-500 hover:text-slate-700',
                       )}
-                      data-aspm-click="ca114903.da194180"
-                      data-aspm-desc="GroupChat-按画像筛选"
+                      data-aspm-click="ca114903.da194177"
+                      data-aspm-desc="GroupChat-切换可协作BotTab"
                       data-aspm-param={``}
                       data-aspm-expo
                     >
-                      按画像筛选
+                      可协作Bot
                     </button>
                   </div>
-                  {/* 搜索框 */}
-                  <div className="relative flex-1">
+                  {/* 智能推荐按钮（始终显示） */}
+                  <button
+                    type="button"
+                    onClick={handleSmartRecommend}
+                    disabled={
+                      !(description.trim() || topic.trim()) || isRecommending
+                    }
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-all',
+                      (description.trim() || topic.trim()) && !isRecommending
+                        ? 'bg-lavender-50 text-lavender-600 hover:bg-lavender-100 border border-lavender-200'
+                        : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-transparent',
+                    )}
+                    title={
+                      !(description.trim() || topic.trim())
+                        ? '请先输入协作目标或协作群名称'
+                        : '根据协作目标智能推荐 Bot'
+                    }
+                    data-aspm-click="ca114903.da194178"
+                    data-aspm-desc="GroupChat-智能推荐Bot"
+                    data-aspm-param={``}
+                    data-aspm-expo
+                  >
+                    {isRecommending ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5" />
+                    )}
+                    {isRecommending ? '推荐中...' : '智能推荐'}
+                  </button>
+                </div>
+
+                {/* 二层 Tab + 搜索框（仅在可协作Bot下显示，且在同一行） */}
+                {memberTab === 'collaborate' ? (
+                  <div className="flex items-center gap-2 mb-2 flex-shrink-0">
+                    {/* 二层 Tab：按名称筛选 / 按画像筛选 */}
+                    <div className="flex items-center bg-slate-50 rounded-lg p-0.5 border border-slate-100 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setFilterMode('name')}
+                        className={cn(
+                          'px-3 py-1 text-xs rounded-md transition-all whitespace-nowrap',
+                          filterMode === 'name'
+                            ? 'bg-white text-slate-800 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-700',
+                        )}
+                        data-aspm-click="ca114903.da194179"
+                        data-aspm-desc="GroupChat-按名称筛选"
+                        data-aspm-param={``}
+                        data-aspm-expo
+                      >
+                        按名称筛选
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFilterMode('profile')}
+                        className={cn(
+                          'px-3 py-1 text-xs rounded-md transition-all whitespace-nowrap',
+                          filterMode === 'profile'
+                            ? 'bg-white text-slate-800 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-700',
+                        )}
+                        data-aspm-click="ca114903.da194180"
+                        data-aspm-desc="GroupChat-按画像筛选"
+                        data-aspm-param={``}
+                        data-aspm-expo
+                      >
+                        按画像筛选
+                      </button>
+                    </div>
+                    {/* 搜索框 */}
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                      <input
+                        type="text"
+                        value={botSearch}
+                        onChange={(e) => setBotSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (
+                            e.key === 'Enter' &&
+                            botSearch.trim() &&
+                            filterMode === 'profile'
+                          ) {
+                            // 记录回车搜索内容，防抖会跳过相同内容的请求
+                            lastEnterSearchRef.current = botSearch;
+                            handleSmartSearch(botSearch);
+                            // 回车后不再是首次搜索
+                            isFirstSmartSearch.current = false;
+                          }
+                        }}
+                        placeholder={
+                          filterMode === 'name'
+                            ? '搜索 Bot 名称或描述...'
+                            : '输入关键词，智能匹配推荐 Bot，按回车可立即搜索'
+                        }
+                        className="w-full pl-8 pr-3.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
+                      />
+                      {filterMode === 'profile' && isLoadingSmartSearch && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-lavender-500" />
+                        </div>
+                      )}
+                      {filterMode === 'name' && isLoadingNameSearch && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-lavender-500" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* 我的好友 tab 下的搜索框 */
+                  <div className="relative mb-2 flex-shrink-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                     <input
                       type="text"
                       value={botSearch}
                       onChange={(e) => setBotSearch(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (
-                          e.key === 'Enter' &&
-                          botSearch.trim() &&
-                          filterMode === 'profile'
-                        ) {
-                          // 记录回车搜索内容，防抖会跳过相同内容的请求
-                          lastEnterSearchRef.current = botSearch;
-                          handleSmartSearch(botSearch);
-                          // 回车后不再是首次搜索
-                          isFirstSmartSearch.current = false;
-                        }
-                      }}
-                      placeholder={
-                        filterMode === 'name'
-                          ? '搜索 Bot 名称或描述...'
-                          : '输入关键词，智能匹配推荐 Bot，按回车可立即搜索'
-                      }
+                      placeholder="搜索 Bot 名称或描述..."
                       className="w-full pl-8 pr-3.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
                     />
-                    {filterMode === 'profile' && isLoadingSmartSearch && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-lavender-500" />
-                      </div>
-                    )}
-                    {filterMode === 'name' && isLoadingNameSearch && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-lavender-500" />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                /* 我的好友 tab 下的搜索框 */
-                <div className="relative mb-2 flex-shrink-0">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                  <input
-                    type="text"
-                    value={botSearch}
-                    onChange={(e) => setBotSearch(e.target.value)}
-                    placeholder="搜索 Bot 名称或描述..."
-                    className="w-full pl-8 pr-3.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-lavender-500/20 focus:border-lavender-400 transition-all"
-                  />
-                </div>
-              )}
-
-              {/* Bot 列表（flex-1 撑满，内部滚动） */}
-              <div
-                ref={listRef}
-                onScroll={handleListScroll}
-                className="flex-1 min-h-0 border border-slate-200/60 rounded-xl overflow-auto"
-              >
-                {actorKind === 'bot' &&
-                (!originator?.is_online ||
-                  originator?.dynamic_status?.status === 'offline') ? (
-                  <PrivateBotHint
-                    visibility={originator?.visibility}
-                    dynamicStatus={originator?.dynamic_status}
-                  />
-                ) : isLoadingBots ? (
-                  <div className="flex items-center justify-center h-full min-h-[200px] text-slate-400 gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-sm">
-                      {botSearch.trim()
-                        ? memberTab === 'collaborate' && filterMode === 'name'
-                          ? '搜索中...'
-                          : '智能搜索中...'
-                        : '加载 Bot 列表...'}
-                    </span>
-                  </div>
-                ) : filteredBots.length === 0 ? (
-                  <div className="flex items-center justify-center h-full min-h-[200px] text-sm text-slate-400">
-                    {botSearch.trim() ? '未找到匹配的 Bot' : '暂无可选 Bot'}
-                  </div>
-                ) : (
-                  <div className="divide-y divide-slate-100">
-                    {filteredBots.map((bot, index) => {
-                      const isSelected = consultantBots.includes(bot.bot_uuid);
-                      const isAvailable = isBotOnline(bot);
-                      // 无论哪个tab，只有可用Bot才能选择；已达上限时不可再选
-                      const canInvite =
-                        isAvailable &&
-                        (isSelected || consultantBots.length < MAX_MEMBER_BOTS);
-                      const unavailableTip = isAvailable
-                        ? `最多选择 ${MAX_MEMBER_BOTS} 个成员 Bot`
-                        : getUnavailableBotTip(bot);
-
-                      return !canInvite ? (
-                        <TooltipProvider delayDuration={100}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div
-                                className={cn(
-                                  'w-full flex items-center gap-2.5 px-3 py-1 text-left transition-colors opacity-60 cursor-not-allowed',
-                                )}
-                              >
-                                <BotAvatar
-                                  type="assistant"
-                                  size="sm"
-                                  name={bot.bot_name}
-                                  botId={bot.bot_uuid?.split(':')[0]}
-                                  avatarUrl={bot.avatar_url}
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-sm font-medium text-slate-800 truncate">
-                                      {bot.bot_name}
-                                    </p>
-                                    <GoldBadge botInfo={bot as any} />
-                                    {/* 好友标签 */}
-                                    {memberTab === 'collaborate' &&
-                                      bot.is_friend && (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
-                                          好友
-                                        </span>
-                                      )}
-                                  </div>
-                                  {bot.summary && (
-                                    <p className="text-xs text-slate-400 truncate leading-tight">
-                                      {bot.summary}
-                                    </p>
-                                  )}
-                                </div>
-                                <div className="w-5 h-5 rounded-full border border-slate-300 flex items-center justify-center flex-shrink-0">
-                                  <Plus className="w-3 h-3 text-slate-400" />
-                                </div>
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">
-                              <span>{unavailableTip}</span>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      ) : (
-                        <button
-                          key={bot.bot_uuid}
-                          type="button"
-                          onClick={() => toggleBot(bot.bot_uuid, index)}
-                          className={cn(
-                            'w-full flex items-center gap-2.5 px-3 py-1 text-left transition-colors',
-                            isSelected
-                              ? 'bg-lavender-50/70'
-                              : 'hover:bg-slate-50',
-                          )}
-                          data-aspm-click="ca114903.da194181"
-                          data-aspm-desc="GroupChat-选择Bot"
-                          data-aspm-param={``}
-                          data-aspm-expo
-                        >
-                          <BotAvatar
-                            type="assistant"
-                            size="sm"
-                            name={bot.bot_name}
-                            botId={bot.bot_uuid?.split(':')[0]}
-                            avatarUrl={bot.avatar_url}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-medium text-slate-800 truncate">
-                                {bot.bot_name}
-                              </p>
-                              <GoldBadge botInfo={bot as any} />
-                              {/* 在线状态 - 两个tab都显示 */}
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-50 text-green-600">
-                                在线
-                              </span>
-                              {memberTab === 'collaborate' && bot.is_friend && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
-                                  好友
-                                </span>
-                              )}
-                            </div>
-                            {bot.summary && (
-                              <p className="text-xs text-slate-400 truncate leading-tight">
-                                {bot.summary}
-                              </p>
-                            )}
-                            {(bot as any).short_profile && (
-                              <TooltipProvider delayDuration={100}>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div className="flex items-center gap-1 mt-0.5 text-xs text-blue-500 bg-blue-50/50 px-1.5 py-0.5 rounded w-fit cursor-pointer">
-                                      <Sparkles className="w-3 h-3" />
-                                      推荐理由：
-                                      <span className="truncate">
-                                        {(bot as any).short_profile}
-                                      </span>
-                                    </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent
-                                    side="top"
-                                    className="bg-slate-800 border-slate-700 max-w-xs"
-                                  >
-                                    <div className="flex items-start gap-1">
-                                      <Sparkles className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
-                                      <span className="text-white">
-                                        推荐理由：
-                                        {(bot as any).short_profile}
-                                      </span>
-                                    </div>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            )}
-                          </div>
-                          <div
-                            className={cn(
-                              'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all',
-                              isSelected
-                                ? 'bg-lavender-500 text-white'
-                                : 'border border-slate-300',
-                            )}
-                          >
-                            {isSelected ? (
-                              <Check className="w-3 h-3" />
-                            ) : (
-                              <Plus className="w-3 h-3 text-slate-400" />
-                            )}
-                          </div>
-                        </button>
-                      );
-                    })}
-
-                    {/* 加载更多指示器（仅按名称筛选模式下） */}
-                    {memberTab === 'collaborate' &&
-                      filterMode === 'name' &&
-                      isLoadingMoreBots && (
-                        <div className="flex items-center justify-center py-3 text-slate-400 gap-2">
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span className="text-xs">加载更多...</span>
-                        </div>
-                      )}
-                    {memberTab === 'collaborate' &&
-                      filterMode === 'name' &&
-                      !hasMoreAvailableBots &&
-                      filteredBots.length > 0 &&
-                      !botSearch && (
-                        <div className="py-2.5 text-center text-xs text-slate-300">
-                          已加载全部 {filteredBots.length} 个 Bot
-                        </div>
-                      )}
                   </div>
                 )}
-              </div>
-            </>
-          )}
-        </div>
+
+                {/* Bot 列表（flex-1 撑满，内部滚动） */}
+                <div
+                  ref={listRef}
+                  onScroll={handleListScroll}
+                  className="flex-1 min-h-0 border border-slate-200/60 rounded-xl overflow-auto"
+                >
+                  {actorKind === 'bot' &&
+                  (!originator?.is_online ||
+                    originator?.dynamic_status?.status === 'offline') ? (
+                    <PrivateBotHint
+                      visibility={originator?.visibility}
+                      dynamicStatus={originator?.dynamic_status}
+                    />
+                  ) : isLoadingBots ? (
+                    <div className="flex items-center justify-center h-full min-h-[200px] text-slate-400 gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">
+                        {botSearch.trim()
+                          ? memberTab === 'collaborate' && filterMode === 'name'
+                            ? '搜索中...'
+                            : '智能搜索中...'
+                          : '加载 Bot 列表...'}
+                      </span>
+                    </div>
+                  ) : filteredBots.length === 0 ? (
+                    <div className="flex items-center justify-center h-full min-h-[200px] text-sm text-slate-400">
+                      {botSearch.trim() ? '未找到匹配的 Bot' : '暂无可选 Bot'}
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {filteredBots.map((bot, index) => {
+                        const isSelected = consultantBots.includes(
+                          bot.bot_uuid,
+                        );
+                        const isAvailable = isBotOnline(bot);
+                        // 无论哪个tab，只有可用Bot才能选择；已达上限时不可再选
+                        const canInvite =
+                          isAvailable &&
+                          (isSelected ||
+                            consultantBots.length < MAX_MEMBER_BOTS);
+                        const unavailableTip = isAvailable
+                          ? `最多选择 ${MAX_MEMBER_BOTS} 个成员 Bot`
+                          : getUnavailableBotTip(bot);
+
+                        return !canInvite ? (
+                          <TooltipProvider delayDuration={100}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div
+                                  className={cn(
+                                    'w-full flex items-center gap-2.5 px-3 py-1 text-left transition-colors opacity-60 cursor-not-allowed',
+                                  )}
+                                >
+                                  <BotAvatar
+                                    type="assistant"
+                                    size="sm"
+                                    name={bot.bot_name}
+                                    botId={bot.bot_uuid?.split(':')[0]}
+                                    avatarUrl={bot.avatar_url}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-medium text-slate-800 truncate">
+                                        {bot.bot_name}
+                                      </p>
+                                      <GoldBadge botInfo={bot as any} />
+                                      {/* 好友标签 */}
+                                      {memberTab === 'collaborate' &&
+                                        bot.is_friend && (
+                                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
+                                            好友
+                                          </span>
+                                        )}
+                                    </div>
+                                    {bot.summary && (
+                                      <p className="text-xs text-slate-400 truncate leading-tight">
+                                        {bot.summary}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="w-5 h-5 rounded-full border border-slate-300 flex items-center justify-center flex-shrink-0">
+                                    <Plus className="w-3 h-3 text-slate-400" />
+                                  </div>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">
+                                <span>{unavailableTip}</span>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <button
+                            key={bot.bot_uuid}
+                            type="button"
+                            onClick={() => toggleBot(bot.bot_uuid, index)}
+                            className={cn(
+                              'w-full flex items-center gap-2.5 px-3 py-1 text-left transition-colors',
+                              isSelected
+                                ? 'bg-lavender-50/70'
+                                : 'hover:bg-slate-50',
+                            )}
+                            data-aspm-click="ca114903.da194181"
+                            data-aspm-desc="GroupChat-选择Bot"
+                            data-aspm-param={``}
+                            data-aspm-expo
+                          >
+                            <BotAvatar
+                              type="assistant"
+                              size="sm"
+                              name={bot.bot_name}
+                              botId={bot.bot_uuid?.split(':')[0]}
+                              avatarUrl={bot.avatar_url}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium text-slate-800 truncate">
+                                  {bot.bot_name}
+                                </p>
+                                <GoldBadge botInfo={bot as any} />
+                                {/* 在线状态 - 两个tab都显示 */}
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-green-50 text-green-600">
+                                  在线
+                                </span>
+                                {memberTab === 'collaborate' &&
+                                  bot.is_friend && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-lavender-50 text-lavender-600">
+                                      好友
+                                    </span>
+                                  )}
+                              </div>
+                              {bot.summary && (
+                                <p className="text-xs text-slate-400 truncate leading-tight">
+                                  {bot.summary}
+                                </p>
+                              )}
+                              {(bot as any).short_profile && (
+                                <TooltipProvider delayDuration={100}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div className="flex items-center gap-1 mt-0.5 text-xs text-blue-500 bg-blue-50/50 px-1.5 py-0.5 rounded w-fit cursor-pointer">
+                                        <Sparkles className="w-3 h-3" />
+                                        推荐理由：
+                                        <span className="truncate">
+                                          {(bot as any).short_profile}
+                                        </span>
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent
+                                      side="top"
+                                      className="bg-slate-800 border-slate-700 max-w-xs"
+                                    >
+                                      <div className="flex items-start gap-1">
+                                        <Sparkles className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
+                                        <span className="text-white">
+                                          推荐理由：
+                                          {(bot as any).short_profile}
+                                        </span>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              )}
+                            </div>
+                            <div
+                              className={cn(
+                                'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all',
+                                isSelected
+                                  ? 'bg-lavender-500 text-white'
+                                  : 'border border-slate-300',
+                              )}
+                            >
+                              {isSelected ? (
+                                <Check className="w-3 h-3" />
+                              ) : (
+                                <Plus className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                      {/* 加载更多指示器（仅按名称筛选模式下） */}
+                      {memberTab === 'collaborate' &&
+                        filterMode === 'name' &&
+                        isLoadingMoreBots && (
+                          <div className="flex items-center justify-center py-3 text-slate-400 gap-2">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span className="text-xs">加载更多...</span>
+                          </div>
+                        )}
+                      {memberTab === 'collaborate' &&
+                        filterMode === 'name' &&
+                        !hasMoreAvailableBots &&
+                        filteredBots.length > 0 &&
+                        !botSearch && (
+                          <div className="py-2.5 text-center text-xs text-slate-300">
+                            已加载全部 {filteredBots.length} 个 Bot
+                          </div>
+                        )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </CollaborationFlowWorkspace>
 
         {/* 底部：错误 + 按钮 */}
         <div className="flex items-center justify-between px-6 py-2 border-t border-slate-100 flex-shrink-0">
