@@ -286,8 +286,16 @@ def _node_detail_view_of(detail: Any) -> TaskNodeDetailView:
 
 @router.get("/{task_id}/graph", response_model=TaskGraphView)
 def get_task_graph(task_id: str, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
-    """Top-level dynamic-workflow DAG snapshot (root_phase + nodes/edges)."""
-    return _graph_view_of(service.get_task_graph(task_id))
+    """Top-level dynamic-workflow DAG snapshot (root_phase + nodes/edges).
+
+    404 when the task is unknown or has no execution graph yet — never return a
+    fake default. The panel treats 4xx as fatal, so a wrong/stale taskId surfaces
+    as a visible "加载失败: 404" instead of silently spinning on an empty graph
+    (which is what the old ``_graph_view_of(None)`` fallback caused)."""
+    snapshot = service.get_task_graph(task_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return _graph_view_of(snapshot)
 
 
 @router.get("/{task_id}/nodes/{node_id}", response_model=TaskNodeDetailView)

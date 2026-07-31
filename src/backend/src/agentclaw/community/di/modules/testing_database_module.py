@@ -30,5 +30,7 @@ class TestingDatabaseModule(Module):
         # required for per-test isolation when a test fixture rebuilds
         # the injector. Safe to call unconditionally (idempotent).
         reset_for_tests()
-        logger.info("DatabasePlugin: SqliteDB (testing override)")
+        import os as _os
+        _db_url = _os.environ.get("DATABASE_URL", "sqlite:///:memory:")
+        logger.info("DatabasePlugin: SqliteDB (testing override, url=%s)", _db_url)
         return SqliteDB()

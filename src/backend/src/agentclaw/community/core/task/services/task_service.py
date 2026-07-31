@@ -329,6 +329,12 @@ class TaskService:
         state_machine canvas fields and adds task-graph-only dimensions."""
         task = self._load(task_id)
         if task is None or task.execution_graph is None:
+            logger.debug(
+                "[Task] get_task_graph miss task_id=%s (task_found=%s, has_execution_graph=%s)",
+                task_id,
+                task is not None,
+                bool(task and task.execution_graph),
+            )
             return None
         g = task.execution_graph
         return {
@@ -447,9 +453,13 @@ class TaskService:
 
     def _load(self, task_id: str) -> Optional[Task]:
         try:
-            return self._task_repo.get_by_id(task_id)
+            task = self._task_repo.get_by_id(task_id)
         except TaskNotFoundError:
+            logger.debug("[Task] _load miss task_id=%s (TaskNotFoundError)", task_id)
             return None
+        if task is None:
+            logger.debug("[Task] _load miss task_id=%s (repo returned None)", task_id)
+        return task
 
     def _emit(self, task: Task, kind: EventKind, **fields: Any) -> TaskEvent:
         seq = next_seq(self._event_repo.latest_seq(task.id))
