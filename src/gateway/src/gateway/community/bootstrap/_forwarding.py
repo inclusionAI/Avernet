@@ -58,16 +58,16 @@ def _load_domain_map(config: Config | None = None) -> DomainMap:
         from gateway.community.config import ConfigLoader
 
         config = ConfigLoader.load()
-    upstream_vars = config.user_config.model_dump().get("upstreams", {})
-    if not isinstance(upstream_vars, dict):
-        upstream_vars = {}
-    upstreams_raw = config.raw.get("upstreams", {}) or {}
+    upstream_vars = config.user_config.upstream_vars
+    upstreams_raw = config.user_config.upstreams
     if not isinstance(upstreams_raw, dict) or not upstreams_raw:
-        raise ValueError("required config section not found: application.yaml upstreams")
-    _logger.info("loading upstream config from application.yaml")
+        raise ValueError(
+            "required config section not found: application.yaml user_config.upstreams"
+        )
+    _logger.info("loading upstream config from application.yaml user_config.upstreams")
     domain_map = DomainMap.from_config(upstreams_raw, variables=upstream_vars)
     _logger.info(
-        "upstream config (application.yaml): %d domains\n%s",
+        "upstream config (application.yaml user_config.upstreams): %d domains\n%s",
         len(domain_map.domains),
         "\n".join(
             f"  {name} → {domain.server}, schema={domain.schema.location}"

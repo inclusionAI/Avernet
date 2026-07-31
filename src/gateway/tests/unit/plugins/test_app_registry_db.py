@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import pytest
 
-from gateway.community.bootstrap._authn import build_database
+from gateway.community.bootstrap import initialize_database
+from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.app import AppRepository
+from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.app import RegisteredApp
 
 
 @pytest.fixture(scope="module")
 def registry() -> AppRepository:
-    return AppRepository(build_database())
+    db = SqliteDatabasePlugin()
+    initialize_database(db, DatabaseConfig(plugin_type="SQLITE_ORM", db_url=""))
+    return AppRepository(db)
 
 
 async def test_known_token_resolves_seeded_app(registry: AppRepository) -> None:

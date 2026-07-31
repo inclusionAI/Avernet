@@ -1,8 +1,9 @@
-"""Authn strategy registry — a DI-friendly dict of named AuthStrategy instances.
+"""Deprecated authn strategy registry helper.
 
-All strategies (both community built-ins and enterprise extras) are registered
-via ``register_authn_strategy()`` into this shared registry. At bootstrap,
-``_strategy_chains()`` calls ``resolve_all()`` to build the identity-chain pool.
+Runtime authn strategy composition now lives in ``PluginContainer`` via the
+``authn_strategies`` ``providers.Dict``. This small class is kept only as a
+local, non-global test/compatibility collector; production bootstrap no longer
+uses a module-level registry or import side-effect strategy registration.
 """
 
 from __future__ import annotations
@@ -13,13 +14,10 @@ from gateway.community.spi.authn import AuthStrategy
 
 
 class AuthnStrategyRegistry:
-    """Mutable per-name collector of authn strategies.
+    """Local per-name collector of authn strategies.
 
-    Strategies can be registered either as concrete instances (community
-    built-ins, constructed at bootstrap with DI-resolved dependencies) or as
-    factory callables (enterprise extras, registered at import time but
-    instantiated later during ``resolve_all()`` to avoid early side-effects
-    like SDK startup).
+    Prefer DI providers for runtime code. This class has no process-global
+    singleton and should not be used as a composition root.
     """
 
     def __init__(self) -> None:
@@ -38,19 +36,3 @@ class AuthnStrategyRegistry:
             else:
                 result[name] = entry
         return result
-
-
-_authn_registry: AuthnStrategyRegistry | None = None
-
-
-def get_authn_registry() -> AuthnStrategyRegistry:
-    global _authn_registry
-    if _authn_registry is None:
-        _authn_registry = AuthnStrategyRegistry()
-    return _authn_registry
-
-
-def register_authn_strategy(
-    name: str, strategy: AuthStrategy | Callable[[], AuthStrategy]
-) -> None:
-    get_authn_registry().register(name, strategy)

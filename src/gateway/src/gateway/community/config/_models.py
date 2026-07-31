@@ -65,6 +65,10 @@ class PluginConfig(BaseSettings):
 class UserConfig(BaseModel):
     model_config = {"extra": "allow"}
     plugins: PluginConfig = Field(default_factory=PluginConfig)
+    upstream_vars: dict[str, str] = Field(default_factory=dict)
+    identity_strategies: dict[str, list[str]] = Field(default_factory=dict)
+    route_security: dict[str, dict[str, str]] = Field(default_factory=dict)
+    upstreams: dict[str, Any] = Field(default_factory=dict)
 
     def get(self, key: str, default: Any = None) -> Any:
         try:

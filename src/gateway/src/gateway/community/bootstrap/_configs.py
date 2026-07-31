@@ -112,6 +112,10 @@ def load_container_config() -> dict:
     from gateway.community.config import ConfigLoader
 
     cfg = ConfigLoader.load()
+    return _container_config_from_loaded(cfg)
+
+
+def _container_config_from_loaded(cfg) -> dict:
     user_config = cfg.user_config.model_dump()
     if cfg.module_config.web:
         user_config[ConfigKey.WEB_PORT.value] = cfg.module_config.web.port
@@ -127,6 +131,11 @@ class DatabaseConfig:
 def init_container_config(container: "ApplicationContainer") -> None:
     from dependency_injector import providers
 
+    from gateway.community.config import ConfigLoader
+
+    loaded = ConfigLoader.load()
     config: providers.Configuration = container.config
     config.from_dict(_schema_defaults())
-    config.from_dict(load_container_config())
+    config.from_dict(_container_config_from_loaded(loaded))
+    container.loaded_config.override(providers.Object(loaded))
+    container.user_config.override(providers.Object(loaded.user_config))
