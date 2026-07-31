@@ -37,7 +37,7 @@ touched. The internal console must stay byte-for-byte unaffected.
         snapshot is regenerated if it pins the `user_config` tree.
 - **Depends on:** —
 
-## Task 2: Compose the gateway URL and carry the credential in its query  `[ ]`
+## Task 2: Compose the gateway URL and carry the credential in its query  `[x]`
 - **Goal:** The behavioural change. `EngineConnectionService` publishes a
   gateway URL under `/engine` with the credential in the query string instead of
   an engine-proxy URL with the credential in a header.
@@ -45,49 +45,49 @@ touched. The internal console must stay byte-for-byte unaffected.
   - `…/core/engine_runtime/connection.py`
   - `tests/community/core/engine_runtime/test_connection.py`
 - **Done when:**
-  - [ ] `_PROXY_TOKEN_HEADER:51` becomes `_PROXY_TOKEN_PARAM` (same
+  - [x] `_PROXY_TOKEN_HEADER:51` becomes `_PROXY_TOKEN_PARAM` (same
         `x-proxypass-token` string, now a query key); `_ENGINE_PREFIX =
         "/engine"` is added near `:48`.
-  - [ ] `__init__:120-133` takes `gateway_config: cfg.GatewayConfig` and no
+  - [x] `__init__:120-133` takes `gateway_config: cfg.GatewayConfig` and no
         longer takes `sandbox_client`. DI needs no edit — the service is bound to
         itself with `@inject` (`di/modules/engine_runtime_module.py:33-35`).
-  - [ ] `_ws_base:288-313` is replaced by `_gateway_ws_base()`: select
+  - [x] `_ws_base:288-313` is replaced by `_gateway_ws_base()`: select
         `base_url_pre` when `get_current_env() == "pre"` else `base_url`
         (matching `di/modules/http_client_module.py:60`), `rstrip("/")`, apply
         the existing `https→wss` / `http→ws` rewrite (`:312`), and raise
         `EngineUpstreamError` naming the config block when the selected value is
         empty.
-  - [ ] `_socket_url:270-286` takes the credential and resolves in this order:
+  - [x] `_socket_url:270-286` takes the credential and resolves in this order:
         (1) `type == "local"` → `ws://{target}{path}`, **no credential**, and the
         gateway config is never read; (2) otherwise →
         `{gateway}/engine/{target}{path}`, with `?x-proxypass-token=…` appended
         **only when a credential exists**; (3) a provider URL that is present but
         not the `/proxypass/` shape → `EngineUpstreamError` (the Risk 1 guard).
-  - [ ] The credential is percent-encoded with `quote(token, safe="")`; the
+  - [x] The credential is percent-encoded with `quote(token, safe="")`; the
         target segment is **not** encoded — `@` and `:` are legal `pchar` and
         production carries them raw.
-  - [ ] Token extraction at `:191` (`ws_token or token`) and its comment at
+  - [x] Token extraction at `:191` (`ws_token or token`) and its comment at
         `:187-190` are **unchanged** — the precedence and its reason still hold.
-  - [ ] `build` no longer builds a `headers` dict; `SocketInfo` is constructed
+  - [x] `build` no longer builds a `headers` dict; `SocketInfo` is constructed
         without it. (The field still exists until Task 3.)
-  - [ ] The module docstring at `:9-11` no longer claims nothing exposes a
+  - [x] The module docstring at `:9-11` no longer claims nothing exposes a
         target or a bare token — the URL now visibly carries both.
-  - [ ] Rewritten tests: `:157` and `:179` assert the credential in the URL's
+  - [x] Rewritten tests: `:157` and `:179` assert the credential in the URL's
         query while still pinning `ws_token`-before-`token`; `:227` asserts the
         gateway host, the `/engine` prefix and the query credential; `:212` and
         `:283` take their failure from an empty `gateway` block rather than
         `sandbox_client`; `:149` and `:235` keep their inputs but now assert
         `EngineUpstreamError` and are renamed, since what they pin is inverted.
-  - [ ] The `_svc` helper `:103-109` drops `sandbox` and gains a `GatewayConfig`;
+  - [x] The `_svc` helper `:103-109` drops `sandbox` and gains a `GatewayConfig`;
         the `_Sandbox` stub `:83` goes.
-  - [ ] New tests: a local device publishes `ws://{target}{path}` with no
+  - [x] New tests: a local device publishes `ws://{target}{path}` with no
         credential and never reads the gateway config; a provider issuing no
         credential publishes a URL with **no** query string, not a trailing
         `?x-proxypass-token=`; a credential needing escaping is percent-encoded;
         the target's `@` and `:` survive **unencoded**; an empty `gateway` block
         raises before any credential is embedded in a URL; `base_url_pre` is
         selected on `pre` and `base_url` otherwise.
-  - [ ] Still passing unmodified: the bot-type and sharing gates `:331-413`,
+  - [x] Still passing unmodified: the bot-type and sharing gates `:331-413`,
         `test_the_provider_is_asked_exactly_once:419`, the expiry tests
         `:288-316`, `test_result_carries_no_target_type_or_bare_token:322`, and
         `test_chat_path_follows_the_engine:256`.

@@ -18,6 +18,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineUpstreamError,
 )
+from agentclaw.community.di.config import GatewayConfig
 
 OWNER = "owner-1"
 BOT = "bot-1"
@@ -80,12 +81,8 @@ class _Devices:
         return self.info
 
 
-class _Sandbox:
-    def __init__(self, base="https://gw.example"):
-        self._base = base
-
-    def proxy_base_url(self):
-        return self._base
+def _gateway(base="https://gw.example", base_pre=""):
+    return GatewayConfig(base_url=base, base_url_pre=base_pre)
 
 
 class _CollaboratorRepo:
@@ -100,10 +97,11 @@ class _CollaboratorRepo:
         return self._collaborators.get((bot_id, owner_id), [])
 
 
-def _svc(bots=None, bindings=None, devices=None, sandbox=None, collaborators=None):
+def _svc(bots=None, bindings=None, devices=None, gateway=None, collaborators=None):
     return EngineConnectionService(
         bots or _Bots(), bindings or _Bindings(), devices or _Devices(),
-        sandbox or _Sandbox(), collaborators or _CollaboratorRepo(),
+        gateway if gateway is not None else _gateway(),
+        collaborators or _CollaboratorRepo(),
     )
 
 
@@ -146,12 +144,13 @@ def test_the_engines_socket_path_is_requested_from_the_provider():
     assert devices.kwargs["path"] == "/api/claude_code/ws"
 
 
-def test_a_relayed_url_is_not_appended_to():
-    """It already ends in the path we asked for; appending again would give
-    ``…/api/openclaw/ws/api/openclaw/ws``, which cannot connect."""
+def test_a_relay_url_the_gateway_prefix_cannot_express_is_refused():
+    """``/wsrelay/{session_id}`` cannot be rebuilt from a target and a path, and
+    the gateway only rewrites ``/engine/`` onto ``/proxypass/``. Publishing the
+    provider's own URL instead would name the hop behind the gateway."""
     devices = _Devices(url="wss://relay.example/wsrelay/s1/api/openclaw/ws")
-    result = _build(_svc(devices=devices))
-    assert result.sockets[0].url == "wss://relay.example/wsrelay/s1/api/openclaw/ws"
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=devices))
 
 
 def test_the_socket_carries_the_ws_credential_not_the_http_one():
@@ -160,7 +159,7 @@ def test_the_socket_carries_the_ws_credential_not_the_http_one():
     ws URL with the wrong credential."""
     devices = _Devices(token="http-tok", ws_token="ws-tok")
     result = _build(_svc(devices=devices))
-    assert result.sockets[0].headers["x-proxypass-token"] == "ws-tok"
+    assert result.sockets[0].url.endswith("?x-proxypass-token=ws-tok")
 
 
 def test_the_socket_expiry_describes_the_ws_credential():
@@ -180,7 +179,7 @@ def test_a_provider_issuing_no_ws_credential_still_uses_its_token():
     """Providers that do not distinguish the two leave `ws_token` empty."""
     devices = _Devices(token="only-tok", ws_token="")
     result = _build(_svc(devices=devices))
-    assert result.sockets[0].headers["x-proxypass-token"] == "only-tok"
+    assert result.sockets[0].url.endswith("?x-proxypass-token=only-tok")
 
 
 def test_a_failing_provider_is_an_upstream_error_not_a_500():
@@ -209,39 +208,105 @@ def test_an_unusable_device_is_not_ready_rather_than_a_500(error_name):
         _build(_svc(devices=devices))
 
 
-def test_a_deployment_without_a_proxy_gateway_is_an_upstream_error():
-    """``proxy_base_url`` raises in builds with no sandbox runtime. Letting it
-    out would 500 on a condition that has a name."""
-    from agentclaw.community.plugin_api.sandbox_runtime import (
-        SandboxRuntimeUnavailableError,
-    )
-
-    class _NoRuntime:
-        def proxy_base_url(self):
-            raise SandboxRuntimeUnavailableError("no ARCA runtime here")
-
+def test_a_deployment_fronting_no_gateway_is_an_upstream_error():
+    """The community build's normal state. Letting an empty host through would
+    publish an address nothing serves, on a condition that has a name."""
     with pytest.raises(EngineUpstreamError):
-        _build(_svc(sandbox=_NoRuntime()))
+        _build(_svc(gateway=_gateway(base="")))
 
 
-def test_proxy_url_is_composed_and_scheme_swapped():
+def test_no_credential_is_embedded_when_the_gateway_is_unconfigured():
+    """The host is resolved before the credential is appended, so a misconfigured
+    deployment cannot leak one into a log line via a half-built URL."""
+    devices = _Devices(token="secret-tok")
+    with pytest.raises(EngineUpstreamError) as excinfo:
+        _build(_svc(devices=devices, gateway=_gateway(base="")))
+    assert "secret-tok" not in str(excinfo.value)
+
+
+def test_gateway_url_is_composed_and_scheme_swapped():
     result = _build(_svc())
     assert result.sockets[0].url == (
-        "wss://gw.example/proxypass/tgt/api/openclaw/ws"
+        "wss://gw.example/engine/tgt/api/openclaw/ws?x-proxypass-token=tok"
     )
-    assert result.sockets[0].headers == {"x-proxypass-token": "tok"}
 
 
-def test_a_provider_supplied_ws_url_is_used_verbatim():
+def test_the_published_url_never_names_the_hop_behind_the_gateway():
+    assert "proxypass/" not in _build(_svc()).sockets[0].url
+
+
+def test_a_provider_relay_url_of_an_unknown_shape_is_refused():
+    """Same guard as the ``/wsrelay/`` case: anything this endpoint cannot
+    re-address onto ``/engine/`` is an upstream error, not a passthrough."""
     devices = _Devices(url="wss://relay.example/route/xyz")
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=devices))
+
+
+def test_a_proxypass_relay_url_is_accepted_and_recomposed():
+    """The shape the gateway *can* express. The provider's URL is not published
+    — the target and the path we asked for are recomposed against the gateway."""
+    devices = _Devices(url="wss://proxy.example/proxypass/tgt/api/openclaw/ws")
     result = _build(_svc(devices=devices))
-    assert result.sockets[0].url == "wss://relay.example/route/xyz"
+    assert result.sockets[0].url == (
+        "wss://gw.example/engine/tgt/api/openclaw/ws?x-proxypass-token=tok"
+    )
 
 
-def test_local_devices_are_reached_directly():
+def test_local_devices_are_reached_directly_without_a_credential():
+    """The gateway routes to the hop behind it, which cannot reach a device on
+    the caller's own machine — and there is no proxy to authenticate to."""
     devices = _Devices(type="local", target="127.0.0.1:20003")
-    assert _build(_svc(devices=devices)).sockets[0].url.startswith(
-        "ws://127.0.0.1:20003"
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url == "ws://127.0.0.1:20003/api/openclaw/ws"
+    assert "x-proxypass-token" not in url
+
+
+def test_a_local_device_does_not_need_a_gateway_configured():
+    devices = _Devices(type="local", target="127.0.0.1:20003")
+    result = _build(_svc(devices=devices, gateway=_gateway(base="")))
+    assert result.sockets[0].url == "ws://127.0.0.1:20003/api/openclaw/ws"
+
+
+def test_no_credential_publishes_no_query_string():
+    """An empty ``?x-proxypass-token=`` would fail the handshake with nothing to
+    diagnose from. Absent is published as absent, as it was when it was a
+    header."""
+    devices = _Devices(token="", ws_token="")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url == "wss://gw.example/engine/tgt/api/openclaw/ws"
+    assert "?" not in url
+
+
+def test_the_credential_is_percent_encoded():
+    devices = _Devices(ws_token="a b&c=d")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url.endswith("?x-proxypass-token=a%20b%26c%3Dd")
+
+
+def test_the_target_segment_is_not_percent_encoded():
+    """``@`` and ``:`` are legal in a path segment and the hop behind the
+    gateway matches the target raw."""
+    devices = _Devices(target="ARCA_ARCA-SANDBOX-abc@0:20003")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert "/engine/ARCA_ARCA-SANDBOX-abc@0:20003/api/openclaw/ws" in url
+
+
+def test_the_pre_gateway_is_used_on_pre(monkeypatch):
+    """pre and prod are separate hosts; collapsing them sends a pre credential
+    to the prod gateway."""
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    gateway = _gateway(base="https://gw.example", base_pre="https://gw-pre.example")
+    assert _build(_svc(gateway=gateway)).sockets[0].url.startswith(
+        "wss://gw-pre.example/engine/"
+    )
+
+
+def test_the_prod_gateway_is_used_off_pre(monkeypatch):
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    gateway = _gateway(base="https://gw.example", base_pre="https://gw-pre.example")
+    assert _build(_svc(gateway=gateway)).sockets[0].url.startswith(
+        "wss://gw.example/engine/"
     )
 
 
@@ -256,7 +321,8 @@ def test_local_devices_are_reached_directly():
 def test_chat_path_follows_the_engine(engine, path):
     """An engine without a dedicated route falls back to the adapter's generic
     one, so a newly-added engine is reachable with no change here."""
-    assert _build(_svc(bots=_Bots(engine))).sockets[0].url.endswith(path)
+    url = _build(_svc(bots=_Bots(engine))).sockets[0].url
+    assert url.split("?")[0].endswith(path)
 
 
 def test_only_a_chat_socket_is_offered():
@@ -278,11 +344,6 @@ def test_unavailable_device_is_not_ready():
 def test_missing_routing_target_is_an_upstream_error_not_a_broken_url():
     with pytest.raises(EngineUpstreamError):
         _build(_svc(devices=_Devices(target="")))
-
-
-def test_missing_proxy_base_is_an_upstream_error():
-    with pytest.raises(EngineUpstreamError):
-        _build(_svc(sandbox=_Sandbox(base="")))
 
 
 def test_expires_at_falls_back_to_the_ttl_when_the_provider_reports_none():
