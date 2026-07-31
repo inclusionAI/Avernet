@@ -398,6 +398,29 @@ async fn rejects_missing_expected_content_and_incomplete_stop_reasons() {
     );
     assert!(error.contains("req-missing"), "{error}");
 
+    for (body, request_id) in [
+        (
+            r#"{"content":[{"type":"text","text":"{\"outcome\":\"approved\"}"}]}"#,
+            "req-stop-missing",
+        ),
+        (
+            r#"{"content":[{"type":"text","text":"{\"outcome\":\"approved\"}"}],"stop_reason":null}"#,
+            "req-stop-null",
+        ),
+    ] {
+        let base_url = spawn_anthropic_response(200, body, request_id).await;
+        let client =
+            AnthropicLlmClient::new(test_config(&base_url, StructuredOutputMode::JsonSchema))
+                .expect("anthropic client");
+        let error = client
+            .complete(test_request(judge_response_format()))
+            .await
+            .expect_err("missing stop reason must fail")
+            .to_string();
+        assert!(error.contains("missing stop_reason"), "{error}");
+        assert!(error.contains(request_id), "{error}");
+    }
+
     for (stop_reason, expected) in [
         ("max_tokens", "reached max_tokens"),
         (

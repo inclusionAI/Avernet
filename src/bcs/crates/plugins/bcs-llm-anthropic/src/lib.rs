@@ -391,7 +391,10 @@ fn reject_incomplete_response(
         Some("pause_turn") => Err(LlmError::Response(format!(
             "anthropic response from {url} paused before completing; request_id={request_id}"
         ))),
-        _ => Ok(()),
+        None => Err(LlmError::Response(format!(
+            "anthropic response from {url} is missing stop_reason; request_id={request_id}"
+        ))),
+        Some(_) => Ok(()),
     }
 }
 
