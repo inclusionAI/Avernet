@@ -793,7 +793,7 @@ class BotService:
             logger.error(f"[get_bot_by_ip_and_user] Error querying bot by IP {ip} and user {user_id}: {e}")
             return None
 
-def _is_first_bot(self, user_id: str) -> bool:
+    def _is_first_bot(self, user_id: str) -> bool:
         """First bot iff the owner has zero bots (current env; tenant enforced by session guard)."""
         return self._repository.count_by_owner(user_id) == 0
 

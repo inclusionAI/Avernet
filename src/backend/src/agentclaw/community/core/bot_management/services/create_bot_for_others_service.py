@@ -1,4 +1,10 @@
-"""Provision another user's default bot with callback-ready control-plane identity."""
+"""Provision a bot for a target user with a callback-ready control-plane identity.
+
+The bot id is globally unique (allocated via ``generate_bot_id``); the legacy
+``"default"`` id convention is retired. When a target user already owns at least
+one bot, the service repairs/restarts that existing bot in place — preserving its
+assigned id — rather than allocating a new one.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +23,9 @@ from agentclaw.community.core.mcp.services.passport_scope import (
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
+from agentclaw.community.core.bot_management.services.bot_service import (
+    generate_bot_id,
+)
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.avernet_tenant import (
@@ -28,7 +37,6 @@ if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
 
 
-_DEFAULT_BOT_ID = "default"
 _RESTART_WAIT = timedelta(minutes=30)
 
 
@@ -47,7 +55,13 @@ class _TargetLockEntry:
 
 
 class CreateBotForOthersService:
-    """Ensure Passport and owner authorization before create/restart actions."""
+    """Ensure Passport and owner authorization before create/restart actions.
+
+    Looks up an existing bot for the target user by owner (not by a literal
+    ``"default"`` id). When one exists, it is repaired/restarted in place and its
+    assigned bot id is preserved. When none exists, a new bot is created with a
+    globally-unique id from ``generate_bot_id``.
+    """
 
     def __init__(
         self,
@@ -123,11 +137,11 @@ class CreateBotForOthersService:
         operator_name: str,
         cookie: str,
     ) -> dict[str, Any]:
-        existing_bot = self._repository.get_by_id_and_owner(
-            _DEFAULT_BOT_ID, target_user_id
-        )
+        existing_bot = self._find_existing_bot_for_owner(target_user_id)
         if existing_bot is None:
-            return self._create_default_bot(
+            bot_id = generate_bot_id(target_user_id, self._repository)
+            return self._create_bot(
+                bot_id=bot_id,
                 target_user_id=target_user_id,
                 target_nick_name=target_nick_name,
                 bot_type=bot_type,
@@ -143,9 +157,21 @@ class CreateBotForOthersService:
             operator_name=operator_name,
         )
 
-    def _create_default_bot(
+    def _find_existing_bot_for_owner(
+        self, target_user_id: str
+    ) -> Mapping[str, Any] | None:
+        """Return one live bot for the owner if any exist (owner-based lookup)."""
+        # NOTE: repairs the owner's first listed bot; multi-bot owner selection
+        # ordering is tracked as a follow-up.
+        _count, items = self._repository.list_by_owner(target_user_id, 1, 1)
+        if not items:
+            return None
+        return items[0]
+
+    def _create_bot(
         self,
         *,
+        bot_id: str,
         target_user_id: str,
         target_nick_name: str,
         bot_type: str | None,
@@ -159,6 +185,7 @@ class CreateBotForOthersService:
             engine_type=DEFAULT_ENGINE_TYPE,
         )
         readiness = self._ensure_passport(
+            bot_id=bot_id,
             target_user_id=target_user_id,
             bot_name=target_nick_name,
             bot_desc=None,
@@ -183,13 +210,13 @@ class CreateBotForOthersService:
             entity_type="staff",
             engine_type=DEFAULT_ENGINE_TYPE,
             ext={"passport": {"agent_code": readiness.agent_code}},
-            bot_id=_DEFAULT_BOT_ID,
+            bot_id=bot_id,
             bot_type=bot_type,
             cookie=cookie,
         )
         return {
             "target_user_id": target_user_id,
-            "bot_id": _DEFAULT_BOT_ID,
+            "bot_id": bot_id,
             "action": "created",
             "bot": result,
             "passport": self._passport_result(readiness),
@@ -207,9 +234,16 @@ class CreateBotForOthersService:
         operator_user_id: str,
         operator_name: str,
     ) -> dict[str, Any]:
+        bot_id = str(bot.get("bot_id") or "")
+        if not bot_id:
+            raise CreateBotForOthersError(
+                "existing bot record has no bot_id; cannot repair",
+                error_code=500,
+            )
         engine_type = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
         existing_ext = self._mapping_copy(bot.get("ext"))
         readiness = self._ensure_passport(
+            bot_id=bot_id,
             target_user_id=target_user_id,
             bot_name=self._optional_string(bot.get("bot_name")),
             bot_desc=self._optional_string(bot.get("bot_desc")),
@@ -221,6 +255,7 @@ class CreateBotForOthersService:
             force_apply=False,
         )
         database_changed = self._persist_agent_code(
+            bot_id=bot_id,
             bot=bot,
             target_user_id=target_user_id,
             agent_code=readiness.agent_code,
@@ -235,7 +270,7 @@ class CreateBotForOthersService:
         bot_status = str(bot.get("status") or "UNKNOWN")
         base_result = {
             "target_user_id": target_user_id,
-            "bot_id": _DEFAULT_BOT_ID,
+            "bot_id": bot_id,
             "status": bot_status,
             "passport": self._passport_result(readiness),
             "owner_relationship": owner_relationship,
@@ -264,7 +299,7 @@ class CreateBotForOthersService:
             }
 
         result = self._bot_service.restart_bot(
-            bot_id=_DEFAULT_BOT_ID,
+            bot_id=bot_id,
             user_id=target_user_id,
             nick_name=target_nick_name,
         )
@@ -278,6 +313,7 @@ class CreateBotForOthersService:
     def _ensure_passport(
         self,
         *,
+        bot_id: str,
         target_user_id: str,
         bot_name: str | None,
         bot_desc: str | None,
@@ -290,7 +326,9 @@ class CreateBotForOthersService:
     ) -> _PassportReadiness:
         stored_agent_code = self._stored_agent_code(existing_ext)
         if not force_apply:
-            passport, auth_status, token = self._query_passport(target_user_id)
+            passport, auth_status, token = self._query_passport(
+                bot_id=bot_id, target_user_id=target_user_id
+            )
             agent_code = self._agent_code(passport) or stored_agent_code
             if self._passport_complete(
                 agent_code=agent_code,
@@ -304,18 +342,18 @@ class CreateBotForOthersService:
             skill_set_service = self._skill_set_factory.create(
                 user_id=target_user_id,
                 entity_id=entity_id,
-                bot_id=_DEFAULT_BOT_ID,
+                bot_id=bot_id,
                 entity_type=entity_type,
                 engine_type=engine_type,
             )
             mcp_codes = skill_set_service.get_bot_mcp_codes(
                 entity_id=entity_id,
-                bot_id=_DEFAULT_BOT_ID,
+                bot_id=bot_id,
                 user_id=target_user_id,
                 entity_type=entity_type,
             )
             apply_result = self._passport_plugin.apply_first_agent_passport(
-                bot_id=_DEFAULT_BOT_ID,
+                bot_id=bot_id,
                 owner_workno=target_user_id,
                 mcp_codes=filter_passport_mcp_codes(mcp_codes),
                 cli_items=get_default_cli_items(engine_type, template_type),
@@ -343,7 +381,9 @@ class CreateBotForOthersService:
                 error_code=5400,
             )
 
-        passport, auth_status, token = self._query_passport(target_user_id)
+        passport, auth_status, token = self._query_passport(
+            bot_id=bot_id, target_user_id=target_user_id
+        )
         queried_agent_code = self._agent_code(passport)
         if queried_agent_code and queried_agent_code != applied_agent_code:
             raise CreateBotForOthersError(
@@ -361,19 +401,19 @@ class CreateBotForOthersService:
         return _PassportReadiness(agent_code=agent_code, source="applied")
 
     def _query_passport(
-        self, target_user_id: str
+        self, *, bot_id: str, target_user_id: str
     ) -> tuple[object, object, object]:
         try:
             passport = self._passport_plugin.query_agent_passport(
-                bot_id=_DEFAULT_BOT_ID,
+                bot_id=bot_id,
                 owner_workno=target_user_id,
             )
             auth_status = self._passport_plugin.query_auth_status(
-                bot_id=_DEFAULT_BOT_ID,
+                bot_id=bot_id,
                 owner_workno=target_user_id,
             )
             token = self._passport_plugin.query_token(
-                bot_id=_DEFAULT_BOT_ID,
+                bot_id=bot_id,
                 owner_workno=target_user_id,
             )
             return passport, auth_status, token
@@ -385,6 +425,7 @@ class CreateBotForOthersService:
     def _persist_agent_code(
         self,
         *,
+        bot_id: str,
         bot: Mapping[str, Any],
         target_user_id: str,
         agent_code: str,
@@ -397,7 +438,7 @@ class CreateBotForOthersService:
         ext["passport"] = ext_passport
         try:
             persisted = self._repository.update_by_owner(
-                bot_id=_DEFAULT_BOT_ID,
+                bot_id=bot_id,
                 owner_id=target_user_id,
                 update_data={"ext": ext},
             )
