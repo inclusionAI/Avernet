@@ -36,6 +36,10 @@ def _app(skill_service):
         "entity_type": "staff", "bot_type": "service", "status": "ACTIVE",
     }
     bot_repo.get_by_id.return_value = bot_repo.get_by_id_and_owner.return_value
+    bot_repo.get_unique_by_id.return_value = bot_repo.get_by_id_and_owner.return_value
+    bot_repo.get_live_by_id_owner_and_env.return_value = [
+        bot_repo.get_by_id_and_owner.return_value
+    ]
 
     resolver = MagicMock()
     resolver.resolve_for_bot.return_value = SimpleNamespace(provider="teclaw")
@@ -119,13 +123,15 @@ def test_readme_route_uses_skill_bot_context_not_request_context_for_teclaw():
             fromlist=["BotRepository"],
         ).BotRepository
     )
-    bot_repo.get_by_id.return_value = {
+    target_bot = {
         "bot_id": "teclaw-bot",
         "owner_id": "skill-owner-u",
         "entity_type": "staff",
         "active_engine": "openclaw",
         "bot_type": "service",
     }
+    bot_repo.get_unique_by_id.return_value = target_bot
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
 
     resp = client.get(
         "/api/skills/1/readme",
@@ -173,13 +179,15 @@ def test_readme_route_link_name_falls_back_to_global_lookup():
             fromlist=["BotRepository"],
         ).BotRepository
     )
-    bot_repo.get_by_id.return_value = {
+    target_bot = {
         "bot_id": "teclaw-bot",
         "owner_id": "owner-u",
         "entity_type": "staff",
         "active_engine": "openclaw",
         "bot_type": "service",
     }
+    bot_repo.get_unique_by_id.return_value = target_bot
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
 
     resp = client.get(
         "/api/skills/x/readme",
@@ -226,7 +234,8 @@ def test_readme_route_handles_duplicate_link_name_scopes_and_desktop_bot():
         "bot_type": "desktop",
         "status": "ACTIVE",
     }
-    bot_repo.get_by_id.return_value = bot_repo.get_by_id_and_owner.return_value
+    bot_repo.get_unique_by_id.return_value = bot_repo.get_by_id_and_owner.return_value
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
 
     resp = client.get(
         "/api/skills/x/readme",
@@ -311,10 +320,53 @@ def test_readme_route_rejects_local_skill_when_owning_bot_is_missing():
             fromlist=["BotRepository"],
         ).BotRepository
     )
-    bot_repo.get_by_id.return_value = None
+    bot_repo.get_unique_by_id.return_value = None
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
 
     resp = client.get("/api/skills/1/readme", params=_Q)
 
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Skill's owning bot was not found"
     assert factory.create.call_count == 1
+
+
+def test_readme_route_resolves_default_bot_by_env_owner_and_bot_id():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "default",
+    }
+    read_svc = MagicMock()
+    read_svc.get_skill_readme = AsyncMock(return_value="# readme")
+    client, factory, _ = _app(lookup_svc)
+    factory.create.side_effect = [lookup_svc, read_svc]
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    target_bot = {
+        "bot_id": "default",
+        "owner_id": "target-owner",
+        "entity_type": "staff",
+        "active_engine": "openclaw",
+        "bot_type": "personal",
+    }
+    bot_repo.get_live_by_id_owner_and_env.return_value = [target_bot]
+
+    resp = client.get(
+        "/api/skills/1/readme",
+        params={"entity_id": "target-owner", "bot_id": "default"},
+    )
+
+    assert resp.status_code == 200
+    bot_repo.get_live_by_id_owner_and_env.assert_called_once()
+    assert bot_repo.get_live_by_id_owner_and_env.call_args.kwargs["bot_id"] == "default"
+    assert bot_repo.get_live_by_id_owner_and_env.call_args.kwargs["owner_id"] == "target-owner"
+    bot_repo.get_unique_by_id.assert_not_called()
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "1", "u1", "default", device_owner_id="target-owner"
+    )

@@ -107,6 +107,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     with_interceptors,
@@ -1231,9 +1232,29 @@ async def get_skill_readme(
     # ``skill.user_id`` is only the Skill author and can be a collaborator.
     read_bot_id = (skill or {}).get("bolt_id") or effective_bot_id
     target_bot = None
+    # ``default`` is shared by many owners.  Resolve an explicitly supplied
+    # owner against the server-side environment so a same-named default Bot
+    # can never select an arbitrary user's workspace.
+    owner_hint = entity_id or (ctx.user_id if read_bot_id == "default" else None)
     try:
-        target_bot = bot_repo.get_by_id(read_bot_id)
+        if owner_hint:
+            matches = bot_repo.get_live_by_id_owner_and_env(
+                bot_id=read_bot_id,
+                owner_id=owner_hint,
+                env=get_current_env(),
+            )
+            if len(matches) > 1:
+                raise HTTPException(status_code=409, detail="Skill's owning bot is ambiguous")
+            if matches:
+                target_bot = matches[0]
+
+        if not target_bot and read_bot_id != "default":
+            # Service Bot IDs are normally globally unique.  Fail closed if
+            # they are not, rather than using repository ``.first()``.
+            target_bot = bot_repo.get_unique_by_id(read_bot_id)
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         logger.warning(
             "[skills.get_skill_readme] target bot lookup failed for bot_id=%s: %s",
             read_bot_id,
