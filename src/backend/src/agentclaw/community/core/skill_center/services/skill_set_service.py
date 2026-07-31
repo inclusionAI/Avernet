@@ -618,7 +618,13 @@ class SkillSetService:
                 continue
 
             # Create association using repository
-            self.skill_set_repo.add_skill_to_set(skill_set_id, skill.get('id'))
+            if not self.skill_set_repo.add_skill_to_set(
+                skill_set_id, skill.get('id')
+            ):
+                results["failed"].append(
+                    {"skill_id": skill_id, "error": "Failed to add skill to skill set"}
+                )
+                continue
             results["success"].append({"skill_id": skill.get('id'), "name": skill.get('name')})
 
         # Update metadata file
@@ -1353,7 +1359,20 @@ class SkillSetService:
         # Create association (store server_code, name, description and icon)
         from agentclaw.community.utils.env_utils import get_current_env
         current_env = get_current_env()
-        self.skill_set_repo.add_mcp_to_set(skill_set_id, server_code, mcp_name, mcp_description, mcp_icon, user_id, env=current_env)
+        if not self.skill_set_repo.add_mcp_to_set(
+            skill_set_id,
+            server_code,
+            mcp_name,
+            mcp_description,
+            mcp_icon,
+            user_id,
+            env=current_env,
+        ):
+            return {
+                "success": False,
+                "error": "Failed to add MCP server to skill set",
+                "server_code": server_code,
+            }
 
         # Sync to device (blocking - must succeed for operation to be considered successful)
         # Note: API key is NOT passed during initial add, user should configure it separately
