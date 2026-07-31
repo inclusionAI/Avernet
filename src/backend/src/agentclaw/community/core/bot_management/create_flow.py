@@ -34,6 +34,10 @@ from agentclaw.community.core.mcp.services.passport_scope import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
 from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.utils.avernet_tenant import (
+    DEFAULT_AVERNET_TENANT,
+    get_current_avernet_tenant,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -201,11 +205,13 @@ def _apply_passport(
     any other apply failure becomes a ``BotServiceError`` so it keeps the
     "Passport apply failed" mapping rather than falling into a generic bucket.
     """
-    apply = (
-        passport_plugin.apply_first_agent_passport
-        if is_first_bot
-        else passport_plugin.apply_agent_passport
-    )
+    # 默认租户:首 bot → applyFirst(跳过审批),非首 → applyAgent(走审批)。
+    # 其他租户(openapi / 外部):一律 applyFirst —— 审批流不适用于外部租户,
+    # 且 applyFirst 对重复调用幂等,故不依赖 is_first_bot。见 #556 的根因修复。
+    if get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT and not is_first_bot:
+        apply = passport_plugin.apply_agent_passport
+    else:
+        apply = passport_plugin.apply_first_agent_passport
     try:
         return apply(
             bot_id=bot_id,
