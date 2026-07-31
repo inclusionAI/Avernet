@@ -326,7 +326,14 @@ def create_bot_with_authorization(
     # Validate the name up front so an invalid one never reaches Passport or
     # create. An unset name stays unset — create_bot applies default naming.
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
-    is_first_bot = bot_id == "default"
+    # Ask the repository, not the id. ``bot_id == "default"`` was a proxy that
+    # held only while every owner's first bot was "default"; ``generate_bot_id``
+    # confines that shortcut to the default tenant, so elsewhere a genuinely
+    # first bot carries a generated id and the proxy would pick
+    # ``apply_agent_passport`` for an owner who has never had a Passport.
+    # Safe here because the new bot's row is not inserted until ``create_bot``,
+    # further down this flow.
+    is_first_bot = bot_service.is_first_bot(user_id)
 
     # Pre-flight before Passport, so a limit or a taken name is reported before
     # the user is sent through authorization and before an external Passport
