@@ -1,8 +1,11 @@
 """EngineRuntimeModule — production singleton for the engine-runtime relay.
 
 ``EngineRuntimeRelay.__init__`` carries ``@inject`` and takes ``BotService``,
-``DeviceContextResolver`` and ``DeviceAdapterTransport``, so a ``configure``
-self-binding plus the Protocol alias is all that is needed.
+``DeviceContextResolver``, ``DeviceAdapterTransport`` and
+``BotPublishRepositoryProtocol`` (a service bot's published runtime binding),
+so a ``configure`` self-binding plus the Protocol alias is all that is needed.
+The publish repository is bound database-mode-keyed by ``ServiceBotModule``,
+the same binding ``CronRelayService`` resolves.
 
 ``DeviceAdapterTransport`` is bound per-profile by the device column, not here:
 corp binds the HTTP transport, test binds the in-memory one, and community

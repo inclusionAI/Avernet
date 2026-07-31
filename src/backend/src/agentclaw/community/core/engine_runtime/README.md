@@ -17,16 +17,20 @@ consumes:
   - "DeviceContextResolver — bot -> DeviceContext (the repo's single provider-resolution point)"
   - "DeviceAdapterTransport — the one system boundary (HTTP to the bot's engine adapter)"
   - "DeviceService — connection info for the socket-composing endpoint"
+  - "BotPublishRepository — a service bot's published runtime binding (ext.binding.online)"
 internal_dependencies:
   - agentclaw.community.core.bot_management.services.bot_service
   - agentclaw.community.core.devices.errors
   - agentclaw.community.core.devices.services.device_context
   - agentclaw.community.core.devices.services.device_context_resolver
   - agentclaw.community.core.devices.services.device_service
+  - agentclaw.community.core.service_bot.repository.bot_publish_repository
+  - agentclaw.community.core.service_bot.repository.models
   - agentclaw.community.log
   - agentclaw.community.core.devices.models
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.sandbox_runtime
+  - agentclaw.community.utils.env_utils
 ```
 
 ### Change impact
@@ -42,6 +46,12 @@ are load-bearing and must survive any refactor:
    notice.
 2. **The engine's `success: false` never becomes a public success.** The engine
    can report failure inside an HTTP 200; `_normalise` raises on that.
+3. **A `service` bot resolves through its published runtime binding, never
+   `ac_bots.binding_id`.** That column holds the pre-publication draft — on the
+   BaaS path, the owner's own device — so the by-bot entry point sends a
+   published bot's traffic to the wrong box. The live binding is the publish
+   record's `ext.binding.online`. Device resolution is also blocking network
+   I/O and must stay off the event loop; `call()` runs it in a worker thread.
 
 Adding a group means adding a router, not a relay method: `call()` is a generic
 forward on purpose.

@@ -504,6 +504,29 @@ it (rule C2), but the two must never be merged by a later reader.
   is the part this surface owns.
 - **2026-07-30 — chat stays a WebSocket.** No `POST /chat`, no SSE. The public
   API hands back a URL and headers; the caller owns the socket.
+- **2026-07-31 — a `service` bot resolves through its *published* runtime
+  binding**, not through `ac_bots.binding_id`. Raised in review against the
+  three groups above that do serve both bot types. That column holds the
+  pre-publication draft — on the BaaS path it is the owner's own personal
+  device, and the binding publishing produces is not on that column at all
+  (`BaasConnInfoBuilder._resolve_bot` documents the same split) — so the by-bot
+  entry point sends a published bot's engine, model and approval calls to the
+  wrong device, or reports "not ready" once the draft binding is released while
+  the published bot is healthy. The live binding is the publish record's
+  `ext.binding.online`, selected with the shared `select_stage_bind_id` and
+  reached through `resolve_for_binding_invoke`, exactly as `DeviceInstanceService`
+  and the cron runtime path reach it. There is **no fallback to the draft**: a
+  bot with no published runtime is "not ready", the same answer an unprovisioned
+  personal bot gets, because serving the draft is the defect this replaces. The
+  publish lookup is owner-agnostic by design (an org bot's `entity_id` need not
+  equal the creating staff id); it is safe because the relay has already
+  resolved the bot owner-scoped before it runs.
+- **2026-07-31 — device resolution never runs on the event loop.** It is
+  synchronous and its provider leg is blocking network I/O — a BaaS-backed bot
+  resolves through `BaasService.get_ws_info`, a sync `httpx` call with a
+  30-second timeout — so one slow provider lookup would park the worker's loop
+  and stall every unrelated request. The relay and the connection endpoint both
+  run it in a worker thread, as `CronRelayService` already does.
 
 ## Open questions for the SDD
 

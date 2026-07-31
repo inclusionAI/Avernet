@@ -18,8 +18,6 @@ from pydantic import BaseModel
 import agentclaw.community.adapters.http.openapi_v1.engine_runtime as pkg
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     ApprovalMode,
-    MessageRole,
-    SocketKind,
 )
 
 def _all_enums() -> list[type]:

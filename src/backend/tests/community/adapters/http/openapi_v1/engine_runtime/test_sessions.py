@@ -248,7 +248,9 @@ def test_history_pages_run_newest_first_without_repeating(client, relay):
     relay.results = [EngineResult(data=_messages(100)[-41:])]
     second = ok(client.get(f"{_base()}/{SESSION_ID}/messages", params={"page": 2, "page_size": 20}))
 
-    ids = lambda d: [i["message_id"] for i in d["items"]]
+    def ids(d):
+        return [i["message_id"] for i in d["items"]]
+
     assert ids(first) == [f"m{i}" for i in range(80, 100)]
     assert ids(second) == [f"m{i}" for i in range(60, 80)]
     assert not set(ids(first)) & set(ids(second))

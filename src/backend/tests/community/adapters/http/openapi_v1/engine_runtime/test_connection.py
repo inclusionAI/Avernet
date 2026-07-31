@@ -23,7 +23,7 @@ from agentclaw.community.core.engine_runtime.models import (
     SocketInfo,
 )
 
-from .conftest import BOT, OWNER, FakeRelay, fails, ok
+from .conftest import BOT, OWNER, fails, ok
 
 URL = f"/openapi/v1/bots/{BOT}/connection"
 

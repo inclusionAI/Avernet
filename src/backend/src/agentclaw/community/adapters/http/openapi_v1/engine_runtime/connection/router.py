@@ -7,6 +7,7 @@ this API, so the engine's frame format never becomes a public contract.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
@@ -51,7 +52,17 @@ async def get_connection(
     # bot's active engine, which is a backend fact. The terminal socket that
     # once needed one was removed — the spec excludes an interactive shell from
     # v1 at any scope. That also removes a device call from this endpoint.
-    result = connections.build(bot_id=bot_id, owner_id=owner_id)
+    # In a worker thread: ``build`` is synchronous and talks to the device
+    # provider (device resolution, then ``get_device_connection``), which on the
+    # BaaS path is a blocking ``httpx`` call with a 30-second timeout. Inline,
+    # one slow provider lookup parks the event loop and stalls every unrelated
+    # request on this worker. Offloading here rather than making ``build``
+    # ``async`` keeps it callable from the sync paths and keeps its declared
+    # signature — which ``test_service_api_conformance`` pins, coroutine status
+    # included — the same on both sides.
+    result = await asyncio.to_thread(
+        connections.build, bot_id=bot_id, owner_id=owner_id
+    )
     return envelope(
         Connection(
             engine=result.engine,

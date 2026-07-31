@@ -79,9 +79,17 @@ All paths are relative to `src/backend/`. Source package is
         owner and raises `BotNotFoundError` for a bot that is not the caller's.
         **This runs before any device work.**
   - [x] `_resolve_device` calls `DeviceContextResolver.resolve_for_bot`
-        (`…/core/devices/services/device_context_resolver.py:61`) and wraps
-        `DeviceNotBoundError` / `ConnInfoBuildError` as
+        (`…/core/devices/services/device_context_resolver.py:61`) for a
+        `personal` bot and wraps `DeviceNotBoundError` / `ConnInfoBuildError` as
         `EngineDeviceNotReadyError`.
+  - [x] A `service` bot resolves through its **published** runtime binding
+        (`ext.binding.online` via `select_stage_bind_id` →
+        `resolve_for_binding_invoke`), never `ac_bots.binding_id`, which holds
+        the pre-publication draft. No fallback to the draft: no published
+        runtime is `EngineDeviceNotReadyError`.
+  - [x] `call(...)` runs `_resolve_device` in a worker thread —
+        resolution is synchronous and its provider leg is a blocking 30-second
+        `httpx` call, so inline it would park the event loop.
   - [x] `call(...)` forwards via `DeviceAdapterTransport.invoke`
         (`…/plugin_api/device_adapter_transport.py:59`).
   - [x] `_normalise` turns the engine's

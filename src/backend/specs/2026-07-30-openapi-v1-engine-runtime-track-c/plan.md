@@ -335,10 +335,16 @@ in `tests/community/architecture/test_service_api_conformance.py`.
   - `_resolve_bot(bot_id, owner_id)` → `BotService.get_bot(bot_id, owner_id)`;
     raises `BotNotFoundError` for a bot that isn't the caller's. **This is the
     isolation seam** and must run before any device work.
-  - `_resolve_device(bot_id, owner_id)` →
+  - `_resolve_device(bot_id, owner_id, bot_type)` →
     `DeviceContextResolver.resolve_for_bot()`
-    (`device_context_resolver.py:61`). Wrap `DeviceNotBoundError` /
-    `ConnInfoBuildError` → `EngineDeviceNotReadyError`.
+    (`device_context_resolver.py:61`) for a `personal` bot. A `service` bot
+    goes through its **published** runtime binding instead — the publish
+    record's `ext.binding.online` via `select_stage_bind_id`, then
+    `resolve_for_binding_invoke()` — because `ac_bots.binding_id` is the
+    pre-publication draft. Wrap `DeviceNotBoundError` / `ConnInfoBuildError` →
+    `EngineDeviceNotReadyError`; a bot with no published runtime raises the
+    same rather than falling back to the draft. Runs in a worker thread: the
+    provider leg is a blocking 30-second `httpx` call.
   - `call(...)` → `DeviceAdapterTransport.invoke(ctx.conn_info, method, path, …)`
     (`plugin_api/device_adapter_transport.py:59`), then `_normalise`.
   - `_normalise(raw)` — the one place the engine's
@@ -390,7 +396,9 @@ in `tests/community/architecture/test_service_api_conformance.py`.
 
 No new packages. No version bumps. Internally: `BotService`,
 `DeviceContextResolver`, `DeviceAdapterTransport`, `DeviceService` (connection
-only) — all already wired.
+only) and `BotPublishRepositoryProtocol` (a service bot's published runtime
+binding) — all already wired; the publish repository is the same binding
+`CronRelayService` resolves.
 
 Note `plugins/community/device_adapter_transport.py:27` is a **no-op** returning
 `{"success": False}`. In the community profile every Track C endpoint will

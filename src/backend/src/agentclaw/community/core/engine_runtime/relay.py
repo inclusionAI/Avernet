@@ -21,6 +21,8 @@ public surface existed.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 
 from injector import inject
@@ -42,7 +44,12 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
+from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
+    BotPublishRepositoryProtocol,
+)
+from agentclaw.community.core.service_bot.repository.models import select_stage_bind_id
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
@@ -57,6 +64,10 @@ logger = get_logger()
 #: the generic upstream failure.
 _CAPABILITY_UNSUPPORTED_STATUS = 501
 
+#: A published bot, whose runtime device is **not** the one ``ac_bots.binding_id``
+#: names. See :meth:`EngineRuntimeRelay._resolve_published_device`.
+_SERVICE_BOT_TYPE = "service"
+
 
 class EngineRuntimeRelay:
     """Forward one call to a bot's engine adapter and normalise the answer."""
@@ -67,10 +78,12 @@ class EngineRuntimeRelay:
         bot_service: BotService,
         resolver: DeviceContextResolver,
         transport: DeviceAdapterTransport,
+        publish_repo: BotPublishRepositoryProtocol,
     ) -> None:
         self._bot_service = bot_service
         self._resolver = resolver
         self._transport = transport
+        self._publish_repo = publish_repo
 
     # ── resolution ────────────────────────────────────────────────────────
 
@@ -99,18 +112,27 @@ class EngineRuntimeRelay:
             active_engine=str(bot.get("active_engine") or ""),
         )
 
-    def _resolve_device(self, bot_id: str, owner_id: str) -> DeviceContext:
+    def _resolve_device(
+        self, bot_id: str, owner_id: str, bot_type: str
+    ) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
 
-        ``DeviceNotBoundError`` (never provisioned, or released) and
-        ``ConnInfoBuildError`` (the provider could not build connection info)
-        are both "try again later" from a caller's point of view, so they
-        collapse to a single retryable error. ``UnknownProviderError`` does
-        **not** — it means the binding row names a provider we do not know,
-        which is bad data on our side and not something a caller can fix by
-        retrying. It propagates to the adapter's 500 mapping.
+        ``DeviceNotBoundError`` (never provisioned, released, or — for a service
+        bot — never published) and ``ConnInfoBuildError`` (the provider could not
+        build connection info) are both "try again later" from a caller's point
+        of view, so they collapse to a single retryable error.
+        ``UnknownProviderError`` does **not** — it means the binding row names a
+        provider we do not know, which is bad data on our side and not something
+        a caller can fix by retrying. It propagates to the adapter's 500 mapping.
+
+        **Synchronous on purpose, and never called from the event loop.** The
+        provider leg of this is blocking network I/O — the BaaS builder calls
+        ``BaasService.get_ws_info`` over a sync ``httpx`` client with a 30-second
+        timeout — so :meth:`call` runs it in a worker thread.
         """
         try:
+            if bot_type == _SERVICE_BOT_TYPE:
+                return self._resolve_published_device(bot_id, owner_id)
             return self._resolver.resolve_for_bot(bot_id, owner_id)
         except (DeviceNotBoundError, ConnInfoBuildError) as exc:
             raise EngineDeviceNotReadyError(
@@ -118,6 +140,68 @@ class EngineRuntimeRelay:
             ) from exc
         except UnknownProviderError:
             raise
+
+    def _resolve_published_device(self, bot_id: str, owner_id: str) -> DeviceContext:
+        """Resolve a ``service`` bot through its **published** runtime binding.
+
+        A service bot's ``ac_bots.binding_id`` is the pre-publication draft — on
+        the BaaS path it is the owner's own personal device, and the binding
+        publishing produced is not on that column at all
+        (``baas_builder.BaasConnInfoBuilder._resolve_bot``). So the by-bot entry
+        point resolves the wrong device for these bots: engine, model and
+        approval calls would land on the owner's draft box while the published
+        bot a caller actually addressed runs elsewhere, or fail as "not ready"
+        once the draft binding is released while the published bot is healthy.
+
+        The live binding is the publish record's ``ext.binding.online``, reached
+        the same way ``DeviceInstanceService._resolve_binding_id_by_bot_id`` and
+        ``CronRuntimeTargetMixin`` reach it. ``select_stage_bind_id`` is the
+        shared selector for that choice rather than a second copy of the rule;
+        on the ``success`` records looked up here it yields ``online``.
+
+        The lookup is deliberately **owner-agnostic** — an org bot's publish
+        record carries an ``entity_id`` that need not equal the creating staff
+        id, and filtering by owner would silently miss it. That costs nothing
+        here: :meth:`call` has already resolved the bot owner-scoped, so the
+        caller's claim to this ``bot_id`` is proven before this runs.
+
+        No fallback to the draft binding. Serving the draft is the defect this
+        replaces, so a bot with no published runtime is "not ready" — the same
+        answer an unprovisioned personal bot gets.
+        """
+        env = get_current_env()
+        record = self._publish_repo.get_latest_success_by_source_bot_id(bot_id, env)
+        if record is None:
+            raise DeviceNotBoundError(
+                f"EngineRuntimeRelay: no published runtime for bot={bot_id} env={env}"
+            )
+
+        # ``BotPublishRecord.ext`` is parsed to a dict by ``to_record()``; the
+        # str branch mirrors the defensive handling in ``DeviceInstanceService``.
+        ext = record.ext or {}
+        if isinstance(ext, str):
+            try:
+                ext = json.loads(ext)
+            except (json.JSONDecodeError, TypeError):
+                raise DeviceNotBoundError(
+                    f"EngineRuntimeRelay: unreadable publish ext for bot={bot_id} "
+                    f"publish_id={record.id}"
+                ) from None
+
+        bind_id = select_stage_bind_id(ext.get("binding") or {}, record.status)
+        if not bind_id:
+            raise DeviceNotBoundError(
+                f"EngineRuntimeRelay: no stage binding for bot={bot_id} "
+                f"publish_id={record.id} status={record.status}"
+            )
+
+        # ``…_invoke`` rather than ``resolve_for_binding``: for the multi-instance
+        # providers a published bot runs on, the transport fetches the address per
+        # binding at call time and this only has to carry the routing fields. It
+        # falls through to full resolution for the providers that need it.
+        return self._resolver.resolve_for_binding_invoke(
+            int(bind_id), owner_id, bot_id=bot_id
+        )
 
     # ── forwarding ────────────────────────────────────────────────────────
 
@@ -139,6 +223,18 @@ class EngineRuntimeRelay:
         then the forward. A handler that reverses it would touch a device for a
         bot the caller does not own.
 
+        Device resolution runs in a **worker thread**. It is synchronous and its
+        provider leg is blocking network I/O — a BaaS-backed bot resolves through
+        ``BaasService.get_ws_info``, a sync ``httpx`` call with a 30-second
+        timeout — so running it inline would park the event loop for the length
+        of one slow provider lookup and stall every unrelated request on the
+        worker. ``CronRelayService`` offloads the same resolution for the same
+        reason (``_prepare_runtime_query_async``), which is also what makes this
+        safe: the repositories underneath are already driven from worker threads
+        on that path in production. No semaphore here — cron needs one because it
+        fans out over every target of one request, while this resolves exactly
+        one device per inbound request, where the bound belongs to the server.
+
         ``enveloped`` declares whether this engine route answers with the
         standard ``{success, data, …}`` envelope. Almost all do — but
         ``GET /api/engine/status`` returns ``EngineManager.status()`` **raw**
@@ -148,8 +244,10 @@ class EngineRuntimeRelay:
         rather than sniffing for a ``success`` key, because a body that happens
         to lack one is exactly the malformed case that must still fail.
         """
-        self.resolve_bot(bot_id, owner_id)
-        ctx = self._resolve_device(bot_id, owner_id)
+        facts = self.resolve_bot(bot_id, owner_id)
+        ctx = await asyncio.to_thread(
+            self._resolve_device, bot_id, owner_id, facts.bot_type
+        )
         raw = await self._invoke(ctx, method, path, body, params, timeout)
         return self._normalise(raw, bot_id=bot_id, path=path, enveloped=enveloped)
 

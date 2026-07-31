@@ -413,6 +413,23 @@ Track B 的坑：**基类放最后** —— `ENVELOPE_ERRORS` 按插入顺序第
   给 token 本身收窄作用域需要引擎侧改动；这个门禁才是本面负责的部分。
 - **2026-07-30 —— 对话仍然是 WebSocket。** 不做 `POST /chat`，不做 SSE。公共 API
   交还 URL 与 headers，socket 由调用方自己持有。
+- **2026-07-31 —— `service` bot 走其**发布态**运行绑定解析**，而不是
+  `ac_bots.binding_id`。这是评审针对上面那三个两种类型都服务的组提出的。该字段存的
+  是发布前的 draft binding —— 在 BaaS 链路上就是 owner 自己的个人设备，而发布产生的
+  binding 根本不在这一列上（`BaasConnInfoBuilder._resolve_bot` 记录了同一处分裂）——
+  所以 by-bot 入口会把已发布 bot 的 engine / models / approvals 调用发到错误的设备
+  上；或者在 draft binding 被释放后，明明发布态 bot 是健康的，却报“设备未就绪”。真正
+  在跑的 binding 是发布单的 `ext.binding.online`，用公共的 `select_stage_bind_id`
+  选取，再经 `resolve_for_binding_invoke` 解析 —— 与 `DeviceInstanceService` 和 cron
+  运行态链路的取法完全一致。**不回落到 draft**：没有发布态运行绑定的 bot 一律按“设备
+  未就绪”处理，跟未开通的 personal bot 同一个答案，因为回落到 draft 正是这里要修掉的
+  缺陷。发布单查询刻意不按 owner 过滤（组织 bot 的 `entity_id` 不一定等于创建者工号）；
+  这样做是安全的，因为 relay 在此之前已经按 owner 作用域解析过该 bot。
+- **2026-07-31 —— 设备解析绝不在事件循环上执行。** 它是同步的，且 provider 那一段是
+  阻塞式网络 I/O —— BaaS 链路的 bot 要经 `BaasService.get_ws_info`，那是一个超时 30
+  秒的同步 `httpx` 调用 —— 所以一次慢查询就会占住 worker 的事件循环，拖垮该 worker 上
+  所有不相干的请求。relay 与 connection 端点都把它放进工作线程执行，与
+  `CronRelayService` 已有的做法一致。
 
 ## 留给 SDD 的开放问题
 

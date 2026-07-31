@@ -8,6 +8,10 @@ envelope normalisation, and transport-failure translation.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import threading
+
 import pytest
 
 from agentclaw.community.core.bot_management.services.bot_service import (
@@ -56,6 +60,7 @@ class _Resolver:
     def __init__(self, raises: Exception | None = None) -> None:
         self._raises = raises
         self.calls: list[tuple[str, str]] = []
+        self.binding_calls: list[tuple[int, str, str]] = []
 
     def resolve_for_bot(self, bot_id, user_id, *, device_uuid=None):
         self.calls.append((bot_id, user_id))
@@ -69,6 +74,41 @@ class _Resolver:
             user_id=user_id,
             bot_type="personal",
         )
+
+    def resolve_for_binding_invoke(self, binding_id, operator_id, *, bot_id,
+                                   device_uuid=None):
+        self.binding_calls.append((binding_id, operator_id, bot_id))
+        if self._raises is not None:
+            raise self._raises
+        return DeviceContext(
+            provider="baas",
+            conn_info={"bind_id": binding_id},
+            binding_id=binding_id,
+            bot_id=bot_id,
+            user_id=operator_id,
+            bot_type="service",
+        )
+
+
+class _PublishRecord:
+    """The few ``BotPublishRecord`` fields the relay reads."""
+
+    def __init__(self, ext, status="success", record_id=7) -> None:
+        self.ext = ext
+        self.status = status
+        self.id = record_id
+
+
+class _PublishRepo:
+    """Stands in for the publish repository's latest-success lookup."""
+
+    def __init__(self, record: object | None = None) -> None:
+        self._record = record
+        self.calls: list[tuple[str, str]] = []
+
+    def get_latest_success_by_source_bot_id(self, source_bot_id, env):
+        self.calls.append((source_bot_id, env))
+        return self._record
 
 
 _UNSET = object()
@@ -106,12 +146,19 @@ class _Transport:
         raise NotImplementedError
 
 
-def _relay(bot_service=None, resolver=None, transport=None) -> EngineRuntimeRelay:
+def _relay(
+    bot_service=None, resolver=None, transport=None, publish_repo=None
+) -> EngineRuntimeRelay:
     return EngineRuntimeRelay(
         bot_service or _BotService(),
         resolver or _Resolver(),
         transport or _Transport(),
+        publish_repo or _PublishRepo(),
     )
+
+
+def _service_bot_service() -> _BotService:
+    return _BotService({(BOT, OWNER): {"bot_id": BOT, "bot_type": "service"}})
 
 
 # ── isolation: bot resolution precedes any device work ────────────────────────
@@ -475,3 +522,129 @@ async def test_a_raw_payload_that_merely_lacks_success_is_still_accepted():
         path="/api/engine/status", enveloped=False,
     )
     assert result.data == status
+
+
+# ── service bots resolve through their published runtime binding ──────────────
+
+
+@pytest.mark.asyncio
+async def test_service_bot_resolves_through_its_published_binding():
+    """A service bot's traffic must reach the *published* device.
+
+    ``ac_bots.binding_id`` is the pre-publication draft — on the BaaS path the
+    owner's own device, and the binding publishing produced is not on that
+    column at all. Resolving by bot would send a caller's engine, model and
+    approval calls to the wrong box while the bot they addressed runs elsewhere.
+    """
+    resolver = _Resolver()
+    repo = _PublishRepo(_PublishRecord({"binding": {"online": 42, "verify": 41}}))
+    relay = _relay(
+        bot_service=_service_bot_service(), resolver=resolver, publish_repo=repo
+    )
+
+    await relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+
+    assert resolver.binding_calls == [(42, OWNER, BOT)]
+    # The by-bot entry point — the draft binding — must not be consulted at all.
+    assert resolver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_personal_bot_still_resolves_by_bot():
+    """The published-binding lookup is service-only; personal bots are unchanged."""
+    resolver = _Resolver()
+    repo = _PublishRepo()
+    await _relay(resolver=resolver, publish_repo=repo).call(
+        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models"
+    )
+
+    assert resolver.calls == [(BOT, OWNER)]
+    assert resolver.binding_calls == []
+    # No publish lookup for a personal bot — it has no publish record to find.
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_service_bot_without_a_published_runtime_is_not_ready():
+    """No published runtime is "not ready", never a fall back to the draft.
+
+    Falling back would resolve the owner's own device — the defect this
+    replaces — so an unpublished service bot gets the same retryable answer an
+    unprovisioned personal bot gets, and the device is never touched.
+    """
+    transport = _Transport()
+    with pytest.raises(EngineDeviceNotReadyError):
+        await _relay(
+            bot_service=_service_bot_service(),
+            transport=transport,
+            publish_repo=_PublishRepo(None),
+        ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_service_bot_with_no_stage_binding_is_not_ready():
+    """A publish record whose ``ext.binding`` names no usable stage."""
+    resolver = _Resolver()
+    with pytest.raises(EngineDeviceNotReadyError):
+        await _relay(
+            bot_service=_service_bot_service(),
+            resolver=resolver,
+            publish_repo=_PublishRepo(_PublishRecord({"binding": {}})),
+        ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+
+    assert resolver.binding_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_ext_is_read_when_it_arrives_as_json_text():
+    """``ext`` is normally a parsed dict; the str form is handled the same."""
+    resolver = _Resolver()
+    repo = _PublishRepo(_PublishRecord(json.dumps({"binding": {"online": 9}})))
+    await _relay(
+        bot_service=_service_bot_service(), resolver=resolver, publish_repo=repo
+    ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+
+    assert resolver.binding_calls == [(9, OWNER, BOT)]
+
+
+# ── device resolution stays off the event loop ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_device_resolution_does_not_block_the_event_loop():
+    """Resolution is blocking network I/O and must run in a worker thread.
+
+    A BaaS-backed bot resolves through ``BaasService.get_ws_info``, a sync
+    ``httpx`` call with a 30-second timeout. Run inline, it parks the loop for
+    that whole time and stalls every unrelated request on the worker.
+
+    The assertion is that the loop keeps running *while* resolution is in
+    flight: this coroutine is what releases the resolver, so if resolution held
+    the loop, nothing could ever release it and the wait below would time out.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _BlockingResolver(_Resolver):
+        def resolve_for_bot(self, bot_id, user_id, *, device_uuid=None):
+            entered.set()
+            if not release.wait(timeout=5):
+                raise AssertionError("resolution was never released")
+            return super().resolve_for_bot(bot_id, user_id, device_uuid=device_uuid)
+
+    relay = _relay(resolver=_BlockingResolver())
+    task = asyncio.create_task(
+        relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+    )
+
+    for _ in range(500):
+        if entered.is_set():
+            break
+        await asyncio.sleep(0.01)
+    assert entered.is_set(), "resolution never started"
+
+    release.set()
+    result = await asyncio.wait_for(task, timeout=5)
+    assert result.data == {}
