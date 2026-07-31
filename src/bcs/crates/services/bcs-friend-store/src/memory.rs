@@ -202,17 +202,54 @@ impl FriendRepoPort for MemoryFriendRepo {
             pairs.remove(&(left.clone(), right.clone()))
         };
 
-        if existed {
-            self.records
+        if !existed {
+            return Ok(false);
+        }
+
+        // Capture the record before removing it so the in-memory state can be
+        // restored if file persistence fails — keeping memory consistent with
+        // the still-present on-disk record (a restart would reload it from
+        // disk since the file write did not happen).
+        let removed_record = {
+            let mut records = self.records.write().await;
+            let mut removed = None;
+            records.retain(|record| {
+                if record.left_bot == left && record.right_bot == right {
+                    removed = Some(record.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            removed
+        };
+
+        if let Err(err) = self.save_to_disk().await {
+            // Persistence failed: restore the in-memory friendship so memory
+            // matches the unchanged on-disk record, and propagate the failure
+            // so callers know the deletion was not durable instead of
+            // reporting a false success that a restart would undo.
+            tracing::error!(
+                left_bot = %left,
+                right_bot = %right,
+                path = ?self.data_dir,
+                error = %err,
+                "Failed to persist friendship removal to disk; restoring in-memory state",
+            );
+            self.pairs
                 .write()
                 .await
-                .retain(|record| !(record.left_bot == left && record.right_bot == right));
-            if let Err(err) = self.save_to_disk().await {
-                tracing::warn!(left_bot = %left, right_bot = %right, path = ?self.data_dir, error = %err, "Failed to persist friendship removal to disk");
+                .insert((left.clone(), right.clone()));
+            if let Some(record) = removed_record {
+                self.records.write().await.push(record);
             }
-            info!(left_bot = %left, right_bot = %right, "Friendship removed");
+            return Err(ServiceError::InternalError(format!(
+                "failed to persist friendship removal ({left}, {right}) to disk"
+            )));
         }
-        Ok(existed)
+
+        info!(left_bot = %left, right_bot = %right, "Friendship removed");
+        Ok(true)
     }
 }
 
@@ -567,6 +604,48 @@ mod tests {
         // are_friends reflects removal; a-c still friends.
         assert!(!must_service(repo.are_friends("a", "b").await));
         assert!(must_service(repo.are_friends("a", "c").await));
+    }
+
+    #[tokio::test]
+    async fn remove_friendship_propagates_disk_persistence_failure() {
+        // Point `data_dir` at a regular file so `save_to_disk`'s
+        // `create_dir_all` fails, simulating a read-only/full filesystem.
+        let temp = match tempfile::tempdir() {
+            Ok(t) => t,
+            Err(err) => panic!("tempdir failed: {err}"),
+        };
+        let blocker = temp.path().join("blocker");
+        if let Err(err) = tokio::fs::write(&blocker, b"not a dir").await {
+            panic!("write blocker file failed: {err}");
+        }
+        let repo = MemoryFriendRepo::with_data_dir(blocker);
+
+        // Seed a friendship directly into memory (do not touch disk).
+        seed(&repo, "a", "b", 300).await;
+        assert!(
+            must_service(repo.are_friends("a", "b").await),
+            "seeded friendship should be present",
+        );
+
+        // Removing must propagate the persistence failure rather than Ok(true),
+        // otherwise the API would report a durable deletion that a restart
+        // reloads from disk.
+        let result = repo.remove_friendship("a", "b").await;
+        assert!(
+            result.is_err(),
+            "remove_friendship should return Err when disk persistence fails, got {result:?}",
+        );
+
+        // In-memory state must stay consistent with the (unchanged) disk
+        // state: the friendship is still present after the failed removal.
+        assert!(
+            must_service(repo.are_friends("a", "b").await),
+            "in-memory friendship should be restored after persistence failure",
+        );
+        let (page, total) = must_service(repo.list_friendships_paginated("a", 0, 10).await);
+        assert_eq!(total, 1, "friendship record should be restored");
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].friend_bot_uuid, "b");
     }
 
     #[tokio::test]
