@@ -24,9 +24,11 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
+    envelope_errors,
     page as page_envelope,
 )
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
+from agentclaw.community.core.cron.errors import CronRelayError
 from agentclaw.community.di import Injected
 
 from .schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate, ScheduleTrigger
@@ -94,6 +96,7 @@ def _map_run(data: dict, routine_id: str) -> RoutineRun:
 
 
 @router.get("", response_model=Envelope[Page[Routine]])
+@envelope_errors
 async def list_routines(
     page: PageParamsDep,
     principal: PrincipalDep,
@@ -131,6 +134,7 @@ async def list_routines(
 
 
 @router.post("", status_code=201, response_model=Envelope[Routine])
+@envelope_errors
 async def create_routine(
     body: RoutineCreate,
     principal: PrincipalDep,
@@ -170,6 +174,7 @@ async def create_routine(
 
 
 @router.get("/{routine_id}", response_model=Envelope[Routine])
+@envelope_errors
 async def get_routine(
     routine_id: str,
     principal: PrincipalDep,
@@ -197,6 +202,7 @@ async def get_routine(
 
 
 @router.patch("/{routine_id}", response_model=Envelope[Routine])
+@envelope_errors
 async def update_routine(
     routine_id: str,
     body: RoutineUpdate,
@@ -241,6 +247,7 @@ async def update_routine(
 
 
 @router.delete("/{routine_id}", response_model=Envelope[Deleted])
+@envelope_errors
 async def delete_routine(
     routine_id: str,
     principal: PrincipalDep,
@@ -251,23 +258,40 @@ async def delete_routine(
     """Delete a routine.
 
     C3: ``bot_id`` is a required query (path carries only ``routine_id``).
-    ``delete_cron`` only operates on the draft stage; the engine rejects
-    published-stage deletes with CronRelayError (403). We surface the
-    engine's ``success`` flag as ``Deleted(deleted=…)`` — NOT the
-    ``deleted()`` factory, which always stamps ``deleted=True``; a failed
-    delete must read ``deleted=False``.
+    ``delete_cron`` only operates on the draft stage; a published-stage delete
+    raises ``CronRelayError`` (error_code 403), mapped here (the code is dynamic
+    per-raise, so not in the static ``ENVELOPE_ERRORS`` map). A failed draft
+    delete is NOT surfaced as ``200 {deleted: false}`` — a missing routine_id
+    maps to 404 and a relay timeout to 502. The engine result distinguishes the
+    two only via its ``error`` text today; a structured engine ``error_code``
+    would make timeout-vs-missing precise (follow-up).
     """
     owner_id = caller_owner_id(principal)
     user_id = owner_id
     nick_name = owner_id
-    result = await factory.delete_cron(
-        bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
-    )
+    try:
+        result = await factory.delete_cron(
+            bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
+        )
+    except CronRelayError as e:
+        # published-stage delete rejected — CronRelayError carries the engine's
+        # error_code (dynamic, so not in the static ENVELOPE_ERRORS map).
+        raise HTTPException(
+            status_code=getattr(e, "error_code", None) or 500, detail=str(e)
+        ) from e
     success = bool(result.get("success")) if isinstance(result, dict) else False
-    return envelope(Deleted(deleted=success), request)
+    if not success:
+        error = str(result.get("error", "") or "") if isinstance(result, dict) else ""
+        if "timeout" in error.lower() or "timed out" in error.lower():
+            raise HTTPException(status_code=502, detail="Routine delete timed out")
+        raise HTTPException(
+            status_code=404, detail="Routine not found or delete failed"
+        )
+    return envelope(Deleted(deleted=True), request)
 
 
 @router.post("/{routine_id}/run", response_model=Envelope[RoutineRun])
+@envelope_errors
 async def run_routine(
     routine_id: str,
     principal: PrincipalDep,
@@ -318,6 +342,7 @@ async def run_routine(
     "/{routine_id}/runs",
     response_model=Envelope[Page[RoutineRun]],
 )
+@envelope_errors
 async def list_routine_runs(
     routine_id: str,
     page: PageParamsDep,

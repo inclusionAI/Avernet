@@ -139,7 +139,15 @@ class _StubService:
 
     def list_resources(self, *args, **kwargs):
         self.last_call_kwargs = dict(kwargs)
-        return self._items
+        items = self._items
+        limit = kwargs.get("limit")
+        offset = kwargs.get("offset", 0) or 0
+        if limit:
+            items = items[offset : offset + limit]
+        return items
+
+    def count_resources(self, *, resource_type=None) -> int:
+        return len(self._items)
 
     def get_resource(self, resource_id):
         # Sync lookup (matches concrete ResourceService.get_resource).
@@ -909,20 +917,17 @@ _DEFAULT_DEVICE_INFO = {"device_provider": "arca", "sandbox_id": "sb-1"}
 
 
 def _delete_deps(*, bot_dict=_DEFAULT_BOT, device_info=None, service=None):
-    """Bundle the four device_fs deps + a stub factory in one call site.
+    """Bundle the three device_fs deps + a stub factory in one call site.
 
-    Returns ``(factory, bot_repo, resolver, dispatcher, device_fs)`` so each
-    test stays focused on the assertion, not the wiring. ``bot_repo`` is kept
-    in the bundle for signature parity (still injected by the handler) but is
-    no longer used to fetch owner — owner_id comes from the principal.
+    Returns ``(factory, resolver, dispatcher, device_fs)``. ``bot_repo`` is no
+    longer in the bundle — the handlers no longer inject ``BotRepository``
+    (dead: the bot lookup lives in ``resolver.resolve_for_bot``). ``bot_dict``
+    / ``device_info`` are accepted for back-compat with call sites that still
+    pass them, but are unused now.
     """
     device_fs = _StubDeviceFs()
     return (
         _StubFactory(service or _StubService([])),
-        _StubBotRepo(
-            bot_dict=bot_dict,
-            device_info=device_info or _DEFAULT_DEVICE_INFO,
-        ),
         _StubResolver(),
         _StubDispatcher(device_fs),
         device_fs,
@@ -932,14 +937,13 @@ def _delete_deps(*, bot_dict=_DEFAULT_BOT, device_info=None, service=None):
 @pytest.mark.asyncio
 async def test_delete_returns_200_envelope_with_deleted_true():
     service = _StubService([])
-    factory, bot_repo, resolver, dispatcher, device_fs = _delete_deps(service=service)
+    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
 
     env = await delete_resource(
         resource_id="1",
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -964,14 +968,13 @@ async def test_delete_returns_200_envelope_with_deleted_true():
 async def test_delete_raises_missing_principal_when_no_authenticated_caller():
     # owner_id now comes from the verified principal (caller_owner_id),
     # NOT bot_repo.get_by_id — a None principal is fail-closed (bots parity).
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
+    factory, resolver, dispatcher, _ = _delete_deps()
 
     resp = await delete_resource(
         resource_id="1",
         principal=None,
         bot_id="ghost",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -984,7 +987,7 @@ async def test_delete_raises_missing_principal_when_no_authenticated_caller():
 async def test_delete_raises_404_when_resource_missing():
     # service.delete_resource returns False for resource_id == "0"
     service = _StubService([])
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps(service=service)
+    factory, resolver, dispatcher, _ = _delete_deps(service=service)
 
     with pytest.raises(HTTPException) as exc:
         await delete_resource(
@@ -992,7 +995,6 @@ async def test_delete_raises_404_when_resource_missing():
             principal={"user_id": "u1"},
             bot_id="bot-a",
             factory=factory,
-            bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
@@ -1004,7 +1006,7 @@ async def test_delete_raises_404_when_resource_missing():
 
 @pytest.mark.asyncio
 async def test_delete_reads_x_trace_id_from_request():
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
+    factory, resolver, dispatcher, _ = _delete_deps()
     request = _request_with_trace("trace-del-1")
 
     env = await delete_resource(
@@ -1012,7 +1014,6 @@ async def test_delete_reads_x_trace_id_from_request():
         principal={"user_id": "u1"},
         bot_id="bot-a",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=request,
@@ -1039,7 +1040,7 @@ async def test_delete_reads_x_trace_id_from_request():
 @pytest.mark.asyncio
 async def test_upload_returns_201_envelope_and_threads_device_fs():
     service = _StubService([])
-    factory, bot_repo, resolver, dispatcher, device_fs = _delete_deps(service=service)
+    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
 
     env = await upload_resource(
         name="hello.txt",
@@ -1047,7 +1048,6 @@ async def test_upload_returns_201_envelope_and_threads_device_fs():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1078,7 +1078,7 @@ async def test_upload_returns_201_envelope_and_threads_device_fs():
 async def test_upload_raises_missing_principal_when_no_authenticated_caller():
     # owner_id from caller_owner_id(principal) — a None principal is
     # fail-closed (no silent bot_repo fallback), mirroring the bots router.
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
+    factory, resolver, dispatcher, _ = _delete_deps()
 
     resp = await upload_resource(
         name="hello.txt",
@@ -1086,7 +1086,6 @@ async def test_upload_raises_missing_principal_when_no_authenticated_caller():
         principal=None,
         bot_id="ghost",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1099,7 +1098,7 @@ async def test_upload_raises_missing_principal_when_no_authenticated_caller():
 async def test_upload_raises_409_on_duplicate_name():
     # upload_file raises ValueError for filename == "taken"
     service = _StubService([])
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps(service=service)
+    factory, resolver, dispatcher, _ = _delete_deps(service=service)
 
     resp = await upload_resource(
         name="taken",
@@ -1107,7 +1106,6 @@ async def test_upload_raises_409_on_duplicate_name():
         principal={"user_id": "u1"},
         bot_id="bot-a",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1118,7 +1116,7 @@ async def test_upload_raises_409_on_duplicate_name():
 
 @pytest.mark.asyncio
 async def test_upload_reads_x_trace_id_from_request():
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
+    factory, resolver, dispatcher, _ = _delete_deps()
     request = _request_with_trace("trace-up-1")
 
     env = await upload_resource(
@@ -1127,7 +1125,6 @@ async def test_upload_reads_x_trace_id_from_request():
         principal={"user_id": "u1"},
         bot_id="bot-a",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=request,
@@ -1153,14 +1150,13 @@ async def test_upload_reads_x_trace_id_from_request():
 @pytest.mark.asyncio
 async def test_download_returns_raw_bytes_with_mime_type():
     service = _StubService([])
-    factory, bot_repo, resolver, dispatcher, device_fs = _delete_deps(service=service)
+    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
 
     response = await download_resource(
         resource_id="1",
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
     )
@@ -1179,7 +1175,7 @@ async def test_download_returns_raw_bytes_with_mime_type():
 async def test_download_raises_missing_principal_when_no_authenticated_caller():
     # owner_id from caller_owner_id(principal) — a None principal is
     # fail-closed (no silent bot_repo fallback), mirroring the bots router.
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
+    factory, resolver, dispatcher, _ = _delete_deps()
 
     with pytest.raises(MissingPrincipalError):
         await download_resource(
@@ -1187,7 +1183,6 @@ async def test_download_raises_missing_principal_when_no_authenticated_caller():
             principal=None,
             bot_id="ghost",
             factory=factory,
-            bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=dispatcher,
         )
@@ -1199,7 +1194,7 @@ async def test_download_raises_404_when_service_returns_none():
     # (simulates not-found / not-a-file / is-directory / read-failure —
     # the service collapses all to None and the handler maps to 404).
     service = _StubService([])
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps(service=service)
+    factory, resolver, dispatcher, _ = _delete_deps(service=service)
 
     with pytest.raises(HTTPException) as exc:
         await download_resource(
@@ -1207,7 +1202,6 @@ async def test_download_raises_404_when_service_returns_none():
             principal={"user_id": "u1"},
             bot_id="bot-a",
             factory=factory,
-            bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=dispatcher,
         )
@@ -1235,14 +1229,13 @@ async def test_download_raises_404_when_service_returns_none():
 @pytest.mark.asyncio
 async def test_preview_returns_envelope_with_content_and_type():
     service = _StubService([])
-    factory, bot_repo, resolver, dispatcher, device_fs = _delete_deps(service=service)
+    factory, resolver, dispatcher, device_fs = _delete_deps(service=service)
 
     env = await preview_resource(
         resource_id="1",
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1268,14 +1261,13 @@ async def test_preview_returns_envelope_with_content_and_type():
 async def test_preview_raises_missing_principal_when_no_authenticated_caller():
     # owner_id from caller_owner_id(principal) — a None principal is
     # fail-closed (no silent bot_repo fallback), mirroring the bots router.
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps()
+    factory, resolver, dispatcher, _ = _delete_deps()
 
     resp = await preview_resource(
         resource_id="1",
         principal=None,
         bot_id="ghost",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1290,7 +1282,7 @@ async def test_preview_raises_404_when_service_returns_none():
     # not-found / not-a-file / is-directory / read-failure / empty — the
     # service collapses all to None and the handler maps to 404).
     service = _StubService([])
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps(service=service)
+    factory, resolver, dispatcher, _ = _delete_deps(service=service)
 
     with pytest.raises(HTTPException) as exc:
         await preview_resource(
@@ -1298,7 +1290,6 @@ async def test_preview_raises_404_when_service_returns_none():
             principal={"user_id": "u1"},
             bot_id="bot-a",
             factory=factory,
-            bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
@@ -1313,14 +1304,13 @@ async def test_preview_raises_413_when_too_large():
     # service.preview_resource raises ValueError for resource_id == "too-large"
     # (simulates content > 1 MB cap); the handler maps ValueError → 413.
     service = _StubService([])
-    factory, bot_repo, resolver, dispatcher, _ = _delete_deps(service=service)
+    factory, resolver, dispatcher, _ = _delete_deps(service=service)
 
     resp = await preview_resource(
         resource_id="too-large",
         principal={"user_id": "u1"},
         bot_id="bot-a",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1467,7 +1457,7 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
     """
     factory, repo = _real_factory_with_inmemory_repo()
     device_fs = _StubDeviceFs()
-    bot_repo = _StubBotRepo(bot_dict=_DEFAULT_BOT)
+
     resolver = _StubResolver()
     dispatcher = _StubDispatcher(device_fs)
 
@@ -1521,7 +1511,6 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1541,7 +1530,6 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
     )
@@ -1556,7 +1544,6 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1573,7 +1560,6 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1591,7 +1577,6 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
             principal={"user_id": "u1"},
             bot_id="bot-x",
             factory=factory,
-            bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
@@ -1607,7 +1592,6 @@ async def test_real_factory_service_supports_all_handler_methods_e2e():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
@@ -1813,7 +1797,7 @@ async def test_get_resource_returns_404_for_cross_bot_resource_id():
 async def test_delete_resource_returns_404_for_cross_bot_resource_id():
     factory, repo = _real_factory_with_inmemory_repo()
     foreign_id = _seed_foreign_resource(repo)
-    bot_repo = _StubBotRepo(bot_dict=_DEFAULT_BOT)
+
     resolver = _StubResolver()
     dispatcher = _StubDispatcher(_StubDeviceFs())
 
@@ -1823,7 +1807,6 @@ async def test_delete_resource_returns_404_for_cross_bot_resource_id():
             principal={"user_id": "u1"},
             bot_id="bot-x",
             factory=factory,
-            bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
@@ -1839,7 +1822,7 @@ async def test_delete_resource_returns_404_for_cross_bot_resource_id():
 async def test_download_resource_returns_404_for_cross_bot_resource_id():
     factory, repo = _real_factory_with_inmemory_repo()
     foreign_id = _seed_foreign_resource(repo)
-    bot_repo = _StubBotRepo(bot_dict=_DEFAULT_BOT)
+
     resolver = _StubResolver()
     dispatcher = _StubDispatcher(_StubDeviceFs())
 
@@ -1849,7 +1832,6 @@ async def test_download_resource_returns_404_for_cross_bot_resource_id():
             principal={"user_id": "u1"},
             bot_id="bot-x",
             factory=factory,
-            bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=dispatcher,
         )
@@ -1861,7 +1843,7 @@ async def test_download_resource_returns_404_for_cross_bot_resource_id():
 async def test_preview_resource_returns_404_for_cross_bot_resource_id():
     factory, repo = _real_factory_with_inmemory_repo()
     foreign_id = _seed_foreign_resource(repo)
-    bot_repo = _StubBotRepo(bot_dict=_DEFAULT_BOT)
+
     resolver = _StubResolver()
     dispatcher = _StubDispatcher(_StubDeviceFs())
 
@@ -1871,7 +1853,6 @@ async def test_preview_resource_returns_404_for_cross_bot_resource_id():
             principal={"user_id": "u1"},
             bot_id="bot-x",
             factory=factory,
-            bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
@@ -1925,7 +1906,7 @@ class _FailingDeviceFs:
 @pytest.mark.asyncio
 async def test_upload_returns_502_when_device_fs_write_fails():
     factory, repo = _real_factory_with_inmemory_repo()
-    bot_repo = _StubBotRepo(bot_dict=_DEFAULT_BOT)
+
     resolver = _StubResolver()
     dispatcher = _StubDispatcher(_FailingDeviceFs())
     rows_before = len(repo._rows)
@@ -1937,7 +1918,6 @@ async def test_upload_returns_502_when_device_fs_write_fails():
             principal={"user_id": "u1"},
             bot_id="bot-x",
             factory=factory,
-            bot_repo=bot_repo,
             resolver=resolver,
             device_fs_dispatcher=dispatcher,
             request=_request_without_trace(),
@@ -1956,7 +1936,7 @@ async def test_upload_409_takes_precedence_over_502_path():
     from datetime import datetime
 
     factory, repo = _real_factory_with_inmemory_repo()
-    bot_repo = _StubBotRepo(bot_dict=_DEFAULT_BOT)
+
     resolver = _StubResolver()
     dispatcher = _StubDispatcher(_FailingDeviceFs())
     # Seed a bot-x FILE row whose name collides with the upload below.
@@ -1983,7 +1963,6 @@ async def test_upload_409_takes_precedence_over_502_path():
         principal={"user_id": "u1"},
         bot_id="bot-x",
         factory=factory,
-        bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
         request=_request_without_trace(),
