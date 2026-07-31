@@ -71,7 +71,7 @@ def boot_with_key(value: str | None) -> None:
         def get_secret(self, secret_name: str) -> object | None:
             return None if value is None else _Secret(value)
 
-    init_principal_verifier_config(_Resolver(), SECRET_NAME)
+    init_principal_verifier_config(_Resolver(), SECRET_NAME, strict=False)
 
 
 @pytest.fixture(autouse=True)

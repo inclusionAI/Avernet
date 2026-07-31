@@ -59,7 +59,7 @@ def clear_config():
 def test_key_is_resolved_through_the_secret_resolver():
     resolver = _FakeResolver(_Secret(KEY))
 
-    init_principal_verifier_config(resolver, SECRET_NAME)
+    init_principal_verifier_config(resolver, SECRET_NAME, strict=False)
 
     assert get_principal_verifier_config().signing_key == KEY
     assert resolver.calls == [SECRET_NAME], "looked the secret up by its registered name"
@@ -72,7 +72,7 @@ def test_audience_and_issuer_are_fixed_in_code():
     name under ``servers:`` in its own config. A knob on only the verifying side
     could not change the contract, just break it.
     """
-    init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME)
+    init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False)
 
     config = get_principal_verifier_config()
 
@@ -89,7 +89,7 @@ def test_no_registered_secret_name_denies():
     """A deployment that never registered the name has no key — so it denies."""
     resolver = _FakeResolver(_Secret(KEY))
 
-    init_principal_verifier_config(resolver, "")
+    init_principal_verifier_config(resolver, "", strict=False)
 
     assert get_principal_verifier_config().signing_key == ""
     assert resolver.calls == [], "never looked up a secret it had no name for"
@@ -97,7 +97,7 @@ def test_no_registered_secret_name_denies():
 
 def test_absent_secret_denies():
     """Registered, but the store has no such secret."""
-    init_principal_verifier_config(_FakeResolver(None), SECRET_NAME)
+    init_principal_verifier_config(_FakeResolver(None), SECRET_NAME, strict=False)
 
     assert get_principal_verifier_config().signing_key == ""
 
@@ -105,18 +105,56 @@ def test_absent_secret_denies():
 @pytest.mark.parametrize("value", ["", "   "])
 def test_empty_or_whitespace_value_counts_as_unset(value):
     """A key that is empty or accidentally whitespace must not look configured."""
-    init_principal_verifier_config(_FakeResolver(_Secret(value)), SECRET_NAME)
+    init_principal_verifier_config(_FakeResolver(_Secret(value)), SECRET_NAME, strict=False)
 
     assert get_principal_verifier_config().signing_key == ""
 
 
 def test_resolver_failure_denies_instead_of_raising():
-    """A secret-store outage must not stop the process from booting.
+    """Permissive: a secret-store outage must not stop a local boot.
 
     Without the key we cannot tell a gateway token from a forged one, which is
     the same answer as never having had one: deny.
     """
-    init_principal_verifier_config(_FakeResolver(raises=True), SECRET_NAME)
+    init_principal_verifier_config(_FakeResolver(raises=True), SECRET_NAME, strict=False)
+
+    assert get_principal_verifier_config().signing_key == ""
+
+
+# ── strict environments refuse to boot without a key ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    "resolver,secret_name",
+    [
+        pytest.param(_FakeResolver(_Secret(KEY)), "", id="no-name-registered"),
+        pytest.param(_FakeResolver(None), SECRET_NAME, id="secret-absent"),
+        pytest.param(_FakeResolver(_Secret("")), SECRET_NAME, id="empty-value"),
+        pytest.param(_FakeResolver(_Secret("   ")), SECRET_NAME, id="whitespace-value"),
+        pytest.param(_FakeResolver(raises=True), SECRET_NAME, id="store-unreachable"),
+    ],
+)
+def test_strict_boot_fails_when_no_key_resolves(resolver, secret_name):
+    """Serving the public API without a key is broken, not degraded.
+
+    Such a deployment answers 401 to every /openapi/v1 request while looking
+    healthy, so pre/prod must fail the rollout rather than surface it as a
+    support ticket. Every way the key can fail to resolve raises here.
+    """
+    with pytest.raises(RuntimeError, match="no signing key"):
+        init_principal_verifier_config(resolver, secret_name, strict=True)
+
+
+def test_strict_boot_succeeds_with_a_key():
+    init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME, strict=True)
+
+    assert get_principal_verifier_config().signing_key == KEY
+
+
+def test_strict_failure_leaves_the_config_denying():
+    """If a caller swallows the boot error, the surface must still not open."""
+    with pytest.raises(RuntimeError):
+        init_principal_verifier_config(_FakeResolver(None), SECRET_NAME, strict=True)
 
     assert get_principal_verifier_config().signing_key == ""
 
@@ -127,7 +165,7 @@ def test_no_fallback_key_is_invented():
     A committed shared secret is a committed credential, and here "no key" fails
     safe rather than open.
     """
-    init_principal_verifier_config(_FakeResolver(None), SECRET_NAME)
+    init_principal_verifier_config(_FakeResolver(None), SECRET_NAME, strict=False)
 
     assert get_principal_verifier_config().signing_key == ""
 
@@ -136,7 +174,7 @@ def test_key_is_resolved_once_at_boot():
     """Deployment config, not per-request state — no secret-store round trip on
     the hot path, and (by the same token) no rotation without a restart."""
     resolver = _FakeResolver(_Secret(KEY))
-    init_principal_verifier_config(resolver, SECRET_NAME)
+    init_principal_verifier_config(resolver, SECRET_NAME, strict=False)
 
     first = get_principal_verifier_config()
 

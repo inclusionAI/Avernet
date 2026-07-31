@@ -21,12 +21,18 @@ What comes from where:
   ``CommunitySecretResolver``; singlebox reads it from
   ``application-singlebox.yaml`` via ``LocalSecretResolver``.
 
-  **Anything short of a real key denies every public request** — boot never ran,
-  no name registered, no such secret, an empty value, or a resolver that raises.
-  That is exactly the pre-auth state this replaces, and it is the safe reading of
-  "unconfigured": we ship **no fallback key**, because a committed shared secret
-  is a committed credential and here not having one fails safe rather than open.
-  Use at least 32 bytes — RFC 7518 §3.2 for SHA-256, and PyJWT warns below it.
+  **In ``pre``/``prod`` an unresolvable key fails the boot** — see ``strict`` on
+  :func:`init_principal_verifier_config`. Serving the public API without one is
+  not a degraded mode, it is a broken deployment that answers 401 to everything
+  while looking healthy, so it is caught at rollout rather than in a ticket.
+
+  Everywhere else — singlebox, local, dev, tests — **anything short of a real key
+  denies every public request** rather than stopping the boot: no name
+  registered, no such secret, an empty value, or a resolver that raises. Those
+  environments legitimately have no key, and that is the pre-auth state this
+  replaces. We ship **no fallback key** either way, because a committed shared
+  secret is a committed credential. Use at least 32 bytes — RFC 7518 §3.2 for
+  SHA-256, and PyJWT warns below it.
 
 - **``aud`` and ``iss``** are fixed in code, not configuration. They are the two
   ends of one wire contract, and the gateway does not make them configurable
@@ -66,27 +72,52 @@ _config: PrincipalVerifierConfig = _DENY
 
 
 def init_principal_verifier_config(
-    resolver: SecretResolver, secret_name: str
+    resolver: SecretResolver, secret_name: str, *, strict: bool
 ) -> PrincipalVerifierConfig:
     """Resolve the shared signing key and install it process-wide.
 
-    Called once from the composition root, which owns both arguments:
-    ``injector.get(SecretResolver)`` and
-    ``injector.get(SecretNamesConfig).gateway_principal_signing_key``.
+    Called once from the composition root, which owns all three arguments:
+    ``injector.get(SecretResolver)``,
+    ``injector.get(SecretNamesConfig).gateway_principal_signing_key``, and
+    whether this environment must have a key.
 
-    Never raises. Every failure — no name registered, no such secret, an empty
-    value, a secret store that is down — installs an empty key, which denies. A
-    misconfigured secret store must not stop the process from booting, and it
-    must not let one through either.
+    ``strict`` decides what an unresolvable key means. A deployment that serves
+    the public API and cannot verify a principal is broken, not degraded: it
+    would answer 401 to every ``/openapi/v1`` request while looking healthy, and
+    the misconfiguration would surface as a support ticket rather than a failed
+    rollout. So ``strict=True`` raises and the process refuses to boot.
+
+    ``strict=False`` installs the deny config instead, for the environments that
+    legitimately have no key: singlebox ships ``gateway_principal.signing_key``
+    empty on purpose (a committed shared secret is a committed credential), and
+    local/dev boots run without a gateway at all. Failing those closed keeps
+    them bootable while still refusing every unverifiable request.
+
+    Raises:
+        RuntimeError: when ``strict`` and no usable key could be resolved.
     """
     global _config
+    signing_key = _resolve_signing_key(resolver, secret_name)
+    if not signing_key and strict:
+        raise RuntimeError(
+            "gateway principal verification has no signing key: "
+            f"secret_names.gateway_principal_signing_key={secret_name!r} "
+            "resolved to nothing. The public /openapi/v1 surface would answer "
+            "401 to every request, so this environment refuses to boot. "
+            "Register the name and provision its value in this profile's "
+            "secret store."
+        )
+
     _config = PrincipalVerifierConfig(
-        signing_key=_resolve_signing_key(resolver, secret_name),
-        audience=_AUDIENCE,
-        issuer=_ISSUER,
+        signing_key=signing_key, audience=_AUDIENCE, issuer=_ISSUER
     )
-    if _config.signing_key:
+    if signing_key:
         logger.info("gateway principal verification is configured")
+    else:
+        logger.warning(
+            "gateway principal verification has no signing key — every "
+            "/openapi/v1 request will answer 401"
+        )
     return _config
 
 

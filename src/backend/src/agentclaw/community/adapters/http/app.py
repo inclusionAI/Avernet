@@ -256,11 +256,18 @@ from agentclaw.community.utils.gateway_principal_config import (  # noqa: E402
 # Resolve the key the gateway signs /openapi/v1 principals with. Done here
 # because AvernetTenantMiddleware reads the verifier config from the raw ASGI
 # layer, before any route and outside the injector — so the composition root
-# pushes it in rather than the middleware pulling it out. Never raises: an
-# unresolvable key means the public API answers 401, not that boot fails.
+# pushes it in rather than the middleware pulling it out.
+#
+# Strict in ``pre``/``prod``, matching the eager binding check above and gated
+# on the same SERVER_ENV: a deployment that serves the public API without a
+# signing key answers 401 to every request while looking healthy, so it must
+# fail the rollout instead. Local, dev, and singlebox legitimately have no key
+# (singlebox ships it empty on purpose), so there it degrades to deny-everything
+# rather than refusing to boot.
 init_principal_verifier_config(
     injector.get(SecretResolver),
     injector.get(SecretNamesConfig).gateway_principal_signing_key,
+    strict=get_current_env() in ("pre", "prod"),
 )
 
 install_middleware(
