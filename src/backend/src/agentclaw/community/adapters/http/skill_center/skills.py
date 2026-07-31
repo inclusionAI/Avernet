@@ -451,7 +451,10 @@ async def upload_skill(
 
         logger.info(f"[skills.upload_skill] Calling service.upload_skill with {len(uploaded_files)} files")
 
-        # Use user_id from query param if provided, otherwise fall back to ctx.user_id
+        # ``user_id`` identifies the Bot owner for collaborator authorization and
+        # device access. Skill metadata belongs to the authenticated uploader;
+        # using the owner for both made collaborator-uploaded local Skills appear
+        # to have been authored by the Bot owner.
         effective_user_id = user_id or ctx.user_id
 
         # Call the service method (async)
@@ -466,6 +469,7 @@ async def upload_skill(
             skill = await service.upload_skill(
                 uploaded_files,
                 user_id=effective_user_id,
+                author_id=ctx.user_id,
                 bolt_id=effective_bot_id,
             )
         finally:
