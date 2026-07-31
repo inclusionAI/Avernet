@@ -6,13 +6,30 @@ use serde::Deserialize;
 /// Request body for creating an invitation on either a Group or Session target.
 ///
 /// `expires_in_seconds` is optional; servers apply a default lifetime when
-/// omitted. The same shape is reused for both create paths because the contract
-/// (`CreateInvitationRequest`) is identical.
+/// omitted. The contract declares `minimum: 1`, so `Some(0)` is rejected at
+/// deserialization time (surfacing as a 400 `invalid_request` envelope via
+/// axum's `JsonRejection`). The same shape is reused for both create paths
+/// because the contract (`CreateInvitationRequest`) is identical.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateInvitationRequest {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_expires_in_seconds")]
     pub expires_in_seconds: Option<u64>,
+}
+
+/// Deserialize `expires_in_seconds` accepting `None` (omitted) and
+/// `Some(n) where n >= 1`; `Some(0)` is rejected so a zero-length invitation
+/// lifetime is never forwarded to the facade.
+fn deserialize_expires_in_seconds<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<u64>::deserialize(deserializer)?;
+    if matches!(value, Some(0)) {
+        Err(serde::de::Error::custom("expires_in_seconds must be >= 1"))
+    } else {
+        Ok(value)
+    }
 }
 
 impl CreateInvitationRequest {

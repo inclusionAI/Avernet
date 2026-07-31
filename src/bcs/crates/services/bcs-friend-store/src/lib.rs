@@ -590,6 +590,27 @@ impl FriendRequestRepoPort for DbFriendRequestStore {
         direction: FriendRequestDirection,
         status_filter: Option<FriendRequestStatus>,
     ) -> Vec<FriendRequest> {
+        // Legacy contract: swallow persistence failures and return an empty
+        // page. V1 callers use `try_list_requests` instead so DB failures
+        // surface as 500 rather than a silent 200 empty page.
+        match self
+            .try_list_requests(bot_id, direction, status_filter)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(err) => {
+                warn!(bot_id = %bot_id, error = %err, "Failed to list friend requests from DB");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn try_list_requests(
+        &self,
+        bot_id: &str,
+        direction: FriendRequestDirection,
+        status_filter: Option<FriendRequestStatus>,
+    ) -> ServiceResult<Vec<FriendRequest>> {
         let env = resolve_env();
         let ts = self.select_timestamp_columns();
         let (sql, params) = match (&direction, &status_filter) {
@@ -662,19 +683,13 @@ impl FriendRequestRepoPort for DbFriendRequestStore {
             ),
         };
 
-        match self
+        let rows = self
             .query(
                 "list_friend_requests",
                 DbStatement::with_params(sql, params),
             )
-            .await
-        {
-            Ok(rows) => rows.iter().filter_map(Self::parse_request).collect(),
-            Err(err) => {
-                warn!(bot_id = %bot_id, error = %err, "Failed to list friend requests from DB");
-                Vec::new()
-            }
-        }
+            .await?;
+        Ok(rows.iter().filter_map(Self::parse_request).collect())
     }
 
     async fn delete_pending_requests_for_bot(&self, bot_id: &str) -> ServiceResult<usize> {

@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use bcs_bot::BotCore;
 use bcs_domain::{
     invite_token_encode, InviteTargetType, InviteTokenPayload,
@@ -29,6 +30,11 @@ use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, FriendCoreService, Group, GroupCoreService,
     GroupStrategy, Participant, ParticipantRole, SessionKind,
 };
+use bcs_service_api::{
+    FriendRequest as DomainFriendRequest, FriendRequestCoreService,
+    FriendRequestDirection as DomainFriendRequestDirection,
+    FriendRequestStatus as DomainFriendRequestStatus, ServiceError, ServiceResult,
+};
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 
@@ -45,6 +51,7 @@ struct Fixture {
     friends: Arc<FriendCore>,
     friend_requests: Arc<FriendRequestCore>,
     sessions: Arc<SessionManagementServiceImpl>,
+    relation: Arc<RelationCore>,
 }
 
 impl Fixture {
@@ -83,7 +90,31 @@ impl Fixture {
             friends,
             friend_requests,
             sessions,
+            relation,
         }
+    }
+
+    /// Build a V1 facade backed by the fixture's cores but substituting a
+    /// custom `FriendRequestCoreService`. Used to exercise failure-propagation
+    /// paths (e.g. a store whose `try_list_requests` errors) without touching
+    /// the legacy default fixture wiring.
+    fn build_service(
+        &self,
+        friend_requests: Arc<dyn FriendRequestCoreService>,
+    ) -> InvitationFriendshipServiceImpl {
+        InvitationFriendshipServiceImpl::new(
+            self.friends.clone(),
+            friend_requests,
+            self.groups.clone(),
+            self.sessions.clone(),
+            self.bots.clone(),
+            self.relation.clone(),
+            SECRET.to_vec(),
+            InvitationFriendshipServiceConfig {
+                relation_env: "dev".to_string(),
+                default_ttl_seconds: 3600,
+            },
+        )
     }
 
     async fn add_bot(&self, bot_uuid: &str) {
@@ -180,6 +211,61 @@ impl Fixture {
 
 fn assert_code(error: ApplicationError, expected: &str) {
     assert_eq!(error.code(), expected);
+}
+
+// ---------------------------------------------------------------------------
+// Stub [`FriendRequestCoreService`] whose `try_list_requests` always errors,
+// used to assert the V1 facade propagates persistence failures as
+// `ApplicationError::Internal` (HTTP 500) instead of a 200 empty page.
+// ---------------------------------------------------------------------------
+
+struct FailingListFriendRequestCore;
+
+#[async_trait]
+impl FriendRequestCoreService for FailingListFriendRequestCore {
+    async fn create_request(
+        &self,
+        _from_bot: &str,
+        _to_bot: &str,
+    ) -> ServiceResult<DomainFriendRequest> {
+        Err(ServiceError::InternalError("not configured".into()))
+    }
+
+    async fn accept_request(&self, _request_id: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn reject_request(&self, _request_id: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+
+    async fn get_request(&self, request_id: &str) -> ServiceResult<DomainFriendRequest> {
+        Err(ServiceError::FriendRequestNotFound(request_id.to_string()))
+    }
+
+    async fn list_requests(
+        &self,
+        _bot_id: &str,
+        _direction: DomainFriendRequestDirection,
+        _status_filter: Option<DomainFriendRequestStatus>,
+    ) -> Vec<DomainFriendRequest> {
+        Vec::new()
+    }
+
+    async fn try_list_requests(
+        &self,
+        _bot_id: &str,
+        _direction: DomainFriendRequestDirection,
+        _status_filter: Option<DomainFriendRequestStatus>,
+    ) -> ServiceResult<Vec<DomainFriendRequest>> {
+        Err(ServiceError::InternalError(
+            "simulated friend-request list failure".into(),
+        ))
+    }
+
+    async fn cancel_pending_requests(&self, _bot_id: &str) -> ServiceResult<usize> {
+        Ok(0)
+    }
 }
 
 // ── InvitationService ─────────────────────────────────────────────────
@@ -765,6 +851,36 @@ async fn list_friend_requests_direction_filter_and_sort() {
     assert_eq!(paged.total, 2);
     assert_eq!(paged.items.len(), 1);
     assert_eq!(paged.items[0].to_bot_uuid, "bot-c");
+}
+
+#[tokio::test]
+async fn list_bot_friend_requests_propagates_repo_failure_as_internal() {
+    // When the friend-request store's `try_list_requests` fails, the V1 facade
+    // must surface the failure as `ApplicationError::Internal` (HTTP 500)
+    // rather than masking it as an empty 200 page (the legacy `list_requests`
+    // swallowing behavior).
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+
+    let failing: Arc<dyn FriendRequestCoreService> = Arc::new(FailingListFriendRequestCore);
+    let service = fx.build_service(failing);
+
+    let error = service
+        .list_bot_friend_requests(ListBotFriendRequests {
+            principal: Fixture::bot_principal("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            direction: FriendRequestDirection::Sent,
+            status: None,
+            offset: 0,
+            limit: 10,
+        })
+        .await
+        .expect_err("list must propagate repo failure");
+    assert!(
+        matches!(error, ApplicationError::Internal(_)),
+        "expected ApplicationError::Internal, got {error:?}",
+    );
+    assert_eq!(error.code(), "internal_error");
 }
 
 #[tokio::test]

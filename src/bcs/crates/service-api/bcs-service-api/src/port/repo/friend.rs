@@ -80,6 +80,22 @@ pub trait FriendRequestRepoPort: Send + Sync {
         direction: FriendRequestDirection,
         status_filter: Option<FriendRequestStatus>,
     ) -> Vec<FriendRequest>;
+    /// List friend requests related to a bot without hiding persistence
+    /// failures.
+    ///
+    /// The compatibility default wraps [`FriendRequestRepoPort::list_requests`]
+    /// so legacy/test implementations remain valid. Stores backed by fallible
+    /// persistence must override this method to propagate DB errors as
+    /// `Err(ServiceError::InternalError(...))` rather than returning an empty
+    /// page (which would mask a 500 as a 200).
+    async fn try_list_requests(
+        &self,
+        bot_id: &str,
+        direction: FriendRequestDirection,
+        status_filter: Option<FriendRequestStatus>,
+    ) -> ServiceResult<Vec<FriendRequest>> {
+        Ok(self.list_requests(bot_id, direction, status_filter).await)
+    }
     async fn delete_pending_requests_for_bot(&self, bot_id: &str) -> ServiceResult<usize>;
     /// Insert an accepted request record if no accepted request for the same
     /// (from_bot, to_bot) pair already exists. Returns the existing or newly

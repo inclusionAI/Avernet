@@ -371,6 +371,55 @@ async fn create_group_invitation_allows_omitted_expires_in_seconds() {
 }
 
 #[tokio::test]
+async fn create_group_invitation_rejects_zero_expires_in_seconds() {
+    // Contract declares `minimum: 1`; `Some(0)` must be rejected at the DTO
+    // layer (400 `invalid_request`) rather than forwarded to the facade.
+    let service = Arc::new(FakeInvitationService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/groups/group-1/invitations",
+            json!({"expires_in_seconds": 0}),
+        ))
+        .await
+        .expect("zero ttl response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+    assert!(
+        service
+            .created_group
+            .lock()
+            .expect("create group lock")
+            .is_none(),
+        "facade must not be called when DTO validation fails"
+    );
+}
+
+#[tokio::test]
+async fn create_group_invitation_allows_one_second_expires_in_seconds() {
+    let service = Arc::new(FakeInvitationService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/groups/group-1/invitations",
+            json!({"expires_in_seconds": 1}),
+        ))
+        .await
+        .expect("one second ttl response");
+    assert_eq!(response.status(), StatusCode::CREATED);
+    {
+        let created = service.created_group.lock().expect("create group lock");
+        let created = created.as_ref().expect("create group command");
+        assert_eq!(created.expires_in_seconds, Some(1));
+    }
+}
+
+#[tokio::test]
 async fn create_session_invitation_returns_created_and_forwards_principal() {
     let service = Arc::new(FakeInvitationService::default());
     let app = test_router(service.clone());

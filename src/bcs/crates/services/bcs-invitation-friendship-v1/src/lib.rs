@@ -488,11 +488,14 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         };
         let mut requests = self
             .friend_requests
-            .list_requests(&command.bot_uuid, direction, command.status)
-            .await;
-        // Legacy `list_requests` returns all matches without ordering or
-        // pagination. Sort `created_at` DESC with a `request_id` ASC
-        // tie-breaker, then apply offset/limit so V1 pagination is stable.
+            .try_list_requests(&command.bot_uuid, direction, command.status)
+            .await
+            .map_err(map_service_error)?;
+        // The repo returns all matches without ordering or pagination. Sort
+        // `created_at` DESC with a `request_id` ASC tie-breaker, then apply
+        // offset/limit so V1 pagination is stable. `try_list_requests`
+        // propagates persistence failures (HTTP 500) instead of masking them
+        // as an empty 200 page.
         requests.sort_by(|a, b| {
             b.created_at
                 .cmp(&a.created_at)

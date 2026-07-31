@@ -128,6 +128,22 @@ pub trait FriendRequestCoreService: Send + Sync {
         status_filter: Option<FriendRequestStatus>,
     ) -> Vec<FriendRequest>;
 
+    /// List friend requests related to a bot without hiding persistence
+    /// failures.
+    ///
+    /// The compatibility default preserves existing implementations. Services
+    /// backed by fallible persistence should override this method so DB
+    /// failures surface to the V1 facade as `ApplicationError::Internal`
+    /// (HTTP 500) instead of being masked as an empty 200 page.
+    async fn try_list_requests(
+        &self,
+        bot_id: &str,
+        direction: FriendRequestDirection,
+        status_filter: Option<FriendRequestStatus>,
+    ) -> ServiceResult<Vec<FriendRequest>> {
+        Ok(self.list_requests(bot_id, direction, status_filter).await)
+    }
+
     /// Cancel all pending friend requests related to a bot
     /// (called when visibility changes to private).
     ///
