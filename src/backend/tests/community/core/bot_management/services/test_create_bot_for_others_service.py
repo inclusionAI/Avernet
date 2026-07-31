@@ -531,3 +531,43 @@ def test_restart_wait_treats_naive_iso_string_as_utc(monkeypatch):
     )
 
     assert result == (10, 20)
+
+
+def test_execute_is_refused_outside_the_default_tenant():
+    """This service writes ``bot_id="default"`` directly, bypassing generate_bot_id.
+
+    ``generate_bot_id`` confines the ``"default"`` shortcut to the default tenant
+    because the Passport principal and BCN record derived from it carry no tenant
+    field. Minting one here for another tenant would reintroduce exactly that
+    collision, so the operation fails closed instead (issue #556).
+    """
+    from agentclaw.community.core.bot_management.errors import CreateBotForOthersError
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+
+    service, repository, bot_service, passport, _, _ = _service()
+
+    with avernet_tenant_scope("acme"):
+        with pytest.raises(CreateBotForOthersError) as excinfo:
+            _execute(service)
+
+    assert excinfo.value.error_code == 400
+    # Fails before any lookup, Passport mint, or create.
+    repository.get_by_id_and_owner.assert_not_called()
+    passport.apply_first_agent_passport.assert_not_called()
+    bot_service.create_bot.assert_not_called()
+
+
+def test_execute_still_runs_in_the_default_tenant():
+    """The guard must not change existing behavior for the internal API path."""
+    from agentclaw.community.utils.avernet_tenant import (
+        DEFAULT_AVERNET_TENANT,
+        avernet_tenant_scope,
+    )
+
+    service, _, bot_service, _, _, _ = _service()
+
+    with avernet_tenant_scope(DEFAULT_AVERNET_TENANT):
+        result = _execute(service)
+
+    assert result["bot_id"] == "default"
+    bot_service.create_bot.assert_called_once()

@@ -339,6 +339,9 @@ class TestRouterLogic:
 
         mock_bot_service = MagicMock()
         mock_bot_service.check_create_bot_preflight.return_value = None
+        # The flow asks the service, not the bot_id, whether this is a first bot
+        # (see create_flow) — so the mock has to answer.
+        mock_bot_service.is_first_bot.return_value = True
         mock_bot_service.create_bot.return_value = {
             "bot_id": "default",
             "owner_id": "user_001",
