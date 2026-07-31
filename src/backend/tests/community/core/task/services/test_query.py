@@ -104,7 +104,7 @@ def test_get_task_graph_carries_superset_fields():
     g = svc.get_task_graph(tid)
     # task-level
     assert g["task_id"] == tid
-    assert g["root_phase"] in {"planned", "executing", "validating"}
+    assert g["root_phase"] in {"defined", "executing", "reviewing"}
     assert g["graph_status"] == "on_plaza"
     assert g["loop_round"] == 0
     assert g["definition_meta"]["node_count"] == 2

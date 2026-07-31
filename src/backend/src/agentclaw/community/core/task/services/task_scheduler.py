@@ -1,16 +1,17 @@
 """TaskScheduler — orchestration authority (Phase 3, plan §2.1/§3).
 
-Drives the EXECUTING → VALIDATING loop. Holds NO state of its own: every write
+Drives the EXECUTING → REVIEWING loop. Holds NO state of its own: every write
 flows through :class:`TaskService` (which guards + folds + appends the event
 log). The Scheduler only decides *what to do next*:
 
-- :meth:`start` (approve 委派) — PLANNED → EXECUTING + ``spawn_build_dag`` +
+- :meth:`start` (approve 委派) — DEFINED → EXECUTING + ``spawn_build_dag`` +
   ``mark_graph(ON_PLAZA)``.
 - :meth:`tick` — topo-unlock PENDING nodes whose predecessors are DONE/SKIPPED,
   recommend (Discover) + dispatch (Driver) + ``set_node_status(RUNNING)``;
-  when all nodes settle → advance VALIDATING + emit the goal-check trigger
+  when all nodes settle → advance REVIEWING + emit the goal-check trigger
   (owner-bot SKILL, stub). Termination guards: ``loop_round`` ceiling, MAX
-  consecutive no-progress ticks → force VALIDATING.
+  consecutive no-progress ticks → force REVIEWING. Unrecoverable FAILED nodes
+  → task FAILED (spec R4).
 - :meth:`on_event` — ACCEPTANCE_FAIL (NODE_REJECTED) → ``_compute_gap`` →
   reroute (enqueue tick) or split (``add_sibling_node``); NODE_FAILED →
   same-executor retry up to ``max_attempts`` (default 2) → reroute (C5).
@@ -118,25 +119,41 @@ def compute_gap(
     task: Task,
     recompose_count: int = 0,
 ) -> dict:
-    """_compute_gap pure rule. Scans nodes for PARTIAL_FAILED (reroute candidate)
-    and FAILED (split candidate). ``atomic`` trips when recompose_count hits the
-    ceiling — no more splits, the loop must force a terminal validate.
+    """_compute_gap pure rule (spec R9/R10). Scans FAILED nodes and classifies
+    recovery room from node properties (``attempted_executors`` length vs
+    ``max_attempts``), NOT from a status-enum distinction (PARTIAL_FAILED is
+    gone — acceptance-fail and execution-fail both land in FAILED).
 
-    Returns ``{need_reroute, need_split, reroute_nodes, split_nodes, atomic}``."""
+    For each FAILED node:
+    - ``attempts < max_attempts`` → reroute candidate (swap executor).
+    - ``attempts >= max_attempts`` and not atomic → split candidate (recompose).
+    - ``atomic and attempts >= max_attempts`` → **unrecoverable** (spec R4: (a)
+      atomic termination with FAILED nodes that can't reroute/split, OR (b)
+      node MAX_ATTEMPTS exhausted with no reroute/split room). The scheduler
+      escalates a non-empty ``unrecoverable_failed`` set to task-level FAILED.
+
+    ``atomic`` trips when ``recompose_count`` hits the ceiling — no more splits.
+    Recovery is attempted first; FAILED only when recovery is impossible.
+
+    Returns ``{need_reroute, need_split, reroute_nodes, split_nodes, atomic,
+    unrecoverable_failed}``."""
     graph = task.execution_graph
     reroute_nodes: list[str] = []
     split_nodes: list[str] = []
+    unrecoverable_failed: list[str] = []
+    atomic = recompose_count >= MAX_RECOMPOSE
     if graph is not None:
         for n in graph.nodes:
-            if n.status is NodeStatus.PARTIAL_FAILED:
+            if n.status is not NodeStatus.FAILED:
+                continue
+            max_attempts = int(n.properties.get("max_attempts") or DEFAULT_MAX_ATTEMPTS)
+            attempts = len(n.attempted_executors)
+            if atomic and attempts >= max_attempts:
+                unrecoverable_failed.append(n.node_id)
+            elif attempts < max_attempts:
                 reroute_nodes.append(n.node_id)
-            elif n.status is NodeStatus.FAILED:
-                max_attempts = int(n.properties.get("max_attempts") or DEFAULT_MAX_ATTEMPTS)
-                if len(n.attempted_executors) < max_attempts:
-                    reroute_nodes.append(n.node_id)
-                else:
-                    split_nodes.append(n.node_id)
-    atomic = recompose_count >= MAX_RECOMPOSE
+            else:  # not atomic and attempts >= max_attempts → split
+                split_nodes.append(n.node_id)
     # atomic suppresses further splits — reroute only.
     need_split = bool(split_nodes) and not atomic
     need_reroute = bool(reroute_nodes) or (bool(split_nodes) and atomic)
@@ -146,6 +163,7 @@ def compute_gap(
         "reroute_nodes": reroute_nodes,
         "split_nodes": split_nodes,
         "atomic": atomic,
+        "unrecoverable_failed": unrecoverable_failed,
     }
 
 
@@ -244,12 +262,12 @@ class TaskScheduler:
         task = self._svc.get(task_id)
         if task is None:
             return None
-        if task.status is not TaskStatus.PLANNED:
+        if task.status is not TaskStatus.DEFINED:
             raise IllegalTransitionError(
-                f"start requires PLANNED, task {task_id} is {task.status.value}"
+                f"start requires DEFINED, task {task_id} is {task.status.value}"
             )
-        logger.info("[Scheduler] task=%s start planned→executing", task_id)
-        # PLANNED → EXECUTING (legal edge)
+        logger.info("[Scheduler] task=%s start defined→executing", task_id)
+        # DEFINED → EXECUTING (legal edge)
         task.status = TaskStatus.EXECUTING
         if task.execution_graph is not None:
             task.execution_graph.root_phase = TaskStatus.EXECUTING
@@ -300,23 +318,38 @@ class TaskScheduler:
 
         settled = _all_settled(task)
         if settled:
-            # all nodes DONE/SKIPPED → advance VALIDATING + emit goal-check trigger (stub)
-            self._advance(task, TaskStatus.VALIDATING)
+            # all nodes DONE/SKIPPED → advance REVIEWING + emit goal-check trigger (stub)
+            self._advance(task, TaskStatus.REVIEWING)
             self._svc._task_repo.save(task)  # noqa: SLF001
-            logger.info("[Scheduler] task %s all settled → VALIDATING", task_id)
-            return {"task_id": task_id, "action": "advance_validating"}
+            logger.info("[Scheduler] task %s all settled → REVIEWING", task_id)
+            return {"task_id": task_id, "action": "advance_reviewing"}
+
+        # R4: unrecoverable FAILED nodes → task-level FAILED. Recovery (reroute/
+        # split) is attempted first via on_event's _handle_acceptance_fail /
+        # _handle_node_failed; this branch trips only when recovery is impossible
+        # (atomic termination OR node MAX_ATTEMPTS exhausted with no reroute/split
+        # room). spec R4 (a)/(b) both surface as a non-empty unrecoverable_failed set.
+        gap = compute_gap(task, self._recompose_count)
+        if gap["unrecoverable_failed"]:
+            self._advance(task, TaskStatus.FAILED)
+            self._svc._task_repo.save(task)  # noqa: SLF001
+            logger.info(
+                "[Scheduler] task %s unrecoverable FAILED nodes=%s → FAILED",
+                task_id, gap["unrecoverable_failed"],
+            )
+            return {"task_id": task_id, "action": "task_failed"}
 
         # termination guards
         if task.loop_round >= MAX_LOOP_ROUNDS or self._no_progress >= MAX_NO_PROGRESS_TICKS:
-            self._advance(task, TaskStatus.VALIDATING)
+            self._advance(task, TaskStatus.REVIEWING)
             self._svc._task_repo.save(task)  # noqa: SLF001
             logger.info(
-                "[Scheduler] task %s termination guard → VALIDATING (loop=%d noprog=%d)",
+                "[Scheduler] task %s termination guard → REVIEWING (loop=%d noprog=%d)",
                 task_id,
                 task.loop_round,
                 self._no_progress,
             )
-            return {"task_id": task_id, "action": "force_validating"}
+            return {"task_id": task_id, "action": "force_reviewing"}
 
         self._no_progress = self._no_progress + 1 if not progressed else 0
         return {"task_id": task_id, "action": "ticked", "progressed": progressed}
@@ -381,7 +414,7 @@ class TaskScheduler:
         - REDRIVE: re-drive via ``ExecutionPort.redispatch_node``, bump
           ``redrive_count``, reset ``running_ticks`` + ``probe_count``.
         - ESCALATE: mark the node ``FAILED`` (the loop's termination guard then
-          forces VALIDATING; reroute/split on watchdog-escalation is a follow-up).
+          forces REVIEWING; reroute/split on watchdog-escalation is a follow-up).
 
         Returns True if any node was PROBED/REDISPATCHED/ESCALATED (acts as
         ``progressed`` so the termination guard doesn't cut a hung node's

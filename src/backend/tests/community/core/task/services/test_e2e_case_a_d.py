@@ -100,7 +100,7 @@ def _planned(svc: TaskService, nodes=("n1",)) -> str:
 # --- Case A: single-bot happy path ----------------------------------------
 
 
-def test_case_a_single_bot_happy_to_delivered():
+def test_case_a_single_bot_happy_to_done():
     svc, sched = _stack()
     tid = _planned(svc)
     # approve → start → initial tick dispatches n1 to RUNNING
@@ -112,15 +112,15 @@ def test_case_a_single_bot_happy_to_delivered():
     # owner-bot 回投: node accepted
     svc.on_event(TaskEvent(task_id=tid, seq=svc._event_repo.latest_seq(tid) + 1, kind=EventKind.NODE_ACCEPTED, payload={"node_id": "n1", "verifier": "bot-1"}))  # noqa: SLF001
 
-    # tick: all settled → VALIDATING
+    # tick: all settled → REVIEWING
     result = sched.tick(tid)
-    assert result["action"] == "advance_validating"
-    assert svc.get(tid).status is TaskStatus.VALIDATING
+    assert result["action"] == "advance_reviewing"
+    assert svc.get(tid).status is TaskStatus.REVIEWING
 
-    # owner-bot 终验 回投: goal verified → DELIVERED + graph VERIFIED
+    # owner-bot 终验 回投: goal verified → DONE + graph VERIFIED
     svc.on_event(TaskEvent(task_id=tid, seq=svc._event_repo.latest_seq(tid) + 1, kind=EventKind.GOAL_VERIFIED, payload={"verifier": "bot-1", "verdict": "pass"}))  # noqa: SLF001
     final = svc.get(tid)
-    assert final.status is TaskStatus.DELIVERED
+    assert final.status is TaskStatus.DONE
     assert final.execution_graph.graph_status is GraphStatus.VERIFIED
 
 

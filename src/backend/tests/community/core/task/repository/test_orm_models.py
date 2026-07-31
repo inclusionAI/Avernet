@@ -48,12 +48,12 @@ def test_three_task_tables_created(engine):
 
 
 def test_ac_task_insert_query_autoincrement(session):
-    row = AcTaskModel(task_id="task-1", user_id="u1", status="intake")
+    row = AcTaskModel(task_id="task-1", user_id="u1", status="drafting")
     session.add(row)
     session.flush()
     assert row.id is not None and row.id > 0
     fetched = session.query(AcTaskModel).filter(AcTaskModel.task_id == "task-1").one()
-    assert fetched.status == "intake"
+    assert fetched.status == "drafting"
     assert fetched.loop_round == 0
     assert fetched.latest_event_seq == 0
 

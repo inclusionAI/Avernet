@@ -210,18 +210,26 @@ def test_select_collab_high_confidence_chat():
     assert select_collab(rec) is CollabMode.CHAT
 
 
-def test_compute_gap_reroute_partial_failed():
+def test_compute_gap_reroute_acceptance_fail_under_max_attempts():
+    """acceptance-fail (NODE_REJECTED) lands in FAILED with acceptance_result='fail';
+    attempts < max → reroute candidate (swap executor). No PARTIAL_FAILED anymore."""
     svc, sched, _ = _scheduler()
     tid = _planned(svc, nodes=("n1",))
     task = svc.get(tid)
     sched.start(tid)
     task = svc.get(tid)
-    task.execution_graph.nodes[0].status = NodeStatus.PARTIAL_FAILED
+    node = task.execution_graph.nodes[0]
+    node.status = NodeStatus.FAILED
+    node.properties["acceptance_result"] = "fail"
+    node.attempted_executors = [
+        AttemptedRecord(executor_id="b1", paradigm=RunMode.SINGLE_BOT, round=1, outcome=AttemptOutcome.FAIL),
+    ]
     svc._task_repo.save(task)  # noqa: SLF001
     gap = compute_gap(task)
     assert gap["need_reroute"] is True
     assert "n1" in gap["reroute_nodes"]
     assert gap["need_split"] is False
+    assert gap["unrecoverable_failed"] == []
 
 
 def test_compute_gap_split_when_max_attempts_exceeded():
@@ -239,9 +247,12 @@ def test_compute_gap_split_when_max_attempts_exceeded():
     gap = compute_gap(task, recompose_count=0)
     assert gap["need_split"] is True
     assert "n1" in gap["split_nodes"]
+    assert gap["unrecoverable_failed"] == []
 
 
-def test_compute_gap_atomic_suppresses_split_at_ceiling():
+def test_compute_gap_atomic_with_exhausted_attempts_is_unrecoverable():
+    """R4 (a)/(b): atomic AND attempts >= max → unrecoverable_failed (no reroute,
+    no split). Recovery is attempted first; FAILED only when recovery is impossible."""
     svc, sched, _ = _scheduler()
     tid = _planned(svc, nodes=("n1",))
     sched.start(tid)
@@ -256,7 +267,8 @@ def test_compute_gap_atomic_suppresses_split_at_ceiling():
     gap = compute_gap(task, recompose_count=MAX_RECOMPOSE)
     assert gap["atomic"] is True
     assert gap["need_split"] is False
-    assert gap["need_reroute"] is True
+    assert gap["need_reroute"] is False
+    assert "n1" in gap["unrecoverable_failed"]
 
 
 # --- watchdog (6.5) ---------------------------------------------------------
@@ -406,7 +418,7 @@ def test_tick_topo_unlock_respects_predecessors():
     assert task.execution_graph.nodes[1].status is NodeStatus.RUNNING
 
 
-def test_tick_all_settled_advances_to_validating():
+def test_tick_all_settled_advances_to_reviewing():
     svc, sched, _ = _scheduler()
     tid = _planned(svc, nodes=("n1",), edges=())
     sched.start(tid)
@@ -414,8 +426,28 @@ def test_tick_all_settled_advances_to_validating():
     svc.set_node_status(task, "n1", NodeStatus.DONE)
     svc._task_repo.save(task)  # noqa: SLF001
     result = sched.tick(tid)
-    assert result["action"] == "advance_validating"
-    assert svc.get(tid).status is TaskStatus.VALIDATING
+    assert result["action"] == "advance_reviewing"
+    assert svc.get(tid).status is TaskStatus.REVIEWING
+
+
+def test_tick_unrecoverable_failed_node_advances_to_failed():
+    """R4: a FAILED node with attempts >= max under atomic recompose ceiling →
+    task FAILED (recovery impossible)."""
+    svc, sched, _ = _scheduler()
+    tid = _planned(svc, nodes=("n1",), edges=())
+    sched.start(tid)
+    task = svc.get(tid)
+    node = task.execution_graph.nodes[0]
+    node.status = NodeStatus.FAILED
+    node.attempted_executors = [
+        AttemptedRecord(executor_id="b1", paradigm=RunMode.SINGLE_BOT, round=1, outcome=AttemptOutcome.FAIL),
+        AttemptedRecord(executor_id="b2", paradigm=RunMode.SINGLE_BOT, round=2, outcome=AttemptOutcome.FAIL),
+    ]
+    svc._task_repo.save(task)  # noqa: SLF001
+    sched._recompose_count = MAX_RECOMPOSE  # noqa: SLF001 — force atomic ceiling
+    result = sched.tick(tid)
+    assert result["action"] == "task_failed"
+    assert svc.get(tid).status is TaskStatus.FAILED
 
 
 def test_tick_noop_when_not_executing():

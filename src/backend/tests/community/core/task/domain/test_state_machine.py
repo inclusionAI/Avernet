@@ -1,7 +1,9 @@
-"""TDD for task/node state machine (Phase 0.2).
+"""TDD for task/node state machine (Phase 0.2; spec §2/§3.3 realignment).
 
 Legal transition tables are the invariant guard TaskService._apply_event uses
-before writing any state. Red first, then green via state_machine.py.
+before writing any state. 7 task states (DRAFTING/DEFINED/EXECUTING/REVIEWING/
+DONE/CANCELLED/FAILED), 6 node states (PENDING/RUNNING/DONE/FAILED/SKIPPED/
+HUMAN_REQUIRED). PARTIAL_FAILED removed; task-level HUNG removed.
 """
 from __future__ import annotations
 
@@ -24,40 +26,45 @@ from agentclaw.community.core.task.domain.state_machine import (
 # --- task transitions -------------------------------------------------------
 
 def test_task_transitions_legal_forward_path():
-    assert TaskStatus.DISCUSSING in TASK_TRANSITIONS[TaskStatus.INTAKE]
-    assert TaskStatus.PLANNED in TASK_TRANSITIONS[TaskStatus.INTAKE]
-    assert TaskStatus.PLANNED in TASK_TRANSITIONS[TaskStatus.DISCUSSING]
-    assert TaskStatus.EXECUTING in TASK_TRANSITIONS[TaskStatus.PLANNED]
-    assert TaskStatus.VALIDATING in TASK_TRANSITIONS[TaskStatus.EXECUTING]
-    assert TaskStatus.DELIVERED in TASK_TRANSITIONS[TaskStatus.VALIDATING]
-    assert TaskStatus.EXECUTING in TASK_TRANSITIONS[TaskStatus.VALIDATING]  # LOOP reroute
+    # DRAFTING → DEFINED → EXECUTING → REVIEWING → DONE (spec §2.2)
+    assert TaskStatus.DEFINED in TASK_TRANSITIONS[TaskStatus.DRAFTING]
+    assert TaskStatus.EXECUTING in TASK_TRANSITIONS[TaskStatus.DEFINED]
+    assert TaskStatus.REVIEWING in TASK_TRANSITIONS[TaskStatus.EXECUTING]
+    assert TaskStatus.DONE in TASK_TRANSITIONS[TaskStatus.REVIEWING]
 
 
-def test_task_transitions_back_and_loop():
-    assert TaskStatus.INTAKE in TASK_TRANSITIONS[TaskStatus.DISCUSSING]  # need more info
-    assert TaskStatus.DISCUSSING in TASK_TRANSITIONS[TaskStatus.PLANNED]  # replan needs info
-    assert TaskStatus.EXECUTING in TASK_TRANSITIONS[TaskStatus.EXECUTING]  # loop round++
+def test_task_transitions_rework_and_loop_and_failed():
+    # REVIEWING → EXECUTING is the rework loop (acceptance rejected → replan)
+    assert TaskStatus.EXECUTING in TASK_TRANSITIONS[TaskStatus.REVIEWING]
+    # EXECUTING → EXECUTING is loop_round++ self-edge
+    assert TaskStatus.EXECUTING in TASK_TRANSITIONS[TaskStatus.EXECUTING]
+    # EXECUTING → FAILED is the unrecoverable termination (spec R4)
+    assert TaskStatus.FAILED in TASK_TRANSITIONS[TaskStatus.EXECUTING]
 
 
-def test_task_transitions_terminal_from_any_non_terminal():
+def test_task_transitions_cancel_from_any_non_terminal():
     for src in TaskStatus:
         if src in TERMINAL_TASK_STATUSES:
             continue
         assert TaskStatus.CANCELLED in TASK_TRANSITIONS[src]
-        assert TaskStatus.HUNG in TASK_TRANSITIONS[src]
+    # task-level HUNG is gone — no non-terminal yields to HUNG (enum has no HUNG)
+    assert not hasattr(TaskStatus, "HUNG")
 
 
 def test_task_transitions_illegal():
-    assert TaskStatus.EXECUTING not in TASK_TRANSITIONS[TaskStatus.DELIVERED]
-    assert TaskStatus.PLANNED not in TASK_TRANSITIONS[TaskStatus.CANCELLED]
-    assert len(TASK_TRANSITIONS[TaskStatus.DELIVERED]) == 0
+    assert TaskStatus.EXECUTING not in TASK_TRANSITIONS[TaskStatus.DONE]
+    assert TaskStatus.EXECUTING not in TASK_TRANSITIONS[TaskStatus.FAILED]
+    assert TaskStatus.DEFINED not in TASK_TRANSITIONS[TaskStatus.DONE]
+    # DRAFTING may NOT jump straight to EXECUTING (must go via DEFINED)
+    assert TaskStatus.EXECUTING not in TASK_TRANSITIONS[TaskStatus.DRAFTING]
+    assert len(TASK_TRANSITIONS[TaskStatus.DONE]) == 0
     assert len(TASK_TRANSITIONS[TaskStatus.CANCELLED]) == 0
-    assert len(TASK_TRANSITIONS[TaskStatus.HUNG]) == 0
+    assert len(TASK_TRANSITIONS[TaskStatus.FAILED]) == 0
 
 
 def test_terminal_task_statuses():
     assert TERMINAL_TASK_STATUSES == frozenset(
-        {TaskStatus.DELIVERED, TaskStatus.CANCELLED, TaskStatus.HUNG}
+        {TaskStatus.DONE, TaskStatus.CANCELLED, TaskStatus.FAILED}
     )
 
 
@@ -66,9 +73,9 @@ def test_terminal_task_statuses():
 def test_node_transitions_legal_running_to_outcomes():
     running_out = NODE_TRANSITIONS[NodeStatus.RUNNING]
     assert NodeStatus.DONE in running_out
-    assert NodeStatus.PARTIAL_FAILED in running_out
-    assert NodeStatus.FAILED in running_out
+    assert NodeStatus.FAILED in running_out  # acceptance-fail + execution-fail unified
     assert NodeStatus.HUMAN_REQUIRED in running_out
+    assert not hasattr(NodeStatus, "PARTIAL_FAILED")  # removed (spec R9)
 
 
 def test_node_transitions_pending():
@@ -78,9 +85,10 @@ def test_node_transitions_pending():
 
 
 def test_node_transitions_retry_back_to_running():
-    assert NodeStatus.RUNNING in NODE_TRANSITIONS[NodeStatus.PARTIAL_FAILED]
     assert NodeStatus.RUNNING in NODE_TRANSITIONS[NodeStatus.FAILED]
     assert NodeStatus.RUNNING in NODE_TRANSITIONS[NodeStatus.HUMAN_REQUIRED]
+    # FAILED → DONE (acceptance-pass兜底, spec R11) also legal
+    assert NodeStatus.DONE in NODE_TRANSITIONS[NodeStatus.FAILED]
 
 
 def test_node_done_idempotent_and_terminal():
@@ -101,26 +109,30 @@ def test_node_illegal():
 # --- guard helpers ----------------------------------------------------------
 
 def test_can_task_transition_true_false():
-    assert can_task_transition(TaskStatus.INTAKE, TaskStatus.DISCUSSING) is True
-    assert can_task_transition(TaskStatus.DELIVERED, TaskStatus.EXECUTING) is False
+    assert can_task_transition(TaskStatus.DRAFTING, TaskStatus.DEFINED) is True
+    assert can_task_transition(TaskStatus.DONE, TaskStatus.EXECUTING) is False
+    assert can_task_transition(TaskStatus.EXECUTING, TaskStatus.FAILED) is True
 
 
 def test_require_task_transition_legal_no_raise():
-    require_task_transition(TaskStatus.PLANNED, TaskStatus.EXECUTING)  # no raise
-    require_task_transition(TaskStatus.VALIDATING, TaskStatus.EXECUTING)  # LOOP
+    require_task_transition(TaskStatus.DEFINED, TaskStatus.EXECUTING)  # no raise
+    require_task_transition(TaskStatus.REVIEWING, TaskStatus.EXECUTING)  # rework
+    require_task_transition(TaskStatus.EXECUTING, TaskStatus.FAILED)  # R4
 
 
 def test_require_task_transition_illegal_raises():
     with pytest.raises(IllegalTransitionError):
-        require_task_transition(TaskStatus.DELIVERED, TaskStatus.EXECUTING)
+        require_task_transition(TaskStatus.DONE, TaskStatus.EXECUTING)
     with pytest.raises(IllegalTransitionError):
         require_task_transition(TaskStatus.CANCELLED, TaskStatus.EXECUTING)
+    with pytest.raises(IllegalTransitionError):
+        require_task_transition(TaskStatus.DRAFTING, TaskStatus.EXECUTING)  # must via DEFINED
 
 
 def test_can_require_node_transition():
     assert can_node_transition(NodeStatus.PENDING, NodeStatus.RUNNING) is True
     assert can_node_transition(NodeStatus.DONE, NodeStatus.RUNNING) is False
-    require_node_transition(NodeStatus.RUNNING, NodeStatus.DONE)  # no raise
+    require_node_transition(NodeStatus.RUNNING, NodeStatus.FAILED)  # no raise
     with pytest.raises(IllegalTransitionError):
         require_node_transition(NodeStatus.SKIPPED, NodeStatus.RUNNING)
 

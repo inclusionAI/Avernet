@@ -42,7 +42,10 @@ class EventKind(StrEnum):
     LOOP_REROUTED = "loop.rerouted"
     EXECUTION_ATTEMPTED = "execution.attempted"
     CANCELLED = "task.cancelled"
-    HUNG = "task.hung"
+    HUNG = "task.hung"  # deprecated: no writer since task-level HUNG terminal was removed
+    # (spec §2 — "被 hung 住" is node-level HUMAN_REQUIRED; unrecoverable → FAILED).
+    # Retained on the enum so the event-log deserializer can still read historical
+    # HUNG entries; new code must not emit it.
 
 
 TASK_CREATED_KIND = EventKind.TASK_CREATED
@@ -213,6 +216,8 @@ class Cancelled(TaskEvent):
 
 @dataclass
 class Hung(TaskEvent):
+    # deprecated: no producer since task-level HUNG terminal was removed (spec §2).
+    # Retained so the event-log deserializer can materialize historical HUNG entries.
     kind: EventKind = EventKind.HUNG
     reason: str = ""
 

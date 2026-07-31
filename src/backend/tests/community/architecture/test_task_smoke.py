@@ -5,7 +5,7 @@ Validates the full wiring chain against a REAL SQLite-backed injector:
   TaskService (Phase 2 swapped the Phase-0 Noop override, plan §2.5) backed by
   the ORM repos (Phase 1, ``ac_task`` / ``ac_task_event``).
 - the FastAPI ``app`` mounts the task router (routes present).
-- POST /api/tasks returns 200 with the real intake Task payload (not 501) and
+- POST /api/tasks returns 200 with the real drafting Task payload (not 501) and
   actually persists (Phase 1.6: events land in the log).
 - get/progress on an unknown id return 404 / {} — proves the handler ran against
   the real binding (a 501 would mean unwired DI).
@@ -110,7 +110,7 @@ def test_smoke_create_task_200_with_noop():
         r = client.post("/api/tasks", json={"title": "smoke", "source": "api"})
         assert r.status_code == 200
         body = r.json()
-        assert body["status"] == "intake"
+        assert body["status"] == "drafting"
         assert body["task_id"]  # NoopTaskService.create returns a Task with an id
     finally:
         try:

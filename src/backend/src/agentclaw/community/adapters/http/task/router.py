@@ -109,7 +109,7 @@ def create_task(req: CreateTaskRequest, service: TaskServiceProtocol = Injected(
     task = service.create(title=req.title, source=req.source, background=req.background)
     return TaskCreatedResponse(
         task_id=_task_id_of(task),
-        status=_status_of(task) or "intake",
+        status=_status_of(task) or "drafting",
         seq=int(getattr(task, "latest_event_seq", 1) or 1),
     )
 
@@ -230,7 +230,7 @@ def approve_plan(
     scheduler: TaskSchedulerProtocol = Injected(TaskSchedulerProtocol),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),
 ) -> Any:
-    """Approve a finalized plan → Scheduler.start (PLANNED → EXECUTING + build DAG)."""
+    """Approve a finalized plan → Scheduler.start (DEFINED → EXECUTING + build DAG)."""
     task = scheduler.start(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")

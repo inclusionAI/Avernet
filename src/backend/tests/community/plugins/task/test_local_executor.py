@@ -91,7 +91,7 @@ def _scheduler(svc: TaskService, exec_port) -> TaskScheduler:
 
 def test_local_instant_dispatch_self_reports_node_done_and_advances():
     """Instant: the start tick dispatches n1 AND the bot self-reports DONE → all
-    settled → VALIDATING, in a single ``start`` call (full self-drive)."""
+    settled → REVIEWING, in a single ``start`` call (full self-drive)."""
     svc = _svc()
     tid = _planned(svc)
     exec_port = LocalBotExecutorPort(svc, settle_mode="instant")
@@ -99,14 +99,14 @@ def test_local_instant_dispatch_self_reports_node_done_and_advances():
     sched.start(tid)
     task = svc.get(tid)
     assert task.execution_graph.nodes[0].status is NodeStatus.DONE
-    assert task.status is TaskStatus.VALIDATING
+    assert task.status is TaskStatus.REVIEWING
     assert exec_port.single_bots == [(tid, "n1", "bot-1")]
 
 
-def test_local_instant_multi_node_closes_to_validating():
+def test_local_instant_multi_node_closes_to_reviewing():
     """n1 self-reports in the start tick; n2 (locked behind n1 in the stale tick
     view) is dispatched on the next tick and self-reports → all DONE →
-    VALIDATING."""
+    REVIEWING."""
     svc = _svc()
     tid = _planned(svc, nodes=("n1", "n2"), edges=(("n1", "n2"),))
     exec_port = LocalBotExecutorPort(svc, settle_mode="instant")
@@ -115,7 +115,7 @@ def test_local_instant_multi_node_closes_to_validating():
     sched.tick(tid)
     task = svc.get(tid)
     assert all(n.status is NodeStatus.DONE for n in task.execution_graph.nodes)
-    assert task.status is TaskStatus.VALIDATING
+    assert task.status is TaskStatus.REVIEWING
 
 
 def test_local_instant_dispatch_result_shape():
@@ -143,10 +143,10 @@ def test_local_deferred_dispatch_enqueues_until_pump():
     delivered = exec_port.pump()
     assert delivered == 1
     assert svc.get(tid).execution_graph.nodes[0].status is NodeStatus.DONE
-    # next tick sees the settled node → VALIDATING
+    # next tick sees the settled node → REVIEWING
     result = sched.tick(tid)
-    assert result["action"] == "advance_validating"
-    assert svc.get(tid).status is TaskStatus.VALIDATING
+    assert result["action"] == "advance_reviewing"
+    assert svc.get(tid).status is TaskStatus.REVIEWING
 
 
 def test_local_deferred_pump_returns_zero_when_nothing_pending():

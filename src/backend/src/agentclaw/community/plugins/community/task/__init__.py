@@ -36,7 +36,7 @@ from agentclaw.community.core.task.domain.models import (
 
 class NoopTaskService(TaskService):
     """No-op TaskService — query returns empty, intake create yields a Task
-    at INTAKE (so smoke tests can trace an id), amend/finalize/on_event/claim
+    at DRAFTING (so smoke tests can trace an id), amend/finalize/on_event/claim
     are None. Phase 2 replaces this with the real event-fold authority."""
 
     def get(self, task_id: str) -> Optional[Task]:
@@ -81,7 +81,7 @@ class NoopTaskService(TaskService):
     def get_task_graph(self, task_id: str) -> dict:
         return {
             "task_id": task_id,
-            "root_phase": "intake",
+            "root_phase": "drafting",
             "graph_status": "on_plaza",
             "loop_round": 0,
             "definition_meta": None,

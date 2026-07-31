@@ -124,7 +124,7 @@ class TaskService:
         background: str = "",
         user_id: str = "",
     ) -> Task:
-        """Create a Task at INTAKE, init the root phase, emit TASK_CREATED,
+        """Create a Task at DRAFTING, init the root phase, emit TASK_CREATED,
         and publish a副屏 panel message so the dynamic DAG pops at creation
         (FR-OBS-11)."""
         source_enum = (
@@ -133,7 +133,7 @@ class TaskService:
             else TaskSource.API
         )
         task_id = _new_task_id()
-        graph = TaskExecutionGraph(root_phase=TaskStatus.INTAKE)
+        graph = TaskExecutionGraph(root_phase=TaskStatus.DRAFTING)
         task = Task(
             id=task_id,
             user_id=user_id,
@@ -153,7 +153,7 @@ class TaskService:
             source=source_enum.value,
         )
         logger.info(
-            "[Task] task=%s create source=%s title=%r status=intake seq=1",
+            "[Task] task=%s create source=%s title=%r status=drafting seq=1",
             task_id, source_enum.value, title,
         )
         # ★ FR-OBS-11: popup the task-entry dynamic-workflow canvas on create.
@@ -170,10 +170,8 @@ class TaskService:
         if task is None:
             return None
         self._apply_spec_patch(task, patch)
-        # INTAKE + a real amendment → advance to DISCUSSING (intro).
-        if task.execution_graph is not None and task.status == TaskStatus.INTAKE:
-            if patch:
-                self._advance_phase(task, TaskStatus.DISCUSSING)
+        # amend does NOT transition (spec R2): the task stays DRAFTING through
+        # the entire element-completion phase until finalize_plan → DEFINED.
         self._emit(task, EventKind.SPEC_AMENDED, patch=patch)
         self._task_repo.save(task)
         return self._task_repo.get_by_id(task_id)
@@ -187,13 +185,14 @@ class TaskService:
         task = self._load(task_id)
         if task is None:
             return None
-        # Plan freeze is legal from DISCUSSING or PLANNED (re-plan) → PLANNED.
-        if task.status not in {TaskStatus.DISCUSSING, TaskStatus.PLANNED}:
+        # Plan freeze is legal from DRAFTING → DEFINED (spec R2/R3). Re-plan from a
+# later phase is not allowed; amend+refinalize must restart at DRAFTING.
+        if task.status not in {TaskStatus.DRAFTING}:
             raise IllegalTransitionError(
                 f"finalize_plan illegal from {task.status.value}"
             )
         task.plan = plan
-        self._advance_phase(task, TaskStatus.PLANNED)
+        self._advance_phase(task, TaskStatus.DEFINED)
         self._emit(
             task,
             EventKind.PLAN_FINALIZED,
@@ -201,7 +200,7 @@ class TaskService:
             confidence=float(plan.confidence),
         )
         logger.info(
-            "[Task] task=%s finalize_plan nodes=%d confidence=%.2f → planned",
+            "[Task] task=%s finalize_plan nodes=%d confidence=%.2f → defined",
             task_id, len(plan.sub_tasks), float(plan.confidence),
         )
         self._task_repo.save(task)
@@ -465,14 +464,13 @@ class TaskService:
         node_id = payload.get("node_id") or ""
         if kind == EventKind.TASK_CREATED:
             if graph is None:
-                task.execution_graph = TaskExecutionGraph(root_phase=TaskStatus.INTAKE)
+                task.execution_graph = TaskExecutionGraph(root_phase=TaskStatus.DRAFTING)
             return
         if graph is None:
             return
         if kind == EventKind.SPEC_AMENDED:
             self._apply_spec_patch(task, payload.get("patch") or {})
-            if task.status == TaskStatus.INTAKE and payload.get("patch"):
-                self._advance_phase(task, TaskStatus.DISCUSSING)
+            # amend does NOT transition (spec R2): task stays DRAFTING.
             return
         if kind == EventKind.PLAN_FINALIZED:
             # Plan already set by finalize_plan; just ensure phase.
@@ -499,8 +497,8 @@ class TaskService:
         if kind == EventKind.NODE_REJECTED:
             node = self._find_node(task, node_id)
             if node is not None:
-                require_node_transition(node.status, NodeStatus.PARTIAL_FAILED)
-                node.status = NodeStatus.PARTIAL_FAILED
+                require_node_transition(node.status, NodeStatus.FAILED)
+                node.status = NodeStatus.FAILED
                 node.properties["acceptance_result"] = "fail"
             return
         if kind == EventKind.NODE_FAILED:
@@ -533,19 +531,17 @@ class TaskService:
             self._apply_goal_verdict(task, verdict="pass")
             return
         if kind == EventKind.GOAL_REJECTED:
-            run_mode = payload.get("run_mode")
-            if run_mode == RunMode.BBS.value:
-                self._advance_phase(task, TaskStatus.HUNG)
-            else:
-                self._apply_goal_verdict(task, verdict="fail")
+            # spec: task-level HUNG is gone; acceptance-rejected parks the graph
+            # at AWAITING_HUMAN_ACCEPT and reworks via REVIEWING → EXECUTING (the
+            # BBS special case no longer escalates to a task-level HUNG terminal).
+            self._apply_goal_verdict(task, verdict="fail")
             return
         if kind == EventKind.CANCELLED:
             self._advance_phase(task, TaskStatus.CANCELLED)
             return
-        if kind == EventKind.HUNG:
-            self._advance_phase(task, TaskStatus.HUNG)
-            return
-        # Unknown kind — ignore (forward-compat).
+        # EventKind.HUNG is retained on the enum for forward-compat of the event
+        # log, but has no writer now (task-level HUNG terminal removed). Unknown
+        # kinds — ignore (forward-compat).
 
     def _apply_goal_verdict(self, task: Task, verdict: str) -> None:
         graph = task.execution_graph
@@ -553,7 +549,7 @@ class TaskService:
             return
         if verdict == "pass":
             graph.graph_status = GraphStatus.VERIFIED
-            self._advance_phase(task, TaskStatus.DELIVERED)
+            self._advance_phase(task, TaskStatus.DONE)
         else:
             graph.graph_status = GraphStatus.AWAITING_HUMAN_ACCEPT
             logger.info(

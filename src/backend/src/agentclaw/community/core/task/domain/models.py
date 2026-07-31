@@ -22,25 +22,29 @@ from typing import Optional
 # --- enums ------------------------------------------------------------------
 
 class TaskStatus(StrEnum):
-    """Task lifecycle (plan §1.1). 8 states; 3 terminals: DELIVERED/CANCELLED/HUNG."""
+    """Task lifecycle (spec §2.1). 7 states; 3 terminals: DONE/CANCELLED/FAILED.
 
-    INTAKE = "intake"
-    DISCUSSING = "discussing"
-    PLANNED = "planned"
+    DRAFTING covers the entire element-completion phase (create + amend do NOT
+    transition out — spec R2); finalize_plan moves to DEFINED."""
+
+    DRAFTING = "drafting"
+    DEFINED = "defined"
     EXECUTING = "executing"
-    VALIDATING = "validating"
-    DELIVERED = "delivered"
+    REVIEWING = "reviewing"
+    DONE = "done"
     CANCELLED = "cancelled"
-    HUNG = "hung"
+    FAILED = "failed"
 
 
 class NodeStatus(StrEnum):
-    """Node runtime status (plan §1.2). HUMAN_REQUIRED = 验收/终验回投需人工."""
+    """Node runtime status (spec §3.3). 6 states; terminal: SKIPPED.
+    Acceptance-fail (NODE_REJECTED) and execution-fail (NODE_FAILED) both land in
+    FAILED; the distinction rides on ``Node.properties['acceptance_result']`` /
+    failure kind, not the status enum (spec R9). HUMAN_REQUIRED = 验收/终验回投需人工."""
 
     PENDING = "pending"
     RUNNING = "running"
     DONE = "done"
-    PARTIAL_FAILED = "partial_failed"
     FAILED = "failed"
     SKIPPED = "skipped"
     HUMAN_REQUIRED = "human_required"
@@ -232,7 +236,7 @@ class Plan:
 @dataclass
 class TaskSpec:
     """The intake face (requirement / acceptance). Progressive: only metadata
-    required at INTAKE. The finalized decomposition (``Plan``) is NOT part of
+    required at DRAFTING. The finalized decomposition (``Plan``) is NOT part of
     the spec — it lives on the :class:`Task` aggregate root as the bridge
     between spec (what's wanted) and ``execution_graph`` (runtime DAG)."""
 
@@ -352,7 +356,7 @@ class Task:
     ``plan`` = the finalized decomposition (bridge between spec and runtime);
     ``execution_graph`` = runtime face (the live DAG).
     ``latest_event_seq`` is the TaskService event-log watermark (single writer guard).
-    ``status`` is the canonical lifecycle phase (8 states); ``execution_graph.root_phase``
+    ``status`` is the canonical lifecycle phase (7 states); ``execution_graph.root_phase``
     mirrors it so a graph snapshot is self-describing. TaskService keeps the two in sync
     on every phase move via the state_machine guard."""
 
@@ -360,7 +364,7 @@ class Task:
     user_id: str
     source: TaskSource
     spec: TaskSpec
-    status: TaskStatus = TaskStatus.INTAKE
+    status: TaskStatus = TaskStatus.DRAFTING
     execution_graph: Optional[TaskExecutionGraph] = None
     plan: Optional[Plan] = None
     latest_event_seq: int = 0

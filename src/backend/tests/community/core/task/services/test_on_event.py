@@ -2,9 +2,10 @@
 
 ``on_event`` is the only state write path. Each kind is guarded + folded into
 the aggregate; the event log is appended (single writer). Goal verdict split:
-PASS → graph VERIFIED + DELIVERED;编排 FAIL → AWAITING_HUMAN_ACCEPT; BBS FAIL →
-HUNG. The fold never self-invokes check_node / check_goal (those are Scheduler
-/ owner-bot SKILL concerns, not TaskService's).
+PASS → graph VERIFIED + DONE; FAIL (single_bot OR bbs) → AWAITING_HUMAN_ACCEPT
+(task-level HUNG is gone — spec §2; unrecoverable blockage is task FAILED via
+the Scheduler, not the goal fold). The fold never self-invokes check_node /
+check_goal (those are Scheduler / owner-bot SKILL concerns, not TaskService's).
 """
 from __future__ import annotations
 
@@ -73,14 +74,16 @@ def test_node_accepted_folds_running_to_done_with_pass():
     assert node.properties.get("acceptance_result") == "pass"
 
 
-def test_node_rejected_folds_running_to_partial_failed():
+def test_node_rejected_folds_running_to_failed():
     svc = _service()
     t = svc.create(title="t")
     _planned_with_dag(svc, t.id)
     svc.claim_node(t.id, "n1", "bot-a")
     svc.on_event(_ev(t.id, EventKind.NODE_REJECTED, next_seq(svc._event_repo.latest_seq(t.id)), node_id="n1", verifier="bot-a", reason="nope"))  # noqa: SLF001
     node = svc._find_node(svc.get(t.id), "n1")  # noqa: SLF001
-    assert node.status is NodeStatus.PARTIAL_FAILED
+    # acceptance-fail lands in FAILED (PARTIAL_FAILED removed, spec R9);
+    # the pass/fail distinction rides on acceptance_result, not the enum.
+    assert node.status is NodeStatus.FAILED
     assert node.properties.get("acceptance_result") == "fail"
 
 
@@ -128,18 +131,18 @@ def test_loop_rerouted_bumps_loop_round():
 # --- goal verdict split -----------------------------------------------------
 
 
-def test_goal_verified_delivers_with_verified_graph():
+def test_goal_verified_done_with_verified_graph():
     svc = _service()
     t = svc.create(title="t")
     _planned_with_dag(svc, t.id)
-    # Goal verdict fires from VALIDATING (VALIDATING → DELIVERED is the legal edge).
+    # Goal verdict fires from REVIEWING (REVIEWING → DONE is the legal edge).
     t2 = svc.get(t.id)
-    t2.status = TaskStatus.VALIDATING
-    t2.execution_graph.root_phase = TaskStatus.VALIDATING
+    t2.status = TaskStatus.REVIEWING
+    t2.execution_graph.root_phase = TaskStatus.REVIEWING
     svc._task_repo.save(t2)  # noqa: SLF001
     svc.on_event(_ev(t.id, EventKind.GOAL_VERIFIED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bot", verdict="pass", summary="ok"))  # noqa: SLF001
     final = svc.get(t.id)
-    assert final.status is TaskStatus.DELIVERED
+    assert final.status is TaskStatus.DONE
     from agentclaw.community.core.task.domain.models import GraphStatus
 
     assert final.execution_graph.graph_status is GraphStatus.VERIFIED
@@ -150,8 +153,8 @@ def test_goal_rejected_edition_parks_awaiting_human_accept():
     t = svc.create(title="t")
     _planned_with_dag(svc, t.id)
     t2 = svc.get(t.id)
-    t2.status = TaskStatus.VALIDATING
-    t2.execution_graph.root_phase = TaskStatus.VALIDATING
+    t2.status = TaskStatus.REVIEWING
+    t2.execution_graph.root_phase = TaskStatus.REVIEWING
     svc._task_repo.save(t2)  # noqa: SLF001
     svc.on_event(_ev(t.id, EventKind.GOAL_REJECTED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bot", verdict="fail", reason="nope", run_mode="single_bot"))  # noqa: SLF001
     final = svc.get(t.id)
@@ -160,19 +163,25 @@ def test_goal_rejected_edition_parks_awaiting_human_accept():
     assert final.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
 
 
-def test_goal_rejected_bbs_hungs():
+def test_goal_rejected_bbs_parks_awaiting_human_accept():
+    # task-level HUNG is gone (spec §2): BBS goal-rejected no longer escalates to
+    # a HUNG terminal; it parks at AWAITING_HUMAN_ACCEPT like the single_bot path.
     svc = _service()
     t = svc.create(title="t")
     _planned_with_dag(svc, t.id)
     t2 = svc.get(t.id)
-    t2.status = TaskStatus.VALIDATING
-    t2.execution_graph.root_phase = TaskStatus.VALIDATING
+    t2.status = TaskStatus.REVIEWING
+    t2.execution_graph.root_phase = TaskStatus.REVIEWING
     svc._task_repo.save(t2)  # noqa: SLF001
     svc.on_event(_ev(t.id, EventKind.GOAL_REJECTED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bbs", verdict="fail", reason="plaza stuck", run_mode="bbs"))  # noqa: SLF001
-    assert svc.get(t.id).status is TaskStatus.HUNG
+    final = svc.get(t.id)
+    from agentclaw.community.core.task.domain.models import GraphStatus
+
+    assert final.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+    assert final.status is TaskStatus.REVIEWING  # not HUNG — stays REVIEWING
 
 
-# --- cancel / hung / envelope ---------------------------------------------
+# --- cancel / envelope ----------------------------------------------------
 
 
 def test_cancelled_event_folds_to_cancelled():

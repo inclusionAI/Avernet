@@ -132,7 +132,7 @@ def test_status_mapping_sm_to_task():
         "running": "running",
         "completed": "done",
         "failed": "failed",
-        "retry_scheduled": "partial_failed",
+        "retry_scheduled": "failed",
         "skipped": "skipped",
     }
     for sm_status, expected in cases.items():

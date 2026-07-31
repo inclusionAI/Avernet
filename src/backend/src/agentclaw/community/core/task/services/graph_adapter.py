@@ -34,7 +34,7 @@ _SM_STATUS_MAP: dict[str, str] = {
     "running": "running",
     "completed": "done",
     "failed": "failed",
-    "retry_scheduled": "partial_failed",
+    "retry_scheduled": "failed",  # PARTIAL_FAILED removed (spec R9); retry-scheduled is a FAILED node with recovery room
     "skipped": "skipped",
     "aborted": "failed",
 }
@@ -48,13 +48,13 @@ def _map_node_status(sm_status: Any) -> str:
 
 def _map_run_status(sm_run_status: Any) -> str:
     """SM run.status → task root_phase (best-effort; the sub-DAG is a live run,
-    so default to ``executing``)."""
+    so default to ``executing``). Aligned to the 7-state task machine (spec §2)."""
     mapping = {
-        "pending": "planned",
+        "pending": "defined",
         "running": "executing",
-        "completed": "validating",
-        "failed": "executing",
-        "aborted": "hung",
+        "completed": "reviewing",
+        "failed": "failed",
+        "aborted": "failed",  # was "hung" — task-level HUNG removed; unrecoverable → FAILED
     }
     if sm_run_status is None:
         return "executing"

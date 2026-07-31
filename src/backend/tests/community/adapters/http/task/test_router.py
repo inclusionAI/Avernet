@@ -42,16 +42,16 @@ def test_create_task_request_rejects_empty_title():
 
 
 def test_task_created_response_shape():
-    r = TaskCreatedResponse(task_id="t1", status="intake", seq=1)
+    r = TaskCreatedResponse(task_id="t1", status="drafting", seq=1)
     assert r.task_id == "t1"
-    assert r.status == "intake"
+    assert r.status == "drafting"
     assert r.seq == 1
 
 
 def test_task_detail_response_minimal():
-    r = TaskDetailResponse(task_id="t1", user_id="u1", status="intake", loop_round=0)
+    r = TaskDetailResponse(task_id="t1", user_id="u1", status="drafting", loop_round=0)
     assert r.task_id == "t1"
-    assert r.status == "intake"
+    assert r.status == "drafting"
     assert r.nodes == []
 
 
@@ -109,7 +109,7 @@ class _StubTaskService:
     """Minimal stub satisfying the TaskService Protocol face used by router."""
 
     def get(self, task_id: str) -> Any:
-        return {"task_id": task_id, "user_id": "u1", "status": "intake",
+        return {"task_id": task_id, "user_id": "u1", "status": "drafting",
                 "spec": {"metadata": {"id": task_id, "title": "x"}},
                 "execution_graph": None, "loop_round": 0}
 
@@ -121,7 +121,7 @@ class _StubTaskService:
                 "done": 1, "total": 3, "nodes": []}
 
     def create(self, title: str, source: str = "api", background: str = "") -> Any:
-        return {"task_id": "t1", "status": "intake", "seq": 1}
+        return {"task_id": "t1", "status": "drafting", "seq": 1}
 
     def amend(self, task_id: str, patch: dict) -> Any:
         return self.get(task_id)
@@ -194,7 +194,7 @@ def test_post_create_task_returns_200():
     assert r.status_code == 200
     body = r.json()
     assert body["task_id"] == "t1"
-    assert body["status"] == "intake"
+    assert body["status"] == "drafting"
 
 
 def test_get_task_detail_returns_200():

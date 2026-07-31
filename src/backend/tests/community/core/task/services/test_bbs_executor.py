@@ -2,7 +2,8 @@
 
 Shared blackboard = TaskExecutionGraph.广场 bots read via TaskService query face
 and write via on_event (no Scheduler tick — BBS is self-drive). Claim is CAS
-(first bot wins; second gets None on the same node). BBS goal-FAIL → HUNG.
+(first bot wins; second gets None on the same node). BBS goal-FAIL parks the
+graph at AWAITING_HUMAN_ACCEPT (task-level HUNG is gone — spec §2).
 """
 from __future__ import annotations
 
@@ -116,18 +117,17 @@ def test_get_task_graph_is_the_shared_blackboard_for_all_bots():
     assert n1["assignee"] == "bot-a"
 
 
-# --- BBS goal fail → HUNG (Case E) ----------------------------------------
+# --- BBS goal fail → AWAITING_HUMAN_ACCEPT (Case E) -----------------------
 
 
-def test_bbs_goal_reject_routes_to_hung():
+def test_bbs_goal_reject_parks_awaiting_human_accept():
     svc, bbs = _service()
     tid = _planned_with_dag(svc, nodes=("n1",))
-    # park at VALIDATING so the reject fold's HUNG move is legal-ish;
-    # BBS goal-FAIL takes the HUNG branch regardless of prior phase via the
-    # run_mode=bbs path in TaskService._apply_event.
+    # park at REVIEWING; BBS goal-FAIL no longer escalates to a task-level HUNG
+    # terminal (spec §2) — it parks at AWAITING_HUMAN_ACCEPT like single_bot.
     task = svc.get(tid)
-    task.status = TaskStatus.VALIDATING
-    task.execution_graph.root_phase = TaskStatus.VALIDATING
+    task.status = TaskStatus.REVIEWING
+    task.execution_graph.root_phase = TaskStatus.REVIEWING
     svc._task_repo.save(task)  # noqa: SLF001
     seq = next_seq(svc._event_repo.latest_seq(tid))  # noqa: SLF001
     bbs.post_progress(
@@ -138,7 +138,11 @@ def test_bbs_goal_reject_routes_to_hung():
             payload={"verifier": "bbs", "verdict": "fail", "reason": "plaza stuck"},
         )
     )
-    assert svc.get(tid).status is TaskStatus.HUNG
+    final = svc.get(tid)
+    from agentclaw.community.core.task.domain.models import GraphStatus
+
+    assert final.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+    assert final.status is TaskStatus.REVIEWING  # not HUNG — stays REVIEWING
 
 
 def test_post_progress_unknown_task_returns_none():

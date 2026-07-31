@@ -37,26 +37,24 @@ from agentclaw.community.core.task.domain.models import (
 )
 
 
-def test_task_status_has_8_states_with_3_terminals():
+def test_task_status_has_7_states_with_3_terminals():
     assert set(TaskStatus) == {
-        TaskStatus.INTAKE,
-        TaskStatus.DISCUSSING,
-        TaskStatus.PLANNED,
+        TaskStatus.DRAFTING,
+        TaskStatus.DEFINED,
         TaskStatus.EXECUTING,
-        TaskStatus.VALIDATING,
-        TaskStatus.DELIVERED,
+        TaskStatus.REVIEWING,
+        TaskStatus.DONE,
         TaskStatus.CANCELLED,
-        TaskStatus.HUNG,
+        TaskStatus.FAILED,
     }
-    assert {TaskStatus.DELIVERED, TaskStatus.CANCELLED, TaskStatus.HUNG} <= set(TaskStatus)
+    assert {TaskStatus.DONE, TaskStatus.CANCELLED, TaskStatus.FAILED} <= set(TaskStatus)
 
 
-def test_node_status_has_7_states():
+def test_node_status_has_6_states():
     assert set(NodeStatus) == {
         NodeStatus.PENDING,
         NodeStatus.RUNNING,
         NodeStatus.DONE,
-        NodeStatus.PARTIAL_FAILED,
         NodeStatus.FAILED,
         NodeStatus.SKIPPED,
         NodeStatus.HUMAN_REQUIRED,

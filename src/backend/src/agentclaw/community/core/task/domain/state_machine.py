@@ -5,17 +5,21 @@ This module is the *only* authority on which state move is legal. TaskService
 as the guard before writing any state change; an illegal move raises
 ``IllegalTransitionError`` and the event is rejected (state stays put).
 
-Notes (plan §1.1-§1.2, §2.1):
-- Task terminals: DELIVERED / CANCELLED / HUNG — no outgoing edges.
-- Any non-terminal Task can yield to CANCELLED or HUNG (user cancel / hung).
-- VALIDATING → EXECUTING is the LOOP reroute (accept FAIL → replan).
+Notes (spec §2, §3.3):
+- Task terminals: DONE / CANCELLED / FAILED — no outgoing edges.
+- Any non-terminal Task can yield to CANCELLED (user cancel). Task-level HUNG is
+  gone — "被 hung 住 / 上升等人工" is node-level HUMAN_REQUIRED (task stays
+  EXECUTING); unrecoverable blockage → FAILED.
+- REVIEWING → EXECUTING is the rework loop (acceptance rejected → replan).
+- EXECUTING → FAILED is the unrecoverable termination (spec R4: atomic
+  termination OR node MAX_ATTEMPTS exhausted with no reroute/split room).
 - EXECUTING → EXECUTING is loop_round++ self-edge (not a state change, but
   legal so the guard doesn't reject a tick that bumps rounds).
-- Node terminal: SKIPPED only. DONE is idempotent (self-edge) but not terminal
-  (a DONE node can still be re-opened by a replan? No — keep it terminal-ish:
-  only self-edge allowed; re-open goes via parent graph re-issue, not here).
-- HUMAN_REQUIRED / PARTIAL_FAILED / FAILED all retry back to RUNNING (owner-bot
-  SKILL 回投 FAIL after accept, or human adjusts then resumes).
+- Node terminal: SKIPPED only. DONE is idempotent (self-edge) but not terminal.
+- HUMAN_REQUIRED / FAILED retry back to RUNNING (owner-bot SKILL 回投 FAIL
+  after accept, or human adjusts then resumes). PARTIAL_FAILED removed;
+  acceptance-fail and execution-fail both land in FAILED (spec R9), distinguished
+  by ``Node.properties['acceptance_result']`` / failure kind, not the enum.
 """
 from __future__ import annotations
 
@@ -29,33 +33,24 @@ class IllegalTransitionError(ValueError):
 # --- task transitions -------------------------------------------------------
 
 TERMINAL_TASK_STATUSES: frozenset[TaskStatus] = frozenset(
-    {TaskStatus.DELIVERED, TaskStatus.CANCELLED, TaskStatus.HUNG}
+    {TaskStatus.DONE, TaskStatus.CANCELLED, TaskStatus.FAILED}
 )
 
 _BASE_TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
-    TaskStatus.INTAKE: frozenset(
-        {TaskStatus.DISCUSSING, TaskStatus.PLANNED}
-    ),
-    TaskStatus.DISCUSSING: frozenset(
-        {TaskStatus.INTAKE, TaskStatus.PLANNED}
-    ),
-    TaskStatus.PLANNED: frozenset(
-        {TaskStatus.EXECUTING, TaskStatus.DISCUSSING}
-    ),
+    TaskStatus.DRAFTING: frozenset({TaskStatus.DEFINED}),
+    TaskStatus.DEFINED: frozenset({TaskStatus.EXECUTING}),
     TaskStatus.EXECUTING: frozenset(
-        {TaskStatus.VALIDATING, TaskStatus.EXECUTING}
+        {TaskStatus.REVIEWING, TaskStatus.EXECUTING, TaskStatus.FAILED}
     ),
-    TaskStatus.VALIDATING: frozenset(
-        {TaskStatus.DELIVERED, TaskStatus.EXECUTING}
-    ),
-    TaskStatus.DELIVERED: frozenset(),
+    TaskStatus.REVIEWING: frozenset({TaskStatus.DONE, TaskStatus.EXECUTING}),
+    TaskStatus.DONE: frozenset(),
     TaskStatus.CANCELLED: frozenset(),
-    TaskStatus.HUNG: frozenset(),
+    TaskStatus.FAILED: frozenset(),
 }
 
-# Any non-terminal can also yield to CANCELLED / HUNG.
+# Any non-terminal can also yield to CANCELLED (task-level HUNG is gone).
 TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
-    src: outgoing | {TaskStatus.CANCELLED, TaskStatus.HUNG}
+    src: outgoing | {TaskStatus.CANCELLED}
     if src not in TERMINAL_TASK_STATUSES
     else outgoing
     for src, outgoing in _BASE_TASK_TRANSITIONS.items()
@@ -69,10 +64,9 @@ TERMINAL_NODE_STATUSES: frozenset[NodeStatus] = frozenset({NodeStatus.SKIPPED})
 NODE_TRANSITIONS: dict[NodeStatus, frozenset[NodeStatus]] = {
     NodeStatus.PENDING: frozenset({NodeStatus.RUNNING, NodeStatus.SKIPPED}),
     NodeStatus.RUNNING: frozenset(
-        {NodeStatus.DONE, NodeStatus.PARTIAL_FAILED, NodeStatus.FAILED, NodeStatus.HUMAN_REQUIRED}
+        {NodeStatus.DONE, NodeStatus.FAILED, NodeStatus.HUMAN_REQUIRED}
     ),
-    NodeStatus.PARTIAL_FAILED: frozenset({NodeStatus.RUNNING}),
-    NodeStatus.FAILED: frozenset({NodeStatus.RUNNING}),
+    NodeStatus.FAILED: frozenset({NodeStatus.RUNNING, NodeStatus.DONE}),
     NodeStatus.HUMAN_REQUIRED: frozenset({NodeStatus.RUNNING}),
     NodeStatus.DONE: frozenset({NodeStatus.DONE}),
     NodeStatus.SKIPPED: frozenset(),

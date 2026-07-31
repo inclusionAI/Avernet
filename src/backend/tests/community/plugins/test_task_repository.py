@@ -87,7 +87,7 @@ def _task(task_id="task-1", user_id="u1", title="t") -> Task:
         user_id=user_id,
         source=TaskSource.API,
         spec=TaskSpec(metadata=TaskSpecMetadata(id=task_id, title=title)),
-        status=TaskStatus.INTAKE,
+        status=TaskStatus.DRAFTING,
     )
 
 
@@ -99,7 +99,7 @@ def test_save_and_get_round_trips_spec_and_status(task_repo):
     task_repo.save(t)
     fetched = task_repo.get_by_id("task-1")
     assert fetched.id == "task-1"
-    assert fetched.status is TaskStatus.INTAKE
+    assert fetched.status is TaskStatus.DRAFTING
     assert fetched.spec.metadata.title == "t"
     assert fetched.source is TaskSource.API
 
@@ -107,11 +107,11 @@ def test_save_and_get_round_trips_spec_and_status(task_repo):
 def test_save_is_upsert_keyed_on_task_id(task_repo):
     t = _task()
     task_repo.save(t)
-    t.status = TaskStatus.PLANNED
+    t.status = TaskStatus.DEFINED
     t.loop_round = 2
     task_repo.save(t)
     fetched = task_repo.get_by_id("task-1")
-    assert fetched.status is TaskStatus.PLANNED
+    assert fetched.status is TaskStatus.DEFINED
     assert fetched.loop_round == 2
 
 
