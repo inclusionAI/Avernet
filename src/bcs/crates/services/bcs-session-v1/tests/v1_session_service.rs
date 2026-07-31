@@ -587,6 +587,138 @@ async fn list_messages_returns_descending_with_cursor() {
 }
 
 #[tokio::test]
+async fn list_messages_composite_cursor_no_skip_tied_created_at() {
+    // VYQHI regression: messages sharing a created_at at a page boundary must
+    // not be skipped when following the opaque composite string cursor.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert", None)],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    // Seed five messages ALL with the same created_at; session_seq breaks ties.
+    for i in 0..5u32 {
+        fixture
+            .message_repo
+            .append_message(NewMessage {
+                group_id: "g1".into(),
+                session_id: session_id.clone(),
+                sender_id: "driver".into(),
+                sender_type: SenderType::Bot,
+                message_type: "text".into(),
+                content: serde_json::Value::String(format!("m{i}")),
+                client_msg_id: None,
+                owner_bot_id: None,
+                created_at: 7_000,
+                run_id: String::new(),
+            })
+            .await
+            .expect("append message");
+    }
+
+    // Page 1 (limit 2): newest two by (created_at DESC, session_seq DESC) →
+    // seqs 5, 4; has_more; opaque next_cursor encodes "7000:4".
+    let page = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: bot_principal("driver"),
+            session_id: session_id.clone(),
+            before: None,
+            limit: 2,
+        },
+    )
+    .await
+    .expect("list messages page 1");
+    assert!(page.has_more);
+    assert_eq!(page.next_cursor.as_deref(), Some("7000:4"));
+    assert_eq!(
+        page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![5, 4]
+    );
+
+    // Page 2: pass the opaque next_cursor back as before → seqs 3, 2.
+    let page = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: bot_principal("driver"),
+            session_id: session_id.clone(),
+            before: page.next_cursor,
+            limit: 2,
+        },
+    )
+    .await
+    .expect("list messages page 2");
+    assert!(page.has_more);
+    assert_eq!(page.next_cursor.as_deref(), Some("7000:2"));
+    assert_eq!(
+        page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![3, 2]
+    );
+
+    // Page 3: follow again → seq 1, no more.
+    let page = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: bot_principal("driver"),
+            session_id,
+            before: page.next_cursor,
+            limit: 2,
+        },
+    )
+    .await
+    .expect("list messages page 3");
+    assert!(!page.has_more);
+    assert!(page.next_cursor.is_none());
+    assert_eq!(
+        page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![1]
+    );
+}
+
+#[tokio::test]
+async fn list_messages_rejects_malformed_before_cursor() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert", None)],
+        None,
+        None,
+    )
+    .await;
+
+    let error = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            principal: bot_principal("driver"),
+            session_id: outcome.session.session_id.clone(),
+            before: Some("not-a-cursor".to_string()),
+            limit: 10,
+        },
+    )
+    .await
+    .expect_err("malformed cursor should 400");
+    assert_eq!(error.code(), "invalid_request");
+}
+
+#[tokio::test]
 async fn participant_add_update_remove_lifecycle() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "expert", "newcomer"] {

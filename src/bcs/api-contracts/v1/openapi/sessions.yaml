@@ -392,12 +392,14 @@ SessionMessagesPath:
       - name: before
         in: query
         description: >-
-          created_at cursor (exclusive). When set, only messages with
-          created_at strictly less than this value are returned. Omit on the
-          first page; pass the response's next_cursor to fetch the next page.
+          Opaque composite cursor (`"created_at:session_seq"`, e.g.
+          `"1234567890:42"`) exclusive bound. When set, only messages strictly
+          before this (created_at, session_seq) lexicographic position are
+          returned, so messages sharing a created_at at a page boundary are
+          not skipped. Omit on the first page; pass the response's next_cursor
+          to fetch the next page.
         schema:
-          type: integer
-          minimum: 0
+          type: string
       - name: limit
         in: query
         schema:

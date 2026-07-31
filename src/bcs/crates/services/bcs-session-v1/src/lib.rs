@@ -764,13 +764,20 @@ impl SessionMessageService for SessionServiceImpl {
             .map_err(map_group_use_case_error)?;
         // Cursor-based direct read (legacy `created_at DESC, session_seq DESC`);
         // `has_more` + `next_cursor` replace the separate COUNT(*) estimate.
+        // VYQHI: the cursor is the opaque composite `"created_at:session_seq"`
+        // string; decode it here into the `(created_at, session_seq)` tuple the
+        // repo expects, and re-encode the repo's tuple `next_cursor` for the
+        // V1 page response.
+        let before = decode_cursor(query.before).map_err(|e| {
+            ApplicationError::invalid("invalid_request", format!("invalid before cursor: {e}"))
+        })?;
         let page = self
             .message_repo
             .list_session_history(
                 &query.session_id,
                 owner_filter,
                 visible_from_seq,
-                query.before,
+                before,
                 query.limit as u32,
             )
             .await
@@ -778,7 +785,7 @@ impl SessionMessageService for SessionServiceImpl {
         let messages = page.messages.iter().map(project_message).collect::<Vec<_>>();
         Ok(SessionMessagePage {
             messages,
-            next_cursor: page.next_cursor,
+            next_cursor: encode_cursor(page.next_cursor),
             has_more: page.has_more,
         })
     }
@@ -905,6 +912,37 @@ fn project_content(content: &serde_json::Value) -> String {
     match content {
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),
+    }
+}
+
+// ── cursor codec (VYQHI composite cursor) ───────────────────────────
+
+/// Encode the repo's composite `(created_at, session_seq)` cursor into the
+/// opaque V1 wire string `"created_at:session_seq"` (e.g. `"1234567890:42"`).
+/// `None` stays `None` (no next page).
+fn encode_cursor(cursor: Option<(u64, i64)>) -> Option<String> {
+    cursor.map(|(created_at, session_seq)| format!("{created_at}:{session_seq}"))
+}
+
+/// Decode the opaque V1 wire cursor string `"created_at:session_seq"` back
+/// into the `(created_at, session_seq)` tuple the repo expects. `None`
+/// passes through. Returns an error message string on a malformed token so
+/// the caller can surface an `invalid_request` 400.
+fn decode_cursor(before: Option<String>) -> Result<Option<(u64, i64)>, String> {
+    match before {
+        None => Ok(None),
+        Some(token) => {
+            let (ts, seq) = token
+                .split_once(':')
+                .ok_or_else(|| format!("missing ':' separator in {token:?}"))?;
+            let created_at: u64 = ts
+                .parse()
+                .map_err(|_| format!("non-numeric created_at in {token:?}"))?;
+            let session_seq: i64 = seq
+                .parse()
+                .map_err(|_| format!("non-numeric session_seq in {token:?}"))?;
+            Ok(Some((created_at, session_seq)))
+        }
     }
 }
 

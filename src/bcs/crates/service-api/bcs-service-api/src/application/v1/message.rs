@@ -36,10 +36,12 @@ pub struct SessionMessage {
 pub struct ListSessionMessages {
     pub principal: Principal,
     pub session_id: String,
-    /// Exclusive `created_at` cursor for cursor-based pagination. Omit (or
-    /// pass `None`) on the first page; on subsequent pages pass the previous
-    /// response's `next_cursor`.
-    pub before: Option<u64>,
+    /// Opaque composite cursor for cursor-based pagination (VYQHI). Encoded
+    /// by the V1 facade as `"created_at:session_seq"` (e.g. `"1234567890:42"`)
+    /// so messages sharing a `created_at` at a page boundary are not skipped.
+    /// Omit (or pass `None`) on the first page; on subsequent pages pass the
+    /// previous response's `next_cursor`.
+    pub before: Option<String>,
     pub limit: u64,
 }
 
@@ -48,12 +50,13 @@ pub struct ListSessionMessages {
 ///
 /// Replaces the legacy `Page<SessionMessage>` (`items/total/offset/limit`)
 /// with the legacy direct-read shape: `messages` in `created_at DESC,
-/// session_seq DESC` order, a `next_cursor` (`created_at` of the last returned
-/// message, present only when `has_more` is true), and `has_more`.
+/// session_seq DESC` order, an opaque composite `next_cursor`
+/// (`"created_at:session_seq"`, present only when `has_more` is true — pass it
+/// back as the `before` query param to fetch the next page), and `has_more`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionMessagePage {
     pub messages: Vec<SessionMessage>,
-    pub next_cursor: Option<u64>,
+    pub next_cursor: Option<String>,
     pub has_more: bool,
 }
 

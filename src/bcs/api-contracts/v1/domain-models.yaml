@@ -678,13 +678,13 @@ SessionMessagePage:
       items:
         $ref: "#/SessionMessage"
     next_cursor:
-      type: integer
-      minimum: 0
+      type: string
       nullable: true
       description: >-
-        created_at cursor for the next page. Present (non-null) only when
-        has_more is true; pass it as the `before` query param to fetch the
-        next page. Null when there are no more messages.
+        Opaque composite cursor (`"created_at:session_seq"`) for the next
+        page. Present (non-null) only when has_more is true; pass it as the
+        `before` query param to fetch the next page. Null when there are no
+        more messages.
     has_more:
       type: boolean
 

@@ -114,10 +114,11 @@ pub struct ListSessionsQuery {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListSessionMessagesQuery {
-    /// Exclusive `created_at` cursor for cursor-based pagination. Omit on the
-    /// first page; pass the response's `next_cursor` to fetch the next page.
+    /// Opaque composite cursor for cursor-based pagination (VYQHI). Encoded
+    /// as `"created_at:session_seq"`. Omit on the first page; pass the
+    /// response's `next_cursor` to fetch the next page.
     #[serde(default)]
-    pub before: Option<u64>,
+    pub before: Option<String>,
     #[serde(default = "default_messages_limit")]
     pub limit: u64,
 }

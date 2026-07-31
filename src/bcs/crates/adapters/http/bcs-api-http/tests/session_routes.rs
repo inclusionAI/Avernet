@@ -316,6 +316,9 @@ impl SessionService for FakeSessionService {
 #[derive(Default)]
 struct FakeSessionMessageService {
     listed: Mutex<Option<ListSessionMessages>>,
+    /// Optional override returned by `list` to exercise non-default
+    /// `next_cursor` / `has_more` combinations (VYQHI composite cursor).
+    page_override: Mutex<Option<SessionMessagePage>>,
 }
 
 #[async_trait]
@@ -325,6 +328,9 @@ impl SessionMessageService for FakeSessionMessageService {
         query: ListSessionMessages,
     ) -> Result<SessionMessagePage, ApplicationError> {
         *self.listed.lock().expect("list messages lock") = Some(query.clone());
+        if let Some(page) = self.page_override.lock().expect("page override lock").take() {
+            return Ok(page);
+        }
         Ok(SessionMessagePage {
             messages: vec![
                 SessionMessage {
@@ -652,6 +658,69 @@ async fn list_session_messages_returns_cursor_page() {
         assert_eq!(listed.before, None);
         assert_eq!(listed.limit, 50);
     }
+}
+
+#[tokio::test]
+async fn list_session_messages_passes_opaque_before_cursor_through() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session, message.clone());
+
+    // The composite cursor token is opaque to the route layer; it must be
+    // passed straight through to the service unchanged.
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/sessions/session-1/messages?before=1234567890:42&limit=10",
+            Value::Null,
+        ))
+        .await
+        .expect("list messages response");
+    assert_eq!(response.status(), StatusCode::OK);
+    {
+        let listed = message.listed.lock().expect("list messages lock");
+        let listed = listed.as_ref().expect("list messages command");
+        assert_eq!(listed.session_id, "session-1");
+        assert_eq!(listed.before.as_deref(), Some("1234567890:42"));
+        assert_eq!(listed.limit, 10);
+    }
+}
+
+#[tokio::test]
+async fn list_session_messages_surfaces_next_cursor_when_has_more() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    {
+        // Configure the fake to return a non-default composite cursor page.
+        let page = SessionMessagePage {
+            messages: vec![SessionMessage {
+                id: "msg-9".into(),
+                session_seq: 9,
+                sender_id: "bot-1".into(),
+                sender_type: MessageSenderKind::Bot,
+                kind: SessionMessageKind::Text,
+                content: "later".into(),
+                created_at: 9_000,
+            }],
+            next_cursor: Some("9000:9".to_string()),
+            has_more: true,
+        };
+        *message.page_override.lock().expect("page override lock") = Some(page);
+    }
+    let app = test_session_router(session, message.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/sessions/session-1/messages?limit=1",
+            Value::Null,
+        ))
+        .await
+        .expect("list messages response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["has_more"], true);
+    assert_eq!(body["data"]["next_cursor"], "9000:9");
 }
 
 #[tokio::test]
