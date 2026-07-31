@@ -1,4 +1,4 @@
-"""Tenant isolation for Skills Track A ticket 02 persistence records."""
+"""Tenant isolation for the tenant-scoped Skills Track A ticket 02 records."""
 from contextlib import contextmanager
 
 import pytest
@@ -19,6 +19,12 @@ from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.avernet_tenant_guard import CrossTenantInsertError
 
 pytestmark = pytest.mark.integration
+
+
+TENANT_SCOPED_MODELS = (
+    DefaultSkillsetMcpExclusion,
+    DefaultSkillsetSkillExclusion,
+)
 
 
 class _FileSqliteDB:
@@ -84,7 +90,7 @@ def _raw_insert_values(model):
 
 
 @pytest.mark.parametrize(
-    "model", (DefaultSkillsetMcpExclusion, DefaultSkillsetSkillExclusion, BotSkillLayoutStateModel),
+    "model", TENANT_SCOPED_MODELS,
 )
 def test_current_tenant_stamps_insert_and_rejects_conflicting_insert(db, model):
     with avernet_tenant_scope("tenant-a"):
@@ -107,7 +113,7 @@ def test_current_tenant_stamps_insert_and_rejects_conflicting_insert(db, model):
 
 
 @pytest.mark.parametrize(
-    "model", (DefaultSkillsetMcpExclusion, DefaultSkillsetSkillExclusion, BotSkillLayoutStateModel),
+    "model", TENANT_SCOPED_MODELS,
 )
 def test_raw_insert_omitting_tenant_uses_server_default(db, model):
     """Core inserts bypass ``before_insert`` and must retain compatibility."""
@@ -122,7 +128,7 @@ def test_raw_insert_omitting_tenant_uses_server_default(db, model):
 
 
 @pytest.mark.parametrize(
-    "model", (DefaultSkillsetMcpExclusion, DefaultSkillsetSkillExclusion, BotSkillLayoutStateModel),
+    "model", TENANT_SCOPED_MODELS,
 )
 def test_direct_orm_queries_and_mutations_are_tenant_scoped(db, model):
     with avernet_tenant_scope("tenant-a"):
@@ -161,7 +167,7 @@ def test_direct_orm_queries_and_mutations_are_tenant_scoped(db, model):
 
 
 @pytest.mark.parametrize(
-    "model", (DefaultSkillsetMcpExclusion, DefaultSkillsetSkillExclusion, BotSkillLayoutStateModel),
+    "model", TENANT_SCOPED_MODELS,
 )
 def test_tenant_local_business_identity_can_repeat_across_tenants(db, model):
     for tenant in ("tenant-a", "tenant-b"):

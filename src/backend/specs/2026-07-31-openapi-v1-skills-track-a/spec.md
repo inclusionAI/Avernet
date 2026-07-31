@@ -17,12 +17,15 @@ or lifecycle workflow; that is Track B.
 
 ## Solution
 
-Apply the established tenant-isolation mechanism to the nine confirmed Skills
-tables. Each row records its tenant, reads and writes are enforced by the
-shared ORM tenant guard, and existing rows remain visible to the internal
-tenant through the database default. The production DDL, including all
-necessary unique-key replacements, is applied as one release gate before the
-application code that reads the new columns is deployed.
+Apply the established tenant-isolation mechanism to the seven tenant-scoped
+Skills tables. Each of those rows records its tenant, reads and writes are
+enforced by the shared ORM tenant guard, and existing rows remain visible to
+the internal tenant through the database default. `ac_bot_skill_layout_state`
+and `ac_skill_migration_quarantine` are instead globally identified by
+`(env, entity_id, bot_id)` because that Bot identity is globally unique across
+tenants. The production DDL, including all necessary unique-key replacements,
+is applied as one release gate before the application code that reads the new
+columns is deployed.
 
 An external tenant starts with an empty tenant-scoped skill catalog: it does
 not receive Git-market catalog entries automatically. Shared skill categories
@@ -44,7 +47,7 @@ remain outside this Track A boundary.
 
 4. As an external tenant, I want to use the same identifiers as another tenant
    where the business identity is tenant-local, so that another tenant's
-   exclusion, layout, audit, or quarantine record cannot block my write.
+   exclusion or audit record cannot block my write.
 
 5. As an engineer implementing Skills Track B, I want tenant scoping to be
    enforced below the HTTP handler, so that an endpoint cannot leak data merely
@@ -70,21 +73,30 @@ remain outside this Track A boundary.
   `ac_default_skillset_skill_exclusion`, `ac_bot_skill_layout_state`,
   `ac_skills_pool_rollout_audit`, and `ac_skill_migration_quarantine`.
 
-- Each scoped table receives a non-null `avernet_tenant` column with database
-  server default `teamclaw`. The mapped model declares the matching tenant
-  field and registers with the existing shared tenant guard. This reuses the
-  established single enforcement mechanism; it does not add model-specific
-  session listeners or endpoint-level filtering.
+- The seven tenant-scoped tables are `ac_skill`, `ac_skill_set`,
+  `ac_skill_set_skill`, `ac_skill_set_mcp`,
+  `ac_default_skillset_mcp_exclusion`,
+  `ac_default_skillset_skill_exclusion`, and
+  `ac_skills_pool_rollout_audit`. Each receives a non-null
+  `avernet_tenant` column with database server default `teamclaw`; its mapped
+  model registers with the shared tenant guard. This reuses the established
+  single enforcement mechanism and does not add endpoint-level filtering.
+
+- `ac_bot_skill_layout_state` and `ac_skill_migration_quarantine` deliberately
+  do not receive `avernet_tenant` and do not register with the tenant guard.
+  Their `(env, entity_id, bot_id)` identity is globally unique across tenants;
+  quarantine adds `migration_generation`. Bot ownership authorization remains
+  the responsibility of the Bot boundary, not these persistence tables.
 
 - The tenant field is persistence metadata, not API data. Existing serializers
   must not expose it and internal response shapes must remain unchanged.
 
 - The production schema change is out-of-band DDL and is one release gate. For
   each affected business unique key, create its tenant-leading replacement
-  first, then remove the legacy key. The five replacements are on
+  first, then remove the legacy key. The three replacements are on
   `ac_default_skillset_mcp_exclusion`,
-  `ac_default_skillset_skill_exclusion`, `ac_bot_skill_layout_state`,
-  `ac_skills_pool_rollout_audit`, and `ac_skill_migration_quarantine`.
+  `ac_default_skillset_skill_exclusion`, and
+  `ac_skills_pool_rollout_audit`.
 
 - The current production DDL is authoritative for key changes. Track A does
   not introduce a new business unique key for tables that do not currently
@@ -98,10 +110,10 @@ remain outside this Track A boundary.
   catalog-boundary decision only; the upload and activation workflow remains
   Track B.
 
-- Skills Pool audit and quarantine records are tenant-scoped now, despite the
-  current cutover being internal-only. Background and scheduled Skills Pool
-  jobs do not yet iterate tenants: this is acceptable only until a second
-  tenant holds real data, and becomes a release gate before that point.
+- Skills Pool rollout audit records are tenant-scoped. Layout state and
+  quarantine records are globally Bot-scoped, so their background scan,
+  reconciliation, cleanup, and recovery paths use the globally unique Bot
+  identity rather than tenant iteration.
 
 - Tenant-leading non-unique query indexes are deferred to the cross-cutting
   index work. They are required before opening sustained multi-tenant traffic,
@@ -112,14 +124,17 @@ remain outside this Track A boundary.
 
 ## Testing Decisions
 
-- Prove insert behavior: a request-scoped write stamps the current tenant, and
-  a raw write omitting the column receives the `teamclaw` server default.
+- Prove tenant-scoped insert behavior: a request-scoped write stamps the
+  current tenant, and a raw write omitting the column receives the `teamclaw`
+  server default.
 
-- For each scoped data set, prove tenant A can read and mutate its own rows,
-  while the same read, update, and delete against tenant B's rows behaves as if
-  the other rows do not exist.
+- For each tenant-scoped data set, prove tenant A can read and mutate its own
+  rows, while the same read, update, and delete against tenant B's rows behaves
+  as if the other rows do not exist. Prove the two globally Bot-scoped tables
+  have no tenant column and reject the same global Bot identity from any tenant
+  context.
 
-- Prove that each of the five replaced unique keys permits equivalent
+- Prove that each of the three replaced unique keys permits equivalent
   tenant-local records in two tenants and still rejects a duplicate within one
   tenant.
 
@@ -148,24 +163,19 @@ remain outside this Track A boundary.
 - Tenant-isolating `ac_skill_category`, legacy aliases, backup tables, and
   inactive historical skill tables excluded from the confirmed scope.
 
-- Refactoring background or scheduled Skills Pool jobs to enumerate tenants.
-  That work is deferred but must complete before a second tenant writes real
-  data.
-
 - Tenant-leading non-unique performance indexes, except where a replacement
   unique key requires the tenant-leading shape for correctness.
 
 ## Further Notes
 
 - The domain terms and catalog decision are recorded in `CONTEXT.md` and the
-  tenant-scoped catalog ADR. The one-gate DDL decision and the five affected
+  tenant-scoped catalog ADR. The one-gate DDL decision and the three affected
   keys are recorded in the DDL ADR.
 
 - The production DDL run needs platform review and an execution window. Its
   order is mandatory: add tenant columns, create tenant-leading unique keys,
   remove legacy unique keys, then deploy code that reads the new columns.
 
-- Background work resolving to `teamclaw` is a temporary compatibility state,
-  not a multi-tenant design. Before the first non-`teamclaw` tenant acquires
-  real Skills data, its scan, reconciliation, cleanup, and recovery paths must
-  have an explicit tenant-iteration design and test coverage.
+- Background work for the globally Bot-scoped layout and quarantine tables
+  resolves records by `(env, entity_id, bot_id)`, not tenant. The remaining
+  tenant-scoped catalog and audit paths continue to use the shared guard.

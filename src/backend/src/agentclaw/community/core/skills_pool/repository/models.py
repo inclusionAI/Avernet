@@ -56,7 +56,6 @@ class BotSkillLayoutStateModel(Base):
     env = Column(String(20), nullable=False)
     entity_id = Column(String(512), nullable=False)
     bot_id = Column(String(128), nullable=False)
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     active_layout = Column(
         String(20),
         nullable=False,
@@ -97,7 +96,6 @@ class BotSkillLayoutStateModel(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "avernet_tenant",
             "env",
             "entity_id",
             "bot_id",
@@ -159,9 +157,6 @@ class BotSkillLayoutStateModel(Base):
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )
-
-
-register_avernet_tenant_guard(BotSkillLayoutStateModel)
 
 
 class SkillsPoolRolloutAuditModel(Base):
@@ -269,18 +264,13 @@ class SkillMigrationQuarantineModel(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-    # Persistence-only isolation metadata. See SkillsPoolRolloutAuditModel for
-    # why this is a server default rather than a Python-side default.
-    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
-
     __table_args__ = (
         UniqueConstraint(
-            "avernet_tenant",
             "env",
             "entity_id",
             "bot_id",
             "migration_generation",
-            name="uk_skill_migration_quarantine_tenant_scope_generation",
+            name="uk_skill_migration_quarantine_scope_generation",
         ),
         Index(
             "idx_skill_migration_quarantine_cleanup",
@@ -333,8 +323,7 @@ class SkillMigrationQuarantineModel(Base):
         )
 
 
-# These records are control-plane data, but their identities become tenant-local
-# as soon as Skills has a second tenant. Reuse the single ORM enforcement point
-# rather than adding repository-specific predicates or listeners.
+# Rollout audit records are tenant-local. Bot layout and quarantine records are
+# keyed globally by (env, entity_id, bot_id), so they deliberately do not use
+# the tenant guard.
 register_avernet_tenant_guard(SkillsPoolRolloutAuditModel)
-register_avernet_tenant_guard(SkillMigrationQuarantineModel)

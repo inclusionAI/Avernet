@@ -16,8 +16,6 @@ ORM，数据库变更单需使用以下与 ORM 一致的 DDL：
 CREATE TABLE ac_skill_migration_quarantine (
   id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT
     COMMENT '自增主键',
-  avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
-    COMMENT '数据隔离租户；既有内部数据归属 teamclaw',
   env VARCHAR(20) NOT NULL
     COMMENT '部署环境，如 pre、prod',
   entity_id VARCHAR(512) NOT NULL
@@ -56,8 +54,8 @@ CREATE TABLE ac_skill_migration_quarantine (
     ON UPDATE CURRENT_TIMESTAMP
     COMMENT '记录最后修改时间',
   PRIMARY KEY (id),
-  UNIQUE KEY uk_skill_migration_quarantine_tenant_scope_generation
-    (avernet_tenant, env, entity_id, bot_id, migration_generation) GLOBAL,
+  UNIQUE KEY uk_skill_migration_quarantine_scope_generation
+    (env, entity_id, bot_id, migration_generation) GLOBAL,
   KEY idx_skill_migration_quarantine_cleanup
     (env, status, pool_activated_at) GLOBAL
 ) DEFAULT CHARSET = utf8mb4
@@ -101,31 +99,21 @@ CREATE TABLE ac_skills_pool_rollout_audit (
 ) DEFAULT CHARSET = utf8mb4
   COMMENT = 'Skills Pool 灰度配置变更追加式审计记录';
 
--- 已存在上述两表的环境不得重复 CREATE。发布读取 avernet_tenant 的 Backend
--- 前，按以下顺序升级：先加列，再建 tenant 前导唯一键，最后删除旧唯一键。
-ALTER TABLE ac_skill_migration_quarantine
-  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
-    COMMENT '数据隔离租户；既有内部数据归属 teamclaw';
+-- 已存在上述两表的环境不得重复 CREATE。只有 rollout audit 是 tenant
+-- 隔离表：发布读取该列的 Backend 前，按以下顺序升级 audit 表。
 ALTER TABLE ac_skills_pool_rollout_audit
   ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
     COMMENT '数据隔离租户；既有内部数据归属 teamclaw';
 
-ALTER TABLE ac_skill_migration_quarantine
-  ADD UNIQUE KEY uk_skill_migration_quarantine_tenant_scope_generation
-    (avernet_tenant, env, entity_id, bot_id, migration_generation) GLOBAL;
 ALTER TABLE ac_skills_pool_rollout_audit
   ADD UNIQUE KEY uk_skills_pool_rollout_audit_tenant_revision
     (avernet_tenant, env, effective_config_version) GLOBAL;
 
-ALTER TABLE ac_skill_migration_quarantine
-  DROP INDEX uk_skill_migration_quarantine_scope_generation;
 ALTER TABLE ac_skills_pool_rollout_audit
   DROP INDEX uk_skills_pool_rollout_audit_revision;
 
 SELECT 1 FROM ac_skill_migration_quarantine LIMIT 1;
 SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1;
-SELECT COUNT(*) AS null_tenant_rows
-  FROM ac_skill_migration_quarantine WHERE avernet_tenant IS NULL;
 SELECT COUNT(*) AS null_tenant_rows
   FROM ac_skills_pool_rollout_audit WHERE avernet_tenant IS NULL;
 SHOW INDEX FROM ac_skill_migration_quarantine;

@@ -11,10 +11,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.skills_pool.repository.models import (
+    BotSkillLayoutStateModel,
     SkillMigrationQuarantineModel,
     SkillsPoolRolloutAuditModel,
 )
-from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    SkillLayout,
+    SkillLayoutPhase,
+)
 from agentclaw.community.plugins.skills_pool_rollout_repository import (
     SkillsPoolRolloutRepository,
 )
@@ -44,6 +49,7 @@ class _SqliteDatabase:
 @pytest.fixture
 def database(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'skills-pool-control.db'}")
+    BotSkillLayoutStateModel.__table__.create(engine)
     SkillsPoolRolloutAuditModel.__table__.create(engine)
     SkillMigrationQuarantineModel.__table__.create(engine)
     return _SqliteDatabase(engine)
@@ -74,122 +80,73 @@ def _quarantine(
     )
 
 
-@pytest.mark.parametrize(
-    ("model", "factory", "identity_filter", "update_values"),
-    [
-        (
-            SkillsPoolRolloutAuditModel,
-            _audit,
-            lambda item: item.effective_config_version == "revision-1",
-            {"action": "disabled"},
-        ),
-        (
-            SkillMigrationQuarantineModel,
-            _quarantine,
-            lambda item: item.migration_generation == "generation-1",
-            {"status": "cleaned"},
-        ),
-    ],
-)
-def test_control_plane_records_are_stamped_and_direct_orm_reads_are_tenant_scoped(
+def _layout() -> BotSkillLayoutStateModel:
+    return BotSkillLayoutStateModel(
+        env="pre",
+        entity_id="owner-1",
+        bot_id="bot-1",
+        active_layout=SkillLayout.LEGACY.value,
+        phase=SkillLayoutPhase.LEGACY_ACTIVE.value,
+    )
+
+
+def test_rollout_audit_is_stamped_and_direct_orm_reads_are_tenant_scoped(
     database,
-    model,
-    factory,
-    identity_filter,
-    update_values,
 ) -> None:
     with avernet_tenant_scope("tenant-a"):
         with database.transactional_orm_session() as session:
-            session.add(factory())
+            session.add(_audit())
 
     with avernet_tenant_scope("tenant-b"):
         with database.transactional_orm_session() as session:
-            assert session.query(model).filter(identity_filter(model)).all() == []
+            assert session.query(SkillsPoolRolloutAuditModel).all() == []
 
     with database.transactional_orm_session() as session:
         row = (
-            session.query(model).execution_options(skip_avernet_tenant_guard=True).one()
+            session.query(SkillsPoolRolloutAuditModel)
+            .execution_options(skip_avernet_tenant_guard=True)
+            .one()
         )
         assert row.avernet_tenant == "tenant-a"
 
 
-@pytest.mark.parametrize(
-    ("model", "factory", "identity_filter", "update_values"),
-    [
-        (
-            SkillsPoolRolloutAuditModel,
-            _audit,
-            lambda item: item.effective_config_version == "revision-1",
-            {"action": "disabled"},
-        ),
-        (
-            SkillMigrationQuarantineModel,
-            _quarantine,
-            lambda item: item.migration_generation == "generation-1",
-            {"status": "cleaned"},
-        ),
-    ],
-)
-def test_cross_tenant_control_plane_update_and_delete_are_noops(
-    database,
-    model,
-    factory,
-    identity_filter,
-    update_values,
-) -> None:
+def test_cross_tenant_rollout_audit_update_and_delete_are_noops(database) -> None:
     with avernet_tenant_scope("tenant-a"):
         with database.transactional_orm_session() as session:
-            session.add(factory())
+            session.add(_audit())
 
     with avernet_tenant_scope("tenant-b"):
         with database.transactional_orm_session() as session:
-            query = session.query(model).filter(identity_filter(model))
-            assert query.update(update_values, synchronize_session=False) == 0
+            query = session.query(SkillsPoolRolloutAuditModel).filter(
+                SkillsPoolRolloutAuditModel.effective_config_version == "revision-1"
+            )
+            assert query.update({"action": "disabled"}, synchronize_session=False) == 0
             assert query.delete(synchronize_session=False) == 0
 
     with avernet_tenant_scope("tenant-a"):
         with database.transactional_orm_session() as session:
-            assert session.query(model).filter(identity_filter(model)).count() == 1
+            assert session.query(SkillsPoolRolloutAuditModel).count() == 1
 
 
-@pytest.mark.parametrize(
-    ("model", "factory", "identity_filter", "update_values"),
-    [
-        (
-            SkillsPoolRolloutAuditModel,
-            _audit,
-            lambda item: item.effective_config_version == "revision-1",
-            {"action": "disabled"},
-        ),
-        (
-            SkillMigrationQuarantineModel,
-            _quarantine,
-            lambda item: item.migration_generation == "generation-1",
-            {"status": "cleaned"},
-        ),
-    ],
-)
-def test_own_tenant_can_update_and_delete_control_plane_records(
-    database,
-    model,
-    factory,
-    identity_filter,
-    update_values,
-) -> None:
+def test_own_tenant_can_update_and_delete_rollout_audit(database) -> None:
     with avernet_tenant_scope("tenant-a"):
         with database.transactional_orm_session() as session:
-            session.add(factory())
+            session.add(_audit())
 
         with database.transactional_orm_session() as session:
-            query = session.query(model).filter(identity_filter(model))
-            assert query.update(update_values, synchronize_session=False) == 1
+            query = session.query(SkillsPoolRolloutAuditModel).filter(
+                SkillsPoolRolloutAuditModel.effective_config_version == "revision-1"
+            )
+            assert query.update({"action": "disabled"}, synchronize_session=False) == 1
 
         with database.transactional_orm_session() as session:
-            query = session.query(model).filter(identity_filter(model))
+            query = session.query(SkillsPoolRolloutAuditModel).filter(
+                SkillsPoolRolloutAuditModel.effective_config_version == "revision-1"
+            )
             assert query.delete(synchronize_session=False) == 1
 
         with database.transactional_orm_session() as session:
-            assert session.query(model).filter(identity_filter(model)).count() == 0
+            assert session.query(SkillsPoolRolloutAuditModel).count() == 0
 
 
 def test_audit_revision_is_unique_per_tenant_and_serialization_hides_tenant(
@@ -213,75 +170,58 @@ def test_audit_revision_is_unique_per_tenant_and_serialization_hides_tenant(
                 session.flush()
 
 
-def test_quarantine_identity_is_unique_per_tenant_and_serialization_hides_tenant(
-    database,
-) -> None:
-    for tenant in ("tenant-a", "tenant-b"):
-        with avernet_tenant_scope(tenant):
-            with database.transactional_orm_session() as session:
-                row = _quarantine()
-                row.pool_activated_at = datetime.now(UTC).replace(tzinfo=None)
-                session.add(row)
-
-    with avernet_tenant_scope("tenant-a"):
-        with database.transactional_orm_session() as session:
-            record = session.query(SkillMigrationQuarantineModel).one().to_record()
-    assert record.scope == BotSkillLayoutScope("pre", "owner-1", "bot-1")
-    assert not hasattr(record, "avernet_tenant")
-
-    with avernet_tenant_scope("tenant-a"):
-        with pytest.raises(IntegrityError):
-            with database.transactional_orm_session() as session:
-                session.add(_quarantine())
-                session.flush()
-
-
 @pytest.mark.parametrize(
-    ("model", "values"),
+    ("model", "factory"),
     [
-        (
-            SkillsPoolRolloutAuditModel,
-            {
-                "env": "pre",
-                "config_id": 1,
-                "action": "enable",
-                "operator": "operator",
-                "reason": "default tenant",
-                "effective_config_version": "raw-default",
-            },
-        ),
-        (
-            SkillMigrationQuarantineModel,
-            {
-                "env": "pre",
-                "entity_id": "owner-raw",
-                "bot_id": "bot-raw",
-                "migration_generation": "raw-default",
-                "engine": "openclaw",
-                "path": "/quarantine/raw-default",
-                "source_evidence": "{}",
-            },
-        ),
+        (BotSkillLayoutStateModel, _layout),
+        (SkillMigrationQuarantineModel, _quarantine),
     ],
 )
-def test_raw_control_plane_inserts_default_to_teamclaw(database, model, values) -> None:
+def test_bot_scoped_control_records_are_global_and_have_no_tenant_column(
+    database,
+    model,
+    factory,
+) -> None:
+    assert "avernet_tenant" not in model.__table__.c
+
+    for tenant in ("tenant-a", "tenant-b"):
+        with avernet_tenant_scope(tenant):
+            if tenant == "tenant-a":
+                with database.transactional_orm_session() as session:
+                    row = factory()
+                    if isinstance(row, SkillMigrationQuarantineModel):
+                        row.pool_activated_at = datetime.now(UTC).replace(tzinfo=None)
+                    session.add(row)
+            else:
+                with pytest.raises(IntegrityError):
+                    with database.transactional_orm_session() as session:
+                        session.add(factory())
+                        session.flush()
+
+    if model is SkillMigrationQuarantineModel:
+        with database.transactional_orm_session() as session:
+            record = session.query(model).one().to_record()
+        assert record.scope == BotSkillLayoutScope("pre", "owner-1", "bot-1")
+
+def test_raw_rollout_audit_inserts_default_to_teamclaw(database) -> None:
     with database.transactional_orm_session() as session:
-        session.execute(insert(model).values(**values))
+        session.execute(insert(SkillsPoolRolloutAuditModel).values(
+            env="pre", config_id=1, action="enable", operator="operator",
+            reason="default tenant", effective_config_version="raw-default",
+        ))
         row = (
-            session.query(model).execution_options(skip_avernet_tenant_guard=True).one()
+            session.query(SkillsPoolRolloutAuditModel)
+            .execution_options(skip_avernet_tenant_guard=True)
+            .one()
         )
         assert row.avernet_tenant == "teamclaw"
 
 
-@pytest.mark.parametrize("factory", [_audit, _quarantine])
-def test_control_plane_insert_rejects_an_explicit_conflicting_tenant(
-    database,
-    factory,
-) -> None:
+def test_rollout_audit_insert_rejects_an_explicit_conflicting_tenant(database) -> None:
     with avernet_tenant_scope("tenant-a"):
         with pytest.raises(CrossTenantInsertError):
             with database.transactional_orm_session() as session:
-                row = factory()
+                row = _audit()
                 row.avernet_tenant = "tenant-b"
                 session.add(row)
                 session.flush()
