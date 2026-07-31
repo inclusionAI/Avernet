@@ -1061,3 +1061,96 @@ async fn session_only_participant_can_list_sessions() {
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.items[0].group_id, "g1");
 }
+
+#[tokio::test]
+async fn session_only_participant_list_sessions_scoped() {
+    // Vcj5: a session-only Bot (in `session.participants` but NOT in
+    // `group.participants`) must see ONLY the sessions it participates in
+    // when calling `list_sessions` — not the entire group session pool. The
+    // prior VaGQQ fix let a session-only Bot pass `can_read_group`, but the
+    // list + count calls still passed `participant_id=None`, surfacing ALL
+    // group sessions. The V1 facade now scopes both `list_by_group` and
+    // `count_by_group` to `Some(principal.actor_id())` when access derives
+    // solely from session membership.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert", "expert2", "expert3", "newcomer"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+
+    // S1: driver + expert. Add newcomer to S1 only (session-only for
+    // newcomer — newcomer is NOT a group.participants member).
+    let s1 = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert", None)],
+        None,
+        Some("S1"),
+    )
+    .await;
+    let s1_id = s1.session.session_id.clone();
+    fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            principal: bot_principal("driver"),
+            session_id: s1_id.clone(),
+            bot_uuid: "newcomer".into(),
+            mode: Some(BotParticipantMode::Auto),
+        })
+        .await
+        .expect("add newcomer to S1");
+
+    // S2 + S3: driver + a different expert; newcomer is NOT a participant.
+    let s2 = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert2", None)],
+        None,
+        Some("S2"),
+    )
+    .await;
+    let s3 = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert3", None)],
+        None,
+        Some("S3"),
+    )
+    .await;
+
+    // Guard: newcomer is session-only (in S1.participants, NOT in
+    // group.participants).
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    assert!(
+        !group
+            .participants
+            .iter()
+            .any(|p| p.bot_uuid == "newcomer"),
+        "newcomer must be session-only (not in group.participants)"
+    );
+
+    // Session-only Bot lists g1 sessions → must see ONLY S1, not S2 / S3.
+    let page = SessionService::list(
+        &fixture.service,
+        ListSessions {
+            principal: bot_principal("newcomer"),
+            group_id: "g1".into(),
+            offset: 0,
+            limit: 10,
+            status: None,
+        },
+    )
+    .await
+    .expect("session-only participant lists scoped sessions");
+    assert_eq!(page.total, 1, "total must reflect scoping (only S1)");
+    assert_eq!(page.items.len(), 1, "items must contain only S1");
+    assert_eq!(page.items[0].session_id, s1_id);
+    assert_ne!(page.items[0].session_id, s2.session.session_id);
+    assert_ne!(page.items[0].session_id, s3.session.session_id);
+}

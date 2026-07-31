@@ -526,8 +526,31 @@ impl SessionService for SessionServiceImpl {
                 "limit must be between 1 and 100",
             ));
         }
-        self.load_readable_group(&command.principal, &command.group_id)
+        let group = self
+            .load_readable_group(&command.principal, &command.group_id)
             .await?;
+        // Vcj5: scope the listing + count to the caller's own sessions when
+        // the caller's read authority derives solely from session membership
+        // (a Bot added to a session but NOT to `group.participants`).
+        // `can_read_group` already authorized the call above via either the
+        // direct path (group participant / group manager) OR the
+        // session-only fallback (`list_group_ids_by_session_participant`).
+        // When access is direct, the caller has group-level read authority
+        // and sees the full group session pool (`participant_id=None`). When
+        // access is session-only, scope both `list_by_group` and
+        // `count_by_group` to `Some(principal.actor_id())` so a session-only
+        // Bot only sees / counts the sessions it actually participates in.
+        let principal_actor_id = command.principal.actor_id();
+        let is_direct = Self::can_manage_group(&command.principal, &group)
+            || group
+                .participants
+                .iter()
+                .any(|p| p.bot_uuid == principal_actor_id);
+        let participant_id: Option<&str> = if is_direct {
+            None
+        } else {
+            Some(principal_actor_id.as_str())
+        };
         let status = command.status.map(map_status_to_domain);
         let mut sessions = self
             .sessions
@@ -537,7 +560,7 @@ impl SessionService for SessionServiceImpl {
                 command.offset,
                 command.limit,
                 None,
-                None,
+                participant_id,
             )
             .await
             .map_err(map_session_error)?;
@@ -551,7 +574,7 @@ impl SessionService for SessionServiceImpl {
         });
         let total = self
             .session_repo
-            .count_by_group(&command.group_id, status, None, None)
+            .count_by_group(&command.group_id, status, None, participant_id)
             .await
             .map_err(map_service_error)?;
         let items = sessions.iter().map(project_summary).collect::<Vec<_>>();
