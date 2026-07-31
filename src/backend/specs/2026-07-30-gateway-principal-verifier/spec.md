@@ -59,11 +59,21 @@ has its own registry, its own secret name, and its own resolver:
 
 | Side | Secret name | Community lookup |
 | --- | --- | --- |
-| backend | `secret_names.gateway_principal_signing_key` | `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` |
+| backend | `SecretNamesConfig.gateway_principal_signing_key` (defaults) | `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` |
 | gateway | `principal_signer.secret_name` (default `principal_signing_key`) | `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` |
 
-Nothing links those two names. Provisioning one and not the other is silent —
-the backend answers 401 to everything and looks configured.
+Nothing links those two names, and **the two sides fail differently when
+unprovisioned** — which side is missing decides what you see:
+
+| Missing | Result |
+| --- | --- |
+| backend, in `pre`/`prod` | **the backend refuses to boot** — `strict=True`, so the rollout fails loudly. Not silent. |
+| backend, elsewhere | the backend boots and answers 401 to every `/openapi/v1` request |
+| gateway, any environment | **silent, and the dangerous one.** The gateway keeps a dev fallback (`avernet-dev-signing-key-NOT-FOR-PROD`) and logs a warning, so it does *not* fail — it signs real tokens with the wrong key. The backend boots, looks configured, and rejects every one of them. |
+
+The gateway-side miss is the case worth designing around: nothing on either side
+treats it as an error, so it survives a rollout and presents as "auth is broken"
+with two healthy-looking services.
 
 | What | Where it comes from now |
 | --- | --- |
