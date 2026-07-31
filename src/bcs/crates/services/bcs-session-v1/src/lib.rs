@@ -29,7 +29,7 @@ use bcs_service_api::application::v1::{
         SessionParticipantInput, SessionService, SessionStatus as V1SessionStatus,
         SessionSummary, UpdateSession, UpdateSessionParticipant,
     },
-    ApplicationError, DeleteResult, Page, Principal,
+    ApplicationError, DeleteResult, HumanPrincipal, Page, Principal,
 };
 use bcs_service_api::application::session::{
     CreateOrReactivateCommand, SessionManagementService, SessionUseCaseError,
@@ -306,14 +306,45 @@ impl SessionServiceImpl {
         )))
     }
 
-    /// Load a session and its parent group, authorizing read access only.
-    /// Used by participant mutation endpoints that permit self-service (the
-    /// target Bot updating its own participant mode / leaving) in addition to
-    /// the manage path (VSN7L): the caller first proves a readable relation,
-    /// then checks `is_self || can_manage_session` itself.
-    async fn load_session_and_group_for_read(
+    /// VYQHN: a Human principal may self-service mutate (update / remove) a
+    /// Session participant when the Human owns the target Bot — i.e.
+    /// `bot.created_by == human.subject.id` or a creator relation edge from
+    /// the Human actor to the Bot exists. Mirrors the Human branch of
+    /// [`ensure_collaboration_eligible`] and `bcs-group-v1::authorize_bot_resource`
+    /// so a Human owner is authorized without group-level manager permissions
+    /// (design §8.7 line 557 explicitly allows Human owners to remove owned
+    /// Bots from sessions they can read).
+    async fn is_owned_bot(
         &self,
-        principal: &Principal,
+        human: &HumanPrincipal,
+        bot_uuid: &str,
+    ) -> Result<bool, ApplicationError> {
+        let bot = self.load_bot(bot_uuid).await?;
+        if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
+            return Ok(true);
+        }
+        let actor_id = format!("human_{}", human.subject.id);
+        let edge = self
+            .relation
+            .get_edge(&actor_id, bot_uuid, &self.config.relation_env)
+            .await
+            .map_err(map_service_error)?;
+        Ok(edge.is_some_and(|edge| edge.is_creator))
+    }
+
+    /// Load a session + parent group WITHOUT the read-authorization gate,
+    /// used only by the participant-mutation endpoints (VSN7L self-service
+    /// and VYQHN Human-owner self-service). The legacy read gate
+    /// ([`can_read_session`]) refuses a non-creator/non-manager Human owner
+    /// of a session participant Bot, which would short-circuit the
+    /// participant-mutation path with a 403 before the ownership check
+    /// ([`is_owned_bot`]) could authorize the Human owner. The unified
+    /// `is_self || is_human_owner || can_manage_session` gate performed by
+    /// the caller after this fetch subsumes the read gate for this path:
+    /// `is_self` implies the Bot is a session participant; `can_manage_session`
+    /// implies `can_read_session`; and `is_human_owner` is the VYQHN addition.
+    async fn load_session_and_group_for_participant_mutation(
+        &self,
         session_id: &str,
     ) -> Result<(Session, DomainGroup), ApplicationError> {
         let session = self
@@ -328,11 +359,6 @@ impl SessionServiceImpl {
                 )
             })?;
         let group = self.load_group(&session.group_id).await?;
-        if !Self::can_read_session(principal, &session, &group) {
-            return Err(ApplicationError::forbidden(
-                "Principal has no readable relation to this Session",
-            ));
-        }
         Ok((session, group))
     }
 
@@ -666,11 +692,22 @@ impl SessionService for SessionServiceImpl {
         // VSN7L: the target Actor may update its own participant mode
         // (self-service) in addition to the driver/originator/manager path,
         // mirroring the sibling Group V1 facade's participant self-service.
+        // VYQHN: a Human principal who owns the target Bot (via created_by
+        // or a creator relation edge) is also authorized to self-service. The
+        // legacy read gate is bypassed here because it would 403 a
+        // non-creator/non-manager Human owner before the ownership check
+        // could authorize them; the unified check below (is_self ||
+        // is_human_owner || can_manage_session) subsumes the read gate for
+        // this path.
         let (session, group) = self
-            .load_session_and_group_for_read(&command.principal, &command.session_id)
+            .load_session_and_group_for_participant_mutation(&command.session_id)
             .await?;
         let is_self = command.principal.actor_id() == command.bot_uuid;
-        if !is_self && !Self::can_manage_session(&command.principal, &session, &group) {
+        let is_human_owner = match &command.principal {
+            Principal::Human(human) => self.is_owned_bot(human, &command.bot_uuid).await?,
+            Principal::Bot(_) => false,
+        };
+        if !is_self && !is_human_owner && !Self::can_manage_session(&command.principal, &session, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal may not manage this Session's participants",
             ));
@@ -704,11 +741,21 @@ impl SessionService for SessionServiceImpl {
         // VSN7L: the target Actor may leave the session (self-service delete)
         // in addition to the driver/originator/manager path, mirroring the
         // sibling Group V1 facade's participant self-leave.
+        // VYQHN: a Human principal who owns the target Bot (via created_by
+        // or a creator relation edge) is also authorized to self-service. As
+        // in update_participant, the legacy read gate is bypassed so the
+        // ownership check is reachable for a non-creator/non-manager Human
+        // owner; the unified check below (is_self || is_human_owner ||
+        // can_manage_session) subsumes the read gate for this path.
         let (session, group) = self
-            .load_session_and_group_for_read(&command.principal, &command.session_id)
+            .load_session_and_group_for_participant_mutation(&command.session_id)
             .await?;
         let is_self = command.principal.actor_id() == command.bot_uuid;
-        if !is_self && !Self::can_manage_session(&command.principal, &session, &group) {
+        let is_human_owner = match &command.principal {
+            Principal::Human(human) => self.is_owned_bot(human, &command.bot_uuid).await?,
+            Principal::Bot(_) => false,
+        };
+        if !is_self && !is_human_owner && !Self::can_manage_session(&command.principal, &session, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal may not manage this Session's participants",
             ));

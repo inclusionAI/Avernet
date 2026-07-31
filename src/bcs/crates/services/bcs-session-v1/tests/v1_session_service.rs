@@ -16,9 +16,9 @@ use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_message_store::MemoryMessageRepo;
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
-    AddSessionParticipant, BotParticipantMode, CompleteSession, CreateSession, DeleteSession,
-    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionInput,
-    SessionMessageService, SessionParticipantInput, SessionService,
+    AddSessionParticipant, AuthenticatedUser, BotParticipantMode, CompleteSession, CreateSession,
+    DeleteSession, DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
+    SessionInput, SessionMessageService, SessionParticipantInput, SessionService,
     SessionStatus as V1SessionStatus, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::port::repo::{MessageRepoPort, SessionRepoPort};
@@ -102,6 +102,19 @@ impl Fixture {
 fn bot_principal(bot_uuid: &str) -> bcs_service_api::application::v1::Principal {
     bcs_service_api::application::v1::Principal::bot(
         bot_uuid.to_string(),
+        "tenant-a".to_string(),
+        BTreeSet::new(),
+    )
+}
+
+fn human_principal(staff_no: &str) -> bcs_service_api::application::v1::Principal {
+    bcs_service_api::application::v1::Principal::human(
+        AuthenticatedUser {
+            id: staff_no.to_string(),
+            username: staff_no.to_string(),
+            display_name: None,
+            full_name: None,
+        },
         "tenant-a".to_string(),
         BTreeSet::new(),
     )
@@ -801,4 +814,131 @@ async fn participant_add_update_remove_lifecycle() {
         .await
         .expect("idempotent delete participant");
     assert!(!again.deleted);
+}
+
+#[tokio::test]
+async fn delete_participant_human_owner_succeeds_and_non_owner_forbidden() {
+    // VYQHN: a Human principal who owns the target Bot (via created_by) may
+    // self-service-remove it from a session they can neither manage nor read
+    // otherwise; a Human without ownership is still forbidden.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "bot-a"] {
+        fixture.add_bot(bot).await;
+    }
+    // bot-a is owned by Human staff-1 via created_by.
+    fixture
+        .bots
+        .save_created_by("bot-a", "staff-1", true)
+        .await
+        .expect("save owner");
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("bot-a", None)],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    // Owner Human removes the owned Bot (not self, not manager, not creator
+    // of this session): authorized solely by is_human_owner.
+    let removed = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            principal: human_principal("staff-1"),
+            session_id: session_id.clone(),
+            bot_uuid: "bot-a".into(),
+        })
+        .await
+        .expect("owner human removes owned bot");
+    assert!(removed.deleted);
+
+    // Re-add bot-a (the driver is a manager and bot-a is public) so the
+    // non-owner scenario starts from the same participant state.
+    fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            principal: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "bot-a".into(),
+            mode: Some(BotParticipantMode::Auto),
+        })
+        .await
+        .expect("re-add bot-a");
+
+    // Non-owner Human (staff-2) is forbidden — neither self, owner, nor
+    // manager/creator.
+    let error = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            principal: human_principal("staff-2"),
+            session_id,
+            bot_uuid: "bot-a".into(),
+        })
+        .await
+        .expect_err("non-owner human should be forbidden");
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+}
+
+#[tokio::test]
+async fn update_participant_human_owner_succeeds_and_non_owner_forbidden() {
+    // VYQHN symmetric: the same Human-owner authorization applies to the
+    // participant mode update path.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "bot-a"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("bot-a", "staff-1", true)
+        .await
+        .expect("save owner");
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("bot-a", None)],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    // Owner Human mutates the owned Bot's participant mode.
+    let updated = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            principal: human_principal("staff-1"),
+            session_id: session_id.clone(),
+            bot_uuid: "bot-a".into(),
+            mode: BotParticipantMode::Muted,
+        })
+        .await
+        .expect("owner human updates owned bot");
+    assert_eq!(updated.mode, BotParticipantMode::Muted);
+
+    // Non-owner Human is forbidden.
+    let error = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            principal: human_principal("staff-2"),
+            session_id,
+            bot_uuid: "bot-a".into(),
+            mode: BotParticipantMode::Auto,
+        })
+        .await
+        .expect_err("non-owner human should be forbidden");
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
 }
