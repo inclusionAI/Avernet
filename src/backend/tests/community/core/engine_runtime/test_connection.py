@@ -25,6 +25,16 @@ OWNER = "owner-1"
 BOT = "bot-1"
 
 
+@pytest.fixture(autouse=True)
+def _pinned_env(monkeypatch):
+    """Most tests here use a gateway with no ``base_url_pre``, so an ambient
+    ``SERVER_ENV=pre`` on the runner would select an empty host and fail them.
+    Pinned rather than assumed; the two env-selection tests set it themselves."""
+    monkeypatch.delenv("SERVER_ENV", raising=False)
+    monkeypatch.delenv("REAL_SERVER_ENV", raising=False)
+    monkeypatch.delenv("ALIPAY_APP_ENV", raising=False)
+
+
 class _Bots:
     def __init__(self, engine="openclaw", bot_type="personal", public="0"):
         self.engine = engine
@@ -216,13 +226,11 @@ def test_a_deployment_fronting_no_gateway_is_an_upstream_error():
         _build(_svc(gateway=_gateway(base="")))
 
 
-def test_no_credential_is_embedded_when_the_gateway_is_unconfigured():
-    """The host is resolved before the credential is appended, so a misconfigured
-    deployment cannot leak one into a log line via a half-built URL."""
-    devices = _Devices(token="secret-tok")
-    with pytest.raises(EngineUpstreamError) as excinfo:
-        _build(_svc(devices=devices, gateway=_gateway(base="")))
-    assert "secret-tok" not in str(excinfo.value)
+def test_a_gateway_base_without_a_scheme_is_an_upstream_error():
+    """``gw.example/engine/…`` is not openable. Refused rather than published,
+    since the value comes from a deployment overlay this build does not own."""
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(gateway=_gateway(base="gw.example")))
 
 
 def test_gateway_url_is_composed_and_scheme_swapped():
@@ -234,6 +242,46 @@ def test_gateway_url_is_composed_and_scheme_swapped():
 
 def test_the_published_url_never_names_the_hop_behind_the_gateway():
     assert "proxypass/" not in _build(_svc()).sockets[0].url
+
+
+def test_an_http_gateway_base_becomes_ws():
+    """The branch singlebox actually runs — its overlay ships an http base."""
+    result = _build(_svc(gateway=_gateway(base="http://127.0.0.1:9999")))
+    assert result.sockets[0].url.startswith("ws://127.0.0.1:9999/engine/")
+
+
+def test_a_gateway_base_already_spelled_as_a_socket_origin_is_kept():
+    result = _build(_svc(gateway=_gateway(base="wss://gw.example")))
+    assert result.sockets[0].url.startswith("wss://gw.example/engine/")
+
+
+def test_the_scheme_rewrite_is_anchored_to_the_scheme():
+    """A substring rewrite would corrupt a base whose path repeats the scheme."""
+    result = _build(_svc(gateway=_gateway(base="https://gw.example/http://x")))
+    assert result.sockets[0].url.startswith("wss://gw.example/http://x/engine/")
+
+
+def test_a_trailing_slash_and_stray_whitespace_are_normalised():
+    result = _build(_svc(gateway=_gateway(base="  https://gw.example//  ")))
+    assert result.sockets[0].url.startswith("wss://gw.example/engine/")
+
+
+def test_a_target_carrying_url_delimiters_cannot_truncate_the_url():
+    """A raw ``#`` would end the path and strip the credential a browser sends;
+    a raw ``?`` would turn the rest of the URL into a query value."""
+    devices = _Devices(target="tgt#frag")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url == (
+        "wss://gw.example/engine/tgt%23frag/api/openclaw/ws?x-proxypass-token=tok"
+    )
+
+
+def test_a_malformed_provider_url_is_named_rather_than_a_500():
+    """``urlsplit`` raises on this. The guard exists to produce a named error,
+    so letting the parse failure out would defeat its whole purpose."""
+    devices = _Devices(url="wss://[bad/proxypass/x")
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=devices))
 
 
 def test_a_provider_relay_url_of_an_unknown_shape_is_refused():
@@ -395,10 +443,18 @@ def test_neither_socket_model_carries_a_headers_field():
     assert set(Socket.model_fields) == {"kind", "url"}
 
 
-def test_result_carries_no_target_type_or_bare_token():
-    text = repr(_build(_svc()))
-    assert "'tgt'" not in text  # the target appears only inside the URL
-    assert "type=" not in text
+def test_result_exposes_no_field_beside_the_url_to_compose_with():
+    """The target and the credential do travel inside the URL — a browser can
+    carry them nowhere else. What the result must not hand over is the *pieces*:
+    a separate target, connection type, or token field would let a caller build
+    an address of its own, which is the hand-off this surface replaces."""
+    result = _build(_svc())
+    assert {f.name for f in dataclasses.fields(result)} == {
+        "engine",
+        "expires_at",
+        "sockets",
+    }
+    assert {f.name for f in dataclasses.fields(result.sockets[0])} == {"kind", "url"}
 
 
 # ── bot-type gate ─────────────────────────────────────────────────────────

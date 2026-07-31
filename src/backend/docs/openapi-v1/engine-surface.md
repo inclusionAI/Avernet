@@ -55,7 +55,7 @@ Track C does not wrap most of them. Four rules decide each one:
 |---|---|---|
 | **C1** | **Frontend → engine directly over HTTP** → **wrap it.** | These are the endpoints with no backend representation today. A public caller has no other way to reach them, so the public API must provide one. |
 | **C2** | **Frontend → backend → engine** → **out of scope.** | The backend already owns a public-facing contract for these; wrapping the engine route again would create a second, divergent path to the same behavior. `/api/cron` is the clearest case — it is already the `routines` category. |
-| **C3** | **WebSocket** → **do not wrap.** | The public API returns the socket URL and the headers to send; the caller opens the socket itself. Relaying frames would republish the engine's internal frame format as a public contract. |
+| **C3** | **WebSocket** → **do not wrap.** | The public API returns one complete socket URL, credential included; the caller opens the socket itself. Relaying frames would republish the engine's internal frame format as a public contract. |
 | **C4** | **AICoding-only** → **out of scope.** | Product-specific surface, not part of the tenant contract. |
 
 The authoritative list for C1 is the proxypass prefix list in
@@ -176,8 +176,7 @@ sockets, never proxypass topology:
   "sockets": [
     {
       "kind": "chat",
-      "url": "wss://<host>/proxypass/<target>/api/openclaw/ws",
-      "headers": { "x-proxypass-token": "<scoped token>" }
+      "url": "wss://<gateway>/engine/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
     }
   ]
 }
@@ -197,32 +196,30 @@ Rules this endpoint must hold:
   reachable. **No `terminal` socket** — it was implemented and then removed:
   `spec.md` excludes "arbitrary command execution and interactive shell on a
   tenant's device … at any scope" from v1, and this reference previously
-  contradicted it. (It would not have worked as published either — the engine's
-  terminal route authenticates a `token` *query* parameter, which a header-only
-  connection does not supply.) `SocketKind` stays an enum over a list so a
+  contradicted it. `SocketKind` stays an enum over a list so a
   second socket is additive. _Corrected 2026-07-30._
-- **The URL is opaque and complete.** Callers concatenate nothing. `target`,
-  `type` and the bare `token` are *not* fields — they are what we are trying to
-  stop publishing. That is why the device connection is requested in
-  **`ws_conn_mode="relay"`**: relay is the mode where the provider returns a
-  finished WebSocket URL. Without it, BaaS hands back a bare routing target that
-  only a proxy gateway can complete — and a build with no sandbox runtime (the
-  community build) has none, so the endpoint would fail rather than return the
-  relay URL that was available all along. Asking for one mode also keeps the URL
-  and the token describing the same one. Where no finished URL comes back, the
-  `{base}/proxypass/{target}` composition remains the fallback, and a deployment
-  with no gateway to compose against is a named upstream error, not a 500.
-  _Corrected 2026-07-30._
-- **A relayed URL is used verbatim, and the engine's path is requested up front.**
-  The provider builds the relay URL server-side *around a path it is given*, so
-  two things follow. Appending our own path to it would produce
-  `…/api/openclaw/ws/api/openclaw/ws`, which cannot connect. And the path it is
-  given must be the bot's own engine: the provider default is openclaw's, while
-  `/api/{engine}/ws` closes with code 4001 when the pinned engine is not the
-  active one — so a `claude_code` bot handed the default would be rejected on
-  connect. `get_device_connection` therefore takes a `path`, which only matters
-  on providers that return a complete URL; the ones that return a routing target
-  ignore it and the path is appended here. _Added 2026-07-30._
+- **The URL is opaque and complete, credential included.** Callers concatenate
+  nothing. `target`, `type` and a bare `token` are *not* fields — handing over
+  the pieces to build an address is what this endpoint exists to stop. The
+  credential rides in the URL's query string rather than a companion header
+  because the consumer is a browser: `new WebSocket(url, protocols)` accepts no
+  headers, so a URL is the only place it can travel. The internal console opens
+  this same socket the same way. _Corrected 2026-07-31._
+- **The address is the gateway's, not the hop behind it.** The published origin
+  comes from the `gateway` config block (`base_url` / `base_url_pre`, selected
+  by env), under an `/engine/{target}{path}` prefix the gateway rewrites onto
+  that hop. A deployment that fronts no gateway — the community build's normal
+  state — is a named upstream error, not a 500 and not a published address
+  nothing serves. _Corrected 2026-07-31._
+- **The URL is composed here, not passed through.** The device connection is
+  still requested in **`ws_conn_mode="relay"`**, and the provider still builds a
+  finished URL, but that URL addresses the hop behind the gateway and is not
+  what we publish; the target and the engine path we already hold are recomposed
+  against the gateway instead. A provider URL of a shape the `/engine` prefix
+  cannot express — BaaS's LOCAL platform answers `/wsrelay/{session_id}` and
+  ignores the path — is refused rather than published, so a wrong assumption
+  surfaces server-side instead of as a socket that will not open.
+  _Corrected 2026-07-31._
 - **`expires_at` is mandatory** so a caller knows to re-fetch rather than
   silently failing on an expired token. It is **the issuer's own value** wherever
   the issuer states one: the BaaS path documents that it *ignores* the requested

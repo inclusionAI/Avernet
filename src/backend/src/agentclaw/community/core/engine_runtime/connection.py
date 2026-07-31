@@ -40,7 +40,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
 from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
-from agentclaw.community.di import config as cfg
+from agentclaw.community.di.config import GatewayConfig
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -61,6 +61,11 @@ _ENGINE_PREFIX = "/engine"
 #: The prefix the hop behind the gateway serves. Only used to recognise a
 #: provider URL we can re-address — see :meth:`_reject_unroutable_provider_url`.
 _PROXYPASS_PREFIX = "/proxypass/"
+
+#: WebSocket scheme for each scheme a gateway base url may be configured with.
+#: ``ws``/``wss`` are accepted so a deployment that spells the base out as a
+#: socket origin is not rejected for being explicit.
+_WS_SCHEMES = {"http": "ws", "https": "wss", "ws": "ws", "wss": "wss"}
 
 #: Connection mode requested from the device provider. See ``build``.
 _RELAY_MODE = "relay"
@@ -133,7 +138,7 @@ class EngineConnectionService:
         bot_service: BotService,
         binding_repository: DeviceBindingRepository,
         device_service: DeviceService,
-        gateway_config: cfg.GatewayConfig,
+        gateway_config: GatewayConfig,
         collaborator_repo: CollaboratorRepositoryProtocol,
     ) -> None:
         self._bot_service = bot_service
@@ -245,19 +250,21 @@ class EngineConnectionService:
             binding_id=binding_id,
             operator=operator,
             ttl=CONNECTION_TTL_SECONDS,
-            # Relay is the mode that yields a *finished* WebSocket URL, which is
-            # this endpoint's whole contract — callers concatenate nothing. The
-            # BaaS provider fills `url` only when relay is asked for; leaving the
-            # mode unset makes it hand back a bare routing target instead, and
-            # the community build has no proxy gateway to turn that target into
-            # a URL. Asking once also keeps the URL and the token describing the
-            # same mode.
+            # Relay is the mode whose credential is scoped to a relayed socket,
+            # and asking for one mode keeps the credential and the address we
+            # publish describing the same one. We no longer consume the URL relay
+            # mode returns — `_socket_url` recomposes against the gateway — but
+            # the mode still selects what the provider issues, so it is not
+            # vestigial.
             ws_conn_mode=_RELAY_MODE,
-            # The provider bakes this path *into* the relay URL, so it has to be
-            # the bot's own engine path. The provider default is openclaw's, and
-            # the engine closes a socket whose pinned engine is not the active
-            # one (code 4001) — a claude_code bot handed the default would be
-            # rejected on connect.
+            # The provider builds its relay around this path, so it has to be the
+            # bot's own engine path: the provider default is openclaw's, and the
+            # engine closes a socket whose pinned engine is not the active one
+            # (code 4001). We publish our own path rather than the provider's
+            # URL, so this no longer decides what a caller connects to — it
+            # decides what the provider relays. The production provider is not in
+            # this repository, so this stays as it was rather than being trimmed
+            # on the assumption that only the discarded URL depended on it.
             path=chat_path,
         )
 
@@ -286,7 +293,11 @@ class EngineConnectionService:
 
         1. A local device — reached directly, with no credential. The gateway
            routes to the hop behind it, which has no path to a device on the
-           caller's own machine, and there is no proxy to authenticate to.
+           caller's own machine, and there is no proxy to authenticate to. Its
+           ``url`` is not consulted at all, so the relay-shape guard below does
+           not apply: the local provider fills that field from *http*-info
+           (``local_device_service.py``), which was never a relay URL and was
+           never published here either.
         2. Otherwise the gateway: ``{base}/engine/{target}{path}``, credential
            in the query.
         """
@@ -299,15 +310,17 @@ class EngineConnectionService:
 
         self._reject_unroutable_provider_url(info)
 
-        # ``target`` is not percent-encoded: it carries ``@`` and ``:`` (e.g.
-        # ``ARCA_x@0:20003``), both legal in a path segment, and the hop behind
-        # the gateway matches it raw.
-        url = f"{self._gateway_ws_base()}{_ENGINE_PREFIX}/{target}{socket_path}"
+        # ``@`` and ``:`` stay raw — both are legal in a path segment and the hop
+        # behind the gateway matches the target verbatim. Everything else is
+        # escaped: a ``?`` or ``#`` in a target would otherwise end the path and
+        # silently strip the credential off the URL we publish.
+        base = self._gateway_ws_base()
+        url = f"{base}{_ENGINE_PREFIX}/{quote(target, safe='@:')}{socket_path}"
+        # Only when there is one. An empty ``?x-proxypass-token=`` would fail the
+        # handshake with nothing to diagnose from, so absent is published as
+        # absent — exactly as it was when this was a header.
         if token:
             url = f"{url}?{_PROXY_TOKEN_PARAM}={quote(token, safe='')}"
-        # No credential ⇒ no query string, rather than an empty parameter that
-        # would fail the handshake with nothing to diagnose from. Absent is
-        # published as absent, exactly as it was when this was a header.
         return url
 
     def _reject_unroutable_provider_url(self, info: object) -> None:
@@ -328,7 +341,14 @@ class EngineConnectionService:
         url = str(getattr(info, "url", "") or "")
         if not url:
             return
-        if not urlsplit(url).path.startswith(_PROXYPASS_PREFIX):
+        try:
+            path = urlsplit(url).path
+        except ValueError:
+            # A malformed url is no more re-addressable than a well-formed one of
+            # the wrong shape, and letting the parse error out would be the 500
+            # this guard exists to prevent.
+            path = ""
+        if not path.startswith(_PROXYPASS_PREFIX):
             raise EngineUpstreamError(
                 "device connection carries a relay url this endpoint cannot "
                 "re-address onto the gateway"
@@ -354,7 +374,18 @@ class EngineConnectionService:
             raise EngineUpstreamError(
                 "no gateway configured for this deployment (user_config.gateway)"
             )
-        return base.replace("https://", "wss://").replace("http://", "ws://")
+
+        # Anchored on the scheme rather than substituted anywhere in the string:
+        # a host or path that happens to contain ``http://`` must not be rewritten
+        # too. Schemes are case-insensitive, and a value carrying none at all is
+        # refused rather than published as a URL nothing can open.
+        scheme, separator, rest = base.partition("://")
+        ws_scheme = _WS_SCHEMES.get(scheme.lower(), "") if separator else ""
+        if not ws_scheme:
+            raise EngineUpstreamError(
+                f"gateway base url has no usable scheme: {base!r}"
+            )
+        return f"{ws_scheme}://{rest}"
 
     def _expires_at(self, info: object) -> str:
         """When the credential above stops working.
