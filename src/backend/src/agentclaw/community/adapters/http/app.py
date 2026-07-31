@@ -245,9 +245,23 @@ attach_injector(app, injector)
 # Middleware (delegated to api/middleware.py)
 # =============================================================================
 from agentclaw.community.adapters.http.middleware import install_middleware  # noqa: E402
-from agentclaw.community.di.config import CorsConfig  # noqa: E402
+from agentclaw.community.di.config import CorsConfig, SecretNamesConfig  # noqa: E402
 from agentclaw.community.plugin_api.auth import AuthPlugin  # noqa: E402
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver  # noqa: E402
 from agentclaw.community.plugin_api.tracer import TracerPlugin  # noqa: E402
+from agentclaw.community.utils.gateway_principal_config import (  # noqa: E402
+    init_principal_verifier_config,
+)
+
+# Resolve the key the gateway signs /openapi/v1 principals with. Done here
+# because AvernetTenantMiddleware reads the verifier config from the raw ASGI
+# layer, before any route and outside the injector — so the composition root
+# pushes it in rather than the middleware pulling it out. Never raises: an
+# unresolvable key means the public API answers 401, not that boot fails.
+init_principal_verifier_config(
+    injector.get(SecretResolver),
+    injector.get(SecretNamesConfig).gateway_principal_signing_key,
+)
 
 install_middleware(
     app,

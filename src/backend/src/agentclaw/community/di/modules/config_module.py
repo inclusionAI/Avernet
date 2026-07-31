@@ -186,6 +186,10 @@ class ConfigModule(Module):
             aiworkbench_repo_url=block.get(
                 "aiworkbench_repo_url", defaults.aiworkbench_repo_url
             ),
+            gateway_principal_signing_key=block.get(
+                "gateway_principal_signing_key",
+                defaults.gateway_principal_signing_key,
+            ),
         )
 
     @singleton

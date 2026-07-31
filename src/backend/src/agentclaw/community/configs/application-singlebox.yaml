@@ -253,6 +253,21 @@ user_config:
 
   # Secret-registry key names. dormant token left unset -> local fallback token.
   # The aiworkbench name matches LocalSecretResolver's key so git-sync resolves
-  # the skills repo URL from this file's openclaw.skills_repo_url.
+  # the skills repo URL from this file's openclaw.skills_repo_url; likewise the
+  # principal key name resolves gateway_principal.signing_key below.
   secret_names:
     aiworkbench_repo_url: "other_manual_agentclaw_aiworkbench_repo_url"
+    gateway_principal_signing_key: "gateway_principal_signing_key"
+
+  # The HMAC secret this box shares with the gateway, which signs the
+  # X-Avernet-Principal token every /openapi/v1 request carries.
+  #
+  # Shipped UNSET on purpose — a committed shared secret is a committed
+  # credential. Left empty, the verifier has no key and the public API answers
+  # 401 to everything, which is where singlebox stands today anyway.
+  #
+  # To exercise the public surface locally, set the same value here and in the
+  # gateway's AVERNET_PRINCIPAL_SIGNING_KEY; the two must match for a token to
+  # verify. Use at least 32 bytes (RFC 7518 §3.2). Do not commit the value.
+  gateway_principal:
+    signing_key: ""

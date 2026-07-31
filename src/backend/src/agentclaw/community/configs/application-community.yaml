@@ -141,6 +141,12 @@ user_config:
   #   secret_names:
   #     dormant_internal_token: "AGENTCLAW_SECRET_..."   # gates /api/internal/dormant/*
   #     aiworkbench_repo_url: "AGENTCLAW_SECRET_..."      # skills source repo URL
+  #     gateway_principal_signing_key: "AGENTCLAW_SECRET_..."  # gates /openapi/v1/*
+  #
+  # gateway_principal_signing_key is the HMAC secret the gateway signs the
+  # X-Avernet-Principal token with. Register a name here and export its value as
+  # "{env_prefix}{NAME}_VALUE" (matching the gateway's own
+  # AVERNET_PRINCIPAL_SIGNING_KEY), or the public API answers 401 to everything.
 
   # MCP catalog — consumed by the community CommunityMCPCenter.
   # Optional path to a local MCP-server catalog file (same shape as

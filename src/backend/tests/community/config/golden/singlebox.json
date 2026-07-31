@@ -152,6 +152,9 @@
       "enable_metrics": false,
       "max_connections": 100
     },
+    "gateway_principal": {
+      "signing_key": ""
+    },
     "git_sync": {
       "bolt_shared_dir_name": "bolt_shared",
       "enable_oss_sync": false
@@ -171,7 +174,8 @@
     },
     "oss_mount_root": "/aidesktop",
     "secret_names": {
-      "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url"
+      "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
+      "gateway_principal_signing_key": "gateway_principal_signing_key"
     },
     "skill": {
       "oss": {
@@ -311,7 +315,8 @@
     },
     "secret_names": {
       "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
-      "dormant_internal_token": ""
+      "dormant_internal_token": "",
+      "gateway_principal_signing_key": "gateway_principal_signing_key"
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",

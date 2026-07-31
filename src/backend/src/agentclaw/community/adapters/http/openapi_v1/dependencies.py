@@ -21,9 +21,10 @@ them yields *no caller* and a ``401`` carrying the same fixed message. The
 specific reason is logged, never returned: telling a caller which part of a
 forged token to fix is telling them how to forge the next one.
 
-When the key is unconfigured (``AVERNET_PRINCIPAL_SIGNING_KEY`` unset) every
-public request still answers ``401`` — the same state this surface has been in
-since it was defined, now reached by denying rather than by a stub.
+When the shared key does not resolve — no secret name registered, no such
+secret, an empty value, or a secret store that is down — every public request
+still answers ``401``: the same state this surface has been in since it was
+defined, now reached by denying rather than by a stub.
 """
 
 from __future__ import annotations

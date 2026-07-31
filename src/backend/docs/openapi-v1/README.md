@@ -337,10 +337,18 @@ route dependency        → require_principal(request)       ─┘  cache on sc
 
 - `core/gateway_principal/` — the verifier and **our** DTOs for the wire shape.
   The backend never imports gateway types (Rule 7 / §9); it projects.
-- `utils/gateway_principal_config.py` — env config.
-  **`AVERNET_PRINCIPAL_SIGNING_KEY` unset ⇒ everything 401s.** There is no dev
+- `utils/gateway_principal_config.py` — resolves the shared key through
+  `SecretResolver`, under the name registered as
+  `secret_names.gateway_principal_signing_key` (corp: the corp secret store;
+  community: `{env_prefix}…_VALUE`; singlebox: `application-singlebox.yaml`).
+  **Anything short of a real key ⇒ everything 401s** — no name registered, no
+  such secret, an empty value, or a resolver that raises. There is no dev
   fallback key on this side on purpose (a committed shared secret is a committed
-  credential); single-box sets the same value both sides.
+  credential); single-box sets the same value both sides. `aud` and `iss` are
+  fixed in code, not configurable — the gateway doesn't make them configurable
+  either, so a knob on only the verifying side could only break the contract.
+  The key is resolved once per process, so rotating it needs a restart on both
+  sides.
 - What gets rejected, all as an identical `401`: bad signature, `alg: none`, an
   `aud` for another upstream, wrong `iss`, expired, a missing required claim, an
   unknown `type` tag, a renamed contract field, an identity set that disagrees

@@ -305,9 +305,14 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 
 - `core/gateway_principal/` —— 验证器与**我们自己**的线上格式 DTO。后端从不 import
   网关类型（Rule 7 / §9），而是做投影（project）。
-- `utils/gateway_principal_config.py` —— 环境变量配置。
-  **`AVERNET_PRINCIPAL_SIGNING_KEY` 未设置 ⇒ 一律 401。** 这一侧故意**不带** dev
-  兜底密钥（提交进仓库的共享密钥就是提交进仓库的凭据）；单盒需要两侧设成同一个值。
+- `utils/gateway_principal_config.py` —— 通过 `SecretResolver` 解析共享密钥，密钥名
+  注册在 `secret_names.gateway_principal_signing_key`（corp：公司密钥库；community：
+  `{env_prefix}…_VALUE`；单盒：`application-singlebox.yaml`）。
+  **只要拿不到真正的密钥就一律 401** —— 未注册密钥名、密钥不存在、值为空，或解析器抛错。
+  这一侧故意**不带** dev 兜底密钥（提交进仓库的共享密钥就是提交进仓库的凭据）；单盒需要
+  两侧设成同一个值。`aud` 与 `iss` 固定写在代码里，不做成配置项 —— 网关那侧同样不可配，
+  只在验证侧加开关无法改变契约，只会把它弄坏。密钥每进程只解析一次，因此轮换密钥需要两侧
+  都重启。
 - 会被拒绝的情形，全部返回**完全一致**的 `401`：签名错误、`alg: none`、`aud` 指向别的
   上游、`iss` 不对、已过期、缺少必需 claim、未知的 `type` tag、契约字段被改名、身份集合
   内部租户不一致，以及**声称自己是 `teamclaw` 的租户**（后者会把全部内部数据交给外部
