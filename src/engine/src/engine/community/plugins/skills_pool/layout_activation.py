@@ -417,6 +417,7 @@ def _finalize_active_root(
     quarantine: Path,
     retire_path: Callable[[Path, Path], None],
     retire_active_repo: Callable[[str, str], dict[str, object]] | None,
+    repo_is_mounted: Callable[[Path], bool],
 ) -> PoolActivationResult | None:
     published = publish_pool_mappings(
         mappings=mappings,
@@ -563,6 +564,21 @@ def _finalize_active_root(
             {
                 "reason": "post_retirement_mapping_verify_failed",
                 "mapping": final_verification.evidence,
+            },
+        )
+    final_inspection = inspect_runtime_layout(
+        engine=engine,
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=layout.pool_root.parents[2],
+        repo_is_mounted=repo_is_mounted,
+    )
+    if final_inspection.status is not RuntimeLayoutInspectionStatus.READY:
+        return PoolActivationResult(
+            PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+            {
+                "reason": "post_retirement_layout_invalid",
+                "probe_status": final_inspection.status.value,
+                "probe": final_inspection.evidence,
             },
         )
     _write_active_marker(
@@ -1203,6 +1219,7 @@ def _activate_pool(
 
     home_path = Path(home)
     layout = _Layout.for_engine(engine, home_path)
+    repo_mount_probe = repo_is_mounted or os.path.ismount
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", migration_generation):
         return _invalid("migration_generation_invalid")
     try:
@@ -1232,7 +1249,7 @@ def _activate_pool(
         engine=engine,
         expected_contract_version=LAYOUT_CONTRACT_VERSION,
         home=home_path,
-        repo_is_mounted=repo_is_mounted or os.path.ismount,
+        repo_is_mounted=repo_mount_probe,
     )
     layout_ready = (
         inspection.status is RuntimeLayoutInspectionStatus.READY
@@ -1286,6 +1303,7 @@ def _activate_pool(
                 quarantine=quarantine,
                 retire_path=retire_path,
                 retire_active_repo=retire_active_repo,
+                repo_is_mounted=repo_mount_probe,
             )
         except OSError as error:
             return PoolActivationResult(
@@ -1354,6 +1372,7 @@ def _activate_pool(
                 quarantine=quarantine,
                 retire_path=retire_path,
                 retire_active_repo=retire_active_repo,
+                repo_is_mounted=repo_mount_probe,
             )
             if completion_failure is not None:
                 return completion_failure
@@ -1423,6 +1442,7 @@ def _activate_pool(
                 quarantine=quarantine,
                 retire_path=retire_path,
                 retire_active_repo=retire_active_repo,
+                repo_is_mounted=repo_mount_probe,
             )
             if completion_failure is not None:
                 return completion_failure
@@ -1552,6 +1572,7 @@ def _activate_pool(
             quarantine=quarantine,
             retire_path=retire_path,
             retire_active_repo=retire_active_repo,
+            repo_is_mounted=repo_mount_probe,
         )
         if completion_failure is not None:
             return completion_failure

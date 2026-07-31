@@ -260,6 +260,70 @@ def test_aicoding_activation_retires_full_corpus_from_active_root(
     assert not active_repo.exists()
 
 
+def test_aicoding_activation_rejects_unmapped_link_through_retired_corpus(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, _, _, pool_repo = _prepared_home(tmp_path)
+    active_root = local_bridge.parent
+    active_repo = active_root / "skills-repo"
+    repo_skill = active_repo / "business" / "historical"
+    repo_skill.mkdir(parents=True)
+    (repo_skill / "SKILL.md").write_text("historical")
+    historical = active_root / "historical"
+    historical.symlink_to(repo_skill, target_is_directory=True)
+
+    def retire_active_repo(_generation: str, _preparation_id: str):
+        for path in sorted(active_repo.rglob("*"), reverse=True):
+            path.unlink() if path.is_file() else path.rmdir()
+        active_repo.rmdir()
+        return {"status": "retired"}
+
+    result = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        retire_active_repo=retire_active_repo,
+    )
+
+    assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert result.evidence["reason"] == "post_retirement_layout_invalid"
+    assert (
+        result.evidence["probe"]["reason"]
+        == "retired_active_corpus_reference_present"
+    )
+    marker = json.loads(
+        (home / ".aicoding" / "workspace" / "skills-pool" / ".pool-active").read_text()
+    )
+    assert marker["activation_state"] == "finalizing"
+    assert historical.is_symlink()
+    assert not historical.exists()
+
+    canonical_repo_skill = pool_repo / "business" / "historical"
+    canonical_repo_skill.mkdir(parents=True)
+    (canonical_repo_skill / "SKILL.md").write_text("historical")
+    historical.unlink()
+    historical.symlink_to(canonical_repo_skill, target_is_directory=True)
+
+    retry = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        retire_active_repo=retire_active_repo,
+    )
+
+    assert retry.status is PoolActivationStatus.ALREADY_COMMITTED
+    marker = json.loads(
+        (home / ".aicoding" / "workspace" / "skills-pool" / ".pool-active").read_text()
+    )
+    assert marker["activation_state"] == "active"
+
+
 def test_aicoding_activation_reserves_active_repo_corpus_name(
     tmp_path: Path,
 ) -> None:
