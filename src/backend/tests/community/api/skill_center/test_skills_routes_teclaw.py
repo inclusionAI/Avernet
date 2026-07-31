@@ -1,6 +1,7 @@
 """Endpoint coverage for the teclaw branches of the readme / delete / parameters
 routes — they resolve the provider and build the skill service with the teclaw
 path adapter. A teclaw-provider resolver drives those branches end-to-end."""
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,8 +11,13 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
-from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
-from agentclaw.community.adapters.http.skill_center.skills import router as skills_router
+from agentclaw.community.adapters.http.dependencies import (
+    RequestContext,
+    get_request_context,
+)
+from agentclaw.community.adapters.http.skill_center.skills import (
+    router as skills_router,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -81,7 +87,9 @@ def _app(skill_service):
 
     class _M(Module):
         def configure(self, binder):
-            from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+            from agentclaw.community.api.skill_service_factory import (
+                SkillServiceFactoryProtocol,
+            )
             from agentclaw.community.api.skill_parameter_service_factory import (
                 SkillParameterServiceFactoryProtocol,
             )
@@ -95,10 +103,18 @@ def _app(skill_service):
             from agentclaw.community.core.devices.services.device_context_resolver import (
                 DeviceContextResolver,
             )
-            from agentclaw.community.core.skill_center.factories import SkillServiceFactory
-            from agentclaw.community.core.skill_center.services.repositories import SkillRepository
-            from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-            from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+            from agentclaw.community.core.skill_center.factories import (
+                SkillServiceFactory,
+            )
+            from agentclaw.community.core.skill_center.services.repositories import (
+                SkillRepository,
+            )
+            from agentclaw.community.core.workspace.path_factory import (
+                WorkspacePathFactory,
+            )
+            from agentclaw.community.plugin_api.skill_center_client import (
+                SkillCenterClient,
+            )
 
             binder.bind(SkillServiceFactory, to=factory)
             binder.bind(SkillServiceFactoryProtocol, to=factory)
@@ -161,7 +177,11 @@ def test_readme_route_uses_skill_bot_context_not_request_context_for_teclaw():
 
     resp = client.get(
         "/api/skills/1/readme",
-        params={"entity_id": "wrong-request-owner", "bot_id": "default", "engine_type": "hermes"},
+        params={
+            "entity_id": "wrong-request-owner",
+            "bot_id": "default",
+            "engine_type": "hermes",
+        },
     )
 
     assert resp.status_code == 200
@@ -391,11 +411,66 @@ def test_readme_route_resolves_default_bot_by_env_owner_and_bot_id():
     assert resp.status_code == 200
     bot_repo.get_live_by_id_owner_and_env.assert_called_once()
     assert bot_repo.get_live_by_id_owner_and_env.call_args.kwargs["bot_id"] == "default"
-    assert bot_repo.get_live_by_id_owner_and_env.call_args.kwargs["owner_id"] == "target-owner"
+    assert (
+        bot_repo.get_live_by_id_owner_and_env.call_args.kwargs["owner_id"]
+        == "target-owner"
+    )
     bot_repo.get_unique_by_id.assert_not_called()
     read_svc.get_skill_readme.assert_awaited_once_with(
         "1", "u1", "default", device_owner_id="target-owner"
     )
+
+
+def test_readme_route_rejects_ambiguous_default_bot_owner_scope():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "default",
+    }
+    client, _, _ = _app(lookup_svc)
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_live_by_id_owner_and_env.return_value = [
+        {"bot_id": "default", "owner_id": "u1"},
+        {"bot_id": "default", "owner_id": "u1"},
+    ]
+
+    resp = client.get(
+        "/api/skills/1/readme", params={"entity_id": "u1", "bot_id": "default"}
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Skill's owning bot is ambiguous"
+
+
+def test_readme_route_handles_target_bot_repository_failure(caplog):
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "service-bot",
+    }
+    client, _, _ = _app(lookup_svc)
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
+    bot_repo.get_unique_by_id.side_effect = RuntimeError("database unavailable")
+
+    resp = client.get("/api/skills/1/readme", params=_Q)
+
+    assert resp.status_code == 404
+    assert "target bot lookup failed" in caplog.text
 
 
 @pytest.mark.parametrize("method", ["get", "post"])
