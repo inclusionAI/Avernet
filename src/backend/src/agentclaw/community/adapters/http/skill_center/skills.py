@@ -1245,6 +1245,12 @@ async def get_skill_readme(
             e,
         )
 
+    # A persisted local Skill must always be read from the Bot that owns it.
+    # Do not fall back to the caller's workspace when that Bot has disappeared:
+    # doing so can turn a stale record into a read against an unrelated device.
+    if skill and skill.get("bolt_id") and not target_bot:
+        raise HTTPException(status_code=404, detail="Skill's owning bot was not found")
+
     read_owner_id = (target_bot or {}).get("owner_id") or effective_entity_id
     read_entity_type = (target_bot or {}).get("entity_type") or effective_entity_type
     # Do not honour a caller-provided engine override for a Skill owned by a
@@ -1254,6 +1260,19 @@ async def get_skill_readme(
         owner_id=read_owner_id,
         bot_repo=bot_repo,
     )
+    if target_bot and (
+        (entity_id and entity_id != read_owner_id)
+        or (bot_id and bot_id != read_bot_id)
+        or (engine_type and engine_type != read_engine)
+    ):
+        logger.warning(
+            "[skills.get_skill_readme] Ignoring mismatched caller context: "
+            "skill_id=%s target_bot_id=%s target_owner_id=%s target_engine=%s",
+            skill_id,
+            read_bot_id,
+            read_owner_id,
+            read_engine,
+        )
     read_is_desktop = False
     if target_bot:
         read_is_desktop = target_bot.get("bot_type") == "desktop"
