@@ -97,7 +97,7 @@ def test_readme_route_teclaw_branch():
     assert path_factory.get_bot_skills_local_dir.call_args.kwargs["is_teclaw"] is True
 
 
-def test_readme_route_uses_skill_owner_context_for_teclaw():
+def test_readme_route_uses_request_owner_context_for_teclaw():
     lookup_svc = MagicMock()
     lookup_svc.get_skill.return_value = {
         "id": "1",
@@ -105,7 +105,7 @@ def test_readme_route_uses_skill_owner_context_for_teclaw():
         "link_name": "x",
         "git_path": "local://skills-local/x",
         "bolt_id": "teclaw-bot",
-        "user_id": "owner-u",
+        "user_id": "collaborator-u",
     }
     read_svc = MagicMock()
     read_svc.get_skill_readme = AsyncMock(return_value="# readme")
@@ -115,7 +115,7 @@ def test_readme_route_uses_skill_owner_context_for_teclaw():
 
     resp = client.get(
         "/api/skills/1/readme",
-        params={"entity_id": "viewer-u", "bot_id": "default", "engine_type": "openclaw"},
+        params={"entity_id": "owner-u", "bot_id": "default", "engine_type": "openclaw"},
     )
 
     assert resp.status_code == 200
@@ -129,7 +129,9 @@ def test_readme_route_uses_skill_owner_context_for_teclaw():
         "staff",
     )
     assert path_factory.get_bot_skills_local_dir.call_args.kwargs["is_teclaw"] is True
-    read_svc.get_skill_readme.assert_awaited_once_with("1", "owner-u", "teclaw-bot")
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "1", "u1", "teclaw-bot", device_owner_id="owner-u"
+    )
 
 
 def test_readme_route_link_name_falls_back_to_global_lookup():
@@ -143,7 +145,7 @@ def test_readme_route_link_name_falls_back_to_global_lookup():
             "link_name": "x",
             "git_path": "local://skills-local/x",
             "bolt_id": "teclaw-bot",
-            "user_id": "owner-u",
+            "user_id": "collaborator-u",
         },
     ]
     read_svc = MagicMock()
@@ -154,14 +156,16 @@ def test_readme_route_link_name_falls_back_to_global_lookup():
 
     resp = client.get(
         "/api/skills/x/readme",
-        params={"entity_id": "viewer-u", "bot_id": "default", "engine_type": "openclaw"},
+        params={"entity_id": "owner-u", "bot_id": "default", "engine_type": "openclaw"},
     )
 
     assert resp.status_code == 200
     lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id="default")
     lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id="b1")
     lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id=None)
-    read_svc.get_skill_readme.assert_awaited_once_with("x", "owner-u", "teclaw-bot")
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "x", "u1", "teclaw-bot", device_owner_id="owner-u"
+    )
 
 
 def test_readme_route_handles_duplicate_link_name_scopes_and_desktop_bot():
@@ -232,7 +236,9 @@ def test_readme_route_falls_back_when_skill_not_found_and_bot_type_lookup_fails(
     resp = client.get("/api/skills/404/readme", params=_Q)
 
     assert resp.status_code == 200
-    read_svc.get_skill_readme.assert_awaited_once_with("404", "u1", "b1")
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "404", "u1", "b1", device_owner_id="u1"
+    )
 
 
 def test_readme_route_numeric_id_falls_back_to_link_name_when_id_missing():
@@ -244,7 +250,7 @@ def test_readme_route_numeric_id_falls_back_to_link_name_when_id_missing():
         "link_name": "123",
         "git_path": "local://skills-local/numeric-link",
         "bolt_id": "teclaw-bot",
-        "user_id": "owner-u",
+        "user_id": "collaborator-u",
     }
     read_svc = MagicMock()
     read_svc.get_skill_readme = AsyncMock(return_value="# numeric")
@@ -257,4 +263,6 @@ def test_readme_route_numeric_id_falls_back_to_link_name_when_id_missing():
     assert resp.status_code == 200
     lookup_svc.get_skill.assert_called_once_with("123")
     lookup_svc.get_skill_by_link_name.assert_called_once_with("123", bolt_id="b1")
-    read_svc.get_skill_readme.assert_awaited_once_with("123", "owner-u", "teclaw-bot")
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "123", "u1", "teclaw-bot", device_owner_id="u1"
+    )

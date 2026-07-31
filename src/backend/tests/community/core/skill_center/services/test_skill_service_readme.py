@@ -206,6 +206,36 @@ class TestGetSkillReadmeEncoding:
         assert result == "# Caller Bot"
         factory.assert_called_once_with("route-bot", "owner1")
 
+    @pytest.mark.asyncio
+    async def test_local_readme_uses_explicit_device_owner_not_skill_author(self, skill_dirs, mock_skill_repo):
+        mock_skill_repo.get_by_id.return_value = {
+            "id": "107",
+            "git_path": "local://skills-local/my-skill",
+            "bolt_id": "service-bot",
+            "user_id": "collaborator",
+        }
+
+        device_fs = AsyncMock()
+        device_fs.read_file = AsyncMock(return_value=b"# Collaborator Skill")
+        factory = MagicMock(return_value=device_fs)
+        svc = _make_service(
+            mock_skill_repo,
+            skill_dirs["repo_dir"],
+            skill_dirs["local_dir"],
+            skill_dirs["active_dir"],
+            device_fs_factory=factory,
+        )
+
+        result = await svc.get_skill_readme(
+            "107",
+            user_id="collaborator",
+            bolt_id="service-bot",
+            device_owner_id="bot-owner",
+        )
+
+        assert result == "# Collaborator Skill"
+        factory.assert_called_once_with("service-bot", "bot-owner")
+
 
 class TestPrepareUploadPlanEncoding:
     """_prepare_upload_plan should handle GBK-encoded SKILL.md bytes."""
@@ -297,4 +327,3 @@ class TestIsIgnoredUploadPath:
         assert "pkg/helper.pyc" not in candidate_paths
         assert ".DS_Store" not in candidate_paths
         assert candidate_paths == {"SKILL.md", "pkg/helper.py"}
-
