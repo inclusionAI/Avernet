@@ -89,28 +89,34 @@ def _make_service() -> BotService:
 
 
 class TestGenerateBotId:
+    """generate_bot_id now always returns a globally-unique id (never 'default')."""
 
-    def test_first_bot_returns_default(self):
+    def test_never_returns_default(self):
         repo = MagicMock()
+        # Regression pin: scenario that used to yield 'default'; new impl must still not.
         repo.exists_by_owner_and_bot_id.return_value = False
-        assert generate_bot_id("user001", repo) == "default"
-
-    def test_second_bot_returns_date_based_id(self):
-        repo = MagicMock()
-        repo.exists_by_owner_and_bot_id.return_value = True
         bot_id = generate_bot_id("user001", repo)
         assert bot_id != "default"
-        assert len(bot_id) == 17  # yyyymmdd + _ + 8 chars
 
-    def test_generated_id_format(self):
+    def test_format_is_date_underscore_random8(self):
         repo = MagicMock()
-        repo.exists_by_owner_and_bot_id.return_value = True
         bot_id = generate_bot_id("user001", repo)
         parts = bot_id.split("_")
         assert len(parts) == 2
-        assert len(parts[0]) == 8  # date part
-        assert len(parts[1]) == 8  # random part
-        assert parts[0].isdigit()
+        assert len(parts[0]) == 8 and parts[0].isdigit()  # yyyymmdd
+        assert len(parts[1]) == 8  # 8 lowercase/digit chars
+
+    def test_successive_calls_are_unique(self):
+        repo = MagicMock()
+        ids = {generate_bot_id("user001", repo) for _ in range(50)}
+        assert len(ids) == 50  # 36^8 space → collision-improbable
+
+    def test_ignores_owner_default_history(self):
+        # Id allocation no longer consults owner history at all.
+        repo = MagicMock()
+        bot_id = generate_bot_id("user001", repo)
+        assert bot_id != "default"
+        repo.exists_by_owner_and_bot_id.assert_not_called()
 
 
 # ===========================================================================

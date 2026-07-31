@@ -257,56 +257,17 @@ def _copy_tree_fast(src: Path, dst: Path, symlinks: bool = True) -> None:
 
 
 def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
+    """Return a globally-unique bot_id.
+
+    Never returns 'default' — that convention is retired. ``bot_repository`` is
+    retained in the signature for call-site compatibility; id allocation no
+    longer depends on owner history.
     """
-    Generate bot_id based on owner's bot history.
-
-    Rules:
-    - In the default tenant, if the user has no bot with id "default", return
-      "default"
-    - Otherwise, return "yyyymmdd_{random_8_chars}"
-
-    The ``"default"`` shortcut is confined to the default tenant on purpose.
-    ``bot_id`` is unique only per owner *per tenant*, and the read below goes
-    through the ``BotModel`` tenant guard — so a second tenant asking "does this
-    owner already have a 'default' bot?" cannot see the first tenant's row and
-    correctly answers no. Both tenants would then mint ``bot_id="default"`` for
-    the same owner, and the identities we derive from it are handed to systems
-    that have no tenant field to tell them apart: the passport service's
-    principal, keyed on ``(bot_id, owner)``; the ``agent_code`` it issues for
-    that principal; and the coordination-network record keyed on
-    ``"{bot_id}:{owner_id}"``.
-
-    A generated ``yyyymmdd_xxxxxxxx`` id is unique on its own, so restricting
-    the shortcut keeps every external identity collision-free without changing
-    a single external contract. Existing bots are unaffected: they all belong to
-    the default tenant and keep ``"default"``.
-
-    Args:
-        owner_id: Owner user ID
-        bot_repository: Bot Repository
-
-    Returns:
-        Bot ID as string ("default" or "yyyymmdd_xxxx")
-    """
-    # Check if owner already has a bot with id "default"
-    if (
-        get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT
-        and not bot_repository.exists_by_owner_and_bot_id(owner_id, "default")
-    ):
-        logger.info(f"[bot_service.generate_bot_id] Owner {owner_id} has no 'default' bot, using 'default' as bot_id")
-        return "default"
-
-    # Generate date-based id with random suffix
+    # owner_id retained as the semantic subject (whose bot); not used in id allocation.
+    del bot_repository  # unused; kept for call-site compatibility
     date_part = datetime.now().strftime("%Y%m%d")
-    # Generate 8 random lowercase letters and digits
-    random_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-    bot_id = f"{date_part}_{random_part}"
-    logger.info(
-        f"[bot_service.generate_bot_id] Owner {owner_id} is not eligible for the "
-        f"'default' bot_id (tenant={get_current_avernet_tenant()}), "
-        f"using generated bot_id: {bot_id}"
-    )
-    return bot_id
+    random_part = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    return f"{date_part}_{random_part}"
 
 
 class BotService:

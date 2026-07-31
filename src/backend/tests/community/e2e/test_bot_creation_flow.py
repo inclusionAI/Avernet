@@ -288,16 +288,21 @@ class TestGenerateBotId:
     """测试 generate_bot_id 函数。"""
 
     def test_generate_first_bot_id(self):
-        """首Bot应返回 'default'。"""
+        """generate_bot_id 始终返回全局唯一 id（不再返回 'default'）。"""
         fake_repo = FakeBotRepository()
 
         from agentclaw.community.core.bot_management.services.bot_service import generate_bot_id
 
         result = generate_bot_id("user_001", fake_repo)
-        assert result == "default"
+        assert result != "default"
+        assert len(result) == 17  # yyyymmdd_xxxxxxxx
+        assert "_" in result
+        parts = result.split("_")
+        assert len(parts[0]) == 8 and parts[0].isdigit()
+        assert len(parts[1]) == 8
 
-    def test_generate_non_first_bot_id(self):
-        """非首Bot应返回日期格式 ID。"""
+    def test_generate_id_with_existing_default_present(self):
+        """owner 已有 'default' bot 时，generate_bot_id 仍返回非 'default' 的全局唯一 id。"""
         fake_repo = FakeBotRepository()
         fake_repo.insert({
             "bot_id": "default",
