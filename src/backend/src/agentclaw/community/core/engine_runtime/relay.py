@@ -27,6 +27,9 @@ from typing import Any
 
 from injector import inject
 
+from agentclaw.community.core.bot_collaborator.repository.protocol import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
@@ -44,6 +47,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
+from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
     BotPublishRepositoryProtocol,
 )
@@ -82,11 +86,13 @@ class EngineRuntimeRelay:
         resolver: DeviceContextResolver,
         transport: DeviceAdapterTransport,
         publish_repo: BotPublishRepositoryProtocol,
+        collaborator_repo: CollaboratorRepositoryProtocol,
     ) -> None:
         self._bot_service = bot_service
         self._resolver = resolver
         self._transport = transport
         self._publish_repo = publish_repo
+        self._collaborator_repo = collaborator_repo
 
     # ── resolution ────────────────────────────────────────────────────────
 
@@ -109,12 +115,36 @@ class EngineRuntimeRelay:
         impossible rather than merely discouraged.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
+        resolved_id = str(bot.get("bot_id") or bot_id)
+        resolved_owner = str(bot.get("owner_id") or owner_id)
         return BotFacts(
-            bot_id=str(bot.get("bot_id") or bot_id),
+            bot_id=resolved_id,
             bot_type=str(bot.get("bot_type") or ""),
             active_engine=str(bot.get("active_engine") or ""),
             bot_pk=int(bot.get("id") or 0),
+            is_shared=bot_is_shared(
+                bot,
+                self._collaborator_repo,
+                bot_id=resolved_id,
+                owner_id=resolved_owner,
+            ),
         )
+
+    async def resolve_bot_off_loop(self, bot_id: str, owner_id: str) -> BotFacts:
+        """:meth:`resolve_bot`, run in a worker thread.
+
+        ``resolve_bot`` is synchronous and not cheap: ``BotService.get_bot``
+        does an owner-scoped row read, a device-binding fetch and a template
+        fetch, and :meth:`_is_shared` may add a collaborator query. Running
+        that inline parks the event loop for the length of one slow database
+        round trip and stalls every unrelated request on the worker — the same
+        reason :meth:`call` already offloads device resolution.
+
+        Handlers that gate on bot facts before forwarding use this, then hand
+        the result to :meth:`call` as ``facts`` so the bot is resolved once per
+        request rather than once per gate plus once per forward.
+        """
+        return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id)
 
     def _resolve_device(
         self, bot_id: str, owner_id: str, facts: BotFacts
@@ -234,6 +264,18 @@ class EngineRuntimeRelay:
             int(bind_id), owner_id, bot_id=bot_id
         )
 
+    def _resolve_bot_and_device(
+        self, bot_id: str, owner_id: str, facts: BotFacts | None
+    ) -> DeviceContext:
+        """Prove ownership, then resolve the device — one worker-thread hop.
+
+        Kept together so :meth:`call` offloads once rather than twice. The
+        order is the isolation order: ``resolve_bot`` raises for a bot the
+        caller does not own, before any device is touched.
+        """
+        resolved = facts if facts is not None else self.resolve_bot(bot_id, owner_id)
+        return self._resolve_device(bot_id, owner_id, resolved)
+
     # ── forwarding ────────────────────────────────────────────────────────
 
     async def call(
@@ -247,6 +289,7 @@ class EngineRuntimeRelay:
         params: dict[str, Any] | None = None,
         timeout: float | None = None,
         enveloped: bool = True,
+        facts: BotFacts | None = None,
     ) -> EngineResult:
         """Issue ``method path`` against the caller's bot's engine adapter.
 
@@ -254,12 +297,25 @@ class EngineRuntimeRelay:
         then the forward. A handler that reverses it would touch a device for a
         bot the caller does not own.
 
-        Device resolution runs in a **worker thread**. It is synchronous and its
-        provider leg is blocking network I/O — a BaaS-backed bot resolves through
+        ``facts`` is the bot this call was already resolved against, for
+        handlers that had to resolve it to gate on it — the sessions group
+        resolves to check :attr:`BotFacts.is_shared` before forwarding. Passing
+        it keeps the request at one owner-scoped resolution instead of two.
+        ``None`` means "not resolved yet" and this call resolves it, which is
+        what every ungated route does. It is **not** a way to supply bot facts
+        from outside: the only safe value is one this relay returned for the
+        same ``bot_id``/``owner_id``, since it stands in for the ownership
+        proof.
+
+        Bot and device resolution share one **worker thread** hop. Both legs are
+        synchronous and neither belongs on the event loop:
+        ``BotService.get_bot`` does an owner-scoped row read plus device-binding
+        and template fetches, and the device leg's provider call is blocking
+        network I/O — a BaaS-backed bot resolves through
         ``BaasService.get_ws_info``, a sync ``httpx`` call with a 30-second
-        timeout — so running it inline would park the event loop for the length
-        of one slow provider lookup and stall every unrelated request on the
-        worker. ``CronRelayService`` offloads the same resolution for the same
+        timeout — so running either inline would park the event loop for the
+        length of one slow database or provider round trip and stall every
+        unrelated request on the worker. ``CronRelayService`` offloads the same resolution for the same
         reason (``_prepare_runtime_query_async``), which is also what makes this
         safe: the repositories underneath are already driven from worker threads
         on that path in production. No semaphore here — cron needs one because it
@@ -275,9 +331,8 @@ class EngineRuntimeRelay:
         rather than sniffing for a ``success`` key, because a body that happens
         to lack one is exactly the malformed case that must still fail.
         """
-        facts = self.resolve_bot(bot_id, owner_id)
         ctx = await asyncio.to_thread(
-            self._resolve_device, bot_id, owner_id, facts
+            self._resolve_bot_and_device, bot_id, owner_id, facts
         )
         raw = await self._invoke(ctx, method, path, body, params, timeout)
         return self._normalise(raw, bot_id=bot_id, path=path, enveloped=enveloped)

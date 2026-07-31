@@ -29,6 +29,15 @@ class EngineRuntimeRelayProtocol(Protocol):
         """
         ...
 
+    async def resolve_bot_off_loop(self, bot_id: str, owner_id: str) -> BotFacts:
+        """:meth:`resolve_bot`, run in a worker thread.
+
+        The form handlers should use: the resolve is synchronous database work
+        and would otherwise block the event loop. Hand the result to
+        :meth:`call` as ``facts`` so a gated route resolves the bot once.
+        """
+        ...
+
     async def call(
         self,
         *,
@@ -40,11 +49,16 @@ class EngineRuntimeRelayProtocol(Protocol):
         params: dict[str, Any] | None = None,
         timeout: float | None = None,
         enveloped: bool = True,
+        facts: BotFacts | None = None,
     ) -> EngineResult:
         """Issue ``method path`` against the caller's bot's engine adapter.
 
         ``enveloped=False`` for the one engine route that answers with a raw
         payload instead of the standard envelope (``GET /api/engine/status``).
+
+        ``facts`` reuses a resolve a gating handler already paid for; ``None``
+        resolves here. Only a value this relay returned for the same
+        ``bot_id``/``owner_id`` is safe — it stands in for the ownership proof.
         """
         ...
 

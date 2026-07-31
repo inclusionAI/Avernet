@@ -24,9 +24,10 @@ BOT = "bot-1"
 
 
 class _Bots:
-    def __init__(self, engine="openclaw", bot_type="personal"):
+    def __init__(self, engine="openclaw", bot_type="personal", public="0"):
         self.engine = engine
         self.bot_type = bot_type
+        self.public = public
         self.calls = []
 
     def get_bot(self, bot_id, user_id):
@@ -35,8 +36,10 @@ class _Bots:
             raise BotNotFoundError(bot_id)
         return {
             "bot_id": bot_id,
+            "owner_id": user_id,
             "bot_type": self.bot_type,
             "active_engine": self.engine,
+            "public": self.public,
         }
 
 
@@ -85,10 +88,22 @@ class _Sandbox:
         return self._base
 
 
-def _svc(bots=None, bindings=None, devices=None, sandbox=None):
+class _CollaboratorRepo:
+    """Stands in for the collaborator table the shared-bot gate reads."""
+
+    def __init__(self, collaborators=None):
+        self._collaborators = collaborators or {}
+        self.calls = []
+
+    def list_by_bot(self, bot_id, owner_id, env, role=None):
+        self.calls.append((bot_id, owner_id))
+        return self._collaborators.get((bot_id, owner_id), [])
+
+
+def _svc(bots=None, bindings=None, devices=None, sandbox=None, collaborators=None):
     return EngineConnectionService(
         bots or _Bots(), bindings or _Bindings(), devices or _Devices(),
-        sandbox or _Sandbox(),
+        sandbox or _Sandbox(), collaborators or _CollaboratorRepo(),
     )
 
 
@@ -331,6 +346,60 @@ def test_a_service_bot_is_refused_before_a_device_is_touched():
 
     # Refused at composition time — no device call was made on the way out.
     assert devices.kwargs is None
+
+
+def test_a_public_personal_bot_is_refused_before_a_device_is_touched():
+    """``personal`` does not imply single-caller — ``ac_bots.public`` is free.
+
+    ``bot_public_service`` sets the column with no ``bot_type`` gate, and
+    ``ExpertChatService`` admits any caller to a public bot and creates their
+    sessions on its binding. This socket's ``sessions.*`` methods would then
+    reach those conversations, which is exactly what the service-bot refusal
+    above exists to prevent.
+    """
+    bindings = _Bindings(raises=AssertionError("must not be reached"))
+    svc = _svc(bots=_Bots(public="1"), bindings=bindings)
+
+    with pytest.raises(EngineBotTypeNotSupportedError):
+        _build(svc)
+
+
+def test_a_collaborated_personal_bot_is_refused():
+    """A coding app takes collaborators while staying ``bot_type='personal'``."""
+    bindings = _Bindings(raises=AssertionError("must not be reached"))
+    collaborators = _CollaboratorRepo({(BOT, OWNER): [{"user_id": "someone"}]})
+    svc = _svc(bindings=bindings, collaborators=collaborators)
+
+    with pytest.raises(EngineBotTypeNotSupportedError):
+        _build(svc)
+
+
+def test_an_unreadable_collaborator_table_refuses_rather_than_publishes():
+    """The gate fails closed: a database blip must not open a shared bot."""
+
+    class _Broken:
+        def list_by_bot(self, bot_id, owner_id, env, role=None):
+            raise RuntimeError("collaborator table unavailable")
+
+    bindings = _Bindings(raises=AssertionError("must not be reached"))
+    svc = _svc(bindings=bindings, collaborators=_Broken())
+
+    with pytest.raises(EngineBotTypeNotSupportedError):
+        _build(svc)
+
+
+def test_the_collaborator_lookup_is_skipped_for_an_already_public_bot():
+    """Public is decisive; there is nothing a second query could change."""
+    collaborators = _CollaboratorRepo()
+    svc = _svc(
+        bots=_Bots(public="1"),
+        bindings=_Bindings(raises=AssertionError("must not be reached")),
+        collaborators=collaborators,
+    )
+
+    with pytest.raises(EngineBotTypeNotSupportedError):
+        _build(svc)
+    assert collaborators.calls == []
 
 
 def test_an_unknown_bot_type_is_refused_rather_than_assumed_personal():

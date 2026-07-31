@@ -1,7 +1,7 @@
 """Sessions group — ``/openapi/v1/bots/{bot_id}/sessions``.
 
-Wraps the engine's ``/api/sessions`` surface. **Personal bots only** — see
-:func:`_require_personal_bot`.
+Wraps the engine's ``/api/sessions`` surface. **Private personal bots only** —
+see :func:`_require_private_personal_bot`.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineHistoryDepthExceededError,
     EngineResourceNotFoundError,
 )
+from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -53,6 +54,8 @@ PrincipalDep = Annotated[Principal, Depends(require_principal)]
 #: The only bot type this group serves. A ``service`` bot's device is reached by
 #: many callers and the engine's session list is not scoped per caller, so
 #: listing there would show the bot's owner other people's conversations.
+#:
+#: Necessary but **not** sufficient — see :func:`_require_private_personal_bot`.
 _SUPPORTED_BOT_TYPE = "personal"
 
 #: One extra item is requested beyond the page, purely to learn whether more
@@ -72,21 +75,38 @@ _LOOKAHEAD = 1
 _MAX_HISTORY_DEPTH = 5000
 
 
-def _require_personal_bot(
+async def _require_private_personal_bot(
     relay: EngineRuntimeRelayProtocol, bot_id: str, owner_id: str
-) -> None:
-    """Resolve the caller's bot and reject non-personal types.
+) -> BotFacts:
+    """Resolve the caller's bot and reject anything more than one caller reaches.
 
     Runs **before** any device call, deliberately: a filter applied to what the
     device returned would already have fetched every caller's sessions. This
     also performs the owner-scoped resolve, so a foreign ``bot_id`` raises
-    ``BotNotFoundError`` here — before a device is touched.
+    ``BotNotFoundError`` here — before a device is touched. The resolved facts
+    are returned so the forward can reuse them instead of resolving again.
+
+    Two conditions, because the hazard is *multi-caller*, not *bot type*. A
+    ``service`` bot is the obvious case. But ``personal`` is single-caller only
+    by default: the bot can be made public, and a coding app can take
+    collaborators, and ``ExpertChatService`` then creates those callers'
+    sessions on this same binding. Since the engine's collection is not scoped
+    per caller (see :attr:`BotFacts.is_shared`), serving this group for such a
+    bot would let its owner list, read, rename and delete other people's
+    conversations. Both refusals are the same 501: what the surface cannot
+    serve, rather than something the caller may retry or fix.
     """
-    facts = relay.resolve_bot(bot_id, owner_id)
+    facts = await relay.resolve_bot_off_loop(bot_id, owner_id)
     if facts.bot_type != _SUPPORTED_BOT_TYPE:
         raise EngineBotTypeNotSupportedError(
             f"sessions are not served for bot_type={facts.bot_type!r}"
         )
+    if facts.is_shared:
+        raise EngineBotTypeNotSupportedError(
+            "sessions are not served for a shared bot: the engine's session "
+            "collection is not scoped per caller"
+        )
+    return facts
 
 
 def _map_session(data: dict[str, Any]) -> Session:
@@ -323,7 +343,7 @@ async def list_sessions(
 ) -> Envelope[SessionPage]:
     """List the bot's sessions."""
     owner_id = caller_owner_id(principal)
-    _require_personal_bot(relay, bot_id, owner_id)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
     params: dict[str, Any] = _window(page)
     if agent_id:
         params["agent_id"] = agent_id
@@ -333,7 +353,7 @@ async def list_sessions(
     if session_key:
         params["session_key"] = session_key
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/sessions",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="GET", path="/api/sessions",
         params=params,
     )
     mapped = [_map_session(d) for d in _as_list(result.data)]
@@ -353,9 +373,9 @@ async def create_session(
 ) -> Envelope[Session]:
     """Create a session."""
     owner_id = caller_owner_id(principal)
-    _require_personal_bot(relay, bot_id, owner_id)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="POST", path="/api/sessions",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="POST", path="/api/sessions",
         body={
             "title": body.title,
             "model": body.model,
@@ -385,9 +405,9 @@ async def get_session(
     # A colon is legal in a path segment (RFC 3986), so ids route as-is. An id
     # containing "/" would not be addressable, but no engine id format has one.
     owner_id = caller_owner_id(principal)
-    _require_personal_bot(relay, bot_id, owner_id)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="GET",
         path=f"/api/sessions/{session_id}",
     )
     if not isinstance(result.data, dict):
@@ -409,10 +429,10 @@ async def update_session(
     # Publicly a PATCH on the resource; the engine models the same operation as
     # a POST to an /update sub-path.
     owner_id = caller_owner_id(principal)
-    _require_personal_bot(relay, bot_id, owner_id)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="POST",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="POST",
         # QUERY params, not a body. The engine declares this route's fields as
         # bare scalar arguments, which FastAPI binds from the query string —
         # there is no Body(...) on it. Sending a body is silently discarded and
@@ -436,9 +456,9 @@ async def delete_session(
 ) -> Envelope[Deleted]:
     """Delete a session."""
     owner_id = caller_owner_id(principal)
-    _require_personal_bot(relay, bot_id, owner_id)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
     await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="DELETE",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="DELETE",
         path=f"/api/sessions/{session_id}",
     )
     return deleted(request)
@@ -464,10 +484,10 @@ async def list_session_messages(
     is never confused with the limit of what this endpoint serves.
     """
     owner_id = caller_owner_id(principal)
-    _require_personal_bot(relay, bot_id, owner_id)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
     _require_within_depth(page)
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="GET",
         path=f"/api/sessions/{session_id}/messages",
         # The history route tail-limits rather than paginating, so the offset is
         # applied here instead of being sent. See ``_history_window``.
@@ -492,9 +512,9 @@ async def clear_session_messages(
 ) -> Envelope[Deleted]:
     """Clear a session's message history, keeping the session."""
     owner_id = caller_owner_id(principal)
-    _require_personal_bot(relay, bot_id, owner_id)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
     await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="DELETE",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="DELETE",
         path=f"/api/sessions/{session_id}/messages",
     )
     return deleted(request)

@@ -16,6 +16,9 @@ from datetime import datetime, timedelta, timezone
 
 from injector import inject
 
+from agentclaw.community.core.bot_collaborator.repository.protocol import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.errors import (
     DeviceDomainError,
@@ -32,6 +35,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
+from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.sandbox_runtime import (
     SandboxRuntimeClient,
@@ -64,12 +68,15 @@ _CHAT_WS_PATHS = {
 
 
 #: The only bot type a socket is published for — the same rule, and the same
-#: reason, as the sessions group's gate.
+#: reason, as the sessions group's gate. Necessary but not sufficient; the bot
+#: must also be unshared. See :func:`_require_private_personal_bot`.
 _SUPPORTED_BOT_TYPE = "personal"
 
 
-def _require_personal_bot(bot_type: str, bot_id: str) -> None:
-    """Reject non-personal bots before a socket is composed.
+def _require_private_personal_bot(
+    bot_type: str, bot_id: str, *, is_shared: bool
+) -> None:
+    """Reject bots more than one caller reaches, before a socket is composed.
 
     The socket this endpoint publishes is **not** chat-scoped, however it is
     labelled. The engine's WebSocket server answers ``hello`` by advertising
@@ -86,6 +93,12 @@ def _require_personal_bot(bot_type: str, bot_id: str) -> None:
     socket for the same bot would hand the same owner the same data over a
     different transport — a 501 on the front door with the window left open.
 
+    ``is_shared`` closes the same window on a ``personal`` bot that is public
+    or has collaborators: those are multi-caller too, and this socket's
+    ``sessions.*`` methods reach every caller's conversations on the device.
+    See :func:`~agentclaw.community.core.engine_runtime.sharing.bot_is_shared`
+    — one predicate, so this gate and the sessions gate cannot drift apart.
+
     Gated here rather than in the router because the rule is about what may be
     *composed*, not about how it is served: any future caller of ``build`` is
     covered without repeating the check.
@@ -93,6 +106,11 @@ def _require_personal_bot(bot_type: str, bot_id: str) -> None:
     if bot_type != _SUPPORTED_BOT_TYPE:
         raise EngineBotTypeNotSupportedError(
             f"connections are not served for bot_type={bot_type!r}"
+        )
+    if is_shared:
+        raise EngineBotTypeNotSupportedError(
+            "connections are not served for a shared bot: the socket grants "
+            "operator.admin over every caller's sessions on the device"
         )
 
 
@@ -106,11 +124,13 @@ class EngineConnectionService:
         binding_repository: DeviceBindingRepository,
         device_service: DeviceService,
         sandbox_client: SandboxRuntimeClient,
+        collaborator_repo: CollaboratorRepositoryProtocol,
     ) -> None:
         self._bot_service = bot_service
         self._binding_repository = binding_repository
         self._device_service = device_service
         self._sandbox_client = sandbox_client
+        self._collaborator_repo = collaborator_repo
 
     def build(self, *, bot_id: str, owner_id: str) -> ConnectionResult:
         """Return the bot's usable sockets.
@@ -123,7 +143,16 @@ class EngineConnectionService:
         can never widen it.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
-        _require_personal_bot(str(bot.get("bot_type") or ""), bot_id)
+        _require_private_personal_bot(
+            str(bot.get("bot_type") or ""),
+            bot_id,
+            is_shared=bot_is_shared(
+                bot,
+                self._collaborator_repo,
+                bot_id=str(bot.get("bot_id") or bot_id),
+                owner_id=str(bot.get("owner_id") or owner_id),
+            ),
+        )
         engine = str(bot.get("active_engine") or "")
 
         binding_id = self._active_binding_id(bot_id, owner_id)

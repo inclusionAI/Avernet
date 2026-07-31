@@ -151,14 +151,33 @@ class _Transport:
         raise NotImplementedError
 
 
+class _CollaboratorRepo:
+    """Stands in for the collaborator table the shared-bot gate reads."""
+
+    def __init__(
+        self, collaborators: dict[tuple[str, str], list] | None = None
+    ) -> None:
+        self._collaborators = collaborators or {}
+        self.calls: list[tuple[str, str]] = []
+
+    def list_by_bot(self, bot_id: str, owner_id: str, env: str, role=None) -> list:
+        self.calls.append((bot_id, owner_id))
+        return self._collaborators.get((bot_id, owner_id), [])
+
+
 def _relay(
-    bot_service=None, resolver=None, transport=None, publish_repo=None
+    bot_service=None,
+    resolver=None,
+    transport=None,
+    publish_repo=None,
+    collaborator_repo=None,
 ) -> EngineRuntimeRelay:
     return EngineRuntimeRelay(
         bot_service or _BotService(),
         resolver or _Resolver(),
         transport or _Transport(),
         publish_repo or _PublishRepo(),
+        collaborator_repo or _CollaboratorRepo(),
     )
 
 
@@ -726,3 +745,104 @@ async def test_device_resolution_does_not_block_the_event_loop():
     release.set()
     result = await asyncio.wait_for(task, timeout=5)
     assert result.data == {}
+
+
+@pytest.mark.asyncio
+async def test_bot_resolution_does_not_block_the_event_loop_either():
+    """``BotService.get_bot`` is synchronous database work, so it offloads too.
+
+    It does an owner-scoped row read plus device-binding and template fetches,
+    and the shared-bot gate may add a collaborator query. Left on the loop it
+    stalls every unrelated request for the length of one slow round trip.
+    """
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _BlockingBotService(_BotService):
+        def get_bot(self, bot_id, user_id):
+            entered.set()
+            if not release.wait(timeout=5):
+                raise AssertionError("resolution was never released")
+            return super().get_bot(bot_id, user_id)
+
+    relay = _relay(bot_service=_BlockingBotService())
+    task = asyncio.create_task(
+        relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+    )
+
+    for _ in range(500):
+        if entered.is_set():
+            break
+        await asyncio.sleep(0.01)
+    assert entered.is_set(), "resolution never started"
+
+    release.set()
+    assert (await asyncio.wait_for(task, timeout=5)).data == {}
+
+
+@pytest.mark.asyncio
+async def test_resolve_bot_off_loop_returns_the_same_facts():
+    relay = _relay()
+    assert await relay.resolve_bot_off_loop(BOT, OWNER) == relay.resolve_bot(BOT, OWNER)
+
+
+@pytest.mark.asyncio
+async def test_prepaid_facts_skip_the_second_resolution():
+    """A gated route resolves once, not once per gate plus once per forward."""
+    bot_service = _BotService()
+    relay = _relay(bot_service=bot_service)
+
+    facts = await relay.resolve_bot_off_loop(BOT, OWNER)
+    assert bot_service.calls == [(BOT, OWNER)]
+
+    await relay.call(
+        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models", facts=facts
+    )
+    assert bot_service.calls == [(BOT, OWNER)], "the forward re-resolved the bot"
+
+
+@pytest.mark.asyncio
+async def test_an_ungated_route_still_resolves_its_own_bot():
+    """``facts=None`` must not become a way to skip the ownership proof."""
+    bot_service = _BotService()
+    relay = _relay(bot_service=bot_service)
+
+    await relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+    assert bot_service.calls == [(BOT, OWNER)]
+
+
+# ── shared bots ───────────────────────────────────────────────────────────────
+
+
+def test_a_private_personal_bot_is_not_shared():
+    assert _relay().resolve_bot(BOT, OWNER).is_shared is False
+
+
+def test_a_public_bot_is_shared():
+    bots = {(BOT, OWNER): {"bot_id": BOT, "owner_id": OWNER, "public": "1"}}
+    relay = _relay(bot_service=_BotService(bots))
+    assert relay.resolve_bot(BOT, OWNER).is_shared is True
+
+
+def test_a_bot_with_collaborators_is_shared():
+    """A coding app keeps ``bot_type='personal'`` while taking collaborators."""
+    repo = _CollaboratorRepo({(BOT, OWNER): [{"user_id": "someone-else"}]})
+    relay = _relay(collaborator_repo=repo)
+    assert relay.resolve_bot(BOT, OWNER).is_shared is True
+
+
+def test_an_unreadable_collaborator_table_reads_as_shared():
+    """Fails closed: the gate this feeds refuses a surface."""
+
+    class _Broken:
+        def list_by_bot(self, bot_id, owner_id, env, role=None):
+            raise RuntimeError("collaborator table unavailable")
+
+    assert _relay(collaborator_repo=_Broken()).resolve_bot(BOT, OWNER).is_shared is True
+
+
+def test_the_collaborator_lookup_is_keyed_on_the_resolved_owner():
+    """``bot_id`` is not unique across owners, so the pair must come from the row."""
+    repo = _CollaboratorRepo()
+    _relay(collaborator_repo=repo).resolve_bot(BOT, OWNER)
+    assert repo.calls == [(BOT, OWNER)]

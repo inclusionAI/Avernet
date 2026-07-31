@@ -58,6 +58,28 @@ class BotFacts:
     #: owner's row. This is the discriminator that keeps the service-bot
     #: publish lookup on the bot the caller actually owns.
     bot_pk: int = 0
+    #: Whether callers other than the owner can reach this bot's device.
+    #:
+    #: ``bot_type`` alone does not answer that. A ``personal`` bot is
+    #: single-caller only by default: ``ac_bots.public`` is set with no
+    #: ``bot_type`` gate (``bot_public_service``), and a coding app —
+    #: ``active_engine == "claude_code"`` with ``template_type ==
+    #: "applicationCoding"`` — takes collaborators through the same branch that
+    #: otherwise requires a ``service`` bot
+    #: (``collaborator_service.add_collaborator``). ``ExpertChatService``
+    #: admits owner, public, and collaborator callers alike
+    #: (``_check_chat_access``) and creates each one's sessions on the bot's
+    #: own binding.
+    #:
+    #: That matters because the engine's session collection is **not** scoped
+    #: per caller in practice: ``GET /api/sessions`` accepts a ``user_id``
+    #: query parameter, but openclaw's port drops it — ``sessions_list`` has no
+    #: such parameter and the adapter only logs ``request.user_id``
+    #: (``plugins/openclaw/_session.py``,
+    #: ``core/adapters/openclaw/session.py``). So a shared bot's session list
+    #: is every caller's sessions, and filtering it by passing ``user_id``
+    #: upstream would be a silent no-op rather than isolation.
+    is_shared: bool = False
 
 
 @dataclass(frozen=True)

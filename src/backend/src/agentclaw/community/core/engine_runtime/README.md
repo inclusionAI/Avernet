@@ -20,6 +20,7 @@ consumes:
   - "DeviceBindingRepository — the active binding id, without building conn info"
   - "BotPublishRepository — a service bot's published runtime binding (ext.binding.online)"
 internal_dependencies:
+  - agentclaw.community.core.bot_collaborator.repository.protocol
   - agentclaw.community.core.bot_management.services.bot_service
   - agentclaw.community.core.devices.errors
   - agentclaw.community.core.devices.repository.protocol

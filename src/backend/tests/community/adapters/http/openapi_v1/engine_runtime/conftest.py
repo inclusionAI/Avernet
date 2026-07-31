@@ -50,9 +50,12 @@ class FakeRelay:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
         return facts
 
+    async def resolve_bot_off_loop(self, bot_id: str, owner_id: str) -> BotFacts:
+        return self.resolve_bot(bot_id, owner_id)
+
     async def call(
         self, *, bot_id, owner_id, method, path,
-        body=None, params=None, timeout=None, enveloped=True,
+        body=None, params=None, timeout=None, enveloped=True, facts=None,
     ) -> EngineResult:
         # Record the ATTEMPT first, then resolve. Ordering it the other way
         # made "no device was touched" tautological: a foreign bot raises in
@@ -78,6 +81,17 @@ class FakeRelay:
     def set_bot_type(self, bot_type: str) -> None:
         self.bots[(BOT, OWNER)] = BotFacts(
             bot_id=BOT, bot_type=bot_type, active_engine="openclaw"
+        )
+
+    def set_shared(self, is_shared: bool = True) -> None:
+        """Make the bot one that more than its owner can reach."""
+        current = self.bots[(BOT, OWNER)]
+        self.bots[(BOT, OWNER)] = BotFacts(
+            bot_id=current.bot_id,
+            bot_type=current.bot_type,
+            active_engine=current.active_engine,
+            bot_pk=current.bot_pk,
+            is_shared=is_shared,
         )
 
     @property

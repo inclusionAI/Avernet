@@ -434,6 +434,41 @@ def test_service_bot_gets_501_without_touching_the_device(
     assert relay.calls == []
 
 
+@pytest.mark.parametrize(
+    "method,suffix",
+    [
+        ("get", ""), ("post", ""), ("get", f"/{SESSION_ID}"),
+        ("patch", f"/{SESSION_ID}"), ("delete", f"/{SESSION_ID}"),
+        ("get", f"/{SESSION_ID}/messages"), ("delete", f"/{SESSION_ID}/messages"),
+    ],
+)
+def test_shared_personal_bot_gets_501_without_touching_the_device(
+    client, relay, method, suffix
+):
+    """``personal`` is not on its own enough — the bot must be single-caller.
+
+    A personal bot can be made public, and a coding app can take
+    collaborators; ``ExpertChatService`` then creates those callers' sessions
+    on this same binding. The engine's collection is not scoped per caller, so
+    serving these routes would let the owner list, read, rename and delete
+    other people's conversations. Gated before the forward for the same reason
+    as the bot-type check: filtering the response would already have fetched
+    them.
+    """
+    relay.set_shared()
+    kwargs = {"json": {}} if method in ("post", "patch") else {}
+    resp = getattr(client, method)(f"{_base()}{suffix}", **kwargs)
+    assert fails(resp, 501)["message"] == "Not supported for this bot type"
+    assert relay.calls == []
+
+
+def test_an_unshared_personal_bot_is_still_served(client, relay):
+    """The gate must not have closed the case it exists to allow."""
+    relay.set_shared(False)
+    assert client.get(_base()).status_code == 200
+    assert relay.paths == ["/api/sessions"]
+
+
 # ── isolation ────────────────────────────────────────────────────────────────
 
 
