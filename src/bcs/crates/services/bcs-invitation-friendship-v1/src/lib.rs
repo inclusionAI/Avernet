@@ -4,19 +4,23 @@
 //! owns Principal-based resource authorization and V1 projections while
 //! delegating friendship/friend-request side effects to the legacy
 //! [`FriendCoreService`] / [`FriendRequestCoreService`] cores and invitation
-//! join side effects to the legacy [`GroupCoreService`] /
-//! [`SessionManagementService`] cores. No HTTP type crosses this boundary.
+//! accept-join side effects to the legacy [`InviteService`]
+//! (`join_group_by_invite` / `join_session_by_invite`). No HTTP type crosses
+//! this boundary.
 //!
 //! V1 invitation divergence from the legacy `InviteService`:
 //! - Tokens are minted directly with `target_type: Some(Group|Session)` via
 //!   `bcs_domain::invite_token_encode`, so the accept path can route without
 //!   inspecting a join URL. Legacy tokens carry `target_type: None` and are
 //!   rejected by V1 accept.
-//! - Accept joins a **Bot** participant (Consultant role) rather than a Human.
-//!   The join is authorized by the invitation token itself (minted by a group
-//!   manager), so it bypasses legacy `GroupManagementService::add_member`
-//!   manager-authorization and writes via `GroupCoreService::add_participant`
-//!   directly, mirroring the legacy `join_*_by_invite` core path.
+//! - V1 `create_*_invitation` mirrors the legacy DM/active-group guards but
+//!   mints tokens directly (the legacy `create_*_invite_token` paths are not
+//!   reused because they emit legacy join URLs).
+//! - Accept pivots to the legacy Human-only join path. A Bot Principal is
+//!   rejected outright; a Human Principal's `staff_no` is forwarded to
+//!   `InviteService::join_*_by_invite`, which `ensure_human`s the actor and
+//!   creates a Human Participant (Consultant role, Present mode). This matches
+//!   the legacy invite-link accept semantics exactly.
 
 use std::sync::Arc;
 
@@ -38,7 +42,8 @@ use bcs_service_api::{
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
     FriendRequest as DomainFriendRequest, FriendRequestDirection as DomainFriendRequestDirection,
     Friendship as DomainFriendship, Group as DomainGroup, GroupCoreService, GroupKind,
-    GroupStrategy, Participant, ParticipantRole, RegisteredBot, RelationCoreService,
+    GroupStatus, GroupStrategy, InviteService, InviteUseCaseError, JoinByInviteCommand,
+    ParticipantRole, RegisteredBot, RelationCoreService,
     ServiceError, SessionManagementService, SessionUseCaseError,
 };
 
@@ -56,8 +61,9 @@ pub struct InvitationFriendshipServiceConfig {
 ///
 /// Holds the legacy cores needed for friendship management, invitation token
 /// mint/verify (via the shared `bcs_domain` HMAC helpers and `token_secret`),
-/// and Bot-participant joins. `GroupManagementService` is intentionally absent:
-/// V1 accept-join is token-authorized and routes through `GroupCoreService` /
+/// and Human-only invitation accept-join. `GroupManagementService` is
+/// intentionally absent: V1 accept delegates to the legacy `InviteService`
+/// `join_*_by_invite`, which routes through `GroupCoreService` /
 /// `SessionManagementService` directly (see module docs).
 pub struct InvitationFriendshipServiceImpl {
     friends: Arc<dyn FriendCoreService>,
@@ -66,6 +72,7 @@ pub struct InvitationFriendshipServiceImpl {
     sessions: Arc<dyn SessionManagementService>,
     registry: Arc<dyn BotRegistryCoreService>,
     relation: Arc<dyn RelationCoreService>,
+    invite: Arc<dyn InviteService>,
     token_secret: Vec<u8>,
     config: InvitationFriendshipServiceConfig,
 }
@@ -79,6 +86,7 @@ impl InvitationFriendshipServiceImpl {
         sessions: Arc<dyn SessionManagementService>,
         registry: Arc<dyn BotRegistryCoreService>,
         relation: Arc<dyn RelationCoreService>,
+        invite: Arc<dyn InviteService>,
         token_secret: Vec<u8>,
         config: InvitationFriendshipServiceConfig,
     ) -> Self {
@@ -89,6 +97,7 @@ impl InvitationFriendshipServiceImpl {
             sessions,
             registry,
             relation,
+            invite,
             token_secret,
             config,
         }
@@ -212,32 +221,6 @@ impl InvitationFriendshipServiceImpl {
         }
     }
 
-    /// Resolve the joining Bot for an accept call. A Bot Principal joins as
-    /// itself (any supplied `bot_uuid` is ignored); a Human Principal must
-    /// supply a `bot_uuid` it owns.
-    async fn resolve_joining_bot(
-        &self,
-        principal: &Principal,
-        bot_uuid: Option<&str>,
-    ) -> Result<String, ApplicationError> {
-        match principal {
-            Principal::Bot(bot) => {
-                self.authorize_bot_resource(principal, &bot.bot_uuid).await?;
-                Ok(bot.bot_uuid.clone())
-            }
-            Principal::Human(_) => {
-                let bot_uuid = bot_uuid.ok_or_else(|| {
-                    ApplicationError::invalid(
-                        "invalid_request",
-                        "bot_uuid is required for a Human Principal accepting an invitation",
-                    )
-                })?;
-                self.authorize_bot_resource(principal, bot_uuid).await?;
-                Ok(bot_uuid.to_string())
-            }
-        }
-    }
-
     // ── friendship projections ─────────────────────────────────────────
 
     async fn ensure_bot_resource(
@@ -264,6 +247,15 @@ impl InvitationService for InvitationFriendshipServiceImpl {
         if group.group_kind == GroupKind::Dm {
             return Err(ApplicationError::forbidden(
                 "Invitations are not available for direct-message groups",
+            ));
+        }
+        // Vcj6P: legacy `create_group_invite_token` L151-153 rejects minting on
+        // a non-active group ("group is not active"). Mirror it so V1 does not
+        // hand out tokens for Completed/Closed/Error targets.
+        if group.status != GroupStatus::Active {
+            return Err(ApplicationError::conflict(
+                "conflict",
+                "group is not active",
             ));
         }
         Ok(self.mint_invitation(
@@ -306,6 +298,24 @@ impl InvitationService for InvitationFriendshipServiceImpl {
                 "Only the Group originator, driver, or manager may manage Sessions",
             ));
         }
+        // Vcj6M: legacy `create_session_invite_token` L186-189 rejects DM parent
+        // groups. Mirror it so session invitations on pairwise DM targets are
+        // not minted. The legacy session path skips `session.status` (it never
+        // checked session status); V1 follows the same precedent.
+        if group.group_kind == GroupKind::Dm {
+            return Err(ApplicationError::forbidden(
+                "Invitations are not available for direct-message groups",
+            ));
+        }
+        // Vcj6P: legacy `create_group_invite_token` L151-153 rejects non-active
+        // groups. The session path's parent shares the same lifecycle as the
+        // group, so mirror the inactive guard on the parent here too.
+        if group.status != GroupStatus::Active {
+            return Err(ApplicationError::conflict(
+                "conflict",
+                "group is not active",
+            ));
+        }
         Ok(self.mint_invitation(
             InvitationTargetType::Session,
             &command.session_id,
@@ -325,120 +335,56 @@ impl InvitationService for InvitationFriendshipServiceImpl {
                 "legacy invitation token without target_type is not supported by V1",
             )
         })?;
-        let joining_bot = self
-            .resolve_joining_bot(&command.principal, command.bot_uuid.as_deref())
-            .await?;
-
-        match target_type {
-            InviteTargetType::Group => self.accept_group_invitation(&payload.id, &joining_bot).await,
-            InviteTargetType::Session => {
-                self.accept_session_invitation(&payload.id, &joining_bot)
-                    .await
+        // Vcj6H: pivot to legacy Human-only accept. A Bot Principal cannot
+        // accept invitations regardless of `bot_uuid` (which is no longer on
+        // the request). The legacy `join_*_by_invite` path enforces this via
+        // `ensure_actor_is_human`, which rejects Bot actors; the V1 facade
+        // mirrors that up-front so the Bot case never reaches the legacy path.
+        let (staff_no, nick_name) = match &command.principal {
+            Principal::Bot(_) => {
+                return Err(ApplicationError::forbidden(
+                    "Only Human Principals can accept invitations",
+                ));
             }
-        }
-    }
-}
-
-impl InvitationFriendshipServiceImpl {
-    async fn accept_group_invitation(
-        &self,
-        group_id: &str,
-        joining_bot: &str,
-    ) -> Result<InvitationAcceptResult, ApplicationError> {
-        // The V1 `acceptInvitation` 404 contract declares only
-        // `invitation_not_found`; map both a missing target (None) and a
-        // `GroupNotFound` storage error to that code so the contract stays
-        // clean and the target type existence is not leaked.
-        let group = self
-            .groups
-            .try_get(group_id)
-            .await
-            .map_err(|e| match e {
-                ServiceError::GroupNotFound(_) => ApplicationError::not_found(
-                    "invitation_not_found",
-                    format!("Invitation target Group '{group_id}' was not found"),
-                ),
-                other => map_service_error(other),
-            })?
-            .ok_or_else(|| {
-                ApplicationError::not_found(
-                    "invitation_not_found",
-                    format!("Invitation target Group '{group_id}' was not found"),
-                )
-            })?;
-        if group
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == joining_bot)
-        {
-            return Ok(InvitationAcceptResult {
-                target_type: InvitationTargetType::Group,
-                target_id: group_id.to_string(),
-                joined: false,
-                already_joined: Some(true),
-            });
-        }
-        let participant = Participant::bot(joining_bot.to_string(), ParticipantRole::Consultant);
-        self.groups
-            .add_participant(group_id, participant)
-            .await
-            .map_err(map_service_error)?;
+            Principal::Human(human) => {
+                let nick = human
+                    .subject
+                    .display_name
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        if human.subject.username.is_empty() {
+                            None
+                        } else {
+                            Some(human.subject.username.clone())
+                        }
+                    });
+                (human.subject.id.clone(), nick)
+            }
+        };
+        let join_command = JoinByInviteCommand {
+            token: command.token.clone(),
+            staff_no,
+            nick_name,
+        };
+        let result = match target_type {
+            InviteTargetType::Group => self.invite.join_group_by_invite(join_command).await,
+            InviteTargetType::Session => {
+                self.invite.join_session_by_invite(join_command).await
+            }
+        };
+        let result = result.map_err(map_invite_use_case_error)?;
+        let mapped_target_type = match target_type {
+            InviteTargetType::Group => InvitationTargetType::Group,
+            InviteTargetType::Session => InvitationTargetType::Session,
+        };
         Ok(InvitationAcceptResult {
-            target_type: InvitationTargetType::Group,
-            target_id: group_id.to_string(),
-            joined: true,
-            already_joined: Some(false),
-        })
-    }
-
-    async fn accept_session_invitation(
-        &self,
-        session_id: &str,
-        joining_bot: &str,
-    ) -> Result<InvitationAcceptResult, ApplicationError> {
-        // The V1 `acceptInvitation` 404 contract declares only
-        // `invitation_not_found`; map both a missing target (None) and a
-        // `SessionUseCaseError::NotFound` to that code so the contract stays
-        // clean and the target type existence is not leaked.
-        let session = self
-            .sessions
-            .get(session_id)
-            .await
-            .map_err(|e| match e {
-                SessionUseCaseError::NotFound(_) => ApplicationError::not_found(
-                    "invitation_not_found",
-                    format!("Invitation target Session '{session_id}' was not found"),
-                ),
-                other => map_session_error(other),
-            })?
-            .ok_or_else(|| {
-                ApplicationError::not_found(
-                    "invitation_not_found",
-                    format!("Invitation target Session '{session_id}' was not found"),
-                )
-            })?;
-        if session
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == joining_bot)
-        {
-            return Ok(InvitationAcceptResult {
-                target_type: InvitationTargetType::Session,
-                target_id: session_id.to_string(),
-                joined: false,
-                already_joined: Some(true),
-            });
-        }
-        let participant = Participant::bot(joining_bot.to_string(), ParticipantRole::Consultant);
-        self.sessions
-            .add_participant(session_id, participant)
-            .await
-            .map_err(map_session_error)?;
-        Ok(InvitationAcceptResult {
-            target_type: InvitationTargetType::Session,
-            target_id: session_id.to_string(),
-            joined: true,
-            already_joined: Some(false),
+            target_type: mapped_target_type,
+            target_id: result.target_id,
+            joined: result.joined,
+            // `already_member == !joined` from the legacy result; flip the
+            // boolean to populate the V1 `already_joined` idempotency flag.
+            already_joined: Some(!result.joined),
         })
     }
 }
@@ -655,6 +601,38 @@ fn map_invite_token_error(error: InviteTokenError) -> ApplicationError {
         InviteTokenError::MalformedPayload(message) => {
             ApplicationError::invalid("invalid_request", format!("malformed invitation token: {message}"))
         }
+    }
+}
+
+/// Map legacy `InviteService::join_*_by_invite` errors onto the V1
+/// `acceptInvitation` contract surface. The contract declares `forbidden`
+/// (403), `invitation_not_found` (404), `conflict` (409), and
+/// `invitation_expired` (410); the join path may surface any of these via
+/// `InviteUseCaseError`. `InvalidToken` maps to `invalid_request` (400) so a
+/// malformed token is still rejected at the contract boundary. `LoginRequired`
+/// and `Service` collapse to `internal_error` (500) — they are not part of the
+/// V1 accept contract surface.
+fn map_invite_use_case_error(error: InviteUseCaseError) -> ApplicationError {
+    match error {
+        InviteUseCaseError::Forbidden(message) => ApplicationError::forbidden(message),
+        InviteUseCaseError::NotFound(target) => ApplicationError::not_found(
+            "invitation_not_found",
+            format!("Invitation target '{target}' was not found"),
+        ),
+        InviteUseCaseError::Conflict(message) => {
+            ApplicationError::conflict("conflict", message)
+        }
+        InviteUseCaseError::Expired => ApplicationError::Gone {
+            code: "invitation_expired".to_string(),
+            message: "invitation link has expired".to_string(),
+        },
+        InviteUseCaseError::InvalidToken(message) => {
+            ApplicationError::invalid("invalid_request", message)
+        }
+        InviteUseCaseError::LoginRequired => {
+            ApplicationError::internal("login required to accept invitation")
+        }
+        InviteUseCaseError::Service(error) => map_service_error(error),
     }
 }
 

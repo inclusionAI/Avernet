@@ -456,7 +456,7 @@ async fn accept_invitation_returns_ok_and_forwards_principal() {
         .oneshot(authenticated_request(
             "POST",
             "/openapi/v1/invitations/token-1/accept",
-            json!({"bot_uuid": "bot-2"}),
+            json!({}),
         ))
         .await
         .expect("accept invitation response");
@@ -472,12 +472,14 @@ async fn accept_invitation_returns_ok_and_forwards_principal() {
         let accepted = accepted.as_ref().expect("accept command");
         assert_eq!(accepted.principal.actor_id(), "bot-1");
         assert_eq!(accepted.token, "token-1");
-        assert_eq!(accepted.bot_uuid.as_deref(), Some("bot-2"));
     }
 }
 
 #[tokio::test]
-async fn accept_invitation_allows_omitted_bot_uuid() {
+async fn accept_invitation_allows_empty_body() {
+    // V1 pivot Vcj6H: `bot_uuid` was removed from `AcceptInvitationRequest`;
+    // the body is now an empty object. `deny_unknown_fields` still rejects any
+    // supplied field (including a stray `bot_uuid`) with 400 invalid_request.
     let service = Arc::new(FakeInvitationService::default());
     let app = test_router(service.clone());
 
@@ -493,7 +495,7 @@ async fn accept_invitation_allows_omitted_bot_uuid() {
     {
         let accepted = service.accepted.lock().expect("accept lock");
         let accepted = accepted.as_ref().expect("accept command");
-        assert_eq!(accepted.bot_uuid, None);
+        assert_eq!(accepted.token, "token-1");
     }
 }
 
@@ -520,16 +522,39 @@ async fn unknown_fields_rejected_with_invalid_request() {
         .expect("create group lock")
         .is_none());
 
+    // Vcj6H: a stray `bot_uuid` is now an unknown field and must be rejected
+    // at the DTO layer (the facade never sees it).
     let accept_response = app
+        .clone()
         .oneshot(authenticated_request(
             "POST",
             "/openapi/v1/invitations/token-1/accept",
-            json!({"bot_uuid": "bot-2", "extra": 1}),
+            json!({"bot_uuid": "bot-2"}),
         ))
         .await
         .expect("unknown accept field response");
     assert_eq!(accept_response.status(), StatusCode::BAD_REQUEST);
     let body = response_json(accept_response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+    assert!(
+        service
+            .accepted
+            .lock()
+            .expect("accept lock")
+            .is_none(),
+        "facade must not be called when DTO validation fails"
+    );
+
+    let extra_response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/invitations/token-1/accept",
+            json!({"extra": 1}),
+        ))
+        .await
+        .expect("arbitrary unknown field response");
+    assert_eq!(extra_response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(extra_response).await;
     assert_eq!(body["data"]["error_code"], "invalid_request");
 }
 

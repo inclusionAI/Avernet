@@ -60,21 +60,19 @@ impl CreateInvitationRequest {
 
 /// Request body for accepting an invitation token.
 ///
-/// `bot_uuid` is omitted when a Bot Principal accepts for itself and set when a
-/// Human Principal accepts on behalf of a Bot it owns.
-#[derive(Debug, Deserialize)]
+/// The body is empty: only a Human Principal authenticated by the Gateway may
+/// accept, and the joining Human actor is derived from the Principal's
+/// `staff_no`. `deny_unknown_fields` rejects any supplied `bot_uuid` (legacy
+/// V1 pre-pivot field, now removed) with a 400 `invalid_request`.
+#[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct AcceptInvitationRequest {
-    #[serde(default)]
-    pub bot_uuid: Option<String>,
-}
+pub struct AcceptInvitationRequest {}
 
 impl AcceptInvitationRequest {
     pub fn into_command(self, principal: Principal, token: String) -> AcceptInvitation {
         AcceptInvitation {
             principal,
             token,
-            bot_uuid: self.bot_uuid,
         }
     }
 }

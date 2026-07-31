@@ -76,14 +76,15 @@ pub struct CreateSessionInvitation {
 
 /// Accept an invitation token and join its target.
 ///
-/// `bot_uuid` is set when a Human Principal accepts on behalf of a Bot it owns;
-/// it is `None` when a Bot Principal accepts for itself. A Bot Principal cannot
-/// override its own identity, so the facade rejects `Some(...)` in that case.
+/// Only a Human Principal authenticated by the Gateway may accept; the V1
+/// facade rejects `Principal::Bot` outright. The joining Human actor is
+/// derived from the Principal's `staff_no` (subject id) and delegated to the
+/// legacy `InviteService::join_*_by_invite`, mirroring the legacy Human-only
+/// join path that creates a Human Participant (Consultant role, Present mode).
 #[derive(Debug, Clone)]
 pub struct AcceptInvitation {
     pub principal: Principal,
     pub token: String,
-    pub bot_uuid: Option<String>,
 }
 
 /// Transport-independent invitation use cases for BCN OpenAPI v1.

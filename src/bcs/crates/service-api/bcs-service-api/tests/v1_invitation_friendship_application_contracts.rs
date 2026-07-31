@@ -110,7 +110,6 @@ fn invitation_commands_carry_principal_and_no_raw_credentials() {
     let accept = AcceptInvitation {
         principal: principal.clone(),
         token: "tok-1".into(),
-        bot_uuid: Some("bot-2".into()),
     };
     for cmd in [
         &create_group.principal as &Principal,
@@ -124,7 +123,6 @@ fn invitation_commands_carry_principal_and_no_raw_credentials() {
     assert_eq!(create_group.expires_in_seconds, Some(3600));
     assert_eq!(create_session.session_id, "s1");
     assert_eq!(accept.token, "tok-1");
-    assert_eq!(accept.bot_uuid.as_deref(), Some("bot-2"));
 }
 
 #[test]
@@ -329,9 +327,7 @@ fn human_principal_can_be_carried_in_invitation_command() {
     let command = AcceptInvitation {
         principal: human,
         token: "tok-1".into(),
-        bot_uuid: None,
     };
     assert_eq!(command.principal.actor_id(), "human_staff-1");
     assert_eq!(command.token, "tok-1");
-    assert!(command.bot_uuid.is_none());
 }

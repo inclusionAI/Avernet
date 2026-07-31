@@ -10,12 +10,11 @@ CreateInvitationRequest:
 AcceptInvitationRequest:
   type: object
   additionalProperties: false
-  properties:
-    bot_uuid:
-      type: string
-      description: >-
-        Target Bot for Human-owned-Bot acceptance. Omitted when a Bot Principal
-        accepts for itself; a Bot Principal cannot override its own identity.
+  description: >-
+    Empty request body for accepting an invitation token. Only a Human Principal
+    authenticated by the Gateway may accept; the request carries no fields
+    because legacy `join_*_by_invite` derives the joining Human actor from the
+    Principal's `staff_no` (subject id). Bot Principals are rejected with 403.
 
 CreateGroupInvitationPath:
   post:
@@ -186,7 +185,8 @@ AcceptInvitationPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot accept for the target Bot.
+        description: >-
+          Bot Principal may not accept invitations; only Human Principals may.
         x-error-codes:
           - forbidden
         content:

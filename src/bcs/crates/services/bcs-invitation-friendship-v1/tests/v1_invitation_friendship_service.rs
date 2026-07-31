@@ -15,20 +15,22 @@ use bcs_domain::{
     invite_token_encode, InviteTargetType, InviteTokenPayload,
 };
 use bcs_friend::{FriendCore, FriendRequestCore};
+use bcs_group::application::invite::InviteServiceImpl;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
+use bcs_service_api::application::invite::InviteService;
 use bcs_service_api::application::session::{CreateOrReactivateCommand, SessionManagementService};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedUser, CreateBotFriendRequest,
     CreateGroupInvitation, CreateSessionInvitation, DeleteResult, FriendshipService,
-    FriendRequest, FriendRequestDirection, FriendRequestStatus, Friendship, InvitationService,
+    FriendRequestDirection, FriendRequestStatus, Friendship, InvitationService,
     InvitationState, InvitationTargetType, ListBotFriendRequests, ListBotFriendships, Page, Principal,
     RejectFriendRequest, DeleteBotFriendship,
 };
 use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, FriendCoreService, Group, GroupCoreService,
-    GroupKind, GroupStrategy, Participant, ParticipantRole, SessionKind,
+    GroupKind, GroupStatus, GroupStrategy, Participant, ParticipantRole, SessionKind,
 };
 use bcs_service_api::{
     FriendRequest as DomainFriendRequest, FriendRequestCoreService,
@@ -37,6 +39,7 @@ use bcs_service_api::{
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
+use bcs_test_support::NoopSystemMessageService;
 
 use bcs_invitation_friendship_v1::{
     InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl,
@@ -52,6 +55,7 @@ struct Fixture {
     friend_requests: Arc<FriendRequestCore>,
     sessions: Arc<SessionManagementServiceImpl>,
     relation: Arc<RelationCore>,
+    invite: Arc<dyn InviteService>,
 }
 
 impl Fixture {
@@ -70,6 +74,23 @@ impl Fixture {
             session_repo.clone(),
             group_repo.clone(),
         ));
+        // Legacy `InviteService` implementation: V1 `accept_invitation` pivoted
+        // to delegate `join_*_by_invite` here (Vcj6H) so the accept path
+        // creates a Human Participant exactly the way legacy invite links do.
+        // `NoopSystemMessageService` covers the `join_session_by_invite`
+        // notification path without forcing a real dispatcher into the
+        // fixture.
+        let invite: Arc<dyn InviteService> = Arc::new(InviteServiceImpl {
+            registry: bots.clone(),
+            group: groups.clone(),
+            session: sessions.clone(),
+            system_message: Arc::new(NoopSystemMessageService),
+            token_secret: SECRET.to_vec(),
+            default_ttl_seconds: 3600,
+            base_url: None,
+            group_link_url: None,
+            session_link_url: None,
+        });
         let service = InvitationFriendshipServiceImpl::new(
             friends.clone(),
             friend_requests.clone(),
@@ -77,6 +98,7 @@ impl Fixture {
             sessions.clone(),
             bots.clone(),
             relation.clone(),
+            invite.clone(),
             SECRET.to_vec(),
             InvitationFriendshipServiceConfig {
                 relation_env: "dev".to_string(),
@@ -91,6 +113,7 @@ impl Fixture {
             friend_requests,
             sessions,
             relation,
+            invite,
         }
     }
 
@@ -109,6 +132,7 @@ impl Fixture {
             self.sessions.clone(),
             self.bots.clone(),
             self.relation.clone(),
+            self.invite.clone(),
             SECRET.to_vec(),
             InvitationFriendshipServiceConfig {
                 relation_env: "dev".to_string(),
@@ -142,13 +166,6 @@ impl Fixture {
             .expect("register bot");
     }
 
-    async fn own_bot(&self, bot_uuid: &str, human_subject_id: &str) {
-        self.bots
-            .save_created_by(bot_uuid, human_subject_id, false)
-            .await
-            .expect("save created_by");
-    }
-
     async fn store_group(&self, group_id: &str, driver: &str) {
         let mut group = Group::new(
             group_id,
@@ -159,6 +176,50 @@ impl Fixture {
         group.label = Some(group_id.to_string());
         group.group_strategy = GroupStrategy::Chat;
         self.groups.upsert(group).await.expect("store group");
+    }
+
+    /// Helper for Vcj6P: store a group whose `status` is set to a non-active
+    /// value so the V1 mint paths reject with `conflict`.
+    async fn store_group_with_status(
+        &self,
+        group_id: &str,
+        driver: &str,
+        status: GroupStatus,
+    ) {
+        let mut group = Group::new(
+            group_id,
+            driver,
+            vec![Participant::bot(driver, ParticipantRole::Driver)],
+        );
+        group.originator = Some(driver.to_string());
+        group.label = Some(group_id.to_string());
+        group.group_strategy = GroupStrategy::Chat;
+        group.status = status;
+        self.groups.upsert(group).await.expect("store group");
+    }
+
+    /// Helper for Vcj6M: store a DM parent group so a session invitation mint
+    /// is rejected with `forbidden`.
+    async fn store_dm_group(&self, group_id: &str, driver: &str, other: &str) {
+        let mut group = Group::new(
+            group_id,
+            driver,
+            vec![
+                Participant::bot(driver, ParticipantRole::Driver),
+                Participant::bot(other, ParticipantRole::Consultant),
+            ],
+        );
+        group.originator = Some(driver.to_string());
+        group.label = Some(group_id.to_string());
+        group.group_strategy = GroupStrategy::Chat;
+        group.group_kind = GroupKind::Dm;
+        self.groups.upsert(group).await.expect("store dm group");
+    }
+
+    async fn set_group_status(&self, group_id: &str, status: GroupStatus) {
+        let mut group = self.groups.get(group_id).await.expect("group present");
+        group.status = status;
+        self.groups.upsert(group).await.expect("update group status");
     }
 
     async fn create_session(&self, group_id: &str, driver: &str) -> String {
@@ -206,6 +267,26 @@ impl Fixture {
             "dev",
             BTreeSet::new(),
         )
+    }
+
+    fn human_principal_with_display(subject_id: &str, display_name: &str) -> Principal {
+        Principal::human(
+            AuthenticatedUser {
+                id: subject_id.to_string(),
+                username: subject_id.to_string(),
+                display_name: Some(display_name.to_string()),
+                full_name: None,
+            },
+            "dev",
+            BTreeSet::new(),
+        )
+    }
+
+    /// Actor ID legacy `ensure_human` records for the given staff_no. Used in
+    /// tests to assert the joining Human participant lands under
+    /// `human_<staff_no>` matching legacy convention.
+    fn human_actor_id(staff_no: &str) -> String {
+        format!("human_{staff_no}")
     }
 }
 
@@ -388,10 +469,95 @@ async fn create_session_invitation_manager_ok() {
 }
 
 #[tokio::test]
-async fn accept_invitation_bot_self_joins_group() {
+async fn create_group_invitation_inactive_group_rejected() {
+    // Vcj6P: legacy `create_group_invite_token` L151-153 rejects "group is not
+    // active". V1 mirrors it so a Completed/Closed/Error group cannot mint an
+    // invitation token.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.store_group_with_status("grp-1", "bot-a", GroupStatus::Completed).await;
+
+    let error = fx
+        .service
+        .create_group_invitation(CreateGroupInvitation {
+            principal: Fixture::bot_principal("bot-a"),
+            group_id: "grp-1".to_string(),
+            expires_in_seconds: None,
+        })
+        .await
+        .expect_err("inactive group rejects mint");
+
+    assert!(
+        matches!(error, ApplicationError::Conflict { .. }),
+        "expected Conflict, got {error:?}",
+    );
+    assert_eq!(error.code(), "conflict");
+}
+
+#[tokio::test]
+async fn create_session_invitation_dm_parent_group_rejected() {
+    // Vcj6M: legacy `create_session_invite_token` L186-189 rejects DM parent
+    // groups. V1 mirrors it so session invitations on pairwise DM targets are
+    // not minted (a third participant cannot join a DM).
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
     fx.add_bot("bot-b").await;
+    fx.store_dm_group("dm-1", "bot-a", "bot-b").await;
+    let session_id = fx.create_session("dm-1", "bot-a").await;
+
+    let error = fx
+        .service
+        .create_session_invitation(CreateSessionInvitation {
+            principal: Fixture::bot_principal("bot-a"),
+            session_id: session_id.clone(),
+            expires_in_seconds: None,
+        })
+        .await
+        .expect_err("DM parent group rejects session invitation mint");
+
+    assert!(
+        matches!(error, ApplicationError::Forbidden(_)),
+        "expected Forbidden, got {error:?}",
+    );
+    assert_eq!(error.code(), "forbidden");
+}
+
+#[tokio::test]
+async fn create_session_invitation_inactive_parent_group_rejected() {
+    // Vcj6P: the session invitation path's parent group shares the same
+    // lifecycle as the group, so mirror the inactive guard on the parent
+    // here too. The session itself is still `Active`; only the parent group
+    // transitions to `Completed`.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx.create_session("grp-1", "bot-a").await;
+    fx.set_group_status("grp-1", GroupStatus::Completed).await;
+
+    let error = fx
+        .service
+        .create_session_invitation(CreateSessionInvitation {
+            principal: Fixture::bot_principal("bot-a"),
+            session_id,
+            expires_in_seconds: None,
+        })
+        .await
+        .expect_err("inactive parent group rejects session invitation mint");
+
+    assert!(
+        matches!(error, ApplicationError::Conflict { .. }),
+        "expected Conflict, got {error:?}",
+    );
+    assert_eq!(error.code(), "conflict");
+}
+
+#[tokio::test]
+async fn accept_invitation_human_joins_group() {
+    // Vcj6H: V1 accept pivoted to legacy Human-only. A Human Principal accepts
+    // via `staff_no` (subject id); the legacy `join_group_by_invite` path
+    // creates a Human Participant (Consultant role, Present mode), not a Bot.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
     fx.store_group("grp-1", "bot-a").await;
 
     let invitation = fx
@@ -407,12 +573,11 @@ async fn accept_invitation_bot_self_joins_group() {
     let result = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            principal: Fixture::human_principal("staff-1"),
             token: invitation.token,
-            bot_uuid: None,
         })
         .await
-        .expect("bot-b accepts");
+        .expect("human accepts");
 
     assert_eq!(result.target_type, InvitationTargetType::Group);
     assert_eq!(result.target_id, "grp-1");
@@ -420,20 +585,28 @@ async fn accept_invitation_bot_self_joins_group() {
     assert_eq!(result.already_joined, Some(false));
 
     let group = fx.groups.get("grp-1").await.expect("group present");
+    let actor = Fixture::human_actor_id("staff-1");
     let joined_as = group
         .participants
         .iter()
-        .find(|p| p.bot_uuid == "bot-b")
-        .expect("bot-b is now a participant");
+        .find(|p| p.bot_uuid == actor)
+        .expect("human participant is now a member");
     assert_eq!(joined_as.role, ParticipantRole::Consultant);
+    assert_eq!(joined_as.actor_kind, bcs_service_api::ActorKind::Human);
+    assert_eq!(
+        joined_as.mode,
+        Some(bcs_service_api::ParticipantMode::Present)
+    );
 }
 
 #[tokio::test]
-async fn accept_invitation_human_owned_bot_joins_group() {
+async fn accept_invitation_human_display_name_provides_nick_name() {
+    // Vcj6H (companion): when the Human Principal carries a `display_name`, the
+    // V1 facade forwards it as `nick_name` to the legacy `JoinByInviteCommand`,
+    // and the legacy `join_group_by_invite` writes the Participant `bot_name`
+    // from that nick_name — not from the staff_no or fallback username.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_bot("bot-b").await;
-    fx.own_bot("bot-b", "human-1").await;
     fx.store_group("grp-1", "bot-a").await;
 
     let invitation = fx
@@ -449,22 +622,34 @@ async fn accept_invitation_human_owned_bot_joins_group() {
     let result = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("human-1"),
+            principal: Fixture::human_principal_with_display("staff-1", "Alice"),
             token: invitation.token,
-            bot_uuid: Some("bot-b".to_string()),
         })
         .await
-        .expect("human-owned bot accepts");
-
+        .expect("human accepts with display_name");
     assert!(result.joined);
-    assert!(fx.groups.get("grp-1").await.unwrap().participants.iter().any(|p| p.bot_uuid == "bot-b"));
+
+    let group = fx.groups.get("grp-1").await.expect("group present");
+    let joined_as = group
+        .participants
+        .iter()
+        .find(|p| p.bot_uuid == Fixture::human_actor_id("staff-1"))
+        .expect("alice is now a participant");
+    assert_eq!(joined_as.bot_name.as_deref(), Some("Alice"));
+    assert_eq!(joined_as.actor_kind, bcs_service_api::ActorKind::Human);
 }
 
 #[tokio::test]
-async fn accept_invitation_human_without_bot_uuid_rejected() {
+async fn accept_invitation_bot_principal_rejected() {
+    // Vcj6H: a Bot Principal may not accept invitations at all. The V1 facade
+    // rejects it up-front with `forbidden`, before any legacy `join_*` side
+    // effects. This naturally subsumes the removed `bot_uuid` field: there is
+    // no way for a Bot Principal to masquerade as another identity.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
+    fx.add_bot("bot-b").await;
     fx.store_group("grp-1", "bot-a").await;
+
     let invitation = fx
         .service
         .create_group_invitation(CreateGroupInvitation {
@@ -478,21 +663,33 @@ async fn accept_invitation_human_without_bot_uuid_rejected() {
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("human-1"),
+            principal: Fixture::bot_principal("bot-b"),
             token: invitation.token,
-            bot_uuid: None,
         })
         .await
-        .expect_err("bot_uuid required for Human");
+        .expect_err("bot principal rejected");
 
-    assert_code(error, "invalid_request");
+    assert!(
+        matches!(error, ApplicationError::Forbidden(_)),
+        "expected Forbidden, got {error:?}",
+    );
+    assert_eq!(error.code(), "forbidden");
+
+    // Regression guard: no participant landed on the group.
+    let group = fx.groups.get("grp-1").await.expect("group present");
+    assert!(
+        !group
+            .participants
+            .iter()
+            .any(|p| p.bot_uuid == "bot-b" || p.bot_uuid == "human_bot-b"),
+        "bot principal accept must not write a participant, got {group:?}",
+    );
 }
 
 #[tokio::test]
 async fn accept_invitation_expired_is_gone() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_bot("bot-b").await;
     fx.store_group("grp-1", "bot-a").await;
 
     let expired = invite_token_encode(
@@ -508,9 +705,8 @@ async fn accept_invitation_expired_is_gone() {
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            principal: Fixture::human_principal("staff-1"),
             token: expired,
-            bot_uuid: None,
         })
         .await
         .expect_err("expired token is Gone");
@@ -523,7 +719,6 @@ async fn accept_invitation_expired_is_gone() {
 async fn accept_invitation_legacy_token_without_target_type_rejected() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_bot("bot-b").await;
     fx.store_group("grp-1", "bot-a").await;
 
     let legacy = invite_token_encode(
@@ -539,9 +734,8 @@ async fn accept_invitation_legacy_token_without_target_type_rejected() {
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            principal: Fixture::human_principal("staff-1"),
             token: legacy,
-            bot_uuid: None,
         })
         .await
         .expect_err("legacy token rejected");
@@ -553,7 +747,6 @@ async fn accept_invitation_legacy_token_without_target_type_rejected() {
 async fn accept_invitation_already_member_is_idempotent() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_bot("bot-b").await;
     fx.store_group("grp-1", "bot-a").await;
 
     let invitation = fx
@@ -568,9 +761,8 @@ async fn accept_invitation_already_member_is_idempotent() {
 
     fx.service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            principal: Fixture::human_principal("staff-1"),
             token: invitation.token.clone(),
-            bot_uuid: None,
         })
         .await
         .expect("first accept");
@@ -578,9 +770,8 @@ async fn accept_invitation_already_member_is_idempotent() {
     let result = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            principal: Fixture::human_principal("staff-1"),
             token: invitation.token,
-            bot_uuid: None,
         })
         .await
         .expect("second accept is idempotent");
@@ -593,7 +784,6 @@ async fn accept_invitation_already_member_is_idempotent() {
 async fn accept_invitation_session_target_joins() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_bot("bot-b").await;
     fx.store_group("grp-1", "bot-a").await;
     let session_id = fx.create_session("grp-1", "bot-a").await;
 
@@ -610,12 +800,11 @@ async fn accept_invitation_session_target_joins() {
     let result = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            principal: Fixture::human_principal("staff-1"),
             token: invitation.token,
-            bot_uuid: None,
         })
         .await
-        .expect("bot-b joins session");
+        .expect("human joins session");
 
     assert_eq!(result.target_type, InvitationTargetType::Session);
     assert!(result.joined);
@@ -625,7 +814,15 @@ async fn accept_invitation_session_target_joins() {
         .await
         .expect("session lookup")
         .expect("session present");
-    assert!(session.participants.iter().any(|p| p.bot_uuid == "bot-b"));
+    let actor = Fixture::human_actor_id("staff-1");
+    assert!(session.participants.iter().any(|p| p.bot_uuid == actor));
+    let joined = session
+        .participants
+        .iter()
+        .find(|p| p.bot_uuid == actor)
+        .expect("human participant present");
+    assert_eq!(joined.role, ParticipantRole::Consultant);
+    assert_eq!(joined.actor_kind, bcs_service_api::ActorKind::Human);
 }
 
 #[tokio::test]
@@ -636,7 +833,6 @@ async fn accept_invitation_target_group_deleted_returns_invitation_not_found() {
     // target type and expose an undeclared error code).
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_bot("bot-b").await;
 
     // Mint a V1 invitation token against a group id that was never stored,
     // simulating "target deleted before accept".
@@ -653,9 +849,8 @@ async fn accept_invitation_target_group_deleted_returns_invitation_not_found() {
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            principal: Fixture::human_principal("staff-1"),
             token,
-            bot_uuid: None,
         })
         .await
         .expect_err("missing group target is invitation_not_found");
@@ -678,7 +873,6 @@ async fn accept_invitation_target_session_deleted_returns_invitation_not_found()
     // target type and expose an undeclared error code).
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
-    fx.add_bot("bot-b").await;
 
     // Mint a V1 invitation token against a session id that was never stored,
     // simulating "target deleted before accept".
@@ -695,9 +889,8 @@ async fn accept_invitation_target_session_deleted_returns_invitation_not_found()
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            principal: Fixture::human_principal("staff-1"),
             token,
-            bot_uuid: None,
         })
         .await
         .expect_err("missing session target is invitation_not_found");
