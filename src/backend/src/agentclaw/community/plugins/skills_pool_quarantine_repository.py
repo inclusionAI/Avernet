@@ -250,12 +250,38 @@ class SkillsPoolQuarantineRepositoryMixin:
                     == SkillLayoutPhase.POOL_ACTIVE.value,
                     BotSkillLayoutStateModel.migration_generation
                     == migration_generation,
-                    BotSkillLayoutStateModel.pool_activated_at < observed_at_db,
+                    BotSkillLayoutStateModel.pool_activated_at.isnot(None),
                 )
                 .first()
             )
             if current is None:
                 return False
+            quarantine = (
+                session.query(SkillMigrationQuarantineModel.id)
+                .filter(
+                    SkillMigrationQuarantineModel.env == scope.env,
+                    SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                    SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                    SkillMigrationQuarantineModel.migration_generation
+                    == migration_generation,
+                    SkillMigrationQuarantineModel.pool_activated_at.isnot(None),
+                    SkillMigrationQuarantineModel.cleaned_at.is_(None),
+                    SkillMigrationQuarantineModel.status != "cleaning",
+                )
+                .first()
+            )
+            if quarantine is None:
+                return False
+            post_activation = (
+                session.query(BotSkillLayoutStateModel.id)
+                .filter(
+                    BotSkillLayoutStateModel.id == current.id,
+                    BotSkillLayoutStateModel.pool_activated_at < observed_at_db,
+                )
+                .first()
+            )
+            if post_activation is None:
+                return True
             affected = (
                 session.query(SkillMigrationQuarantineModel)
                 .filter(
@@ -288,7 +314,25 @@ class SkillsPoolQuarantineRepositoryMixin:
                     synchronize_session=False,
                 )
             )
-        return affected == 1
+            if affected == 1:
+                return True
+            superseded = (
+                session.query(SkillMigrationQuarantineModel.id)
+                .filter(
+                    SkillMigrationQuarantineModel.env == scope.env,
+                    SkillMigrationQuarantineModel.entity_id == scope.entity_id,
+                    SkillMigrationQuarantineModel.bot_id == scope.bot_id,
+                    SkillMigrationQuarantineModel.migration_generation
+                    == migration_generation,
+                    SkillMigrationQuarantineModel.pool_activated_at < observed_at_db,
+                    SkillMigrationQuarantineModel.cleaned_at.is_(None),
+                    SkillMigrationQuarantineModel.status != "cleaning",
+                    SkillMigrationQuarantineModel.runtime_reconciled_at
+                    >= observed_at_db,
+                )
+                .first()
+            )
+            return superseded is not None
 
     def claim_cleanup(
         self,
