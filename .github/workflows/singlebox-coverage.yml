@@ -13,6 +13,7 @@ on:
       - "src/bcs/**"
       - "src/engine/**"
       - "src/frontend/**"
+      - "src/gateway/**"
       - ".github/workflows/singlebox-coverage.yml"
   push:
     branches:
