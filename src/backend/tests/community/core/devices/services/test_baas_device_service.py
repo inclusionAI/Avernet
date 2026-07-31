@@ -277,6 +277,7 @@ class TestGetDeviceConnection:
         info.bot_uuid = "BOT-1"
         info.tenant = "team_claw"
         info.engine_port = 20003
+        info.expires_at = "2099-01-01T00:00:00Z"
         return info
 
     def test_returns_baas_connection_with_bot_engine(self):
@@ -304,6 +305,45 @@ class TestGetDeviceConnection:
         assert result.engine_type == "claude_code"
         assert result.bot_uuid == "BOT-1"
         assert result.url == ""
+
+    def test_the_requested_socket_path_reaches_ws_info(self):
+        """BaaS builds ``ws_url`` around this path, so relay callers that need a
+        specific engine's socket must be able to ask for it. Its own default is
+        openclaw's."""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), path="/api/claude_code/ws"
+        )
+
+        assert baas.get_ws_info.call_args.kwargs["path"] == "api/claude_code/ws"
+
+    def test_no_path_leaves_the_provider_default_alone(self):
+        """Passing None would blank the default rather than keep it."""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert "path" not in baas.get_ws_info.call_args.kwargs
+
+    def test_server_issued_expiry_is_passed_through(self):
+        """The ``ttl`` argument is ignored here — the server decides — so the
+        only truthful expiry for the returned token is the one ws-info states.
+        Dropping it leaves callers computing an expiry for a token that has a
+        different one."""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        result = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), ttl=60
+        )
+
+        assert result.expires_at == "2099-01-01T00:00:00Z"
 
     def test_relay_mode_returns_baas_ws_url_in_compatible_url_field(self):
         baas = MagicMock()

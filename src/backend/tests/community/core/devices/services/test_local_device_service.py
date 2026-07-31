@@ -826,6 +826,13 @@ def test_compose_conn_info_fills_url_and_token_from_http_info(
     assert conn.url == "http://10.0.0.1:20010"
     # http-info 提供的 token 应覆盖 ws-info 的（业务调用主要走 http）
     assert conn.token == "http-token-001"
+    # ws-info 的 expires_at 描述的是 ws token，不是这里返回的 http token——
+    # 填上就是给 caller 一个对不上的过期时间，所以留空表示"签发方没说"。
+    assert conn.expires_at == ""
+    # 但 socket 侧不能跟着留空：target 来自 ws-info，凭据也必须是 ws-info 的，
+    # 否则正常路径就发出一对不匹配的 socket/token。
+    assert conn.ws_token == "fake-token"
+    assert conn.ws_expires_at == "2099-01-01T00:00:00"
     mock_baas.get_http_info.assert_called_once()
     call_kwargs = mock_baas.get_http_info.call_args.kwargs
     assert call_kwargs["bind_id"] == 99
@@ -895,6 +902,8 @@ def test_compose_conn_info_http_info_failure_falls_back_to_ws_only(
     assert conn.url == ""
     # token 用 ws 的（fake-token，见 fixture）
     assert conn.token == "fake-token"
+    # 回落到 ws token 后，ws-info 的过期时间才是对的那个
+    assert conn.expires_at == "2099-01-01T00:00:00"
     # target 仍是 ws 的
     assert conn.target == "127.0.0.1:18789"
 

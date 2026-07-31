@@ -504,6 +504,9 @@ class LocalDeviceService(DeviceService):
             )
             url = http_info.http_url
             token = http_info.token
+            # http-info 不带过期时间，而返回的 token 是它的——ws-info 的
+            # expires_at 描述的是另一个 token，填上就是错的。
+            expires_at = ""
         except Exception as e:
             logger.warning(
                 "[_compose_device_conn_info] http-info unavailable bind=%s: %s "
@@ -512,11 +515,19 @@ class LocalDeviceService(DeviceService):
             )
             url = ""
             token = ws_info.token
+            # 回落到 ws-info 的 token，所以 ws-info 的过期时间此刻是对的。
+            expires_at = ws_info.expires_at
 
         return DeviceConnectionInfo(
             type=LOCAL_DEVICE_PROVIDER,
             target=ws_info.target,
             token=token,
+            expires_at=expires_at,
+            # target 来自 ws-info，凭据也必须来自 ws-info。正常路径的 token 是
+            # http-info 的（另一个 token），配着 ws 地址发出去就是一对不匹配的
+            # socket/凭据 —— socket caller 读这一对。
+            ws_token=ws_info.token,
+            ws_expires_at=ws_info.expires_at,
             engine_type=device.device_props.get("engine", DEFAULT_ENGINE_TYPE),
             baas_base_url=ws_info.baas_base_url,
             bot_uuid=ws_info.bot_uuid,
@@ -748,11 +759,16 @@ class LocalDeviceService(DeviceService):
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection info.
 
         ``device_uuid`` targets a specific instance for multi-instance BaaS bots;
         local devices are single-instance and ignore it.
+
+        ``path`` is ignored here: this provider returns a bare routing target
+        (and an HTTP base URL), never a finished WebSocket URL, so the caller
+        appends the path itself. Accepted to keep the provider signatures equal.
         """
         record = self._repo.get_by_id(binding_id)
         if record is None:
