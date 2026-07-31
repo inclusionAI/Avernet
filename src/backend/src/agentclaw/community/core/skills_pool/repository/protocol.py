@@ -249,7 +249,12 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         observed_at: datetime,
         evidence: dict[str, object],
     ) -> bool:
-        """Record a qualified post-activation runtime lifecycle signal."""
+        """Account for a runtime-ready signal.
+
+        ``True`` means the signal was persisted or is safely obsolete or
+        superseded. ``False`` means current state cannot account for it and the
+        caller must retry.
+        """
         ...
 
     def record_runtime_reconciliation_failure(
@@ -260,7 +265,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         observed_at: datetime,
         evidence: dict[str, object],
     ) -> bool:
-        """Invalidate older READY evidence with a newer unhealthy runtime fact."""
+        """Account for a runtime failure, invalidating older READY evidence."""
         ...
 
     def begin_legacy_rollback(

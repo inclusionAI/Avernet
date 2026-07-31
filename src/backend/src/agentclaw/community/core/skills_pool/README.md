@@ -128,7 +128,9 @@ Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
   以“递归引擎 + Legacy corpus 入口”持续 serving。该门禁不能只加在 Backend
   adapter 的 `/readiness`，否则无法覆盖直接访问 Gateway 的流量。
 - 人工 wake/retry 通过持久化任务队列交接，repair/rollback 复用既有恢复
-  服务；所有写入口仅对 operator 开放。
+  服务；激活前观测或已被同 generation 更新证据覆盖的 runtime 任务直接安全
+  收敛，不写入或覆盖证据；缺失当前状态或 quarantine 时仍 fail closed 重试。
+  所有写入口仅对 operator 开放。
 
 ## Context Boundary
 
