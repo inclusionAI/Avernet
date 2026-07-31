@@ -56,7 +56,9 @@ pub trait MessageRepoPort: Send + Sync + 'static {
     /// plus cursor-based pagination (replaces V1's offset/limit + total path).
     ///
     /// Sort order is the legacy `created_at DESC, session_seq DESC` (newest
-    /// first); `before` is an exclusive `created_at` cursor for the next page.
+    /// first); `before` is an exclusive composite `(created_at, session_seq)`
+    /// cursor for the next page so messages sharing a `created_at` at a page
+    /// boundary are not permanently skipped (VYQHI).
     ///
     /// VSN7A/VHxMU/VUlao — fix the V1 message-history regressions in one
     /// place:
@@ -71,7 +73,7 @@ pub trait MessageRepoPort: Send + Sync + 'static {
     ///   (store-per-env architecture, matching the existing INSERT behavior).
     /// - Cursor pagination with `has_more` instead of a separate `COUNT(*)`
     ///   estimate (VHxMU); `next_cursor` is the last returned message's
-    ///   `created_at` when `has_more` is true.
+    ///   `(created_at, session_seq)` when `has_more` is true.
     ///
     /// Default returns an empty page so noop/test impls keep compiling; real
     /// impls (memory + mysql) override this.
@@ -80,7 +82,7 @@ pub trait MessageRepoPort: Send + Sync + 'static {
         session_id: &str,
         owner_filter: MessageOwnerFilter,
         visible_from_seq: Option<i64>,
-        before: Option<u64>,
+        before: Option<(u64, i64)>,
         limit: u32,
     ) -> ServiceResult<MessagePage> {
         let _ = (session_id, owner_filter, visible_from_seq, before, limit);

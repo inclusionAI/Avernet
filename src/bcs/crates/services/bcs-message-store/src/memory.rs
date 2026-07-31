@@ -144,7 +144,7 @@ impl MessageRepoPort for MemoryMessageRepo {
         filtered.truncate(limit);
 
         let next_cursor = if has_more {
-            filtered.last().map(|m| m.created_at)
+            filtered.last().map(|m| (m.created_at, m.session_seq))
         } else {
             None
         };
@@ -174,7 +174,7 @@ impl MessageRepoPort for MemoryMessageRepo {
         session_id: &str,
         owner_filter: MessageOwnerFilter,
         visible_from_seq: Option<i64>,
-        before: Option<u64>,
+        before: Option<(u64, i64)>,
         limit: u32,
     ) -> ServiceResult<MessagePage> {
         let sessions = self.sessions.read().await;
@@ -206,8 +206,12 @@ impl MessageRepoPort for MemoryMessageRepo {
             }
         }
 
-        if let Some(cursor) = before {
-            filtered.retain(|m| m.created_at < cursor);
+        // VYQHI: composite (created_at, session_seq) cursor so messages sharing
+        // a created_at at a page boundary are not permanently skipped on the
+        // next page. The cursor is an exclusive strict-lexicographic bound.
+        if let Some((cursor_ts, cursor_seq)) = before {
+            filtered
+                .retain(|m| (m.created_at, m.session_seq) < (cursor_ts, cursor_seq));
         }
 
         // Legacy order: created_at DESC, session_seq DESC.
@@ -222,7 +226,7 @@ impl MessageRepoPort for MemoryMessageRepo {
             filtered.truncate(limit);
         }
         let next_cursor = if has_more {
-            filtered.last().map(|m| m.created_at)
+            filtered.last().map(|m| (m.created_at, m.session_seq))
         } else {
             None
         };
@@ -334,8 +338,8 @@ mod tests {
     /// `list_session_history` must mirror the legacy direct-read contract:
     /// `created_at DESC, session_seq DESC` order, the full 3-state
     /// `MessageOwnerFilter` (incl. `IsNull`), `visible_from_seq` cutoff, an
-    /// exclusive `before` created_at cursor, and `has_more` + `next_cursor`
-    /// instead of a count estimate.
+    /// exclusive composite `(created_at, session_seq)` `before` cursor
+    /// (VYQHI), and `has_more` + `next_cursor` instead of a count estimate.
     #[tokio::test]
     async fn list_session_history_desc_cutoff_and_cursor() {
         let repo = MemoryMessageRepo::new();
@@ -405,9 +409,17 @@ mod tests {
             vec![5, 4, 3]
         );
 
-        // before=3000 (exclusive created_at): only created_at < 3000 → [2,1].
+        // before=(3000, i64::MIN) (exclusive created_at == 3000): only
+        // created_at < 3000 → [2,1]. The MIN session_seq sentinel makes the
+        // composite bound behave like the legacy created_at-only strict-less.
         let page = repo
-            .list_session_history("s3", MessageOwnerFilter::Any, None, Some(3000), 50)
+            .list_session_history(
+                "s3",
+                MessageOwnerFilter::Any,
+                None,
+                Some((3000, i64::MIN)),
+                50,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -415,33 +427,45 @@ mod tests {
             vec![2, 1]
         );
 
-        // limit=2 with has_more + next_cursor = last.created_at (2000).
+        // limit=2 with has_more + next_cursor = (4000, 4).
         let page = repo
             .list_session_history("s3", MessageOwnerFilter::Any, None, None, 2)
             .await
             .unwrap();
         assert!(page.has_more);
-        assert_eq!(page.next_cursor, Some(4000));
+        assert_eq!(page.next_cursor, Some((4000, 4)));
         assert_eq!(
             page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
             vec![5, 4]
         );
 
-        // Follow the cursor: before=4000 → [3,2], still has_more (1 left).
+        // Follow the cursor: before=(4000,4) → [3,2], still has_more (1 left).
         let page = repo
-            .list_session_history("s3", MessageOwnerFilter::Any, None, Some(4000), 2)
+            .list_session_history(
+                "s3",
+                MessageOwnerFilter::Any,
+                None,
+                Some((4000, 4)),
+                2,
+            )
             .await
             .unwrap();
         assert!(page.has_more);
-        assert_eq!(page.next_cursor, Some(2000));
+        assert_eq!(page.next_cursor, Some((2000, 2)));
         assert_eq!(
             page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
             vec![3, 2]
         );
 
-        // Final page: before=2000 → [1], no more.
+        // Final page: before=(2000,2) → [1], no more.
         let page = repo
-            .list_session_history("s3", MessageOwnerFilter::Any, None, Some(2000), 2)
+            .list_session_history(
+                "s3",
+                MessageOwnerFilter::Any,
+                None,
+                Some((2000, 2)),
+                2,
+            )
             .await
             .unwrap();
         assert!(!page.has_more);
@@ -458,5 +482,71 @@ mod tests {
             .unwrap();
         assert!(page.messages.is_empty());
         assert!(!page.has_more);
+    }
+
+    /// VYQHI regression: messages sharing the same `created_at` at a page
+    /// boundary must not be skipped when following the composite cursor.
+    #[tokio::test]
+    async fn list_session_history_tied_created_at_no_skip() {
+        let repo = MemoryMessageRepo::new();
+        // Seed 5 messages ALL with the same created_at; session_seq breaks ties.
+        {
+            let mut sessions = repo.sessions.write().await;
+            let entry = sessions.entry("stie".to_string()).or_default();
+            for seq in 1..=5i64 {
+                let mut m = make_msg("stie", &format!("t{seq}"), seq);
+                m.created_at = 9_000; // identical for every message
+                entry.messages.push(m);
+            }
+            entry.seq = 5;
+        }
+
+        // Page 1 (limit 2): [5, 4], next_cursor = (9000, 4).
+        let page = repo
+            .list_session_history("stie", MessageOwnerFilter::Any, None, None, 2)
+            .await
+            .unwrap();
+        assert!(page.has_more);
+        assert_eq!(page.next_cursor, Some((9_000, 4)));
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![5, 4]
+        );
+
+        // Page 2: before=(9000,4) → [3, 2], next_cursor = (9000, 2).
+        let page = repo
+            .list_session_history(
+                "stie",
+                MessageOwnerFilter::Any,
+                None,
+                Some((9_000, 4)),
+                2,
+            )
+            .await
+            .unwrap();
+        assert!(page.has_more);
+        assert_eq!(page.next_cursor, Some((9_000, 2)));
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![3, 2]
+        );
+
+        // Page 3: before=(9000,2) → [1], no more.
+        let page = repo
+            .list_session_history(
+                "stie",
+                MessageOwnerFilter::Any,
+                None,
+                Some((9_000, 2)),
+                2,
+            )
+            .await
+            .unwrap();
+        assert!(!page.has_more);
+        assert!(page.next_cursor.is_none());
+        assert_eq!(
+            page.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 }

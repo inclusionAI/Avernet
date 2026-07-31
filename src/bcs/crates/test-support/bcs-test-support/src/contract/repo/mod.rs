@@ -1026,12 +1026,16 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
     assert!(page.has_more);
     assert!(page.next_cursor.is_some());
 
-    // query_messages — cursor
+    // query_messages — cursor. The repo surfaces a composite
+    // `(created_at, session_seq)` next_cursor; the legacy created_at-only
+    // cursor param extracts `.0` to preserve the legacy created_at-only
+    // predicate (the seed messages have distinct created_at values, so the
+    // composite and created_at-only cursors behave identically here).
     let page2 = repo
         .query_messages(MessageQuery {
             group_id: group_id.to_string(),
             session_id: session_id.to_string(),
-            cursor: page.next_cursor,
+            cursor: page.next_cursor.map(|c| c.0),
             limit: 10,
             keyword: None,
             sender_id: None,
@@ -1257,9 +1261,10 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
     assert_eq!(public_owner_page.messages[0].owner_bot_id, None);
 
     // list_session_history — legacy direct-read contract: `created_at DESC,
-    // session_seq DESC` with cursor-based pagination + full `MessageOwnerFilter`.
-    // env isolation (VUlao) is the store's responsibility: the MySQL/SQLite
-    // store filters reads by its own `env`; the memory store does not track env.
+    // session_seq DESC` with composite `(created_at, session_seq)` cursor
+    // pagination + full `MessageOwnerFilter`. env isolation (VUlao) is the
+    // store's responsibility: the MySQL/SQLite store filters reads by its own
+    // `env`; the memory store does not track env.
     let history = repo
         .list_session_history(session_id, MessageOwnerFilter::Any, None, None, 3)
         .await
@@ -1267,13 +1272,19 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
     assert!(history.has_more);
     assert!(history.next_cursor.is_some());
     assert_eq!(
+        history.next_cursor,
+        Some((5000, 7)),
+        "next_cursor is the composite (created_at, session_seq) of the last row"
+    );
+    assert_eq!(
         history.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
         vec![9, 8, 7],
         "must be created_at DESC, session_seq DESC"
     );
 
-    // follow the cursor: next_cursor is the created_at of seq 7 (5000), so the
-    // next page is rows with created_at < 5000 → seqs 6,5,4 (still has_more).
+    // follow the cursor: before=(5000,7) excludes seq 7 (5000,7) and anything
+    // newer, so the next page is seqs 6,5,4 (still has_more). Verifies the
+    // VYQHI composite-cursor fix — a bare created_at cursor would skip seq 7.
     let history_next = repo
         .list_session_history(
             session_id,
@@ -1285,6 +1296,11 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
         .await
         .expect("list_session_history next page");
     assert!(history_next.has_more);
+    assert_eq!(
+        history_next.next_cursor,
+        Some((2200, 4)),
+        "next page cursor is the composite (created_at, session_seq) of seq 4"
+    );
     assert_eq!(
         history_next
             .messages

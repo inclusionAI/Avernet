@@ -380,7 +380,7 @@ impl GroupMessageHistoryService for MessageService {
                 messages,
                 limit: cmd.limit,
                 before: cmd.before,
-                next_before: page.next_cursor,
+                next_before: page.next_cursor.map(|c| c.0),
             })
         } else {
             info!(
@@ -467,7 +467,7 @@ impl GroupMessageHistoryService for MessageService {
                 messages,
                 limit: cmd.limit,
                 before: cmd.before,
-                next_before: page.next_cursor,
+                next_before: page.next_cursor.map(|c| c.0),
             })
         } else {
             info!(

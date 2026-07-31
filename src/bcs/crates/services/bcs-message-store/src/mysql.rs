@@ -353,7 +353,7 @@ impl MessageRepoPort for MySqlMessageStore {
         }
 
         let next_cursor = if has_more {
-            messages.last().map(|m| m.created_at)
+            messages.last().map(|m| (m.created_at, m.session_seq))
         } else {
             None
         };
@@ -415,7 +415,12 @@ impl MessageRepoPort for MySqlMessageStore {
 
     /// Direct-read session history with full visibility predicates + cursor
     /// pagination. Sort is the legacy `created_at DESC, session_seq DESC`
-    /// (newest first); `before` is an exclusive `created_at` cursor.
+    /// (newest first); `before` is an exclusive composite
+    /// `(created_at, session_seq)` cursor so tied `created_at` rows are not
+    /// skipped at a page boundary (VYQHI). SQL uses the
+    /// `created_at < ? OR (created_at = ? AND session_seq < ?)` compound
+    /// predicate because SQLite (used by the conformance test harness) does
+    /// not support MySQL row-constructor comparison `(a, b) < (?, ?)`.
     ///
     /// VUlao: filters reads by the store's own `env` so one env cannot leak
     /// another env's messages (matches the INSERT-time env tagging).
@@ -424,7 +429,7 @@ impl MessageRepoPort for MySqlMessageStore {
         session_id: &str,
         owner_filter: MessageOwnerFilter,
         visible_from_seq: Option<i64>,
-        before: Option<u64>,
+        before: Option<(u64, i64)>,
         limit: u32,
     ) -> ServiceResult<MessagePage> {
         let limit = limit as usize;
@@ -454,9 +459,17 @@ impl MessageRepoPort for MySqlMessageStore {
             params.push(DbValue::from(visible_from));
         }
 
-        if let Some(cursor) = before {
-            conditions.push("created_at < ?".to_string());
-            params.push(DbValue::from(cursor));
+        // VYQHI: composite (created_at, session_seq) strict-less bound. The
+        // compound `created_at < ? OR (created_at = ? AND session_seq < ?)`
+        // is equivalent to the row-constructor `(created_at, session_seq) <
+        // (?, ?)` and runs on both MySQL and SQLite.
+        if let Some((cursor_ts, cursor_seq)) = before {
+            conditions.push(
+                "(created_at < ? OR (created_at = ? AND session_seq < ?))".to_string(),
+            );
+            params.push(DbValue::from(cursor_ts));
+            params.push(DbValue::from(cursor_ts));
+            params.push(DbValue::from(cursor_seq));
         }
 
         // Fetch limit+1 to detect has_more.
@@ -486,7 +499,7 @@ impl MessageRepoPort for MySqlMessageStore {
         }
 
         let next_cursor = if has_more {
-            messages.last().map(|m| m.created_at)
+            messages.last().map(|m| (m.created_at, m.session_seq))
         } else {
             None
         };
