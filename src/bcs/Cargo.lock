@@ -293,6 +293,7 @@ dependencies = [
  "bcs-judge",
  "bcs-jwt",
  "bcs-leader-election",
+ "bcs-llm-anthropic",
  "bcs-llm-api",
  "bcs-llm-openai-compatible",
  "bcs-message",
@@ -1048,6 +1049,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-llm-anthropic"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-config-api",
+ "bcs-llm-api",
+ "bcs-test-support",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "bcs-llm-api"
 version = "0.1.0"
 dependencies = [
@@ -1064,6 +1081,7 @@ dependencies = [
  "async-trait",
  "bcs-config-api",
  "bcs-llm-api",
+ "bcs-test-support",
  "reqwest",
  "secrecy",
  "serde",
@@ -1519,6 +1537,7 @@ dependencies = [
  "bcs-cache-api",
  "bcs-db-api",
  "bcs-domain",
+ "bcs-llm-api",
  "bcs-service-api",
  "bcs-session",
  "bcs-session-file",

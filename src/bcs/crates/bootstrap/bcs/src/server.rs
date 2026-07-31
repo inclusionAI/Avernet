@@ -65,6 +65,7 @@ use bcs_http::{
 use bcs_judge::{LlmJudgeService, NoopJudgeEvaluator};
 use bcs_leader_election::StandaloneLeaderElection;
 use bcs_llm_api::LlmChatCompletionPort;
+use bcs_llm_anthropic::AnthropicLlmClient;
 use bcs_llm_openai_compatible::OpenAiCompatibleLlmClient;
 use bcs_message::MessageService;
 use bcs_message_flow::{A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessageFlow};
@@ -1948,12 +1949,14 @@ fn create_interceptor_chain(config: &BcsConfig) -> crate::Result<Arc<Interceptor
 enum JudgeLlmProviderKind {
     None,
     OpenAiCompatible,
+    Anthropic,
 }
 
 fn select_judge_llm_provider(config: &BcsConfig) -> crate::Result<JudgeLlmProviderKind> {
     match &config.llm.provider_type {
         LlmProviderType::None => Ok(JudgeLlmProviderKind::None),
         LlmProviderType::OpenAiCompatible => Ok(JudgeLlmProviderKind::OpenAiCompatible),
+        LlmProviderType::Anthropic => Ok(JudgeLlmProviderKind::Anthropic),
         LlmProviderType::Other(provider) => Err(crate::BcsError::InvalidConfig(format!(
             "llm.type = '{}' is not available in this binary",
             provider
@@ -1975,6 +1978,22 @@ fn create_public_judge_evaluator(config: &BcsConfig) -> crate::Result<Arc<dyn Ju
                 base_url = %llm_config.base_url,
                 structured_output = ?llm_config.structured_output,
                 "OpenAI-compatible LLM judge enabled"
+            );
+            Ok(Arc::new(LlmJudgeService::new(
+                Arc::new(llm_client),
+                llm_config.model.clone(),
+            )))
+        }
+        JudgeLlmProviderKind::Anthropic => {
+            let llm_config = resolve_llm_config(config);
+            let llm_client = AnthropicLlmClient::new(llm_config.clone()).map_err(|error| {
+                crate::BcsError::InvalidConfig(format!("invalid llm config: {error}"))
+            })?;
+            info!(
+                model = %llm_config.model,
+                base_url = %llm_config.base_url,
+                structured_output = ?llm_config.structured_output,
+                "Anthropic LLM judge enabled"
             );
             Ok(Arc::new(LlmJudgeService::new(
                 Arc::new(llm_client),
@@ -2108,7 +2127,7 @@ mod judge_provider_tests {
     }
 
     #[test]
-    fn judge_llm_provider_selection_uses_openai_compatible_type() {
+    fn judge_llm_provider_selection_uses_public_provider_types() {
         let mut config = BcsConfig::default();
         config.llm.provider_type = LlmProviderType::OpenAiCompatible;
 
@@ -2116,6 +2135,40 @@ mod judge_provider_tests {
             select_judge_llm_provider(&config).unwrap(),
             JudgeLlmProviderKind::OpenAiCompatible
         );
+
+        config.llm.provider_type = LlmProviderType::Anthropic;
+        assert_eq!(
+            select_judge_llm_provider(&config).unwrap(),
+            JudgeLlmProviderKind::Anthropic
+        );
+    }
+
+    #[test]
+    fn anthropic_llm_provider_requires_api_key() {
+        let mut config = BcsConfig::default();
+        config.llm.provider_type = LlmProviderType::Anthropic;
+        config.llm.base_url = "https://api.anthropic.com/v1".to_string();
+        config.llm.api_key_env = None;
+        config.llm.api_key = None;
+
+        let error = match create_judge_evaluator(&config, &BcsServerExtensions::default()) {
+            Ok(_) => panic!("anthropic provider without an API key should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("anthropic api_key is required"));
+    }
+
+    #[test]
+    fn anthropic_llm_provider_builds_judge_evaluator() {
+        let mut config = BcsConfig::default();
+        config.llm.provider_type = LlmProviderType::Anthropic;
+        config.llm.base_url = "https://api.anthropic.com/v1".to_string();
+        config.llm.api_key_env = None;
+        config.llm.api_key = Some(Secret::new("anthropic-key".to_string()));
+
+        create_judge_evaluator(&config, &BcsServerExtensions::default())
+            .expect("valid anthropic provider should build a judge evaluator");
     }
 
     #[tokio::test]
@@ -4096,7 +4149,7 @@ mod tests {
     }
 
     #[test]
-    fn judge_llm_provider_selection_uses_openai_compatible_type() {
+    fn judge_llm_provider_selection_uses_public_provider_types() {
         let mut config = BcsConfig::default();
         assert_eq!(
             select_judge_llm_provider(&config).unwrap(),
@@ -4107,6 +4160,12 @@ mod tests {
         assert_eq!(
             select_judge_llm_provider(&config).unwrap(),
             JudgeLlmProviderKind::OpenAiCompatible
+        );
+
+        config.llm.provider_type = LlmProviderType::Anthropic;
+        assert_eq!(
+            select_judge_llm_provider(&config).unwrap(),
+            JudgeLlmProviderKind::Anthropic
         );
     }
 

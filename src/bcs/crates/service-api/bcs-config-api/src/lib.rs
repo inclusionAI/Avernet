@@ -871,6 +871,8 @@ pub enum LlmProviderType {
     None,
     /// OpenAI Chat Completions compatible HTTP API.
     OpenAiCompatible,
+    /// Anthropic Messages HTTP API.
+    Anthropic,
     /// A linked extension-provided LLM provider.
     Other(String),
 }
@@ -880,6 +882,7 @@ impl LlmProviderType {
         match self {
             Self::None => "none",
             Self::OpenAiCompatible => "openai_compatible",
+            Self::Anthropic => "anthropic",
             Self::Other(value) => value.as_str(),
         }
     }
@@ -903,6 +906,7 @@ impl<'de> Deserialize<'de> for LlmProviderType {
         Ok(match value.trim().to_ascii_lowercase().as_str() {
             "none" => Self::None,
             "openai_compatible" => Self::OpenAiCompatible,
+            "anthropic" => Self::Anthropic,
             _ => Self::Other(value),
         })
     }
@@ -918,11 +922,11 @@ impl Default for LlmProviderType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StructuredOutputMode {
-    /// Send OpenAI `response_format = { type = "json_schema", ... }`.
+    /// Use the provider's native JSON Schema constrained-output mechanism.
     JsonSchema,
-    /// Send OpenAI JSON mode and rely on local schema validation.
+    /// Use JSON-object mode and rely on local schema validation when supported.
     JsonObject,
-    /// Convert the schema to a forced OpenAI-compatible tool call.
+    /// Convert the schema to a provider-native forced tool call.
     ToolCall,
 }
 

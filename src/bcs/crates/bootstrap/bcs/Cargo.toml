@@ -149,6 +149,7 @@ bcs-collaboration-template = { workspace = true }
 bcs-collaboration-runtime = { workspace = true }
 bcs-collaboration-store = { workspace = true }
 bcs-judge = { workspace = true }
+bcs-llm-anthropic = { workspace = true }
 bcs-llm-openai-compatible = { workspace = true }
 
 # URL encoding

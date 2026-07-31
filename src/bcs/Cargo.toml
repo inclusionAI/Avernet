@@ -67,6 +67,7 @@ members = [
     "crates/plugins/bcs-storage-local",
     "crates/plugins/bcs-db-local",
     "crates/plugins/bcs-db-mysql",
+    "crates/plugins/bcs-llm-anthropic",
     "crates/plugins/bcs-llm-openai-compatible",
     "crates/plugins/bcs-secret-local",
     "crates/plugins/bcs-security-gateway-local",
@@ -277,6 +278,7 @@ bcs-cache-local            = { path = "crates/plugins/bcs-cache-local" }
 bcs-cache-redis            = { path = "crates/plugins/bcs-cache-redis" }
 bcs-db-local               = { path = "crates/plugins/bcs-db-local" }
 bcs-db-mysql               = { path = "crates/plugins/bcs-db-mysql" }
+bcs-llm-anthropic          = { path = "crates/plugins/bcs-llm-anthropic" }
 bcs-llm-openai-compatible = { path = "crates/plugins/bcs-llm-openai-compatible" }
 bcs-secret-local           = { path = "crates/plugins/bcs-secret-local" }
 bcs-auth-session           = { path = "crates/plugins/bcs-auth-session" }
