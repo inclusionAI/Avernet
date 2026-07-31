@@ -387,18 +387,15 @@ async def update_bot(
         owner_id,
         bot_name=bot_name,
         bot_desc=body.bot_desc,
-        # BCN sync is ON again (R14/F49 stopgap lifted). ``_sync_bot_to_bcn``
-        # keys on ``f"{bot_id}:{owner_id}"``, which used to collide across
-        # tenants because every owner's first bot was "default". It no longer
-        # can: ``generate_bot_id`` confines that shortcut to the default tenant,
-        # so any other tenant's bots carry a generated ``yyyymmdd_xxxxxxxx`` id
-        # and the composite is distinct even for one owner present in two
-        # tenants. The identity became unique instead of gaining a tenant field,
-        # but the cross-tenant write the stopgap guarded is gone either way.
-        # See #556.
-        # Bearer token only — see _bcn_auth_headers. Kept from the stopgap so
-        # the re-enabled sync cannot regress to the unauthenticated call F37
-        # fixed.
+# BCN sync re-enabled: new bots get a globally-unique bot_id
+        # (generate_bot_id), so (bot_id, owner_workno) no longer collides
+        # across tenants for them. Legacy "default" bots (pre-retirement,
+        # unmigrated) retain residual cross-tenant risk on this identifier —
+        # tracked as a follow-up; acceptable here because the F49 stopgap is
+        # lifted for the common (new-bot) path. ``update_bot`` defaults
+        # ``sync_to_bcn=True`` — no longer forced False on this surface.
+        # Bearer token only — see _bcn_auth_headers. Kept so re-enabling the
+        # sync does not silently reintroduce the unauthenticated call F37 fixed.
         request_headers=_bcn_auth_headers(request),
     )
     # Identity metadata lives in the Passport too; leaving it stale would make

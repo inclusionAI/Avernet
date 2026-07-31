@@ -811,22 +811,19 @@ def test_auth_status_defaulted_engine_passes_when_configured(client, svc, passpo
 # ----- round-14 review regressions ------------------------------------------
 
 
-def test_update_syncs_to_bcn(client, svc):
-    """R14/F49 stopgap lifted: the BCN identity can no longer collide (#556).
+def test_update_re_enables_bcn_sync(client, svc):
+    """BCN sync is back on for this surface.
 
-    ``_sync_bot_to_bcn`` keys on ``f"{bot_id}:{owner_id}"``. That collided while
-    every owner's first bot was ``"default"`` — two tenants sharing a principal
-    resolved to one BCN record and either could overwrite the other's name and
-    summary. ``generate_bot_id`` now confines the ``"default"`` shortcut to the
-    default tenant, so any other tenant's bots carry a generated id and the
-    composite is distinct even for one owner present in both.
-
-    Asserting the default rather than an explicit ``True``: the point is that
-    this surface no longer opts out, so a re-introduced ``sync_to_bcn=False``
-    fails here.
+    The F49 stopgap forced ``sync_to_bcn=False`` because ``bot_id`` was only
+    unique per owner — every owner's first bot was "default" — so two tenants
+    sharing a principal collapsed to one BCN record. Now that
+    ``(bot_id, owner_workno)`` is globally unique, the cross-tenant write is no
+    longer possible, so the openapi update surface no longer forces the flag
+    off. ``update_bot`` defaults ``sync_to_bcn`` to ``True``; the contract here
+    is "not forced False" — explicitly ``True`` or omitted (default) both pass.
     """
     _ok(client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"}))
-    assert svc.update_bot.call_args.kwargs.get("sync_to_bcn", True) is not False
+    assert svc.update_bot.call_args.kwargs.get("sync_to_bcn", True) is True
 
 
 def test_update_still_carries_the_bearer_token(client, svc):
