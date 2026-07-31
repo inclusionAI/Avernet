@@ -230,7 +230,11 @@ impl SessionRepoPort for MemorySessionRepo {
             })
             .cloned()
             .collect();
-        v.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+        // VSN7M: order by created_at DESC with session_id ASC tie-breaker
+        // BEFORE pagination so same-timestamp sessions do not skip/duplicate
+        // across pages. The repo owns the deterministic order; the facade's
+        // post-pagination sort is now a no-op safety net.
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(a.id.cmp(&b.id)));
         v.into_iter()
             .skip(offset as usize)
             .take(limit as usize)
@@ -264,9 +268,10 @@ impl SessionRepoPort for MemorySessionRepo {
         status: Option<SessionStatus>,
         title_contains: Option<&str>,
         participant_id: Option<&str>,
-    ) -> u64 {
+    ) -> ServiceResult<u64> {
         let st = self.state.read().await;
-        st.sessions
+        Ok(st
+            .sessions
             .values()
             .filter(|s| s.group_id == group_id)
             .filter(|s| status.map(|want| s.status == want).unwrap_or(true))
@@ -284,7 +289,7 @@ impl SessionRepoPort for MemorySessionRepo {
                     s.participants.iter().any(|p| p.bot_uuid == pid)
                 })
             })
-            .count() as u64
+            .count() as u64)
     }
 
     async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> {
@@ -887,24 +892,38 @@ mod tests {
         repo.complete_if_running(&s5.id, None, None).await.unwrap(); // Alpha Gamma, Completed, bot_1
 
         // No filters → all 5 in g1 (other-group session excluded)
-        assert_eq!(repo.count_by_group("g1", None, None, None).await, 5);
+        assert_eq!(
+            repo.count_by_group("g1", None, None, None).await.unwrap(),
+            5
+        );
 
         // Count is NOT the paginated subset
         let page = repo.list_by_group("g1", None, 0, 2, None, None).await;
         assert_eq!(page.len(), 2);
-        assert_eq!(repo.count_by_group("g1", None, None, None).await, 5);
+        assert_eq!(
+            repo.count_by_group("g1", None, None, None).await.unwrap(),
+            5
+        );
 
         // Status filter: Running only → s1, s2, s4 = 3
         assert_eq!(
-            repo.count_by_group("g1", Some(SessionStatus::Running), None, None).await,
+            repo.count_by_group("g1", Some(SessionStatus::Running), None, None)
+                .await
+                .unwrap(),
             3
         );
 
         // Title filter: "alpha" (case-insensitive) → s1, s2, s5 = 3
-        assert_eq!(repo.count_by_group("g1", None, Some("alpha"), None).await, 3);
+        assert_eq!(
+            repo.count_by_group("g1", None, Some("alpha"), None).await.unwrap(),
+            3
+        );
 
         // Participant filter: bot_1 → s1, s3, s5 = 3
-        assert_eq!(repo.count_by_group("g1", None, None, Some("bot_1")).await, 3);
+        assert_eq!(
+            repo.count_by_group("g1", None, None, Some("bot_1")).await.unwrap(),
+            3
+        );
 
         // Combined: Running + "alpha" + bot_1 → only s1 = 1
         assert_eq!(
@@ -914,7 +933,8 @@ mod tests {
                 Some("alpha"),
                 Some("bot_1")
             )
-            .await,
+            .await
+            .unwrap(),
             1
         );
 
@@ -928,7 +948,7 @@ mod tests {
         ];
         for (status, title, pid) in combos {
             let listed = repo.list_by_group("g1", status, 0, 1000, title, pid).await;
-            let counted = repo.count_by_group("g1", status, title, pid).await;
+            let counted = repo.count_by_group("g1", status, title, pid).await.unwrap();
             assert_eq!(
                 listed.len() as u64,
                 counted,

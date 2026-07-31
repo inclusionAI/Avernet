@@ -71,17 +71,20 @@ pub trait SessionRepoPort: Send + Sync {
     /// semantics MUST match `list_by_group` exactly so `total` is consistent
     /// with the paginated page returned alongside it.
     ///
-    /// Default returns `0` so noop/test impls keep compiling; real impls
-    /// (memory + mysql) override this.
+    /// Returns `ServiceResult<u64>` so real impls can propagate storage
+    /// failures instead of silently yielding `0` (which would violate the page
+    /// contract: a nonempty page with `total=0`). Default returns `Ok(0)` so
+    /// noop/test impls keep compiling; real impls (memory + mysql) override
+    /// this.
     async fn count_by_group(
         &self,
         group_id: &str,
         status: Option<SessionStatus>,
         title_contains: Option<&str>,
         participant_id: Option<&str>,
-    ) -> u64 {
+    ) -> ServiceResult<u64> {
         let _ = (group_id, status, title_contains, participant_id);
-        0
+        Ok(0)
     }
 
     /// **CAS 完成**：仅当当前 status=Running 时落 Completed 并返回新 session；

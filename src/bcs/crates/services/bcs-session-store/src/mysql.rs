@@ -813,7 +813,7 @@ impl SessionRepoPort for MySqlSessionStore {
         let sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions s {join} \
              WHERE {where_clause} \
-             ORDER BY s.gmt_create DESC LIMIT ? OFFSET ?",
+             ORDER BY s.gmt_create DESC, s.session_id ASC LIMIT ? OFFSET ?",
             select_cols = select_cols,
             join = join_clause,
             where_clause = conditions.join(" AND "),
@@ -870,13 +870,16 @@ impl SessionRepoPort for MySqlSessionStore {
     /// (env + group_id + optional status / title_contains / participant_id
     /// JOIN) but runs `SELECT COUNT(*)` without LIMIT/OFFSET. Used by the V1
     /// session list endpoint to compute `total`.
+    ///
+    /// Propagates DB failures as `ServiceResult::Err` rather than silently
+    /// returning `0`, so a nonempty page never pairs with `total=0`.
     async fn count_by_group(
         &self,
         group_id: &str,
         status: Option<SessionStatus>,
         title_contains: Option<&str>,
         participant_id: Option<&str>,
-    ) -> u64 {
+    ) -> ServiceResult<u64> {
         let mut conditions: Vec<String> = vec![
             "s.env = ?".to_string(),
             "s.group_id = ?".to_string(),
@@ -915,19 +918,26 @@ impl SessionRepoPort for MySqlSessionStore {
             where_clause = conditions.join(" AND "),
         );
 
-        match self.db.query(DbStatement::with_params(&sql, params)).await {
-            Ok(rows) => rows
-                .into_iter()
-                .next()
-                .and_then(|row| {
-                    db_get_column_opt::<i64>(&row, "cnt")
-                        .ok()
-                        .flatten()
-                        .map(|v| v.max(0) as u64)
-                })
-                .unwrap_or(0),
-            Err(_) => 0,
-        }
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(|e| {
+                ServiceError::InternalError(format!(
+                    "count sessions for Group '{group_id}': {e}"
+                ))
+            })?;
+        let total = rows
+            .into_iter()
+            .next()
+            .and_then(|row| {
+                db_get_column_opt::<i64>(&row, "cnt")
+                    .ok()
+                    .flatten()
+                    .map(|v| v.max(0) as u64)
+            })
+            .unwrap_or(0);
+        Ok(total)
     }
 
     async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> {

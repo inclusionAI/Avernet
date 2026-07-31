@@ -888,37 +888,57 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
     //   s               — Completed, title=None,    bot1
     //   svc             — Running,   title="hello", bot1
     //   collect_session — Running,   title=None,    bot-collector + bot-other
-    assert_eq!(repo.count_by_group(group_id, None, None, None).await, 3);
     assert_eq!(
-        repo.count_by_group(group_id, Some(SessionStatus::Running), None, None).await,
+        repo.count_by_group(group_id, None, None, None).await.expect("count_by_group none"),
+        3
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, Some(SessionStatus::Running), None, None)
+            .await
+            .expect("count_by_group running"),
         2
     );
     assert_eq!(
-        repo.count_by_group(group_id, Some(SessionStatus::Completed), None, None).await,
+        repo.count_by_group(group_id, Some(SessionStatus::Completed), None, None)
+            .await
+            .expect("count_by_group completed"),
         1
     );
     assert_eq!(
-        repo.count_by_group(group_id, None, Some("hello"), None).await,
+        repo.count_by_group(group_id, None, Some("hello"), None)
+            .await
+            .expect("count_by_group hello"),
         1
     );
     assert_eq!(
-        repo.count_by_group(group_id, None, None, Some("bot1")).await,
+        repo.count_by_group(group_id, None, None, Some("bot1"))
+            .await
+            .expect("count_by_group bot1"),
         2
     );
     assert_eq!(
-        repo.count_by_group(group_id, None, None, Some("bot-collector")).await,
+        repo.count_by_group(group_id, None, None, Some("bot-collector"))
+            .await
+            .expect("count_by_group bot-collector"),
         1
     );
     // count_by_group must equal list_by_group total (large limit) — consistency.
     let listed_all = repo.list_by_group(group_id, None, 0, 1000, None, None).await;
     assert_eq!(
         listed_all.len() as u64,
-        repo.count_by_group(group_id, None, None, None).await
+        repo.count_by_group(group_id, None, None, None)
+            .await
+            .expect("count_by_group consistency")
     );
     // count != paginated subset
     let listed_page = repo.list_by_group(group_id, None, 0, 1, None, None).await;
     assert_eq!(listed_page.len(), 1);
-    assert_eq!(repo.count_by_group(group_id, None, None, None).await, 3);
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, None)
+            .await
+            .expect("count_by_group after page"),
+        3
+    );
 }
 
 pub async fn session_repo_port_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) {

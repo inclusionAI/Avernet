@@ -33,8 +33,8 @@ use bcs_service_api::application::session::{
 use bcs_service_api::port::repo::{MessageRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
     backfill_participant_names, ActorKind, BotRegistryCoreService, Group as DomainGroup,
-    GroupCoreService, GroupStrategy, Participant, ParticipantMode, ParticipantRole,
-    ServiceError, Session, SessionKind, SessionStatus as DomainSessionStatus,
+    GroupCoreService, GroupStrategy, Participant, ParticipantMode, ParticipantRole, ServiceError,
+    Session, SessionKind, SessionStatus as DomainSessionStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -382,8 +382,9 @@ impl SessionService for SessionServiceImpl {
             )
             .await
             .map_err(map_session_error)?;
-        // The repo may not guarantee order; sort by created_at DESC with a
-        // session_id ASC tie-breaker for deterministic pagination.
+        // Repo ORDER BY already guarantees created_at DESC, session_id ASC
+        // (VSN7M); keep this sort as a no-op safety net for impls that do not
+        // honour the ordered contract.
         sessions.sort_by(|a, b| {
             b.created_at
                 .cmp(&a.created_at)
@@ -392,7 +393,8 @@ impl SessionService for SessionServiceImpl {
         let total = self
             .session_repo
             .count_by_group(&command.group_id, status, None, None)
-            .await;
+            .await
+            .map_err(map_service_error)?;
         let items = sessions.iter().map(project_summary).collect::<Vec<_>>();
         Ok(Page {
             items,
