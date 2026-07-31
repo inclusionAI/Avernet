@@ -180,7 +180,9 @@ Follows the established host-config pattern exactly; no new mechanism.
      it. Preserves `test_local_devices_are_reached_directly:241`.
   2. otherwise → `{gateway_ws_base}{_ENGINE_PREFIX}/{target}{socket_path}` plus
      `?{_PROXY_TOKEN_PARAM}={quote(token)}` when a credential exists.
-  3. a provider URL that is not the proxypass shape → see Risk 1.
+  3. a provider URL present but not the `/proxypass/` shape → `EngineUpstreamError`.
+     A guard on the Risk 1 decision, not a supported path; it never fires for a
+     bot this endpoint serves.
 - `connection.py:288-313` `_ws_base` — replaced by `_gateway_ws_base()`: select
   `base_url_pre` / `base_url` by env, `rstrip("/")`, apply the existing
   `https→wss` / `http→ws` rewrite (`:312`), raise `EngineUpstreamError` when the
@@ -227,12 +229,17 @@ is a different workstream's deliverable. See Rollout.
   `test_a_relayed_url_is_not_appended_to:149-154` exercises exactly that shape.
   It cannot be rebuilt from `target` + `path`, and the agreed gateway rewrite
   (`/engine/{rest}` → `/proxypass/{rest}`) cannot express it.
-  **Mitigation:** raise `EngineUpstreamError` naming the unroutable shape, rather
-  than publishing the engine proxy's host to a tenant — which is the exact thing
-  the spec exists to stop. **This needs the user's confirmation** that
-  tenant-facing personal bots cannot land on the LOCAL/desktop BaaS platform; if
-  they can, this is a regression for those bots and the gateway thread needs a
-  second prefix for the relay shape. Recorded as an open decision below.
+  **Decided 2026-07-31:** a tenant-facing personal bot cannot land on that
+  platform, so the shape is out of scope. `_socket_url` composes from `target` +
+  `chat_path` and ignores the provider's own URL.
+
+  **Mitigation — enforce the assumption rather than hope for it.** When the
+  provider *does* return a URL whose path is not the `/proxypass/` shape, raise
+  `EngineUpstreamError` naming it. The guard should never fire given the decision
+  above; the point is that if the assumption is ever wrong, it surfaces as a
+  named server-side error instead of a tenant reporting a socket that will not
+  open. Publishing the engine proxy's host as a fallback is not an option — that
+  is the exact thing the spec exists to stop.
 
 - **Risk 2 — an empty credential would publish an unopenable URL.** Today a
   missing token simply omits `headers` (`:192`). Appending
@@ -342,8 +349,12 @@ service takes injected fakes and makes no network call.
 - `:212` and `:283` — the "no gateway configured" failures now come from an empty
   `gateway` block, not from `sandbox_client`. The `_svc` helper (`:103-109`) and
   the `_Sandbox` stub (`:83`) lose `sandbox` and gain a `GatewayConfig`.
-- `:149` and `:235` — the verbatim-passthrough tests, per whichever way Risk 1 is
-  decided.
+- `:149` `test_a_relayed_url_is_not_appended_to` and `:235`
+  `test_a_provider_supplied_ws_url_is_used_verbatim` — both pin the
+  verbatim-passthrough behaviour this change removes. `:235`'s URL
+  (`wss://relay.example/route/xyz`) and `:149`'s (`…/wsrelay/s1/…`) become the
+  guard's inputs: they now assert `EngineUpstreamError` rather than a published
+  URL. Rename both, since what they pin is now the opposite.
 
 **New:**
 - A local device publishes `ws://{target}{path}` with **no** credential in the
@@ -372,12 +383,13 @@ a read timeout above the engine's 30-second heartbeat
 of any catch-all. Those belong to the gateway workstream; this endpoint only
 publishes an address that assumes them.
 
-## Open Decision
+## Decisions Taken
 
-**Risk 1 needs an answer before implementation.** If a tenant-facing personal bot
-can be served by the BaaS LOCAL/desktop platform — the one returning
-`wss://{host}/wsrelay/{session_id}` — then erroring on that shape is a
-regression, and the gateway needs a second prefix for it. If those bots cannot
-reach this endpoint, erroring is correct and cheap. Defaulting to **error**
-pending confirmation, because the alternative silently publishes the internal
-proxy host to a tenant.
+| Decision | Answer | Recorded |
+|---|---|---|
+| Gateway address source | `user_config.gateway` block in `application.yaml`, `base_url` / `base_url_pre` selected by `get_current_env()`; corp values land in the cob overlay | 2026-07-31 |
+| Credential placement | Query parameter on the socket URL only; `headers` removed from the contract. HTTP keeps the header and gains no query form | 2026-07-31 |
+| `wsrelay` provider URLs (Risk 1) | Out of scope — tenant-facing personal bots cannot reach that platform. Compose from `target` + `chat_path`; guard with a named error if a non-`/proxypass/` URL ever appears | 2026-07-31 |
+| `sandbox_client` on the constructor | Removed, not kept — dead once `_ws_base` goes, and DI fills `__init__` by `@inject` | 2026-07-31 |
+
+No open decisions remain. Ready for `tasks`.
