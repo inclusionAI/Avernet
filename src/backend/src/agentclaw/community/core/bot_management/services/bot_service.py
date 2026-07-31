@@ -793,27 +793,13 @@ class BotService:
             logger.error(f"[get_bot_by_ip_and_user] Error querying bot by IP {ip} and user {user_id}: {e}")
             return None
 
-    def is_first_bot(self, user_id: str) -> bool:
-        """
-        Check whether the user has no bots yet.
-
-        Asks the repository how many bots the owner has rather than testing for
-        a bot with id ``"default"``. The id test was a proxy that only held while
-        every owner's first bot was ``"default"``; ``generate_bot_id`` confines
-        that shortcut to the default tenant, so in any other tenant a genuinely
-        first bot carries a generated id and the proxy would answer False —
-        sending the create flow down the non-first-bot Passport branch.
-
-        Must be called before the new bot's row is inserted; both call sites
-        (:meth:`_resolve_bot_name` and ``create_flow``) run pre-insert.
-
-        Args:
-            user_id: User ID to check
-
-        Returns:
-            True if the user owns no bots, False otherwise
-        """
+def _is_first_bot(self, user_id: str) -> bool:
+        """First bot iff the owner has zero bots (current env; tenant enforced by session guard)."""
         return self._repository.count_by_owner(user_id) == 0
+
+    def is_first_bot(self, user_id: str) -> bool:
+        """Public alias (used by create_flow) for :meth:`_is_first_bot`."""
+        return self._is_first_bot(user_id)
 
     def _check_bot_count_limit(self, owner_id: str) -> None:
         """Enforce the per-owner bot count limit.
