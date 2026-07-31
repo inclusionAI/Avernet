@@ -1259,7 +1259,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
     // list_session_messages_by_seq — ascending order + total + pagination.
     // Session now has 9 messages (seq 1..9).
     let (asc, total) = repo
-        .list_session_messages_by_seq(session_id, 0, 100)
+        .list_session_messages_by_seq(session_id, 0, 100, None, None)
         .await
         .expect("list_session_messages_by_seq full");
     assert_eq!(total, 9);
@@ -1272,7 +1272,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
 
     // pagination: offset=2, limit=3 → seqs [3,4,5], total still 9
     let (page_asc, page_total) = repo
-        .list_session_messages_by_seq(session_id, 2, 3)
+        .list_session_messages_by_seq(session_id, 2, 3, None, None)
         .await
         .expect("list_session_messages_by_seq paged");
     assert_eq!(page_total, 9);
@@ -1284,7 +1284,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
 
     // unknown session → empty, total 0
     let (none, none_total) = repo
-        .list_session_messages_by_seq("no-such-session", 0, 10)
+        .list_session_messages_by_seq("no-such-session", 0, 10, None, None)
         .await
         .expect("list_session_messages_by_seq unknown");
     assert!(none.is_empty());

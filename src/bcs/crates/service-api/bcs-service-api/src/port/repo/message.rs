@@ -60,8 +60,20 @@ pub trait MessageRepoPort: Send + Sync + 'static {
     /// does NOT replace [`MessageRepoPort::query_messages`] (compat): the old
     /// cursor-based DESC query is unchanged.
     ///
-    /// Returns `(messages, total)` where `total` is the number of messages in
-    /// the session BEFORE pagination is applied.
+    /// VSN7A/VHxMU — message-history visibility predicates. Both filters are
+    /// applied BEFORE pagination so pages stay consistent, and `total` is the
+    /// filtered count (matches the same filters), not the raw session count:
+    /// - `visible_from_seq`: when set, only messages with
+    ///   `session_seq >= visible_from_seq` are returned (spec §5.2 new-participant
+    ///   cutoff so a late joiner cannot read pre-join history).
+    /// - `owner_bot_id`: when set, only messages whose `owner_bot_id` equals
+    ///   the given bot are returned (ManagerWorker worker self-message view).
+    ///   `None` means "any owner" (no owner filtering). NOTE: the public-only
+    ///   (`owner_bot_id IS NULL`) isolation for ManagerWorker non-worker
+    ///   viewers is intentionally NOT expressible with `Option<&str>`; the V1
+    ///   session facade documents that case as deferred to the group history
+    ///   path (`bcs-message`'s `MessageService`) which owns the full
+    ///   `MessageOwnerFilter` enum.
     ///
     /// Default returns an empty page so noop/test impls keep compiling; real
     /// impls (memory + mysql) override this.
@@ -70,8 +82,10 @@ pub trait MessageRepoPort: Send + Sync + 'static {
         session_id: &str,
         offset: u64,
         limit: u64,
+        visible_from_seq: Option<i64>,
+        owner_bot_id: Option<&str>,
     ) -> ServiceResult<(Vec<PersistedMessage>, u64)> {
-        let _ = (session_id, offset, limit);
+        let _ = (session_id, offset, limit, visible_from_seq, owner_bot_id);
         Ok((Vec::new(), 0))
     }
 }

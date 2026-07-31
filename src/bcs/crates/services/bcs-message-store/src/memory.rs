@@ -166,11 +166,16 @@ impl MessageRepoPort for MemoryMessageRepo {
     /// List messages for a session ordered by `session_seq` ASCENDING with
     /// offset/limit pagination, plus the total count for the session (before
     /// pagination). Does NOT replace `query_messages` (compat).
+    ///
+    /// VSN7A/VHxMU: `visible_from_seq` + `owner_bot_id` are applied BEFORE
+    /// pagination so pages stay consistent and `total` is the filtered count.
     async fn list_session_messages_by_seq(
         &self,
         session_id: &str,
         offset: u64,
         limit: u64,
+        visible_from_seq: Option<i64>,
+        owner_bot_id: Option<&str>,
     ) -> ServiceResult<(Vec<PersistedMessage>, u64)> {
         let sessions = self.sessions.read().await;
         let entry = match sessions.get(session_id) {
@@ -181,6 +186,14 @@ impl MessageRepoPort for MemoryMessageRepo {
         // (e.g. direct seeding in tests) still yields chronological order.
         let mut filtered: Vec<PersistedMessage> = entry.messages.iter().cloned().collect();
         filtered.sort_by(|a, b| a.session_seq.cmp(&b.session_seq));
+        // Apply visibility predicates before pagination + count so pages and
+        // `total` stay consistent with the viewer's scope.
+        if let Some(visible_from) = visible_from_seq {
+            filtered.retain(|m| m.session_seq >= visible_from);
+        }
+        if let Some(owner) = owner_bot_id {
+            filtered.retain(|m| m.owner_bot_id.as_deref() == Some(owner));
+        }
         let total = filtered.len() as u64;
         let paged = filtered
             .into_iter()
@@ -265,7 +278,10 @@ mod tests {
         }
 
         // Full list, ASC order
-        let (msgs, total) = repo.list_session_messages_by_seq("s1", 0, 100).await.unwrap();
+        let (msgs, total) = repo
+            .list_session_messages_by_seq("s1", 0, 100, None, None)
+            .await
+            .unwrap();
         assert_eq!(total, 5);
         assert_eq!(msgs.len(), 5);
         assert_eq!(
@@ -274,24 +290,36 @@ mod tests {
         );
 
         // Pagination: offset=1, limit=2 → seqs [2, 3], total still 5
-        let (msgs, total) = repo.list_session_messages_by_seq("s1", 1, 2).await.unwrap();
+        let (msgs, total) = repo
+            .list_session_messages_by_seq("s1", 1, 2, None, None)
+            .await
+            .unwrap();
         assert_eq!(total, 5);
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].session_seq, 2);
         assert_eq!(msgs[1].session_seq, 3);
 
         // offset beyond total → empty page, total still 5
-        let (msgs, total) = repo.list_session_messages_by_seq("s1", 10, 5).await.unwrap();
+        let (msgs, total) = repo
+            .list_session_messages_by_seq("s1", 10, 5, None, None)
+            .await
+            .unwrap();
         assert!(msgs.is_empty());
         assert_eq!(total, 5);
 
         // limit=0 → empty page, total still 5
-        let (msgs, total) = repo.list_session_messages_by_seq("s1", 0, 0).await.unwrap();
+        let (msgs, total) = repo
+            .list_session_messages_by_seq("s1", 0, 0, None, None)
+            .await
+            .unwrap();
         assert!(msgs.is_empty());
         assert_eq!(total, 5);
 
         // Unknown session → empty, total 0
-        let (msgs, total) = repo.list_session_messages_by_seq("nope", 0, 10).await.unwrap();
+        let (msgs, total) = repo
+            .list_session_messages_by_seq("nope", 0, 10, None, None)
+            .await
+            .unwrap();
         assert!(msgs.is_empty());
         assert_eq!(total, 0);
     }

@@ -739,11 +739,25 @@ impl SessionMessageService for SessionServiceImpl {
                 "limit must be between 1 and 100",
             ));
         }
-        self.load_session_for_read(&query.principal, &query.session_id)
+        let session = self
+            .load_session_for_read(&query.principal, &query.session_id)
             .await?;
+        // VSN7A/VHxMU — apply the message-history visibility scope the viewer
+        // is authorized to read, mirroring `bcs-message`'s `MessageService`.
+        // The store applies both filters before pagination so pages + `total`
+        // stay consistent with the viewer scope.
+        let group = self.load_group(&session.group_id).await?;
+        let (visible_from_seq, owner_bot_id) =
+            compute_message_visibility(&query.principal, &group, &session);
         let (messages, total) = self
             .message_repo
-            .list_session_messages_by_seq(&query.session_id, query.offset, query.limit)
+            .list_session_messages_by_seq(
+                &query.session_id,
+                query.offset,
+                query.limit,
+                visible_from_seq,
+                owner_bot_id.as_deref(),
+            )
             .await
             .map_err(map_service_error)?;
         let items = messages.iter().map(project_message).collect::<Vec<_>>();
@@ -757,6 +771,75 @@ impl SessionMessageService for SessionServiceImpl {
 }
 
 // ── projection helpers ────────────────────────────────────────────────
+
+/// Visibility window applied to message history for a viewer that joined
+/// late (spec §5.2: a participant sees at most the N messages preceding their
+/// join point). Mirrors the bootstrap default `new_participant_visible_limit`
+/// (`config.rs::default_new_participant_visible_limit`); kept as a const here
+/// because the V1 session facade does not (yet) own its own history config.
+const NEW_PARTICIPANT_VISIBLE_LIMIT: i64 = 100;
+
+/// Derive the message-history visibility predicates for a viewer, mirroring
+/// `bcs-message`'s `MessageService::get_session_history` new-message path so
+/// the V1 session list applies the same scoping the group history path does.
+///
+/// Returns `(visible_from_seq, owner_bot_id)`:
+/// - `ManagerWorker` strategy + the viewer's bot is a Worker participant →
+///   owner isolation: `(None, Some(worker_id))` so a worker only reads its
+///   own owned messages.
+/// - Otherwise (Chat, or ManagerWorker non-worker viewer) → all owners
+///   (`owner_bot_id = None`); the spec §5.2 new-participant `visible_from_seq`
+///   cutoff is derived from `session.participant_join_seq` /
+///   `session.current_msg_seq` relative to the viewer's `bot_uuid`. A Human
+///   viewer has no per-bot join map, so `visible_from_seq` is `None` (no
+///   cutoff) and the human reads the full visible scope.
+///
+/// Limitation: the `ManagerWorker` public-only (`owner_bot_id IS NULL`)
+/// isolation for non-worker viewers is NOT expressible with `Option<&str>` at
+/// the repo contract; the V1 session list returns all-owners for those
+/// viewers (deferred to the group history path which owns the full
+/// `MessageOwnerFilter` enum).
+fn compute_message_visibility(
+    principal: &Principal,
+    group: &DomainGroup,
+    session: &Session,
+) -> (Option<i64>, Option<String>) {
+    let view_bot_id: &str = match principal {
+        Principal::Bot(bot) => bot.bot_uuid.as_str(),
+        // Human viewer: no per-bot join map; the cutoff does not apply.
+        _ => "",
+    };
+
+    // ManagerWorker owner-isolation: a Worker participant only reads its own
+    // owned messages. Chat / non-worker viewers fall through to the cutoff
+    // path (all owners).
+    if group.group_strategy == GroupStrategy::ManagerWorker && !view_bot_id.is_empty() {
+        let is_worker = session
+            .participants
+            .iter()
+            .chain(group.participants.iter())
+            .any(|p| p.bot_uuid == view_bot_id && p.role == ParticipantRole::Worker);
+        if is_worker {
+            return (None, Some(view_bot_id.to_string()));
+        }
+    }
+
+    // Spec §5.2 new-participant join cutoff (Chat + ManagerWorker non-worker).
+    // No cutoff applies when the session has no recorded messages yet
+    // (current_msg_seq <= 0) — mirrors `compute_visible_from_seq`'s guard.
+    let visible_from_seq = if view_bot_id.is_empty() || session.current_msg_seq <= 0 {
+        None
+    } else {
+        let join_seq = session
+            .participant_join_seq
+            .as_ref()
+            .and_then(|jm| jm.get(view_bot_id))
+            .and_then(serde_json::Value::as_i64);
+        let base_seq = join_seq.unwrap_or(session.current_msg_seq);
+        Some((base_seq - NEW_PARTICIPANT_VISIBLE_LIMIT + 1).max(1))
+    };
+    (visible_from_seq, None)
+}
 
 fn build_participant(input: &SessionParticipantInput, role: ParticipantRole) -> Participant {
     let mode = map_v1_mode_to_domain(input.mode.unwrap_or(BotParticipantMode::Auto));

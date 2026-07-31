@@ -417,26 +417,42 @@ impl MessageRepoPort for MySqlMessageStore {
     /// offset/limit pagination, plus the total count for the session (before
     /// pagination). Runs a separate `SELECT COUNT(*)` for the total. Does NOT
     /// replace `query_messages` (compat).
+    ///
+    /// VSN7A/VHxMU: `visible_from_seq` + `owner_bot_id` are applied to BOTH
+    /// the list and the count so `total` is the filtered count and pages stay
+    /// consistent with the viewer's scope.
     async fn list_session_messages_by_seq(
         &self,
         session_id: &str,
         offset: u64,
         limit: u64,
+        visible_from_seq: Option<i64>,
+        owner_bot_id: Option<&str>,
     ) -> ServiceResult<(Vec<PersistedMessage>, u64)> {
+        // Build the shared visibility WHERE fragment + params so the list and
+        // count queries stay in lockstep.
+        let mut where_parts: Vec<&str> = vec!["session_id = ?"];
+        let mut filter_params: Vec<DbValue> = vec![DbValue::from(session_id.to_string())];
+        if let Some(visible_from) = visible_from_seq {
+            where_parts.push("session_seq >= ?");
+            filter_params.push(DbValue::from(visible_from));
+        }
+        if let Some(owner) = owner_bot_id {
+            where_parts.push("owner_bot_id = ?");
+            filter_params.push(DbValue::from(owner.to_string()));
+        }
+        let where_clause = where_parts.join(" AND ");
+
         let select_sql = format!(
             "SELECT {SELECT_COLS} FROM bcs_messages \
-             WHERE session_id = ? ORDER BY session_seq ASC LIMIT ? OFFSET ?"
+             WHERE {where_clause} ORDER BY session_seq ASC LIMIT ? OFFSET ?"
         );
+        let mut select_params = filter_params.clone();
+        select_params.push(DbValue::from(limit));
+        select_params.push(DbValue::from(offset));
         let rows = self
             .db
-            .query(DbStatement::with_params(
-                &select_sql,
-                vec![
-                    DbValue::from(session_id.to_string()),
-                    DbValue::from(limit),
-                    DbValue::from(offset),
-                ],
-            ))
+            .query(DbStatement::with_params(&select_sql, select_params))
             .await
             .map_err(|e| {
                 ServiceError::InternalError(format!("list_session_messages_by_seq query: {e}"))
@@ -449,13 +465,10 @@ impl MessageRepoPort for MySqlMessageStore {
             })?);
         }
 
-        let count_sql = "SELECT COUNT(*) AS cnt FROM bcs_messages WHERE session_id = ?";
+        let count_sql = format!("SELECT COUNT(*) AS cnt FROM bcs_messages WHERE {where_clause}");
         let count_rows = self
             .db
-            .query(DbStatement::with_params(
-                count_sql,
-                vec![DbValue::from(session_id.to_string())],
-            ))
+            .query(DbStatement::with_params(&count_sql, filter_params))
             .await
             .map_err(|e| {
                 ServiceError::InternalError(format!("list_session_messages_by_seq count: {e}"))
@@ -471,6 +484,8 @@ impl MessageRepoPort for MySqlMessageStore {
             session_id = %session_id,
             count = messages.len(),
             total,
+            visible_from_seq = ?visible_from_seq,
+            owner_bot_id = ?owner_bot_id,
             backend = %self.backend_label(),
             "messages listed by seq (asc)"
         );
