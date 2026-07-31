@@ -30,7 +30,8 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 )
 
 log = logging.getLogger("session_resource.service")
-_SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._ -]+$")
+_SAFE_FILENAME = re.compile(r"^[\w .-]+$", re.UNICODE)
+_MAX_FILENAME_UTF8_BYTES = 255
 
 
 class SessionResourceService:
@@ -438,7 +439,14 @@ class SessionResourceService:
     def _safe_filename(value: str) -> str:
         if Path(value).name != value or value in {".", ".."}:
             raise ValueError("invalid_filename")
-        if not _SAFE_FILENAME.fullmatch(value):
+        try:
+            filename_bytes = value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("invalid_filename") from exc
+        if (
+            len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
+            or not _SAFE_FILENAME.fullmatch(value)
+        ):
             raise ValueError("invalid_filename")
         return value
 
