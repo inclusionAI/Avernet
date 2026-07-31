@@ -811,16 +811,22 @@ def test_auth_status_defaulted_engine_passes_when_configured(client, svc, passpo
 # ----- round-14 review regressions ------------------------------------------
 
 
-def test_update_does_not_sync_to_bcn(client, svc):
-    """R14/F49: the BCN identity has no tenant axis, so this surface stays out.
+def test_update_syncs_to_bcn(client, svc):
+    """R14/F49 stopgap lifted: the BCN identity can no longer collide (#556).
 
-    ``_sync_bot_to_bcn`` keys on ``f"{bot_id}:{owner_id}"``; ``bot_id`` is only
-    unique per owner, so two tenants sharing a principal resolve to one BCN
-    record and either can overwrite the other's. Stopgap until the BCN contract
-    carries a tenant — a stale name beats a cross-tenant write.
+    ``_sync_bot_to_bcn`` keys on ``f"{bot_id}:{owner_id}"``. That collided while
+    every owner's first bot was ``"default"`` — two tenants sharing a principal
+    resolved to one BCN record and either could overwrite the other's name and
+    summary. ``generate_bot_id`` now confines the ``"default"`` shortcut to the
+    default tenant, so any other tenant's bots carry a generated id and the
+    composite is distinct even for one owner present in both.
+
+    Asserting the default rather than an explicit ``True``: the point is that
+    this surface no longer opts out, so a re-introduced ``sync_to_bcn=False``
+    fails here.
     """
     _ok(client.put("/openapi/v1/bots/b1", json={"bot_name": "Renamed"}))
-    assert svc.update_bot.call_args.kwargs["sync_to_bcn"] is False
+    assert svc.update_bot.call_args.kwargs.get("sync_to_bcn", True) is not False
 
 
 def test_update_still_carries_the_bearer_token(client, svc):
