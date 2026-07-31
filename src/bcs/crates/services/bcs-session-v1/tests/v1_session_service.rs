@@ -1154,3 +1154,56 @@ async fn session_only_participant_list_sessions_scoped() {
     assert_ne!(page.items[0].session_id, s2.session.session_id);
     assert_ne!(page.items[0].session_id, s3.session.session_id);
 }
+
+#[tokio::test]
+async fn create_session_duplicate_participant_rejected() {
+    // VeHS7: a CreateSession command that lists the same bot twice must be
+    // rejected before persistence. The memory store would otherwise silently
+    // accept an inflated roster while the MySQL store would surface the
+    // `uk_session_participants_env_session_bot` unique constraint as a generic
+    // session-ID collision on retry — inconsistent behavior across backends.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+
+    let error = fixture
+        .service
+        .create(CreateSession {
+            principal: bot_principal("driver"),
+            group_id: "g1".into(),
+            driver_bot_uuid: "driver".into(),
+            title: None,
+            input: None,
+            participants: vec![
+                participant_input("expert", None),
+                participant_input("expert", Some(BotParticipantMode::Muted)),
+            ],
+        })
+        .await
+        .expect_err("duplicate participant should be rejected");
+    assert!(
+        matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::InvalidInput { .. }
+        ),
+        "expected InvalidInput, got {error:?}",
+    );
+    assert_eq!(error.code(), "invalid_request");
+
+    // Guard: no session was materialized for the rejected command.
+    let page = SessionService::list(
+        &fixture.service,
+        ListSessions {
+            principal: bot_principal("driver"),
+            group_id: "g1".into(),
+            offset: 0,
+            limit: 10,
+            status: None,
+        },
+    )
+    .await
+    .expect("list sessions");
+    assert_eq!(page.total, 0, "no session should be persisted on rejection");
+}

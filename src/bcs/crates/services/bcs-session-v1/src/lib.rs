@@ -12,6 +12,7 @@
 //! - Read operations (get / list / list messages) additionally allow session
 //!   participants and group members.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -451,6 +452,20 @@ impl SessionService for SessionServiceImpl {
                 "invalid_participant",
                 "at least one session participant is required",
             ));
+        }
+        // VeHS7: reject duplicate participants before any persistence so the
+        // memory store doesn't silently accept an inflated roster and the MySQL
+        // store doesn't surface the `uk_session_participants_env_session_bot`
+        // unique constraint as a generic session-ID collision on retry. The
+        // contract mirrors this with `uniqueItems: true` on the array.
+        let mut seen: HashSet<&str> = HashSet::new();
+        for input in &command.participants {
+            if !seen.insert(input.bot_uuid.as_str()) {
+                return Err(ApplicationError::invalid(
+                    "invalid_request",
+                    format!("duplicate participant: {}", input.bot_uuid),
+                ));
+            }
         }
         for input in &command.participants {
             self.ensure_collaboration_eligible(
