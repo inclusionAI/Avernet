@@ -272,8 +272,10 @@ user_config:
   # credential. Left empty, the verifier has no key and the public API answers
   # 401 to everything, which is where singlebox stands today anyway.
   #
-  # To exercise the public surface locally, set the same value here and in the
-  # gateway's AVERNET_PRINCIPAL_SIGNING_KEY; the two must match for a token to
-  # verify. Use at least 32 bytes (RFC 7518 §3.2). Do not commit the value.
+  # To exercise the public surface locally, set the same value on both sides —
+  # here, and in the gateway's own SecretResolver, which since #673 reads it
+  # from AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE (its secret.env_prefix plus
+  # principal_signer.secret_name). The two must match for a token to verify.
+  # Use at least 32 bytes (RFC 7518 §3.2). Do not commit the value.
   gateway_principal:
     signing_key: ""

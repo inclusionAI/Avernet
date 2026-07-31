@@ -159,8 +159,11 @@ user_config:
   #     AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE
   #
   # gateway_principal_signing_key is the HMAC secret the gateway signs the
-  # X-Avernet-Principal token with, so its value must match the gateway's own
-  # AVERNET_PRINCIPAL_SIGNING_KEY. Unregistered or unset, the public API answers
+  # X-Avernet-Principal token with, so its value must match what the gateway
+  # resolves for its own principal_signer.secret_name (since #673 the gateway
+  # goes through a SecretResolver too; its community flavor reads
+  # AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE). The two registries are separate
+  # — only the value has to agree. Unregistered or unset, the public API answers
   # 401 to everything.
 
   # MCP catalog — consumed by the community CommunityMCPCenter.

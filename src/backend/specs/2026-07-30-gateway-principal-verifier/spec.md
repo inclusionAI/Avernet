@@ -52,15 +52,28 @@ From `plugins/principal_signer/bare/_plugin.py` and `_forward.py` in PR #599:
 
 ## Configuration (as of PR #670)
 
-The backend no longer reads any `AVERNET_PRINCIPAL_*` variable. The gateway
-still reads `AVERNET_PRINCIPAL_SIGNING_KEY` on the *signing* side; the two sides
-no longer share a vocabulary, only a value.
+The backend no longer reads any `AVERNET_PRINCIPAL_*` variable. Neither does the
+gateway: #673 moved its signing side onto its own `SecretResolver` SPI in the
+same release. **The two sides now share only a value, not a vocabulary** — each
+has its own registry, its own secret name, and its own resolver:
+
+| Side | Secret name | Community lookup |
+| --- | --- | --- |
+| backend | `secret_names.gateway_principal_signing_key` | `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` |
+| gateway | `principal_signer.secret_name` (default `principal_signing_key`) | `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` |
+
+Nothing links those two names. Provisioning one and not the other is silent —
+the backend answers 401 to everything and looks configured.
 
 | What | Where it comes from now |
 | --- | --- |
 | signing key | `SecretResolver`, under the name registered as `secret_names.gateway_principal_signing_key` |
-| `aud` | a constant, `backend` — the gateway signs it from the upstream server's own name and never made it configurable |
-| `iss` | a constant, `gateway` — likewise hardcoded on the signing side |
+| `aud` | a constant, `backend` — the gateway signs it from the upstream server's own name, which it never made configurable |
+| `iss` | a constant, `gateway` — matching the **default** of the gateway's `principal_signer.issuer`, which since #673 *is* configurable there |
+
+The `iss` row is a live coupling, not a symmetry: changing the gateway's
+`issuer` requires changing the backend constant in the same release, or every
+`/openapi/v1` request answers 401.
 
 Per profile, the key's value resolves from: the corp secret store (corp);
 `{env_prefix}{NAME}_VALUE` (community, via `CommunitySecretResolver`); or
@@ -107,8 +120,9 @@ placed the seams.
    committed dev secret with a warning; we deliberately do not mirror it. A
    committed shared secret is a committed credential, and on this side "no key"
    fails safe: every public request answers 401, which is precisely the state
-   this replaces. Single-box sets the same value on both sides (since PR #670,
-   from `gateway_principal.signing_key` here and the env var on the gateway).
+   this replaces. Single-box sets the same value on both sides: since PR #670
+   from `gateway_principal.signing_key` here, and since gateway #673 from
+   `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` there.
 2. **Tenant passes through verbatim.** The gateway's tenant id *is* the
    `avernet_tenant` isolation key — no translation table. Consequence worth
    knowing: a gateway tenant must be spelled exactly as the column stores it,

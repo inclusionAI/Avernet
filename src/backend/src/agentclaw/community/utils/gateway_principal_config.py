@@ -34,12 +34,21 @@ What comes from where:
   secret is a committed credential. Use at least 32 bytes — RFC 7518 §3.2 for
   SHA-256, and PyJWT warns below it.
 
-- **``aud`` and ``iss``** are fixed in code, not configuration. They are the two
-  ends of one wire contract, and the gateway does not make them configurable
-  either: it signs ``iss`` from a hardcoded default and ``aud`` from the upstream
-  server's own name (``servers:`` in its ``configs/application.yaml``). A knob on
-  only the verifying side could not change the contract, just break it — so the
-  values live next to the code that checks them.
+- **``aud`` and ``iss``** are fixed in code, not configuration — a deliberate
+  call, so that one wire contract has one spelling rather than a knob per side.
+
+  ``aud`` is not configurable on the signing side at all: the gateway signs it
+  from the upstream server's own name (``servers:`` in its
+  ``configs/application.yaml``), so a knob here could not change the contract,
+  only break it.
+
+  ``iss`` **is** configurable on the gateway (``user_config.principal_signer.
+  issuer``, since gateway #673 moved that config into the file). Its default is
+  ``gateway``, which is what :data:`_ISSUER` matches, so the contract holds as
+  shipped. But the coupling is now real and unenforced: **changing the gateway's
+  ``issuer`` requires changing this constant in the same release**, or every
+  ``/openapi/v1`` request answers 401. If that ever needs to vary per
+  deployment, this is the line to revisit.
 
 Resolved once, at boot: the key is deployment configuration, and a per-request
 secret-store round trip on the hot path buys nothing. There is deliberately no
@@ -60,7 +69,9 @@ logger = get_logger()
 # upstream must not verify here, so these two spellings have to match.
 _AUDIENCE = "backend"
 
-# The ``iss`` we accept — the gateway's own hardcoded issuer.
+# The ``iss`` we accept. Matches the default of the gateway's
+# ``user_config.principal_signer.issuer``, which is configurable on that side —
+# so this constant and that setting must move together or every request 401s.
 _ISSUER = "gateway"
 
 # What every unresolved deployment gets: an empty key, which the verifier treats

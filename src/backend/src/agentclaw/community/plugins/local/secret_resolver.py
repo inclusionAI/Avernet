@@ -90,9 +90,11 @@ class LocalSecretResolver(MockSeam, SecretResolver):
 
         Ships unset: ``application-singlebox.yaml`` carries the block but no
         value, so out of the box this returns ``None`` and every ``/openapi/v1``
-        request answers 401 — the same state singlebox is in today. Set it there
-        *and* in the gateway's ``AVERNET_PRINCIPAL_SIGNING_KEY`` to exercise the
-        public surface locally; the two must match for a token to verify.
+        request answers 401 — the same state singlebox is in today. To exercise
+        the public surface locally, set it there *and* on the gateway, whose own
+        ``SecretResolver`` reads
+        ``AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE``; the two must match for a
+        token to verify.
         """
         local_config = self._read_singlebox_local_config()
         principal_config = local_config.get("gateway_principal") or {}
