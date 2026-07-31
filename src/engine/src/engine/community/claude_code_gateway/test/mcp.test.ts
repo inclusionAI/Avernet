@@ -369,14 +369,17 @@ describe('mcp.tools.* handlers (phase-1 stubs)', () => {
 
   // Helper: create a stub execFile that returns a JSON response.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function stubExecFile(jsonResponse: unknown, capture?: { env?: Record<string, string> }): any {
+  function stubExecFile(jsonResponse: unknown, capture?: { env?: Record<string, string>; args?: string[] }): any {
     return (
       _cmd: string,
-      _args: string[],
+      args: string[],
       opts: { env?: Record<string, string> },
       cb: (err: Error | null, stdout: string, stderr: string) => void,
     ) => {
-      if (capture) capture.env = opts.env;
+      if (capture) {
+        capture.env = opts.env;
+        capture.args = args;
+      }
       cb(null, JSON.stringify(jsonResponse), '');
     };
   }
@@ -410,6 +413,21 @@ describe('mcp.tools.* handlers (phase-1 stubs)', () => {
       assert.ok(capture.env, 'env should be passed to execFile');
       assert.equal(capture.env!.MCPORTER_USER_TOKEN, 'Bearer sno-330429',
         'list should inject Bearer <userToken> into MCPORTER_USER_TOKEN (same as call)');
+    } finally {
+      _resetExecFileRunner();
+    }
+  });
+
+  it('list passes --config <store.configPath> in argv', async () => {
+    try {
+      const capture: { env?: Record<string, string>; args?: string[] } = {};
+      _setExecFileRunner(stubExecFile({ tools: [] }, capture));
+      await handleToolsList(store, { serverCode: 'test-srv' });
+      assert.ok(capture.args, 'args should be captured');
+      const configIdx = capture.args!.indexOf('--config');
+      assert.notEqual(configIdx, -1, 'argv must include --config');
+      assert.equal(capture.args![configIdx + 1], store.configPath,
+        '--config value must match store.configPath');
     } finally {
       _resetExecFileRunner();
     }
@@ -456,6 +474,21 @@ describe('mcp.tools.* handlers (phase-1 stubs)', () => {
       assert.ok(capture.env, 'env should always be passed to execFile');
       assert.equal(capture.env!.MCPORTER_USER_TOKEN, '',
         'empty userToken → empty MCPORTER_USER_TOKEN (zero-regression)');
+    } finally {
+      _resetExecFileRunner();
+    }
+  });
+
+  it('call passes --config <store.configPath> in argv', async () => {
+    try {
+      const capture: { env?: Record<string, string>; args?: string[] } = {};
+      _setExecFileRunner(stubExecFile({ ok: true, data: {} }, capture));
+      await handleToolsCall(store, { toolName: 'x', serverCode: 'srv', arguments: {} });
+      assert.ok(capture.args, 'args should be captured');
+      const configIdx = capture.args!.indexOf('--config');
+      assert.notEqual(configIdx, -1, 'argv must include --config');
+      assert.equal(capture.args![configIdx + 1], store.configPath,
+        '--config value must match store.configPath');
     } finally {
       _resetExecFileRunner();
     }

@@ -209,6 +209,7 @@ class _McpPortMixin:
         cmd = ["mcporter", "call", tool]
         for key, value in (args or {}).items():
             cmd.append(f"{key}={value}")
+        cmd.extend(["--config", str(self._mcporter_config_path())])
 
         timeout = 30
         try:
@@ -261,6 +262,7 @@ class _McpPortMixin:
             ",".join(normalized) if normalized else "__EMPTY_FILTER_DISABLE_ALL__"
         )
         command = ["mcporter", "filter-servers", csv_codes]
+        command.extend(["--config", str(self._mcporter_config_path())])
         try:
             proc = _sp.run(
                 command,

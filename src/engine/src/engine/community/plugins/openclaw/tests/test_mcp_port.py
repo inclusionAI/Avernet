@@ -267,7 +267,7 @@ async def test_full_crud_lifecycle(impl, cfg_path):
 
 
 @pytest.mark.asyncio
-async def test_call_tool_builds_correct_argv(impl, monkeypatch):
+async def test_call_tool_builds_correct_argv(impl, cfg_path, monkeypatch):
     captured: dict = {}
 
     def fake_run(cmd, **kwargs):
@@ -280,7 +280,10 @@ async def test_call_tool_builds_correct_argv(impl, monkeypatch):
     import subprocess as _sp  # noqa: PLC0415
     monkeypatch.setattr(_sp, "run", fake_run)
     result = await impl.call_tool("my_tool", {"key": "val", "num": 42})
-    assert captured["cmd"] == ["mcporter", "call", "my_tool", "key=val", "num=42"]
+    assert captured["cmd"] == [
+        "mcporter", "call", "my_tool", "key=val", "num=42",
+        "--config", str(cfg_path),
+    ]
     assert result["tool_name"] == "my_tool"
     assert result["is_error"] is False
     assert result["content"] == [{"type": "text", "text": "tool_output"}]
@@ -314,7 +317,7 @@ async def test_call_tool_nonzero_exit_sets_is_error(impl, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_call_tool_no_args(impl, monkeypatch):
+async def test_call_tool_no_args(impl, cfg_path, monkeypatch):
     captured: dict = {}
 
     def fake_run(cmd, **kwargs):
@@ -324,7 +327,10 @@ async def test_call_tool_no_args(impl, monkeypatch):
     import subprocess as _sp  # noqa: PLC0415
     monkeypatch.setattr(_sp, "run", fake_run)
     await impl.call_tool("bare_tool", {})
-    assert captured["cmd"] == ["mcporter", "call", "bare_tool"]
+    assert captured["cmd"] == [
+        "mcporter", "call", "bare_tool",
+        "--config", str(cfg_path),
+    ]
 
 
 @pytest.mark.asyncio
@@ -355,7 +361,7 @@ async def test_call_tool_timeout_raises_timeout_error(impl, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_filter_servers_passes_csv_to_subprocess(impl, monkeypatch):
+async def test_filter_servers_passes_csv_to_subprocess(impl, cfg_path, monkeypatch):
     captured: dict = {}
 
     def fake_run(cmd, **kwargs):
@@ -366,7 +372,10 @@ async def test_filter_servers_passes_csv_to_subprocess(impl, monkeypatch):
     import subprocess as _sp  # noqa: PLC0415
     monkeypatch.setattr(_sp, "run", fake_run)
     result = await impl.filter_servers(["a", "b"], timeout=5)
-    assert captured["cmd"] == ["mcporter", "filter-servers", "a,b"]
+    assert captured["cmd"] == [
+        "mcporter", "filter-servers", "a,b",
+        "--config", str(cfg_path),
+    ]
     assert result["return_code"] == 0
     assert result["stdout"] == "out"
     assert result["server_codes"] == ["a", "b"]

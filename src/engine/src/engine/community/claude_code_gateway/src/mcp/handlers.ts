@@ -241,7 +241,7 @@ export async function handleConfigDelete(
 // ---- Tools plane (phase-1 stub) ----
 
 export async function handleToolsList(
-  _store: McpStore,
+  store: McpStore,
   params: unknown,
 ): Promise<McpResult<{ tools: Array<{ name: string; description?: string }> }>> {
   const p = asObject(params);
@@ -261,7 +261,7 @@ export async function handleToolsList(
   try {
     const { stdout } = await new Promise<{ stdout: string; stderr: string }>(
       (resolve, reject) => {
-        runner.execFile('mcporter', [ 'list', serverCode, '--schema', '--json' ], {
+        runner.execFile('mcporter', [ 'list', serverCode, '--schema', '--json', '--config', store.configPath ], {
           timeout: 30000,
           maxBuffer: 10 * 1024 * 1024,
           env: { ...process.env, MCPORTER_USER_TOKEN: userToken ? `Bearer ${userToken}` : '' },
@@ -296,7 +296,7 @@ export async function handleToolsList(
 }
 
 export async function handleToolsCall(
-  _store: McpStore,
+  store: McpStore,
   params: unknown,
 ): Promise<McpResult<{
   serverCode: string;
@@ -343,7 +343,7 @@ export async function handleToolsCall(
       (resolve, reject) => {
         // mcporter `call` uses `--output json`, not `--json` — see
         // MCPORTER_CALL_OUTPUT_ARGS. Pinned by test/mcp-real-binary.test.ts.
-        runner.execFile('mcporter', [ 'call', selector, ...cmdArgs, ...MCPORTER_CALL_OUTPUT_ARGS ], {
+        runner.execFile('mcporter', [ 'call', selector, ...cmdArgs, ...MCPORTER_CALL_OUTPUT_ARGS, '--config', store.configPath ], {
           timeout: 60000,
           maxBuffer: 10 * 1024 * 1024,
           env: { ...process.env, ...mcporterEnv },

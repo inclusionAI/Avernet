@@ -214,6 +214,11 @@ export class McpStore {
     await fsp.rename(tmp, this.filePath);
   }
 
+  /** Absolute path to the mcporter.json this store manages (for --config passthrough). */
+  get configPath(): string {
+    return this.filePath;
+  }
+
   /** Await any pending writes. Use on shutdown or from tests. */
   async flush(): Promise<void> {
     if (this.pendingTimer) {
