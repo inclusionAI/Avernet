@@ -141,6 +141,31 @@ def test_layout_repository_satisfies_public_protocol_shape() -> None:
     assert isinstance(repository, SkillsPoolLayoutRepositoryProtocol)
 
 
+def test_runtime_reconciliation_fails_closed_without_quarantine() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    with database.transactional_orm_session() as session:
+        session.add(
+            BotSkillLayoutStateModel(
+                env=scope.env,
+                entity_id=scope.entity_id,
+                bot_id=scope.bot_id,
+                active_layout=SkillLayout.POOL.value,
+                phase=SkillLayoutPhase.POOL_ACTIVE.value,
+                migration_generation="generation-1",
+                pool_activated_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+
+    assert not repository.record_runtime_reconciliation(
+        scope=scope,
+        migration_generation="generation-1",
+        observed_at=datetime.now(UTC) - timedelta(days=1),
+        evidence={"source": "pre_activation_without_quarantine"},
+    )
+
+
 def test_cutover_commit_logs_missing_quarantine_path(caplog) -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
@@ -1408,6 +1433,23 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
     assert quarantine is not None
     assert quarantine.engine == "openclaw"
     assert quarantine.source_evidence["evidence"]["bridge"] == "valid"
+    assert not repository.record_runtime_reconciliation(
+        scope=scope,
+        migration_generation="missing-generation",
+        observed_at=datetime.now(UTC),
+        evidence={"source": "wrong_generation"},
+    )
+    pre_activation_observed_at = datetime.now(UTC) - timedelta(days=1)
+    assert repository.record_runtime_reconciliation(
+        scope=scope,
+        migration_generation="generation-1",
+        observed_at=pre_activation_observed_at,
+        evidence={"source": "concurrent_pre_activation_wakeup"},
+    )
+    quarantine = repository.get_quarantine(scope, "generation-1")
+    assert quarantine is not None
+    assert quarantine.runtime_reconciled_at is None
+    assert quarantine.runtime_evidence is None
     ready_observed_at = datetime.now(UTC) + timedelta(seconds=1)
     assert repository.record_runtime_reconciliation(
         scope=scope,
@@ -1430,12 +1472,18 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
     assert failed is not None
     assert failed.runtime_reconciliation_status is RuntimeReconciliationStatus.FAILED
     assert failed.runtime_evidence == {"outcome": "invalid"}
-    assert not repository.record_runtime_reconciliation(
+    assert repository.record_runtime_reconciliation(
         scope=scope,
         migration_generation="generation-1",
         observed_at=failed_observed_at,
         evidence={"source": "stale_retry"},
     )
+    superseded = repository.get_quarantine(scope, "generation-1")
+    assert superseded is not None
+    assert (
+        superseded.runtime_reconciliation_status is RuntimeReconciliationStatus.FAILED
+    )
+    assert superseded.runtime_evidence == {"outcome": "invalid"}
     assert not repository.claim_cleanup(
         scope=scope,
         migration_generation="generation-1",
