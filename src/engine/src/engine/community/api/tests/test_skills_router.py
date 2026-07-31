@@ -359,6 +359,35 @@ def test_runtime_layout_probe_rejects_plugin_engine_mismatch(
     plugin.probe_pool_layout.assert_awaited_once()
 
 
+def test_runtime_layout_probe_rejects_real_openclaw_plugin_engine_mismatch(
+    client,
+    rich_manager,
+) -> None:
+    rich_manager._active_engine._skills = OpenClawSkillsAdapter(
+        OpenClawPluginImpl()
+    )
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "hermes",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "INVALID",
+        "engine": "hermes",
+        "layout_contract_version": "skills-pool-p3-v1",
+        "preparation_id": None,
+        "evidence": {
+            "reason": "runtime_engine_mismatch",
+            "actual_engine": "openclaw",
+        },
+    }
+
+
 def test_pool_activation_and_mapping_routes_are_capability_independent(
     client, rich_manager
 ):
