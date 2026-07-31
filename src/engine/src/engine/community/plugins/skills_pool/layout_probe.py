@@ -394,7 +394,11 @@ def _active_marker_valid(
     return True
 
 
-def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
+def _active_entries_failure_reason(
+    layout: _FilesystemPoolLayout,
+    *,
+    engine: str,
+) -> str | None:
     """Validate mutable managed entries without freezing an old mapping set."""
 
     pool_roots = tuple(
@@ -409,6 +413,14 @@ def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
             layout.repo_bridge,
         )
     )
+    retired_active_corpus_roots = (
+        (
+            Path(os.path.abspath(layout.active_root / "skills-local")),
+            Path(os.path.abspath(layout.active_root / "skills-repo")),
+        )
+        if engine == "aicoding"
+        else ()
+    )
     for entry in layout.active_root.iterdir():
         if not entry.is_symlink():
             continue
@@ -417,14 +429,16 @@ def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
             try:
                 target_stat = entry.stat()
             except (FileNotFoundError, NotADirectoryError):
-                return False
+                return "active_managed_entry_invalid"
             if not stat.S_ISDIR(target_stat.st_mode):
-                return False
+                return "active_managed_entry_invalid"
             continue
+        if any(target.is_relative_to(root) for root in retired_active_corpus_roots):
+            return "retired_active_corpus_reference_present"
         if any(target.is_relative_to(root) for root in retired_roots):
-            return False
+            return "active_managed_entry_invalid"
         # External active entries predate Pool and remain outside this migration.
-    return True
+    return None
 
 
 def inspect_runtime_layout(
@@ -759,9 +773,12 @@ def inspect_runtime_layout(
                         preparation_id=preparation_id,
                     )
             try:
-                active_entries_valid = _active_entries_valid(layout)
+                active_entries_failure_reason = _active_entries_failure_reason(
+                    layout,
+                    engine=engine,
+                )
             except PermissionError:
-                active_entries_valid = False
+                active_entries_failure_reason = "active_managed_entry_invalid"
             except OSError as error:
                 return _transient(
                     engine=engine,
@@ -771,12 +788,12 @@ def inspect_runtime_layout(
                     error=error,
                     preparation_id=preparation_id,
                 )
-            if not active_entries_valid:
+            if active_entries_failure_reason is not None:
                 return _invalid(
                     engine=engine,
                     contract_version=expected_contract_version,
                     layout=layout,
-                    reason="active_managed_entry_invalid",
+                    reason=active_entries_failure_reason,
                     preparation_id=preparation_id,
                 )
         active_checks = {

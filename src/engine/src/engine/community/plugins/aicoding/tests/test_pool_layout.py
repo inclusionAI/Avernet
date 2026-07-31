@@ -515,6 +515,40 @@ def test_aicoding_active_probe_rejects_full_corpus_in_active_root(
     assert inspection.evidence["reason"] == "active_repo_corpus_present"
 
 
+def test_aicoding_active_probe_rejects_skill_link_through_retired_corpus(
+    tmp_path: Path,
+) -> None:
+    home, _, local_bridge, _, _, pool_repo = _prepared_home(tmp_path)
+    activated = activate_aicoding_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+    assert activated.committed
+    active_root = local_bridge.parent
+    retired_repo = active_root / "skills-repo"
+    indirect = active_root / "shared"
+    indirect.symlink_to(
+        retired_repo / "business/shared",
+        target_is_directory=True,
+    )
+    assert not indirect.exists()
+
+    inspection = inspect_aicoding_runtime_layout(
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert inspection.status is RuntimeLayoutInspectionStatus.INVALID
+    assert (
+        inspection.evidence["reason"]
+        == "retired_active_corpus_reference_present"
+    )
+
+
 def test_aicoding_rollback_rebuilds_legacy_from_current_pool(
     tmp_path: Path,
 ) -> None:
