@@ -3,15 +3,19 @@ use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Extension, Json, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use bcs_service_api::application::v1::{
-    CreateGroup, DeleteGroup, GetGroup, ListBotGroups, Principal, UpdateGroup,
+    AddGroupParticipant, CreateGroup, DeleteGroup, DeleteGroupParticipant, GetGroup, ListBotGroups,
+    Principal, UpdateGroup, UpdateGroupParticipant,
 };
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
 };
-use crate::v1::openapi::dto::group::{CreateGroupRequest, ListGroupsQuery, UpdateGroupRequest};
+use crate::v1::openapi::dto::group::{
+    AddParticipantRequest, CreateGroupRequest, ListGroupsQuery, UpdateGroupRequest,
+    UpdateParticipantRequest,
+};
 
 pub fn router() -> Router<ApiState> {
     Router::new()
@@ -23,6 +27,14 @@ pub fn router() -> Router<ApiState> {
         .route(
             "/openapi/v1/groups/{group_id}",
             get(get_group).patch(update_group).delete(delete_group),
+        )
+        .route(
+            "/openapi/v1/groups/{group_id}/participants",
+            post(add_group_participant),
+        )
+        .route(
+            "/openapi/v1/groups/{group_id}/participants/{actor_id}",
+            patch(update_group_participant).delete(remove_group_participant),
         )
 }
 
@@ -144,6 +156,83 @@ async fn delete_group(
         .delete(DeleteGroup {
             principal,
             group_id,
+        })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(20_000, "OK", result, request_id.0)),
+    )
+        .into_response())
+}
+
+async fn add_group_participant(
+    State(state): State<ApiState>,
+    Extension(principal): Extension<Principal>,
+    Extension(request_id): Extension<RequestId>,
+    path: Result<Path<String>, PathRejection>,
+    body: Result<Json<AddParticipantRequest>, JsonRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let result = state
+        .group_service
+        .add_participant(AddGroupParticipant {
+            principal,
+            group_id,
+            actor_id: body.actor_id,
+            role: body.role,
+        })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(20_000, "OK", result, request_id.0)),
+    )
+        .into_response())
+}
+
+async fn update_group_participant(
+    State(state): State<ApiState>,
+    Extension(principal): Extension<Principal>,
+    Extension(request_id): Extension<RequestId>,
+    path: Result<Path<(String, String)>, PathRejection>,
+    body: Result<Json<UpdateParticipantRequest>, JsonRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Path((group_id, actor_id)) =
+        path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let result = state
+        .group_service
+        .update_participant(UpdateGroupParticipant {
+            principal,
+            group_id,
+            actor_id,
+            mode: body.mode,
+        })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(20_000, "OK", result, request_id.0)),
+    )
+        .into_response())
+}
+
+async fn remove_group_participant(
+    State(state): State<ApiState>,
+    Extension(principal): Extension<Principal>,
+    Extension(request_id): Extension<RequestId>,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Path((group_id, actor_id)) =
+        path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let result = state
+        .group_service
+        .delete_participant(DeleteGroupParticipant {
+            principal,
+            group_id,
+            actor_id,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;

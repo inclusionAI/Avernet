@@ -7,10 +7,24 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
-    ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
-    CollaborationGroupDetail, CreateGroup, CreateGroupOutcome, DeleteGroup, DeleteResult, GetGroup,
-    GroupDeliveryPolicy, GroupDetail, GroupService, GroupStatus, GroupStrategy, GroupVisibility,
-    ListBotGroups, Page, Participant, Principal, UpdateGroup,
+    AddGroupParticipant, ApplicationError, BotFinalDelivery, ChatConfiguration,
+    CollaborationConfiguration, CollaborationGroupDetail, CreateGroup, CreateGroupOutcome,
+    DeleteGroup, DeleteGroupParticipant, DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail,
+    GroupService, GroupStatus, GroupStrategy, GroupVisibility, ListBotGroups, Page, Participant,
+    Principal, UpdateGroup, UpdateGroupParticipant,
+};
+use bcs_service_api::application::v1::{
+    AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome,
+    DeleteSession, DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
+    SessionCompletionResult, SessionDetail, SessionMessagePage, SessionMessageService,
+    SessionParticipant, SessionService, SessionSummary, UpdateSession,
+    UpdateSessionParticipant,
+};
+use bcs_service_api::application::v1::{
+    AcceptFriendRequest, AcceptInvitation, CreateBotFriendRequest, CreateGroupInvitation,
+    CreateSessionInvitation, Friendship, FriendshipService, FriendRequest, Invitation,
+    InvitationAcceptResult, InvitationService, ListBotFriendRequests, ListBotFriendships,
+    RejectFriendRequest, DeleteBotFriendship,
 };
 use bcs_service_api::{ActorKind, ParticipantMode, ParticipantRole};
 use serde_json::{Value, json};
@@ -43,6 +57,9 @@ struct FakeGroupService {
     get: Mutex<Option<GetGroup>>,
     updated: Mutex<Option<UpdateGroup>>,
     deleted: Mutex<Option<DeleteGroup>>,
+    added_participant: Mutex<Option<AddGroupParticipant>>,
+    updated_participant: Mutex<Option<UpdateGroupParticipant>>,
+    removed_participant: Mutex<Option<DeleteGroupParticipant>>,
 }
 
 #[async_trait]
@@ -82,12 +99,193 @@ impl GroupService for FakeGroupService {
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        let group_id = command.group_id.clone();
         *self.deleted.lock().expect("delete lock") = Some(command);
         Ok(DeleteResult {
-            group_id,
             deleted: true,
         })
+    }
+
+    async fn add_participant(
+        &self,
+        command: AddGroupParticipant,
+    ) -> Result<Participant, ApplicationError> {
+        *self.added_participant.lock().expect("add participant lock") = Some(command.clone());
+        Ok(Participant {
+            actor_id: command.actor_id,
+            actor_kind: ActorKind::Bot,
+            name: None,
+            role: command.role,
+            mode: ParticipantMode::Auto,
+        })
+    }
+
+    async fn update_participant(
+        &self,
+        command: UpdateGroupParticipant,
+    ) -> Result<Participant, ApplicationError> {
+        *self
+            .updated_participant
+            .lock()
+            .expect("update participant lock") = Some(command.clone());
+        Ok(Participant {
+            actor_id: command.actor_id,
+            actor_kind: ActorKind::Bot,
+            name: None,
+            role: ParticipantRole::Consultant,
+            mode: command.mode,
+        })
+    }
+
+    async fn delete_participant(
+        &self,
+        command: DeleteGroupParticipant,
+    ) -> Result<DeleteResult, ApplicationError> {
+        *self
+            .removed_participant
+            .lock()
+            .expect("remove participant lock") = Some(command);
+        Ok(DeleteResult { deleted: true })
+    }
+}
+
+struct NoopSessionService;
+
+#[async_trait]
+impl SessionService for NoopSessionService {
+    async fn create(
+        &self,
+        _command: CreateSession,
+    ) -> Result<CreateSessionOutcome, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn list(&self, _command: ListSessions) -> Result<Page<SessionSummary>, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn get(&self, _query: GetSession) -> Result<SessionDetail, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn update(&self, _command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn delete(&self, _command: DeleteSession) -> Result<DeleteResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn complete(
+        &self,
+        _command: CompleteSession,
+    ) -> Result<SessionCompletionResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn add_participant(
+        &self,
+        _command: AddSessionParticipant,
+    ) -> Result<SessionParticipant, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn update_participant(
+        &self,
+        _command: UpdateSessionParticipant,
+    ) -> Result<SessionParticipant, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+
+    async fn delete_participant(
+        &self,
+        _command: DeleteSessionParticipant,
+    ) -> Result<DeleteResult, ApplicationError> {
+        Err(ApplicationError::internal("session not configured"))
+    }
+}
+
+struct NoopSessionMessageService;
+
+#[async_trait]
+impl SessionMessageService for NoopSessionMessageService {
+    async fn list(
+        &self,
+        _query: ListSessionMessages,
+    ) -> Result<SessionMessagePage, ApplicationError> {
+        Err(ApplicationError::internal("session messages not configured"))
+    }
+}
+
+struct NoopInvitationService;
+
+#[async_trait]
+impl InvitationService for NoopInvitationService {
+    async fn create_group_invitation(
+        &self,
+        _command: CreateGroupInvitation,
+    ) -> Result<Invitation, ApplicationError> {
+        Err(ApplicationError::internal("invitation not configured"))
+    }
+
+    async fn create_session_invitation(
+        &self,
+        _command: CreateSessionInvitation,
+    ) -> Result<Invitation, ApplicationError> {
+        Err(ApplicationError::internal("invitation not configured"))
+    }
+
+    async fn accept_invitation(
+        &self,
+        _command: AcceptInvitation,
+    ) -> Result<InvitationAcceptResult, ApplicationError> {
+        Err(ApplicationError::internal("invitation not configured"))
+    }
+}
+
+struct NoopFriendshipService;
+
+#[async_trait]
+impl FriendshipService for NoopFriendshipService {
+    async fn list_bot_friendships(
+        &self,
+        _command: ListBotFriendships,
+    ) -> Result<Page<Friendship>, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn delete_bot_friendship(
+        &self,
+        _command: DeleteBotFriendship,
+    ) -> Result<DeleteResult, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn create_bot_friend_request(
+        &self,
+        _command: CreateBotFriendRequest,
+    ) -> Result<FriendRequest, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn list_bot_friend_requests(
+        &self,
+        _command: ListBotFriendRequests,
+    ) -> Result<Page<FriendRequest>, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn accept_friend_request(
+        &self,
+        _command: AcceptFriendRequest,
+    ) -> Result<FriendRequest, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
+    }
+
+    async fn reject_friend_request(
+        &self,
+        _command: RejectFriendRequest,
+    ) -> Result<FriendRequest, ApplicationError> {
+        Err(ApplicationError::internal("friendship not configured"))
     }
 }
 
@@ -125,6 +323,10 @@ fn group_detail() -> GroupDetail {
 fn test_router(service: Arc<FakeGroupService>) -> axum::Router {
     router(ApiState::new(
         service,
+        Arc::new(NoopSessionService),
+        Arc::new(NoopSessionMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(NoopFriendshipService),
         Arc::new(HeaderVerifier {
             principal: principal(),
         }),
@@ -239,6 +441,7 @@ async fn all_five_group_routes_forward_the_verified_principal() {
     assert_eq!(patch_response.status(), StatusCode::OK);
 
     let delete_response = app
+        .clone()
         .oneshot(authenticated_request(
             "DELETE",
             "/openapi/v1/groups/group-1",
@@ -249,6 +452,70 @@ async fn all_five_group_routes_forward_the_verified_principal() {
     assert_eq!(delete_response.status(), StatusCode::OK);
     let delete_body = response_json(delete_response).await;
     assert_eq!(delete_body["data"]["deleted"], true);
+
+    let add_participant_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/groups/group-1/participants",
+            json!({ "actor_id": "bot-2", "role": "consultant" }),
+        ))
+        .await
+        .expect("add participant forwarding response");
+    assert_eq!(add_participant_response.status(), StatusCode::OK);
+    {
+        let added = service
+            .added_participant
+            .lock()
+            .expect("add participant lock");
+        let added = added.as_ref().expect("add participant command");
+        assert_eq!(added.principal.actor_id(), "bot-1");
+        assert_eq!(added.group_id, "group-1");
+        assert_eq!(added.actor_id, "bot-2");
+        assert_eq!(added.role, ParticipantRole::Consultant);
+    }
+
+    let update_participant_response = app
+        .clone()
+        .oneshot(authenticated_request(
+            "PATCH",
+            "/openapi/v1/groups/group-1/participants/bot-2",
+            json!({ "mode": "muted" }),
+        ))
+        .await
+        .expect("update participant forwarding response");
+    assert_eq!(update_participant_response.status(), StatusCode::OK);
+    {
+        let updated = service
+            .updated_participant
+            .lock()
+            .expect("update participant lock");
+        let updated = updated.as_ref().expect("update participant command");
+        assert_eq!(updated.principal.actor_id(), "bot-1");
+        assert_eq!(updated.group_id, "group-1");
+        assert_eq!(updated.actor_id, "bot-2");
+        assert_eq!(updated.mode, ParticipantMode::Muted);
+    }
+
+    let remove_participant_response = app
+        .oneshot(authenticated_request(
+            "DELETE",
+            "/openapi/v1/groups/group-1/participants/bot-2",
+            Value::Null,
+        ))
+        .await
+        .expect("remove participant forwarding response");
+    assert_eq!(remove_participant_response.status(), StatusCode::OK);
+    {
+        let removed = service
+            .removed_participant
+            .lock()
+            .expect("remove participant lock");
+        let removed = removed.as_ref().expect("remove participant command");
+        assert_eq!(removed.principal.actor_id(), "bot-1");
+        assert_eq!(removed.group_id, "group-1");
+        assert_eq!(removed.actor_id, "bot-2");
+    }
 }
 
 #[tokio::test]
@@ -440,4 +707,78 @@ async fn reused_dm_returns_ok_instead_of_created() {
     let body = response_json(response).await;
     assert_eq!(body["code"], 20_000);
     assert_eq!(body["message"], "OK");
+}
+
+#[tokio::test]
+async fn add_group_participant_returns_participant() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/groups/group-1/participants",
+            json!({ "actor_id": "bot-2", "role": "consultant" }),
+        ))
+        .await
+        .expect("add participant response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_000);
+    assert_eq!(body["data"]["actor_id"], "bot-2");
+    assert_eq!(body["data"]["role"], "consultant");
+}
+
+#[tokio::test]
+async fn update_group_participant_returns_updated_mode() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "PATCH",
+            "/openapi/v1/groups/group-1/participants/bot-2",
+            json!({ "mode": "muted" }),
+        ))
+        .await
+        .expect("update participant response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["mode"], "muted");
+}
+
+#[tokio::test]
+async fn remove_group_participant_returns_deleted() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "DELETE",
+            "/openapi/v1/groups/group-1/participants/bot-2",
+            Value::Null,
+        ))
+        .await
+        .expect("remove participant response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["deleted"], true);
+}
+
+#[tokio::test]
+async fn add_group_participant_rejects_unknown_field() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service);
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/groups/group-1/participants",
+            json!({ "actor_id": "bot-2", "role": "consultant", "extra": 1 }),
+        ))
+        .await
+        .expect("unknown field response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
 }

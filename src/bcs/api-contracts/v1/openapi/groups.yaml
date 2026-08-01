@@ -51,7 +51,10 @@ ListBotGroupsPath:
             - state_machine
     responses:
       "200":
-        description: Matching groups after relation filtering and pagination.
+        description: >-
+          Groups ordered by created_at descending (group_id ascending
+          tie-breaker) after relation/strategy/kind filtering and
+          deduplication, then paginated with offset/limit.
         content:
           application/json:
             schema:
@@ -468,3 +471,204 @@ UpdateGroup:
         - public
     delivery_policy:
       $ref: ../domain-models.yaml#/DeliveryPolicy
+
+UpdateGroupParticipantRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    mode:
+      $ref: ../domain-models.yaml#/ParticipantMode
+
+AddGroupParticipantPath:
+  post:
+    operationId: add_group_participant
+    summary: Add a Human or Bot actor as a Group participant.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CreateParticipant"
+    responses:
+      "200":
+        description: Added participant.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/ParticipantEnvelope
+      "400":
+        description: Invalid participant definition.
+        x-error-codes:
+          - invalid_request
+          - invalid_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the group.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group or referenced actor is missing or hidden.
+        x-error-codes:
+          - group_not_found
+          - bot_not_found
+          - actor_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Participant conflicts with current group state.
+        x-error-codes:
+          - conflict
+          - participant_already_exists
+          - non_public_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+GroupParticipantPath:
+  patch:
+    operationId: update_group_participant
+    summary: Update the mutable properties of a Group participant.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+      - $ref: ../shared.yaml#/ActorIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/UpdateGroupParticipantRequest"
+    responses:
+      "200":
+        description: Updated participant.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/ParticipantEnvelope
+      "400":
+        description: Invalid patch.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the participant.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group, participant, or referenced actor is missing or hidden.
+        x-error-codes:
+          - group_not_found
+          - participant_not_found
+          - actor_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Patch conflicts with role or group invariants.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: remove_group_participant
+    summary: Remove a participant or let an actor leave the group.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+      - $ref: ../shared.yaml#/ActorIdPath
+    responses:
+      "200":
+        description: Idempotent remove result.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/DeleteResultEnvelope
+      "400":
+        description: Invalid identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot remove the participant.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group is missing or hidden; a missing participant removes idempotently.
+        x-error-codes:
+          - group_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: A required role cannot be removed before it is transferred.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
