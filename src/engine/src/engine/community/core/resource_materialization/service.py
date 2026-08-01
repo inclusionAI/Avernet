@@ -28,7 +28,9 @@ from engine.community.plugin_api.resource_materialization import (
 from engine.community.plugin_api.workspace_root import workspace_root_strict
 
 log = logging.getLogger("engine.resource_materialization")
-_SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+_SAFE_IDENTIFIER_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+_WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
+_MAX_FILENAME_UTF8_BYTES = 255
 
 
 class MaterializationSecurityError(ValueError):
@@ -150,7 +152,11 @@ class ResourceMaterializationService:
             # can never disclose a sibling or host path through the content API.
             self._assert_contained(root, target)
             canonical = target.resolve(strict=True)
-            if not canonical.is_file() or canonical.stat().st_size != entry.size_bytes:
+            if (
+                not canonical.is_file()
+                or canonical.stat().st_size != entry.size_bytes
+                or self._sha256(canonical) != entry.content_hash
+            ):
                 raise ResourceNotMaterializedError("resource_not_materialized")
             if self._sha256(canonical) != entry.content_hash:
                 raise ResourceNotMaterializedError("resource_not_materialized")
@@ -184,10 +190,11 @@ class ResourceMaterializationService:
                 result = await self._materialize_locked(request)
             except MaterializationSecurityError as exc:
                 log.warning(
-                    "engine.resource_materialize.path.reject resource_id=%s task_version=%s error_type=%s",
+                    "engine.resource_materialize.path.reject resource_id=%s task_version=%s error_type=%s reason=%s",
                     request.resource_id,
                     request.task_version,
                     type(exc).__name__,
+                    str(exc),
                 )
                 result = self._failure_result(request, "invalid_device_path")
             except Exception as exc:
@@ -230,7 +237,9 @@ class ResourceMaterializationService:
         # COSEC: resolve the final parent after mkdir and enforce containment;
         # this rejects pre-existing symlinks that redirect writes outside Bot root.
         self._assert_contained(root, target)
-        temporary = target.with_name(f".{target.name}.part-{uuid.uuid4().hex}")
+        # Keep the temporary segment independent of the user filename: the final
+        # filename may already be close to the filesystem's per-segment limit.
+        temporary = target.with_name(f".part-{uuid.uuid4().hex}")
         log.info(
             "engine.resource_materialize.pull.start resource_id=%s task_version=%s path_hash=%s",
             request.resource_id,
@@ -297,13 +306,31 @@ class ResourceMaterializationService:
         root: Path,
         request: MaterializationRequest,
     ) -> tuple[Path, Path]:
-        segments = (
+        identifier_segments = (
             request.scope_key_hash,
             request.session_key_hash,
             request.resource_id,
-            request.filename,
         )
-        if any(not _SAFE_SEGMENT.fullmatch(segment) for segment in segments):
+        if any(
+            not _SAFE_IDENTIFIER_SEGMENT.fullmatch(segment)
+            for segment in identifier_segments
+        ):
+            raise MaterializationSecurityError("invalid controlled path segment")
+        try:
+            filename_bytes = request.filename.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise MaterializationSecurityError("invalid controlled path segment") from exc
+        if (
+            not request.filename
+            or Path(request.filename).name != request.filename
+            or request.filename in {".", ".."}
+            or len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
+            or any(
+                not character.isprintable()
+                or character in _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS
+                for character in request.filename
+            )
+        ):
             raise MaterializationSecurityError("invalid controlled path segment")
         supplied_path = request.workspace_relative_path or request.device_path
         if supplied_path is None:

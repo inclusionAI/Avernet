@@ -12,6 +12,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.di.config import BaasConfig
 from agentclaw.community.core.session_resources.baas_client import (
     SessionResourceBaasClient,
 )
@@ -74,6 +75,7 @@ class SessionResourcesModule(Module):
         resolver: DeviceContextResolver,
         token_vault: TokenVault,
         adapter_transport: DeviceAdapterTransport,
+        baas_config: BaasConfig,
     ) -> SessionResourceService:
         return SessionResourceService(
             repository=repository,
@@ -82,6 +84,7 @@ class SessionResourcesModule(Module):
             device_context_resolver=resolver,
             token_vault=token_vault,
             adapter_transport=adapter_transport,
+            default_tenant=baas_config.tenant,
         )
 
     @singleton
