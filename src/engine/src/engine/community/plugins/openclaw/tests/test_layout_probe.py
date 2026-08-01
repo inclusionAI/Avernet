@@ -12,6 +12,7 @@ from engine.community.plugins.openclaw.layout_probe import (
     RuntimeLayoutInspectionStatus,
     inspect_runtime_layout,
 )
+from engine.community.plugins.skills_pool import layout_probe as shared_layout_probe
 
 
 def _ready_home(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
@@ -65,6 +66,19 @@ def test_ready_requires_real_bridge_mount_and_readable_repo(tmp_path):
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
     assert result.preparation_id == "2a958f59-8cf4-4413-a267-7d56d3382f23"
+    assert (
+        result.evidence["mapping_contract_version"]
+        == "skills-pool-mapping-v2"
+    )
+    assert result.evidence["resolved_layout"] == {
+        "active_root": str(home / ".openclaw/workspace/skills"),
+        "local_root": str(
+            home / ".openclaw/workspace/skills-pool/skills-local"
+        ),
+        "repo_root": str(
+            home / ".openclaw/workspace/skills-pool/skills-repo"
+        ),
+    }
     assert result.evidence["checks"]["pool_repo_mounted"] is True
     assert result.evidence["checks"]["legacy_repo_bridge_valid"] is True
 
@@ -100,6 +114,10 @@ def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
     assert result.evidence["activation_state"] == "active"
+    assert result.evidence["mapping_contract_version"] == (
+        "skills-pool-mapping-v2"
+    )
+    assert result.evidence["resolved_layout"]["local_root"] == str(pool_local)
     assert result.evidence["checks"]["legacy_storage_entries_absent"] is True
 
 
@@ -126,6 +144,10 @@ def test_active_marker_allows_normal_skill_deactivation(tmp_path):
     )
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
+    assert result.evidence["mapping_contract_version"] == (
+        "skills-pool-mapping-v2"
+    )
+    assert result.evidence["resolved_layout"]["local_root"] == str(pool_local)
 
 
 def test_finalizing_marker_allows_concurrent_skill_deactivation(tmp_path):
@@ -150,6 +172,32 @@ def test_finalizing_marker_allows_concurrent_skill_deactivation(tmp_path):
     )
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
+
+
+def test_finalizing_marker_rejects_unreadable_active_entries(
+    tmp_path, monkeypatch
+):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    _write_active_marker(home, activation_state="finalizing")
+
+    def raise_permission_error(*_args, **_kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(
+        shared_layout_probe,
+        "_active_entries_failure_reason",
+        raise_permission_error,
+    )
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "active_managed_entry_invalid"
 
 
 def test_active_marker_allows_normal_skill_activation(tmp_path):

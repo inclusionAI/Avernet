@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from threading import Barrier
 
-from sqlalchemy import create_engine, func, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -38,6 +38,9 @@ from agentclaw.community.core.skills_pool.repository.protocol import (
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.plugins.skills_pool_layout_repository import (
     SkillsPoolLayoutRepository,
+)
+from agentclaw.community.plugins.skills_pool_quarantine_repository import (
+    _database_timestamp,
 )
 
 
@@ -104,6 +107,23 @@ def test_skills_pool_operational_tables_use_mysql_timestamp_contract() -> None:
     assert "GMT_MODIFY TIMESTAMP" in audit_ddl
 
 
+def test_aware_runtime_observation_uses_mysql_session_timestamp() -> None:
+    observed_at = datetime(2026, 7, 30, 12, 58, 13, 841734, tzinfo=UTC)
+
+    expression = _database_timestamp(observed_at, dialect_name="mysql")
+    compiled = str(
+        select(expression).compile(
+            dialect=mysql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    ).lower()
+
+    assert "from_unixtime(1785416293.841734)" in compiled
+    assert _database_timestamp(observed_at, dialect_name="sqlite") == (
+        observed_at.replace(tzinfo=None)
+    )
+
+
 def rollout_evidence() -> RolloutEvidence:
     return RolloutEvidence(
         env="pre",
@@ -119,6 +139,31 @@ def test_layout_repository_satisfies_public_protocol_shape() -> None:
     repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
 
     assert isinstance(repository, SkillsPoolLayoutRepositoryProtocol)
+
+
+def test_runtime_reconciliation_fails_closed_without_quarantine() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    with database.transactional_orm_session() as session:
+        session.add(
+            BotSkillLayoutStateModel(
+                env=scope.env,
+                entity_id=scope.entity_id,
+                bot_id=scope.bot_id,
+                active_layout=SkillLayout.POOL.value,
+                phase=SkillLayoutPhase.POOL_ACTIVE.value,
+                migration_generation="generation-1",
+                pool_activated_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+
+    assert not repository.record_runtime_reconciliation(
+        scope=scope,
+        migration_generation="generation-1",
+        observed_at=datetime.now(UTC) - timedelta(days=1),
+        evidence={"source": "pre_activation_without_quarantine"},
+    )
 
 
 def test_cutover_commit_logs_missing_quarantine_path(caplog) -> None:
@@ -312,6 +357,81 @@ def test_not_capable_probe_releases_preparing_claim_and_preserves_evidence() -> 
     assert state.last_probe_result == "NOT_CAPABLE"
     assert state.last_probe_evidence == {"reason": "pool_marker_missing"}
     assert state.data_plane_cutover_committed is False
+
+
+def test_not_capable_probe_releases_ready_claim_before_cutover() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+
+    assert repository.release_not_capable_claim(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        evidence={"reason": "runtime_contract_missing"},
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert state.target_layout is None
+    assert state.migration_generation is None
+    assert state.preparation_id is None
+
+
+def test_changed_engine_releases_ready_claim_before_cutover() -> None:
+    repository = SkillsPoolLayoutRepository(InMemorySqliteDB())
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+
+    assert repository.release_changed_engine_claim(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        evidence={
+            "reason": "bot_engine_changed",
+            "claimed_engine": "openclaw",
+            "current_engine": "claude_code",
+        },
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert state.target_layout is None
+    assert state.migration_generation is None
+    assert state.last_probe_result == "BOT_CHANGED"
+    assert state.last_probe_evidence == {
+        "reason": "bot_engine_changed",
+        "claimed_engine": "openclaw",
+        "current_engine": "claude_code",
+    }
 
 
 def test_claim_updates_an_existing_unclaimed_legacy_row() -> None:
@@ -709,6 +829,337 @@ def test_unknown_cutover_is_fenced_for_manual_repair() -> None:
     assert state.last_failure_evidence == {"reason": "response_lost"}
 
 
+def test_cutover_finalizing_persists_quarantine_at_irreversible_boundary() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    quarantine_path = (
+        "/home/admin/.openclaw/workspace/skills-pool/"
+        ".migration-quarantine/generation-1/skills-local"
+    )
+
+    assert repository.record_cutover_finalizing(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": False,
+            "status": "POST_CUTOVER_SYNC_PENDING",
+            "evidence": {"quarantine": quarantine_path},
+        },
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert state.data_plane_cutover_committed is True
+    with database.transactional_orm_session() as session:
+        quarantine = session.query(SkillMigrationQuarantineModel).one()
+        assert quarantine.path == quarantine_path
+        assert quarantine.pool_activated_at is None
+
+
+def test_cutover_finalizing_accepts_pending_evidence_without_quarantine() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+
+    assert repository.record_cutover_finalizing(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": False,
+            "status": "POST_CUTOVER_SYNC_PENDING",
+            "evidence": {"reason": "post_cutover_sync_failed"},
+        },
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert state.data_plane_cutover_committed is True
+    with database.transactional_orm_session() as session:
+        assert session.query(SkillMigrationQuarantineModel).count() == 0
+
+
+def test_finalizing_without_quarantine_accepts_runtime_identity_and_commits() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    assert repository.record_cutover_finalizing(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": False,
+            "status": "POST_CUTOVER_SYNC_PENDING",
+            "evidence": {"reason": "transport_response_unavailable"},
+        },
+    )
+    with database.transactional_orm_session() as session:
+        assert session.query(SkillMigrationQuarantineModel).count() == 0
+
+    quarantine_path = (
+        "/home/admin/.aicoding/workspace/skills-pool/"
+        ".migration-quarantine/generation-1/skills-local"
+    )
+    assert repository.record_post_cutover_evidence(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "ALREADY_COMMITTED",
+            "evidence": {
+                "active_marker": "same-generation",
+                "quarantine": quarantine_path,
+                "quarantine_cleanup_pending": True,
+            },
+        },
+    )
+    assert repository.has_quarantine_identity(
+        scope=scope,
+        migration_generation="generation-1",
+    )
+    assert repository.commit_pool_active(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        local_locators={},
+    )
+
+    state = repository.get(scope)
+    assert state.active_layout is SkillLayout.POOL
+    assert state.phase is SkillLayoutPhase.POOL_ACTIVE
+
+
+def test_post_cutover_evidence_reuses_existing_quarantine_identity() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    quarantine_path = (
+        "/home/admin/.openclaw/workspace/skills-pool/"
+        ".migration-quarantine/generation-1/skills-local"
+    )
+    assert repository.record_cutover_committed(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "COMMITTED",
+            "evidence": {"quarantine": quarantine_path},
+        },
+    )
+
+    assert repository.has_quarantine_identity(
+        scope=scope,
+        migration_generation="generation-1",
+    )
+    assert not repository.quarantine_identity_conflicts(
+        scope=scope,
+        migration_generation="generation-1",
+        engine="openclaw",
+        path=quarantine_path,
+    )
+    assert repository.quarantine_identity_conflicts(
+        scope=scope,
+        migration_generation="generation-1",
+        engine="openclaw",
+        path=f"{quarantine_path}-other",
+    )
+    assert repository.quarantine_identity_conflicts(
+        scope=scope,
+        migration_generation="generation-1",
+        engine="claude_code",
+        path=quarantine_path,
+    )
+    assert repository.record_post_cutover_evidence(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "ALREADY_COMMITTED",
+            "evidence": {"active_marker": "same-generation"},
+        },
+    )
+    assert repository.record_post_cutover_evidence(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "ALREADY_COMMITTED",
+            "evidence": {
+                "active_marker": "same-generation",
+                "quarantine": "",
+            },
+        },
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert (
+        state.last_probe_evidence["cutover"]["post_cutover_evidence_recorded"]
+        is True
+    )
+    assert state.last_probe_evidence["cutover"]["evidence"] == {
+        "active_marker": "same-generation",
+        "quarantine": "",
+    }
+    with database.transactional_orm_session() as session:
+        quarantine = session.query(SkillMigrationQuarantineModel).one()
+        assert quarantine.path == quarantine_path
+
+
+def test_cutover_commit_reuses_quarantine_from_pending_response() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    quarantine_path = (
+        "/home/admin/.openclaw/workspace/skills-pool/"
+        ".migration-quarantine/generation-1/skills-local"
+    )
+    assert repository.record_cutover_finalizing(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "status": "POST_CUTOVER_SYNC_PENDING",
+            "evidence": {"quarantine": quarantine_path},
+        },
+    )
+
+    assert repository.record_cutover_committed(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={
+            "committed": True,
+            "status": "ALREADY_COMMITTED",
+            "evidence": {"active_marker": "same-generation"},
+        },
+    )
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
+    assert state.data_plane_cutover_committed is True
+
+
 def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
@@ -769,7 +1220,7 @@ def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
         lease_owner="worker-2",
         lease_seconds=60,
     )
-    assert repository.record_cutover_committed(
+    assert repository.record_post_cutover_evidence(
         scope=scope,
         migration_generation="generation-1",
         lease_owner="worker-2",
@@ -813,6 +1264,68 @@ def test_operator_resolves_manual_repair_with_note_and_explicit_fact() -> None:
     assert active.last_failure_evidence["previous_failure"] == {
         "reason": "response_lost"
     }
+
+
+def test_legacy_committed_repair_refresh_failure_keeps_refresh_phase() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+    assert repository.record_ready_probe(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+        evidence={"marker": "valid"},
+    )
+    assert repository.begin_cutover(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        preparation_id="preparation-1",
+    )
+    assert repository.mark_repair_required(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-1",
+        failure_code="UNKNOWN",
+        failure_stage="cutover_outcome_unknown",
+        evidence={"reason": "response_lost"},
+    )
+    assert repository.resolve_repair(
+        scope=scope,
+        migration_generation="generation-1",
+        operator="oncall-1",
+        note="legacy backend resolved this row as committed",
+        cutover_committed=True,
+    )
+    assert repository.try_acquire_lease(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-2",
+        lease_seconds=60,
+    )
+    assert repository.record_post_cutover_failure(
+        scope=scope,
+        migration_generation="generation-1",
+        lease_owner="worker-2",
+        failure_code="TRANSIENT_ERROR",
+        failure_stage="post_cutover_refresh",
+        retryable=True,
+        evidence={"reason": "adapter_temporarily_unreachable"},
+    )
+
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
+    assert state.data_plane_cutover_committed is True
+    assert state.last_failure_code == "TRANSIENT_ERROR"
 
 
 def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
@@ -904,14 +1417,8 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
         lease_owner="worker-1",
         preparation_id="preparation-1",
         local_locators={
-            1: (
-                "local:///home/admin/.openclaw/workspace/"
-                "skills-pool/skills-local/local-a"
-            ),
-            2: (
-                "local:///home/admin/.openclaw/workspace/"
-                "skills-pool/skills-local/local-b"
-            ),
+            1: "local:///runtime/vendor-x/pool/local-a",
+            2: "local:///runtime/vendor-x/pool/local-b",
         },
     )
 
@@ -926,6 +1433,23 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
     assert quarantine is not None
     assert quarantine.engine == "openclaw"
     assert quarantine.source_evidence["evidence"]["bridge"] == "valid"
+    assert not repository.record_runtime_reconciliation(
+        scope=scope,
+        migration_generation="missing-generation",
+        observed_at=datetime.now(UTC),
+        evidence={"source": "wrong_generation"},
+    )
+    pre_activation_observed_at = datetime.now(UTC) - timedelta(days=1)
+    assert repository.record_runtime_reconciliation(
+        scope=scope,
+        migration_generation="generation-1",
+        observed_at=pre_activation_observed_at,
+        evidence={"source": "concurrent_pre_activation_wakeup"},
+    )
+    quarantine = repository.get_quarantine(scope, "generation-1")
+    assert quarantine is not None
+    assert quarantine.runtime_reconciled_at is None
+    assert quarantine.runtime_evidence is None
     ready_observed_at = datetime.now(UTC) + timedelta(seconds=1)
     assert repository.record_runtime_reconciliation(
         scope=scope,
@@ -948,12 +1472,18 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
     assert failed is not None
     assert failed.runtime_reconciliation_status is RuntimeReconciliationStatus.FAILED
     assert failed.runtime_evidence == {"outcome": "invalid"}
-    assert not repository.record_runtime_reconciliation(
+    assert repository.record_runtime_reconciliation(
         scope=scope,
         migration_generation="generation-1",
         observed_at=failed_observed_at,
         evidence={"source": "stale_retry"},
     )
+    superseded = repository.get_quarantine(scope, "generation-1")
+    assert superseded is not None
+    assert (
+        superseded.runtime_reconciliation_status is RuntimeReconciliationStatus.FAILED
+    )
+    assert superseded.runtime_evidence == {"outcome": "invalid"}
     assert not repository.claim_cleanup(
         scope=scope,
         migration_generation="generation-1",
@@ -1027,8 +1557,8 @@ def test_pool_active_commit_updates_only_all_local_rows_for_exact_bot() -> None:
             for row in session.query(Skill).order_by(Skill.id).all()
         }
     assert paths == {
-        1: ("local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-a"),
-        2: ("local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"),
+        1: "local:///runtime/vendor-x/pool/local-a",
+        2: "local:///runtime/vendor-x/pool/local-b",
         3: "git://business/repo",
         4: "local:///legacy/other-bot",
         5: "local:///legacy/other-env",

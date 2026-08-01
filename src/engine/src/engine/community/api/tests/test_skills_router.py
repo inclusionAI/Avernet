@@ -10,16 +10,19 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from engine.community.api.skills.router import router as skills_router
+from engine.community.core.adapters.openclaw.skills import (
+    OpenClawSkillsAdapter,
+)
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.exceptions import (
     CapabilityNotSupportedError,
 )
 from engine.community.core.engine.registry import EngineRegistry
+from engine.community.core.skills.exceptions import (
+    InvalidPoolMappingRequestError,
+)
 from engine.community.core.skills.models import (
     CleanSymlinksResult,
     PoolLayoutActivationResult,
@@ -30,10 +33,14 @@ from engine.community.core.skills.models import (
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     PoolQuarantineCleanupResult,
+    PoolSkillMappingIntent,
     SymlinkItem,
     SyncSymlinksResult,
 )
 from engine.community.manager import EngineManager
+from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 class _EngineWithSkills(BaseEngine):
@@ -257,6 +264,130 @@ def test_runtime_layout_probe_has_no_engine_capability_dependency(
     plugin.probe_pool_layout.assert_awaited_once()
 
 
+def test_runtime_layout_probe_rejects_unknown_engine_before_dispatch(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.probe_pool_layout = AsyncMock()
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "unknown-engine",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "INVALID",
+        "engine": "unknown-engine",
+        "layout_contract_version": "skills-pool-p3-v1",
+        "preparation_id": None,
+        "evidence": {
+            "reason": "layout_identity_invalid",
+            "error_type": "SkillLayoutResolutionError",
+        },
+    }
+    plugin.probe_pool_layout.assert_not_awaited()
+
+
+def test_runtime_layout_probe_rejects_unknown_contract_before_dispatch(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.probe_pool_layout = AsyncMock()
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "hermes",
+            "layout_contract_version": "skills-pool-p3-v999",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "INVALID",
+        "engine": "hermes",
+        "layout_contract_version": "skills-pool-p3-v999",
+        "preparation_id": None,
+        "evidence": {
+            "reason": "layout_identity_invalid",
+            "error_type": "UnsupportedLayoutContractError",
+        },
+    }
+    plugin.probe_pool_layout.assert_not_awaited()
+
+
+def test_runtime_layout_probe_rejects_plugin_engine_mismatch(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.probe_pool_layout = AsyncMock(
+        return_value=PoolLayoutProbeResult(
+            status=PoolLayoutProbeStatus.READY,
+            engine="hermes",
+            layout_contract_version="skills-pool-p3-v1",
+            preparation_id="prep-1",
+            evidence={"checks": {"marker_valid": True}},
+        )
+    )
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "openclaw",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "INVALID",
+        "engine": "openclaw",
+        "layout_contract_version": "skills-pool-p3-v1",
+        "preparation_id": None,
+        "evidence": {
+            "reason": "runtime_engine_mismatch",
+            "actual_engine": "hermes",
+        },
+    }
+    plugin.probe_pool_layout.assert_awaited_once()
+
+
+def test_runtime_layout_probe_rejects_real_openclaw_plugin_engine_mismatch(
+    client,
+    rich_manager,
+) -> None:
+    rich_manager._active_engine._skills = OpenClawSkillsAdapter(
+        OpenClawPluginImpl()
+    )
+
+    response = client.post(
+        "/api/skills/layout/probe",
+        json={
+            "engine": "hermes",
+            "layout_contract_version": "skills-pool-p3-v1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "status": "INVALID",
+        "engine": "hermes",
+        "layout_contract_version": "skills-pool-p3-v1",
+        "preparation_id": None,
+        "evidence": {
+            "reason": "runtime_engine_mismatch",
+            "actual_engine": "openclaw",
+        },
+    }
+
+
 def test_pool_activation_and_mapping_routes_are_capability_independent(
     client, rich_manager
 ):
@@ -345,6 +476,245 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
         ],
         source_layout=PoolMappingSourceLayout.LEGACY,
     )
+
+
+def test_pool_mapping_routes_propagate_logical_v2_contract(
+    client, rich_manager
+):
+    plugin = MagicMock()
+    plugin.activate_pool_layout = AsyncMock(
+        return_value=PoolLayoutActivationResult(
+            committed=True,
+            status=PoolLayoutActivationStatus.COMMITTED,
+            evidence={},
+        ),
+    )
+    plugin.publish_pool_mappings = AsyncMock(
+        return_value=PoolMappingPublishResult(published=True, evidence={}),
+    )
+    plugin.verify_pool_mappings = AsyncMock(
+        return_value=PoolMappingVerificationResult(valid=True, evidence={}),
+    )
+    rich_manager._active_engine._skills = plugin
+    mapping = {
+        "corpus": "repo",
+        "relative_path": "business/reviewer",
+        "link_name": "reviewer",
+    }
+    version = "skills-pool-mapping-v2"
+
+    activation = client.post(
+        "/api/skills/layout/activate",
+        json={
+            "migration_generation": "generation-1",
+            "preparation_id": "preparation-1",
+            "registered_local_names": [],
+            "mapping_contract_version": version,
+            "mappings": [mapping],
+        },
+    )
+    published = client.post(
+        "/api/skills/layout/mappings/publish",
+        json={
+            "mapping_contract_version": version,
+            "mappings": [mapping],
+        },
+    )
+    verified = client.post(
+        "/api/skills/layout/mappings/verify",
+        json={
+            "mapping_contract_version": version,
+            "mappings": [mapping],
+        },
+    )
+
+    assert activation.status_code == published.status_code == verified.status_code == 200
+    intent = PoolSkillMappingIntent(
+        corpus="repo",
+        relative_path="business/reviewer",
+        link_name="reviewer",
+    )
+    request = plugin.activate_pool_layout.await_args.args[0]
+    assert request.mapping_contract_version == version
+    assert request.mappings == [intent]
+    plugin.publish_pool_mappings.assert_awaited_once_with(
+        [intent],
+        mapping_contract_version=version,
+    )
+    plugin.verify_pool_mappings.assert_awaited_once_with(
+        [intent],
+        mapping_contract_version=version,
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        (
+            "activate_pool_layout",
+            "/api/skills/layout/activate",
+            {
+                "migration_generation": "generation-1",
+                "preparation_id": "preparation-1",
+                "registered_local_names": [],
+                "mappings": [],
+            },
+        ),
+        (
+            "publish_pool_mappings",
+            "/api/skills/layout/mappings/publish",
+            {"mappings": []},
+        ),
+        (
+            "verify_pool_mappings",
+            "/api/skills/layout/mappings/verify",
+            {"mappings": []},
+        ),
+    ],
+)
+def test_pool_mapping_routes_map_invalid_request_errors_to_400(
+    client,
+    rich_manager,
+    method: str,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    plugin = MagicMock()
+    setattr(
+        plugin,
+        method,
+        AsyncMock(
+            side_effect=InvalidPoolMappingRequestError(
+                "mapping_contract_version is unsupported"
+            )
+        ),
+    )
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "mapping_contract_version is unsupported"
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/api/skills/layout/activate",
+            {
+                "migration_generation": "generation-1",
+                "preparation_id": "preparation-1",
+                "registered_local_names": [],
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {"source": "/pool/a", "target": "/active/a"}
+                ],
+            },
+        ),
+        (
+            "/api/skills/layout/mappings/publish",
+            {
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {"source": "/pool/a", "target": "/active/a"}
+                ],
+            },
+        ),
+        (
+            "/api/skills/layout/mappings/verify",
+            {
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {"source": "/pool/a", "target": "/active/a"}
+                ],
+            },
+        ),
+    ],
+)
+def test_pool_mapping_routes_reject_v2_physical_shape_via_real_adapter(
+    client,
+    rich_manager,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    rich_manager._active_engine._skills = OpenClawSkillsAdapter(
+        OpenClawPluginImpl()
+    )
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 400
+    assert "logical mapping" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        (
+            "activate_pool_layout",
+            "/api/skills/layout/activate",
+            {
+                "migration_generation": "generation-1",
+                "preparation_id": "preparation-1",
+                "registered_local_names": [],
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {
+                        "corpus": "unknown",
+                        "relative_path": "writer",
+                        "link_name": "writer",
+                    }
+                ],
+            },
+        ),
+        (
+            "publish_pool_mappings",
+            "/api/skills/layout/mappings/publish",
+            {
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {
+                        "corpus": "unknown",
+                        "relative_path": "writer",
+                        "link_name": "writer",
+                    }
+                ],
+            },
+        ),
+        (
+            "verify_pool_mappings",
+            "/api/skills/layout/mappings/verify",
+            {
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "mappings": [
+                    {
+                        "corpus": "unknown",
+                        "relative_path": "writer",
+                        "link_name": "writer",
+                    }
+                ],
+            },
+        ),
+    ],
+)
+def test_pool_mapping_routes_reject_unknown_corpus_at_schema_boundary(
+    client,
+    rich_manager,
+    method: str,
+    path: str,
+    payload: dict[str, object],
+) -> None:
+    plugin = MagicMock()
+    setattr(plugin, method, AsyncMock())
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 422
+    getattr(plugin, method).assert_not_awaited()
 
 
 @pytest.mark.parametrize(

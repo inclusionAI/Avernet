@@ -1,0 +1,653 @@
+CreateSessionRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - driver_bot_uuid
+    - participants
+  properties:
+    title:
+      type: string
+    input:
+      $ref: ../domain-models.yaml#/SessionInput
+    driver_bot_uuid:
+      type: string
+    participants:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        $ref: "#/SessionParticipantInput"
+
+SessionParticipantInput:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_uuid
+  properties:
+    bot_uuid:
+      type: string
+    mode:
+      $ref: ../domain-models.yaml#/BotParticipantMode
+
+UpdateSessionRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    title:
+      type: string
+
+UpdateSessionParticipantRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    mode:
+      $ref: ../domain-models.yaml#/BotParticipantMode
+
+GroupSessionsPath:
+  post:
+    operationId: create_session
+    summary: Create a Session under a Group.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CreateSessionRequest"
+    responses:
+      "201":
+        description: Created session detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/CreatedSessionEnvelope
+      "400":
+        description: Invalid session definition.
+        x-error-codes:
+          - invalid_request
+          - invalid_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot create a session in the group.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group or referenced Bot is missing or hidden.
+        x-error-codes:
+          - group_not_found
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Session conflicts with current group state.
+        x-error-codes:
+          - conflict
+          - non_public_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+  get:
+    operationId: list_sessions
+    summary: List Sessions under a Group.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: status
+        in: query
+        schema:
+          $ref: ../domain-models.yaml#/SessionStatus
+    responses:
+      "200":
+        description: >-
+          Sessions ordered by created_at descending (session_id ascending
+          tie-breaker), then paginated with offset/limit.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionPageEnvelope
+      "400":
+        description: Invalid filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot read the group.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group is missing or hidden.
+        x-error-codes:
+          - group_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+SessionPath:
+  get:
+    operationId: get_session
+    summary: Get session detail.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    responses:
+      "200":
+        description: Session detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionDetailEnvelope
+      "400":
+        description: Invalid session identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot read the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  patch:
+    operationId: update_session
+    summary: Update the explicitly mutable session properties.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/UpdateSessionRequest"
+    responses:
+      "200":
+        description: Updated session detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionDetailEnvelope
+      "400":
+        description: Invalid patch.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Session update conflicts with current state.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: delete_session
+    summary: Delete a session using the authenticated Principal as caller.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    responses:
+      "200":
+        description: Idempotent delete result.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/DeleteResultEnvelope
+      "400":
+        description: Invalid session identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot delete the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+SessionCompletionPath:
+  post:
+    operationId: complete_session
+    summary: Complete a running chat session; idempotent after completion.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    responses:
+      "200":
+        description: Session completion result. Returns the same result when repeated.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionCompletionEnvelope
+      "400":
+        description: Invalid session identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot complete the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+SessionMessagesPath:
+  get:
+    operationId: list_session_messages
+    summary: List session message history (cursor-based).
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - name: before
+        in: query
+        description: >-
+          Opaque composite cursor (`"created_at:session_seq"`, e.g.
+          `"1234567890:42"`) exclusive bound. When set, only messages strictly
+          before this (created_at, session_seq) lexicographic position are
+          returned, so messages sharing a created_at at a page boundary are
+          not skipped. Omit on the first page; pass the response's next_cursor
+          to fetch the next page.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: view_bot_id
+        in: query
+        description: >-
+          Optional viewer identity for message history visibility scoping.
+          Bot callers: omit (defaults to self) or pass self bot_uuid.
+          Human callers: omit for full manager-view; pass "human_<staff_no>"
+          for own participant cutoff; or pass an owned Bot's UUID for that
+          Bot's perspective (ownership verified server-side).
+        schema:
+          type: string
+    responses:
+      "200":
+        description: >-
+          Messages ordered by created_at descending, session_seq descending
+          (legacy behavior); cursor-based pagination.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionMessagePageEnvelope
+      "400":
+        description: Invalid filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot read the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AddSessionParticipantPath:
+  post:
+    operationId: add_session_participant
+    summary: Add a Bot as a Session participant.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/SessionParticipantInput"
+    responses:
+      "200":
+        description: Added session participant.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionParticipantEnvelope
+      "400":
+        description: Invalid participant definition.
+        x-error-codes:
+          - invalid_request
+          - invalid_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session or referenced Bot is missing or hidden.
+        x-error-codes:
+          - session_not_found
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Participant conflicts with session state.
+        x-error-codes:
+          - conflict
+          - participant_already_exists
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+SessionParticipantPath:
+  patch:
+    operationId: update_session_participant
+    summary: Update a Session participant mode.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: ../shared.yaml#/BotUuidPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/UpdateSessionParticipantRequest"
+    responses:
+      "200":
+        description: Updated session participant.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionParticipantEnvelope
+      "400":
+        description: Invalid patch.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the participant.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session or participant is missing or hidden.
+        x-error-codes:
+          - session_not_found
+          - participant_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Participant update conflicts with current state.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: remove_session_participant
+    summary: Remove a Session participant or let a Bot leave.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: ../shared.yaml#/BotUuidPath
+    responses:
+      "200":
+        description: Idempotent remove result.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/DeleteResultEnvelope
+      "400":
+        description: Invalid identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot remove the participant.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or hidden; a missing participant removes idempotently.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Driver invariant prevents removal.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

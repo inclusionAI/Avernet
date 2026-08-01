@@ -320,9 +320,31 @@ pub struct DeleteGroup {
     pub group_id: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct AddGroupParticipant {
+    pub principal: Principal,
+    pub group_id: String,
+    pub actor_id: String,
+    pub role: ParticipantRole,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateGroupParticipant {
+    pub principal: Principal,
+    pub group_id: String,
+    pub actor_id: String,
+    pub mode: ParticipantMode,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeleteGroupParticipant {
+    pub principal: Principal,
+    pub group_id: String,
+    pub actor_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeleteResult {
-    pub group_id: String,
     pub deleted: bool,
 }
 
@@ -350,4 +372,19 @@ pub trait GroupService: Send + Sync {
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError>;
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError>;
+
+    async fn add_participant(
+        &self,
+        command: AddGroupParticipant,
+    ) -> Result<Participant, ApplicationError>;
+
+    async fn update_participant(
+        &self,
+        command: UpdateGroupParticipant,
+    ) -> Result<Participant, ApplicationError>;
+
+    async fn delete_participant(
+        &self,
+        command: DeleteGroupParticipant,
+    ) -> Result<DeleteResult, ApplicationError>;
 }

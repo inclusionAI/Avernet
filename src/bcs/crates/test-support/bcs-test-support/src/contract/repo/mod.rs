@@ -882,6 +882,63 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
     repo.uncollect(&collect_session.id, "bot-stranger")
         .await
         .expect("uncollect non-participant idempotent");
+
+    // count_by_group — mirrors list_by_group filters, returns total (no pagination).
+    // Group now has 3 sessions:
+    //   s               — Completed, title=None,    bot1
+    //   svc             — Running,   title="hello", bot1
+    //   collect_session — Running,   title=None,    bot-collector + bot-other
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, None).await.expect("count_by_group none"),
+        3
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, Some(SessionStatus::Running), None, None)
+            .await
+            .expect("count_by_group running"),
+        2
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, Some(SessionStatus::Completed), None, None)
+            .await
+            .expect("count_by_group completed"),
+        1
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, None, Some("hello"), None)
+            .await
+            .expect("count_by_group hello"),
+        1
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, Some("bot1"))
+            .await
+            .expect("count_by_group bot1"),
+        2
+    );
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, Some("bot-collector"))
+            .await
+            .expect("count_by_group bot-collector"),
+        1
+    );
+    // count_by_group must equal list_by_group total (large limit) — consistency.
+    let listed_all = repo.list_by_group(group_id, None, 0, 1000, None, None).await;
+    assert_eq!(
+        listed_all.len() as u64,
+        repo.count_by_group(group_id, None, None, None)
+            .await
+            .expect("count_by_group consistency")
+    );
+    // count != paginated subset
+    let listed_page = repo.list_by_group(group_id, None, 0, 1, None, None).await;
+    assert_eq!(listed_page.len(), 1);
+    assert_eq!(
+        repo.count_by_group(group_id, None, None, None)
+            .await
+            .expect("count_by_group after page"),
+        3
+    );
 }
 
 pub async fn session_repo_port_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) {
@@ -969,12 +1026,16 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
     assert!(page.has_more);
     assert!(page.next_cursor.is_some());
 
-    // query_messages — cursor
+    // query_messages — cursor. The repo surfaces a composite
+    // `(created_at, session_seq)` next_cursor; the legacy created_at-only
+    // cursor param extracts `.0` to preserve the legacy created_at-only
+    // predicate (the seed messages have distinct created_at values, so the
+    // composite and created_at-only cursors behave identically here).
     let page2 = repo
         .query_messages(MessageQuery {
             group_id: group_id.to_string(),
             session_id: session_id.to_string(),
-            cursor: page.next_cursor,
+            cursor: page.next_cursor.map(|c| c.0),
             limit: 10,
             keyword: None,
             sender_id: None,
@@ -1198,6 +1259,110 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
         .expect("query public owner rows");
     assert_eq!(public_owner_page.messages.len(), 1);
     assert_eq!(public_owner_page.messages[0].owner_bot_id, None);
+
+    // list_session_history — legacy direct-read contract: `created_at DESC,
+    // session_seq DESC` with composite `(created_at, session_seq)` cursor
+    // pagination + full `MessageOwnerFilter`. env isolation (VUlao) is the
+    // store's responsibility: the MySQL/SQLite store filters reads by its own
+    // `env`; the memory store does not track env.
+    let history = repo
+        .list_session_history(session_id, MessageOwnerFilter::Any, None, None, 3)
+        .await
+        .expect("list_session_history first page");
+    assert!(history.has_more);
+    assert!(history.next_cursor.is_some());
+    assert_eq!(
+        history.next_cursor,
+        Some((5000, 7)),
+        "next_cursor is the composite (created_at, session_seq) of the last row"
+    );
+    assert_eq!(
+        history.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![9, 8, 7],
+        "must be created_at DESC, session_seq DESC"
+    );
+
+    // follow the cursor: before=(5000,7) excludes seq 7 (5000,7) and anything
+    // newer, so the next page is seqs 6,5,4 (still has_more). Verifies the
+    // VYQHI composite-cursor fix — a bare created_at cursor would skip seq 7.
+    let history_next = repo
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::Any,
+            None,
+            history.next_cursor,
+            3,
+        )
+        .await
+        .expect("list_session_history next page");
+    assert!(history_next.has_more);
+    assert_eq!(
+        history_next.next_cursor,
+        Some((2200, 4)),
+        "next page cursor is the composite (created_at, session_seq) of seq 4"
+    );
+    assert_eq!(
+        history_next
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![6, 5, 4]
+    );
+
+    // IsNull → only NULL-owned messages (seqs 9,6,5,4,3,2,1) in DESC order.
+    let public_only = repo
+        .list_session_history(session_id, MessageOwnerFilter::IsNull, None, None, 100)
+        .await
+        .expect("list_session_history IsNull");
+    assert_eq!(
+        public_only
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![9, 6, 5, 4, 3, 2, 1]
+    );
+    assert!(!public_only.has_more);
+
+    // Eq → only the given owner's messages (seq 8 is workerA).
+    let worker_only = repo
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::Eq("workerA".to_string()),
+            None,
+            None,
+            100,
+        )
+        .await
+        .expect("list_session_history Eq");
+    assert_eq!(
+        worker_only
+            .messages
+            .iter()
+            .map(|m| m.session_seq)
+            .collect::<Vec<_>>(),
+        vec![8]
+    );
+
+    // visible_from_seq cutoff: only seqs >= 4 survive, DESC.
+    let cutoff = repo
+        .list_session_history(session_id, MessageOwnerFilter::Any, Some(4), None, 100)
+        .await
+        .expect("list_session_history visible_from_seq");
+    assert_eq!(
+        cutoff.messages.iter().map(|m| m.session_seq).collect::<Vec<_>>(),
+        vec![9, 8, 7, 6, 5, 4]
+    );
+
+    // unknown session → empty page, no more.
+    let empty_history = repo
+        .list_session_history("no-such-session", MessageOwnerFilter::Any, None, None, 10)
+        .await
+        .expect("list_session_history unknown session");
+    assert!(empty_history.messages.is_empty());
+    assert!(!empty_history.has_more);
+    assert!(empty_history.next_cursor.is_none());
 }
 
 fn now_ms() -> u64 {

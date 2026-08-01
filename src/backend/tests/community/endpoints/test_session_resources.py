@@ -51,6 +51,7 @@ _OWNER = "session-resource-user"
 _BOT_ID = "bot-session-resource"
 _DEVICE_ID = "device-session-resource"
 _SESSION_KEY = "session-resource-key"
+_UPSTREAM_ERROR_SESSION_KEY = "session-resource-upstream-error"
 _AUTH_HEADERS = {"x-user-id": _OWNER}
 _QUERY = {"bot_id": _BOT_ID, "session_key": _SESSION_KEY}
 _RESOURCE_ID = "sr-endpoint-1"
@@ -65,6 +66,14 @@ class _SessionFileApiHandler(BaseHTTPRequestHandler):
     def _write(self, data: dict[str, Any]) -> None:
         body = json.dumps({"code": 0, "data": data}).encode("utf-8")
         self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _write_error(self, status_code: int) -> None:
+        body = b'{"detail":"upstream diagnostic must not reach callers"}'
+        self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -96,6 +105,9 @@ class _SessionFileApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
         path = urlparse(self.path).path
         if path.endswith("/files/upload-url"):
+            if f"/{_UPSTREAM_ERROR_SESSION_KEY}/" in path:
+                self._write_error(503)
+                return
             self._write(
                 {
                     "transfer_id": _TRANSFER_ID,
@@ -248,6 +260,10 @@ _INVALID_UPLOAD_INTENT_BODY = {
     **_UPLOAD_INTENT_BODY,
     "files": [{"filename": "../notes.txt"}],
 }
+_UPSTREAM_ERROR_UPLOAD_INTENT_BODY = {
+    **_UPLOAD_INTENT_BODY,
+    "session_key": _UPSTREAM_ERROR_SESSION_KEY,
+}
 _UPLOAD_COMPLETE_BODY = {
     **_QUERY,
     "resource_id": _RESOURCE_ID,
@@ -298,6 +314,23 @@ def upload_intents_ok():
 )
 def upload_intents_invalid_filename():
     """Reject an unsafe filename before external transfer work begins."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/session-resources/upload-intents",
+    scenario="session_file_upstream_unavailable",
+    input=CaseInput(
+        headers=_AUTH_HEADERS, json_body=_UPSTREAM_ERROR_UPLOAD_INTENT_BODY
+    ),
+    seed=_seed_bot,
+    expect=ExpectError(
+        status=502,
+        json_contains={"detail": "session_file_upstream_unavailable"},
+    ),
+)
+def upload_intents_upstream_unavailable():
+    """Map Session File failures without exposing its response body."""
 
 
 @endpoint_test(
@@ -358,6 +391,36 @@ def materialize_status_ready():
 )
 def materialize_status_not_found():
     """Require a resource owned by the requested session."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/session-resources/pending",
+    scenario="upload_pending_record",
+    input=CaseInput(query_params=_QUERY, headers=_AUTH_HEADERS),
+    seed=_seed_upload_pending_record,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "files": [
+                {"resource_id": _RESOURCE_ID, "status": "upload_url_issued"}
+            ]
+        },
+    ),
+)
+def list_pending_resources_ok():
+    """List non-ready resources for page reload recovery."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/session-resources/pending",
+    scenario="missing_session_key",
+    input=CaseInput(query_params={"bot_id": _BOT_ID}, headers=_AUTH_HEADERS),
+    expect=ExpectError(status=422),
+)
+def list_pending_resources_missing_session_key():
+    """Require the session key at the HTTP boundary."""
 
 
 @endpoint_test(
@@ -473,16 +536,16 @@ def content_ok():
 @endpoint_test(
     method="GET",
     path="/api/session-resources/{resource_id}/content",
-    scenario="engine_file_missing_requeues",
+    scenario="engine_file_missing_requires_reupload",
     input=_resource_input(),
     seed=_seed_content_missing,
     expect=ExpectError(
         status=409,
-        json_contains={"detail": "resource_materializing"},
+        json_contains={"detail": "resource_missing"},
     ),
 )
-def content_missing_requeues():
-    """A missing Engine file schedules real re-materialization."""
+def content_missing_requires_reupload():
+    """A missing Engine file does not re-materialize from BaaS."""
 
 
 @endpoint_test(

@@ -145,13 +145,19 @@ class DeviceConnectionInfo:
     http-info 失败回落到 ws-info token 时才填。空串表示"签发方没说"，
     caller 不得据此推断"永不过期"。
     """
+    ws_target: str = ""
+    """WebSocket 路由目标；未单独提供时 caller 回退到 ``target``。
+
+    LocalDeviceService 的 HTTP-info 与 WS-info 会签发不同的 target/token
+    组合，因此必须像凭据一样分别携带，不能把 HTTP target 与 WS token
+    拼在一起。
+    """
     ws_token: str = ""
     """WebSocket 凭据 —— 开 socket 的 caller 用这个，不要用 ``token``.
 
     ``token`` 是 *HTTP* 侧的凭据：LocalDeviceService 正常路径返回的是
-    http-info 的 token，而 ``target`` 来自 ws-info，两者是不同的 token
-    （见下方 ``ws_expires_at``）。把 http token 配着 ws 地址发出去，
-    正常路径就是一对不匹配的 socket/凭据。
+    http-info 的 token，WebSocket 则使用 ``ws_target/ws_token`` 这一对
+    （见下方 ``ws_expires_at``）。
 
     只在它与 ``token`` **不同**时填：LocalDeviceService 正常路径填 ws-info 的
     token；BaaS 链路的 ``token`` 本就是 ws token，留空。空串的含义是"``token``

@@ -1,0 +1,381 @@
+CreateFriendRequestRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - to_bot_uuid
+  properties:
+    to_bot_uuid:
+      type: string
+
+ListFriendshipsPath:
+  get:
+    operationId: list_bot_friendships
+    summary: List a Bot's friendships.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/BotUuidPath
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    responses:
+      "200":
+        description: >-
+          Friendships ordered by created_at descending (friend_bot_uuid
+          ascending tie-breaker), paginated with offset/limit.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/FriendshipPageEnvelope
+      "400":
+        description: Invalid filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the target Bot identity.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Target Bot is missing.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+FriendshipPath:
+  delete:
+    operationId: delete_bot_friendship
+    summary: Remove a friendship symmetrically and idempotently.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/BotUuidPath
+      - $ref: ../shared.yaml#/FriendBotUuidPath
+    responses:
+      "200":
+        description: Idempotent remove result.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/DeleteResultEnvelope
+      "400":
+        description: Invalid identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage either friendship endpoint.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Target Bot is missing.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+BotFriendRequestsPath:
+  post:
+    operationId: create_bot_friend_request
+    summary: Send a friend request from the path Bot to a target Bot.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/BotUuidPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CreateFriendRequestRequest"
+    responses:
+      "201":
+        description: Created friend request.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/CreatedFriendRequestEnvelope
+      "400":
+        description: Invalid friend request.
+        x-error-codes:
+          - invalid_request
+          - cannot_add_self
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the target Bot identity.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Target Bot is missing.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: A conflicting request or friendship already exists.
+        x-error-codes:
+          - conflict
+          - friend_request_already_exists
+          - duplicate_friendship
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+  get:
+    operationId: list_bot_friend_requests
+    summary: List friend requests sent by or received by a Bot.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/BotUuidPath
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: direction
+        in: query
+        schema:
+          $ref: ../domain-models.yaml#/FriendRequestDirection
+      - name: status
+        in: query
+        schema:
+          $ref: ../domain-models.yaml#/FriendRequestStatus
+    responses:
+      "200":
+        description: >-
+          Friend requests ordered by created_at descending (request_id
+          ascending tie-breaker), paginated with offset/limit.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/FriendRequestPageEnvelope
+      "400":
+        description: Invalid filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot manage the target Bot identity.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Target Bot is missing.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AcceptFriendRequestPath:
+  post:
+    operationId: accept_friend_request
+    summary: Accept a friend request as the receiver; idempotent after acceptance.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/FriendRequestIdPath
+    responses:
+      "200":
+        description: Accepted friend request.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/FriendRequestDecisionEnvelope
+      "400":
+        description: Invalid identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal is not the receiver of the request.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Friend request is missing.
+        x-error-codes:
+          - friend_request_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Request is already rejected and cannot be accepted.
+        x-error-codes:
+          - conflict
+          - cannot_accept_rejected
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+RejectFriendRequestPath:
+  post:
+    operationId: reject_friend_request
+    summary: Reject a friend request as the receiver; idempotent after rejection.
+    x-avernet-security:
+      principal: required
+    parameters:
+      - $ref: ../shared.yaml#/FriendRequestIdPath
+    responses:
+      "200":
+        description: Rejected friend request.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/FriendRequestDecisionEnvelope
+      "400":
+        description: Invalid identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal is not the receiver of the request.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Friend request is missing.
+        x-error-codes:
+          - friend_request_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Request is already accepted and cannot be rejected.
+        x-error-codes:
+          - conflict
+          - cannot_reject_accepted
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

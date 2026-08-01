@@ -23,7 +23,7 @@ from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
 # set with template keys.
 CODING_TEMPLATE_TYPES = frozenset({"applicationCoding", "personalCoding"})
 TEMPLATE_CONFIG_CONSUMING_ENGINES = frozenset({"aicoding", "claude_code"})
-BOT_TYPE_ENV_MAP = {
+LEGACY_BOT_TYPE_ENV_MAP = {
     "personalCoding": "personal",
     "applicationCoding": "application",
 }
@@ -54,15 +54,19 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         template_config: dict[str, Any] | None = None,
     ) -> bool:
         # Keep historical/built-in template types working even where legacy call
-        # sites only know template_type.  For user-created AC templates, do not
-        # require backend enum updates: as long as the bot is a coding engine and
-        # carries a template-factory config snapshot, consume it.
+        # sites only know template_type.  For non-legacy template types, the
+        # active engine must be a template-config-consuming engine and the saved
+        # snapshot must carry full template identity (template_key and template_uid).
+        # This prevents arbitrary plain dicts from being treated as governed template
+        # config while still allowing normalCC / architect / user-created / future
+        # template types to consume their resolved snapshot without backend enum
+        # updates.
         if template_type in CODING_TEMPLATE_TYPES:
             return True
-        return (
-            active_engine in TEMPLATE_CONFIG_CONSUMING_ENGINES
-            and cls.has_template_factory_config(template_config)
+        has_template_identity = isinstance(template_config, dict) and bool(
+            template_config.get("template_key") and template_config.get("template_uid")
         )
+        return active_engine in TEMPLATE_CONFIG_CONSUMING_ENGINES and has_template_identity
 
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         template_type = ctx.template_type
@@ -75,9 +79,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             return None
         envs: Dict[str, str] = {}
 
-        bot_type = BOT_TYPE_ENV_MAP.get(template_type or "")
-        if bot_type:
-            envs["BOT_TYPE"] = bot_type
+        # Historical template types expose stable legacy bot-type values, while
+        # template-factory templates expose their template_type verbatim so new
+        # template types do not require backend enum/map changes.
+        if template_type:
+            envs["BOT_TYPE"] = LEGACY_BOT_TYPE_ENV_MAP.get(
+                template_type, template_type
+            )
 
         devflow_workflow = template_config.get("devflow_workflow", "")
         if isinstance(devflow_workflow, dict):

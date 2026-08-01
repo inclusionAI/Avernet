@@ -68,6 +68,9 @@ class ManifestEntry(BaseModel):
     size_bytes: int
     content_hash: str
     status: Literal["ready", "failed"]
+    observed_size: int | None = None
+    observed_mtime_ns: int | None = None
+    observed_inode: int | None = None
 
 
 @dataclass(frozen=True)

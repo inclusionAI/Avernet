@@ -19,7 +19,7 @@ members = [
     "crates/services/bcs-friend",
     "crates/services/bcs-friend-store",
     "crates/services/bcs-group",
-    "crates/services/bcs-group-v1",
+    "crates/application/v1/bcs-app-group",
     "crates/services/bcs-group-store",
     "crates/services/bcs-message",
     "crates/services/bcs-message-flow",
@@ -47,6 +47,8 @@ members = [
     "crates/services/bcs-secret",
     "crates/services/bcs-session",
     "crates/services/bcs-session-store",
+    "crates/application/v1/bcs-app-session",
+    "crates/application/v1/bcs-app-invitation",
     "crates/services/bcs-session-file",
     "crates/services/bcs-session-file-store",
     "crates/services/bcs-routing",
@@ -225,7 +227,7 @@ bcs-collaboration-store = { path = "crates/services/bcs-collaboration-store" }
 bcs-judge = { path = "crates/services/bcs-judge" }
 bcs-jwt = { path = "crates/services/bcs-jwt" }
 bcs-group      = { path = "crates/services/bcs-group" }
-bcs-group-v1   = { path = "crates/services/bcs-group-v1" }
+bcs-app-group   = { path = "crates/application/v1/bcs-app-group" }
 bcs-group-store = { path = "crates/services/bcs-group-store" }
 bcs-message = { path = "crates/services/bcs-message" }
 bcs-message-flow = { path = "crates/services/bcs-message-flow" }
@@ -261,6 +263,8 @@ bcs-config                 = { path = "crates/services/bcs-config" }
 bcs-route-security         = { path = "crates/services/bcs-route-security" }
 bcs-session                = { path = "crates/services/bcs-session" }
 bcs-session-store          = { path = "crates/services/bcs-session-store" }
+bcs-app-session             = { path = "crates/application/v1/bcs-app-session" }
+bcs-app-invitation = { path = "crates/application/v1/bcs-app-invitation" }
 bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }

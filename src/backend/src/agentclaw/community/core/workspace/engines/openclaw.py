@@ -25,6 +25,8 @@ _OPENCLAW_RSYNC_EXCLUDES = [
     "workspace/skills/skills-center",
     "workspace/skills-pool/skills-repo",
     "workspace/skills-pool/.skills-repo*",
+    "workspace/clawbench_results/",
+    "workspace/clawbench_template_generate/",
     "skills/*/.git/",
     "memory/",
     "logs/",

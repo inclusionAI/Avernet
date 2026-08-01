@@ -1610,16 +1610,26 @@ class TestBotChatServiceGetSession:
                 await service.get_session(trace_id="trace-1", owner_id="user1", log_source="langfuse")
 
     @pytest.mark.asyncio
-    async def test_get_session_langfuse_default_bot_owner_match(self, service):
-        """Langfuse default-bot traces are accessible when userId matches owner_id."""
+    @pytest.mark.parametrize(
+        "owner_fields",
+        [
+            {"userId": "user1"},
+            {"metadata": {"attributes": {"identity.owner_id": "user1"}}},
+            {"metadata": {"attributes": {"user.id": "user1"}}},
+        ],
+    )
+    async def test_get_session_langfuse_default_bot_owner_match(
+        self, service, owner_fields
+    ):
+        """Default-bot traces accept every supported owner representation."""
         trace_response = AsyncMock()
         trace_response.status = 200
         trace_response.json = AsyncMock(return_value={
             "id": "trace-1",
             "name": "Session",
-            "userId": "user1",
             "timestamp": "2025-01-01T00:00:00Z",
             "success": True,
+            **owner_fields,
         })
         trace_response.__aenter__ = AsyncMock(return_value=trace_response)
         trace_response.__aexit__ = AsyncMock(return_value=False)

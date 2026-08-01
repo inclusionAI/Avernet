@@ -38,11 +38,12 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeResult,
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
-    PoolQuarantineCleanupRequest,
-    PoolQuarantineCleanupResult,
     PoolMappingPublishResult,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
+    PoolQuarantineCleanupRequest,
+    PoolQuarantineCleanupResult,
+    PoolSkillMappingIntent,
     Skill,
     SkillConfig,
     SkillExecutionRequest,
@@ -54,6 +55,18 @@ from engine.community.core.skills.models import (
 )
 from engine.community.core.skills.protocol import SkillsService
 from engine.community.plugin_api.openclaw.skills import OpenClawSkillsPort
+
+
+def _serialize_pool_mapping(
+    item: PoolSkillMappingIntent | SymlinkItem,
+) -> dict[str, str]:
+    if isinstance(item, PoolSkillMappingIntent):
+        return {
+            "corpus": item.corpus,
+            "relative_path": item.relative_path,
+            "link_name": item.link_name,
+        }
+    return {"source": item.source, "target": item.target}
 
 
 class OpenClawSkillsAdapter(SkillsService):
@@ -150,17 +163,15 @@ class OpenClawSkillsAdapter(SkillsService):
         request: PoolLayoutActivateRequest,
         auth: AuthContext | None = None,
     ) -> PoolLayoutActivationResult:
-        raw = await self._port.activate_pool_layout(
-            {
-                "migration_generation": request.migration_generation,
-                "preparation_id": request.preparation_id,
-                "registered_local_names": request.registered_local_names,
-                "mappings": [
-                    {"source": item.source, "target": item.target}
-                    for item in request.mappings
-                ],
-            }
-        )
+        payload: dict[str, object] = {
+            "migration_generation": request.migration_generation,
+            "preparation_id": request.preparation_id,
+            "registered_local_names": request.registered_local_names,
+            "mappings": [_serialize_pool_mapping(item) for item in request.mappings],
+        }
+        if request.mapping_contract_version is not None:
+            payload["mapping_contract_version"] = request.mapping_contract_version
+        raw = await self._port.activate_pool_layout(payload)
         raw_status = str(raw.get("status", ""))
         try:
             status = PoolLayoutActivationStatus(raw_status)
@@ -253,20 +264,19 @@ class OpenClawSkillsAdapter(SkillsService):
 
     async def publish_pool_mappings(
         self,
-        mappings: list[SymlinkItem],
+        mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
-        raw = await self._port.publish_pool_mappings(
-            {
-                "mappings": [
-                    {"source": item.source, "target": item.target}
-                    for item in mappings
-                ],
-                "source_layout": source_layout.value,
-            }
-        )
+        payload: dict[str, object] = {
+            "mappings": [_serialize_pool_mapping(item) for item in mappings],
+            "source_layout": source_layout.value,
+        }
+        if mapping_contract_version is not None:
+            payload["mapping_contract_version"] = mapping_contract_version
+        raw = await self._port.publish_pool_mappings(payload)
         return PoolMappingPublishResult(
             published=raw.get("published") is True,
             evidence=dict(raw.get("evidence") or {}),
@@ -274,20 +284,19 @@ class OpenClawSkillsAdapter(SkillsService):
 
     async def verify_pool_mappings(
         self,
-        mappings: list[SymlinkItem],
+        mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:
-        raw = await self._port.verify_pool_mappings(
-            {
-                "mappings": [
-                    {"source": item.source, "target": item.target}
-                    for item in mappings
-                ],
-                "source_layout": source_layout.value,
-            }
-        )
+        payload: dict[str, object] = {
+            "mappings": [_serialize_pool_mapping(item) for item in mappings],
+            "source_layout": source_layout.value,
+        }
+        if mapping_contract_version is not None:
+            payload["mapping_contract_version"] = mapping_contract_version
+        raw = await self._port.verify_pool_mappings(payload)
         return PoolMappingVerificationResult(
             valid=raw.get("valid") is True,
             evidence=dict(raw.get("evidence") or {}),

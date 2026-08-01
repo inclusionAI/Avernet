@@ -2,7 +2,8 @@ use bcs_service_api::application::v1::{
     BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CreateCollaborationGroup,
     CreateDirectMessageGroup, CreateGroupSpec, CreateParticipant, GroupDeliveryPolicy,
     GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility, ManagerWorkerConfiguration,
-    MembershipFilter, ParticipantRole, StateMachineConfiguration, StateMachineDefinitionReference,
+    MembershipFilter, ParticipantMode, ParticipantRole, StateMachineConfiguration,
+    StateMachineDefinitionReference,
     StateMachineParticipantBinding,
 };
 use serde::{Deserialize, Deserializer, de::Error as _};
@@ -81,6 +82,19 @@ pub struct ParticipantRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct AddParticipantRequest {
+    pub actor_id: String,
+    pub role: ParticipantRole,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateParticipantRequest {
+    pub mode: ParticipantMode,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeliveryPolicyRequest {
     pub bot_final_delivery: BotFinalDelivery,
 }
@@ -107,7 +121,7 @@ where
     }
 }
 
-fn deserialize_present_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+pub(crate) fn deserialize_present_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,

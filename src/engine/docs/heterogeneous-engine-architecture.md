@@ -1073,6 +1073,71 @@ class SkillExecutionResult:
     duration_ms: int = 0
 ```
 
+### 7.3 Skills Pool mapping wire contract
+
+`SkillsService` 的 Pool activation、publish、verify 使用显式版本协商。当前
+新契约版本为 `skills-pool-mapping-v2`：
+
+```json
+{
+  "mapping_contract_version": "skills-pool-mapping-v2",
+  "mappings": [
+    {
+      "corpus": "local",
+      "relative_path": "writer",
+      "link_name": "writer"
+    },
+    {
+      "corpus": "repo",
+      "relative_path": "business/reviewer",
+      "link_name": "reviewer"
+    }
+  ]
+}
+```
+
+- `corpus` 只允许 `local` 或 `repo`；`relative_path` 必须是规范化的相对
+  POSIX 路径；`link_name` 必须是单个规范化路径段。绝对路径、路径逃逸、
+  重复 target、未知 corpus 和额外/混合字段全部 fail closed。
+- Backend 不发送 engine-specific source/target。Engine 的
+  `layout_planner.py` 使用当前 engine、layout state、repo delivery 与本地
+  home 投影物理 source/active target；publish/verify 返回
+  `resolved_mappings`，activation/rollback 返回 `local_locators`。这些路径是
+  Engine evidence，Backend 只能校验和持久化，不能按 engine 重建。
+- READY Probe 已进入 cutover evidence（存在 active marker）后，
+  `checks.stable_repo_bridge_valid` 只在 AICoding/Hermes 已进入 `active`
+  且稳定 repo bridge 已实际校验时存在并为 `true`。OpenClaw/Claude Code
+  的 active layout 以及仍为 `finalizing` 的恢复窗口不适用或尚未完成该
+  检查，必须省略此 key，不能用 `false` 或未经校验的 `true` 代替；
+  preparation/Legacy evidence 仍按各 Engine 拓扑报告其必需 bridge 检查。
+- 新 Backend 只有在 `/api/skills/layout/probe` 的 READY evidence 明确包含
+  `"mapping_contract_version": "skills-pool-mapping-v2"` 后，才会在已通过
+  rollout gate 且 migration claim 成功的 reconcile 中发送 v2。缺失或旧
+  capability 归类为 `NOT_CAPABLE`，保持 Legacy；probe 本身不能触发
+  claim/cutover。已处于 Pool 的 Bot 发起显式 rollback 时也会重新 probe
+  当前 binding；若 runtime 已降级或缺少 capability，则 Backend 在首个 v2
+  mapping 请求和文件系统 rollback 前停止，保留现状并返回可重试失败。
+- 兼容窗口内，新 Engine 仍接受不带 `mapping_contract_version` 的 legacy
+  physical item：`{"source": "...", "target": "..."}`。无版本 logical
+  payload、带 v2 的 physical payload、logical/physical 混合 payload 和未知
+  version 均在任何文件系统 mutation 前以
+  `InvalidPoolMappingRequestError` 拒绝，HTTP delivery adapter 固定映射为
+  `400`；Engine layout descriptor/invariant 异常不归入该输入错误。未知
+  corpus 等不满足 HTTP schema 的结构错误由 FastAPI 在进入 Skills Service
+  前以 `422` 拒绝，同样不能触发 plugin 调用或文件系统 mutation。
+- 消费者包括 Backend `SkillsPoolRuntimeProtocol`/
+  `SkillsPoolReconcileService`、Engine `/api/skills` router 与
+  `SkillsService`，以及 OpenClaw、Claude Code、AICoding、Hermes 的
+  filesystem composition roots。OpenClaw/Claude Code 内置 consumer
+  直接广告 v2；AICoding/Hermes 由具体 composition root 在接入同一 resolver
+  后显式广告。旧 composition root 不广告，混部期间保持
+  `NOT_CAPABLE`/Legacy。四个 consumer 使用相同 contract tests；Teclaw
+  保持 artifact delivery，不消费文件系统 mapping。
+- v2 在混部期间不替换 legacy wire form；旧 Backend→新 Engine 可继续使用
+  无版本 physical payload，新 Backend→旧 Engine 经 probe capability gate
+  停留在 Legacy。移除 legacy form 需要独立版本与全量 runtime 升级证据，
+  不属于当前迁移。
+
 ---
 
 ## 8. Approval 抽象层

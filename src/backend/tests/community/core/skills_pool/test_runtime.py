@@ -117,8 +117,9 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
     )
     mappings = [
         PoolSkillMapping(
-            source=("/home/admin/.openclaw/workspace/skills-pool/skills-local/a"),
-            target="/home/admin/.openclaw/workspace/skills/a",
+            corpus="local",
+            relative_path="a",
+            link_name="a",
         )
     ]
 
@@ -165,6 +166,17 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
         "/api/skills/layout/mappings/publish",
         "/api/skills/layout/mappings/verify",
     ]
+    logical_mapping = {
+        "corpus": "local",
+        "relative_path": "a",
+        "link_name": "a",
+    }
+    for index in (0, 2, 3):
+        assert (
+            transport.calls[index]["body"]["mapping_contract_version"]
+            == "skills-pool-mapping-v2"
+        )
+        assert transport.calls[index]["body"]["mappings"] == [logical_mapping]
 
 
 @pytest.mark.asyncio

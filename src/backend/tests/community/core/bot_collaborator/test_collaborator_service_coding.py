@@ -17,6 +17,12 @@ from agentclaw.community.core.bot_collaborator.models import (
     CollaboratorRecord,
     CollaboratorRole,
 )
+from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
+    AICodingMemberManagementCapability,
+)
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
 
 
 OWNER = "owner-001"
@@ -37,13 +43,23 @@ def bot_repo():
 
 
 @pytest.fixture
-def service(collaborator_repo, bot_repo):
+def template_service():
+    svc = Mock()
+    svc.get_template_config.return_value = None
+    return svc
+
+
+@pytest.fixture
+def service(collaborator_repo, bot_repo, template_service):
     svc = CollaboratorService(
         collaborator_repo=collaborator_repo,
         bot_repo=bot_repo,
         passport_plugin=Mock(),
         resolver_provider=lambda: Mock(),
         device_fs_dispatcher_provider=lambda: Mock(),
+        member_management_capability_service=MemberManagementCapabilityService(
+            engine_capabilities=(AICodingMemberManagementCapability(template_service),),
+        ),
     )
     # 隔离协作变更回调副作用（会反查协作者列表 / AgentPass），聚焦类型判断分支
     svc.on_collaboration_changed = Mock()
@@ -85,6 +101,40 @@ def test_add_collaborator_coding_app_allowed(service, bot_repo, collaborator_rep
 
     assert record is collaborator_repo.insert.return_value
     collaborator_repo.insert.assert_called_once()
+
+
+def test_add_collaborator_member_management_flag_allowed(
+    service, bot_repo, collaborator_repo, template_service
+):
+    """模板 advanced_config.member_management=true -> 非 service / 非 coding 也放行。"""
+    bot_repo.get_by_id_and_owner.return_value = _bot(
+        bot_type="personal",
+        active_engine="openclaw",
+        template_type="chat",
+    )
+    template_service.get_template_config.return_value = {
+        "bot_template_config": {"advanced_config": {"member_management": True}}
+    }
+
+    record = _add(service)
+
+    assert record is collaborator_repo.insert.return_value
+    collaborator_repo.insert.assert_called_once()
+
+
+def test_add_collaborator_member_management_requires_boolean_true(service, bot_repo, template_service):
+    """member_management 只有布尔 True 放行，字符串等 truthy 值不扩权。"""
+    bot_repo.get_by_id_and_owner.return_value = _bot(
+        bot_type="personal",
+        active_engine="openclaw",
+        template_type="chat",
+    )
+    template_service.get_template_config.return_value = {
+        "bot_template_config": {"advanced_config": {"member_management": "true"}}
+    }
+
+    with pytest.raises(BotNotServiceTypeError):
+        _add(service)
 
 
 def test_add_collaborator_service_type_still_allowed(service, bot_repo, collaborator_repo):

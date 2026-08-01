@@ -28,8 +28,15 @@ from agentclaw.community.core.bot_collaborator.repository.protocol import (
     BotCollabLockRepositoryProtocol,
 )
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import CollaboratorService
+from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
+    AICodingMemberManagementCapability,
+)
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -78,11 +85,24 @@ class BotCollaboratorModule(Module):
     @singleton
     @provider
     @inject
+    def member_management_capability_service(
+        self,
+        template_service: TemplateService,
+    ) -> MemberManagementCapabilityService:
+        """Construct engine-agnostic member-management capability coordinator."""
+        return MemberManagementCapabilityService(
+            engine_capabilities=(AICodingMemberManagementCapability(template_service),),
+        )
+
+    @singleton
+    @provider
+    @inject
     def collaborator_service(
         self,
         collaborator_repo: CollaboratorRepositoryProtocol,
         bot_repo: BotRepository,
         passport_plugin: PassportPlugin,
+        member_management_capability_service: MemberManagementCapabilityService,
         injector: Injector,
     ) -> CollaboratorService:
         """Construct ``CollaboratorService``.
@@ -97,6 +117,7 @@ class BotCollaboratorModule(Module):
             passport_plugin=passport_plugin,
             resolver_provider=lambda: injector.get(DeviceContextResolver),
             device_fs_dispatcher_provider=lambda: injector.get(DeviceFilesystemDispatcher),
+            member_management_capability_service=member_management_capability_service,
         )
 
     # ── Core Protocol aliases (for core layer internal use) ───────────────

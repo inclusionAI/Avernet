@@ -245,6 +245,21 @@ class TestOpenClawIsRsyncExcluded:
         provider = OpenClawSandboxProvider(workspace=_workspace())
         assert provider._is_rsync_excluded("workspace/README.md") is False
 
+    def test_clawbench_exact_directory_rules_exclude_and_descendants(self):
+        # ``workspace/clawbench_results/`` and ``workspace/clawbench_template_generate/``
+        # are exact directory rules (trailing slash): hide the directory and descendants.
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+        # clawbench_results directory and descendants are excluded
+        assert provider._is_rsync_excluded("workspace/clawbench_results") is True
+        assert provider._is_rsync_excluded("workspace/clawbench_results/sub/file") is True
+        # clawbench_template_generate directory and descendants are excluded
+        assert provider._is_rsync_excluded("workspace/clawbench_template_generate") is True
+        assert provider._is_rsync_excluded("workspace/clawbench_template_generate/sub/file") is True
+        # other clawbench_* paths are NOT excluded (no longer wildcard)
+        assert provider._is_rsync_excluded("workspace/clawbench_test") is False
+        assert provider._is_rsync_excluded("workspace/clawbench_other") is False
+        assert provider._is_rsync_excluded("workspace/clawbench-foo") is False
+
 
 @pytest.mark.unit
 class TestOpenClawListDirectorySandbox:

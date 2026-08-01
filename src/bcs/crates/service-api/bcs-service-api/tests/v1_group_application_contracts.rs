@@ -2,10 +2,12 @@ use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedUser, BotFinalDelivery, DeleteGroup, DeleteResult,
+    AddGroupParticipant, ApplicationError, AuthenticatedUser, BotFinalDelivery, DeleteGroup,
+    DeleteGroupParticipant, DeleteResult,
     DirectMessageGroupSummary, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupKindFilter,
     GroupService, GroupStatus, GroupSummary, GroupVisibility, ListBotGroups, Membership,
-    MembershipFilter, Page, Principal, UpdateGroup,
+    MembershipFilter, Page, Participant, ParticipantMode, ParticipantRole, Principal, UpdateGroup,
+    UpdateGroupParticipant,
 };
 
 struct NoopGroupService;
@@ -36,9 +38,29 @@ impl GroupService for NoopGroupService {
 
     async fn delete(&self, _command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
         Ok(DeleteResult {
-            group_id: "group-1".into(),
             deleted: false,
         })
+    }
+
+    async fn add_participant(
+        &self,
+        _command: AddGroupParticipant,
+    ) -> Result<Participant, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
+    }
+
+    async fn update_participant(
+        &self,
+        _command: UpdateGroupParticipant,
+    ) -> Result<Participant, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
+    }
+
+    async fn delete_participant(
+        &self,
+        _command: DeleteGroupParticipant,
+    ) -> Result<DeleteResult, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
     }
 }
 
@@ -125,4 +147,30 @@ fn delivery_policy_is_narrower_than_legacy_routing_policy() {
 fn group_service_is_object_safe() {
     fn accepts_service(_: &dyn GroupService) {}
     accepts_service(&NoopGroupService);
+}
+
+#[test]
+fn participant_commands_carry_principal_and_no_raw_credentials() {
+    let principal = Principal::bot("bot-1", "tenant-a", BTreeSet::new());
+    let add = AddGroupParticipant {
+        principal: principal.clone(),
+        group_id: "g1".into(),
+        actor_id: "bot-2".into(),
+        role: ParticipantRole::Consultant,
+    };
+    let update = UpdateGroupParticipant {
+        principal: principal.clone(),
+        group_id: "g1".into(),
+        actor_id: "bot-2".into(),
+        mode: ParticipantMode::Muted,
+    };
+    let remove = DeleteGroupParticipant {
+        principal,
+        group_id: "g1".into(),
+        actor_id: "bot-2".into(),
+    };
+    for cmd in [&add.principal as &Principal, &update.principal, &remove.principal] {
+        let s = format!("{cmd:?}");
+        assert!(!s.contains("Cookie") && !s.contains("Bearer") && !s.contains("sender"));
+    }
 }

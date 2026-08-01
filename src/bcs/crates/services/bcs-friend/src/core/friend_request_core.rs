@@ -213,6 +213,17 @@ impl FriendRequestCoreService for FriendRequestCore {
             .await
     }
 
+    async fn try_list_requests(
+        &self,
+        bot_id: &str,
+        direction: FriendRequestDirection,
+        status_filter: Option<FriendRequestStatus>,
+    ) -> ServiceResult<Vec<FriendRequest>> {
+        self.repo
+            .try_list_requests(bot_id, direction, status_filter)
+            .await
+    }
+
     async fn cancel_pending_requests(&self, bot_id: &str) -> ServiceResult<usize> {
         self.repo.delete_pending_requests_for_bot(bot_id).await
     }

@@ -56,7 +56,9 @@ use bcs_friend_store::{
 };
 use bcs_fuse_client::FuseClient;
 use bcs_fusion::{FuseClientService, FuseWorkerProfileService, LocalFusionService};
-use bcs_group::{GroupConfig, GroupCore, GroupManagement};
+use bcs_group::{
+    GroupConfig, GroupCore, GroupManagement, GroupManagementWithRuntimeCleanup,
+};
 use bcs_group_store::{MemoryGroupRepo, MySqlGroupStore};
 use bcs_http::{
     admin_invocation_terminal::AdminInvocationTerminalObserver,
@@ -104,7 +106,7 @@ use bcs_service_api::{
     },
 };
 use bcs_services_container::{Services, ServicesBuilder};
-use bcs_session::SessionManagementServiceImpl;
+use bcs_session::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
 use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
 use bcs_system_message::{
     SystemMessageDispatcherImpl, SystemMessageServiceImpl,
@@ -1368,7 +1370,6 @@ impl Default for BcsServerState {
         .with_channel_binding_cleanup(channel_binding_cleanup.clone())
         .with_outbound_url_guard(outbound_url_guard.clone())
         .with_bot_runtime(bot_use_cases.clone()));
-        let group_management = maybe_wrap_group_management(&config, group_management_impl.clone());
         let group_proposals = Arc::new(GroupProposalUseCases::new(
             sessions.clone(),
             bot_registry.clone(),
@@ -1413,6 +1414,17 @@ impl Default for BcsServerState {
             ))
             .with_message_repo(message_repo.clone())
             .with_frontend_delivery(frontend_delivery.clone()),
+        );
+        let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
+            session_management.clone(),
+            collaboration_runtime.clone(),
+        ));
+        let group_management = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                group_management_impl.clone(),
+                collaboration_runtime.clone(),
+            )),
         );
         let channel_runtime = build_channel_runtime(
             &config,
@@ -1489,13 +1501,6 @@ impl Default for BcsServerState {
             crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
             outbound_url_guard.clone(),
         );
-        let _state_machine_timeout_handle = crate::state_machine_timeout_scanner::spawn(
-            services.collaboration_runtime.clone(),
-            crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
-            crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
-            crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
-        );
-
         // Start JWT token expiry scanner
         let _token_expiry_handle = crate::token_expiry_scanner::spawn(
             bot_connections.clone(),
@@ -2571,6 +2576,17 @@ impl BcsServer {
             .with_message_repo(message_repo.clone())
             .with_frontend_delivery(frontend_delivery.clone()),
         );
+        let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
+            session_management.clone(),
+            collaboration_runtime.clone(),
+        ));
+        let group_management = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                use_cases.group_management,
+                collaboration_runtime.clone(),
+            )),
+        );
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
@@ -2628,10 +2644,7 @@ impl BcsServer {
             .provider_management(provider_management)
             .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
-            .group_management(maybe_wrap_group_management(
-                &config,
-                use_cases.group_management,
-            ))
+            .group_management(group_management)
             .group_query(use_cases.group_query)
             .workbench_sessions(use_cases.workbench_sessions)
             .group_proposals(use_cases.group_proposals)
@@ -2657,13 +2670,6 @@ impl BcsServer {
             crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
             callback_url_guard.clone(),
         );
-        let _state_machine_timeout_handle = crate::state_machine_timeout_scanner::spawn(
-            services.collaboration_runtime.clone(),
-            crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
-            crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
-            crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
-        );
-
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
 
@@ -3119,6 +3125,17 @@ impl BcsServer {
                 .with_frontend_delivery(frontend_delivery.clone()),
             )
         };
+        let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
+            session_management.clone(),
+            collaboration_runtime.clone(),
+        ));
+        let group_management = maybe_wrap_group_management(
+            &config,
+            Arc::new(GroupManagementWithRuntimeCleanup::new(
+                use_cases.group_management,
+                collaboration_runtime.clone(),
+            )),
+        );
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
@@ -3185,10 +3202,7 @@ impl BcsServer {
             .provider_management(provider_management)
             .organization_management(organization_management)
             .provider_bot_events(provider_bot_events)
-            .group_management(maybe_wrap_group_management(
-                &config,
-                use_cases.group_management,
-            ))
+            .group_management(group_management)
             .group_query(use_cases.group_query)
             .workbench_sessions(use_cases.workbench_sessions)
             .group_proposals(use_cases.group_proposals)
@@ -3214,13 +3228,6 @@ impl BcsServer {
             crate::timeout_scanner::DEFAULT_SCAN_INTERVAL,
             outbound_url_guard.clone(),
         );
-        let _state_machine_timeout_handle =
-            crate::state_machine_timeout_scanner::spawn_if_leader(
-                leader_election.as_ref(),
-                services.collaboration_runtime.clone(),
-            )
-            .await?;
-
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
 
@@ -3450,6 +3457,16 @@ impl BcsServer {
             })
     }
 
+    fn spawn_state_machine_timeout_scanner(&self) -> tokio::task::JoinHandle<()> {
+        crate::state_machine_timeout_scanner::spawn(
+            self.state.leader_election.clone(),
+            self.state.services.collaboration_runtime.clone(),
+            crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
+            crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
+            crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
+        )
+    }
+
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
         let addr: SocketAddr = format!("{}:{}", self.config.bind, self.config.port)
@@ -3457,6 +3474,7 @@ impl BcsServer {
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
 
         self.initialize_lifecycle().await?;
+        let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
 
         // Spawn async chat-run TTL cleanup loop.
         {
@@ -3567,6 +3585,7 @@ impl BcsServer {
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
 
         self.initialize_lifecycle().await?;
+        let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
 
         let app = self.build_router().await;
 

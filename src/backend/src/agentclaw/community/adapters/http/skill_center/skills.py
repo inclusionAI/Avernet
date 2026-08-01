@@ -110,6 +110,7 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     InterceptedResponse,
@@ -451,7 +452,10 @@ async def upload_skill(
 
         logger.info(f"[skills.upload_skill] Calling service.upload_skill with {len(uploaded_files)} files")
 
-        # Use user_id from query param if provided, otherwise fall back to ctx.user_id
+        # ``user_id`` identifies the Bot owner for collaborator authorization and
+        # device access. Skill metadata belongs to the authenticated uploader;
+        # using the owner for both made collaborator-uploaded local Skills appear
+        # to have been authored by the Bot owner.
         effective_user_id = user_id or ctx.user_id
 
         # Call the service method (async)
@@ -466,6 +470,7 @@ async def upload_skill(
             skill = await service.upload_skill(
                 uploaded_files,
                 user_id=effective_user_id,
+                author_id=ctx.user_id,
                 bolt_id=effective_bot_id,
             )
         finally:
@@ -1226,31 +1231,72 @@ async def get_skill_readme(
             logger.warning(f"[skills.get_skill_readme] SkillCenter file-content failed: {e}")
         raise HTTPException(status_code=404, detail="Skill or README not found")
 
-    # The DB row is the source of truth for the bot/owner that owns local files.
-    # Keep this explicit so README reads do not regress to request-context-only
-    # resolution after REL20260710 rebases.
-    # This is especially important for TEClaw requests whose HTTP context can be
-    # default/openclaw even though the local skill belongs to a TEClaw bot.
+    # A Skill may be read while the caller is operating another Bot.  Its DB
+    # ``bolt_id`` is the authoritative target; derive owner, entity type and
+    # engine from that Bot instead of trusting the caller's route parameters.
+    # ``skill.user_id`` is only the Skill author and can be a collaborator.
     read_bot_id = (skill or {}).get("bolt_id") or effective_bot_id
-    read_owner_id = (skill or {}).get("user_id") or effective_entity_id
-    read_entity_type = effective_entity_type
+    target_bot = None
+    # ``default`` is shared by many owners.  Resolve an explicitly supplied
+    # owner against the server-side environment so a same-named default Bot
+    # can never select an arbitrary user's workspace.
+    owner_hint = entity_id or (ctx.user_id if read_bot_id == "default" else None)
+    try:
+        if owner_hint:
+            matches = bot_repo.get_live_by_id_owner_and_env(
+                bot_id=read_bot_id,
+                owner_id=owner_hint,
+                env=get_current_env(),
+            )
+            if len(matches) > 1:
+                raise HTTPException(status_code=409, detail="Skill's owning bot is ambiguous")
+            if matches:
+                target_bot = matches[0]
+
+        if not target_bot and read_bot_id != "default":
+            # Service Bot IDs are normally globally unique.  Fail closed if
+            # they are not, rather than using repository ``.first()``.
+            target_bot = bot_repo.get_unique_by_id(read_bot_id)
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
+        logger.warning(
+            "[skills.get_skill_readme] target bot lookup failed for bot_id=%s: %s",
+            read_bot_id,
+            e,
+        )
+
+    # A persisted local Skill must always be read from the Bot that owns it.
+    # Do not fall back to the caller's workspace when that Bot has disappeared:
+    # doing so can turn a stale record into a read against an unrelated device.
+    if skill and skill.get("bolt_id") and not target_bot:
+        raise HTTPException(status_code=404, detail="Skill's owning bot was not found")
+
+    read_owner_id = (target_bot or {}).get("owner_id") or effective_entity_id
+    read_entity_type = (target_bot or {}).get("entity_type") or effective_entity_type
+    # Do not honour a caller-provided engine override for a Skill owned by a
+    # different Bot: it points at a different on-device workspace.
     read_engine = resolve_engine_for_bot(
         bot_id=read_bot_id,
         owner_id=read_owner_id,
-        override=engine_type,
         bot_repo=bot_repo,
     )
-    read_is_desktop = False
-    try:
-        bot = bot_repo.get_by_id_and_owner(read_bot_id, read_owner_id)
-        if bot and bot.get("bot_type") == "desktop":
-            read_is_desktop = True
-    except Exception as e:
+    if target_bot and (
+        (entity_id and entity_id != read_owner_id)
+        or (bot_id and bot_id != read_bot_id)
+        or (engine_type and engine_type != read_engine)
+    ):
         logger.warning(
-            "[skills.get_skill_readme] bot_type lookup failed for bot_id=%s "
-            "owner=%s: %s — defaulting is_desktop=False",
-            read_bot_id, read_owner_id, e,
+            "[skills.get_skill_readme] Ignoring mismatched caller context: "
+            "skill_id=%s target_bot_id=%s target_owner_id=%s target_engine=%s",
+            skill_id,
+            read_bot_id,
+            read_owner_id,
+            read_engine,
         )
+    read_is_desktop = False
+    if target_bot:
+        read_is_desktop = target_bot.get("bot_type") == "desktop"
 
     read_is_teclaw, read_local_skill_adapter = _resolve_teclaw_local_skill(
         resolver, read_bot_id, read_owner_id
@@ -1294,7 +1340,12 @@ async def get_skill_readme(
         "skill_id=%s, user_id=%s, bot_id=%s",
         skill_id, read_owner_id, read_bot_id,
     )
-    readme = await read_service.get_skill_readme(skill_id, read_owner_id, read_bot_id)
+    readme = await read_service.get_skill_readme(
+        skill_id,
+        ctx.user_id,
+        read_bot_id,
+        device_owner_id=read_owner_id,
+    )
     if readme is None:
         raise HTTPException(status_code=404, detail="Skill or README not found")
     logger.info(f"[skills.get_skill_readme] Success: skill_id={skill_id}")
@@ -2150,9 +2201,10 @@ def _resolve_parameter_bot(
     not the authenticated actor (who may be an ADMIN collaborator).
 
     The requested Bot ID is used only as a lookup key; ownership always comes
-    from the Bot row. Bot-private Skills must agree with that identity. Shared
-    Git market Skills intentionally have no owner/Bot fields and remain usable
-    across Bots.
+    from the Bot row. ``Skill.user_id`` records the author and may therefore be
+    a collaborator, so it must never participate in device-owner resolution.
+    Bot-private Skills are scoped by ``bolt_id``; shared Git market Skills have
+    no Bot binding and remain usable across Bots.
     """
 
     bot = bot_repo.get_by_id_and_entity(requested_bot_id, requested_entity_id)
@@ -2166,29 +2218,22 @@ def _resolve_parameter_bot(
         )
 
     skill_bot_id = str(skill.get("bolt_id") or "")
-    skill_owner_id = str(skill.get("user_id") or "")
     is_shared_git_skill = (
         str(skill.get("git_path") or "").startswith("git://")
-        and not skill_owner_id
+        and not skill_bot_id
     )
     if is_shared_git_skill:
         return bot
 
-    if not skill_bot_id or not skill_owner_id:
+    if not skill_bot_id:
         raise HTTPException(
             status_code=409,
-            detail="Skill ownership metadata is incomplete",
+            detail="Skill Bot metadata is incomplete",
         )
     if requested_bot_id != skill_bot_id:
         raise HTTPException(
             status_code=409,
             detail="Skill does not belong to the requested Bot",
-        )
-
-    if bot_owner_id != skill_owner_id:
-        raise HTTPException(
-            status_code=409,
-            detail="Skill and Bot ownership metadata are inconsistent",
         )
     return bot
 

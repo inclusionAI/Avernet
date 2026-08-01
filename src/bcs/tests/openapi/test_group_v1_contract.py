@@ -14,32 +14,8 @@ from scripts.validate_openapi_contract import (  # noqa: E402
     validate_contract,
 )
 
-EXPECTED_OPERATIONS = {
-    ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/groups"),
-    ("post", "/openapi/v1/groups"),
-    ("get", "/openapi/v1/groups/{group_id}"),
-    ("patch", "/openapi/v1/groups/{group_id}"),
-    ("delete", "/openapi/v1/groups/{group_id}"),
-}
 
-
-def test_first_batch_contains_exactly_the_five_group_operations() -> None:
-    contract = load_contract(CONTRACT_ROOT)
-
-    actual = {
-        (method, path)
-        for path, path_item in contract["paths"].items()
-        for method in path_item
-        if method.lower()
-        in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
-    }
-
-    assert actual == EXPECTED_OPERATIONS
-    assert not any(path.startswith("/openapi/v1/bcn/") for _, path in actual)
-    assert not any(path.startswith("/openapi/v1/actors/") for _, path in actual)
-
-
-def test_first_batch_contract_obeys_bcn_openapi_rules() -> None:
+def test_contract_obeys_bcn_openapi_rules() -> None:
     contract = load_contract(CONTRACT_ROOT)
 
     assert validate_contract(contract) == []

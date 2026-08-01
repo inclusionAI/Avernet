@@ -71,7 +71,9 @@ class FileTransferBackend(Protocol):
     - AliyunOssFileTransferBackend: production OSS operations via oss2 SDK.
     """
 
-    def generate_upload_url(self, staging_path: str, expire_seconds: int) -> str:
+    def generate_upload_url(
+        self, staging_path: str, expire_seconds: int, content_type: str | None = None
+    ) -> str:
         """Generate a presigned PUT URL for uploading a file to the staging path.
 
         The staging_path is a complete OSS object key constructed by the
@@ -80,6 +82,9 @@ class FileTransferBackend(Protocol):
         Args:
             staging_path: Complete OSS object key (constructed by Dispatcher).
             expire_seconds: URL validity duration in seconds.
+            content_type: Optional MIME type to include in the presigned
+                signature. When set, OSS enforces Content-Type matching on
+                the PUT request (mismatched requests receive 403).
 
         Returns:
             Presigned PUT URL string.
@@ -130,7 +135,11 @@ class FileTransferBackend(Protocol):
         ...
 
     def initiate_multipart_upload(
-        self, staging_path: str, expire_seconds: int, part_count: int = 2
+        self,
+        staging_path: str,
+        expire_seconds: int,
+        part_count: int = 2,
+        content_type: str | None = None,
     ) -> MultipartSession:
         """Kick off multipart upload.
 
@@ -143,6 +152,10 @@ class FileTransferBackend(Protocol):
             staging_path: Complete OSS object key.
             expire_seconds: URL validity duration in seconds.
             part_count: Number of parts to generate pre-signed URLs for.
+            content_type: Optional MIME type to include in per-part
+                pre-signed signatures. When set, OSS enforces Content-Type
+                matching on each part's PUT request (mismatched requests
+                receive 403).
 
         Returns:
             MultipartSession with session_id and per-part upload URLs.
@@ -237,11 +250,12 @@ class FileTransferBackend(Protocol):
         """Construct full OSS object key for Session file transfer staging.
 
         The Session Dispatcher calls this instead of hardcoding paths.
-        Pattern: ``{staging_root}/{env}/{tenant}/{session_id}/[{subdir}/]{transfer_id}/{filename}``
+        Pattern: ``{staging_root}/{tenant}/{session_id}/[{subdir}/]{transfer_id}/{filename}``
 
         Distinct from ``build_staging_path`` (Bot file transfer) because
-        Session staging includes ``session_id`` and ``env`` scoping with
-        no device-level component.
+        Session staging includes ``session_id`` scoping with
+        no device-level component. Environment isolation is provided by
+        the ``staging_root_path`` configuration value.
 
         Args:
             tenant: Tenant identifier for scoping.
