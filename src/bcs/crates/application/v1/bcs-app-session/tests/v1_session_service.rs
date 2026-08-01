@@ -3,7 +3,7 @@
 //! Exercises the `SessionService` + `SessionMessageService` impls against the
 //! real in-memory store stack (GroupCore / BotCore / SessionManagementService
 //! / MemorySessionRepo / MemoryMessageRepo), mirroring the sibling
-//! `bcs-group-v1` test harness.
+//! `bcs-app-group` test harness.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use bcs_service_api::{
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
-use bcs_session_v1::{SessionServiceConfig, SessionServiceImpl};
+use bcs_app_session::{SessionServiceConfig, SessionServiceImpl};
 
 struct Fixture {
     service: SessionServiceImpl,
@@ -1070,7 +1070,7 @@ async fn complete_service_invocation_session_rejected() {
 async fn session_only_participant_can_list_sessions() {
     // VaGQQ: a Bot that is only a session participant (added to a session
     // but NOT to group.participants) must still be able to list the group's
-    // sessions. The sibling bcs-group-v1 facade already permits this via
+    // sessions. The sibling bcs-app-group facade already permits this via
     // `list_group_ids_by_session_participant`; the session-v1 facade's
     // `can_read_group` must mirror that check.
     let fixture = Fixture::new().await;

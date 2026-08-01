@@ -154,7 +154,7 @@ impl MessageService {
     /// Compute the message-history visibility predicates for a viewer, mirroring
     /// the new-message path of `MessageService::get_session_history`. This is
     /// the single source of truth shared by the legacy group-history facade and
-    /// the V1 `bcs-session-v1` message-history facade so the two cannot drift.
+    /// the V1 `bcs-app-session` message-history facade so the two cannot drift.
     ///
     /// Returns:
     /// - `ManagerWorker` strategy + worker viewer → `(Eq(worker_id), None)`

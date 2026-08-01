@@ -1,4 +1,4 @@
-//! V1 Group participant use-case tests for `bcs_group_v1::GroupServiceImpl`.
+//! V1 Group participant use-case tests for `bcs_app_group::GroupServiceImpl`.
 //!
 //! The harness mirrors `tests/v1_group_service.rs`: it wires
 //! `GroupServiceImpl` with the in-memory real services (`GroupCore`,
@@ -25,7 +25,7 @@ use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::NoopSystemMessageService;
 
-use bcs_group_v1::{GroupServiceConfig, GroupServiceImpl};
+use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 
 const GROUP_ID: &str = "group-1";
 

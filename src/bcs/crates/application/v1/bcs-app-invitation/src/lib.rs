@@ -120,7 +120,7 @@ impl InvitationFriendshipServiceImpl {
 
     /// Principal must be the Bot itself or a Human that owns it (via
     /// `created_by` or a creator relation edge). Mirrors
-    /// `bcs-group-v1::authorize_bot_resource`.
+    /// `bcs-app-group::authorize_bot_resource`.
     async fn authorize_bot_resource(
         &self,
         principal: &Principal,
@@ -159,7 +159,7 @@ impl InvitationFriendshipServiceImpl {
     }
 
     /// Manager of a group: driver, originator, or ManagerWorker manager.
-    /// Mirrors `bcs-group-v1::can_manage_group`.
+    /// Mirrors `bcs-app-group::can_manage_group`.
     fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
         let actor_id = principal.actor_id();
         actor_id == group.driver_bot

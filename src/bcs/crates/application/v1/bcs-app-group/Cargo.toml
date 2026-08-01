@@ -1,5 +1,5 @@
 [package]
-name = "bcs-group-v1"
+name = "bcs-app-group"
 description = "Versioned Group application facade for the BCN V1 API"
 edition = { workspace = true }
 license = { workspace = true }

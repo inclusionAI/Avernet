@@ -3,7 +3,7 @@
 //! Exercises both `InvitationService` and `FriendshipService` impls against the
 //! real in-memory store stack (GroupCore / BotCore / SessionManagementService
 //! / FriendCore / FriendRequestCore / RelationCore), mirroring the sibling
-//! `bcs-group-v1` / `bcs-session-v1` test harnesses.
+//! `bcs-app-group` / `bcs-app-session` test harnesses.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -41,7 +41,7 @@ use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::NoopSystemMessageService;
 
-use bcs_invitation_friendship_v1::{
+use bcs_app_invitation::{
     InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl,
 };
 

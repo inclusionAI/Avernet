@@ -404,6 +404,69 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-app-group"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-bot",
+ "bcs-bot-store",
+ "bcs-cache-local",
+ "bcs-db-api",
+ "bcs-friend",
+ "bcs-group",
+ "bcs-group-store",
+ "bcs-relation",
+ "bcs-service-api",
+ "bcs-session",
+ "bcs-session-store",
+ "bcs-test-support",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "bcs-app-invitation"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-bot",
+ "bcs-domain",
+ "bcs-friend",
+ "bcs-group",
+ "bcs-relation",
+ "bcs-service-api",
+ "bcs-session",
+ "bcs-session-store",
+ "bcs-test-support",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "bcs-app-session"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-bot",
+ "bcs-bot-store",
+ "bcs-cache-local",
+ "bcs-db-api",
+ "bcs-domain",
+ "bcs-friend",
+ "bcs-group",
+ "bcs-group-store",
+ "bcs-message",
+ "bcs-message-store",
+ "bcs-relation",
+ "bcs-service-api",
+ "bcs-session",
+ "bcs-session-store",
+ "bcs-test-support",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-auth-alipay"
 version = "0.1.0"
 dependencies = [
@@ -929,27 +992,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bcs-group-v1"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bcs-bot",
- "bcs-bot-store",
- "bcs-cache-local",
- "bcs-db-api",
- "bcs-friend",
- "bcs-group",
- "bcs-group-store",
- "bcs-relation",
- "bcs-service-api",
- "bcs-session",
- "bcs-session-store",
- "bcs-test-support",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "bcs-http"
 version = "0.1.0"
 dependencies = [
@@ -1004,24 +1046,6 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
-]
-
-[[package]]
-name = "bcs-invitation-friendship-v1"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bcs-bot",
- "bcs-domain",
- "bcs-friend",
- "bcs-group",
- "bcs-relation",
- "bcs-service-api",
- "bcs-session",
- "bcs-session-store",
- "bcs-test-support",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -1446,30 +1470,6 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
-]
-
-[[package]]
-name = "bcs-session-v1"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bcs-bot",
- "bcs-bot-store",
- "bcs-cache-local",
- "bcs-db-api",
- "bcs-domain",
- "bcs-friend",
- "bcs-group",
- "bcs-group-store",
- "bcs-message",
- "bcs-message-store",
- "bcs-relation",
- "bcs-service-api",
- "bcs-session",
- "bcs-session-store",
- "bcs-test-support",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

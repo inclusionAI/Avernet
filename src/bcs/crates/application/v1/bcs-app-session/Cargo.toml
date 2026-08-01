@@ -1,6 +1,6 @@
 [package]
-name = "bcs-invitation-friendship-v1"
-description = "Versioned Invitation + Friendship application facade for the BCN V1 API"
+name = "bcs-app-session"
+description = "Versioned Session application facade for the BCN V1 API"
 edition = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
@@ -13,13 +13,19 @@ workspace = true
 [dependencies]
 async-trait = { workspace = true }
 bcs-domain = { workspace = true }
+bcs-message = { workspace = true }
 bcs-service-api = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
 bcs-bot = { workspace = true }
+bcs-bot-store = { workspace = true }
+bcs-cache-local = { workspace = true }
+bcs-db-api = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-group = { workspace = true }
+bcs-group-store = { workspace = true }
+bcs-message-store = { workspace = true }
 bcs-relation = { workspace = true }
 bcs-session = { workspace = true }
 bcs-session-store = { workspace = true }

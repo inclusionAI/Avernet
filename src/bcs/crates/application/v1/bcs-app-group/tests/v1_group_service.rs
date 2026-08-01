@@ -37,7 +37,7 @@ use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::NoopSystemMessageService;
 
-use bcs_group_v1::{GroupServiceConfig, GroupServiceImpl};
+use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 
 struct Fixture {
     service: GroupServiceImpl,

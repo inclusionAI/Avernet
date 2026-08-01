@@ -95,7 +95,7 @@ impl SessionServiceImpl {
     // ── authorization helpers ──────────────────────────────────────────
 
     /// Manager of the parent group (driver / originator / ManagerWorker
-    /// manager). Mirrors `bcs-group-v1`'s `can_manage_group`.
+    /// manager). Mirrors `bcs-app-group`'s `can_manage_group`.
     fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
         let actor_id = principal.actor_id();
         actor_id == group.driver_bot
@@ -120,7 +120,7 @@ impl SessionServiceImpl {
 
     /// Read a group's sessions: group participant, group manager, or a
     /// session-only participant (a Bot added to a session but not to
-    /// `group.participants`). Mirrors `bcs-group-v1::can_read_group`
+    /// `group.participants`). Mirrors `bcs-app-group::can_read_group`
     /// (lib.rs:180-199) so an invitation-accept that adds the Bot to the
     /// session (not the group) still authorizes `list_sessions`.
     async fn can_read_group(
@@ -262,7 +262,7 @@ impl SessionServiceImpl {
             })
     }
 
-    /// VSN7B: Mirror `bcs-group-v1`'s `ensure_collaboration_eligible`. A
+    /// VSN7B: Mirror `bcs-app-group`'s `ensure_collaboration_eligible`. A
     /// caller may add a Bot to a session only when that Bot is
     /// collaboration-eligible for the caller:
     /// - the target must be a Bot Actor that is not Hidden; AND
@@ -328,7 +328,7 @@ impl SessionServiceImpl {
     /// Session participant when the Human owns the target Bot — i.e.
     /// `bot.created_by == human.subject.id` or a creator relation edge from
     /// the Human actor to the Bot exists. Mirrors the Human branch of
-    /// [`ensure_collaboration_eligible`] and `bcs-group-v1::authorize_bot_resource`
+    /// [`ensure_collaboration_eligible`] and `bcs-app-group::authorize_bot_resource`
     /// so a Human owner is authorized without group-level manager permissions
     /// (design §8.7 line 557 explicitly allows Human owners to remove owned
     /// Bots from sessions they can read).
