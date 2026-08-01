@@ -136,3 +136,62 @@ def test_no_signing_key_is_committed_to_the_singlebox_config():
         "reintroduces a committed-credential shape for a knob that ships inert"
     )
     assert "gateway_principal_signing_key" not in user_config.get("secret_names", {})
+
+
+def test_value_defined_only_in_the_base_config_still_resolves(tmp_path, monkeypatch):
+    """The overlay carries what singlebox *changes*; the base carries the rest.
+
+    ``YamlConfigProvider`` deep-merges application.yaml under the overlay, so a
+    value left in the base is part of the effective config the app booted with.
+    Reading the overlay alone would return None for it and send GitSyncService
+    to its on-disk fallback for no reason.
+    """
+    runtime = tmp_path / "configs"
+    runtime.mkdir()
+    (runtime / "application.yaml").write_text(
+        'user_config:\n  openclaw:\n    skills_repo_url: "git@example.com:from-base.git"\n',
+        encoding="utf-8",
+    )
+    (runtime / "application-singlebox.yaml").write_text(
+        "user_config:\n  workspace:\n    env_folder: overlay-only\n", encoding="utf-8"
+    )
+    # Point the bundled path at a non-existent file that still carries the
+    # overlay's *name* — the pair search derives the overlay filename from it.
+    monkeypatch.setattr(
+        LocalSecretResolver,
+        "_SINGLEBOX_CONFIG_PATH",
+        tmp_path / "bundled" / "application-singlebox.yaml",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    secret = LocalSecretResolver().get_secret(_AIWORKBENCH_REPO_URL_SECRET_NAME)
+
+    assert secret is not None
+    assert secret.secret_value == "git@example.com:from-base.git"
+
+
+def test_overlay_still_wins_over_the_base_for_the_same_key(tmp_path, monkeypatch):
+    """Deep merge, not base-wins: the overlay overrides what it does define."""
+    runtime = tmp_path / "configs"
+    runtime.mkdir()
+    (runtime / "application.yaml").write_text(
+        'user_config:\n  openclaw:\n    skills_repo_url: "git@example.com:from-base.git"\n',
+        encoding="utf-8",
+    )
+    (runtime / "application-singlebox.yaml").write_text(
+        'user_config:\n  openclaw:\n    skills_repo_url: "git@example.com:from-overlay.git"\n',
+        encoding="utf-8",
+    )
+    # Point the bundled path at a non-existent file that still carries the
+    # overlay's *name* — the pair search derives the overlay filename from it.
+    monkeypatch.setattr(
+        LocalSecretResolver,
+        "_SINGLEBOX_CONFIG_PATH",
+        tmp_path / "bundled" / "application-singlebox.yaml",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    secret = LocalSecretResolver().get_secret(_AIWORKBENCH_REPO_URL_SECRET_NAME)
+
+    assert secret is not None
+    assert secret.secret_value == "git@example.com:from-overlay.git"

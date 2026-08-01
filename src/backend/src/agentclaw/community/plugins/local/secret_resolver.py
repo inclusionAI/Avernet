@@ -58,9 +58,11 @@ class LocalSecretResolver(MockSeam, SecretResolver):
         ``application.yaml`` and the overlay. A deployed singlebox assembles its
         runtime ``configs/`` in the working directory, so reading only the
         bundled copy would resolve secrets from a file the operator never edits
-        — they would set a value in the active config and see no effect. Mirror
-        that search order exactly, pairing rule included, so both reads land on
-        the same file.
+        — they would set a value in the active config and see no effect.
+
+        This names the overlay for log messages. The *values* come from
+        :meth:`_read_singlebox_local_config`, which applies the same search
+        order **and** the base-under-overlay deep merge the provider performs.
 
         Falls back to the bundled path when no directory holds the pair, which
         keeps a test that points ``_SINGLEBOX_CONFIG_PATH`` at a lone fixture
@@ -110,22 +112,44 @@ class LocalSecretResolver(MockSeam, SecretResolver):
     def _read_singlebox_local_config(self) -> dict:
         """Return the ``user_config`` block, or ``{}`` if it cannot be read.
 
+        Mirrors ``YamlConfigProvider._load_yaml_configs`` in full, which means
+        **deep-merging ``application.yaml`` under the overlay** rather than
+        reading the overlay alone. The overlay only carries what singlebox
+        *changes*; anything the deployment leaves in the base is still part of
+        the effective config. Reading one file would resolve to ``None`` for a
+        value the app itself booted with — e.g. an ``openclaw.skills_repo_url``
+        defined in the base and not repeated in the overlay, which would send
+        GitSyncService to its on-disk fallback for no reason.
+
         An unreadable or malformed config is not fatal here: every caller treats
         a missing value as "this secret is absent", which is the Protocol's
         ``None`` outcome.
         """
-        config_path = self._active_singlebox_config_path()
+        from agentclaw.community.core.config.yaml_provider import _deep_merge
+
+        for config_dir in (
+            Path.cwd() / "configs",
+            self._SINGLEBOX_CONFIG_PATH.parent,
+        ):
+            base = config_dir / "application.yaml"
+            overlay = config_dir / self._SINGLEBOX_CONFIG_PATH.name
+            if base.exists() and overlay.exists():
+                merged = _deep_merge(self._load_yaml(base), self._load_yaml(overlay))
+                return merged.get("user_config") or {}
+
+        # No directory holds the pair — read the overlay alone. Keeps a test
+        # that points _SINGLEBOX_CONFIG_PATH at a lone fixture working.
+        return self._load_yaml(self._SINGLEBOX_CONFIG_PATH).get("user_config") or {}
+
+    def _load_yaml(self, path: Path) -> dict:
+        """Parse one yaml file, or ``{}`` if it cannot be read."""
         try:
             import yaml
 
-            with config_path.open(encoding="utf-8") as f:
-                config = yaml.safe_load(f) or {}
+            with path.open(encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
         except Exception as exc:
             logger.warning(
-                "[LocalMock] failed to read singlebox config %s: %s",
-                config_path,
-                exc,
+                "[LocalMock] failed to read singlebox config %s: %s", path, exc
             )
             return {}
-
-        return config.get("user_config") or {}

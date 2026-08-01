@@ -25,6 +25,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_chat
+  - agentclaw.community.core.config.yaml_provider  # LocalSecretResolver reuses the provider's deep-merge so both read one effective config
   - agentclaw.community.core.devices
   - agentclaw.community.core.errors
   - agentclaw.community.core.expert_chat
