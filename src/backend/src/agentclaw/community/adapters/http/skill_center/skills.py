@@ -2201,9 +2201,10 @@ def _resolve_parameter_bot(
     not the authenticated actor (who may be an ADMIN collaborator).
 
     The requested Bot ID is used only as a lookup key; ownership always comes
-    from the Bot row. Bot-private Skills must agree with that identity. Shared
-    Git market Skills intentionally have no owner/Bot fields and remain usable
-    across Bots.
+    from the Bot row. ``Skill.user_id`` records the author and may therefore be
+    a collaborator, so it must never participate in device-owner resolution.
+    Bot-private Skills are scoped by ``bolt_id``; shared Git market Skills have
+    no Bot binding and remain usable across Bots.
     """
 
     bot = bot_repo.get_by_id_and_entity(requested_bot_id, requested_entity_id)
@@ -2217,29 +2218,22 @@ def _resolve_parameter_bot(
         )
 
     skill_bot_id = str(skill.get("bolt_id") or "")
-    skill_owner_id = str(skill.get("user_id") or "")
     is_shared_git_skill = (
         str(skill.get("git_path") or "").startswith("git://")
-        and not skill_owner_id
+        and not skill_bot_id
     )
     if is_shared_git_skill:
         return bot
 
-    if not skill_bot_id or not skill_owner_id:
+    if not skill_bot_id:
         raise HTTPException(
             status_code=409,
-            detail="Skill ownership metadata is incomplete",
+            detail="Skill Bot metadata is incomplete",
         )
     if requested_bot_id != skill_bot_id:
         raise HTTPException(
             status_code=409,
             detail="Skill does not belong to the requested Bot",
-        )
-
-    if bot_owner_id != skill_owner_id:
-        raise HTTPException(
-            status_code=409,
-            detail="Skill and Bot ownership metadata are inconsistent",
         )
     return bot
 

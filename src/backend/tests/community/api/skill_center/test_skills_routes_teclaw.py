@@ -475,7 +475,7 @@ def test_readme_route_handles_target_bot_repository_failure(caplog):
 
 @pytest.mark.parametrize("method", ["get", "post"])
 def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
-    """ADMIN 协作者操作参数时，设备解析必须使用 Bot owner 而非 actor。"""
+    """协作者上传并操作参数时，设备解析必须使用 Bot owner 而非 author。"""
 
     lookup_svc = MagicMock()
     lookup_svc.get_skill.return_value = {
@@ -484,7 +484,7 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
         "link_name": "x",
         "git_path": "local://skills-local/x",
         "bolt_id": "b1",
-        "user_id": "owner-u",
+        "user_id": "collaborator-author",
     }
     lookup_svc.parse_local_skill_config = AsyncMock(return_value=None)
     client, _, _ = _app(lookup_svc)
@@ -560,6 +560,35 @@ def test_parameter_route_rejects_request_bot_mismatch_before_device_access():
     )
 
     assert response.status_code == 409
+    parameter_factory.create.assert_not_awaited()
+
+
+def test_parameter_route_rejects_private_skill_without_bot_binding():
+    """Private local Skills must retain a Bot binding even though author is optional."""
+
+    from agentclaw.community.api.skill_parameter_service_factory import (
+        SkillParameterServiceFactoryProtocol,
+    )
+    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+
+    lookup_svc = MagicMock()
+    skill = {
+        "id": "1",
+        "name": "x",
+        "link_name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": None,
+        "user_id": "collaborator-author",
+    }
+    client, _, _ = _app(lookup_svc)
+    injector = client.app.state.injector
+    injector.get(SkillRepository).get_by_id.return_value = skill
+    parameter_factory = injector.get(SkillParameterServiceFactoryProtocol)
+
+    response = client.get("/api/skills/1/parameters", params=_Q)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Skill Bot metadata is incomplete"
     parameter_factory.create.assert_not_awaited()
 
 
@@ -661,7 +690,7 @@ def test_parameter_route_returns_structured_error_without_active_binding():
 
 
 def test_shared_git_skill_parameters_use_requested_bot_owner():
-    """共享 Git Skill 无 Skill owner 时，仍以目标 Bot owner 解析设备。"""
+    """共享 Git Skill 的 author 不影响目标 Bot owner 解析。"""
 
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
@@ -676,7 +705,7 @@ def test_shared_git_skill_parameters_use_requested_bot_owner():
         "link_name": "shared",
         "git_path": "git://shared",
         "bolt_id": None,
-        "user_id": None,
+        "user_id": "market-author",
         "is_public": True,
     }
     lookup_svc.get_skill.return_value = skill
