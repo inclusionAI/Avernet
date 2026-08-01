@@ -8,11 +8,11 @@ coding agents working on OCB.
 Before changing code, read the files that define the boundary you are touching.
 For architecture-sensitive work, these documents are mandatory:
 
-- `src/bcs/docs/arch/arch.rules.md` — the OCB architecture constitution.
-- `src/bcs/docs/arch/ci.enforce.md` — required CI gates for enforcing the constitution.
-- `src/bcs/docs/arch/context-boundary-format.md` — required context boundary metadata
+- `docs/arch/arch.rules.md` — the OCB architecture constitution.
+- `docs/arch/ci.enforce.md` — required CI gates for enforcing the constitution.
+- `docs/arch/context-boundary-format.md` — required context boundary metadata
   for backend modules.
-- `src/bcs/docs/arch/protocol-contract-tests.md` — required conformance test shape for
+- `docs/arch/protocol-contract-tests.md` — required conformance test shape for
   plugin protocols.
 
 If a module has its own `AGENTS.md`, follow it in addition to this file. The
@@ -32,15 +32,15 @@ OCB is a monorepo for a multi-bot AI workbench. It includes:
 
 ```text
 ocb/
+├── docs/
+│   ├── arch/                 # Architecture constitution and CI constraints
+│   └── open-source/          # Open-source readiness and design notes
 ├── scripts/                  # Local orchestration and utility scripts
 ├── src/
 │   ├── backend/              # Python backend service
 │   ├── frontend/             # TypeScript frontend workbench
 │   ├── engine/               # Python engine adapter
 │   ├── bcs/                  # Rust coordination service
-│   │   └── docs/
-│   │       ├── arch/         # Architecture constitution and CI constraints
-│   │       └── ...           # Technical docs and design specs
 │   └── tui/                  # Rust terminal client
 └── tests/                    # Cross-module tests
 ```
@@ -80,7 +80,7 @@ The architecture constitution is binding. In practice:
 ## CI Expectations
 
 Changes should preserve or improve the gates described in
-`src/bcs/docs/arch/ci.enforce.md`:
+`docs/arch/ci.enforce.md`:
 
 - dependency boundary checks
 - forbidden transport/framework usage in core
