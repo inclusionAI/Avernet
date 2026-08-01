@@ -4,7 +4,7 @@
 
 - Worktree / repo: Avernet `rebase/session-file-engine-direct-on-dev`
 - Head / base: `rebase/session-file-engine-direct-on-dev` / `dev`
-- PR: 待推送后创建
+- PR: https://github.com/inclusionAI/Avernet/pull/677
 - 人工意见模式: auto
 
 本分支以最新 `origin/dev` 为底，只挑选 Session File Engine Direct 的 8 个提交；
@@ -24,24 +24,30 @@
 
 | 轮次 | 来源 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 待 PR 创建 | - | 待检查 | - | - | - |
+| 0 | 无 | - | CLEAR | 创建时未发现自动 review 或普通评论。 | - | 2026-08-01 初始查询。 |
 
 ## ACI/CI
 
 | Job/指标 | 状态 | 证据 | 根因 | 修复/提交 | 验证 |
 | --- | --- | --- | --- | --- | --- |
-| 远端检查 | PENDING | PR 待创建 | - | - | 本地验证已通过，等待远端实际结果。 |
+| BCS e2e (coverage gated) | PENDING | GitHub Actions | 已排队 | - | 等待实际结果。 |
+| Singlebox coverage | PENDING | GitHub Actions | 已排队 | - | 等待实际结果。 |
+| BCS unit tests | PENDING | GitHub Actions | 已排队 | - | 等待实际结果。 |
+| Backend unit tests | PENDING | GitHub Actions | 已排队 | - | 等待实际结果。 |
+| Engine unit tests | PENDING | GitHub Actions | 已排队 | - | 等待实际结果。 |
+| BaaS unit tests | PENDING | GitHub Actions | 已排队 | - | 等待实际结果。 |
+| Gateway unit tests | PENDING | GitHub Actions | 已排队 | - | 等待实际结果。 |
 
 ## 人工意见
 
 | 轮次 | 作者 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 | --- | --- | --- | --- | --- | --- |
-| 0 | 待 PR 创建 | - | 待检查 | - | - | - |
+| 0 | 无 | - | CLEAR | 创建时未发现人工 review 或普通评论。 | - | 2026-08-01 初始查询。 |
 
 ## 当前结论
 
-- PR: NOT_CREATED
-- 自动意见: PENDING
+- PR: OPEN (#677)
+- 自动意见: CLEAR
 - ACI/CI: PENDING
-- 人工意见: PENDING
-- 下一步: 推送分支并创建面向 `dev` 的 PR。
+- 人工意见: CLEAR
+- 下一步: 等待当前 head 的全部远端检查结束；出现合理评论或确定性失败时修复后重新检查。
