@@ -520,7 +520,7 @@ SessionParticipant:
     actor_id:
       type: string
     actor_kind:
-      const: bot
+      $ref: "#/ActorKind"
     name:
       type: string
     role:
@@ -532,7 +532,7 @@ SessionParticipant:
         - worker
         - observer
     mode:
-      $ref: "#/BotParticipantMode"
+      $ref: "#/ParticipantMode"
     joined_at:
       type: integer
       minimum: 0

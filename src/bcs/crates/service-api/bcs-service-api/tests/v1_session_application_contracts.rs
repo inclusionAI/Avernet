@@ -5,7 +5,7 @@ use bcs_service_api::application::v1::{
     ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedUser, BotParticipantMode,
     CompleteSession, CreateSession, CreateSessionOutcome, DeleteResult, DeleteSession,
     DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, MessageSenderKind,
-    Page, Principal, SessionCompletionResult, SessionDetail, SessionMessage,
+    Page, ParticipantMode, Principal, SessionCompletionResult, SessionDetail, SessionMessage,
     SessionMessageKind, SessionMessagePage, SessionMessageService, SessionParticipant,
     SessionParticipantInput, SessionService, SessionStatus, UpdateSession, UpdateSessionParticipant,
 };
@@ -200,21 +200,41 @@ fn bot_participant_mode_is_narrower_than_domain_participant_mode() {
 }
 
 #[test]
-fn session_participant_serializes_with_bot_only_actor_kind() {
-    let participant = SessionParticipant {
+fn session_participant_serializes_bot_and_human_actors() {
+    // Vey7i: the V1 `SessionParticipant` contract admits both Bot and Human
+    // actors. A Bot participant serializes with `actor_kind: "bot"` and the
+    // Bot-valid `mode: "auto"`; a Human participant (inserted by the legacy
+    // invitation-accept path) serializes with `actor_kind: "human"` and the
+    // Human-valid `mode: "present"`.
+    let bot = SessionParticipant {
         actor_id: "bot-1".into(),
         actor_kind: ActorKind::Bot,
         name: Some("Zhang San".into()),
         role: bcs_service_api::application::v1::ParticipantRole::Driver,
-        mode: BotParticipantMode::Auto,
+        mode: ParticipantMode::Auto,
         joined_at: Some(42),
     };
-    let json = serde_json::to_value(&participant).expect("serialize SessionParticipant");
-    assert_eq!(json["actor_id"], "bot-1");
-    assert_eq!(json["actor_kind"], "bot");
-    assert_eq!(json["role"], "driver");
-    assert_eq!(json["mode"], "auto");
-    assert_eq!(json["joined_at"], 42);
+    let bot_json = serde_json::to_value(&bot).expect("serialize Bot SessionParticipant");
+    assert_eq!(bot_json["actor_id"], "bot-1");
+    assert_eq!(bot_json["actor_kind"], "bot");
+    assert_eq!(bot_json["role"], "driver");
+    assert_eq!(bot_json["mode"], "auto");
+    assert_eq!(bot_json["joined_at"], 42);
+
+    let human = SessionParticipant {
+        actor_id: "human_staff-1".into(),
+        actor_kind: ActorKind::Human,
+        name: Some("Alice".into()),
+        role: bcs_service_api::application::v1::ParticipantRole::Consultant,
+        mode: ParticipantMode::Present,
+        joined_at: None,
+    };
+    let human_json = serde_json::to_value(&human).expect("serialize Human SessionParticipant");
+    assert_eq!(human_json["actor_id"], "human_staff-1");
+    assert_eq!(human_json["actor_kind"], "human");
+    assert_eq!(human_json["role"], "consultant");
+    assert_eq!(human_json["mode"], "present");
+    assert!(human_json.get("joined_at").is_none());
 }
 
 #[test]

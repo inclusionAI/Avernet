@@ -23,8 +23,8 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::port::repo::{MessageRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, Group, GroupCoreService, GroupStrategy, Participant,
-    ParticipantRole, SessionKind,
+    ActorKind, BotCapabilities, BotRegistryCoreService, Group, GroupCoreService, GroupStrategy,
+    Participant, ParticipantMode, ParticipantRole, SessionKind,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -255,7 +255,7 @@ async fn create_as_manager_succeeds_and_projects_participants() {
         .find(|p| p.actor_id == "expert")
         .expect("expert participant");
     assert_eq!(expert.role, ParticipantRole::Consultant);
-    assert_eq!(expert.mode, BotParticipantMode::Muted);
+    assert_eq!(expert.mode, ParticipantMode::Muted);
     assert_eq!(expert.name.as_deref(), Some("expert"));
     let driver = detail
         .participants
@@ -263,7 +263,7 @@ async fn create_as_manager_succeeds_and_projects_participants() {
         .find(|p| p.actor_id == "driver")
         .expect("driver participant");
     assert_eq!(driver.role, ParticipantRole::Driver);
-    assert_eq!(driver.mode, BotParticipantMode::Auto);
+    assert_eq!(driver.mode, ParticipantMode::Auto);
 }
 
 #[tokio::test]
@@ -834,7 +834,7 @@ async fn participant_add_update_remove_lifecycle() {
         .expect("add participant");
     assert_eq!(added.actor_id, "newcomer");
     assert_eq!(added.role, ParticipantRole::Consultant);
-    assert_eq!(added.mode, BotParticipantMode::Auto);
+    assert_eq!(added.mode, ParticipantMode::Auto);
 
     // Adding twice is a conflict.
     let error = fixture
@@ -860,7 +860,7 @@ async fn participant_add_update_remove_lifecycle() {
         })
         .await
         .expect("update participant");
-    assert_eq!(updated.mode, BotParticipantMode::Muted);
+    assert_eq!(updated.mode, ParticipantMode::Muted);
 
     // Remove.
     let removed = fixture
@@ -995,7 +995,7 @@ async fn update_participant_human_owner_succeeds_and_non_owner_forbidden() {
         })
         .await
         .expect("owner human updates owned bot");
-    assert_eq!(updated.mode, BotParticipantMode::Muted);
+    assert_eq!(updated.mode, ParticipantMode::Muted);
 
     // Non-owner Human is forbidden.
     let error = fixture
@@ -1585,4 +1585,75 @@ async fn human_view_session_messages_as_unowned_bot_forbidden() {
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
     ));
+}
+
+#[tokio::test]
+async fn get_preserves_human_participant_from_legacy_invitation_join() {
+    // Vey7i: the legacy invitation-accept path (`join_session_by_invite`)
+    // inserts a Human participant directly into `session.participants` with
+    // `actor_kind: Human, mode: Present` (see
+    // `bcs-group/src/application/invite.rs`). The V1 facade `get` must surface
+    // that participant verbatim — `actor_kind: Human` and `mode: Present` —
+    // NOT boot-truncate it to the Bot-only `Auto`. This seeds the same roster
+    // shape via the repo (the contract `join_session_by_invite` ultimately
+    // writes via `SessionManagementService::add_participant`) and reads it
+    // back through the V1 `SessionService::get` projection path.
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.store_group("g1", "driver", None).await;
+
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant {
+                        bot_uuid: "human_staff-1".into(),
+                        bot_name: Some("Alice".into()),
+                        kind: None,
+                        role: ParticipantRole::Consultant,
+                        actor_kind: ActorKind::Human,
+                        mode: Some(ParticipantMode::Present),
+                    },
+                ],
+                group_version: Some(group.version),
+                caller_id: Some("driver".to_string()),
+                caller_principal: Some("driver".to_string()),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session with human participant");
+
+    let detail = fixture
+        .service
+        .get(GetSession {
+            principal: bot_principal("driver"),
+            session_id: session.id.clone(),
+        })
+        .await
+        .expect("get session");
+
+    let human = detail
+        .participants
+        .iter()
+        .find(|p| p.actor_id == "human_staff-1")
+        .expect("human participant present in V1 projection");
+    assert_eq!(human.actor_kind, ActorKind::Human);
+    assert_eq!(human.mode, ParticipantMode::Present);
+    assert_eq!(human.role, ParticipantRole::Consultant);
+
+    // The Bot driver is still projected as a Bot with Auto (no regression).
+    let driver = detail
+        .participants
+        .iter()
+        .find(|p| p.actor_id == "driver")
+        .expect("driver participant present");
+    assert_eq!(driver.actor_kind, ActorKind::Bot);
+    assert_eq!(driver.mode, ParticipantMode::Auto);
 }

@@ -961,25 +961,19 @@ fn build_participant(input: &SessionParticipantInput, role: ParticipantRole) -> 
 }
 
 fn project_participant(participant: &Participant) -> SessionParticipant {
+    // Vey7i: pass `actor_kind` and the 4-value domain `ParticipantMode`
+    // through verbatim so a Human participant inserted by the legacy
+    // invitation-accept path (`actor_kind: Human, mode: Present`) is surfaced
+    // as-is, not boot-truncated to `Auto`. Client-input Bot participants still
+    // round-trip `Auto`/`Muted` because `build_participant` / `add_participant`
+    // map the V1 input mode into the domain mode before persistence.
     SessionParticipant {
         actor_id: participant.bot_uuid.clone(),
         actor_kind: participant.actor_kind,
         name: participant.bot_name.clone(),
         role: participant.role,
-        mode: project_bot_mode(participant.effective_mode()),
+        mode: participant.effective_mode(),
         joined_at: None,
-    }
-}
-
-/// Project the domain collaboration mode into the V1 Bot-only mode. Session
-/// participants are Bot-only in V1; the Human-only `Present`/`Absent` variants
-/// should not appear, but default to `Auto` if they do rather than failing the
-/// read path.
-fn project_bot_mode(mode: ParticipantMode) -> BotParticipantMode {
-    match mode {
-        ParticipantMode::Auto => BotParticipantMode::Auto,
-        ParticipantMode::Muted => BotParticipantMode::Muted,
-        ParticipantMode::Present | ParticipantMode::Absent => BotParticipantMode::Auto,
     }
 }
 
@@ -1223,19 +1217,52 @@ mod tests {
     }
 
     #[test]
-    fn project_bot_mode_narrows_to_auto_or_muted() {
-        assert_eq!(
-            project_bot_mode(ParticipantMode::Auto),
-            BotParticipantMode::Auto
-        );
-        assert_eq!(
-            project_bot_mode(ParticipantMode::Muted),
-            BotParticipantMode::Muted
-        );
-        // Human-only modes default to Auto for Bot-only sessions.
-        assert_eq!(
-            project_bot_mode(ParticipantMode::Present),
-            BotParticipantMode::Auto
-        );
+    fn project_participant_preserves_human_present_mode() {
+        // Vey7i: a legacy invitation-accept inserts a Human participant with
+        // `actor_kind: Human, mode: Present`. The V1 projection must NOT map
+        // that into the Bot-only `Auto`/`Muted` vocabulary; it must pass
+        // `actor_kind` and `effective_mode()` through verbatim so `GET session`
+        // surfaces the real membership.
+        let human = Participant {
+            bot_uuid: "human_staff-1".into(),
+            bot_name: Some("Alice".into()),
+            kind: None,
+            role: ParticipantRole::Consultant,
+            actor_kind: ActorKind::Human,
+            mode: Some(ParticipantMode::Present),
+        };
+        let projected = project_participant(&human);
+        assert_eq!(projected.actor_id, "human_staff-1");
+        assert_eq!(projected.actor_kind, ActorKind::Human);
+        assert_eq!(projected.role, ParticipantRole::Consultant);
+        assert_eq!(projected.mode, ParticipantMode::Present);
+        assert_eq!(projected.name.as_deref(), Some("Alice"));
+
+        // `mode: None` falls back to the actor-kind default; for a Human that
+        // is `Absent`, and the projection must surface that verbatim too.
+        let absent = Participant {
+            bot_uuid: "human_staff-2".into(),
+            bot_name: None,
+            kind: None,
+            role: ParticipantRole::Observer,
+            actor_kind: ActorKind::Human,
+            mode: None,
+        };
+        let projected_absent = project_participant(&absent);
+        assert_eq!(projected_absent.actor_kind, ActorKind::Human);
+        assert_eq!(projected_absent.mode, ParticipantMode::Absent);
+
+        // No regression for Bot participants: Auto/Muted pass through as-is.
+        let bot = Participant {
+            bot_uuid: "bot-1".into(),
+            bot_name: None,
+            kind: None,
+            role: ParticipantRole::Driver,
+            actor_kind: ActorKind::Bot,
+            mode: Some(ParticipantMode::Muted),
+        };
+        let projected_bot = project_participant(&bot);
+        assert_eq!(projected_bot.actor_kind, ActorKind::Bot);
+        assert_eq!(projected_bot.mode, ParticipantMode::Muted);
     }
 }

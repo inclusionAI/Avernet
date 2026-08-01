@@ -22,7 +22,7 @@ use bcs_service_api::application::v1::{
     InvitationAcceptResult, InvitationService, ListBotFriendRequests, ListBotFriendships,
     RejectFriendRequest, DeleteBotFriendship,
 };
-use bcs_service_api::{ActorKind, ParticipantRole};
+use bcs_service_api::{ActorKind, ParticipantMode, ParticipantRole};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -278,7 +278,10 @@ impl SessionService for FakeSessionService {
             actor_kind: ActorKind::Bot,
             name: None,
             role: ParticipantRole::Consultant,
-            mode: command.mode.unwrap_or(BotParticipantMode::Auto),
+            mode: match command.mode {
+                Some(BotParticipantMode::Muted) => ParticipantMode::Muted,
+                Some(BotParticipantMode::Auto) | None => ParticipantMode::Auto,
+            },
             joined_at: Some(1),
         })
     }
@@ -296,7 +299,10 @@ impl SessionService for FakeSessionService {
             actor_kind: ActorKind::Bot,
             name: None,
             role: ParticipantRole::Consultant,
-            mode: command.mode,
+            mode: match command.mode {
+                BotParticipantMode::Muted => ParticipantMode::Muted,
+                BotParticipantMode::Auto => ParticipantMode::Auto,
+            },
             joined_at: Some(1),
         })
     }
@@ -396,7 +402,7 @@ fn session_participant() -> SessionParticipant {
         actor_kind: ActorKind::Bot,
         name: Some("Bot 1".into()),
         role: ParticipantRole::Driver,
-        mode: BotParticipantMode::Auto,
+        mode: ParticipantMode::Auto,
         joined_at: Some(1),
     }
 }

@@ -6,12 +6,15 @@ use super::{ApplicationError, Principal};
 
 pub use bcs_domain::{ActorKind, ParticipantMode, ParticipantRole};
 
-/// Per-session bot collaboration mode.
+/// Per-session bot collaboration mode for *client input* only.
 ///
-/// V1 sessions are Bot-only, so the V1 projection exposes only the two
-/// Bot-valid variants of the domain `ParticipantMode`. The route/facade
-/// enforces `actor_kind == Bot` for session participants; `Human` actors are
-/// rejected before reaching the application layer.
+/// V1 session participants can be Bots (added by clients via
+/// `create` / `add_participant` / `update_participant`) or Humans (added by
+/// the legacy invitation-accept path, `join_session_by_invite`, with
+/// `actor_kind: Human, mode: Present`). The V1 `SessionParticipant` *output*
+/// therefore carries the full domain `ParticipantMode` (4 values) so a Human
+/// participant is surfaced verbatim. Client *input* still admits only the two
+/// Bot-valid variants (`auto`, `muted`); Humans never enter via client input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BotParticipantMode {
@@ -41,7 +44,7 @@ pub struct SessionParticipant {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub role: ParticipantRole,
-    pub mode: BotParticipantMode,
+    pub mode: ParticipantMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joined_at: Option<u64>,
 }
