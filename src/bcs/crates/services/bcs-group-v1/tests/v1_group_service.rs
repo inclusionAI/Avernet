@@ -575,6 +575,10 @@ fn normal_group(
     group.label = Some(group_id.to_string());
     group.group_strategy = strategy;
     group.updated_at = updated_at;
+    // V1 list_bot_groups sorts by `created_at DESC, group_id ASC`; pin both
+    // timestamps to the same value so existing ordering assertions remain
+    // deterministic under the new comparator.
+    group.created_at = updated_at;
     group
 }
 
@@ -688,6 +692,91 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
         .expect("list session-only");
     assert_eq!(session_only.total, 1);
     assert_eq!(session_only.items.len(), 1);
+}
+
+#[tokio::test]
+async fn list_bot_groups_sorts_by_created_at_desc_not_updated_at() {
+    // V1 contract declares `created_at DESC, group_id ASC`. The legacy
+    // `updated_at DESC` ordering would put a recently-edited but older group
+    // first, violating the contract. Seed three groups where the sort keys
+    // diverge to prove the V1 facade uses `created_at` (with `group_id` as
+    // the deterministic tie-breaker).
+    let fixture = Fixture::new().await;
+    for bot in ["target", "driver-a", "driver-b", "driver-c"] {
+        fixture.add_public_bot(bot).await;
+    }
+
+    // Group A: oldest by created_at, but most recently edited.
+    let mut group_a = normal_group(
+        "group-a",
+        "driver-a",
+        vec![
+            Participant::bot("driver-a", ParticipantRole::Driver),
+            Participant::bot("target", ParticipantRole::Consultant),
+        ],
+        GroupStrategy::Chat,
+        500,
+    );
+    group_a.created_at = 100;
+    fixture.groups.upsert(group_a).await.expect("store group-a");
+
+    // Group B: newer by created_at, older by updated_at.
+    let mut group_b = normal_group(
+        "group-b",
+        "driver-b",
+        vec![
+            Participant::bot("driver-b", ParticipantRole::Driver),
+            Participant::bot("target", ParticipantRole::Consultant),
+        ],
+        GroupStrategy::Chat,
+        200,
+    );
+    group_b.created_at = 300;
+    fixture.groups.upsert(group_b).await.expect("store group-b");
+
+    // Group C: ties Group B on created_at, lower group_id; proves the
+    // `group_id ASC` tie-breaker keeps B before C.
+    let mut group_c = normal_group(
+        "group-c",
+        "driver-c",
+        vec![
+            Participant::bot("driver-c", ParticipantRole::Driver),
+            Participant::bot("target", ParticipantRole::Consultant),
+        ],
+        GroupStrategy::Chat,
+        50,
+    );
+    group_c.created_at = 300;
+    fixture.groups.upsert(group_c).await.expect("store group-c");
+
+    let page = fixture
+        .service
+        .list_bot_groups(ListBotGroups {
+            principal: bot_principal("target"),
+            bot_uuid: "target".into(),
+            offset: 0,
+            limit: 10,
+            q: None,
+            membership: MembershipFilter::All,
+            kind: GroupKindFilter::All,
+            strategy: None,
+        })
+        .await
+        .expect("list groups");
+
+    assert_eq!(page.total, 3);
+    assert_eq!(page.items.len(), 3);
+    // created_at DESC (group-b & group-c at 300 before group-a at 100), then
+    // group_id ASC tie-breaker (group-b before group-c).
+    let ids = page
+        .items
+        .iter()
+        .map(|summary| match summary {
+            GroupSummary::Normal(it) => it.group_id.as_str(),
+            other => panic!("expected normal summary, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["group-b", "group-c", "group-a"]);
 }
 
 #[tokio::test]

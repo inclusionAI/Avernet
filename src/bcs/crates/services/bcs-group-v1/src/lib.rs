@@ -958,7 +958,12 @@ impl GroupService for GroupServiceImpl {
                 })
             })
             .collect::<Vec<_>>();
-        groups.sort_by(|(left, _), (right, _)| DomainGroup::cmp_by_updated_at_desc(left, right));
+        // V1 contract (`api-contracts/v1/openapi/groups.yaml`) declares
+        // `created_at DESC, group_id ASC`. Legacy HTTP endpoints keep
+        // `updated_at` sort, so we use a dedicated comparator here.
+        groups.sort_by(|(left, _), (right, _)| {
+            DomainGroup::cmp_by_created_at_desc_group_id_asc(left, right)
+        });
         let total = groups.len() as u64;
         let page = groups
             .into_iter()
