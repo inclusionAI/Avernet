@@ -421,8 +421,19 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         &self,
         command: DeleteBotFriendship,
     ) -> Result<DeleteResult, ApplicationError> {
-        self.ensure_bot_resource(&command.principal, &command.bot_uuid)
-            .await?;
+        // The contract allows either endpoint of the friendship to initiate
+        // deletion ("Principal cannot manage either friendship endpoint").
+        // Try the primary bot_uuid first; fall back to the friend endpoint.
+        match self
+            .ensure_bot_resource(&command.principal, &command.bot_uuid)
+            .await
+        {
+            Ok(()) => {}
+            Err(_) => {
+                self.ensure_bot_resource(&command.principal, &command.friend_bot_uuid)
+                    .await?;
+            }
+        }
         let deleted = self
             .friends
             .remove_friendship(&command.bot_uuid, &command.friend_bot_uuid)
