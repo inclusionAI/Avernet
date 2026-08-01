@@ -9,10 +9,12 @@
 - **Superseded in part**: how the verifier is *configured* changed in PR #670.
   The signing key is a credential, so it now resolves through `SecretResolver`
   instead of `AVERNET_PRINCIPAL_SIGNING_KEY`, and `aud`/`iss` became constants
-  rather than env vars. Everything else below — the wire contract, what gets
-  rejected, and every decision in the Decisions section — still holds. See
-  **Configuration (as of PR #670)** below for the current contract and the
-  migration a deployment needs.
+  rather than env vars. The **wire contract** and **what gets rejected** are
+  unchanged. Anything describing *configuration* is superseded and marked so
+  inline — see **Configuration (as of PR #670)** below for the current contract
+  and the migration a deployment needs, plus Solution §5 and Decisions §1, which
+  carry their own corrections. Do not read an unmarked passage as current if it
+  talks about where the key comes from.
 
 ## Problem
 
@@ -132,8 +134,15 @@ placed the seams.
    request scope, because both `resolve_avernet_tenant` (called from ASGI
    middleware before routing) and `require_principal` (the route dependency)
    need it.
-5. **Config** (`utils/gateway_principal_config.py`): env-driven, process-cached,
-   shaped like `utils/env_utils` because the middleware call site is outside DI.
+5. ~~**Config** (`utils/gateway_principal_config.py`): env-driven, process-cached,
+   shaped like `utils/env_utils` because the middleware call site is outside DI.~~
+   **Superseded by PR #670.** Still process-wide and resolved once, but no longer
+   env-driven and no longer shaped like `env_utils`: the signing key is a
+   credential, so the composition root resolves it through `SecretResolver` at
+   boot and *pushes* it in via `init_principal_verifier_config`. The middleware
+   call site being outside DI is still the reason it cannot be an
+   `Injected(...)` parameter — that is what makes it a boot-time push rather
+   than a request-time pull. See **Configuration (as of PR #670)** above.
 
 ## Decisions
 
