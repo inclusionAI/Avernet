@@ -237,6 +237,10 @@ class SkillsPoolRolloutOperations:
         reason: str,
         acceptance_batch_id: str | None = None,
     ) -> RolloutConfigSnapshot:
+        # Retain the established HTTP/service parameter for callers that still
+        # send it.  Engine promotion is now independent, so it must not
+        # validate or audit acceptance evidence from another engine.
+        del acceptance_batch_id
         self._validate_change(operator=operator, reason=reason)
         if engine not in ENGINE_PROMOTION_ORDER:
             raise RolloutOperationError(f"unsupported engine: {engine}")
@@ -247,46 +251,25 @@ class SkillsPoolRolloutOperations:
             raise RolloutOperationError(
                 "disable environment full rollout before promoting another engine"
             )
-        expected_previous = ENGINE_PROMOTION_ORDER[
-            : ENGINE_PROMOTION_ORDER.index(engine)
-        ]
-        if current.promoted_engines != expected_previous:
-            raise RolloutOperationError(
-                f"previous engine promotion is incomplete for {engine}"
-            )
-        previous_engine = expected_previous[-1] if expected_previous else None
-        acceptance = None
-        if previous_engine is not None:
-            acceptance = self._accepted_batch(
-                current,
-                engine=previous_engine,
-                batch_id=acceptance_batch_id,
-            )
-            if acceptance is None:
-                raise RolloutOperationError(
-                    f"an accepted {previous_engine} batch is required for {engine}"
-                )
-            if self._open_batches(
-                current,
-                env=env,
-                engine=previous_engine,
-            ):
-                raise RolloutOperationError(
-                    f"{previous_engine} still has an unaccepted batch"
-                )
+        promoted = {*current.promoted_engines, engine}
+        promoted_engines = tuple(
+            candidate
+            for candidate in ENGINE_PROMOTION_ORDER
+            if candidate in promoted
+        )
         return self._write(
             snapshot=RolloutConfigSnapshot(
                 **{
                     **self._snapshot_values(current),
-                    "promoted_engines": (*current.promoted_engines, engine),
+                    "promoted_engines": promoted_engines,
                 }
             ),
             expected_snapshot=current,
             enabled=current.enabled,
             operator=operator,
             reason=reason,
-            batch_id=acceptance.batch_id if acceptance else None,
-            evidence=acceptance.report if acceptance else None,
+            batch_id=None,
+            evidence=None,
             action=f"promote:{engine}",
         )
 

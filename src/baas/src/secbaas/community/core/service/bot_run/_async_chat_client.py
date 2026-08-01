@@ -752,9 +752,7 @@ class AsyncChatClient:
             content = payload.get("message", {}).get("content", [])
             text = content[0].get("text", "") if content else ""
             state.content = text
-            self._emit_stream_chunk(
-                state, StreamChunk(type="final", content=text)
-            )
+            self._emit_stream_chunk(state, StreamChunk(type="final", content=text))
             if self.verbose:
                 logger.info(
                     "[agent] final: sessionKey=%s, stream=%s", session_key, stream

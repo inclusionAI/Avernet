@@ -1,6 +1,7 @@
 """Endpoint coverage for the teclaw branches of the readme / delete / parameters
 routes — they resolve the provider and build the skill service with the teclaw
 path adapter. A teclaw-provider resolver drives those branches end-to-end."""
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,8 +11,13 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
-from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
-from agentclaw.community.adapters.http.skill_center.skills import router as skills_router
+from agentclaw.community.adapters.http.dependencies import (
+    RequestContext,
+    get_request_context,
+)
+from agentclaw.community.adapters.http.skill_center.skills import (
+    router as skills_router,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -33,13 +39,15 @@ def _app(skill_service):
     bot_repo = MagicMock()
     default_bot = {
         "bot_id": "b1", "owner_id": "u1", "active_engine": "openclaw",
-        "bot_type": "service", "status": "ACTIVE",
+        "entity_type": "staff", "bot_type": "service", "status": "ACTIVE",
     }
     bot_repo.get_by_id_and_owner.return_value = default_bot
     bot_repo.get_by_id.return_value = default_bot
     bot_repo.get_by_id_and_entity.side_effect = (
         lambda _bot_id, _entity_id: bot_repo.get_by_id.return_value
     )
+    bot_repo.get_unique_by_id.return_value = default_bot
+    bot_repo.get_live_by_id_owner_and_env.return_value = [default_bot]
 
     resolver = MagicMock()
     resolver.resolve_for_bot.return_value = SimpleNamespace(provider="teclaw")
@@ -79,7 +87,9 @@ def _app(skill_service):
 
     class _M(Module):
         def configure(self, binder):
-            from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
+            from agentclaw.community.api.skill_service_factory import (
+                SkillServiceFactoryProtocol,
+            )
             from agentclaw.community.api.skill_parameter_service_factory import (
                 SkillParameterServiceFactoryProtocol,
             )
@@ -93,10 +103,18 @@ def _app(skill_service):
             from agentclaw.community.core.devices.services.device_context_resolver import (
                 DeviceContextResolver,
             )
-            from agentclaw.community.core.skill_center.factories import SkillServiceFactory
-            from agentclaw.community.core.skill_center.services.repositories import SkillRepository
-            from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-            from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+            from agentclaw.community.core.skill_center.factories import (
+                SkillServiceFactory,
+            )
+            from agentclaw.community.core.skill_center.services.repositories import (
+                SkillRepository,
+            )
+            from agentclaw.community.core.workspace.path_factory import (
+                WorkspacePathFactory,
+            )
+            from agentclaw.community.plugin_api.skill_center_client import (
+                SkillCenterClient,
+            )
 
             binder.bind(SkillServiceFactory, to=factory)
             binder.bind(SkillServiceFactoryProtocol, to=factory)
@@ -126,7 +144,7 @@ def test_readme_route_teclaw_branch():
     assert path_factory.get_bot_skills_local_dir.call_args.kwargs["is_teclaw"] is True
 
 
-def test_readme_route_uses_skill_owner_context_for_teclaw():
+def test_readme_route_uses_skill_bot_context_not_request_context_for_teclaw():
     lookup_svc = MagicMock()
     lookup_svc.get_skill.return_value = {
         "id": "1",
@@ -134,17 +152,36 @@ def test_readme_route_uses_skill_owner_context_for_teclaw():
         "link_name": "x",
         "git_path": "local://skills-local/x",
         "bolt_id": "teclaw-bot",
-        "user_id": "owner-u",
+        "user_id": "collaborator-u",
     }
     read_svc = MagicMock()
     read_svc.get_skill_readme = AsyncMock(return_value="# readme")
 
     client, factory, path_factory = _app(lookup_svc)
     factory.create.side_effect = [lookup_svc, read_svc]
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    target_bot = {
+        "bot_id": "teclaw-bot",
+        "owner_id": "skill-owner-u",
+        "entity_type": "staff",
+        "active_engine": "openclaw",
+        "bot_type": "service",
+    }
+    bot_repo.get_unique_by_id.return_value = target_bot
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
 
     resp = client.get(
         "/api/skills/1/readme",
-        params={"entity_id": "viewer-u", "bot_id": "default", "engine_type": "openclaw"},
+        params={
+            "entity_id": "wrong-request-owner",
+            "bot_id": "default",
+            "engine_type": "hermes",
+        },
     )
 
     assert resp.status_code == 200
@@ -152,13 +189,15 @@ def test_readme_route_uses_skill_owner_context_for_teclaw():
     assert factory.create.call_count == 2
     assert factory.create.call_args.kwargs["local_skill_path_adapter"] is not None
     assert path_factory.get_bot_skills_local_dir.call_args.args[:4] == (
-        "owner-u",
+        "skill-owner-u",
         "teclaw-bot",
         "openclaw",
         "staff",
     )
     assert path_factory.get_bot_skills_local_dir.call_args.kwargs["is_teclaw"] is True
-    read_svc.get_skill_readme.assert_awaited_once_with("1", "owner-u", "teclaw-bot")
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "1", "u1", "teclaw-bot", device_owner_id="skill-owner-u"
+    )
 
 
 def test_readme_route_link_name_falls_back_to_global_lookup():
@@ -172,7 +211,7 @@ def test_readme_route_link_name_falls_back_to_global_lookup():
             "link_name": "x",
             "git_path": "local://skills-local/x",
             "bolt_id": "teclaw-bot",
-            "user_id": "owner-u",
+            "user_id": "collaborator-u",
         },
     ]
     read_svc = MagicMock()
@@ -180,17 +219,34 @@ def test_readme_route_link_name_falls_back_to_global_lookup():
 
     client, factory, _ = _app(lookup_svc)
     factory.create.side_effect = [lookup_svc, read_svc]
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    target_bot = {
+        "bot_id": "teclaw-bot",
+        "owner_id": "owner-u",
+        "entity_type": "staff",
+        "active_engine": "openclaw",
+        "bot_type": "service",
+    }
+    bot_repo.get_unique_by_id.return_value = target_bot
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
 
     resp = client.get(
         "/api/skills/x/readme",
-        params={"entity_id": "viewer-u", "bot_id": "default", "engine_type": "openclaw"},
+        params={"entity_id": "owner-u", "bot_id": "default", "engine_type": "openclaw"},
     )
 
     assert resp.status_code == 200
     lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id="default")
     lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id="b1")
     lookup_svc.get_skill_by_link_name.assert_any_call("x", bolt_id=None)
-    read_svc.get_skill_readme.assert_awaited_once_with("x", "owner-u", "teclaw-bot")
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "x", "u1", "teclaw-bot", device_owner_id="owner-u"
+    )
 
 
 def test_readme_route_handles_duplicate_link_name_scopes_and_desktop_bot():
@@ -224,6 +280,8 @@ def test_readme_route_handles_duplicate_link_name_scopes_and_desktop_bot():
         "bot_type": "desktop",
         "status": "ACTIVE",
     }
+    bot_repo.get_unique_by_id.return_value = bot_repo.get_by_id_and_owner.return_value
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
 
     resp = client.get(
         "/api/skills/x/readme",
@@ -261,7 +319,9 @@ def test_readme_route_falls_back_when_skill_not_found_and_bot_type_lookup_fails(
     resp = client.get("/api/skills/404/readme", params=_Q)
 
     assert resp.status_code == 200
-    read_svc.get_skill_readme.assert_awaited_once_with("404", "u1", "b1")
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "404", "u1", "b1", device_owner_id="u1"
+    )
 
 
 def test_readme_route_numeric_id_falls_back_to_link_name_when_id_missing():
@@ -273,7 +333,7 @@ def test_readme_route_numeric_id_falls_back_to_link_name_when_id_missing():
         "link_name": "123",
         "git_path": "local://skills-local/numeric-link",
         "bolt_id": "teclaw-bot",
-        "user_id": "owner-u",
+        "user_id": "collaborator-u",
     }
     read_svc = MagicMock()
     read_svc.get_skill_readme = AsyncMock(return_value="# numeric")
@@ -286,12 +346,136 @@ def test_readme_route_numeric_id_falls_back_to_link_name_when_id_missing():
     assert resp.status_code == 200
     lookup_svc.get_skill.assert_called_once_with("123")
     lookup_svc.get_skill_by_link_name.assert_called_once_with("123", bolt_id="b1")
-    read_svc.get_skill_readme.assert_awaited_once_with("123", "owner-u", "teclaw-bot")
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "123", "u1", "teclaw-bot", device_owner_id="u1"
+    )
+
+
+def test_readme_route_rejects_local_skill_when_owning_bot_is_missing():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "deleted-bot",
+    }
+    client, factory, _ = _app(lookup_svc)
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_unique_by_id.return_value = None
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
+
+    resp = client.get("/api/skills/1/readme", params=_Q)
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Skill's owning bot was not found"
+    assert factory.create.call_count == 1
+
+
+def test_readme_route_resolves_default_bot_by_env_owner_and_bot_id():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "default",
+    }
+    read_svc = MagicMock()
+    read_svc.get_skill_readme = AsyncMock(return_value="# readme")
+    client, factory, _ = _app(lookup_svc)
+    factory.create.side_effect = [lookup_svc, read_svc]
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    target_bot = {
+        "bot_id": "default",
+        "owner_id": "target-owner",
+        "entity_type": "staff",
+        "active_engine": "openclaw",
+        "bot_type": "personal",
+    }
+    bot_repo.get_live_by_id_owner_and_env.return_value = [target_bot]
+
+    resp = client.get(
+        "/api/skills/1/readme",
+        params={"entity_id": "target-owner", "bot_id": "default"},
+    )
+
+    assert resp.status_code == 200
+    bot_repo.get_live_by_id_owner_and_env.assert_called_once()
+    assert bot_repo.get_live_by_id_owner_and_env.call_args.kwargs["bot_id"] == "default"
+    assert (
+        bot_repo.get_live_by_id_owner_and_env.call_args.kwargs["owner_id"]
+        == "target-owner"
+    )
+    bot_repo.get_unique_by_id.assert_not_called()
+    read_svc.get_skill_readme.assert_awaited_once_with(
+        "1", "u1", "default", device_owner_id="target-owner"
+    )
+
+
+def test_readme_route_rejects_ambiguous_default_bot_owner_scope():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "default",
+    }
+    client, _, _ = _app(lookup_svc)
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_live_by_id_owner_and_env.return_value = [
+        {"bot_id": "default", "owner_id": "u1"},
+        {"bot_id": "default", "owner_id": "u1"},
+    ]
+
+    resp = client.get(
+        "/api/skills/1/readme", params={"entity_id": "u1", "bot_id": "default"}
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Skill's owning bot is ambiguous"
+
+
+def test_readme_route_handles_target_bot_repository_failure(caplog):
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": "service-bot",
+    }
+    client, _, _ = _app(lookup_svc)
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.bot_management.repository.protocol",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
+    bot_repo.get_unique_by_id.side_effect = RuntimeError("database unavailable")
+
+    resp = client.get("/api/skills/1/readme", params=_Q)
+
+    assert resp.status_code == 404
+    assert "target bot lookup failed" in caplog.text
 
 
 @pytest.mark.parametrize("method", ["get", "post"])
 def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
-    """ADMIN 协作者操作参数时，设备解析必须使用 Bot owner 而非 actor。"""
+    """协作者上传并操作参数时，设备解析必须使用 Bot owner 而非 author。"""
 
     lookup_svc = MagicMock()
     lookup_svc.get_skill.return_value = {
@@ -300,7 +484,7 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
         "link_name": "x",
         "git_path": "local://skills-local/x",
         "bolt_id": "b1",
-        "user_id": "owner-u",
+        "user_id": "collaborator-author",
     }
     lookup_svc.parse_local_skill_config = AsyncMock(return_value=None)
     client, _, _ = _app(lookup_svc)
@@ -376,6 +560,35 @@ def test_parameter_route_rejects_request_bot_mismatch_before_device_access():
     )
 
     assert response.status_code == 409
+    parameter_factory.create.assert_not_awaited()
+
+
+def test_parameter_route_rejects_private_skill_without_bot_binding():
+    """Private local Skills must retain a Bot binding even though author is optional."""
+
+    from agentclaw.community.api.skill_parameter_service_factory import (
+        SkillParameterServiceFactoryProtocol,
+    )
+    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+
+    lookup_svc = MagicMock()
+    skill = {
+        "id": "1",
+        "name": "x",
+        "link_name": "x",
+        "git_path": "local://skills-local/x",
+        "bolt_id": None,
+        "user_id": "collaborator-author",
+    }
+    client, _, _ = _app(lookup_svc)
+    injector = client.app.state.injector
+    injector.get(SkillRepository).get_by_id.return_value = skill
+    parameter_factory = injector.get(SkillParameterServiceFactoryProtocol)
+
+    response = client.get("/api/skills/1/parameters", params=_Q)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Skill Bot metadata is incomplete"
     parameter_factory.create.assert_not_awaited()
 
 
@@ -477,7 +690,7 @@ def test_parameter_route_returns_structured_error_without_active_binding():
 
 
 def test_shared_git_skill_parameters_use_requested_bot_owner():
-    """共享 Git Skill 无 Skill owner 时，仍以目标 Bot owner 解析设备。"""
+    """共享 Git Skill 的 author 不影响目标 Bot owner 解析。"""
 
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
@@ -492,7 +705,7 @@ def test_shared_git_skill_parameters_use_requested_bot_owner():
         "link_name": "shared",
         "git_path": "git://shared",
         "bolt_id": None,
-        "user_id": None,
+        "user_id": "market-author",
         "is_public": True,
     }
     lookup_svc.get_skill.return_value = skill

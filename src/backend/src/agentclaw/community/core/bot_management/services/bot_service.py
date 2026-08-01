@@ -176,6 +176,18 @@ class BotLimitExceededError(BotServiceError):
     pass
 
 
+DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE = (
+    "Teclaw Cloud Bot 不能作为 Default Bot，请先创建其他类型的 Bot。"
+)
+
+
+class DefaultBotTeclawNotAllowedError(BotServiceError):
+    """Default Bot cannot use a Teclaw Cloud engine."""
+
+    def __init__(self) -> None:
+        super().__init__(DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE)
+
+
 # 仅允许中英文、数字、下划线、中划线、空格；禁止 @ # / 等特殊字符。
 _BOT_NAME_MAX_LEN = 32
 _BOT_NAME_ALLOWED_RE = re.compile(r"^[\w一-鿿 \-]+$", re.UNICODE)
@@ -922,6 +934,8 @@ class BotService:
     def check_create_bot_preflight(
         self,
         user_id: str,
+        bot_id: Optional[str] = None,
+        engine_type: Optional[str] = None,
         bot_name: Optional[str] = None,
     ) -> None:
         """Validate whether a bot creation request can start external auth.
@@ -942,6 +956,13 @@ class BotService:
         if bot_name and bot_name.strip():
             if self._repository.get_by_bot_name(bot_name.strip()):
                 raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
+        if bot_id is not None and engine_type is not None:
+            self._validate_default_bot_engine(bot_id, engine_type)
+
+    def _validate_default_bot_engine(self, bot_id: str, engine_type: str) -> None:
+        """Reject Teclaw Cloud as the engine of the reserved Default Bot."""
+        if bot_id == "default" and self.is_teclaw_bot(engine_type):
+            raise DefaultBotTeclawNotAllowedError()
 
     def _check_device_limit(self, entity_id: str, entity_type: str, owner_id: str) -> None:
         """
@@ -1161,10 +1182,15 @@ class BotService:
             # 未传入 bot_id，生成新的
             bot_id = generate_bot_id(user_id, self._repository)
 
-        # ===== 数量上限校验：避免单用户无限创建 Bot =====
-        # 复用 device_allocation.max_devices_per_entity 作为每用户 Bot 上限
-        # （语义同源：每用户最多 N 个 Bot/设备）。
-        self._check_bot_count_limit(user_id)
+        # Resolve active engine before creation preflight validation.
+        resolved_active_engine = engine_type or DEFAULT_ENGINE_TYPE
+
+        # ===== 创建前置校验：数量上限 + Default Bot 引擎约束 =====
+        self.check_create_bot_preflight(
+            user_id=user_id,
+            bot_id=bot_id,
+            engine_type=resolved_active_engine,
+        )
 
         # Resolve entity info
         resolved_entity_id = entity_id or f"staff_{user_id}"
@@ -1178,8 +1204,6 @@ class BotService:
         # engine — so switch_engine would refuse to switch back to it.
         resolved_engine_types = _get_engine_types()
 
-        # Resolve active engine: use frontend specified, otherwise use default
-        resolved_active_engine = engine_type or DEFAULT_ENGINE_TYPE
         # A bot's active engine must be a member of its own enabled-engine list —
         # switch_engine checks that list, so a row violating this can never
         # return to the engine it was created on. The invariant held by accident
@@ -3127,6 +3151,8 @@ class BotService:
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+        self._validate_default_bot_engine(bot_id, engine_type)
+
         # Check if the engine is in bot's engine_types
         bot_engine_types = bot.get("engine_types", [])
         if engine_type not in bot_engine_types:
@@ -3997,14 +4023,11 @@ class BotService:
         )
 
         # resolved_template_config 已在 BCN 能力门控前读取，后续 BaaS restart 复用同一快照。
-        # 与 _allocate_device_async（create / arca-restart 路径）同口径构造 extra_envs
-        # 与 template_config，让 BaaS 原地重启也消费 BOT_TYPE / RELAY_DEFAULT_MODEL /
-        # RELAY_DEFAULT_RUNTIME / AIX_DEVFLOW_INFO / GIT_ADDRESSES 及 sandbox overrides。
-        # 不补这段则 applicationCoding bot 走 baas 重启后 upgrade 不带 envs，容器拿不到
-        # BOT_TYPE=model/runtime 即便在 update_bot 改过也不生效。引擎口径与 create_bot
-        # 对齐（claude_code + aicoding），门控不命中时 extra_envs/template_config 保持
-        # None，upgrade 行为与改动前完全一致（envs 退化为 AGENTCLAW_ENGINE 单值）。
-        device_template_config: Optional[Dict[str, Any]] = None
+        # 与 _allocate_device_async（create / arca-restart 路径）同口径构造
+        # extra_envs，并独立透传 template_config。extra_envs 提供引擎策略
+        # 变量（BOT_TYPE / RELAY_DEFAULT_* / AIX_DEVFLOW_INFO / GIT_ADDRESSES），
+        # template_config 提供沙箱覆写（envs / image / resource_spec）。两者
+        # 不能互相门控。
         extra_envs: Optional[Dict[str, Any]] = self._build_engine_extra_envs(
             bot_id=str(bot_id),
             owner_id=user_id,
@@ -4014,25 +4037,26 @@ class BotService:
             template_config=resolved_template_config,
             log_context="bot_service._restart_bot_baas",
         )
-        if extra_envs:
-            # 与 _allocate_device_async 对齐：附加 template_uid 上下文给 BaaS device 层。
-            # 解析失败仅记 warning 不阻断（_attach_template_uid_context 内部已兜底）。
-            try:
-                device_template_config = self._attach_template_uid_context(
-                    bot_id=str(bot_id),
-                    user_id=user_id,
-                    bot_type=bot.get("bot_type", ""),
-                    engine_type=active_engine,
-                    template_type=bot_template_type,
-                    template_config=resolved_template_config,
-                )
-            except Exception as e:
-                logger.warning(
-                    "[bot_service._restart_bot_baas] Failed to attach template uid context for bot %s: %s",
-                    bot_id, e,
-                )
-                device_template_config = resolved_template_config
-
+        # 与 _allocate_device_async 对齐：BaaS 原地重启也必须透传模板快照。
+        # template_config.envs / image / resource_spec 是独立的沙箱覆写能力，
+        # 不能被 extra_envs（引擎策略环境变量）是否命中门控影响。否则非
+        # coding 模板或仅配置 envs/image/spec 的模板在 restart -> /update 时会
+        # 退化成默认 envs，丢失创建 Bot 时使用的沙箱覆写。
+        try:
+            device_template_config = self._attach_template_uid_context(
+                bot_id=str(bot_id),
+                user_id=user_id,
+                bot_type=bot.get("bot_type", ""),
+                engine_type=active_engine,
+                template_type=bot_template_type,
+                template_config=resolved_template_config,
+            )
+        except Exception as e:
+            logger.warning(
+                "[bot_service._restart_bot_baas] Failed to attach template uid context for bot %s: %s",
+                bot_id, e,
+            )
+            device_template_config = resolved_template_config
 
         import uuid as _uuid
         request_id = _uuid.uuid4().hex
@@ -4050,8 +4074,8 @@ class BotService:
             "migration_path": mig,
             # 个人 Bot / 服务 Bot 草稿的普通重启不走发布产物迁移，但仍按 NAS home 目录运行。
             "mount_home_dir_storage": True,
-            # 门控命中时透传 envs / template_config，让容器拿到 BOT_TYPE / RELAY_DEFAULT_*
-            # 及 sandbox overrides；门控不命中保持 None，upgrade 行为与改动前一致。
+            # extra_envs 可能因引擎策略门控为 None；template_config 仍需透传，
+            # 以保留创建 Bot 时使用的 envs / image / resource_spec 沙箱覆写。
             "extra_envs": extra_envs,
             "template_config": device_template_config,
         }

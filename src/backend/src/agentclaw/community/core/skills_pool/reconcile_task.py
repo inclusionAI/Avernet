@@ -15,6 +15,7 @@ from agentclaw.community.core.devices.repository.protocol import (
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.events.types import (
     BaasPublishCompletedEvent,
+    DeviceActivatedEvent,
     DeviceAliveEvent,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
@@ -408,13 +409,42 @@ class SkillsPoolReconcileWakeupListener(LifecycleBase):
 
     def handle(
         self,
-        event: DeviceAliveEvent | BaasPublishCompletedEvent,
+        event: DeviceAliveEvent | DeviceActivatedEvent | BaasPublishCompletedEvent,
     ) -> None:
         if isinstance(event, DeviceAliveEvent):
             self._handle_device_alive(event)
             return
+        if isinstance(event, DeviceActivatedEvent):
+            self._handle_device_activated(event)
+            return
         if isinstance(event, BaasPublishCompletedEvent):
             self._handle_baas_publish_completed(event)
+
+    def _handle_device_activated(self, event: DeviceActivatedEvent) -> None:
+        if event.device_provider != "baas":
+            return
+        binding = self._bindings.get_by_id(event.binding_id)
+        if binding is None or binding.device_provider != "baas":
+            return
+        if (
+            binding.device_id != event.device_id
+            or binding.entity_id != event.entity_id
+            or binding.entity_type != event.entity_type
+        ):
+            return
+        bot = self._bots.get_by_binding_id(event.binding_id)
+        if bot is None or bot.get("bot_type") != "desktop":
+            return
+        self._enqueue(
+            binding=binding,
+            bot=bot,
+            source="desktop_device_activated",
+            signal_identity={
+                "binding_id": event.binding_id,
+                "device_id": event.device_id,
+                "sandbox_id": event.sandbox_id,
+            },
+        )
 
     def _handle_device_alive(self, event: DeviceAliveEvent) -> None:
         # BaaS has a publish-id signal below. Avoid turning its generic ACTIVE

@@ -5,15 +5,26 @@ from __future__ import annotations
 import json
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from uuid import UUID
 
-
-LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
+from engine.community.config import RepoDelivery, current_repo_delivery
+from engine.community.core.skills.layout_planner import (
+    LAYOUT_CONTRACT_VERSION,
+    MAPPING_CONTRACT_VERSION,
+    LayoutIdentity,
+    RuntimeLayoutContext,
+    resolve_filesystem_skill_layout,
+    resolved_filesystem_layout_evidence,
+)
+from engine.community.core.skills.layout_planner import (
+    ResolvedFilesystemLayoutPlan as _FilesystemPoolLayout,
+)
 
 
 class RuntimeLayoutInspectionStatus(str, Enum):
@@ -41,98 +52,39 @@ class RuntimeLayoutInspection:
         }
 
 
-@dataclass(frozen=True)
-class _FilesystemPoolLayout:
-    legacy_root: Path
-    legacy_local: Path
-    legacy_repo: Path
-    pool_root: Path
-    pool_local: Path
-    pool_repo: Path
-    marker: Path
-    active_marker: Path
-    local_bridge: Path
-    repo_bridge: Path
-
-    @classmethod
-    def for_home(cls, home: Path) -> "_FilesystemPoolLayout":
-        return cls.for_engine("openclaw", home)
-
-    @classmethod
-    def for_engine(cls, engine: str, home: Path) -> "_FilesystemPoolLayout":
-        if engine == "hermes":
-            workspace = home / ".hermes" / "workspace"
-            legacy_root = home / ".hermes" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            legacy_repo = home / ".hermes" / "skills-repo"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                legacy_repo=legacy_repo,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                marker=pool_root / ".pool-ready",
-                active_marker=pool_root / ".pool-active",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=legacy_repo,
-            )
-        if engine == "aicoding":
-            workspace = home / ".aicoding" / "workspace"
-            legacy_root = home / ".claude" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            legacy_repo = home / ".aicoding" / "skills-repo"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                legacy_repo=legacy_repo,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                marker=pool_root / ".pool-ready",
-                active_marker=pool_root / ".pool-active",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=legacy_repo,
-            )
-        if engine == "claude_code":
-            workspace = home / ".claude_code" / "workspace"
-            legacy_root = home / ".claude" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            legacy_repo = home / ".claude_code" / "skills-repo"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                legacy_repo=legacy_repo,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                marker=pool_root / ".pool-ready",
-                active_marker=pool_root / ".pool-active",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=legacy_root / "skills-repo",
-            )
-        if engine != "openclaw":
-            raise ValueError(f"unsupported filesystem Pool engine: {engine}")
-        workspace = home / ".openclaw" / "workspace"
-        legacy_root = workspace / "skills"
-        pool_root = workspace / "skills-pool"
-        legacy_local = legacy_root / "skills-local"
-        legacy_repo = legacy_root / "skills-repo"
-        return cls(
-            legacy_root=legacy_root,
-            legacy_local=legacy_local,
-            legacy_repo=legacy_repo,
-            pool_root=pool_root,
-            pool_local=pool_root / "skills-local",
-            pool_repo=pool_root / "skills-repo",
-            marker=pool_root / ".pool-ready",
-            active_marker=pool_root / ".pool-active",
-            local_bridge=legacy_local,
-            repo_bridge=legacy_repo,
+def _ready_evidence(
+    *,
+    layout: _FilesystemPoolLayout,
+    marker: dict[str, Any],
+    checks: dict[str, bool],
+    mapping_contract_version: str | None,
+    activation_state: str | None = None,
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "marker": str(layout.marker),
+        "prepared_at": marker["prepared_at"],
+        "cutover_evidence_contract_version": "quarantine-v1",
+        "checks": checks,
+    }
+    if activation_state is not None:
+        evidence.update(
+            {
+                "active_marker": str(layout.active_marker),
+                "activation_state": activation_state,
+            }
         )
+    if mapping_contract_version is not None:
+        evidence.update(
+            {
+                "mapping_contract_version": mapping_contract_version,
+                "resolved_layout": resolved_filesystem_layout_evidence(
+                    layout,
+                    local_root=layout.pool_local,
+                    repo_root=layout.pool_repo,
+                ),
+            }
+        )
+    return evidence
 
 
 def _not_capable(
@@ -206,7 +158,7 @@ def _valid_timestamp(value: object) -> bool:
     if not isinstance(value, str):
         return False
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return False
     return parsed.tzinfo is not None
@@ -225,6 +177,7 @@ def _marker_contract_valid(
     layout: _FilesystemPoolLayout,
     expected_engine: str,
     expected_contract_version: str,
+    repo_delivery: RepoDelivery,
 ) -> bool:
     summary = marker.get("validation_summary")
     if not isinstance(summary, dict):
@@ -246,11 +199,59 @@ def _marker_contract_valid(
         and pool_local.get("valid") is True
         and isinstance(pool_repo, dict)
         and pool_repo.get("path") == str(layout.pool_repo)
-        and pool_repo.get("readable_mount") is True
         and pool_repo.get("valid") is True
         and isinstance(managed, list)
     )
     if not common:
+        return False
+    if repo_delivery is RepoDelivery.DOWNLOAD:
+        delivery_source = marker.get("repo_delivery_source")
+        delivery_bridge = summary.get("repo_delivery_bridge")
+        delivery_valid = (
+            marker.get("repo_delivery") == RepoDelivery.DOWNLOAD.value
+            and isinstance(delivery_source, str)
+            and bool(delivery_source)
+            and pool_repo.get("readable_delivery") is True
+            and pool_repo.get("source") == delivery_source
+            and isinstance(delivery_bridge, dict)
+            and delivery_bridge.get("path") == str(layout.pool_repo)
+            and delivery_bridge.get("target") == delivery_source
+            and delivery_bridge.get("valid") is True
+        )
+        if not delivery_valid:
+            return False
+        expected_bridges: list[dict[str, object]] = []
+        if expected_engine != "openclaw":
+            expected_bridges.append(
+                {
+                    "name": "stable_local_bridge",
+                    "path": str(layout.local_bridge),
+                    "target": str(layout.legacy_local),
+                    "valid": True,
+                }
+            )
+            expected_bridges.append(
+                {
+                    "name": "legacy_repo_delivery",
+                    "path": str(layout.legacy_repo),
+                    "target": delivery_source,
+                    "valid": True,
+                }
+            )
+        if expected_engine == "claude_code":
+            expected_bridges.append(
+                {
+                    "name": "legacy_repo_bridge",
+                    "path": str(layout.repo_bridge),
+                    "target": str(layout.legacy_repo),
+                    "valid": True,
+                }
+            )
+        bridges_valid = summary.get("structural_bridges") == expected_bridges
+        if expected_engine == "hermes":
+            return bridges_valid and summary.get("legacy_bridge_verified") is True
+        return bridges_valid
+    if pool_repo.get("readable_mount") is not True:
         return False
     if expected_engine == "openclaw":
         return (
@@ -325,17 +326,16 @@ def _managed_entries_valid(
     marker: dict[str, Any],
     layout: _FilesystemPoolLayout,
 ) -> bool:
-    entries = layout.legacy_root.iterdir()
+    entries = layout.active_root.iterdir()
     for entry in entries:
         if entry in (layout.local_bridge, layout.repo_bridge):
             continue
         record = _managed_entry_record(entry, layout)
-        if record is not None:
-            if record["valid"] is not True:
-                return False
+        if record is not None and record["valid"] is not True:
+            return False
 
     declared = marker["validation_summary"]["managed_active_entries"]
-    if any(
+    return not any(
         not isinstance(record, dict)
         or record.get("source") not in {"local", "repo"}
         or not isinstance(record.get("path"), str)
@@ -343,9 +343,7 @@ def _managed_entries_valid(
         or not isinstance(record.get("pool_target"), str)
         or record.get("valid") is not True
         for record in declared
-    ):
-        return False
-    return True
+    )
 
 
 def _active_marker_valid(
@@ -387,7 +385,7 @@ def _active_marker_valid(
         ):
             return False
         if (
-            target.parent != Path(os.path.abspath(layout.legacy_root))
+            target.parent != Path(os.path.abspath(layout.active_root))
             or target in {layout.local_bridge, layout.repo_bridge}
             or target in seen_targets
         ):
@@ -396,12 +394,15 @@ def _active_marker_valid(
     return True
 
 
-def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
+def _active_entries_failure_reason(
+    layout: _FilesystemPoolLayout,
+    *,
+    engine: str,
+) -> str | None:
     """Validate mutable managed entries without freezing an old mapping set."""
 
     pool_roots = tuple(
-        Path(os.path.abspath(root))
-        for root in (layout.pool_local, layout.pool_repo)
+        Path(os.path.abspath(root)) for root in (layout.pool_local, layout.pool_repo)
     )
     retired_roots = tuple(
         Path(os.path.abspath(root))
@@ -412,7 +413,15 @@ def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
             layout.repo_bridge,
         )
     )
-    for entry in layout.legacy_root.iterdir():
+    retired_active_corpus_roots = (
+        (
+            Path(os.path.abspath(layout.active_root / "skills-local")),
+            Path(os.path.abspath(layout.active_root / "skills-repo")),
+        )
+        if engine == "aicoding"
+        else ()
+    )
+    for entry in layout.active_root.iterdir():
         if not entry.is_symlink():
             continue
         target = _lexical_symlink_target(entry)
@@ -420,22 +429,26 @@ def _active_entries_valid(layout: _FilesystemPoolLayout) -> bool:
             try:
                 target_stat = entry.stat()
             except (FileNotFoundError, NotADirectoryError):
-                return False
+                return "active_managed_entry_invalid"
             if not stat.S_ISDIR(target_stat.st_mode):
-                return False
+                return "active_managed_entry_invalid"
             continue
+        if any(target.is_relative_to(root) for root in retired_active_corpus_roots):
+            return "retired_active_corpus_reference_present"
         if any(target.is_relative_to(root) for root in retired_roots):
-            return False
+            return "active_managed_entry_invalid"
         # External active entries predate Pool and remain outside this migration.
-    return True
+    return None
 
 
 def inspect_runtime_layout(
     *,
     engine: str,
     expected_contract_version: str = LAYOUT_CONTRACT_VERSION,
+    mapping_contract_version: str | None = MAPPING_CONTRACT_VERSION,
     home: Path = Path("/home/admin"),
     repo_is_mounted: Callable[[Path], bool] = os.path.ismount,
+    repo_delivery: RepoDelivery | None = None,
 ) -> RuntimeLayoutInspection:
     """Inspect local runtime facts; this function never mutates the filesystem."""
     if engine == "teclaw":
@@ -451,7 +464,14 @@ def inspect_runtime_layout(
             "engine_pool_probe_not_implemented",
         )
 
-    layout = _FilesystemPoolLayout.for_engine(engine, home)
+    effective_repo_delivery = repo_delivery or current_repo_delivery()
+    layout = resolve_filesystem_skill_layout(
+        LayoutIdentity(
+            engine_type=engine,
+            layout_contract_version=expected_contract_version,
+        ),
+        RuntimeLayoutContext(home=home),
+    )
     try:
         marker_stat = layout.marker.stat()
     except (FileNotFoundError, NotADirectoryError):
@@ -518,6 +538,7 @@ def inspect_runtime_layout(
         layout=layout,
         expected_engine=engine,
         expected_contract_version=expected_contract_version,
+        repo_delivery=effective_repo_delivery,
     ):
         return _invalid(
             engine=engine,
@@ -570,27 +591,50 @@ def inspect_runtime_layout(
             error=error,
             preparation_id=preparation_id,
         )
-    try:
-        pool_repo_mounted = repo_is_mounted(layout.pool_repo)
-    except OSError as error:
-        return _transient(
-            engine=engine,
-            contract_version=expected_contract_version,
-            layout=layout,
-            reason="pool_repo_temporarily_unavailable",
-            error=error,
-            preparation_id=preparation_id,
-        )
+    pool_repo_delivered = False
+    if effective_repo_delivery is RepoDelivery.MOUNT:
+        try:
+            pool_repo_delivered = repo_is_mounted(layout.pool_repo)
+        except OSError as error:
+            return _transient(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="pool_repo_temporarily_unavailable",
+                error=error,
+                preparation_id=preparation_id,
+            )
+    else:
+        try:
+            delivery_source = Path(str(marker["repo_delivery_source"]))
+            pool_repo_delivered = (
+                layout.pool_repo.is_symlink()
+                and _lexical_symlink_target(layout.pool_repo)
+                == Path(os.path.abspath(delivery_source))
+            )
+        except OSError as error:
+            return _transient(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="pool_repo_temporarily_unavailable",
+                error=error,
+                preparation_id=preparation_id,
+            )
     if (
         pool_repo_stat is None
         or not stat.S_ISDIR(pool_repo_stat.st_mode)
-        or not pool_repo_mounted
+        or not pool_repo_delivered
     ):
         return _invalid(
             engine=engine,
             contract_version=expected_contract_version,
             layout=layout,
-            reason="pool_repo_not_mounted",
+            reason=(
+                "pool_repo_not_mounted"
+                if effective_repo_delivery is RepoDelivery.MOUNT
+                else "pool_repo_delivery_invalid"
+            ),
             preparation_id=preparation_id,
         )
     try:
@@ -677,9 +721,23 @@ def inspect_runtime_layout(
                 reason="active_marker_contract_mismatch",
                 preparation_id=preparation_id,
             )
+        active_repo_corpus = layout.active_root / "skills-repo"
+        if engine == "aicoding" and (
+            active_repo_corpus.exists() or active_repo_corpus.is_symlink()
+        ):
+            return _invalid(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="active_repo_corpus_present",
+                preparation_id=preparation_id,
+            )
         if active_marker["activation_state"] == "active":
             retired_bridges = [("local", layout.local_bridge)]
-            if engine in {"openclaw", "claude_code"}:
+            if engine in {"openclaw", "claude_code"} and not (
+                engine == "openclaw"
+                and effective_repo_delivery is RepoDelivery.DOWNLOAD
+            ):
                 retired_bridges.append(("repo", layout.repo_bridge))
             for bridge_name, bridge_path in retired_bridges:
                 if bridge_path.exists() or bridge_path.is_symlink():
@@ -714,59 +772,87 @@ def inspect_runtime_layout(
                         reason="stable_repo_bridge_invalid",
                         preparation_id=preparation_id,
                     )
-            try:
-                active_entries_valid = _active_entries_valid(layout)
-            except PermissionError:
-                active_entries_valid = False
-            except OSError as error:
-                return _transient(
-                    engine=engine,
-                    contract_version=expected_contract_version,
-                    layout=layout,
-                    reason="active_entries_temporarily_unavailable",
-                    error=error,
-                    preparation_id=preparation_id,
-                )
-            if not active_entries_valid:
-                return _invalid(
-                    engine=engine,
-                    contract_version=expected_contract_version,
-                    layout=layout,
-                    reason="active_managed_entry_invalid",
-                    preparation_id=preparation_id,
-                )
+        try:
+            active_entries_failure_reason = _active_entries_failure_reason(
+                layout,
+                engine=engine,
+            )
+        except PermissionError:
+            active_entries_failure_reason = "active_managed_entry_invalid"
+        except OSError as error:
+            return _transient(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason="active_entries_temporarily_unavailable",
+                error=error,
+                preparation_id=preparation_id,
+            )
+        if active_entries_failure_reason is not None:
+            return _invalid(
+                engine=engine,
+                contract_version=expected_contract_version,
+                layout=layout,
+                reason=active_entries_failure_reason,
+                preparation_id=preparation_id,
+            )
+        active_checks = {
+            "marker_valid": True,
+            "active_marker_valid": True,
+            "pool_local_valid": True,
+            (
+                "pool_repo_mounted"
+                if effective_repo_delivery is RepoDelivery.MOUNT
+                else "pool_repo_downloaded"
+            ): True,
+            "pool_repo_readable": True,
+            "pool_mappings_valid": True,
+            "legacy_storage_entries_absent": (
+                active_marker["activation_state"] == "active"
+            ),
+        }
+        if (
+            engine in {"aicoding", "hermes"}
+            and active_marker["activation_state"] == "active"
+        ):
+            active_checks["stable_repo_bridge_valid"] = True
         return RuntimeLayoutInspection(
             status=RuntimeLayoutInspectionStatus.READY,
             engine=engine,
             layout_contract_version=expected_contract_version,
             preparation_id=preparation_id,
-            evidence={
-                "marker": str(layout.marker),
-                "active_marker": str(layout.active_marker),
-                "prepared_at": marker["prepared_at"],
-                "activation_state": active_marker["activation_state"],
-                "checks": {
-                    "marker_valid": True,
-                    "active_marker_valid": True,
-                    "pool_local_valid": True,
-                    "pool_repo_mounted": True,
-                    "pool_repo_readable": True,
-                    "pool_mappings_valid": True,
-                    "legacy_storage_entries_absent": (
-                        active_marker["activation_state"] == "active"
-                    ),
-                    "stable_repo_bridge_valid": (
-                        engine in {"aicoding", "hermes"}
-                    ),
-                },
-            },
+            evidence=_ready_evidence(
+                layout=layout,
+                marker=marker,
+                activation_state=active_marker["activation_state"],
+                mapping_contract_version=mapping_contract_version,
+                checks=active_checks,
+            ),
         )
-    required_bridges = [("legacy_repo", layout.repo_bridge, layout.pool_repo)]
-    if engine != "openclaw":
-        required_bridges = [
-            ("stable_local", layout.local_bridge, layout.legacy_local),
-            ("stable_repo", layout.repo_bridge, layout.pool_repo),
-        ]
+    if effective_repo_delivery is RepoDelivery.DOWNLOAD:
+        required_bridges = []
+        if engine != "openclaw":
+            required_bridges.append(
+                ("stable_local", layout.local_bridge, layout.legacy_local)
+            )
+            required_bridges.append(
+                (
+                    "legacy_repo_delivery",
+                    layout.legacy_repo,
+                    Path(str(marker["repo_delivery_source"])),
+                )
+            )
+        if engine == "claude_code":
+            required_bridges.append(
+                ("legacy_repo", layout.repo_bridge, layout.legacy_repo)
+            )
+    else:
+        required_bridges = [("legacy_repo", layout.repo_bridge, layout.pool_repo)]
+        if engine != "openclaw":
+            required_bridges = [
+                ("stable_local", layout.local_bridge, layout.legacy_local),
+                ("stable_repo", layout.repo_bridge, layout.pool_repo),
+            ]
     for bridge_name, bridge_path, expected_target in required_bridges:
         try:
             bridge_stat = bridge_path.lstat()
@@ -831,15 +917,21 @@ def inspect_runtime_layout(
     checks = {
         "marker_valid": True,
         "pool_local_valid": True,
-        "pool_repo_mounted": True,
+        (
+            "pool_repo_mounted"
+            if effective_repo_delivery is RepoDelivery.MOUNT
+            else "pool_repo_downloaded"
+        ): True,
         "pool_repo_readable": True,
         "managed_active_entries_valid": True,
     }
-    if engine == "openclaw":
+    if engine == "openclaw" and effective_repo_delivery is RepoDelivery.MOUNT:
         checks["legacy_repo_bridge_valid"] = True
     else:
-        checks["stable_local_bridge_valid"] = True
-        checks["stable_repo_bridge_valid"] = True
+        if engine != "openclaw":
+            checks["stable_local_bridge_valid"] = True
+        if effective_repo_delivery is RepoDelivery.MOUNT:
+            checks["stable_repo_bridge_valid"] = True
         if engine == "hermes":
             checks["legacy_local_bridge_valid"] = True
     return RuntimeLayoutInspection(
@@ -847,11 +939,12 @@ def inspect_runtime_layout(
         engine=engine,
         layout_contract_version=expected_contract_version,
         preparation_id=preparation_id,
-        evidence={
-            "marker": str(layout.marker),
-            "prepared_at": marker["prepared_at"],
-            "checks": checks,
-        },
+        evidence=_ready_evidence(
+            layout=layout,
+            marker=marker,
+            mapping_contract_version=mapping_contract_version,
+            checks=checks,
+        ),
     )
 
 

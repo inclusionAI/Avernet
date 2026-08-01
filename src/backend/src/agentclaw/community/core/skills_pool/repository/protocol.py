@@ -98,6 +98,17 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """记录旧运行时证据，并原子释放尚处于准备阶段的迁移认领。"""
         ...
 
+    def release_changed_engine_claim(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """记录引擎身份漂移，并原子释放尚未开始切换的迁移认领。"""
+        ...
+
     def record_cutover_committed(
         self,
         *,
@@ -108,6 +119,38 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         evidence: dict[str, object],
     ) -> bool:
         """记录不可逆的数据面切换已经完成。"""
+        ...
+
+    def record_post_cutover_evidence(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        lease_owner: str,
+        preparation_id: str,
+        evidence: dict[str, object],
+    ) -> bool:
+        """在边界已提交时补齐运行时证据，不重复提交数据面边界。"""
+        ...
+
+    def has_quarantine_identity(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+    ) -> bool:
+        """确认该 generation 已持久化 quarantine 身份。"""
+        ...
+
+    def quarantine_identity_conflicts(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        engine: str,
+        path: str,
+    ) -> bool:
+        """判断运行时身份是否与该 generation 已持久化身份冲突。"""
         ...
 
     def record_cutover_finalizing(
@@ -206,7 +249,12 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         observed_at: datetime,
         evidence: dict[str, object],
     ) -> bool:
-        """Record a qualified post-activation runtime lifecycle signal."""
+        """Account for a runtime-ready signal.
+
+        ``True`` means the signal was persisted or is safely obsolete or
+        superseded. ``False`` means current state cannot account for it and the
+        caller must retry.
+        """
         ...
 
     def record_runtime_reconciliation_failure(
@@ -217,7 +265,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         observed_at: datetime,
         evidence: dict[str, object],
     ) -> bool:
-        """Invalidate older READY evidence with a newer unhealthy runtime fact."""
+        """Account for a runtime failure, invalidating older READY evidence."""
         ...
 
     def begin_legacy_rollback(

@@ -7,7 +7,6 @@ import pytest
 
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     CurrentRuntimeLayoutProbeService,
-    OpenClawPoolLayout,
     RuntimeLayoutProbeResult,
     RuntimeLayoutProbeStatus,
 )
@@ -47,6 +46,7 @@ def _service(
                     "layout_contract_version": "skills-pool-p3-v1",
                     "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
                     "evidence": {
+                        "mapping_contract_version": "skills-pool-mapping-v2",
                         "checks": {
                             "pool_repo_mounted": True,
                             "legacy_repo_bridge_valid": True,
@@ -98,6 +98,7 @@ async def test_claude_code_ready_uses_current_runtime_probe():
                 "layout_contract_version": "skills-pool-p3-v1",
                 "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
                 "evidence": {
+                    "mapping_contract_version": "skills-pool-mapping-v2",
                     "checks": {
                         "stable_local_bridge_valid": True,
                         "stable_repo_bridge_valid": True,
@@ -139,6 +140,7 @@ async def test_aicoding_ready_uses_current_runtime_probe():
                 "layout_contract_version": "skills-pool-p3-v1",
                 "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
                 "evidence": {
+                    "mapping_contract_version": "skills-pool-mapping-v2",
                     "checks": {
                         "stable_local_bridge_valid": True,
                         "stable_repo_bridge_valid": True,
@@ -180,6 +182,7 @@ async def test_hermes_ready_requires_current_runtime_h0_evidence():
                 "layout_contract_version": "skills-pool-p3-v1",
                 "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
                 "evidence": {
+                    "mapping_contract_version": "skills-pool-mapping-v2",
                     "checks": {
                         "legacy_local_bridge_valid": True,
                         "stable_repo_bridge_valid": True,
@@ -234,6 +237,33 @@ async def test_new_runtime_without_marker_is_not_capable():
 
     assert result.status is RuntimeLayoutProbeStatus.NOT_CAPABLE
     assert result.evidence["reason"] == "pool_ready_marker_absent"
+
+
+@pytest.mark.asyncio
+async def test_ready_runtime_without_mapping_v2_is_not_capable():
+    service, *_ = _service(
+        response={
+            "success": True,
+            "data": {
+                "status": "READY",
+                "engine": "openclaw",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
+                "evidence": {"checks": {"pool_repo_mounted": True}},
+            },
+        }
+    )
+
+    result = await service.probe_bot(
+        bot_id="bot-1",
+        user_id="user-1",
+        engine="openclaw",
+    )
+
+    assert result.status is RuntimeLayoutProbeStatus.NOT_CAPABLE
+    assert result.evidence == {
+        "reason": "logical_mapping_contract_not_supported"
+    }
 
 
 @pytest.mark.asyncio
@@ -421,7 +451,6 @@ async def test_teclaw_is_noop_without_resolving_runtime():
         bot_id="bot-1",
         user_id="user-1",
         engine="teclaw",
-        layout=OpenClawPoolLayout.for_home("/not-used"),
     )
 
     assert result == RuntimeLayoutProbeResult(
@@ -450,7 +479,10 @@ def test_real_engine_response_schema_is_accepted(monkeypatch):
             engine="openclaw",
             layout_contract_version="skills-pool-p3-v1",
             preparation_id="2a958f59-8cf4-4413-a267-7d56d3382f23",
-            evidence={"checks": {"pool_repo_mounted": True}},
+            evidence={
+                "mapping_contract_version": "skills-pool-mapping-v2",
+                "checks": {"pool_repo_mounted": True},
+            },
         ),
         message="运行时 Skills Pool 布局探测完成",
     )
@@ -458,7 +490,6 @@ def test_real_engine_response_schema_is_accepted(monkeypatch):
     result = CurrentRuntimeLayoutProbeService._parse_response(
         engine_response.model_dump(mode="json"),
         engine="openclaw",
-        layout=OpenClawPoolLayout.for_home(),
     )
 
     assert result.status is RuntimeLayoutProbeStatus.READY

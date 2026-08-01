@@ -141,6 +141,103 @@ def test_pool_active_factory_scopes_skill_writes_to_canonical_pool(test_injector
     ).endswith("/skills-pool/skills-local/handmade")
 
 
+def test_desktop_pool_active_factory_uses_the_same_canonical_paths(
+    test_injector,
+):
+    factory = test_injector.get(SkillSetServiceFactory)
+    factory._bot_repo.get_by_id_and_owner = lambda *_: {
+        "bot_type": "desktop",
+    }
+    factory._pool_layout_paths = lambda *_: (
+        "/home/admin/.openclaw/workspace/skills",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-local",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+    )
+
+    svc = factory.create(
+        user_id="u1",
+        entity_id="e1",
+        bot_id="b1",
+        engine_type="openclaw",
+    )
+
+    assert svc.is_desktop is True
+    assert str(svc.local_dir).endswith("/skills-pool/skills-local")
+    assert str(svc.repo_dir).endswith("/skills-pool/skills-repo")
+    assert str(svc.skill_service.local_dir).endswith(
+        "/skills-pool/skills-local"
+    )
+
+
+def test_desktop_legacy_factory_preserves_existing_paths(test_injector):
+    factory = test_injector.get(SkillSetServiceFactory)
+    factory._bot_repo.get_by_id_and_owner = lambda *_: {
+        "bot_type": "desktop",
+    }
+    factory._pool_layout_paths = lambda *_: None
+
+    svc = factory.create(
+        user_id="u1",
+        entity_id="e1",
+        bot_id="b1",
+        engine_type="openclaw",
+    )
+
+    assert svc.is_desktop is True
+    assert str(svc.local_dir) == (
+        "/home/admin/.openclaw/workspace/skills/skills-local"
+    )
+    assert str(svc.repo_dir) == (
+        "/home/admin/.openclaw/workspace/skills/skills-repo"
+    )
+
+
+def test_desktop_pool_mapping_uses_canonical_pool_sources(test_injector):
+    factory = test_injector.get(SkillSetServiceFactory)
+    factory._bot_repo.get_by_id_and_owner = lambda *_: {
+        "bot_type": "desktop",
+    }
+    factory._pool_layout_paths = lambda *_: (
+        "/home/admin/.openclaw/workspace/skills",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-local",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+    )
+    svc = factory.create(
+        user_id="u1",
+        entity_id="e1",
+        bot_id="b1",
+        engine_type="openclaw",
+    )
+    svc.get_active_skills = lambda **_: [
+        {
+            "name": "handmade",
+            "git_path": (
+                "local:///home/admin/.openclaw/workspace/skills/"
+                "skills-local/handmade"
+            ),
+        },
+        {
+            "name": "reviewer",
+            "git_path": "git://business/reviewer",
+        },
+    ]
+
+    mappings = svc.get_symlink_mappings(user_id="u1", bolt_id="b1")
+
+    assert [(item.source, item.target) for item in mappings] == [
+        (
+            "/home/admin/.openclaw/workspace/skills-pool/"
+            "skills-local/handmade",
+            "/home/admin/.openclaw/workspace/skills/handmade",
+        ),
+        (
+            "/home/admin/.openclaw/workspace/skills-pool/"
+            "skills-repo/business/reviewer",
+            "/home/admin/.openclaw/workspace/skills/reviewer",
+        ),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_real_skill_parameter_service_factory_create(test_injector):
     """Async factory: builds the per-bot device_fs and constructs the

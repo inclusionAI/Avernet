@@ -116,9 +116,13 @@ from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
 )
+from agentclaw.community.core.skills_pool.reconcile_task import (
+    SkillsPoolReconcileWakeupListener,
+)
 from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
+    SkillLayoutPhase,
     runtime_uses_pool_paths,
 )
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
@@ -407,7 +411,7 @@ class SkillCenterModule(Module):
             _requested_engine: str,
         ) -> tuple[str, str, str] | None:
             bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
-            if bot is None or bot.get("bot_type") == "desktop":
+            if bot is None:
                 return None
             engine = bot.get("active_engine")
             if not isinstance(engine, str):
@@ -624,12 +628,40 @@ class SkillCenterModule(Module):
         skill_set_factory: SkillSetServiceFactory,
         resolver: DeviceContextResolver,
         device_sync_dispatcher: DeviceSyncDispatcher,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
     ) -> SkillSymlinkListener:
+        def desktop_layout_authority(bot: dict) -> str | None:
+            if bot.get("bot_type") != "desktop":
+                return None
+            env = bot.get("env")
+            entity_id = bot.get("entity_id")
+            bot_id = bot.get("bot_id")
+            if not all(
+                isinstance(value, str) and value
+                for value in (env, entity_id, bot_id)
+            ):
+                return None
+            state = layout_repository.get(
+                BotSkillLayoutScope(
+                    env=env,
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                )
+            )
+            if state.phase is SkillLayoutPhase.POOL_ACTIVE:
+                return "pool"
+            if runtime_uses_pool_paths(state):
+                return "transition"
+            return "legacy"
+
         return SkillSymlinkListener(
             bot_repo=bot_repo,
             skill_set_factory=skill_set_factory,
             resolver=resolver,
             device_sync_dispatcher=device_sync_dispatcher,
+            desktop_layout_authority=desktop_layout_authority,
+            desktop_reconcile_wakeup=skills_pool_wakeup.handle,
         )
 
     # ── Service API Protocol aliases ────────────────────────────────────

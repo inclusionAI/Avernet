@@ -12,6 +12,7 @@ import pytest
 
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
+    DefaultBotTeclawNotAllowedError,
     BotService,
     BotServiceError,
     generate_bot_id,
@@ -74,6 +75,11 @@ def _make_service() -> BotService:
     svc._skill_set_factory = MagicMock()
     svc._bot_publish_repo = MagicMock()
     svc._oss_record_repo = MagicMock()
+    teclaw_provision = MagicMock()
+    teclaw_provision.is_teclaw.side_effect = lambda engine: (
+        (engine or "").strip().lower() == "teclaw"
+    )
+    svc._teclaw_provision_provider = lambda: teclaw_provision
     return svc
 
 
@@ -317,6 +323,39 @@ class TestSwitchEngine:
         ):
             with pytest.raises(BotServiceError, match="not enabled"):
                 svc.switch_engine("bot001", "user001", "openclaw")
+
+    def test_rejects_switching_default_bot_to_teclaw(self):
+        svc = _make_service()
+        bot = _make_bot(
+            bot_id="default",
+            engine_types=["moltis", "openclaw", "teclaw"],
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
+            return_value=["moltis", "openclaw", "teclaw"],
+        ):
+            with pytest.raises(DefaultBotTeclawNotAllowedError):
+                svc.switch_engine("default", "user001", "teclaw")
+
+        svc._repository.update_by_owner.assert_not_called()
+
+    def test_allows_switching_non_default_bot_to_teclaw(self):
+        svc = _make_service()
+        bot = _make_bot(engine_types=["moltis", "openclaw", "teclaw"])
+        updated_bot = {**bot, "active_engine": "teclaw", "binding_id": None}
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.update_by_owner.return_value = updated_bot
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
+            return_value=["moltis", "openclaw", "teclaw"],
+        ):
+            result = svc.switch_engine("bot001", "user001", "teclaw")
+
+        assert result["active_engine"] == "teclaw"
+        svc._repository.update_by_owner.assert_called_once()
 
     def test_switches_engine_successfully(self):
         svc = _make_service()

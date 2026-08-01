@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
-
 from engine.community.api.caps import check_capability
 from engine.community.api.response import ApiResponse
 from engine.community.api.skills.schemas import (
@@ -21,28 +19,53 @@ from engine.community.api.skills.schemas import (
     PoolLayoutActivateRequest,
     PoolLayoutActivateResponse,
     PoolLayoutRollbackRequest,
-    PoolQuarantineCleanupRequest,
     PoolMappingVerifyRequest,
+    PoolQuarantineCleanupRequest,
     RuntimeLayoutProbeApiResponse,
     RuntimeLayoutProbeRequest,
     RuntimeLayoutProbeResponse,
     SyncSymlinkRequest,
 )
+from engine.community.api.skills.schemas import (
+    PoolPhysicalMapping as PoolPhysicalMappingSchema,
+)
+from engine.community.api.skills.schemas import (
+    PoolSkillMappingIntent as PoolSkillMappingIntentSchema,
+)
 from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
+from engine.community.core.skills.exceptions import (
+    InvalidPoolMappingRequestError,
+)
+from engine.community.core.skills.layout_planner import (
+    LayoutIdentity,
+    RuntimeLayoutContext,
+    SkillLayoutResolutionError,
+    resolve_skill_layout,
+)
 from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
     CleanSymlinksRequest,
-    PoolLayoutActivateRequest as PoolLayoutActivateCommand,
-    PoolLayoutRollbackRequest as PoolLayoutRollbackCommand,
-    PoolLayoutProbeRequest as PoolLayoutProbeCommand,
     PoolMappingSourceLayout,
-    PoolQuarantineCleanupRequest as PoolQuarantineCleanupCommand,
+    PoolSkillMappingIntent,
     SymlinkItem,
     SyncBindPathsRequest,
     SyncSymlinksRequest,
 )
+from engine.community.core.skills.models import (
+    PoolLayoutActivateRequest as PoolLayoutActivateCommand,
+)
+from engine.community.core.skills.models import (
+    PoolLayoutProbeRequest as PoolLayoutProbeCommand,
+)
+from engine.community.core.skills.models import (
+    PoolLayoutRollbackRequest as PoolLayoutRollbackCommand,
+)
+from engine.community.core.skills.models import (
+    PoolQuarantineCleanupRequest as PoolQuarantineCleanupCommand,
+)
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 log = logging.getLogger("api-skills")
@@ -53,11 +76,50 @@ def _skills_plugin():
     return EngineManager.get_instance().skills
 
 
+def _mapping_command(
+    item: PoolSkillMappingIntentSchema | PoolPhysicalMappingSchema,
+) -> PoolSkillMappingIntent | SymlinkItem:
+    if isinstance(item, PoolSkillMappingIntentSchema):
+        return PoolSkillMappingIntent(
+            corpus=item.corpus,
+            relative_path=item.relative_path,
+            link_name=item.link_name,
+        )
+    return SymlinkItem(
+        source=item.source,
+        target=item.target,
+    )
+
+
 @router.post("/layout/probe", response_model=RuntimeLayoutProbeApiResponse)
 async def probe_runtime_skills_layout(
     body: RuntimeLayoutProbeRequest,
 ) -> RuntimeLayoutProbeApiResponse:
     """通过 Skills Service API 核验当前运行时事实。"""
+    try:
+        resolve_skill_layout(
+            LayoutIdentity(
+                engine_type=body.engine,
+                layout_contract_version=body.layout_contract_version,
+            ),
+            RuntimeLayoutContext(),
+        )
+    except SkillLayoutResolutionError as error:
+        return RuntimeLayoutProbeApiResponse(
+            success=True,
+            data=RuntimeLayoutProbeResponse(
+                status="INVALID",
+                engine=body.engine,
+                layout_contract_version=body.layout_contract_version,
+                preparation_id=None,
+                evidence={
+                    "reason": "layout_identity_invalid",
+                    "error_type": type(error).__name__,
+                },
+            ),
+            message="运行时 Skills Pool 布局探测完成",
+        )
+
     plugin = _skills_plugin()
     try:
         result = await plugin.probe_pool_layout(
@@ -68,6 +130,21 @@ async def probe_runtime_skills_layout(
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    if result.engine != body.engine:
+        return RuntimeLayoutProbeApiResponse(
+            success=True,
+            data=RuntimeLayoutProbeResponse(
+                status="INVALID",
+                engine=body.engine,
+                layout_contract_version=body.layout_contract_version,
+                preparation_id=None,
+                evidence={
+                    "reason": "runtime_engine_mismatch",
+                    "actual_engine": result.engine,
+                },
+            ),
+            message="运行时 Skills Pool 布局探测完成",
+        )
     return RuntimeLayoutProbeApiResponse(
         success=True,
         data=RuntimeLayoutProbeResponse.model_validate(result.to_data()),
@@ -91,14 +168,14 @@ async def activate_runtime_skills_layout(
                 migration_generation=body.migration_generation,
                 preparation_id=body.preparation_id,
                 registered_local_names=body.registered_local_names,
-                mappings=[
-                    SymlinkItem(source=item.source, target=item.target)
-                    for item in body.mappings
-                ],
+                mappings=[_mapping_command(item) for item in body.mappings],
+                mapping_contract_version=body.mapping_contract_version,
             )
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    except InvalidPoolMappingRequestError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return PoolLayoutActivateApiResponse(
         success=result.committed,
         data=PoolLayoutActivateResponse.model_validate(result.to_data()),
@@ -173,16 +250,19 @@ async def verify_runtime_skill_mappings(
         if body.source_layout == PoolMappingSourceLayout.LEGACY.value
         else {}
     )
+    if body.mapping_contract_version is not None:
+        layout_kwargs["mapping_contract_version"] = (
+            body.mapping_contract_version
+        )
     try:
         result = await plugin.verify_pool_mappings(
-            [
-                SymlinkItem(source=item.source, target=item.target)
-                for item in body.mappings
-            ],
+            [_mapping_command(item) for item in body.mappings],
             **layout_kwargs,
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    except InvalidPoolMappingRequestError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return ApiResponse(
         success=result.valid,
         data=result.to_data(),
@@ -202,16 +282,19 @@ async def publish_runtime_skill_mappings(
         if body.source_layout == PoolMappingSourceLayout.LEGACY.value
         else {}
     )
+    if body.mapping_contract_version is not None:
+        layout_kwargs["mapping_contract_version"] = (
+            body.mapping_contract_version
+        )
     try:
         result = await plugin.publish_pool_mappings(
-            [
-                SymlinkItem(source=item.source, target=item.target)
-                for item in body.mappings
-            ],
+            [_mapping_command(item) for item in body.mappings],
             **layout_kwargs,
         )
     except CapabilityNotSupportedError as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    except InvalidPoolMappingRequestError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return ApiResponse(
         success=result.published,
         data=result.to_data(),

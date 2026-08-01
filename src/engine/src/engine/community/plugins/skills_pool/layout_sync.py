@@ -19,6 +19,7 @@ def mirror_local_tree(
     source_root: Path,
     pool_local: Path,
     staging_root: Path,
+    remove_missing: bool = True,
 ) -> tuple[list[str], Manifest]:
     """把 Legacy local 收敛到 Pool，同时保留同步窗口内的 Pool 新写入。
 
@@ -41,15 +42,16 @@ def mirror_local_tree(
         pool_local=pool_local,
         baseline=pool_baseline,
     )
-    deleted = sorted(
-        set(pool_baseline) - set(staged_manifest),
-        key=lambda key: (-key.count("/"), key),
-    )
-    for key in deleted:
-        _remove_if_unchanged(
-            target=pool_local / key,
-            expected=pool_baseline[key],
+    if remove_missing:
+        deleted = sorted(
+            set(pool_baseline) - set(staged_manifest),
+            key=lambda key: (-key.count("/"), key),
         )
+        for key in deleted:
+            _remove_if_unchanged(
+                target=pool_local / key,
+                expected=pool_baseline[key],
+            )
     _remove_path(staging_root)
     return [entry.name for entry in source_entries], staged_manifest
 

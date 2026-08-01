@@ -194,6 +194,19 @@ def test_the_socket_carries_the_ws_credential_not_the_http_one():
     assert result.sockets[0].url.endswith("?x-proxypass-token=ws-tok")
 
 
+def test_a_local_socket_uses_the_ws_target_not_the_http_target():
+    """Local HTTP and WebSocket credentials are issued for different targets."""
+    devices = _Devices(
+        type="local",
+        target="LOCAL_bot@template:20010",
+        token="http-tok",
+        ws_target="127.0.0.1:18789",
+        ws_token="ws-tok",
+    )
+    result = _build(_svc(devices=devices))
+    assert result.sockets[0].url == "ws://127.0.0.1:18789/api/openclaw/ws"
+
+
 def test_the_socket_expiry_describes_the_ws_credential():
     """Same pairing for the expiry: `expires_at` describes the http token, which
     is not what was published."""

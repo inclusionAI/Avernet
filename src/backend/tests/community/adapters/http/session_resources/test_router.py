@@ -8,6 +8,7 @@ import pytest
 
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.session_resources.router import (
+    list_pending_session_resources,
     materialize_status,
     materialized_callback,
     stream_content,
@@ -53,6 +54,10 @@ class _Service:
     def get_status(self, **kwargs):
         self.status_kwargs = kwargs
         return _record()
+
+    def list_pending(self, **kwargs):
+        self.pending_kwargs = kwargs
+        return [_record()]
 
     def materialized_callback(self, **kwargs):
         self.callback_kwargs = kwargs
@@ -103,6 +108,26 @@ async def test_polling_only_reads_backend_service_state():
         "bot_id": "bot-1",
         "session_key": "session-raw",
         "resource_id": "sr_001",
+    }
+
+
+@pytest.mark.asyncio
+async def test_pending_lists_only_control_plane_records():
+    service = _Service()
+    user = AuthenticatedUser("id", "owner-1", "owner-1")
+
+    result = await list_pending_session_resources(
+        "bot-1",
+        "session-raw",
+        user=user,
+        service=service,
+    )
+
+    assert result["files"][0]["resource_id"] == "sr_001"
+    assert service.pending_kwargs == {
+        "owner_id": "owner-1",
+        "bot_id": "bot-1",
+        "session_key": "session-raw",
     }
 
 
