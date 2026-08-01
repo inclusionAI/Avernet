@@ -11,7 +11,10 @@ from agentclaw.community.core.session_resources.baas_client import (
     SessionResourceBaasClient,
 )
 from agentclaw.community.core.session_resources.service import SessionResourceService
-from agentclaw.community.core.session_resources.types import SessionResourceStatus
+from agentclaw.community.core.session_resources.types import (
+    SessionResourceStatus,
+    TransferApiVersion,
+)
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterStreamResponse,
 )
@@ -112,13 +115,20 @@ class _HttpClient:
 
 
 class _Resolver:
+    def __init__(self, *, provider="baas", conn_info=None) -> None:
+        self._provider = provider
+        self._conn_info = conn_info or {
+            "tenant": "tenant-1",
+            "bot_uuid": "bot-uuid-1",
+        }
+
     def resolve_for_bot(self, bot_id, owner_id):
         return type(
             "Context",
             (),
             {
-                "provider": "baas",
-                "conn_info": {"tenant": "tenant-1", "bot_uuid": "bot-uuid-1"},
+                "provider": self._provider,
+                "conn_info": self._conn_info,
             },
         )()
 
@@ -157,14 +167,14 @@ class _Transport:
         )
 
 
-def _service(queue=None, *, complete_status="DONE", transport=None):
+def _service(queue=None, *, complete_status="DONE", transport=None, resolver=None):
     repo = _Repo()
     http = _HttpClient(complete_status=complete_status)
     service = SessionResourceService(
         repository=repo,
         baas_client=SessionResourceBaasClient(http),
         task_queue=queue or _Queue(),
-        device_context_resolver=_Resolver(),
+        device_context_resolver=resolver or _Resolver(),
         token_vault=TokenVault(master_key="test-master-key"),
         adapter_transport=transport or _Transport(),
     )
@@ -202,8 +212,144 @@ def test_upload_intent_uses_session_api_and_persists_encrypted_session_key():
     assert repo.value.transfer_api_version.value == "session_v2"
 
 
+def test_upload_intent_defaults_missing_arca_identity_without_logging_raw_values(caplog):
+    caplog.set_level("INFO", logger="session_resource.service")
+    resolver = _Resolver(
+        provider="arca",
+        conn_info={
+            "proxypass_url": "https://proxypass.example/internal",
+            "x-proxypass-token": "secret-token",
+        },
+    )
+    service, repo, http = _service(resolver=resolver)
+
+    intent = _intent(service)
+
+    assert http.calls[0][0] == (
+        "/api/v1/sessions/team_claw/session%2Fraw%20value/files/upload-url"
+    )
+    assert intent.resource.tenant == "team_claw"
+    assert repo.value.bot_uuid == ""
+    assert "provider=arca" in caplog.text
+    assert "tenant_source=default" in caplog.text
+    assert "bot_uuid_present=False" in caplog.text
+    assert "tenant_type=NoneType" in caplog.text
+    assert "bot_uuid_type=NoneType" in caplog.text
+    for raw_value in (
+        "owner-1",
+        "bot-1",
+        "session/raw value",
+        "report.txt",
+        "secret-token",
+        "https://proxypass.example/internal",
+    ):
+        assert raw_value not in caplog.text
+    for forbidden_field in (
+        "resource_id=",
+        "session_key_hash=",
+        "file_ext=",
+        "size_bytes=",
+        "upload_type=",
+    ):
+        assert forbidden_field not in caplog.text
+
+
+def test_upload_intent_defaults_empty_tenant():
+    resolver = _Resolver(
+        provider="arca",
+        conn_info={"tenant": "", "bot_uuid": "upstream-bot-uuid"},
+    )
+    service, repo, http = _service(resolver=resolver)
+
+    intent = _intent(service)
+
+    assert http.calls[0][0] == (
+        "/api/v1/sessions/team_claw/session%2Fraw%20value/files/upload-url"
+    )
+    assert intent.resource.tenant == "team_claw"
+    assert repo.value.bot_uuid == "upstream-bot-uuid"
+
+
+def test_upload_intent_normalizes_nonstring_bot_uuid_without_leaking_value(caplog):
+    caplog.set_level("INFO", logger="session_resource.service")
+    resolver = _Resolver(
+        provider="arca",
+        conn_info={"tenant": "tenant-1", "bot_uuid": {"private": "value"}},
+    )
+    service, repo, _ = _service(resolver=resolver)
+
+    intent = _intent(service)
+
+    assert intent.resource.bot_uuid == ""
+    assert repo.value.bot_uuid == ""
+    assert "bot_uuid_present=False" in caplog.text
+    assert "bot_uuid_type=dict" in caplog.text
+    assert "private" not in caplog.text
+    assert "value" not in caplog.text
+
+
+def test_upload_intent_preserves_nonempty_upstream_identity():
+    resolver = _Resolver(
+        provider="arca",
+        conn_info={"tenant": "upstream-tenant", "bot_uuid": "upstream-bot-uuid"},
+    )
+    service, repo, http = _service(resolver=resolver)
+
+    intent = _intent(service)
+
+    assert http.calls[0][0].startswith("/api/v1/sessions/upstream-tenant/")
+    assert intent.resource.tenant == "upstream-tenant"
+    assert repo.value.bot_uuid == "upstream-bot-uuid"
+
+
+def test_upload_intent_rejects_nonstring_tenant_without_leaking_identity(caplog):
+    caplog.set_level("WARNING", logger="session_resource.service")
+    resolver = _Resolver(
+        provider="arca",
+        conn_info={"tenant": {"private-tenant": "hidden"}, "bot_uuid": "bot-uuid"},
+    )
+    service, repo, http = _service(resolver=resolver)
+
+    with pytest.raises(ValueError, match="BaaS device identity is unavailable"):
+        _intent(service)
+
+    assert repo.value is None
+    assert http.calls == []
+    assert "provider=arca" in caplog.text
+    assert "tenant_source=invalid" in caplog.text
+    assert "tenant_type=dict" in caplog.text
+    assert "bot_uuid_type=str" in caplog.text
+    assert "private-tenant" not in caplog.text
+    assert "hidden" not in caplog.text
+    assert "bot-uuid" not in caplog.text
+
+
+def test_legacy_complete_uses_the_recorded_bot_uuid():
+    service, repo, http = _service()
+    intent = _intent(service)
+    repo.value = replace(
+        intent.resource,
+        transfer_api_version=TransferApiVersion.BOT_DEVICE_V1,
+        bot_uuid="legacy-bot-uuid",
+    )
+
+    service.complete_upload(
+        owner_id="owner-1",
+        bot_id="bot-1",
+        session_key="session/raw value",
+        resource_id=intent.resource.resource_id,
+        transfer_id="transfer-1",
+    )
+
+    assert (
+        http.calls[1][0]
+        == "/api/v1/bots/tenant-1/legacy-bot-uuid/files/upload-url/transfer-1/complete"
+    )
+
+
 def test_upload_intent_allows_unicode_filename_within_filesystem_limit():
     service, repo, http = _service()
+    filename = "\u4e2d\u6587 \u62a5\u544a (final)\uff08\u5df2\u5ba1\uff09.txt"
 
     intent = service.create_upload_intent(
         owner_id="owner-1",
@@ -211,13 +357,13 @@ def test_upload_intent_allows_unicode_filename_within_filesystem_limit():
         session_key="session/raw value",
         scope_type="personal_bot_chat",
         engine_type="openclaw",
-        filename="\u4e2d\u6587\u62a5\u544a 2026.txt",
+        filename=filename,
         size_bytes=4,
     )
 
-    assert http.calls[0][1]["json"]["filename"] == "\u4e2d\u6587\u62a5\u544a 2026.txt"
-    assert repo.value.filename == "\u4e2d\u6587\u62a5\u544a 2026.txt"
-    assert intent.resource.workspace_relative_path.endswith("/\u4e2d\u6587\u62a5\u544a 2026.txt")
+    assert http.calls[0][1]["json"]["filename"] == filename
+    assert repo.value.filename == filename
+    assert intent.resource.workspace_relative_path.endswith(f"/{filename}")
 
 
 def test_upload_intent_rejects_filename_exceeding_utf8_segment_limit():
@@ -233,6 +379,27 @@ def test_upload_intent_rejects_filename_exceeding_utf8_segment_limit():
             filename=f"{'\u4e2d' * 86}.txt",
             size_bytes=4,
         )
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [".", "..", "folder/report.txt", r"folder\report.txt", "report?.txt", "report\n.txt"],
+)
+def test_upload_intent_rejects_unsafe_filename_characters(filename):
+    service, _, http = _service()
+
+    with pytest.raises(ValueError, match="invalid_filename"):
+        service.create_upload_intent(
+            owner_id="owner-1",
+            bot_id="bot-1",
+            session_key="session/raw value",
+            scope_type="personal_bot_chat",
+            engine_type="openclaw",
+            filename=filename,
+            size_bytes=4,
+        )
+
+    assert http.calls == []
 
 
 def test_upload_complete_requires_baas_done_then_queues_identity_only():

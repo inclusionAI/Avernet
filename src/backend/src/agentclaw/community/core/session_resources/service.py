@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 from pathlib import Path
 
@@ -30,8 +29,9 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 )
 
 log = logging.getLogger("session_resource.service")
-_SAFE_FILENAME = re.compile(r"^[\w .-]+$", re.UNICODE)
+_WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
 _MAX_FILENAME_UTF8_BYTES = 255
+_DEFAULT_SESSION_FILE_TENANT = "team_claw"
 
 
 class SessionResourceService:
@@ -66,10 +66,38 @@ class SessionResourceService:
     ) -> SessionUploadIntent:
         safe_filename = self._safe_filename(filename)
         context = self._resolver.resolve_for_bot(bot_id, owner_id)
-        tenant = context.conn_info.get("tenant")
-        bot_uuid = context.conn_info.get("bot_uuid")
-        if not isinstance(tenant, str) or not isinstance(bot_uuid, str):
+        raw_tenant = context.conn_info.get("tenant")
+        raw_bot_uuid = context.conn_info.get("bot_uuid")
+        provider = (
+            context.provider
+            if isinstance(context.provider, str)
+            else type(context.provider).__name__
+        )
+        bot_uuid_present = isinstance(raw_bot_uuid, str) and bool(raw_bot_uuid)
+        if raw_tenant is None or raw_tenant == "":
+            tenant = _DEFAULT_SESSION_FILE_TENANT
+            tenant_source = "default"
+        elif isinstance(raw_tenant, str):
+            tenant = raw_tenant
+            tenant_source = "context"
+        else:
+            log.warning(
+                "session_resource.upload_intent.identity.reject provider=%s tenant_source=invalid bot_uuid_present=%s tenant_type=%s bot_uuid_type=%s",
+                provider,
+                bot_uuid_present,
+                type(raw_tenant).__name__,
+                type(raw_bot_uuid).__name__,
+            )
             raise ValueError("BaaS device identity is unavailable")
+        bot_uuid = raw_bot_uuid if bot_uuid_present else ""
+        log.info(
+            "session_resource.upload_intent.identity.resolved provider=%s tenant_source=%s bot_uuid_present=%s tenant_type=%s bot_uuid_type=%s",
+            provider,
+            tenant_source,
+            bot_uuid_present,
+            type(raw_tenant).__name__,
+            type(raw_bot_uuid).__name__,
+        )
         grant = self._baas.create_session_upload_grant(
             tenant=tenant,
             session_id=session_key,
@@ -94,6 +122,8 @@ class SessionResourceService:
                 session_key_hash=session_hash,
                 engine_type=engine_type,
                 tenant=tenant,
+                # Session v2 uses tenant + session ID. Empty bot_uuid marks the
+                # shared legacy column as inapplicable; BOT_DEVICE_V1 needs a real value.
                 bot_uuid=bot_uuid,
                 display_name=filename,
                 filename=safe_filename,
@@ -106,14 +136,6 @@ class SessionResourceService:
                 size_bytes=size_bytes,
                 client_content_hash=content_hash,
             )
-        )
-        log.info(
-            "session_resource.upload_intent.create resource_id=%s session_key_hash=%s file_ext=%s size_bytes=%s upload_type=%s",
-            resource_id,
-            session_hash[:16],
-            Path(safe_filename).suffix.lower(),
-            size_bytes,
-            grant.upload_type,
         )
         return SessionUploadIntent(resource=record, grant=grant)
 
@@ -444,8 +466,13 @@ class SessionResourceService:
         except UnicodeEncodeError as exc:
             raise ValueError("invalid_filename") from exc
         if (
-            len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
-            or not _SAFE_FILENAME.fullmatch(value)
+            not value
+            or len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
+            or any(
+                not character.isprintable()
+                or character in _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS
+                for character in value
+            )
         ):
             raise ValueError("invalid_filename")
         return value

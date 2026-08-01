@@ -16,11 +16,15 @@ from agentclaw.community.core.task_queue.types import Complete, Retry
 
 
 class _Resolver:
+    def __init__(self, conn_info=None, *, provider="baas") -> None:
+        self._conn_info = conn_info or {"target": "engine"}
+        self._provider = provider
+
     def resolve_for_bot(self, bot_id, owner_id):
         return type(
             "Context",
             (),
-            {"conn_info": {"target": "engine"}, "provider": "baas"},
+            {"conn_info": self._conn_info, "provider": self._provider},
         )()
 
 
@@ -94,6 +98,32 @@ def test_handler_reloads_decrypts_and_dispatches_to_shared_engine_endpoint():
     assert body["transfer_api_version"] == "session_v2"
     assert body["workspace_relative_path"].startswith(".teamclaw/")
     assert "owner_id" not in body
+
+
+def test_session_v2_empty_bot_uuid_uses_the_given_arca_proxypass_context():
+    vault = TokenVault(master_key="test-master-key")
+    arca_context = {
+        "url": "https://proxypass.example/proxypass/ARCA_test",
+        "headers": {"x-proxypass-token": "secret-token"},
+        "use_proxy": True,
+    }
+    transport = _Transport()
+    handler = SessionResourceMaterializeHandler(
+        _Resolver(arca_context, provider="arca"),
+        transport,
+        _Repo(replace(_record(vault), tenant="team_claw", bot_uuid="")),
+        vault,
+    )
+
+    result = handler.handle(_payload())
+
+    assert isinstance(result, Complete)
+    conn_info, method, path, body = transport.calls[0]
+    assert conn_info is arca_context
+    assert (method, path) == ("POST", "/api/resource-materializations")
+    assert body["tenant"] == "team_claw"
+    assert "bot_uuid" not in body
+    assert "bot_uuid" not in path
 
 
 def test_handler_ignores_stale_task_without_calling_engine():
