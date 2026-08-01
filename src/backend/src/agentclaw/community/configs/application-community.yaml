@@ -166,8 +166,16 @@ user_config:
   # principal_signer.secret_name (since #673 the gateway goes through a
   # SecretResolver too; its community flavor reads
   # AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE). The two registries are separate
-  # — only the value has to agree. Unset, the public API answers 401 to
-  # everything.
+  # — only the value has to agree.
+  #
+  # Leaving it unset does NOT fail the same way everywhere:
+  #   SERVER_ENV=pre|prod  -> the process REFUSES TO BOOT. app.py passes
+  #                           strict=True, so init_principal_verifier_config
+  #                           raises and no request is ever served. A missed
+  #                           rollout step fails visibly instead of shipping a
+  #                           surface that 401s while reporting healthy.
+  #   anything else (dev)  -> the process boots and answers 401 on every
+  #                           /openapi/v1 request.
 
   # MCP catalog — consumed by the community CommunityMCPCenter.
   # Optional path to a local MCP-server catalog file (same shape as

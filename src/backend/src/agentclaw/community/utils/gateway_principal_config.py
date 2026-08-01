@@ -143,11 +143,16 @@ def get_principal_verifier_config() -> PrincipalVerifierConfig:
 
 
 def _resolve_signing_key(resolver: SecretResolver, secret_name: str) -> str:
-    """Return the shared key, or ``""`` when this deployment has none."""
+    """Return the shared key, or ``""`` when this deployment has none.
+
+    Logs *what* failed, never *what happens next*: the caller decides that from
+    ``strict``, and predicting "will answer 401" here would be wrong in the
+    strict case, where the process raises and never serves a request at all.
+    """
     if not secret_name:
         logger.warning(
             "no 'gateway_principal_signing_key' registered in the secret_names "
-            "config — the public API will answer 401"
+            "config — no principal signing key resolved"
         )
         return ""
 
@@ -158,15 +163,15 @@ def _resolve_signing_key(resolver: SecretResolver, secret_name: str) -> str:
         # key we cannot tell a gateway token from a forged one, which is the
         # same answer as never having had one.
         logger.exception(
-            "resolving the principal signing key failed — the public API will "
-            "answer 401"
+            "resolving the principal signing key failed — no principal "
+            "signing key resolved"
         )
         return ""
 
     if secret is None:
         logger.warning(
-            "secret %r is not present in the secret store — the public API will "
-            "answer 401",
+            "secret %r is not present in the secret store — no principal "
+            "signing key resolved",
             secret_name,
         )
         return ""
@@ -174,8 +179,8 @@ def _resolve_signing_key(resolver: SecretResolver, secret_name: str) -> str:
     key = str(getattr(secret, "secret_value", "") or "").strip()
     if not key:
         logger.warning(
-            "secret %r resolved with an empty value — the public API will "
-            "answer 401",
+            "secret %r resolved with an empty value — no principal signing "
+            "key resolved",
             secret_name,
         )
     return key
