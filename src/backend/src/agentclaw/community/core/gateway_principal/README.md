@@ -10,9 +10,10 @@ earns the right to believe that header: signature, `aud` (this component), `iss`
 agrees on one tenant which is not the internal one. Any failure is total — there
 is no partial trust and no fallback.
 
-Nothing here reads a framework, a header, or the environment (Rule 7). The HTTP
-seam lives in `adapters/http/openapi_v1/dependencies.py`; the environment-driven
-config in `utils/gateway_principal_config.py`.
+Nothing here reads a framework, a header, the environment, or a secret store
+(Rule 7). The HTTP seam lives in `adapters/http/openapi_v1/dependencies.py`; the
+config — including resolving the shared signing key through `SecretResolver` —
+in `utils/gateway_principal_config.py`.
 
 ## Context Boundary
 

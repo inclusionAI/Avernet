@@ -18,8 +18,9 @@ success and no fallback: a token we cannot fully verify yields no caller, and th
 request is answered ``401``.
 
 Transport-agnostic by design (Rule 7) — no framework, no header parsing, no
-environment reads. The adapter hands it a token string and a config; the config
-is loaded from the environment in ``utils/gateway_principal_config.py``.
+environment reads, no secret store. The adapter hands it a token string and a
+config; that config is assembled in ``utils/gateway_principal_config.py``, which
+resolves the signing key through ``SecretResolver``.
 """
 
 from __future__ import annotations
@@ -62,9 +63,9 @@ class PrincipalVerifierConfig:
     """Everything needed to verify a forwarded principal token.
 
     ``signing_key`` is the HMAC secret shared with the gateway's ``bare``
-    signer. An empty key means the deployment has not been given one — see
-    :func:`verify_principal_token`, which then fails every verification closed
-    rather than accepting unsigned identity.
+    signer. An empty key means the deployment has not been given one, or could
+    not resolve it — see :func:`verify_principal_token`, which then fails every
+    verification closed rather than accepting unsigned identity.
 
     ``audience`` must equal the gateway's upstream-server name for this
     component (``servers:`` in the gateway's ``upstreams.yaml``), and ``issuer``

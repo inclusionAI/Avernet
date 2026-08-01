@@ -245,9 +245,30 @@ attach_injector(app, injector)
 # Middleware (delegated to api/middleware.py)
 # =============================================================================
 from agentclaw.community.adapters.http.middleware import install_middleware  # noqa: E402
-from agentclaw.community.di.config import CorsConfig  # noqa: E402
+from agentclaw.community.di.config import CorsConfig, SecretNamesConfig  # noqa: E402
 from agentclaw.community.plugin_api.auth import AuthPlugin  # noqa: E402
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver  # noqa: E402
 from agentclaw.community.plugin_api.tracer import TracerPlugin  # noqa: E402
+from agentclaw.community.utils.gateway_principal_config import (  # noqa: E402
+    init_principal_verifier_config,
+)
+
+# Resolve the key the gateway signs /openapi/v1 principals with. Done here
+# because AvernetTenantMiddleware reads the verifier config from the raw ASGI
+# layer, before any route and outside the injector — so the composition root
+# pushes it in rather than the middleware pulling it out.
+#
+# Strict in ``pre``/``prod``, matching the eager binding check above and gated
+# on the same SERVER_ENV: a deployment that serves the public API without a
+# signing key answers 401 to every request while looking healthy, so it must
+# fail the rollout instead. Local, dev, and singlebox legitimately have no key
+# (singlebox ships it empty on purpose), so there it degrades to deny-everything
+# rather than refusing to boot.
+init_principal_verifier_config(
+    injector.get(SecretResolver),
+    injector.get(SecretNamesConfig).gateway_principal_signing_key,
+    strict=get_current_env() in ("pre", "prod"),
+)
 
 install_middleware(
     app,

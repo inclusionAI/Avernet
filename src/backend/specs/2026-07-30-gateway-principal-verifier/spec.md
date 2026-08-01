@@ -6,6 +6,15 @@
 - Counterpart: gateway PR #599 (`feat/principal-signer`) — the signing half
 - Related: `docs/2026-07-21-auth-design.md` §7.1; the cross-cutting "Real
   caller-identity verifier" row in `src/backend/docs/openapi-v1/README.md`
+- **Superseded in part**: how the verifier is *configured* changed in PR #670.
+  The signing key is a credential, so it now resolves through `SecretResolver`
+  instead of `AVERNET_PRINCIPAL_SIGNING_KEY`, and `aud`/`iss` became constants
+  rather than env vars. The **wire contract** and **what gets rejected** are
+  unchanged. Anything describing *configuration* is superseded and marked so
+  inline — see **Configuration (as of PR #670)** below for the current contract
+  and the migration a deployment needs, plus Solution §5 and Decisions §1, which
+  carry their own corrections. Do not read an unmarked passage as current if it
+  talks about where the key comes from.
 
 ## Problem
 
@@ -39,9 +48,70 @@ From `plugins/principal_signer/bare/_plugin.py` and `_forward.py` in PR #599:
 | `iat`/`exp` | short TTL, default 60s |
 | `principals` | a **list** of `Principal.model_dump(mode="json")`, tagged by `type` |
 
-Gateway env names, reused verbatim so one secret has one vocabulary:
+~~Gateway env names, reused verbatim so one secret has one vocabulary:
 `AVERNET_PRINCIPAL_SIGNING_KEY`, plus our `AVERNET_PRINCIPAL_AUDIENCE` and
-`AVERNET_PRINCIPAL_ISSUER`.
+`AVERNET_PRINCIPAL_ISSUER`.~~ **Superseded by PR #670** — see below.
+
+## Configuration (as of PR #670)
+
+The backend no longer reads any `AVERNET_PRINCIPAL_*` variable. Neither does the
+gateway: #673 moved its signing side onto its own `SecretResolver` SPI in the
+same release. **The two sides now share only a value, not a vocabulary** — each
+has its own registry, its own secret name, and its own resolver:
+
+| Side | Secret name | Community lookup |
+| --- | --- | --- |
+| backend | `SecretNamesConfig.gateway_principal_signing_key` (defaults) | `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` |
+| gateway | `principal_signer.secret_name` (default `principal_signing_key`) | `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` |
+
+Nothing links those two names, and **the two sides fail differently when
+unprovisioned** — which side is missing decides what you see:
+
+| Missing | Result |
+| --- | --- |
+| backend, in `pre`/`prod` | **the backend refuses to boot** — `strict=True`, so the rollout fails loudly. Not silent. |
+| backend, elsewhere | the backend boots and answers 401 to every `/openapi/v1` request |
+| gateway, any environment | **silent, and the dangerous one.** The gateway keeps a dev fallback (`avernet-dev-signing-key-NOT-FOR-PROD`) and logs a warning, so it does *not* fail — it signs real tokens with the wrong key. The backend boots, looks configured, and rejects every one of them. |
+
+The gateway-side miss is the case worth designing around: nothing on either side
+treats it as an error, so it survives a rollout and presents as "auth is broken"
+with two healthy-looking services.
+
+| What | Where it comes from now |
+| --- | --- |
+| signing key | `SecretResolver`, under `SecretNamesConfig.gateway_principal_signing_key` — which **defaults**, so a deployment configures only the value |
+| `aud` | a constant, `backend` — the gateway signs it from the upstream server's own name, which it never made configurable |
+| `iss` | a constant, `gateway` — matching the **default** of the gateway's `principal_signer.issuer`, which since #673 *is* configurable there |
+
+The `iss` row is a live coupling, not a symmetry: changing the gateway's
+`issuer` requires changing the backend constant in the same release, or every
+`/openapi/v1` request answers 401.
+
+Per profile, the key's value resolves from: the corp secret store (corp);
+`{env_prefix}{NAME}_VALUE` (community, via `CommunitySecretResolver`); or
+nothing at all in singlebox/test — that profile has no secret store and ships
+no local stand-in, so the public surface denies there.
+
+**Migration.** A deployment that set `AVERNET_PRINCIPAL_SIGNING_KEY` on the
+backend must move that value. The secret *name* needs no action — it defaults —
+so this is only about provisioning the value where that profile's resolver reads
+it (see the table above).
+
+What a missed migration looks like depends on the environment:
+
+- **`pre` / `prod` fail to boot.** `init_principal_verifier_config` is called
+  with `strict=True` and raises, so the process never starts. The rollout fails
+  visibly rather than deploying a surface that 401s while reporting healthy.
+- **local / dev / singlebox keep booting and answer 401** on every
+  `/openapi/v1` request. Those environments legitimately have no key —
+  singlebox ships no local key on purpose — so failing
+  the boot there would brick local development and the singlebox coverage gate.
+
+There is deliberately no env fallback: silently honouring the old variable would
+keep a credential in the environment, which is the thing this change exists to
+stop, and a fallback that works is a fallback nobody migrates off. Failing —
+loudly in strict environments, closed everywhere else — makes the missed step
+visible instead of leaving a credential-shaped hole open.
 
 ## Solution
 
@@ -64,8 +134,15 @@ placed the seams.
    request scope, because both `resolve_avernet_tenant` (called from ASGI
    middleware before routing) and `require_principal` (the route dependency)
    need it.
-5. **Config** (`utils/gateway_principal_config.py`): env-driven, process-cached,
-   shaped like `utils/env_utils` because the middleware call site is outside DI.
+5. ~~**Config** (`utils/gateway_principal_config.py`): env-driven, process-cached,
+   shaped like `utils/env_utils` because the middleware call site is outside DI.~~
+   **Superseded by PR #670.** Still process-wide and resolved once, but no longer
+   env-driven and no longer shaped like `env_utils`: the signing key is a
+   credential, so the composition root resolves it through `SecretResolver` at
+   boot and *pushes* it in via `init_principal_verifier_config`. The middleware
+   call site being outside DI is still the reason it cannot be an
+   `Injected(...)` parameter — that is what makes it a boot-time push rather
+   than a request-time pull. See **Configuration (as of PR #670)** above.
 
 ## Decisions
 
@@ -73,7 +150,11 @@ placed the seams.
    committed dev secret with a warning; we deliberately do not mirror it. A
    committed shared secret is a committed credential, and on this side "no key"
    fails safe: every public request answers 401, which is precisely the state
-   this replaces. Single-box sets the same env var on both sides.
+   this replaces. **Single-box cannot set a key at all** — since PR #670 it has
+   no local stand-in for a secret store, so it denies unconditionally. The two
+   sides matching is a concern only where both are provisioned: a real secret
+   store or the environment here, and since gateway #673
+   `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` there.
 2. **Tenant passes through verbatim.** The gateway's tenant id *is* the
    `avernet_tenant` isolation key — no translation table. Consequence worth
    knowing: a gateway tenant must be spelled exactly as the column stores it,
@@ -138,8 +219,9 @@ placed the seams.
   verification per request, 401 parity between "no credential" and "bad
   credential", and `test_public_routes_require_principal`, which pins the
   property that makes the tenant fallback safe.
-- `tests/community/utils/test_gateway_principal_config.py` — the env contract,
-  including that no fallback key is invented.
+- `tests/community/utils/test_gateway_principal_config.py` — the configuration
+  contract (the `SecretResolver` path since PR #670), including that no fallback
+  key is invented.
 - Existing suites unmodified and green, including `test_bots_endpoints.py` and
   `test_mcp_endpoints.py`, whose `require_principal` overrides keep working
   because `caller_owner_id`'s tolerated shapes did not change.

@@ -41,19 +41,43 @@ from agentclaw.community.utils.avernet_tenant import (
     DEFAULT_AVERNET_TENANT,
     get_current_avernet_tenant,
 )
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils.gateway_principal_config import (
+    init_principal_verifier_config,
     reset_principal_verifier_config_cache,
 )
 
 KEY = "seam-test-shared-secret-at-least-32-bytes"
 TENANT = "acme-tenant"
+SECRET_NAME = "gateway_principal_signing_key"
+
+
+class _Secret:
+    secret_user = "gateway"
+
+    def __init__(self, value: str) -> None:
+        self.secret_value = value
+
+
+def boot_with_key(value: str | None) -> None:
+    """Boot the seam with ``value`` as the shared key (``None`` = no such secret).
+
+    The key is a credential, so it is resolved through ``SecretResolver`` at boot
+    rather than read off the environment; these tests drive the same entry point
+    the composition root uses.
+    """
+
+    class _Resolver(SecretResolver):
+        def get_secret(self, secret_name: str) -> object | None:
+            return None if value is None else _Secret(value)
+
+    init_principal_verifier_config(_Resolver(), SECRET_NAME, strict=False)
 
 
 @pytest.fixture(autouse=True)
-def signing_key(monkeypatch):
-    """Configure the shared key, and drop the process-wide config cache around it."""
-    monkeypatch.setenv("AVERNET_PRINCIPAL_SIGNING_KEY", KEY)
-    reset_principal_verifier_config_cache()
+def signing_key():
+    """Install the shared key, and drop the process-wide config around it."""
+    boot_with_key(KEY)
     yield
     reset_principal_verifier_config_cache()
 
@@ -194,10 +218,9 @@ def test_token_for_another_upstream_is_rejected(client):
     assert response.status_code == 401
 
 
-def test_unconfigured_key_denies_everything(client, monkeypatch):
+def test_unconfigured_key_denies_everything(client):
     """The pre-auth state is preserved by denying, not by trusting a stub."""
-    monkeypatch.delenv("AVERNET_PRINCIPAL_SIGNING_KEY", raising=False)
-    reset_principal_verifier_config_cache()
+    boot_with_key(None)
 
     response = client.get(
         "/openapi/v1/bots/_probe", headers={PRINCIPAL_HEADER: mint()}

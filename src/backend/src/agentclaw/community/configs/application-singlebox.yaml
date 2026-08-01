@@ -260,5 +260,11 @@ user_config:
   # Secret-registry key names. dormant token left unset -> local fallback token.
   # The aiworkbench name matches LocalSecretResolver's key so git-sync resolves
   # the skills repo URL from this file's openclaw.skills_repo_url.
+  #
+  # No gateway principal signing key here on purpose: singlebox has no secret
+  # store, and a yaml stand-in would be a committed-credential shape shipped
+  # empty. Without a key the verifier denies, so /openapi/v1 answers 401 in
+  # singlebox — the state it has always been in. Serving that surface locally
+  # is a deliberate change, not a config line.
   secret_names:
     aiworkbench_repo_url: "other_manual_agentclaw_aiworkbench_repo_url"
