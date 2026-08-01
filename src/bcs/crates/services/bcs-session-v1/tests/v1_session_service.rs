@@ -847,7 +847,7 @@ async fn participant_add_update_remove_lifecycle() {
         })
         .await
         .expect_err("duplicate add should conflict");
-    assert_eq!(error.code(), "conflict");
+    assert_eq!(error.code(), "participant_already_exists");
 
     // Update mode.
     let updated = fixture
@@ -1656,4 +1656,210 @@ async fn get_preserves_human_participant_from_legacy_invitation_join() {
         .expect("driver participant present");
     assert_eq!(driver.actor_kind, ActorKind::Bot);
     assert_eq!(driver.mode, ParticipantMode::Auto);
+}
+
+// ── VfhG3: derive session participant role from parent group ───────────────
+//
+// create_session / add_participant previously hardcoded
+// ParticipantRole::Consultant for every participant, losing the Worker /
+// Manager role carried by the parent group's roster. The V1 facade now derives
+// the role from group.participants first, then falls back to the strategy
+// default (ManagerWorker→Worker, else Consultant), mirroring the legacy
+// bcs-http handler which cloned group.participants. add_participant also
+// surfaces an explicit `participant_already_exists` 409 (the legacy memory repo
+// silently skipped duplicates).
+
+#[tokio::test]
+async fn create_session_preserves_manager_worker_worker_role() {
+    // VfhG3: when the parent group is ManagerWorker and a participant Bot is a
+    // Worker in group.participants, create_session must derive the Worker role
+    // for the session participant rather than hardcoding Consultant.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker"],
+            "driver",
+            Some("the task"),
+        )
+        .await;
+
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("worker", None)],
+        None,
+        None,
+    )
+    .await;
+
+    let worker = outcome
+        .session
+        .participants
+        .iter()
+        .find(|p| p.actor_id == "worker")
+        .expect("worker participant projected");
+    assert_eq!(
+        worker.role,
+        ParticipantRole::Worker,
+        "VfhG3: ManagerWorker Worker must keep Worker role in session, not Consultant"
+    );
+    assert_eq!(worker.mode, ParticipantMode::Auto);
+
+    // The driver is still forced to the Driver role regardless of derivation.
+    let driver = outcome
+        .session
+        .participants
+        .iter()
+        .find(|p| p.actor_id == "driver")
+        .expect("driver participant projected");
+    assert_eq!(driver.role, ParticipantRole::Driver);
+}
+
+#[tokio::test]
+async fn create_session_defaults_consultant_for_chat_context() {
+    // VfhG3: a Bot NOT present in the parent group.participants (Chat strategy)
+    // falls back to the strategy default (Chat → Consultant), preserving the
+    // pre-VfhG3 behaviour for the common Chat case.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert", None)],
+        None,
+        None,
+    )
+    .await;
+
+    let expert = outcome
+        .session
+        .participants
+        .iter()
+        .find(|p| p.actor_id == "expert")
+        .expect("expert participant projected");
+    assert_eq!(
+        expert.role,
+        ParticipantRole::Consultant,
+        "VfhG3: Chat group + non-roster participant defaults to Consultant"
+    );
+}
+
+#[tokio::test]
+async fn add_participant_duplication_rejects_409() {
+    // VfhG3: adding the same Bot to a session twice must reject the second call
+    // with a 409 Conflict carrying the explicit `participant_already_exists`
+    // code (the legacy memory repo silently skipped duplicates).
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert", "newcomer"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture.store_group("g1", "driver", None).await;
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert", None)],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    // First add of newcomer succeeds.
+    fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            principal: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "newcomer".into(),
+            mode: Some(BotParticipantMode::Auto),
+        })
+        .await
+        .expect("first add of newcomer");
+
+    // Second add of newcomer is rejected with participant_already_exists.
+    let error = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            principal: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "newcomer".into(),
+            mode: None,
+        })
+        .await
+        .expect_err("duplicate add should reject with participant_already_exists");
+    assert!(
+        matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::Conflict { ref code, .. }
+                if code == "participant_already_exists"
+        ),
+        "expected Conflict(participant_already_exists), got {error:?}",
+    );
+    assert_eq!(error.code(), "participant_already_exists");
+}
+
+#[tokio::test]
+async fn add_participant_derives_worker_role_for_manager_worker() {
+    // VfhG3: when the parent group is ManagerWorker and the added Bot is a
+    // Worker in group.participants, add_participant must derive the Worker role
+    // rather than hardcoding Consultant.
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker", "expert"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker"],
+            "driver",
+            None,
+        )
+        .await;
+    // Seed a session with driver + expert (NOT worker) so worker can be added
+    // via add_participant and the derived role is observable.
+    let outcome = create_session(
+        &fixture,
+        bot_principal("driver"),
+        "g1",
+        "driver",
+        vec![participant_input("expert", None)],
+        None,
+        None,
+    )
+    .await;
+    let session_id = outcome.session.session_id.clone();
+
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            principal: bot_principal("driver"),
+            session_id: session_id.clone(),
+            bot_uuid: "worker".into(),
+            mode: Some(BotParticipantMode::Auto),
+        })
+        .await
+        .expect("add worker participant");
+
+    assert_eq!(
+        added.role,
+        ParticipantRole::Worker,
+        "VfhG3: ManagerWorker Worker gains Worker role on add_participant, not Consultant"
+    );
+    assert_eq!(added.mode, ParticipantMode::Auto);
 }

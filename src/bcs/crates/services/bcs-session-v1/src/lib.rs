@@ -487,11 +487,27 @@ impl SessionService for SessionServiceImpl {
                 .map(|ctx| serde_json::json!({ "query": ctx })),
         };
 
-        let mut participants = command
+        let mut participants: Vec<Participant> = command
             .participants
             .iter()
-            .map(|input| build_participant(input, ParticipantRole::Consultant))
-            .collect::<Vec<_>>();
+            .map(|input| {
+                // VfhG3: derive role from parent group.participants if the bot is
+                // already there; otherwise strategy default (ManagerWorker→Worker,
+                // else Consultant). Mirrors legacy bcs-http create_session which
+                // clones group.participants preserving their roles rather than
+                // hardcoding Consultant and losing the Worker/Manager role.
+                let group_role = group
+                    .participants
+                    .iter()
+                    .find(|p| p.bot_uuid == input.bot_uuid)
+                    .map(|p| p.role);
+                let role = group_role.unwrap_or_else(|| match group.group_strategy {
+                    GroupStrategy::ManagerWorker => ParticipantRole::Worker,
+                    _ => ParticipantRole::Consultant,
+                });
+                build_participant(input, role)
+            })
+            .collect();
 
         // Ensure the driver is present in the roster with the Driver role.
         match participants
@@ -710,20 +726,24 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: AddSessionParticipant,
     ) -> Result<SessionParticipant, ApplicationError> {
-        let (session, _) = self
+        let (session, group) = self
             .load_session_for_manage(&command.principal, &command.session_id)
             .await?;
         // VSN7B: the added Bot must be collaboration-eligible for the caller
         // (visible + friend/creator relation), not merely registered.
         self.ensure_collaboration_eligible(&command.principal, &command.bot_uuid, "bot_uuid")
             .await?;
+        // VfhG3: explicit 409 if the target Bot is already a session participant.
+        // The legacy memory repo silently skipped duplicates (idempotent); the V1
+        // contract surfaces a `participant_already_exists` Conflict so callers
+        // can distinguish a real add from a no-op.
         if session
             .participants
             .iter()
             .any(|p| p.bot_uuid == command.bot_uuid)
         {
             return Err(ApplicationError::conflict(
-                "conflict",
+                "participant_already_exists",
                 format!(
                     "Bot '{}' is already a participant of Session '{}'",
                     command.bot_uuid, command.session_id
@@ -733,11 +753,25 @@ impl SessionService for SessionServiceImpl {
         let mode = command
             .mode
             .unwrap_or(BotParticipantMode::Auto);
+        // VfhG3: derive role from parent group.participants if the bot is already
+        // there; otherwise strategy default (ManagerWorker→Worker, else
+        // Consultant). Mirrors legacy bcs-http add_session_participant which picks
+        // role from body.role or defaults by strategy (ManagerWorker→Worker,
+        // Chat→Consultant) rather than hardcoding Consultant.
+        let group_role = group
+            .participants
+            .iter()
+            .find(|p| p.bot_uuid == command.bot_uuid)
+            .map(|p| p.role);
+        let role = group_role.unwrap_or_else(|| match group.group_strategy {
+            GroupStrategy::ManagerWorker => ParticipantRole::Worker,
+            _ => ParticipantRole::Consultant,
+        });
         let participant = Participant {
             bot_uuid: command.bot_uuid.clone(),
             bot_name: None,
             kind: None,
-            role: ParticipantRole::Consultant,
+            role,
             actor_kind: ActorKind::Bot,
             mode: Some(map_v1_mode_to_domain(mode)),
         };
