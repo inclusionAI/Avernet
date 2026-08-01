@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
-
 from engine.community.api.resource_materialization.router import (
     create_resource_materialization,
     stream_resource_content,
@@ -14,15 +12,7 @@ from engine.community.core.resource_materialization.models import (
 from engine.community.core.resource_materialization.service import (
     ResourceNotMaterializedError,
 )
-from engine.community.plugin_api.auth_gate.models import VerifyResult
-
-
-class _AuthGate:
-    def __init__(self, allowed: bool = True) -> None:
-        self.allowed = allowed
-
-    async def verify(self, token: str, content: str, session_id: str):
-        return VerifyResult(allowed=self.allowed)
+from fastapi import BackgroundTasks, HTTPException
 
 
 class _Service:
@@ -61,15 +51,13 @@ def _request() -> MaterializationRequest:
 
 
 @pytest.mark.asyncio
-async def test_accepts_authenticated_request_and_schedules_service():
+async def test_accepts_proxied_request_and_schedules_service():
     tasks = BackgroundTasks()
     service = _Service()
 
     response = await create_resource_materialization(
         _request(),
         tasks,
-        x_iam_token="iam-token",
-        auth_gate_service=_AuthGate(),
         service=service,
     )
 
@@ -81,35 +69,7 @@ async def test_accepts_authenticated_request_and_schedules_service():
 
 
 @pytest.mark.asyncio
-async def test_rejects_missing_internal_identity():
-    with pytest.raises(HTTPException) as exc:
-        await create_resource_materialization(
-            _request(),
-            BackgroundTasks(),
-            x_iam_token=None,
-            auth_gate_service=_AuthGate(),
-            service=_Service(),
-        )
-
-    assert exc.value.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_rejects_denied_internal_identity():
-    with pytest.raises(HTTPException) as exc:
-        await create_resource_materialization(
-            _request(),
-            BackgroundTasks(),
-            x_iam_token="denied",
-            auth_gate_service=_AuthGate(allowed=False),
-            service=_Service(),
-        )
-
-    assert exc.value.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_content_stream_requires_internal_auth_and_streams_manifest_file(tmp_path):
+async def test_content_streams_manifest_file_over_proxied_route(tmp_path):
     service = _Service()
     service.path = tmp_path / "report.txt"
     service.path.write_bytes(b"content")
@@ -117,8 +77,6 @@ async def test_content_stream_requires_internal_auth_and_streams_manifest_file(t
     response = await stream_resource_content(
         "sr_001",
         disposition="attachment",
-        x_iam_token="iam-token",
-        auth_gate_service=_AuthGate(),
         service=service,
     )
 
@@ -138,8 +96,6 @@ async def test_content_returns_materializing_when_manifest_file_is_missing(tmp_p
         await stream_resource_content(
             "missing",
             disposition="inline",
-            x_iam_token="iam-token",
-            auth_gate_service=_AuthGate(),
             service=service,
         )
 
