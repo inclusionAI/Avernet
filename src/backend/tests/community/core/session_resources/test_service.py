@@ -167,7 +167,14 @@ class _Transport:
         )
 
 
-def _service(queue=None, *, complete_status="DONE", transport=None, resolver=None):
+def _service(
+    queue=None,
+    *,
+    complete_status="DONE",
+    transport=None,
+    resolver=None,
+    default_tenant="configured-tenant",
+):
     repo = _Repo()
     http = _HttpClient(complete_status=complete_status)
     service = SessionResourceService(
@@ -177,6 +184,7 @@ def _service(queue=None, *, complete_status="DONE", transport=None, resolver=Non
         device_context_resolver=resolver or _Resolver(),
         token_vault=TokenVault(master_key="test-master-key"),
         adapter_transport=transport or _Transport(),
+        default_tenant=default_tenant,
     )
     return service, repo, http
 
@@ -231,12 +239,12 @@ def test_upload_intent_defaults_missing_arca_identity_without_logging_raw_values
     )
 
     assert http.calls[0][0] == (
-        "/api/v1/sessions/team_claw/session%2Fraw%20value/files/upload-url"
+        "/api/v1/sessions/configured-tenant/session%2Fraw%20value/files/upload-url"
     )
-    assert intent.resource.tenant == "team_claw"
+    assert intent.resource.tenant == "configured-tenant"
     assert repo.value.bot_uuid == ""
     assert "provider=arca" in service_logs
-    assert "tenant_source=default" in service_logs
+    assert "tenant_source=configured_default" in service_logs
     assert "bot_uuid_present=False" in service_logs
     assert "tenant_type=NoneType" in service_logs
     assert "bot_uuid_type=NoneType" in service_logs
@@ -269,9 +277,9 @@ def test_upload_intent_defaults_empty_tenant():
     intent = _intent(service)
 
     assert http.calls[0][0] == (
-        "/api/v1/sessions/team_claw/session%2Fraw%20value/files/upload-url"
+        "/api/v1/sessions/configured-tenant/session%2Fraw%20value/files/upload-url"
     )
-    assert intent.resource.tenant == "team_claw"
+    assert intent.resource.tenant == "configured-tenant"
     assert repo.value.bot_uuid == "upstream-bot-uuid"
 
 
@@ -327,6 +335,23 @@ def test_upload_intent_rejects_nonstring_tenant_without_leaking_identity(caplog)
     assert "private-tenant" not in caplog.text
     assert "hidden" not in caplog.text
     assert "bot-uuid" not in caplog.text
+
+
+def test_upload_intent_rejects_missing_tenant_without_configured_default(caplog):
+    caplog.set_level("WARNING", logger="session_resource.service")
+    resolver = _Resolver(
+        provider="arca",
+        conn_info={"proxypass_url": "https://proxypass.example/internal"},
+    )
+    service, repo, http = _service(resolver=resolver, default_tenant="")
+
+    with pytest.raises(ValueError, match="BaaS device identity is unavailable"):
+        _intent(service)
+
+    assert repo.value is None
+    assert http.calls == []
+    assert "provider=arca" in caplog.text
+    assert "tenant_source=unconfigured_default" in caplog.text
 
 
 def test_legacy_complete_uses_the_recorded_bot_uuid():

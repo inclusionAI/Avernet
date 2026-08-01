@@ -31,7 +31,6 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 log = logging.getLogger("session_resource.service")
 _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
 _MAX_FILENAME_UTF8_BYTES = 255
-_DEFAULT_SESSION_FILE_TENANT = "team_claw"
 
 
 class SessionResourceService:
@@ -44,6 +43,7 @@ class SessionResourceService:
         device_context_resolver: DeviceContextResolver,
         token_vault: TokenVault,
         adapter_transport: DeviceAdapterTransport,
+        default_tenant: str,
     ) -> None:
         self._repository = repository
         self._baas = baas_client
@@ -51,6 +51,7 @@ class SessionResourceService:
         self._resolver = device_context_resolver
         self._vault = token_vault
         self._adapter_transport = adapter_transport
+        self._default_tenant = default_tenant.strip()
 
     def create_upload_intent(
         self,
@@ -75,8 +76,17 @@ class SessionResourceService:
         )
         bot_uuid_present = isinstance(raw_bot_uuid, str) and bool(raw_bot_uuid)
         if raw_tenant is None or raw_tenant == "":
-            tenant = _DEFAULT_SESSION_FILE_TENANT
-            tenant_source = "default"
+            if not self._default_tenant:
+                log.warning(
+                    "session_resource.upload_intent.identity.reject provider=%s tenant_source=unconfigured_default bot_uuid_present=%s tenant_type=%s bot_uuid_type=%s",
+                    provider,
+                    bot_uuid_present,
+                    type(raw_tenant).__name__,
+                    type(raw_bot_uuid).__name__,
+                )
+                raise ValueError("BaaS device identity is unavailable")
+            tenant = self._default_tenant
+            tenant_source = "configured_default"
         elif isinstance(raw_tenant, str):
             tenant = raw_tenant
             tenant_source = "context"

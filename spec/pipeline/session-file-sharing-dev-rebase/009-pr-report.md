@@ -26,10 +26,11 @@
 
 | Job/指标 | 状态 | 证据 | 根因 | 修复/提交 | 验证 |
 |---|---|---|---|---|---|
-| Backend Session Resources | PASS（本地） | focused pytest | N/A | `d2e74f56` | 31 passed |
+| Backend Session Resources | PASS（本地） | focused pytest + architecture guard | N/A | pending | 34 passed |
 | Engine Session Files | PASS（本地） | focused pytest | N/A | `d2e74f56` | 40 passed |
 | Ruff / whitespace | PASS（本地） | focused lint + `git diff --check` | N/A | N/A | 无诊断 |
-| 远端门禁 | PENDING | [#680 checks](https://github.com/inclusionAI/Avernet/pull/680/checks) | 7 个工作流已创建，处于 queued 或 in progress。 | N/A | 等待当前 head 终态 |
+| Backend unit tests（`113a15a8`） | FAIL | [job](https://github.com/inclusionAI/Avernet/actions/runs/30692329522/job/91349161780) | 社区源码硬编码企业 tenant，触发 shipped-config 架构门禁。 | 移除常量，改用注入的 `BaasConfig.tenant`；缺失配置 fail closed，并补回归测试。 | 本地 34 passed；等待新 head 全量 CI。 |
+| 远端门禁（新 head） | PENDING | [#680 checks](https://github.com/inclusionAI/Avernet/pull/680/checks) | 修复提交尚未推送。 | pending | 推送后等待终态 |
 
 ## 人工意见
 
@@ -41,6 +42,6 @@
 
 - PR: OPEN
 - 自动意见: PENDING
-- ACI/CI: PENDING
+- ACI/CI: PENDING（前一 head 的 Backend unit 已修复，等待新 head）
 - 人工意见: PENDING
-- 下一步: 观察当前 head 的远端检查，并在其终态后复查评论。
+- 下一步: 推送 Backend 架构门禁修复，等待新 head 的所有远端检查并复查评论。
