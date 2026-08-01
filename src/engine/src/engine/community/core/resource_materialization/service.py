@@ -29,7 +29,7 @@ from engine.community.plugin_api.workspace_root import workspace_root_strict
 
 log = logging.getLogger("engine.resource_materialization")
 _SAFE_IDENTIFIER_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
-_SAFE_FILENAME = re.compile(r"^[\w .-]+$", re.UNICODE)
+_WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
 _MAX_FILENAME_UTF8_BYTES = 255
 
 
@@ -321,8 +321,15 @@ class ResourceMaterializationService:
         except UnicodeEncodeError as exc:
             raise MaterializationSecurityError("invalid controlled path segment") from exc
         if (
-            len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
-            or not _SAFE_FILENAME.fullmatch(request.filename)
+            not request.filename
+            or Path(request.filename).name != request.filename
+            or request.filename in {".", ".."}
+            or len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
+            or any(
+                not character.isprintable()
+                or character in _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS
+                for character in request.filename
+            )
         ):
             raise MaterializationSecurityError("invalid controlled path segment")
         supplied_path = request.workspace_relative_path or request.device_path
