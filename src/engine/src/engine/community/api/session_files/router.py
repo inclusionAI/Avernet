@@ -1,4 +1,4 @@
-"""Direct, session-scoped file access through a Bot proxypass connection."""
+"""Direct, session-scoped file access through a trusted Bot proxypass."""
 from __future__ import annotations
 
 import asyncio
@@ -8,45 +8,11 @@ from collections.abc import AsyncIterator
 from engine.community.core.session_files.models import SessionFileError
 from engine.community.core.session_files.service import SessionFileService
 from engine.community.di import Injected
-from engine.community.plugin_api.auth_gate.protocol import AuthGateService
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 log = logging.getLogger("engine.session_files.api")
 router = APIRouter(prefix="/api/session-files", tags=["session-files"])
-
-
-async def _authorize(
-    *,
-    auth_gate_service: AuthGateService,
-    iam_token: str | None,
-    session_key: str,
-    operation: str,
-    resource_id: str | None = None,
-) -> None:
-    if not iam_token:
-        raise HTTPException(status_code=401, detail="missing_iam_token")
-    try:
-        result = await auth_gate_service.verify(
-            token=iam_token,
-            content=f"session-file:{operation}:{resource_id or 'session'}",
-            session_id=session_key,
-        )
-    except Exception as exc:
-        log.warning(
-            "engine.session_files.auth.error operation=%s resource_id=%s error_type=%s",
-            operation,
-            resource_id,
-            type(exc).__name__,
-        )
-        raise HTTPException(status_code=503, detail="session_file_auth_unavailable") from exc
-    if not result.allowed:
-        log.info(
-            "engine.session_files.auth.denied operation=%s resource_id=%s",
-            operation,
-            resource_id,
-        )
-        raise HTTPException(status_code=403, detail="session_file_access_denied")
 
 
 def _error(exc: SessionFileError) -> HTTPException:
@@ -63,16 +29,9 @@ def _error(exc: SessionFileError) -> HTTPException:
 @router.get("")
 async def list_session_files(
     session_key: str = Query(alias="sessionKey", min_length=1, max_length=2048),
-    x_iam_token: str | None = Header(default=None, alias="x-iam-token"),
-    auth_gate_service: AuthGateService = Injected(AuthGateService),  # noqa: B008
     service: SessionFileService = Injected(SessionFileService),  # noqa: B008
 ) -> dict:
-    await _authorize(
-        auth_gate_service=auth_gate_service,
-        iam_token=x_iam_token,
-        session_key=session_key,
-        operation="list",
-    )
+    log.info("engine.session_files.proxypass_access operation=list")
     try:
         files = await asyncio.to_thread(service.list_files, session_key=session_key)
     except SessionFileError as exc:
@@ -85,16 +44,11 @@ async def stream_session_file_content(
     resource_id: str,
     session_key: str = Query(alias="sessionKey", min_length=1, max_length=2048),
     disposition: str = Query("inline", pattern="^(inline|attachment)$"),
-    x_iam_token: str | None = Header(default=None, alias="x-iam-token"),
-    auth_gate_service: AuthGateService = Injected(AuthGateService),  # noqa: B008
     service: SessionFileService = Injected(SessionFileService),  # noqa: B008
 ) -> StreamingResponse:
-    await _authorize(
-        auth_gate_service=auth_gate_service,
-        iam_token=x_iam_token,
-        session_key=session_key,
-        operation="content",
-        resource_id=resource_id,
+    log.info(
+        "engine.session_files.proxypass_access operation=content resource_id=%s",
+        resource_id,
     )
     try:
         content = await asyncio.to_thread(
@@ -128,16 +82,11 @@ async def stream_session_file_content(
 async def delete_session_file(
     resource_id: str,
     session_key: str = Query(alias="sessionKey", min_length=1, max_length=2048),
-    x_iam_token: str | None = Header(default=None, alias="x-iam-token"),
-    auth_gate_service: AuthGateService = Injected(AuthGateService),  # noqa: B008
     service: SessionFileService = Injected(SessionFileService),  # noqa: B008
 ) -> dict:
-    await _authorize(
-        auth_gate_service=auth_gate_service,
-        iam_token=x_iam_token,
-        session_key=session_key,
-        operation="delete",
-        resource_id=resource_id,
+    log.info(
+        "engine.session_files.proxypass_access operation=delete resource_id=%s",
+        resource_id,
     )
     try:
         await asyncio.to_thread(
