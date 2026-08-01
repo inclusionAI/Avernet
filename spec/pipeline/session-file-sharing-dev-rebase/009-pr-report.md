@@ -4,20 +4,20 @@
 
 - Worktree / repo: `rebase-session-files-on-dev-20260801` / `inclusionAI/Avernet`
 - Head / base: `rebase/session-files-on-dev-20260801` / `dev` (`339556a6`)
-- PR: 待创建
+- PR: https://github.com/inclusionAI/Avernet/pull/679
 - 人工意见模式: auto
 
 ## PR 判定
 
 | 结果 | 证据 | 说明 |
 |---|---|---|
-| 待创建 PR | 本地分支包含 5 条 Session File 提交 | 仅从旧发布线挑选 Session File 改动，未重放无关 Skills/AICoding 历史。 |
+| 已创建 PR | [#679](https://github.com/inclusionAI/Avernet/pull/679) | `rebase/session-files-on-dev-20260801` 指向 `dev`；仅从旧发布线挑选 Session File 改动，未重放无关 Skills/AICoding 历史。 |
 
 ## 自动意见
 
 | 轮次 | 来源 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 |---|---|---|---|---|---|---|
-| 0 | N/A | N/A | PENDING | PR 尚未创建。 | N/A | N/A |
+| 1 | 无 | N/A | PENDING | 首次查询无 review 或普通评论。 | N/A | 等待远端检查稳定后复查。 |
 
 ## ACI/CI
 
@@ -26,17 +26,17 @@
 | Backend Session Resources | PASS（本地） | focused pytest | N/A | `42b62715` | 31 passed |
 | Engine Session Files | PASS（本地） | focused pytest | N/A | `4fde2af7` | 34 passed |
 | Ruff / whitespace | PASS（本地） | focused lint + `git diff --check` | N/A | N/A | 无诊断 |
-| 远端门禁 | PENDING | PR 尚未创建 | N/A | N/A | 待推送后观察 |
+| 远端门禁 | PENDING | [#679 checks](https://github.com/inclusionAI/Avernet/pull/679/checks) | 7 个工作流已创建，处于 queued 或 in progress。 | N/A | 等待当前 head 终态 |
 
 ## 人工意见
 
 | 轮次 | 作者 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 |---|---|---|---|---|---|---|
-| 0 | N/A | N/A | PENDING | PR 尚未创建。 | N/A | N/A |
+| 1 | 无 | N/A | PENDING | 首次查询无 review 或普通评论。 | N/A | 等待远端检查稳定后复查。 |
 
 ## 当前结论
 
-- PR: NOT_CREATED
+- PR: OPEN
 - 自动意见: PENDING
 - ACI/CI: PENDING
 - 人工意见: PENDING
