@@ -308,8 +308,8 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 - `utils/gateway_principal_config.py` —— 通过 `SecretResolver` 按
   `SecretNamesConfig.gateway_principal_signing_key` 解析共享密钥。该密钥名**自带默认
   值**，因此部署只需配置「值」：公司密钥库（corp，overlay 同时覆盖密钥名）、
-  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE`（community），或当前生效的
-  `application-singlebox.yaml` 里的 `gateway_principal.signing_key`（单盒）。
+  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE`（community）。单盒**不解析任何值** ——
+  既没有密钥库，也不提供本地替代品，因此单盒的 `/openapi/v1` 一律拒绝。
   这一侧故意**不带** dev 兜底密钥（提交进仓库的共享密钥就是提交进仓库的凭据）；单盒需要
   两侧设成同一个值。密钥只在启动时解析一次，因此轮换密钥需要两侧都重启。
 

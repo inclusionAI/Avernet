@@ -76,7 +76,7 @@ _ENGINE_RUNTIME_EXEMPT_REASON = (
     "could only assert 401s and would prove nothing. The verifier has landed "
     "and require_principal is real; what is still missing is a minter. It "
     "accepts only a token signed with the gateway's key, singlebox runs the "
-    "backend without a gateway, and gateway_principal.signing_key ships unset "
+    "backend without a gateway, and singlebox ships no local signing key "
     "there — which the verifier treats as deny. That is the same blocker, and "
     "deliberately the same answer, as _GATEWAY_PRINCIPAL_EXEMPT_REASON above: "
     "the auth workstream chose to wait for a gateway in the box rather than "

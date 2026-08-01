@@ -1,15 +1,15 @@
 """Local SecretResolver.
 
 The remote secret backend is unreachable in local/singlebox mode. Most secrets
-are unavailable, but a couple are configured locally so their consumers can reuse
-the same SecretResolver contract as corp:
+are unavailable, but the aiworkbench repo URL is configured locally so
+GitSyncService can reuse the same SecretResolver contract as corp.
 
-- the aiworkbench repo URL, for GitSyncService;
-- the gateway principal signing key, for the ``/openapi/v1`` verifier.
-
-Both are read from ``application-singlebox.yaml``. Neither ships with a value:
-this file resolves what the operator put there, and returns ``None`` when they
-put nothing — a committed shared secret would be a committed credential.
+Deliberately **not** here: the gateway principal signing key. It would only ever
+be a singlebox-shaped stand-in for a secret store, shipped empty so it did
+nothing, and every deployment that actually serves ``/openapi/v1`` resolves it
+from a real store or the environment instead. Singlebox therefore has no key and
+answers 401 on the public surface — the state it has always been in. Giving it
+one is a deliberate change, not a config line.
 """
 
 from dataclasses import dataclass
@@ -24,7 +24,6 @@ from agentclaw.community.plugins.local._mock_seam import MockSeam
 logger = get_logger()
 
 _AIWORKBENCH_REPO_URL_SECRET_NAME = "other_manual_agentclaw_aiworkbench_repo_url"
-_PRINCIPAL_SIGNING_KEY_SECRET_NAME = "gateway_principal_signing_key"
 
 
 @dataclass(frozen=True)
@@ -59,9 +58,9 @@ class LocalSecretResolver(MockSeam, SecretResolver):
         ``application.yaml`` and the overlay. A deployed singlebox assembles its
         runtime ``configs/`` in the working directory, so reading only the
         bundled copy would resolve secrets from a file the operator never edits
-        — they would set ``gateway_principal.signing_key`` in the active config
-        and still get 401 everywhere. Mirror that search order exactly, pairing
-        rule included, so both reads land on the same file.
+        — they would set a value in the active config and see no effect. Mirror
+        that search order exactly, pairing rule included, so both reads land on
+        the same file.
 
         Falls back to the bundled path when no directory holds the pair, which
         keeps a test that points ``_SINGLEBOX_CONFIG_PATH`` at a lone fixture
@@ -79,44 +78,9 @@ class LocalSecretResolver(MockSeam, SecretResolver):
     def get_secret(self, secret_name: str) -> Any | None:
         if secret_name == _AIWORKBENCH_REPO_URL_SECRET_NAME:
             return self._get_aiworkbench_repo_url_secret()
-        if secret_name == _PRINCIPAL_SIGNING_KEY_SECRET_NAME:
-            return self._get_principal_signing_key_secret()
 
         logger.info("[LocalMock] SecretResolver.get_secret(%s) -> None", secret_name)
         return None
-
-    def _get_principal_signing_key_secret(self) -> _LocalSecret | None:
-        """Resolve the HMAC key singlebox shares with the gateway.
-
-        Ships unset: ``application-singlebox.yaml`` carries the block but no
-        value, so out of the box this returns ``None`` and every ``/openapi/v1``
-        request answers 401 — the same state singlebox is in today. To exercise
-        the public surface locally, set it there *and* on the gateway, whose own
-        ``SecretResolver`` reads
-        ``AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE``; the two must match for a
-        token to verify.
-        """
-        local_config = self._read_singlebox_local_config()
-        principal_config = local_config.get("gateway_principal") or {}
-        key = principal_config.get("signing_key")
-        if not isinstance(key, str) or not key.strip():
-            logger.info(
-                "[LocalMock] no gateway_principal.signing_key in %s — the "
-                "public API will answer 401",
-                self._active_singlebox_config_path(),
-            )
-            return None
-
-        # The name only — never the key itself.
-        logger.info(
-            "[LocalMock] SecretResolver.get_secret(%s) -> "
-            "application-singlebox.yaml",
-            _PRINCIPAL_SIGNING_KEY_SECRET_NAME,
-        )
-        return _LocalSecret(
-            secret_user=_PRINCIPAL_SIGNING_KEY_SECRET_NAME,
-            secret_value=key.strip(),
-        )
 
     def _get_aiworkbench_repo_url_secret(self) -> _LocalSecret | None:
         repo_url = self._read_singlebox_skills_repo_url()

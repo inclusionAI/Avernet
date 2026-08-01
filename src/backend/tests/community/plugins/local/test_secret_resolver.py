@@ -54,62 +54,7 @@ def test_aiworkbench_repo_url_unreadable_singlebox_yaml_returns_none(
     assert LocalSecretResolver().get_secret(_AIWORKBENCH_REPO_URL_SECRET_NAME) is None
 
 
-# ── the gateway principal signing key ────────────────────────────────────────
-
-
-def test_principal_signing_key_is_read_from_singlebox_yaml(tmp_path, monkeypatch):
-    """Singlebox has no secret store, so the operator's key comes from the yaml."""
-    _write_config(
-        tmp_path,
-        monkeypatch,
-        """
-user_config:
-  gateway_principal:
-    signing_key: "a-local-shared-secret-of-32-bytes-plus"
-""",
-    )
-
-    secret = LocalSecretResolver().get_secret(_PRINCIPAL_SIGNING_KEY_SECRET_NAME)
-
-    assert secret is not None
-    assert secret.secret_value == "a-local-shared-secret-of-32-bytes-plus"
-
-
-def test_principal_signing_key_ships_unset_and_resolves_to_none(tmp_path, monkeypatch):
-    """The shipped config carries the block but no value — a committed shared
-    secret would be a committed credential. Absent means the public API denies."""
-    _write_config(
-        tmp_path,
-        monkeypatch,
-        """
-user_config:
-  gateway_principal:
-    signing_key: ""
-""",
-    )
-
-    assert LocalSecretResolver().get_secret(_PRINCIPAL_SIGNING_KEY_SECRET_NAME) is None
-
-
-def test_principal_signing_key_whitespace_only_resolves_to_none(tmp_path, monkeypatch):
-    """A key that is accidentally whitespace must not look configured."""
-    _write_config(
-        tmp_path,
-        monkeypatch,
-        """
-user_config:
-  gateway_principal:
-    signing_key: "   "
-""",
-    )
-
-    assert LocalSecretResolver().get_secret(_PRINCIPAL_SIGNING_KEY_SECRET_NAME) is None
-
-
-def test_principal_signing_key_missing_block_resolves_to_none(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch, "user_config: {}\n")
-
-    assert LocalSecretResolver().get_secret(_PRINCIPAL_SIGNING_KEY_SECRET_NAME) is None
+# ── which config file is the live one ────────────────────────────────────────
 
 
 def test_runtime_overlay_wins_over_the_bundled_config(tmp_path, monkeypatch):
@@ -117,14 +62,14 @@ def test_runtime_overlay_wins_over_the_bundled_config(tmp_path, monkeypatch):
 
     ``YamlConfigProvider`` boots from ``cwd/configs`` when it holds both
     ``application.yaml`` and the overlay, so an operator editing that copy must
-    be the one this resolver reads — otherwise they set the key exactly as
-    instructed and still get 401 everywhere.
+    be the one this resolver reads — otherwise they set a value exactly as
+    instructed and see no effect.
     """
     runtime = tmp_path / "configs"
     runtime.mkdir()
     (runtime / "application.yaml").write_text("user_config: {}\n", encoding="utf-8")
     (runtime / "application-singlebox.yaml").write_text(
-        'user_config:\n  gateway_principal:\n    signing_key: "from-the-runtime-overlay"\n',
+        'user_config:\n  openclaw:\n    skills_repo_url: "git@example.com:from-runtime.git"\n',
         encoding="utf-8",
     )
     bundled = _write_config(
@@ -132,17 +77,17 @@ def test_runtime_overlay_wins_over_the_bundled_config(tmp_path, monkeypatch):
         monkeypatch,
         """
 user_config:
-  gateway_principal:
-    signing_key: "from-the-bundled-copy"
+  openclaw:
+    skills_repo_url: "git@example.com:from-bundled.git"
 """,
     )
     assert bundled.parent != runtime, "the two copies must be distinct files"
     monkeypatch.chdir(tmp_path)
 
-    secret = LocalSecretResolver().get_secret(_PRINCIPAL_SIGNING_KEY_SECRET_NAME)
+    secret = LocalSecretResolver().get_secret(_AIWORKBENCH_REPO_URL_SECRET_NAME)
 
     assert secret is not None
-    assert secret.secret_value == "from-the-runtime-overlay"
+    assert secret.secret_value == "git@example.com:from-runtime.git"
 
 
 def test_bundled_config_is_used_when_no_runtime_overlay_exists(tmp_path, monkeypatch):
@@ -152,47 +97,42 @@ def test_bundled_config_is_used_when_no_runtime_overlay_exists(tmp_path, monkeyp
         monkeypatch,
         """
 user_config:
-  gateway_principal:
-    signing_key: "from-the-bundled-copy"
+  openclaw:
+    skills_repo_url: "git@example.com:from-bundled.git"
 """,
     )
     monkeypatch.chdir(tmp_path)
 
-    secret = LocalSecretResolver().get_secret(_PRINCIPAL_SIGNING_KEY_SECRET_NAME)
+    secret = LocalSecretResolver().get_secret(_AIWORKBENCH_REPO_URL_SECRET_NAME)
 
     assert secret is not None
-    assert secret.secret_value == "from-the-bundled-copy"
+    assert secret.secret_value == "git@example.com:from-bundled.git"
 
 
-def test_shipped_singlebox_config_carries_the_block_but_no_key():
-    """The real shipped file: one knob, present and empty, nothing committed."""
+# ── the gateway principal signing key is deliberately absent ─────────────────
+
+
+def test_principal_signing_key_does_not_resolve_locally():
+    """Singlebox has no key, so the public surface denies.
+
+    A yaml stand-in for a secret store would be a committed-credential shape
+    shipped empty. Without one the verifier has nothing to trust and
+    /openapi/v1 answers 401 — where singlebox has always been. Giving it a key
+    is a deliberate change, so this pins the absence rather than leaving it to
+    be re-added by habit.
+    """
+    assert LocalSecretResolver().get_secret("gateway_principal_signing_key") is None
+
+
+def test_no_signing_key_is_committed_to_the_singlebox_config():
+    """Whatever else the shipped config grows, it must carry no signing key."""
     import yaml
 
     with LocalSecretResolver._SINGLEBOX_CONFIG_PATH.open(encoding="utf-8") as f:
         user_config = yaml.safe_load(f)["user_config"]
 
-    assert "signing_key" in user_config["gateway_principal"], (
-        "the block must exist so an operator has somewhere to put the key"
+    assert "gateway_principal" not in user_config, (
+        "the singlebox signing-key block was removed deliberately; re-adding it "
+        "reintroduces a committed-credential shape for a knob that ships inert"
     )
-    assert not user_config["gateway_principal"]["signing_key"], (
-        "no signing key may be committed to the repository"
-    )
-    assert "gateway_principal_signing_key" not in user_config.get("secret_names", {}), (
-        "the name defaults in SecretNamesConfig — registering it here is the "
-        "second config entry this shape exists to avoid"
-    )
-
-
-def test_the_default_secret_name_is_what_this_resolver_answers_to():
-    """The two halves of the one-knob shape must agree.
-
-    Nothing else links ``SecretNamesConfig``'s default to the constant this
-    resolver matches on, so if either moves the lookup silently stops resolving
-    and every /openapi/v1 request answers 401.
-    """
-    from agentclaw.community.di.config import SecretNamesConfig
-
-    assert (
-        SecretNamesConfig().gateway_principal_signing_key
-        == _PRINCIPAL_SIGNING_KEY_SECRET_NAME
-    )
+    assert "gateway_principal_signing_key" not in user_config.get("secret_names", {})

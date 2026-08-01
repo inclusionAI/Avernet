@@ -342,8 +342,8 @@ route dependency        → require_principal(request)       ─┘  cache on sc
   That name **defaults**, so a deployment configures only the *value*: the corp
   secret store (corp overlays also override the name),
   `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` (community), or
-  `gateway_principal.signing_key` in the active `application-singlebox.yaml`
-  (singlebox). There is no dev fallback key on this side on purpose — a
+  Singlebox resolves nothing — no secret store, no local stand-in — so
+  `/openapi/v1` denies there. There is no dev fallback key on this side on purpose — a
   committed shared secret is a committed credential; single-box sets the same
   value on both sides. The key is resolved once at boot, so rotating it needs a
   restart on both sides.

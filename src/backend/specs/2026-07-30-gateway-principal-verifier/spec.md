@@ -87,8 +87,8 @@ The `iss` row is a live coupling, not a symmetry: changing the gateway's
 
 Per profile, the key's value resolves from: the corp secret store (corp);
 `{env_prefix}{NAME}_VALUE` (community, via `CommunitySecretResolver`); or
-`gateway_principal.signing_key` in the active `application-singlebox.yaml`
-(singlebox/test, via `LocalSecretResolver`).
+nothing at all in singlebox/test — that profile has no secret store and ships
+no local stand-in, so the public surface denies there.
 
 **Migration.** A deployment that set `AVERNET_PRINCIPAL_SIGNING_KEY` on the
 backend must move that value. The secret *name* needs no action — it defaults —
@@ -102,7 +102,7 @@ What a missed migration looks like depends on the environment:
   visibly rather than deploying a surface that 401s while reporting healthy.
 - **local / dev / singlebox keep booting and answer 401** on every
   `/openapi/v1` request. Those environments legitimately have no key —
-  singlebox ships `gateway_principal.signing_key` empty on purpose — so failing
+  singlebox ships no local key on purpose — so failing
   the boot there would brick local development and the singlebox coverage gate.
 
 There is deliberately no env fallback: silently honouring the old variable would
@@ -142,8 +142,9 @@ placed the seams.
    committed shared secret is a committed credential, and on this side "no key"
    fails safe: every public request answers 401, which is precisely the state
    this replaces. Single-box sets the same value on both sides: since PR #670
-   from `gateway_principal.signing_key` here, and since gateway #673 from
-   `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` there.
+   from a real secret store or the environment on this side, and since gateway
+   #673 from `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` there. Singlebox
+   configures neither and therefore denies.
 2. **Tenant passes through verbatim.** The gateway's tenant id *is* the
    `avernet_tenant` isolation key — no translation table. Consequence worth
    knowing: a gateway tenant must be spelled exactly as the column stores it,

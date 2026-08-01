@@ -155,9 +155,6 @@
     "gateway": {
       "base_url": "http://127.0.0.1:9999"
     },
-    "gateway_principal": {
-      "signing_key": ""
-    },
     "git_sync": {
       "bolt_shared_dir_name": "bolt_shared",
       "enable_oss_sync": false

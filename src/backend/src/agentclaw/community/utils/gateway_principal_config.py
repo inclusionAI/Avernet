@@ -19,8 +19,8 @@ What comes from where:
   so a deployment configures only the *value*, wherever its resolver reads that
   from: the corp secret store (corp env overlays also override the name with the
   real registry key); ``AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE``
-  via ``CommunitySecretResolver``; or ``gateway_principal.signing_key`` in
-  ``application-singlebox.yaml`` via ``LocalSecretResolver``.
+  via ``CommunitySecretResolver``. Singlebox resolves **nothing** — it has no
+  secret store and ships no local stand-in, so the public surface denies there.
 
   **In ``pre``/``prod`` an unresolvable key fails the boot** — see ``strict`` on
   :func:`init_principal_verifier_config`. Serving the public API without one is
@@ -100,10 +100,10 @@ def init_principal_verifier_config(
     rollout. So ``strict=True`` raises and the process refuses to boot.
 
     ``strict=False`` installs the deny config instead, for the environments that
-    legitimately have no key: singlebox ships ``gateway_principal.signing_key``
-    empty on purpose (a committed shared secret is a committed credential), and
-    local/dev boots run without a gateway at all. Failing those closed keeps
-    them bootable while still refusing every unverifiable request.
+    legitimately have no key: singlebox ships no local key at all (a committed
+    shared secret is a committed credential), and local/dev boots run without a
+    gateway. Failing those closed keeps them bootable while still refusing every
+    unverifiable request.
 
     Raises:
         RuntimeError: when ``strict`` and no usable key could be resolved.
