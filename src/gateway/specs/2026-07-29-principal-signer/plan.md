@@ -1,5 +1,11 @@
 # Principal 签发与转发（网关侧）— 实现计划
 
+> **⚠️ 配置部分已过时。** 本文中的 `AVERNET_PRINCIPAL_SIGNING_KEY` / `_KID` / `_TTL`
+> env 读取是这份计划落地当时的实现记录，PR #673 之后网关已改由 `SecretResolver` +
+> `user_config.principal_signer` 取配置，那些 env 变量不再被读取。**不要照本文配置部署**
+> —— 当前契约见同目录 `spec.md` 的「配置来源（PR #673 起）」。其余内容（SPI 形状、转发
+> 接缝、`aud` 取自 `server.name`）仍然成立。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 网关把解析出的 `dict[PrincipalType, Principal]` 签成短时 JWT，以 `X-Avernet-Principal` 头注入转发请求，去掉空占位接缝。

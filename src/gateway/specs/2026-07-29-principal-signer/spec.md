@@ -145,11 +145,38 @@ class BarePrincipalSigner(PrincipalSigner):
 
 ### 配置来源
 
-沿用 `DATABASE_URL` 的 env 约定：
+> **⚠️ 本节已被 PR #673 取代。** 下面这套 `AVERNET_PRINCIPAL_SIGNING_*` env 约定
+> 网关**已经不再读取**；照此配置会让密钥落空、网关退回 dev fallback 签名，而下游
+> 后端（backend PR #670 起密钥同样走 SecretResolver）会拒掉每一个转发请求。当前契约见
+> 下方「配置来源（PR #673 起）」。
 
-- `AVERNET_PRINCIPAL_SIGNING_KEY`：HMAC 密钥（必填，bare 见下）。
-- `AVERNET_PRINCIPAL_SIGNING_KID`：密钥 id，默认 `bare`。
-- `AVERNET_PRINCIPAL_SIGNING_TTL`：TTL 秒，默认 `60`。
+~~沿用 `DATABASE_URL` 的 env 约定：~~
+
+- ~~`AVERNET_PRINCIPAL_SIGNING_KEY`：HMAC 密钥（必填，bare 见下）。~~
+- ~~`AVERNET_PRINCIPAL_SIGNING_KID`：密钥 id，默认 `bare`。~~
+- ~~`AVERNET_PRINCIPAL_SIGNING_TTL`：TTL 秒，默认 `60`。~~
+
+### 配置来源（PR #673 起）
+
+密钥是凭据，因此改由 `SecretResolver` SPI 解析；其余三项是非机密配置，移入
+`user_config.principal_signer`：
+
+| 项 | 位置 | 默认值 |
+| --- | --- | --- |
+| 密钥名 | `user_config.principal_signer.secret_name` | `principal_signing_key` |
+| 密钥值 | `SecretResolver`（community 味型读 `{secret.env_prefix}{NAME}_VALUE`） | 无 |
+| `kid` | `user_config.principal_signer.kid` | `bare` |
+| `issuer` | `user_config.principal_signer.issuer` | `gateway` |
+| `ttl_seconds` | `user_config.principal_signer.ttl_seconds` | `60` |
+
+`secret.env_prefix` 默认 `AVERNET_SECRET_`，所以 community 部署实际导出的是
+`AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE`。
+
+**与后端的关系**：两侧各有自己的注册表与密钥名，**只有「值」需要一致** ——
+后端走 `SecretNamesConfig.gateway_principal_signing_key`
+（community 读 `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE`）。
+另需注意 `issuer` 现在这一侧可配、后端是常量 `gateway`：改了这里就必须在同一个版本
+里改后端常量，否则所有 `/openapi/v1` 请求都会 401。
 
 **未设密钥时**的取舍（已确认）：bare 组合根使用一个固定 **dev fallback** 密钥并
 `logger.warning(...)`（明示「非生产」），保证单盒/测试可跑。sofa 非对称味型将**强制**

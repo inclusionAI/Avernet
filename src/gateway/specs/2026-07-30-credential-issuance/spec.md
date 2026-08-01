@@ -19,7 +19,11 @@ demo 行靠 bootstrap 手动 seed。本工作项补齐：
 ### 已确认取舍
 
 1. 暴露形态：core 服务方法 + 网关 HTTP 接口。
-2. 签发密钥：复用 `PrincipalSigner` 的 HMAC 密钥（`AVERNET_PRINCIPAL_SIGNING_KEY`）。
+2. 签发密钥：复用 `PrincipalSigner` 的 HMAC 密钥。~~（`AVERNET_PRINCIPAL_SIGNING_KEY`）~~
+   PR #673 起该密钥改由 `SecretResolver` 按
+   `user_config.principal_signer.secret_name`（默认 `principal_signing_key`）解析；
+   community 味型读 `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE`。那个 env 变量已不再
+   被读取。
 3. 接口鉴权：暂不鉴权（文档标注 not-for-prod；生产再加 admin 令牌）。
 
 ### 非目标
