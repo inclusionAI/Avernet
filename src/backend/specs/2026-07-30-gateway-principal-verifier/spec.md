@@ -141,10 +141,11 @@ placed the seams.
    committed dev secret with a warning; we deliberately do not mirror it. A
    committed shared secret is a committed credential, and on this side "no key"
    fails safe: every public request answers 401, which is precisely the state
-   this replaces. Single-box sets the same value on both sides: since PR #670
-   from a real secret store or the environment on this side, and since gateway
-   #673 from `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` there. Singlebox
-   configures neither and therefore denies.
+   this replaces. **Single-box cannot set a key at all** — since PR #670 it has
+   no local stand-in for a secret store, so it denies unconditionally. The two
+   sides matching is a concern only where both are provisioned: a real secret
+   store or the environment here, and since gateway #673
+   `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` there.
 2. **Tenant passes through verbatim.** The gateway's tenant id *is* the
    `avernet_tenant` isolation key — no translation table. Consequence worth
    knowing: a gateway tenant must be spelled exactly as the column stores it,

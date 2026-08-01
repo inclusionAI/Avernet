@@ -341,12 +341,12 @@ route dependency        → require_principal(request)       ─┘  cache on sc
   `SecretResolver` under `SecretNamesConfig.gateway_principal_signing_key`.
   That name **defaults**, so a deployment configures only the *value*: the corp
   secret store (corp overlays also override the name),
-  `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` (community), or
-  Singlebox resolves nothing — no secret store, no local stand-in — so
-  `/openapi/v1` denies there. There is no dev fallback key on this side on purpose — a
-  committed shared secret is a committed credential; single-box sets the same
-  value on both sides. The key is resolved once at boot, so rotating it needs a
-  restart on both sides.
+  or `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` (community).
+  **Singlebox resolves nothing** — no secret store, no local stand-in — so
+  `/openapi/v1` denies there and no config knob changes that; giving singlebox a
+  key is a deliberate change, not a config line. There is no dev fallback key on
+  this side on purpose: a committed shared secret is a committed credential. The
+  key is resolved once at boot, so rotating it needs a restart on both sides.
 
   **An unresolvable key behaves differently by environment**, and the
   difference is the whole point:
