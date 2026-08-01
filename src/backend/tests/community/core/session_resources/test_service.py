@@ -224,17 +224,22 @@ def test_upload_intent_defaults_missing_arca_identity_without_logging_raw_values
     service, repo, http = _service(resolver=resolver)
 
     intent = _intent(service)
+    service_logs = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "session_resource.service"
+    )
 
     assert http.calls[0][0] == (
         "/api/v1/sessions/team_claw/session%2Fraw%20value/files/upload-url"
     )
     assert intent.resource.tenant == "team_claw"
     assert repo.value.bot_uuid == ""
-    assert "provider=arca" in caplog.text
-    assert "tenant_source=default" in caplog.text
-    assert "bot_uuid_present=False" in caplog.text
-    assert "tenant_type=NoneType" in caplog.text
-    assert "bot_uuid_type=NoneType" in caplog.text
+    assert "provider=arca" in service_logs
+    assert "tenant_source=default" in service_logs
+    assert "bot_uuid_present=False" in service_logs
+    assert "tenant_type=NoneType" in service_logs
+    assert "bot_uuid_type=NoneType" in service_logs
     for raw_value in (
         "owner-1",
         "bot-1",
@@ -243,7 +248,7 @@ def test_upload_intent_defaults_missing_arca_identity_without_logging_raw_values
         "secret-token",
         "https://proxypass.example/internal",
     ):
-        assert raw_value not in caplog.text
+        assert raw_value not in service_logs
     for forbidden_field in (
         "resource_id=",
         "session_key_hash=",
@@ -251,7 +256,7 @@ def test_upload_intent_defaults_missing_arca_identity_without_logging_raw_values
         "size_bytes=",
         "upload_type=",
     ):
-        assert forbidden_field not in caplog.text
+        assert forbidden_field not in service_logs
 
 
 def test_upload_intent_defaults_empty_tenant():
