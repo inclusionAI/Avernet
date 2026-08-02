@@ -130,14 +130,21 @@ class PathRewrite:
     def apply(self, path: str) -> str:
         """*path* with ``from_prefix`` replaced by ``to_prefix``.
 
-        A path that does not carry the prefix is returned unchanged. That cannot
-        happen for a path the domain map has already resolved to this domain —
-        :func:`_parse_rewrite` refuses a ``from`` that does not begin at the
-        domain's own prefix — so it is a defensive branch, not a supported one.
+        The prefix matches on **segment boundaries**, not characters: either the
+        path is the prefix exactly, or the prefix is followed by ``/``. A
+        character-wise ``startswith`` would rewrite ``/a/v20/ws`` under a prefix
+        of ``/a/v2`` and produce ``/proxypass0/ws`` — a path on the upstream that
+        nobody asked for and that no reader would predict.
+
+        A path that does not carry the prefix is returned unchanged. Validation
+        makes that unreachable for a path the domain map resolved here, so it is
+        a defensive branch rather than a supported one.
         """
-        if not path.startswith(self.from_prefix):
-            return path
-        return f"{self.to_prefix}{path[len(self.from_prefix) :]}"
+        if path == self.from_prefix:
+            return self.to_prefix
+        if path.startswith(f"{self.from_prefix}/"):
+            return f"{self.to_prefix}{path[len(self.from_prefix) :]}"
+        return path
 
 
 @dataclass(frozen=True)
@@ -336,6 +343,16 @@ def _parse_rewrite(name: str, raw: Any, domain_prefix: str) -> PathRewrite | Non
     to_prefix = str(spec.get("to", ""))
     if not from_prefix or not to_prefix:
         raise ValueError(f"domain {name!r}: rewrite needs both 'from' and 'to'")
+    if not to_prefix.startswith("/"):
+        # The relay concatenates this straight onto the upstream origin, so a
+        # relative value silently becomes part of the *host*: `to: proxypass`
+        # against `wss://proxy.internal` yields `wss://proxy.internalproxypass/…`,
+        # which is a different host or an unparseable URI, not a path.
+        raise ValueError(
+            f"domain {name!r}: rewrite.to {to_prefix!r} must be an absolute path "
+            f"starting with '/' — it is joined to the upstream origin, so a "
+            f"relative value would be absorbed into the host"
+        )
     anchored = from_prefix.rstrip("/")
     if anchored != domain_prefix and not anchored.startswith(f"{domain_prefix}/"):
         raise ValueError(

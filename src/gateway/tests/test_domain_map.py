@@ -202,6 +202,66 @@ def test_a_rewrite_on_the_domain_boundary_is_accepted(from_prefix: str) -> None:
     assert engine.rewrite is not None
 
 
+def test_a_rewrite_matches_on_segment_boundaries_not_characters() -> None:
+    """A nested `from` must not eat into a longer sibling segment.
+
+    `/openapi/v1/engine/v20/ws` under a `from` of `/openapi/v1/engine/v2` is a
+    *different* segment, but a character-wise prefix match would rewrite it to
+    `/proxypass0/ws` — a path on the upstream nobody asked for.
+    """
+    engine = _rewrite_map("/openapi/v1/engine/v2").domain_for("/openapi/v1/engine/v20")
+    assert engine is not None
+    assert engine.upstream_path("/openapi/v1/engine/v20/ws") == (
+        "/openapi/v1/engine/v20/ws"
+    )
+    # The real nested path still rewrites.
+    assert engine.upstream_path("/openapi/v1/engine/v2/ws") == "/proxypass/ws"
+    # And the prefix on its own maps to the target exactly.
+    assert engine.upstream_path("/openapi/v1/engine/v2") == "/proxypass"
+
+
+@pytest.mark.parametrize("to_prefix", ["proxypass", "proxypass/x", ""])
+def test_a_rewrite_target_must_be_an_absolute_path(to_prefix: str) -> None:
+    """A relative `to` is absorbed into the upstream *host*, not the path.
+
+    The relay joins it straight onto the origin, so `to: proxypass` against
+    `wss://proxy.internal` yields `wss://proxy.internalproxypass/…` — a
+    different host, or an unparseable URI.
+    """
+    with pytest.raises(ValueError, match="absolute path|needs both"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "engine": {
+                        "server": "s",
+                        "rewrite": {"from": "/openapi/v1/engine", "to": to_prefix},
+                    }
+                },
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
+def test_a_rewrite_target_of_root_strips_the_prefix() -> None:
+    """`to: /` is a legitimate "mount at the upstream root" rewrite."""
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "engine": {
+                    "server": "s",
+                    "rewrite": {"from": "/openapi/v1/engine", "to": "/"},
+                }
+            },
+            "servers": {"s": {"base_url": "http://s"}},
+        },
+        variables={},
+    )
+    engine = dm.domain_for("/openapi/v1/engine/t")
+    assert engine is not None
+    assert engine.upstream_path("/openapi/v1/engine/t/ws") == "/t/ws"
+
+
 def test_a_rewrite_needs_both_ends() -> None:
     with pytest.raises(ValueError, match="needs both"):
         DomainMap.from_config(
