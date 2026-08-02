@@ -7,12 +7,12 @@ use bcs_domain::{
     MessageOwnerFilter, MessageQuery, NewMessage, SenderType,
 };
 use bcs_service_api::{
-    BindingChannel, BotCapabilities, BotRepoPort, DefaultDelivery, FriendRepoPort, FriendRequest,
-    FriendRequestDirection, FriendRequestRepoPort, FriendRequestStatus, Group, GroupChatProposal,
-    GroupKind, GroupMutableFieldsPatch, GroupRepoPort, GroupStatus, NewSessionParams, Participant,
-    ParticipantMode, ParticipantRole, ProposalCoreService, RelationEdge, RelationRepoPort,
-    RoutingMode, RoutingPolicy, ServiceSpec, Session, SessionKind, SessionRepoPort, SessionStatus,
-    Skill,
+    BindingChannel, BotCapabilities, BotControlPlaneRepoPort, BotRepoPort, DefaultDelivery,
+    FriendRepoPort, FriendRequest, FriendRequestDirection, FriendRequestRepoPort,
+    FriendRequestStatus, Group, GroupChatProposal, GroupKind, GroupMutableFieldsPatch,
+    GroupRepoPort, GroupStatus, NewSessionParams, Participant, ParticipantMode, ParticipantRole,
+    ProposalCoreService, RelationEdge, RelationRepoPort, RoutingMode, RoutingPolicy, ServiceSpec,
+    Session, SessionKind, SessionRepoPort, SessionStatus, Skill,
 };
 use bcs_service_api::ServiceError;
 use bcs_service_api::port::repo::{
@@ -245,6 +245,41 @@ pub async fn bot_repo_contract_tests<T: BotRepoPort + ?Sized>(repo: &T) {
 
 pub async fn bot_repo_port_contract_tests<T: BotRepoPort + ?Sized>(repo: &T) {
     bot_repo_contract_tests(repo).await;
+}
+
+pub async fn bot_control_plane_repo_port_contract_tests<T: BotControlPlaneRepoPort + ?Sized>(
+    repo: &T,
+    env: &str,
+    known_bot_id: &str,
+) {
+    assert!(
+        repo.get_control_plane("control-plane-contract-missing", env)
+            .await
+            .expect("read missing control-plane Bot")
+            .is_none()
+    );
+
+    let record = repo
+        .get_control_plane(known_bot_id, env)
+        .await
+        .expect("read known control-plane Bot")
+        .expect("known control-plane Bot exists");
+    assert_eq!(record.bot_id, known_bot_id);
+    assert_eq!(record.env, env);
+
+    let batch = repo
+        .get_control_plane_by_ids(
+            &[
+                known_bot_id.to_string(),
+                "control-plane-contract-missing".to_string(),
+                known_bot_id.to_string(),
+            ],
+            env,
+        )
+        .await
+        .expect("batch read control-plane Bots");
+    assert_eq!(batch.len(), 1);
+    assert_eq!(batch[0].bot_id, known_bot_id);
 }
 
 pub async fn group_repo_contract_tests<T: GroupRepoPort + ?Sized>(repo: &T) {

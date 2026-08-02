@@ -18,6 +18,364 @@ Actor:
     name:
       type: string
 
+# ---- Bot control-plane resources ------------------------------------------
+
+BotKind:
+  type: string
+  enum:
+    - bot
+    - human
+  description: >-
+    Persisted bcs_bots actor kind. Legacy rows without actor_kind are exposed
+    as bot.
+
+BotVisibility:
+  type: string
+  enum:
+    - public
+    - protected
+    - private
+  description: Discovery and collaboration visibility stored for the Bot.
+
+BotStatus:
+  type: string
+  enum:
+    - online
+    - hidden
+  description: >-
+    Raw persisted Bot status. This field does not express effective runtime
+    connectivity.
+
+BotReachability:
+  type: string
+  enum:
+    - reachable
+    - unreachable
+  description: >-
+    Effective runtime reachability computed with the existing BCN
+    online/downlink logic. It has no direct database column.
+
+BotSkill:
+  type: object
+  additionalProperties: false
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      minLength: 1
+    description:
+      type: string
+  description: One non-sensitive capability declared by a physical Bot.
+
+BotDescriptor:
+  type: object
+  additionalProperties: false
+  required:
+    - summary
+    - domains
+    - skills
+    - scopes
+  properties:
+    summary:
+      type: string
+      description: Empty when no legacy summary was persisted.
+    domains:
+      type: array
+      description: Empty when no legacy domains were persisted.
+      items:
+        type: string
+    skills:
+      type: array
+      description: Empty when no legacy skills were persisted.
+      items:
+        $ref: "#/BotSkill"
+    scopes:
+      type: array
+      description: Empty when no legacy scopes were persisted.
+      items:
+        type: string
+  description: >-
+    Public capability description of a physical Bot. It contains no provider,
+    credential, endpoint, or internal routing configuration.
+
+BotProvider:
+  type: object
+  additionalProperties: false
+  required:
+    - provider_id
+    - name
+  properties:
+    provider_id:
+      type: string
+      minLength: 1
+    name:
+      type: string
+      minLength: 1
+  description: Optional non-sensitive Provider projection; no slug is exposed.
+
+PhysicalBot:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - kind
+    - name
+    - visibility
+    - status
+    - env
+    - descriptor
+    - reachability
+    - created_at
+    - updated_at
+  properties:
+    bot_id:
+      type: string
+      minLength: 1
+      description: Authoritative BCN identifier.
+    kind:
+      const: bot
+    name:
+      type: string
+      minLength: 1
+    visibility:
+      $ref: "#/BotVisibility"
+    status:
+      $ref: "#/BotStatus"
+    env:
+      type: string
+      minLength: 1
+      description: Persisted environment boundary; never inferred from kind.
+    created_by:
+      type: string
+      minLength: 1
+      description: >-
+        Immutable creator staff_no. Omitted when a legacy row has no creator.
+    descriptor:
+      $ref: "#/BotDescriptor"
+    reachability:
+      $ref: "#/BotReachability"
+    provider:
+      $ref: "#/BotProvider"
+    agent_code:
+      type: string
+      description: Optional read-only external Agent identity.
+    created_at:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Unix milliseconds mapped from gmt_create.
+    updated_at:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Unix milliseconds mapped from gmt_modified.
+  description: >-
+    A physical software Bot. descriptor and reachability are normalized even
+    when their legacy source columns are incomplete.
+
+HumanBot:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - kind
+    - name
+    - visibility
+    - status
+    - env
+    - created_at
+    - updated_at
+  properties:
+    bot_id:
+      type: string
+      minLength: 1
+      description: Authoritative BCN identifier.
+    kind:
+      const: human
+    name:
+      type: string
+      minLength: 1
+    visibility:
+      $ref: "#/BotVisibility"
+    status:
+      $ref: "#/BotStatus"
+    env:
+      type: string
+      minLength: 1
+      description: Persisted environment boundary; never inferred from kind.
+    created_by:
+      type: string
+      minLength: 1
+      description: >-
+        Immutable creator staff_no. Omitted when a legacy row has no creator.
+    created_at:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Unix milliseconds mapped from gmt_create.
+    updated_at:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Unix milliseconds mapped from gmt_modified.
+  description: >-
+    A Human row stored in bcs_bots. Human participates in groups and sessions
+    but has no descriptor, reachability, Provider projection, or agent_code.
+
+Bot:
+  oneOf:
+    - $ref: "#/PhysicalBot"
+    - $ref: "#/HumanBot"
+  discriminator:
+    propertyName: kind
+    mapping:
+      bot: "#/PhysicalBot"
+      human: "#/HumanBot"
+  description: BCN control-plane domain object for physical Bots and Humans.
+
+BotCandidate:
+  type: object
+  additionalProperties: false
+  required:
+    - bot
+    - is_friend
+  properties:
+    bot:
+      $ref: "#/PhysicalBot"
+    is_friend:
+      type: boolean
+      description: Whether the acting physical Bot has an accepted Friendship.
+
+BotPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Bot"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+BotCandidatePage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/BotCandidate"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+BotList:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Bot"
+
+BotEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/Bot"
+    request_id:
+      type: string
+
+BotPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotPage"
+    request_id:
+      type: string
+
+BotCandidatePageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotCandidatePage"
+    request_id:
+      type: string
+
+BotListEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotList"
+    request_id:
+      type: string
+
 Participant:
   type: object
   additionalProperties: false
