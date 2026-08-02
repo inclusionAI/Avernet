@@ -208,9 +208,11 @@ class SchedulerOpsMixin:
             self._svc.mark_graph_status(self._svc.get(task.id), GraphStatus.AWAITING_HUMAN_ACCEPT)
             logger.info("[SchedulerV2] bot-search miss node=%s depth=%d ≥MAX → mark-hang", n.node_id, depth)
             return True
-        self._add_child(task, n.node_id, f"{n.node_id}_dec", "decomposition", NodeType.DECOMPOSITION)
+        # 未匹配 → 分解:DECOMPOSITION 子节点继承父 BOT_SEARCH 的 spec(真实需求文本),
+        # 让 DecomposerPort.decompose_subtasks 拿到“要分解什么”,而非字面 "decomposition"。
+        self._add_child(task, n.node_id, f"{n.node_id}_dec", n.spec, NodeType.DECOMPOSITION)
         self._set_done(task, n.node_id)
-        logger.info("[SchedulerV2] bot-search miss node=%s → decomposition", n.node_id)
+        logger.info("[SchedulerV2] bot-search miss node=%s → decomposition(spec=%s)", n.node_id, n.spec)
         return True
 
     def _decomposition(self, task: Task, n: Node) -> bool:

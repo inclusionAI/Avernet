@@ -508,6 +508,7 @@ class TaskService(GraphStateOpsMixin):
             if node is not None:
                 require_node_transition(node.status, NodeStatus.RUNNING)
                 node.status = NodeStatus.RUNNING
+            self._sync_subtask_status(task, node_id, NodeStatus.RUNNING)
             return
         if kind == EventKind.NODE_ACCEPTED:
             node = self._find_node(task, node_id)
@@ -515,6 +516,7 @@ class TaskService(GraphStateOpsMixin):
                 require_node_transition(node.status, NodeStatus.DONE)
                 node.status = NodeStatus.DONE
                 node.properties["acceptance_result"] = "pass"
+            self._sync_subtask_status(task, node_id, NodeStatus.DONE)
             return
         if kind == EventKind.NODE_REJECTED:
             node = self._find_node(task, node_id)
@@ -522,12 +524,14 @@ class TaskService(GraphStateOpsMixin):
                 require_node_transition(node.status, NodeStatus.FAILED)
                 node.status = NodeStatus.FAILED
                 node.properties["acceptance_result"] = "fail"
+            self._sync_subtask_status(task, node_id, NodeStatus.FAILED)
             return
         if kind == EventKind.NODE_FAILED:
             node = self._find_node(task, node_id)
             if node is not None:
                 require_node_transition(node.status, NodeStatus.FAILED)
                 node.status = NodeStatus.FAILED
+            self._sync_subtask_status(task, node_id, NodeStatus.FAILED)
             return
         if kind == EventKind.LOOP_REROUTED:
             task.loop_round += 1
@@ -693,6 +697,16 @@ class TaskService(GraphStateOpsMixin):
                 return n
         return None
 
+    def _sync_subtask_status(self, task: Task, node_id: str, status: NodeStatus) -> None:
+        """实体维度 SubtaskState.status 跟随动作维度 fold(NODE_RUNNING/ACCEPTED/
+        REJECTED/FAILED)同步——聚合触发(_v2_detect_and_aggregate)看的是 SubtaskState
+        .status,故终态 fold 必须同时落实体维度,否则叶子闭合但聚合不触发。"""
+        if task.execution_graph is None:
+            return
+        st = task.execution_graph.state.subtasks.get(node_id)
+        if st is not None:
+            st.status = status
+
     def _attempt_record(
         self,
         executor_id: str,
@@ -764,7 +778,14 @@ class TaskService(GraphStateOpsMixin):
             for e in p.edges:
                 g.edges.append(Edge(edge_id=e.edge_id, from_node=e.from_node, to_node=e.to_node, kind=e.kind))
         else:
-            _append(NodeType.BOT_SEARCH, "n_bot_search", "bot-search", execute_start_id)
+            # 无计划 → 根 BOT_SEARCH:spec 用真实需求文本(目标/标题),让搜推与后续
+            # 分解拿得到真实内容,而非字面占位(plan §2.2 n4;搜推先行)。
+            objective = (
+                task.spec.goal.objective
+                if task.spec.goal and task.spec.goal.objective
+                else (task.spec.metadata.title or "task")
+            )
+            _append(NodeType.BOT_SEARCH, "n_bot_search", objective, execute_start_id)
         self._task_repo.save(task)
 
     def spawn_sub_dag(
