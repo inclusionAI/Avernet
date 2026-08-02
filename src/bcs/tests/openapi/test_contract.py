@@ -1,9 +1,9 @@
-"""Phase-one BCN OpenAPI contract inventory.
+"""Approved BCN OpenAPI V1 contract inventory.
 
-The contract must expose exactly the 27 approved operations across Group,
-GroupParticipant, Session, SessionParticipant, Invitation, and
-Friendship/FriendRequest, and must not expose message-send, Internal API, or
-routing-only path aliases.
+The contract must expose exactly the approved operations across Bot, Group,
+GroupParticipant, Session, SessionParticipant, Invitation, and Friendship /
+FriendRequest, and must not expose message-send, Internal API, or routing-only
+path aliases.
 """
 
 import sys
@@ -18,6 +18,11 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 
 EXPECTED_OPERATIONS = {
+    ("get", "/openapi/v1/bots/{bot_id}/candidates"),
+    ("post", "/openapi/v1/bots/query"),
+    ("get", "/openapi/v1/bots/{bot_id}"),
+    ("patch", "/openapi/v1/bots/{bot_id}"),
+    ("get", "/openapi/v1/bots/mine"),
     ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/groups"),
     ("post", "/openapi/v1/groups"),
     ("get", "/openapi/v1/groups/{group_id}"),
@@ -58,14 +63,17 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_27_phase_one_operations() -> None:
+def test_contract_contains_exactly_the_32_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
-def test_phase_one_excludes_send_message_internal_and_routing_aliases() -> None:
+def test_contract_excludes_unapproved_runtime_and_routing_surfaces() -> None:
     actual = _actual_operations()
 
     assert ("post", "/openapi/v1/sessions/{session_id}/messages") not in actual
+    assert ("get", "/openapi/v1/bots") not in actual
+    assert ("get", "/openapi/v1/bots/discover") not in actual
+    assert ("patch", "/openapi/v1/bots/{bot_id}/descriptor") not in actual
     assert not any(path.startswith("/openapi/v1/bcn/") for _, path in actual)
     assert not any(path.startswith("/openapi/v1/actors/") for _, path in actual)
     assert not any(path.startswith("/openapi/v1/internal/") for _, path in actual)
