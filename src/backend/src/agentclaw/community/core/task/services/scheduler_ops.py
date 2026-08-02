@@ -303,7 +303,11 @@ class SchedulerOpsMixin:
           只派一次,guard ``__reroute_probe_sent__``):由该 bot 的 task-plan-skill 判
           是否 reroute → 发起 gap bot-search(retrieve-state 上下文)→ ``add_node``
           (BOT_SEARCH) → 后续 tick 处理(命中 dispatch / 未匹配 decomposition)。
-          **reroute 是 skill 判定 + 图操作,非 scheduler 的 ``redispatch(C5)`` 规则**。"""
+          **reroute 是 skill 判定 + 图操作,非 scheduler 的 ``redispatch(C5)`` 规则**。
+        - probe 已派后:若 skill 已发起 reroute(兄弟 BOT_SEARCH ``{node_id}_reroute``
+          存在)→ 等 tick 处理兄弟,不动;若 skill 未 reroute(无兄弟)→ **不可恢复**,
+          tick 自动挂起 ``AWAITING_HUMAN_ACCEPT`` 等人确认(升 BBS 经 BBS_CONFIRMED /
+          不升经 HANG_CANCELLED → task FAILED,T-13 §18.1-12 unrecoverable 留待 MARK_HANG)。"""
         node_id = n.node_id
         max_attempts = int(n.properties.get("max_attempts") or DEFAULT_MAX_ATTEMPTS)
         attempts = len(n.attempted_executors)
@@ -323,22 +327,43 @@ class SchedulerOpsMixin:
             )
             return True
         # 到 max → 派 reroute 判定给失败方 exec-bot skill(只派一次,免每 tick 重复派)
-        if n.properties.get("__reroute_probe_sent__"):
+        if not n.properties.get("__reroute_probe_sent__"):
+            fresh = self._svc.get(task.id)
+            fn = self._svc._find_node(fresh, node_id)  # noqa: SLF001
+            if fn is None:
+                return False
+            fn.properties["__reroute_probe_sent__"] = True
+            self._svc._task_repo.save(fresh)  # noqa: SLF001
+            last = n.attempted_executors[-1].executor_id if n.attempted_executors else (n.assignee or "")
+            if last:
+                self._execution.probe(task.id, node_id, last)
+                logger.info(
+                    "[Scheduler] retry-exhausted node=%s → probe skill for reroute judgment", node_id,
+                )
+                return True
+            return False
+        # probe 已派:skill 已发起 reroute(兄弟 BOT_SEARCH 存在)→ 等 tick 处理兄弟,不挂起
+        if self._has_reroute_sibling(task, node_id):
+            return False
+        # probe 已派但 skill 未 reroute → 不可恢复:tick 自动挂起等人确认(只挂一次)
+        if n.properties.get("__unrecoverable_hung__"):
             return False
         fresh = self._svc.get(task.id)
         fn = self._svc._find_node(fresh, node_id)  # noqa: SLF001
-        if fn is None:
+        if fn is not None:
+            fn.properties["__unrecoverable_hung__"] = True
+            self._svc._task_repo.save(fresh)  # noqa: SLF001
+        self._svc.mark_graph_status(self._svc.get(task.id), GraphStatus.AWAITING_HUMAN_ACCEPT)
+        logger.info("[Scheduler] unrecoverable node=%s → AWAITING_HUMAN_ACCEPT", node_id)
+        return True
+
+    def _has_reroute_sibling(self, task: Task, node_id: str) -> bool:
+        """skill 是否已为该失败节点发起 reroute(``open_reroute_search`` 落的兄弟
+        BOT_SEARCH,node_id = ``{node_id}_reroute``)。存在 → reroute 进行中,tick 不挂起。"""
+        g = task.execution_graph
+        if g is None:
             return False
-        fn.properties["__reroute_probe_sent__"] = True
-        self._svc._task_repo.save(fresh)  # noqa: SLF001
-        last = n.attempted_executors[-1].executor_id if n.attempted_executors else (n.assignee or "")
-        if last:
-            self._execution.probe(task.id, node_id, last)
-            logger.info(
-                "[Scheduler] retry-exhausted node=%s → probe skill for reroute judgment", node_id,
-            )
-            return True
-        return False
+        return any(nd.node_id == f"{node_id}_reroute" for nd in g.nodes)
 
     def _sync_subtask_running(self, task_id: str, node_id: str) -> None:
         """claim 只写 Node 维;实体维 SubtaskState 在此同步 RUNNING(与 ``_dispatch`` 一致)。"""

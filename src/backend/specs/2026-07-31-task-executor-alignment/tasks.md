@@ -118,8 +118,11 @@
   - router `POST /events`:`TaskService.on_event`(落态 fold)+ `Scheduler.on_event`(泵 tick)
     双调,补上原 design §... 漏接的编排反应半。
 - done-when:`U-retry-redispatch` 同执行方 re-claim 重派、计数真实推进;`U-retry-exhausted` 到上限
-  停止重派 + 派 reroute 判定给 skill(probe 被调一次);`U-no-c5-rule` `driver.redispatch(C5)` 不被调。
-- 测试:U-retry-redispatch, U-retry-exhausted, U-no-c5-rule(e2e:test_node_failed_retries_same_executor_then_asks_skill_reroute)
+  停止重派 + 派 reroute 判定给 skill(probe 被调一次);`U-no-c5-rule` `driver.redispatch(C5)` 不被调;
+  `U-unrecoverable-hang` probe 已派 + skill 未 reroute(无兄弟 BOT_SEARCH)→ tick 自动挂起
+  AWAITING_HUMAN_ACCEPT → 人 HANG_CANCELLED → task FAILED(§18.1-12 unrecoverable 留待 MARK_HANG 落地)。
+- 测试:U-retry-redispatch, U-retry-exhausted, U-no-c5-rule, U-unrecoverable-hang
+  (e2e:test_node_failed_retries_same_executor_then_asks_skill_reroute, test_node_failed_unrecoverable_hang_then_human_decline_task_failed)
 
 ### T-14 [开源] `graph_checkpoint` 回溯
 - 依赖:T-11 ｜ 输入:plan §8.3 ｜ spec FR-GRAPH-03c/AC-S-09

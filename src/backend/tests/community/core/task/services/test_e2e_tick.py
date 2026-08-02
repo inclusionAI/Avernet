@@ -533,3 +533,31 @@ def test_node_failed_reroute_miss_recursive_decompose_depth_plus_one():
         if nid in (f"{c}_disp" for c in child_ids)
     )
     assert driver.redispatched == []  # 无 scheduler C5 规则
+
+
+# --- ⑦ 不可恢复 FAILED → 挂起等人确认 → 人不升 → task FAILED(T-13 unrecoverable)---
+
+def test_node_failed_unrecoverable_hang_then_human_decline_task_failed():
+    """不可恢复失败:retry 上限 → probe 给 skill → skill 未发起 reroute(无兄弟 BOT_SEARCH)
+    → tick 自动挂起 AWAITING_HUMAN_ACCEPT → 人确认不升(HANG_CANCELLED,经真实 on_event fold)
+    → task FAILED 终态。
+
+    与 ⑥ 的区别:⑥ skill 判定 reroute(发起 gap bot-search,可恢复);本用例 skill 放弃
+    reroute → 不可恢复 → 挂起等人 → 人不升 → task FAILED。全程真实 on_event + tick,不戳状态。"""
+    svc = _svc()
+    discover = FakeDiscover(hits={"n_impl_hash": ["crypto-bot"]})
+    driver = FakeDriver()
+    sched = _scheduler(svc, discover, driver=driver)
+    task = _planned_task(svc, sched, "n_impl_hash", "实现登录密码哈希比对")
+    _drive_to_reroute_handoff(svc, sched, task.id, "n_impl_hash")  # 2× NODE_FAILED → probe 已派
+    task = svc.get(task.id)
+    assert (task.id, "n_impl_hash", "crypto-bot") in sched._execution.probes  # noqa: SLF001
+    # skill 未发起 reroute(无 n_impl_hash_reroute 兄弟)→ 下次 tick 检"probe 已派 + 无兄弟"→ 自动挂起
+    sched.tick(task.id)
+    task = svc.get(task.id)
+    assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+    # 人确认不升 → task FAILED 终态(经真实 on_event HANG_CANCELLED fold)
+    _report_event(svc, sched, task.id, EventKind.HANG_CANCELLED, {})
+    task = svc.get(task.id)
+    assert task.status is TaskStatus.FAILED
+    assert driver.redispatched == []  # 无 scheduler C5 规则;不可恢复走人确认→FAILED,非计数 reroute
