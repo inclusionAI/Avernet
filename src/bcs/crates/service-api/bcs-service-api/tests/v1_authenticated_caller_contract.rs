@@ -6,8 +6,10 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 #[test]
 fn authenticated_caller_preserves_all_identity_kinds_without_selecting_an_actor() {
-    let expire_at =
-        OffsetDateTime::parse("2030-01-01T00:00:00Z", &Rfc3339).expect("valid contract timestamp");
+    let expire_at = match OffsetDateTime::parse("2030-01-01T00:00:00Z", &Rfc3339) {
+        Ok(value) => value,
+        Err(_) => panic!("valid contract timestamp"),
+    };
     let caller = AuthenticatedCaller {
         tenant: "tenant-a".into(),
         user: Some(AuthenticatedUserIdentity {

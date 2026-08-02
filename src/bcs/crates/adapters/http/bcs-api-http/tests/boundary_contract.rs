@@ -21,6 +21,7 @@ fn manifest_does_not_depend_on_legacy_or_concrete_bcs_crates() {
     for forbidden in [
         "bcs-protocol",
         "bcs-http",
+        "bcs-jwt",
         "bcs-group",
         "bcs-session",
         "bcs-friend",
@@ -35,6 +36,23 @@ fn manifest_does_not_depend_on_legacy_or_concrete_bcs_crates() {
             "versioned HTTP adapter must not depend on {forbidden}"
         );
     }
+}
+
+#[test]
+fn production_bootstrap_does_not_mount_the_versioned_http_adapter() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let bootstrap_manifest =
+        match fs::read_to_string(manifest_dir.join("../../../bootstrap/bcs/Cargo.toml")) {
+            Ok(source) => source,
+            Err(_) => panic!("read production bootstrap manifest"),
+        };
+
+    assert!(
+        !bootstrap_manifest
+            .lines()
+            .any(|line| { line.trim_start().starts_with("bcs-api-http ") }),
+        "production bootstrap must not mount bcs-api-http in this preparatory change"
+    );
 }
 
 #[test]

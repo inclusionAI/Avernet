@@ -217,6 +217,29 @@ fn crate_root_does_not_reexport_wire_dtos() {
 }
 
 #[test]
+fn authenticated_caller_contract_contains_no_transport_or_credential_fields() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = match fs::read_to_string(manifest_dir.join("src/application/v1/identity.rs")) {
+        Ok(source) => source,
+        Err(_) => panic!("read authenticated identity contract"),
+    };
+
+    for forbidden in [
+        "jsonwebtoken",
+        "axum",
+        "HeaderMap",
+        "X-Avernet-Principal",
+        "access_key_token",
+        "bot_token",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "authenticated identity contract must not contain {forbidden}",
+        );
+    }
+}
+
+#[test]
 fn boundary_scan_ignores_comments_and_string_literals() {
     let offenses = source_offenses(
         r#"

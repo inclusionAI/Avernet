@@ -9,7 +9,8 @@ use super::{
 };
 
 const NOW: u64 = 1_785_657_600;
-const TEST_KEY: &[u8] = b"TEST-ONLY-bcs-principal-contract-key-32-bytes";
+const TEST_KEY_TEXT: &str = "TEST-ONLY-bcs-principal-contract-key-32-bytes";
+const TEST_KEY: &[u8] = TEST_KEY_TEXT.as_bytes();
 
 #[derive(Deserialize)]
 struct ContractFixture {
@@ -19,12 +20,35 @@ struct ContractFixture {
     principals: Value,
 }
 
+fn must_ok<T, E>(result: Result<T, E>, context: &str) -> T {
+    match result {
+        Ok(value) => value,
+        Err(_) => panic!("{context}"),
+    }
+}
+
+fn must_some<T>(value: Option<T>, context: &str) -> T {
+    match value {
+        Some(value) => value,
+        None => panic!("{context}"),
+    }
+}
+
+fn must_err<T, E>(result: Result<T, E>, context: &str) -> E {
+    match result {
+        Err(error) => error,
+        Ok(_) => panic!("{context}"),
+    }
+}
+
 fn fixture() -> ContractFixture {
-    serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../../api-contracts/v1/gateway-principal/principal-set.json"
-    )))
-    .expect("valid shared Principal fixture")
+    must_ok(
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../../api-contracts/v1/gateway-principal/principal-set.json"
+        ))),
+        "valid shared Principal fixture",
+    )
 }
 
 fn mint(fixture: &ContractFixture, principals: Value) -> String {
@@ -49,17 +73,25 @@ fn header(typ: &str, kid: &str) -> Header {
 }
 
 fn mint_with(header: Header, claims: &Value, signing_key: &[u8]) -> String {
-    encode(&header, claims, &EncodingKey::from_secret(signing_key)).expect("test token signs")
+    must_ok(
+        encode(&header, claims, &EncodingKey::from_secret(signing_key)),
+        "test token signs",
+    )
 }
 
 fn verifier_from(fixture: &ContractFixture) -> GatewayPrincipalTokenVerifier {
-    let trust = GatewayPrincipalTrust::new(
-        fixture.issuer.clone(),
-        fixture.audience.clone(),
-        fixture.key_id.clone(),
+    let trust = must_ok(
+        GatewayPrincipalTrust::new(
+            fixture.issuer.clone(),
+            fixture.audience.clone(),
+            fixture.key_id.clone(),
+        ),
+        "valid trust",
+    );
+    must_ok(
+        GatewayPrincipalTokenVerifier::new(TEST_KEY, trust),
+        "valid verifier",
     )
-    .expect("valid trust");
-    GatewayPrincipalTokenVerifier::new(TEST_KEY, trust).expect("valid verifier")
 }
 
 fn verifier() -> GatewayPrincipalTokenVerifier {
@@ -96,9 +128,7 @@ fn verify_principals(
 
 fn select_principals(principals: &Value, kinds: &[&str]) -> Value {
     Value::Array(
-        principals
-            .as_array()
-            .expect("fixture principals array")
+        must_some(principals.as_array(), "fixture principals array")
             .iter()
             .filter(|principal| {
                 principal["type"]
@@ -115,9 +145,10 @@ fn verifies_the_shared_all_identity_fixture_without_projecting_secrets() {
     let fixture = fixture();
     let token = mint(&fixture, fixture.principals.clone());
 
-    let caller = verifier_from(&fixture)
-        .verify_at(&token, NOW)
-        .expect("verified caller");
+    let caller = must_ok(
+        verifier_from(&fixture).verify_at(&token, NOW),
+        "verified caller",
+    );
 
     assert_eq!(caller.tenant, "tenant-a");
     assert_eq!(
@@ -149,12 +180,13 @@ fn accepts_user_only_bot_only_and_user_plus_bot() {
         (&["bot"][..], false, true),
         (&["user", "bot"][..], true, true),
     ] {
-        let caller = verifier_from(&fixture)
-            .verify_at(
+        let caller = must_ok(
+            verifier_from(&fixture).verify_at(
                 &mint(&fixture, select_principals(&fixture.principals, kinds)),
                 NOW,
-            )
-            .expect("valid identity combination");
+            ),
+            "valid identity combination",
+        );
         assert_eq!(caller.user.is_some(), expect_user);
         assert_eq!(caller.bot.is_some(), expect_bot);
     }
@@ -163,18 +195,16 @@ fn accepts_user_only_bot_only_and_user_plus_bot() {
 #[test]
 fn principal_order_does_not_change_the_normalized_caller() {
     let fixture = fixture();
-    let forward = verifier_from(&fixture)
-        .verify_at(&mint(&fixture, fixture.principals.clone()), NOW)
-        .expect("forward order");
-    let mut reversed = fixture
-        .principals
-        .as_array()
-        .expect("fixture principals array")
-        .clone();
+    let forward = must_ok(
+        verifier_from(&fixture).verify_at(&mint(&fixture, fixture.principals.clone()), NOW),
+        "forward order",
+    );
+    let mut reversed = must_some(fixture.principals.as_array(), "fixture principals array").clone();
     reversed.reverse();
-    let reverse = verifier_from(&fixture)
-        .verify_at(&mint(&fixture, Value::Array(reversed)), NOW)
-        .expect("reverse order");
+    let reverse = must_ok(
+        verifier_from(&fixture).verify_at(&mint(&fixture, Value::Array(reversed)), NOW),
+        "reverse order",
+    );
     assert_eq!(forward, reverse);
 }
 
@@ -214,7 +244,10 @@ fn rejects_untrusted_algorithm_token_type_and_key_id() {
 
 #[test]
 fn rejects_empty_trust_material() {
-    let valid = GatewayPrincipalTrust::new("gateway", "bcs", "bare").expect("valid trust");
+    let valid = must_ok(
+        GatewayPrincipalTrust::new("gateway", "bcs", "bare"),
+        "valid trust",
+    );
     assert_eq!(
         GatewayPrincipalTokenVerifier::new(b"", valid).err(),
         Some(GatewayPrincipalVerifierBuildError::EmptySigningKey),
@@ -270,7 +303,7 @@ fn rejects_wrong_signature_issuer_and_audience() {
 fn rejects_missing_required_claims_and_invalid_shapes() {
     for claim in ["iss", "aud", "iat", "exp", "principals"] {
         let mut claims = valid_claims();
-        claims.as_object_mut().expect("claims object").remove(claim);
+        must_some(claims.as_object_mut(), "claims object").remove(claim);
         let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
         assert_eq!(
             verifier().verify_at(&token, NOW),
@@ -340,10 +373,7 @@ fn rejects_empty_unknown_and_duplicate_principal_types() {
 
     let mut duplicate = fixture().principals;
     let repeated_user = duplicate[0].clone();
-    duplicate
-        .as_array_mut()
-        .expect("principals array")
-        .push(repeated_user);
+    must_some(duplicate.as_array_mut(), "principals array").push(repeated_user);
     assert_eq!(
         verify_principals(duplicate),
         Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
@@ -354,10 +384,7 @@ fn rejects_empty_unknown_and_duplicate_principal_types() {
 fn rejects_missing_required_known_principal_fields() {
     for (index, field) in [(0, "subject"), (1, "bot"), (2, "app"), (3, "access_key")] {
         let mut principals = fixture().principals;
-        principals[index]
-            .as_object_mut()
-            .expect("principal object")
-            .remove(field);
+        must_some(principals[index].as_object_mut(), "principal object").remove(field);
         assert_eq!(
             verify_principals(principals),
             Err(GatewayPrincipalVerificationError::InvalidClaims),
@@ -375,7 +402,7 @@ fn rejects_mixed_and_contradictory_tenants() {
         "/0/subject/tenant_id",
     ] {
         let mut principals = fixture().principals;
-        *principals.pointer_mut(pointer).expect("fixture pointer") = json!("tenant-b");
+        *must_some(principals.pointer_mut(pointer), "fixture pointer") = json!("tenant-b");
         assert_eq!(
             verify_principals(principals),
             Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
@@ -405,7 +432,7 @@ fn rejects_blank_stable_identities_and_invalid_access_key_time() {
         "/3/access_key/access_key",
     ] {
         let mut principals = fixture().principals;
-        *principals.pointer_mut(pointer).expect("fixture pointer") = json!("   ");
+        *must_some(principals.pointer_mut(pointer), "fixture pointer") = json!("   ");
         assert_eq!(
             verify_principals(principals),
             Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
@@ -440,15 +467,13 @@ fn verification_errors_do_not_expose_tokens_or_keys() {
     claims["principals"] = principals;
     let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
 
-    let error = verifier()
-        .verify_at(&token, NOW)
-        .expect_err("blank tenant must fail");
+    let error = must_err(verifier().verify_at(&token, NOW), "blank tenant must fail");
     let message = error.to_string();
     for forbidden in [
         "TEST_ONLY_BOT_TOKEN_MARKER",
         "TEST_ONLY_ACCESS_KEY_TOKEN_MARKER",
         token.as_str(),
-        std::str::from_utf8(TEST_KEY).expect("ASCII test key"),
+        TEST_KEY_TEXT,
     ] {
         assert!(!message.contains(forbidden));
     }

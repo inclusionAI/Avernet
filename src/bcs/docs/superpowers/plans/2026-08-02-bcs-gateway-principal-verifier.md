@@ -1254,7 +1254,7 @@ Update `bcs-api-http/CONTEXT.md` to state that V1 owns the Gateway wire projecti
 Run:
 
 ```bash
-rustfmt --edition 2024 \
+rustfmt --edition 2024 --config skip_children=true \
   src/bcs/crates/service-api/bcs-service-api/src/application/v1/identity.rs \
   src/bcs/crates/service-api/bcs-service-api/src/application/v1/mod.rs \
   src/bcs/crates/service-api/bcs-service-api/tests/v1_authenticated_caller_contract.rs \
@@ -1265,7 +1265,7 @@ rustfmt --edition 2024 \
   src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/verifier.rs \
   src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/tests.rs \
   src/bcs/crates/adapters/http/bcs-api-http/tests/boundary_contract.rs
-rustfmt --edition 2024 --check \
+rustfmt --edition 2024 --config skip_children=true --check \
   src/bcs/crates/service-api/bcs-service-api/src/application/v1/identity.rs \
   src/bcs/crates/service-api/bcs-service-api/src/application/v1/mod.rs \
   src/bcs/crates/service-api/bcs-service-api/tests/v1_authenticated_caller_contract.rs \
