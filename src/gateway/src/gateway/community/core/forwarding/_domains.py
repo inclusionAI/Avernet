@@ -58,21 +58,39 @@ _DEFAULT_PROTOCOLS = frozenset({HTTP})
 _SCHEME_IS_SECURE = {"http": False, "https": True, "ws": False, "wss": True}
 
 
-#: A host we are willing to dial: a DNS name or an IPv4 literal. Underscores are
-#: tolerated because internal service names use them; anything else — a space, a
-#: slash, an empty label — is a configuration error, not an exotic hostname.
-_REG_NAME = re.compile(r"[A-Za-z0-9._-]+")
+#: One DNS label: alphanumeric at both ends, hyphens allowed only inside.
+#: Underscores are tolerated throughout because internal service names use them.
+#: Validating per label rather than across the whole name is what rejects an
+#: empty label (``foo..bar``) and a hyphen-only one (``-``) — both structurally
+#: impossible names that a single whole-string character class would admit.
+_LABEL = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?")
+
+#: RFC 1035 §2.3.4. A longer label cannot be encoded, let alone resolved.
+_MAX_LABEL_LENGTH = 63
 
 
 def _names_a_host(host: str) -> bool:
-    """Whether *host* is something a client can actually resolve and dial."""
+    """Whether *host* is something a client could resolve and dial.
+
+    Structure only. Whether the name *does* resolve is not knowable at boot —
+    an upstream may legitimately not be provisioned yet — so this rejects names
+    that could never resolve, not names that merely happen not to.
+    """
     if not host:
         return False
     try:
         ipaddress.ip_address(host)
     except ValueError:
-        return _REG_NAME.fullmatch(host) is not None
-    return True
+        pass
+    else:
+        return True
+    # A single trailing dot is a fully-qualified name rooted at the DNS root
+    # (``up.example.``), which is legal; anything more is an empty label.
+    labels = host[:-1].split(".") if host.endswith(".") else host.split(".")
+    return bool(labels) and all(
+        len(label) <= _MAX_LABEL_LENGTH and _LABEL.fullmatch(label) is not None
+        for label in labels
+    )
 
 
 def _expand_vars(value: str, variables: dict[str, str]) -> str:
@@ -134,6 +152,16 @@ class Server:
                 f"upstream server {self.name!r}: base_url {self.base_url!r} must "
                 f"name a host — a scheme on its own leaves nothing to dial, so "
                 f"every request for this server would fail at call time"
+            )
+        if split.query or split.fragment:
+            # The request path is appended to this value, so a query or fragment
+            # here swallows it: `https://up.example/base?fixed=1` becomes
+            # `…/base?fixed=1/proxypass/…`, putting the whole upstream path
+            # inside the query string.
+            raise ValueError(
+                f"upstream server {self.name!r}: base_url {self.base_url!r} must "
+                f"be an origin and optional base path only — the request path is "
+                f"appended to it, so a query or fragment would swallow that path"
             )
 
     @property
@@ -398,6 +426,15 @@ def _parse_rewrite(name: str, raw: Any, domain_prefix: str) -> PathRewrite | Non
             f"domain {name!r}: rewrite.to {to_prefix!r} must be an absolute path "
             f"starting with '/' — it is joined to the upstream origin, so a "
             f"relative value would be absorbed into the host"
+        )
+    if "?" in to_prefix or "#" in to_prefix:
+        # Being absolute is not enough: the request tail is appended to this
+        # prefix, so `to: /proxypass?fixed=1` sends the upstream a path of just
+        # `/proxypass` and folds the tail — credential included — into the query.
+        raise ValueError(
+            f"domain {name!r}: rewrite.to {to_prefix!r} must be a path prefix "
+            f"with no query or fragment — the rest of the request path is "
+            f"appended to it, and would land inside the query instead"
         )
     anchored = from_prefix.rstrip("/")
     if anchored != domain_prefix and not anchored.startswith(f"{domain_prefix}/"):

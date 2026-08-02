@@ -68,9 +68,15 @@ _HANDSHAKE_METHOD = "GET"
 # 403 for all three — so these distinguish causes in our own logs and tests
 # rather than forming a client-facing contract.
 _CLOSE_NO_ROUTE = 4404
+_CLOSE_TRAVERSAL = 4400
 _CLOSE_UNAUTHENTICATED = 4401
 _CLOSE_INTERNAL = 4500
 _CLOSE_UPSTREAM_UNAVAILABLE = 4502
+
+#: A path segment that means "up one level", in any spelling. ``..`` arrives
+#: decoded; ``%2e%2e`` (and its mixed-case and half-encoded variants) arrive
+#: encoded, and the socket plane relays the raw path, so both must be caught.
+_DOT_SEGMENTS = frozenset({".", ".."})
 
 #: Codes a peer may report but no endpoint may put in a close frame (RFC 6455
 #: §7.4.1), mapped to the nearest code that may be sent.
@@ -102,6 +108,11 @@ async def forward_websocket(websocket: WebSocket) -> None:
         await _refuse(websocket, _CLOSE_NO_ROUTE, "no route for path")
         return
 
+    if _has_dot_segment(path):
+        await _refuse(websocket, _CLOSE_TRAVERSAL, "path contains a traversal segment")
+        return
+    raw_path = _raw_path(websocket)
+
     try:
         identities = await state.authenticator.authenticate(
             _HANDSHAKE_METHOD, path, _bundle(websocket)
@@ -115,7 +126,7 @@ async def forward_websocket(websocket: WebSocket) -> None:
     # — the routing target, the upstream path, any encoding its author chose —
     # is carried through untouched.
     query = websocket.scope.get("query_string", b"").decode("latin-1")
-    upstream_path = domain.upstream_path(_raw_path(websocket))
+    upstream_path = domain.upstream_path(raw_path)
     url = f"{domain.server.websocket_base_url}{upstream_path}" + (
         f"?{query}" if query else ""
     )
@@ -152,6 +163,26 @@ async def forward_websocket(websocket: WebSocket) -> None:
         await _relay(websocket, upstream)
     finally:
         await cm.__aexit__(None, None, None)
+
+
+def _has_dot_segment(path: str) -> bool:
+    """Whether any segment of the **decoded** path is ``.`` or ``..``.
+
+    The gateway relays the raw path deliberately, so it never collapses these
+    itself — but it must not hand them on either. This prefix is the one route
+    the shipped table exempts from authentication, and the hop behind it checks
+    a credential scoped to ``/proxypass``; an upstream (or any L7 hop between)
+    that decodes and then normalises would resolve the traversal *outside* that
+    route, on a host the gateway is configured to reach. Refusing here does not
+    depend on assuming which of them normalises.
+
+    Deliberately the decoded path and not the raw one. Starlette decodes exactly
+    once, so this already sees through ``%2e%2e`` and through an encoded slash
+    hiding a segment boundary — while a double encoding such as ``%252e`` stays
+    the literal text ``%2e``, which names a file rather than a parent. Decoding
+    again here would collapse that distinction and refuse a legitimate path.
+    """
+    return any(segment in _DOT_SEGMENTS for segment in path.split("/"))
 
 
 def _raw_path(websocket: WebSocket) -> str:

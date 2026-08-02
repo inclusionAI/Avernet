@@ -19,7 +19,11 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
-from gateway.community.adapters.web._relay_ws import forward_websocket, relay_route
+from gateway.community.adapters.web._relay_ws import (
+    _has_dot_segment,
+    forward_websocket,
+    relay_route,
+)
 from gateway.community.core.forwarding import DomainMap
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.ws_forwarder import (
@@ -369,6 +373,84 @@ def test_a_traversal_under_the_socket_domain_never_reaches_http() -> None:
         response = client.get("/openapi/v1/engine/%2e%2e/%2e%2e/admin/keys")
     assert response.status_code == 404
     assert forwarder.opened == []
+
+
+@pytest.mark.parametrize(
+    "decoded_path",
+    [
+        "/openapi/v1/engine/../../admin",
+        "/openapi/v1/engine/./admin",
+        "/openapi/v1/engine/a/../../admin",
+    ],
+)
+def test_the_traversal_guard_matches_decoded_dot_segments(decoded_path: str) -> None:
+    """Asserted directly, because no HTTP client will send these unaltered.
+
+    httpx normalises a literal `..` before the request leaves it, so the route
+    test below can only exercise the percent-encoded spellings. The guard reads
+    the decoded path, so these are the shapes it actually compares against.
+    """
+    assert _has_dot_segment(decoded_path)
+
+
+@pytest.mark.parametrize(
+    "decoded_path",
+    [
+        "/openapi/v1/engine/a.b/ws",  # a dot inside a name is not a dot segment
+        "/openapi/v1/engine/%2e/ws",  # what `%252e` decodes to: a filename
+        "/openapi/v1/engine/.../ws",
+        "/openapi/v1/engine/..a/ws",
+    ],
+)
+def test_the_traversal_guard_leaves_ordinary_paths_alone(decoded_path: str) -> None:
+    assert not _has_dot_segment(decoded_path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/openapi/v1/engine/%2e%2e/%2e%2e/admin",
+        "/openapi/v1/engine/%2E%2E/admin",  # encoding is case-insensitive
+        "/openapi/v1/engine/.%2e/admin",  # half-encoded
+        "/openapi/v1/engine/%2e%2e%2Fadmin",  # an encoded slash hiding the boundary
+    ],
+)
+def test_a_traversal_on_the_socket_plane_is_refused_before_dialling(path: str) -> None:
+    """The one prefix the shipped table exempts from authentication.
+
+    The socket plane relays the *raw* path by design, so `%2e%2e` would reach
+    the upstream intact. The hop behind the gateway checks a credential scoped
+    to `/proxypass`; an upstream — or any L7 hop between — that decodes and then
+    normalises would resolve the traversal outside that route, on a host the
+    gateway is configured to reach. Refusing here does not require guessing
+    which of them normalises.
+    """
+    app, _, forwarder = _build()
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as caught:
+            with client.websocket_connect(path):
+                pass
+    assert caught.value.code == 4400
+    assert forwarder.opened == []  # never dialled
+
+
+def test_a_dot_inside_a_name_still_relays() -> None:
+    """Only whole `.`/`..` segments are traversal; a dot inside a name is not.
+
+    The double-encoded case (`%252e`, which decodes once to the literal text
+    `%2e` and names a file) is asserted against the guard directly and in the
+    live smoke instead: `TestClient` decodes the path *twice*, so it turns
+    `%252e` into `.` and would refuse a request real uvicorn relays.
+    """
+    app, _, forwarder = _build()
+    with TestClient(app) as client:
+        with client.websocket_connect("/openapi/v1/engine/a.b/c..d/ws") as ws:
+            ws.send_text("ping")
+            ws.receive_text()
+        _settled(forwarder)
+    assert (
+        forwarder.opened[0].request.url == "wss://proxy.internal/proxypass/a.b/c..d/ws"
+    )
 
 
 def test_an_http_domain_still_forwards_verbatim() -> None:

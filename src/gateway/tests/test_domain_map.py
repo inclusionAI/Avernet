@@ -243,6 +243,28 @@ def test_a_rewrite_target_must_be_an_absolute_path(to_prefix: str) -> None:
         )
 
 
+@pytest.mark.parametrize("to_prefix", ["/proxypass?fixed=1", "/proxypass#fragment"])
+def test_a_rewrite_target_may_not_carry_a_query_or_fragment(to_prefix: str) -> None:
+    """Absolute is not sufficient — the request tail is appended to this prefix.
+
+    `to: /proxypass?fixed=1` sends the upstream a path of just `/proxypass` and
+    folds the rest of the request, credential included, into the query string.
+    """
+    with pytest.raises(ValueError, match="no query or fragment"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "engine": {
+                        "server": "s",
+                        "rewrite": {"from": "/openapi/v1/engine", "to": to_prefix},
+                    }
+                },
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
 def test_a_rewrite_target_of_root_strips_the_prefix() -> None:
     """`to: /` is a legitimate "mount at the upstream root" rewrite."""
     dm = DomainMap.from_config(
@@ -335,6 +357,43 @@ def test_a_base_url_that_names_no_host_is_refused(base_url: str) -> None:
         Server(name="up", base_url=base_url)
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://foo..bar",  # an empty label
+        "https://-/x",  # a label that is only a hyphen
+        "https://a-/x",  # a label ending in a hyphen
+        "https://./x",  # the root dot alone is not a name
+        "https://-lead.example/x",
+    ],
+)
+def test_a_base_url_whose_dns_labels_are_malformed_is_refused(base_url: str) -> None:
+    """Checked per label, not across the whole name.
+
+    A single character class spanning the whole hostname admits an empty label
+    and a hyphen-only one, neither of which can ever resolve. Structure is
+    knowable at boot; *reachability* is not, which is why nothing here asks
+    whether the name currently resolves.
+    """
+    with pytest.raises(ValueError, match="must name a host"):
+        Server(name="up", base_url=base_url)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["https://up.example/base?fixed=1", "https://up.example/base#fragment"],
+)
+def test_a_base_url_carrying_a_query_or_fragment_is_refused(base_url: str) -> None:
+    """The request path is appended to this value, so either one swallows it.
+
+    ``https://up.example/base?fixed=1`` would dial
+    ``…/base?fixed=1/proxypass/...``, putting the entire upstream path inside
+    the query string.
+    """
+    with pytest.raises(ValueError, match="origin and optional base path"):
+        Server(name="up", base_url=base_url)
+
+
 def test_a_base_url_with_an_unusable_port_is_refused() -> None:
     """``urlsplit(...).port`` raises on a non-numeric port; boot is where it should."""
     with pytest.raises(ValueError, match="unusable port"):
@@ -350,6 +409,8 @@ def test_a_base_url_with_an_unusable_port_is_refused() -> None:
         "https://127.0.0.1:9000",
         "wss://[::1]:9000/x",  # an IPv6 literal, brackets and all
         "https://up.example/base/path",  # a base path is still allowed
+        "https://up.example./x",  # a trailing dot is a rooted FQDN, not an empty label
+        "https://a-b.example/x",  # hyphens are legal *inside* a label
     ],
 )
 def test_a_base_url_that_names_a_host_is_accepted(base_url: str) -> None:
