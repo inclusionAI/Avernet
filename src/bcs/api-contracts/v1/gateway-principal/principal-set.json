@@ -1,0 +1,50 @@
+{
+  "issuer": "gateway",
+  "audience": "bcs",
+  "key_id": "bare",
+  "principals": [
+    {
+      "type": "user",
+      "tenant": "tenant-a",
+      "subject": {
+        "id": "user-1",
+        "username": "alice",
+        "display_name": "Alice",
+        "full_name": null,
+        "tenant_id": "tenant-a"
+      }
+    },
+    {
+      "type": "bot",
+      "tenant": "tenant-a",
+      "bot": {
+        "bot_uuid": "bot-1",
+        "owner_id": "user-1",
+        "token": "TEST_ONLY_BOT_TOKEN_MARKER",
+        "app_id": 7,
+        "agent_code": "agent-1",
+        "tenant": "tenant-a"
+      }
+    },
+    {
+      "type": "app",
+      "tenant": "tenant-a",
+      "app": {
+        "app_id": 7,
+        "app_name": "Contract App",
+        "owners": "contract-owner",
+        "tenant": "tenant-a",
+        "app_type": "THIRD_PARTY"
+      }
+    },
+    {
+      "type": "access_key",
+      "tenant": "tenant-a",
+      "access_key": {
+        "access_key": "ak-test-1",
+        "access_key_token": "TEST_ONLY_ACCESS_KEY_TOKEN_MARKER",
+        "expire_at": "2030-01-01T00:00:00Z"
+      }
+    }
+  ]
+}
