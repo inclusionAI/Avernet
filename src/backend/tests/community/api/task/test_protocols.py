@@ -71,6 +71,24 @@ class _NoopTaskService:
     def history(self, task_id: str, after_seq: int = 0) -> list[Any]:
         return []
 
+    # v2 graph-operation write face (plan §4.3/§7.1,FR-GRAPH-11)
+    def add_node(self, task_id: str, node: Any, parent_node: Any,
+                 node_type: Any, executor: str = "") -> Any:
+        return None
+
+    def add_edge(self, task_id: str, from_node: str, to_node: str, kind: Any) -> Any:
+        return None
+
+    def update_state(self, task_id: str, scope: Any, patch: dict,
+                     semantics: Any) -> None:
+        return None
+
+    def retrieve_state(self, task_id: str, scope: Any) -> dict:
+        return {}
+
+    def snapshot(self, task_id: str) -> Any:
+        return None
+
 
 class _NoopDiscover:
     def recommend(self, task_id: str, node_id: str) -> Any:
@@ -80,6 +98,9 @@ class _NoopDiscover:
 class _NoopDecomposer:
     def decompose(self, task_id: str) -> Any:
         return None
+
+    def decompose_subtasks(self, spec: str, state: Any) -> list[Any]:
+        return []
 
 
 class _NoopDriver:

@@ -21,6 +21,7 @@ from agentclaw.community.core.task.domain.models import (
     RunMode,
     SubTaskSpec,
     Task,
+    TaskState,
 )
 from agentclaw.community.core.task.domain.repository import TaskRepo
 
@@ -94,6 +95,20 @@ class DecomposerService(DecomposerPort):
             for i, c in enumerate(clauses)
         ]
         return Plan(sub_tasks=sub_tasks, confidence=_confidence(len(clauses)))
+
+    def decompose_subtasks(self, spec: str, state: TaskState) -> list[SubTaskSpec]:
+        """v2 单签名(plan §4.1/spec FR-GRAPH-05)。children ``depth = 父 depth +1``;
+        父深度由调用方置入 ``state.public['__decompose_parent_depth__']``(未置 = 顶层
+        → children depth=0,即根 subtask)。规则分句同 ``decompose_spec``。"""
+        parent_depth = int(state.public.get("__decompose_parent_depth__", -1))
+        child_depth = parent_depth + 1 if parent_depth >= 0 else 0
+        clauses = _dedup(_split_clauses(spec))
+        return [
+            SubTaskSpec(
+                node_id=f"n{i + 1}", spec=c, run_mode=RunMode.SINGLE_BOT, depth=child_depth
+            )
+            for i, c in enumerate(clauses)
+        ]
 
 
 __all__ = ["DecomposerService"]

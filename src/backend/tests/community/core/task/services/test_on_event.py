@@ -9,7 +9,6 @@ check_goal (those are Scheduler / owner-bot SKILL concerns, not TaskService's).
 """
 from __future__ import annotations
 
-import pytest
 
 from agentclaw.community.core.task.domain.events import (
     EventKind,
@@ -148,7 +147,9 @@ def test_goal_verified_done_with_verified_graph():
     assert final.execution_graph.graph_status is GraphStatus.VERIFIED
 
 
-def test_goal_rejected_edition_parks_awaiting_human_accept():
+def test_goal_rejected_pre_bbs_loops_gap():
+    # v2 三终止(O-P2/§13):BBS 前 goal-FAIL → 回 gap(REVIEWING→EXECUTING,重跑 loop),
+    # 非终态、非 AWAITING_HUMAN_ACCEPT。限轮次由 scheduler 守,超限 force-hang。
     svc = _service()
     t = svc.create(title="t")
     _planned_with_dag(svc, t.id)
@@ -160,12 +161,12 @@ def test_goal_rejected_edition_parks_awaiting_human_accept():
     final = svc.get(t.id)
     from agentclaw.community.core.task.domain.models import GraphStatus
 
-    assert final.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+    assert final.status is TaskStatus.EXECUTING  # 回 gap 重跑
+    assert final.execution_graph.graph_status is GraphStatus.ON_PLAZA
 
 
-def test_goal_rejected_bbs_parks_awaiting_human_accept():
-    # task-level HUNG is gone (spec §2): BBS goal-rejected no longer escalates to
-    # a HUNG terminal; it parks at AWAITING_HUMAN_ACCEPT like the single_bot path.
+def test_goal_rejected_post_bbs_failed_terminal():
+    # v2 三终止(O-P2/§13):BBS 后 goal-FAIL → FAILED 终态(不回环/不再上升)。
     svc = _service()
     t = svc.create(title="t")
     _planned_with_dag(svc, t.id)
@@ -175,10 +176,7 @@ def test_goal_rejected_bbs_parks_awaiting_human_accept():
     svc._task_repo.save(t2)  # noqa: SLF001
     svc.on_event(_ev(t.id, EventKind.GOAL_REJECTED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bbs", verdict="fail", reason="plaza stuck", run_mode="bbs"))  # noqa: SLF001
     final = svc.get(t.id)
-    from agentclaw.community.core.task.domain.models import GraphStatus
-
-    assert final.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
-    assert final.status is TaskStatus.REVIEWING  # not HUNG — stays REVIEWING
+    assert final.status is TaskStatus.FAILED  # BBS 后终态
 
 
 # --- cancel / envelope ----------------------------------------------------

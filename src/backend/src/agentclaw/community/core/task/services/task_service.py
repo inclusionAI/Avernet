@@ -21,7 +21,6 @@ not ``T | None``; required non-optional; ``@inject`` constructor injection.
 """
 from __future__ import annotations
 
-import copy
 import uuid
 from typing import Any, Optional
 
@@ -46,15 +45,18 @@ from agentclaw.community.core.task.domain.models import (
     GraphStatus,
     Node,
     NodeStatus,
+    NodeType,
     Plan,
     RouteClass,
     RunMode,
     SubDagRef,
+    SubTaskSpec,
     Task,
     TaskExecutionGraph,
     TaskSource,
     TaskSpec,
     TaskSpecMetadata,
+    TaskState,
     TaskStatus,
 )
 from agentclaw.community.core.task.domain.repository import (
@@ -64,9 +66,11 @@ from agentclaw.community.core.task.domain.repository import (
 )
 from agentclaw.community.core.task.domain.state_machine import (
     IllegalTransitionError,
+    require_graph_transition,
     require_node_transition,
     require_task_transition,
 )
+from agentclaw.community.core.task.services.graph_state_ops import GraphStateOpsMixin
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -97,7 +101,7 @@ def _coerce_status(value: Any, enum_cls: type) -> Any:
 # --- service ----------------------------------------------------------------
 
 
-class TaskService:
+class TaskService(GraphStateOpsMixin):
     """Unified task authority (plan §2.1). Holds NO编排 decision."""
 
     @inject
@@ -541,10 +545,11 @@ class TaskService:
             self._apply_goal_verdict(task, verdict="pass")
             return
         if kind == EventKind.GOAL_REJECTED:
-            # spec: task-level HUNG is gone; acceptance-rejected parks the graph
-            # at AWAITING_HUMAN_ACCEPT and reworks via REVIEWING → EXECUTING (the
-            # BBS special case no longer escalates to a task-level HUNG terminal).
-            self._apply_goal_verdict(task, verdict="fail")
+            # v2 三终止(O-P2/§13):BBS 后 → FAILED 终态;BBS 前 → 回 gap 重跑(限轮次
+            # 由 scheduler 守,超限 force-hang)。由 run_mode 或图含 BBS_DISPATCH 判 BBS 后。
+            self._apply_goal_verdict(
+                task, verdict="fail", run_mode=str(payload.get("run_mode") or "")
+            )
             return
         if kind == EventKind.CANCELLED:
             self._advance_phase(task, TaskStatus.CANCELLED)
@@ -553,18 +558,33 @@ class TaskService:
         # log, but has no writer now (task-level HUNG terminal removed). Unknown
         # kinds — ignore (forward-compat).
 
-    def _apply_goal_verdict(self, task: Task, verdict: str) -> None:
+    def _apply_goal_verdict(self, task: Task, verdict: str, run_mode: str = "") -> None:
         graph = task.execution_graph
         if graph is None:
             return
         if verdict == "pass":
             graph.graph_status = GraphStatus.VERIFIED
             self._advance_phase(task, TaskStatus.DONE)
-        else:
-            graph.graph_status = GraphStatus.AWAITING_HUMAN_ACCEPT
+            return
+        # FAIL — v2 三终止(O-P2/§13):BBS 后 → FAILED 终态;BBS 前 → 回 gap 重跑。
+        bbs_escalated = run_mode == "bbs" or any(
+            n.node_type is NodeType.BBS_DISPATCH for n in graph.nodes
+        )
+        if bbs_escalated:
+            # REVIEWING → EXECUTING → FAILED(两段合法边;BBS 后不回环/不再上升)
+            if task.status is TaskStatus.REVIEWING:
+                self._advance_phase(task, TaskStatus.EXECUTING)
+            self._advance_phase(task, TaskStatus.FAILED)
             logger.info(
-                "[TaskService] goal rejected task=%s → AWAITING_HUMAN_ACCEPT",
-                task.id,
+                "[TaskService] goal rejected (post-BBS) task=%s → FAILED", task.id,
+            )
+        else:
+            # BBS 前 → 回 gap:REVIEWING → EXECUTING(重跑 loop;限轮次由 scheduler 守)
+            graph.graph_status = GraphStatus.ON_PLAZA
+            if task.status is TaskStatus.REVIEWING:
+                self._advance_phase(task, TaskStatus.EXECUTING)
+            logger.info(
+                "[TaskService] goal rejected (pre-BBS) task=%s → gap loop", task.id,
             )
 
     # --- internal: state-group helpers (plan §2.2) ------------------------
@@ -654,6 +674,33 @@ class TaskService:
                 )
             )
 
+    def spawn_build_dag_v2(self, task: Task) -> None:
+        """v2:构建全生命周期动作节点骨架(plan §2.2 伪代码 n1..n4)。
+
+        recognition→clarify→execute_start→bot_search(根,depth 0)。规划三节点由
+        skill 在 task 创建/澄清/批准时跑过;``tick_v2`` 遇 PENDING 规划节点标 DONE
+        推进链。后续 bot_search/decomposition/dispatch/... 由 ``TaskScheduler._tick_v2``
+        按 NodeType 推进(搜推先行 / 分解 / 聚合 / hang / bbs / 终验)。图中节点带
+        显式 NodeType → ``is_v2_graph`` 判真 → 走 v2 tick 门控。
+        """
+        if task.execution_graph is None:
+            task.execution_graph = TaskExecutionGraph(root_phase=task.status)
+        g = task.execution_graph
+        g.nodes = []
+        g.edges = []
+        g.state = TaskState()
+        self._task_repo.save(task)
+        prev: Optional[str] = None
+        for nt in (
+            NodeType.RECOGNITION,
+            NodeType.CLARIFY,
+            NodeType.EXECUTE_START,
+            NodeType.BOT_SEARCH,
+        ):
+            nid = f"n_{nt.value}"
+            self.add_node(task.id, SubTaskSpec(node_id=nid, spec=nt.value), prev, nt)
+            prev = nid
+
     def spawn_sub_dag(
         self,
         task: Task,
@@ -677,11 +724,19 @@ class TaskService:
         )
 
     def mark_graph_status(self, task: Task, status: GraphStatus) -> None:
-        if task.execution_graph is not None:
-            task.execution_graph.graph_status = status
+        if task.execution_graph is None:
+            return
+        g = task.execution_graph
+        # v2 guard(plan §5.1/§18.1-8):graph_status 迁移走 GRAPH_TRANSITIONS。
+        # 初始落 ON_PLAZA(从 None 状态首次赋值)不经 guard;其余迁移必经 guard。
+        if g.graph_status is not None and g.graph_status != status:
+            require_graph_transition(g.graph_status, status)
+        g.graph_status = status
+        self._task_repo.save(task)
 
     def mark_terminal(self, task: Task, status: TaskStatus) -> None:
         self._advance_phase(task, status)
+        self._task_repo.save(task)
 
     def add_sibling_node(
         self,
@@ -710,6 +765,9 @@ class TaskService:
         require_node_transition(node.status, status)
         node.status = status
 
+    # v2 图操作 + State 写口/读口/快照 见 GraphStateOpsMixin(plan §4.3/§8,
+    # 守 architecture 1000-line cap 抽出至 services/graph_state_ops.py)。
+
     # --- internal: wire projections ---------------------------------------
 
     def _definition_meta(self, task: Task) -> Optional[dict]:
@@ -729,6 +787,8 @@ class TaskService:
             "node_id": n.node_id,
             "display_name": n.spec,
             "status": n.status.value,
+            "node_type": n.node_type.value,  # v2(§3.1)
+            "render_kind": self._render_kind(n.node_type),  # v2(O-P5):exec/control-gate/system-bridge
             "sub_status": (n.properties.get("sub_status") or "idle"),
             "attempt": (rec.round if rec else 0),
             "assignee": n.assignee or "",
@@ -743,6 +803,7 @@ class TaskService:
                 for a in n.artifacts
             ],
             "acceptance_result": n.properties.get("acceptance_result"),
+            "judge_outputs": n.properties.get("judge_outputs"),  # v2(§18.1-13):拆出 judge 历史
             "targets_acceptance": [
                 {"kind": c.kind.value, "properties": c.properties}
                 for c in n.targets_acceptance

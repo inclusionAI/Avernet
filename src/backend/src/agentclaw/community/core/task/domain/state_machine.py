@@ -23,7 +23,7 @@ Notes (spec §2, §3.3):
 """
 from __future__ import annotations
 
-from .models import NodeStatus, TaskStatus
+from .models import GraphStatus, NodeStatus, TaskStatus
 
 
 class IllegalTransitionError(ValueError):
@@ -94,4 +94,37 @@ def require_node_transition(current: NodeStatus, target: NodeStatus) -> None:
     if not can_node_transition(current, target):
         raise IllegalTransitionError(
             f"illegal node transition: {current.value} -> {target.value}"
+        )
+
+
+# --- graph-status transitions (v2,plan §5.1) --------------------------------
+# ON_PLAZA = 活性执行(含 BBS 同图);AWAITING_HUMAN_ACCEPT = mark_hang 挂起门(等人
+# 确认:升 BBS→ON_PLAZA / 不升→task FAILED);AWAITING_HUMAN_ADJUST = 人介入调整后回
+# AWAITING_HUMAN_ACCEPT;VERIFIED = goal-verify PASS 终态。mark_graph_status 经此 guard
+# (现实现是裸赋值,§18.1-8 补 guard)。
+
+GRAPH_TRANSITIONS: dict[GraphStatus, frozenset[GraphStatus]] = {
+    GraphStatus.ON_PLAZA: frozenset(
+        {GraphStatus.AWAITING_HUMAN_ACCEPT, GraphStatus.VERIFIED}
+    ),
+    GraphStatus.AWAITING_HUMAN_ACCEPT: frozenset(
+        {GraphStatus.ON_PLAZA, GraphStatus.AWAITING_HUMAN_ADJUST}
+    ),
+    GraphStatus.AWAITING_HUMAN_ADJUST: frozenset(
+        {GraphStatus.ON_PLAZA, GraphStatus.AWAITING_HUMAN_ACCEPT}
+    ),
+    GraphStatus.VERIFIED: frozenset(),
+}
+
+TERMINAL_GRAPH_STATUSES: frozenset[GraphStatus] = frozenset({GraphStatus.VERIFIED})
+
+
+def can_graph_transition(current: GraphStatus, target: GraphStatus) -> bool:
+    return target in GRAPH_TRANSITIONS.get(current, frozenset())
+
+
+def require_graph_transition(current: GraphStatus, target: GraphStatus) -> None:
+    if not can_graph_transition(current, target):
+        raise IllegalTransitionError(
+            f"illegal graph transition: {current.value} -> {target.value}"
         )

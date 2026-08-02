@@ -30,10 +30,20 @@ from typing import Any, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.task.domain.events import TaskEvent
 from agentclaw.community.core.task.domain.models import (
+    AcceptanceCriteria,
+    AttemptOutcome,
+    Edge,
+    EdgeKind,
+    GraphSnapshot,
+    Node,
+    NodeType,
     Plan,
     RouteClass,
     RunMode,
+    StateSemantics,
+    SubTaskSpec,
     Task,
+    TaskState,
 )
 
 
@@ -85,6 +95,39 @@ class PanelMessage:
     component: str
     params: dict = field(default_factory=dict)
     kind: str = "open_panel"
+
+
+def aggregate_verdict(
+    self_acceptances: list[AcceptanceCriteria],
+    child_results: list[dict],
+) -> tuple[AttemptOutcome, list[str]]:
+    """完成判断纯函数(plan §12A / FR-GRAPH-07b)。
+
+    ``EXEC_AGGREGATE``(父级)与 ``GOAL_VERIFY``(任务级)共用同一判定骨架:读
+    ``self_acceptances``(父 ``targets_acceptance`` / Task ``goal.acceptances``)
+    + ``child_results``(State 里下属产出验收),逐 AC 比对 → ``(DONE|PARTIAL|FAIL,
+    unmet_criteria)``。区别仅入参来源(父 subtask 分区 vs 任务级),调用方负责取数。
+
+    默认实现:无 acceptance → 看 child_results 是否全 PASS;有 acceptance → 全部
+    child PASS 视作满足(结构化 AC 断言由 SKILL 侧细化,此处给保守聚合)。
+    """
+    if not self_acceptances:
+        # 无显式 AC:children 全 PASS 则 DONE。
+        if child_results and all(r.get("outcome") == AttemptOutcome.PASS for r in child_results):
+            return AttemptOutcome.PASS, []
+        return AttemptOutcome.FAIL, ["no acceptance criteria and not all children passed"]
+    # 有 AC:此处保守判定——children 任一非 PASS 即不达标(gap);全 PASS 则 DONE。
+    unmet: list[str] = []
+    for idx, ac in enumerate(self_acceptances):
+        # 结构化 AC 断言落 SKILL 侧;此处按 child 聚合保守判:无 child PASS 证据视为 unmet。
+        label = ac.properties.get("label") or f"ac[{idx}]"
+        if not any(r.get("outcome") == AttemptOutcome.PASS for r in child_results):
+            unmet.append(str(label))
+    if not unmet:
+        return AttemptOutcome.PASS, []
+    if len(unmet) < len(self_acceptances):
+        return AttemptOutcome.PARTIAL, unmet
+    return AttemptOutcome.FAIL, unmet
 
 
 # --- Protocols --------------------------------------------------------------
@@ -143,6 +186,42 @@ class TaskService(Protocol):
         follow. Exposed via GET /tasks/{task_id}/history."""
         ...
 
+    # --- v2 graph-operation write face (plan §4.3/§7.1,FR-GRAPH-11) -------
+    # 所有图变更经此写口:guard → fold → append event → save(状态组同口)。
+    def add_node(
+        self,
+        task_id: str,
+        node,  # Node | SubTaskSpec
+        parent_node: Optional[str],
+        node_type: NodeType,
+        executor: str = "",
+    ) -> Node:
+        """Append a node of ``node_type`` under ``parent_node``; append EDGE."""
+        ...
+
+    def add_edge(self, task_id: str, from_node: str, to_node: str, kind: EdgeKind) -> Edge:
+        """Append an edge."""
+        ...
+
+    def update_state(
+        self,
+        task_id: str,
+        scope: Optional[str],
+        patch: dict,
+        semantics: StateSemantics,
+    ) -> None:
+        """State 写口。``scope=None`` → ``TaskState.public``;else → ``subtasks[scope]``。
+        按 ``semantics`` 归约 fold(plan §3.2/§8.2)。"""
+        ...
+
+    def retrieve_state(self, task_id: str, scope: Optional[str]) -> dict:
+        """读 ``public`` (+ ``subtasks[scope]``);``scope=None`` 只读 public。"""
+        ...
+
+    def snapshot(self, task_id: str) -> GraphSnapshot:
+        """落当前 fold 快照(回溯/断点重跑,plan §8.3/FR-GRAPH-03c)。"""
+        ...
+
 
 @runtime_checkable
 class BotDiscoverPort(Protocol):
@@ -154,9 +233,35 @@ class BotDiscoverPort(Protocol):
 
 @runtime_checkable
 class DecomposerPort(Protocol):
-    """Decompose a spec into a Plan at runtime (C4 runtime拆解 / LOOP重规划)."""
+    """Decompose a spec into sub-tasks (plan §4.1/spec FR-GRAPH-05)。
+
+    v2 退单签名 = :meth:`decompose_subtasks`(spec + state → ``list[SubTaskSpec]``,
+    带 ``depth=父+1``),统一初始/递归/BBS 分解入口。旧 :meth:`decompose`
+    (``task_id`` → ``Plan``)保留作过渡(§15),新代码用 ``decompose_subtasks``。"""
 
     def decompose(self, task_id: str) -> Plan:
+        """deprecated 过渡:task_id → Plan。新代码用 decompose_subtasks。"""
+        ...
+
+    def decompose_subtasks(self, spec: str, state: TaskState) -> list[SubTaskSpec]:
+        """v2 单签名:分解 spec 为 children(带 depth=父 state 分区 depth+1)。"""
+        ...
+
+
+@runtime_checkable
+class OwnerResolver(Protocol):
+    """解析 owner bot(验收发起人,plan §4.2/spec O-7②)。
+
+    SINGLE_BOT 自验收内联,不走 Port;COOP_GROUP 群 owner 经
+    :meth:`resolve_group_owner`(查 BCS,群成员动态);task-owner 经
+    :meth:`resolve_task_owner`(读 ``Task.owner_bot_id``,缺失抛错)。纯解析,不写态。"""
+
+    def resolve_group_owner(self, group_id: str) -> str:
+        """协作群 owner-bot(群成员动态,需查 BCS)。"""
+        ...
+
+    def resolve_task_owner(self, task_id: str) -> str:
+        """task-owner = ``Task.owner_bot_id``(持久化);缺失抛错。"""
         ...
 
 
@@ -236,8 +341,13 @@ class BbsExecutor(Protocol):
 
     def post_progress(self, event: TaskEvent) -> Optional[Task]:
         """广场续做:fold a bot-reported event via TaskService.on_event (state
-        group write, no Scheduler tick). BBS FAIL verdict → HUNG (handled in
-        TaskService._apply_goal_verdict)."""
+        group write, no Scheduler tick). BBS goal-FAIL → FAILED 终态(v2 §13,
+        handled in TaskService._apply_goal_verdict run_mode=bbs branch)。"""
+        ...
+
+    def retrieve_state(self, task_id: str, scope: Optional[str] = None) -> dict:
+        """广场读黑板:public(+ ``subtasks[scope]``);``progress_snapshot`` 不存在
+        (§18.1-10),读经此口(delegate TaskService.retrieve_state)。"""
         ...
 
 
@@ -303,6 +413,7 @@ __all__ = [
     "DecomposerPort",
     "DispatchResult",
     "ExecutionPort",
+    "OwnerResolver",
     "PanelDeliveryPort",
     "PanelEventPublisher",
     "PanelMessage",
@@ -310,4 +421,5 @@ __all__ = [
     "TaskDriverPort",
     "TaskScheduler",
     "TaskService",
+    "aggregate_verdict",
 ]

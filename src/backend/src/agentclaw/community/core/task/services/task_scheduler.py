@@ -37,7 +37,11 @@ from agentclaw.community.core.task.protocols import (
     TaskDriverPort,
     TaskService,
 )
-from agentclaw.community.core.task.domain.events import EventKind, TaskEvent
+from agentclaw.community.core.task.domain.events import EventKind
+from agentclaw.community.core.task.services.scheduler_v2_ops import (
+    SchedulerV2OpsMixin,
+    is_v2_graph,
+)
 from agentclaw.community.core.task.domain.models import (
     AttemptOutcome,
     CollabMode,
@@ -236,8 +240,11 @@ def _all_settled(task: Task) -> bool:
 # --- scheduler -------------------------------------------------------------
 
 
-class TaskScheduler:
-    """Orchestration authority. All writes via TaskService."""
+class TaskScheduler(SchedulerV2OpsMixin):
+    """Orchestration authority. All writes via TaskService.
+
+    v2:含动作节点的图(is_v2_graph)走 ``_tick_v2``(NodeType-aware,plan §7.2);
+    否则回退旧 tick,保既存 scheduler 测试不破。"""
 
     @inject
     def __init__(
@@ -290,6 +297,10 @@ class TaskScheduler:
         if task.status not in {TaskStatus.EXECUTING}:
             return {"task_id": task_id, "action": "noop", "reason": f"status={task.status.value}"}
         logger.info("[Scheduler] task=%s tick status=executing", task_id)
+
+        # v2 门控:含动作节点的图走 NodeType-aware tick(plan §7.2);否则旧链路。
+        if task.execution_graph is not None and is_v2_graph(task):
+            return self._tick_v2(task)
 
         progressed = False
         if task.execution_graph is not None:

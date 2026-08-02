@@ -43,6 +43,13 @@ class EventKind(StrEnum):
     EXECUTION_ATTEMPTED = "execution.attempted"
     CANCELLED = "task.cancelled"
     HUNG = "task.hung"  # deprecated: no writer since task-level HUNG terminal was removed
+    # v2 全生命周期图操作事件(plan §6):图结构变更 + State 写 + 判定回投 + 挂起。
+    NODE_ADDED = "node.added"          # add_node
+    EDGE_ADDED = "edge.added"          # add_edge
+    STATE_UPDATED = "state.updated"    # update_state(纯 State 写)
+    PLAN_REQUESTED = "task.plan_requested"  # EXECUTE_START 后请 owner-bot 规划(§12)
+    EXEC_AGGREGATED = "node.aggregated"  # exec-aggregate 聚合验收结果(父 subtask DONE/REJECTED)
+    NODE_HANG = "node.hang"            # mark-hang 挂起(graph → AWAITING_HUMAN_ACCEPT)
     # (spec §2 — "被 hung 住" is node-level HUMAN_REQUIRED; unrecoverable → FAILED).
     # Retained on the enum so the event-log deserializer can still read historical
     # HUNG entries; new code must not emit it.

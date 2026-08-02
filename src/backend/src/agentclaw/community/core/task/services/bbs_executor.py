@@ -2,12 +2,13 @@
 
 The shared blackboard IS the task's :class:`TaskExecutionGraph`.广场 bots:
 
-- **read** the blackboard via :class:`TaskService` query face (``get_task_graph``)
-  — no special "BBS read API"; the same副屏 query face serves everyone.
+- **read** the blackboard via :class:`TaskService` query face (:meth:`retrieve_state`
+  / ``get_task_graph``) — no special "BBS read API"; the same副屏 query face serves
+  everyone.``progress_snapshot`` does not exist(§18.1-10):read 经 ``retrieve_state``。
 - **write** via :meth:`TaskService.on_event` (run_mode=BBS) through the state
   group. BBS does NOT drive a Scheduler tick — it is self-drive on the广场; the
-  graph_status stays ON_PLAZA. A BBS goal-FAIL verdict routes the task to HUNG
-  (TaskService._apply_goal_verdict, run_mode=bbs branch).
+  graph_status stays ON_PLAZA. A BBS goal-FAIL verdict routes the task to FAILED
+  终态(v2 三终止 O-P2/§13:``TaskService._apply_goal_verdict`` run_mode=bbs branch)。
 
 This executor holds **mechanics only** (广场认领 CAS, 续做 event fold): it holds
 NO task state — the event log + graph snapshot remain the single source of truth,
@@ -73,7 +74,7 @@ class BbsExecutorService(BbsExecutor):
 
     def post_progress(self, event: Any) -> Optional[Task]:
         """广场续做:fold a bot-reported event via TaskService.on_event (state
-        group, no Scheduler tick). BBS goal-FAIL → HUNG (handled in fold)."""
+        group, no Scheduler tick). BBS goal-FAIL → FAILED 终态(v2 §13,fold 内理)。"""
         # Ensure the event reads as BBS-sourced so the goal-verdict fold takes
         # the BBS branch on rejection.
         if isinstance(event, TaskEvent) and event.payload.get("run_mode") is None:
@@ -82,6 +83,13 @@ class BbsExecutorService(BbsExecutor):
             event.setdefault("payload", {})
             event["payload"].setdefault("run_mode", RunMode.BBS.value)
         return self._svc.on_event(event)
+
+    def retrieve_state(self, task_id: str, scope: Optional[str] = None) -> dict:
+        """广场读黑板:delegate TaskService.retrieve_state(public + subtasks[scope])。
+
+        ``progress_snapshot`` 不存在(§18.1-10):BBS bot 读执行上下文/中间结果/gap
+        经此口(scope=node_id 读该 subtask 分区;scope=None 读 public)。"""
+        return self._svc.retrieve_state(task_id, scope)
 
 
 def _is_unlocked(task: Any, node_id: str) -> bool:

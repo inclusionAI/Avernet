@@ -52,7 +52,7 @@ class AcTaskModel(Base):
     env = Column(String(64), nullable=False, default="dev")
     user_id = Column(String(128), nullable=False, default="")
     source = Column(String(32), nullable=False, default="api")
-    status = Column(String(32), nullable=False, default="intake")
+    status = Column(String(32), nullable=False, default="drafting")  # v2(§18.1-11):对齐 TaskStatus.DRAFTING
     loop_round = Column(Integer, nullable=False, default=0)
     latest_event_seq = Column(Integer, nullable=False, default=0)
     spec_json = Column(Text, nullable=True)
