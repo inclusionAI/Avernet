@@ -22,7 +22,7 @@ from gateway.community.adapters.web._forward import _ALL_METHODS, forward_reques
 from gateway.community.adapters.web._relay_ws import (
     _has_dot_segment,
     forward_websocket,
-    relay_route,
+    relay_routes,
 )
 from gateway.community.core.forwarding import DomainMap
 from gateway.community.spi.auth import AuthError
@@ -170,9 +170,8 @@ def _build(
     # driven from config. With no engine domain configured, nothing is mounted
     # under that prefix at all — which is the behaviour under test.
     for name in domain_map.websocket_domains():
-        app.add_api_websocket_route(
-            relay_route(domain_map.base_path, name), forward_websocket
-        )
+        for route in relay_routes(domain_map.base_path, name):
+            app.add_api_websocket_route(route, forward_websocket)
     # An always-present route so an unconfigured prefix is refused by the
     # endpoint rather than by Starlette's router, keeping the assertion about
     # our own behaviour.
@@ -462,6 +461,29 @@ def test_an_encoded_routing_prefix_is_refused(path: str) -> None:
     assert forwarder.opened == []  # never dialled
 
 
+def test_the_bare_domain_prefix_is_mounted_too() -> None:
+    """Starlette needs a separator before `{full_path:path}`, so two mounts.
+
+    Asserted structurally rather than by connecting, and deliberately so:
+    `TestClient` follows Starlette's slash redirect, so a handshake to the bare
+    prefix succeeds through it whether or not the route exists. Against real
+    uvicorn the same request is refused with HTTP 403 before reaching the
+    entrypoint. A behavioural test here would pass either way and pin nothing.
+    """
+    app, _, _ = _build()
+    mounted = {getattr(route, "path", None) for route in app.routes}
+    assert "/openapi/v1/engine" in mounted
+    assert "/openapi/v1/engine/{full_path:path}" in mounted
+
+
+def test_relay_routes_returns_both_forms_together() -> None:
+    """Returned as one tuple so a caller cannot mount one and forget the other."""
+    assert relay_routes("/openapi/v1", "engine") == (
+        "/openapi/v1/engine",
+        "/openapi/v1/engine/{full_path:path}",
+    )
+
+
 def _nested_rewrite_app(forwarder: _StubForwarder) -> FastAPI:
     """A domain whose `rewrite.from` is *deeper* than the domain prefix.
 
@@ -489,9 +511,8 @@ def _nested_rewrite_app(forwarder: _StubForwarder) -> FastAPI:
     app.state.ws_forwarder = forwarder
     app.state.domain_map = domain_map
     for name in domain_map.websocket_domains():
-        app.add_api_websocket_route(
-            relay_route(domain_map.base_path, name), forward_websocket
-        )
+        for route in relay_routes(domain_map.base_path, name):
+            app.add_api_websocket_route(route, forward_websocket)
     return app
 
 

@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from gateway.community import __version__
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
 from gateway.community.adapters.web._log_redaction import install_credential_redaction
-from gateway.community.adapters.web._relay_ws import forward_websocket, relay_route
+from gateway.community.adapters.web._relay_ws import forward_websocket, relay_routes
 from gateway.community.adapters.web.admin import router as admin_router
 from gateway.community.config import ConfigLoader
 from gateway.community.logger import get_logger, get_logger_plugin
@@ -137,9 +137,8 @@ def create_app() -> FastAPI:
     # catch-all below.
     domain_map = bs.forwarding.domain_map
     for name in domain_map.websocket_domains():
-        app.add_api_websocket_route(
-            relay_route(domain_map.base_path, name), forward_websocket
-        )
+        for route in relay_routes(domain_map.base_path, name):
+            app.add_api_websocket_route(route, forward_websocket)
 
     app.add_api_route(
         "/{full_path:path}",

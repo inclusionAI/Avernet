@@ -50,13 +50,23 @@ from ._forward import _INBOUND_STRIP, _PRINCIPAL_HEADER, _bundle
 logger = get_logger("relay_ws")
 
 
-def relay_route(base_path: str, domain: str) -> str:
-    """The path a socket domain's entrypoint is mounted on.
+def relay_routes(base_path: str, domain: str) -> tuple[str, ...]:
+    """Every path a socket domain's entrypoint must be mounted on.
 
     Built from configuration rather than written down, so adding a socket domain
     is a config edit and this module never names one.
+
+    **Two paths, not one.** Starlette compiles ``{full_path:path}`` with a
+    mandatory separator in front of it, so mounting only the tail form leaves
+    the bare prefix unserved — a handshake to exactly ``/openapi/v1/engine``
+    is refused before it reaches the entrypoint. That is not hypothetical: a
+    domain whose upstream publishes its socket at the rewrite target's own root
+    is reached at precisely that prefix, and :meth:`PathRewrite.apply` has an
+    exact-prefix branch for it. Returned together so a caller cannot mount one
+    and forget the other.
     """
-    return f"{base_path.rstrip('/')}/{domain}/{{full_path:path}}"
+    prefix = f"{base_path.rstrip('/')}/{domain}"
+    return (prefix, f"{prefix}/{{full_path:path}}")
 
 
 #: A WebSocket handshake is an HTTP ``GET``; route security is resolved for it
