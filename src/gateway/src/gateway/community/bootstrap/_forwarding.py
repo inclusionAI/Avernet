@@ -11,9 +11,15 @@ import logging
 from pathlib import Path
 
 from gateway.community.config import Config
-from gateway.community.core.forwarding import DomainMap, Forwarding
+from gateway.community.core.forwarding import (
+    DomainMap,
+    EngineRoute,
+    Forwarding,
+    build_engine_route,
+)
 from gateway.community.spi.forwarder import Forwarder
 from gateway.community.spi.schema_catalog import SchemaCatalog
+from gateway.community.spi.ws_forwarder import WebSocketForwarder
 
 _logger = logging.getLogger("bootstrap")
 
@@ -23,6 +29,7 @@ _DEFAULT_REFRESH_SECONDS = 300.0
 def build_forwarding(
     forwarder: Forwarder,
     catalog: SchemaCatalog,
+    ws_forwarder: WebSocketForwarder,
 ) -> Forwarding:
     """Build the forwarding subsystem (called once from ``create_app``).
 
@@ -34,6 +41,7 @@ def build_forwarding(
 
     config = ConfigLoader.load()
     domain_map = _load_domain_map(config)
+    engine_route = _load_engine_route(config)
     refresh_seconds = _DEFAULT_REFRESH_SECONDS
     sources: dict[str, str | Path] = {}
     if config.config_dir is not None:
@@ -49,8 +57,37 @@ def build_forwarding(
         domain_map=domain_map,
         forwarder=forwarder,
         catalog=catalog,
+        ws_forwarder=ws_forwarder,
+        engine_route=engine_route,
         refresh_seconds=refresh_seconds,
     )
+
+
+def _load_engine_route(config: Config) -> EngineRoute | None:
+    """The root-anchored ``/engine`` socket route, if this deployment has one.
+
+    Read from the same ``user_config.upstreams`` section the domain map is read
+    from, so one section describes everything the gateway routes. Absent is a
+    supported answer and the community build's: a gateway that fronts no engine
+    proxy refuses every handshake on the prefix rather than serving a socket to
+    nowhere.
+    """
+    upstreams_raw = config.user_config.upstreams
+    if not isinstance(upstreams_raw, dict):
+        return None
+    engine_route = build_engine_route(upstreams_raw, config.user_config.upstream_vars)
+    if engine_route is None:
+        _logger.info(
+            "no engine socket route configured (application.yaml "
+            "user_config.upstreams.engine): /engine/** is not served"
+        )
+    else:
+        _logger.info(
+            "engine socket route → %s (%s)",
+            engine_route.server,
+            engine_route.ws_base_url,
+        )
+    return engine_route
 
 
 def _load_domain_map(config: Config | None = None) -> DomainMap:

@@ -30,6 +30,9 @@ user_config:
   # Enterprise overrides specific selectors via config overlay.
   plugins:
     forwarder: "httpx"
+    # Duplex forwarder for the /engine socket route. The same library also makes
+    # the gateway's own server accept an Upgrade at all.
+    ws_forwarder: "websockets"
     schema_catalog: "file"
     cache: "stub"
     auth: "stub"
@@ -91,6 +94,17 @@ user_config:
     "/openapi/v1/bots/**":
       user: required
 
+    # The tenant engine socket. No gateway identity: the credential is already
+    # in the handshake's query string and is checked by the proxypass hop behind
+    # the gateway, and a browser's WebSocket API can attach nothing else.
+    #
+    # Written down as an explicit empty requirement rather than left out — an
+    # omitted rule falls through to "/**" above and fails closed, so silence
+    # here would refuse every socket. Stating it keeps this table an honest
+    # description of what the gateway requires, and makes tightening the prefix
+    # a config edit.
+    "/engine/**": {}
+
   # Domain → upstream-server map for the gateway.
   #
   # The leading path segment after `base_path` is the DOMAIN; it selects the
@@ -109,6 +123,29 @@ user_config:
   # routing/auth/forwarding never read it.
   upstreams:
     base_path: /openapi/v1
+
+    # The tenant engine socket route. NOT a domain: `/engine` is anchored at the
+    # root of the gateway's host, outside `base_path`, because that is the
+    # address the backend's connection endpoint publishes
+    # (`wss://<gateway>/engine/<target><engine-path>?x-proxypass-token=...`).
+    # A WebSocket handshake to `/engine/{rest}` is relayed to
+    # `{server}/proxypass/{rest}`, query included, byte for byte.
+    #
+    # Left unset here: the community build fronts no engine proxy, so
+    # `/engine/**` refuses every handshake — the mirror of the backend shipping
+    # an empty `user_config.gateway` block. A deployment that has one adds:
+    #
+    #   engine:
+    #     server: engine_proxy
+    #
+    # …with a matching entry under `servers:` whose `base_url` carries a scheme
+    # (`https://` → `wss://`, `http://` → `ws://`; `ws`/`wss` accepted verbatim).
+    #
+    # Operational note for whatever fronts the gateway in such a deployment: the
+    # hop must pass the Upgrade through and must impose NO read timeout on this
+    # prefix. The socket's credential is checked once, at the handshake, and the
+    # connection is designed to outlive its expiry — an idle deadline tears down
+    # healthy sockets.
 
     domains:
       bots:
@@ -146,3 +183,5 @@ user_config:
         base_url: "${backend_server_url}"
       baas:
         base_url: "${baas_server_url}"
+      # engine_proxy:
+      #   base_url: "${engine_proxy_server_url}"

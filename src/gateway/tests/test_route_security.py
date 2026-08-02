@@ -20,6 +20,19 @@ def test_shipped_config_loads_and_requires_user() -> None:
     assert req[PrincipalType.USER] is Presence.REQUIRED
 
 
+def test_shipped_config_exempts_the_engine_socket_prefix() -> None:
+    """The socket's credential is checked by the hop behind the gateway.
+
+    An *empty* requirement, not a missing rule: an omitted rule falls through to
+    ``/**`` and fails closed, so the exemption has to be written down — which is
+    also what keeps the table an honest description of the gateway's posture.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("GET", "/engine/ARCA_x@0:20003/api/openclaw/ws")
+    assert req == {}
+
+
 def test_more_specific_rule_wins() -> None:
     rs = RouteSecurity.from_table(
         {

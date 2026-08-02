@@ -147,6 +147,7 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
             build_forwarding,
             forwarder=plugins.providers["forwarder"],
             catalog=plugins.providers["schema_catalog"],
+            ws_forwarder=plugins.providers["ws_forwarder"],
         )
     )
 

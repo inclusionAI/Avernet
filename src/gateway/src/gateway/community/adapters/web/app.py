@@ -1,8 +1,10 @@
 """FastAPI Web application entry point.
 
 The gateway serves no hand-written per-operation routes: one catch-all forwards
-every ``/openapi/v1`` request to its domain's upstream, and ``/openapi.json`` is
-generated from each upstream's published description (via the schema catalog).
+every ``/openapi/v1`` request to its domain's upstream, one WebSocket route
+relays the tenant engine socket published under ``/engine``, and
+``/openapi.json`` is generated from each upstream's published description (via
+the schema catalog).
 """
 
 from __future__ import annotations
@@ -14,6 +16,10 @@ from typing import Any
 from fastapi import FastAPI
 
 from gateway.community import __version__
+from gateway.community.adapters.web._engine_ws import (
+    ENGINE_WS_ROUTE,
+    forward_websocket,
+)
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
 from gateway.community.adapters.web.admin import router as admin_router
 from gateway.community.config import ConfigLoader
@@ -94,6 +100,8 @@ def create_app() -> FastAPI:
     app.state.authenticator = bs.authenticator
     app.state.domain_map = bs.forwarding.domain_map
     app.state.forwarder = bs.forwarding.forwarder
+    app.state.ws_forwarder = bs.forwarding.ws_forwarder
+    app.state.engine_route = bs.forwarding.engine_route
     app.state.principal_signer = bs.principal_signer
     app.state.access_key_issuer = bs.access_key_issuer
     app.state.app_registrar = bs.app_registrar
@@ -119,6 +127,12 @@ def create_app() -> FastAPI:
     # Admin endpoints (credential issuance/registration) — explicit routes, so
     # they win over the catch-all forward. Unauthenticated (single-box/dev only).
     app.include_router(admin_router, prefix="/admin")
+
+    # The tenant engine socket. A WebSocket route, so it never competes with
+    # the HTTP catch-all below: an HTTP request under /engine has no configured
+    # domain and stays a 404, which is what this prefix publishes — one socket,
+    # nothing else.
+    app.add_api_websocket_route(ENGINE_WS_ROUTE, forward_websocket)
 
     app.add_api_route(
         "/{full_path:path}",
