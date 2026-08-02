@@ -7,6 +7,8 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use super::wire::{GatewayClaims, GatewayPrincipal};
 
+const CLOCK_SKEW_SECONDS: u64 = 5;
+
 pub struct GatewayPrincipalTrust {
     issuer: String,
     audience: String,
@@ -19,10 +21,16 @@ impl GatewayPrincipalTrust {
         audience: impl Into<String>,
         key_id: impl Into<String>,
     ) -> Result<Self, GatewayPrincipalVerifierBuildError> {
+        let issuer = issuer.into();
+        let audience = audience.into();
+        let key_id = key_id.into();
+        if !is_non_blank(&issuer) || !is_non_blank(&audience) || !is_non_blank(&key_id) {
+            return Err(GatewayPrincipalVerifierBuildError::InvalidTrustConfiguration);
+        }
         Ok(Self {
-            issuer: issuer.into(),
-            audience: audience.into(),
-            key_id: key_id.into(),
+            issuer,
+            audience,
+            key_id,
         })
     }
 }
@@ -37,6 +45,9 @@ impl GatewayPrincipalTokenVerifier {
         signing_key: &[u8],
         trust: GatewayPrincipalTrust,
     ) -> Result<Self, GatewayPrincipalVerifierBuildError> {
+        if signing_key.is_empty() {
+            return Err(GatewayPrincipalVerifierBuildError::EmptySigningKey);
+        }
         Ok(Self {
             decoding_key: DecodingKey::from_secret(signing_key),
             trust,
@@ -55,8 +66,11 @@ impl GatewayPrincipalTokenVerifier {
     pub(super) fn verify_at(
         &self,
         token: &str,
-        _now: u64,
+        now: u64,
     ) -> Result<AuthenticatedCaller, GatewayPrincipalVerificationError> {
+        if token.is_empty() {
+            return Err(GatewayPrincipalVerificationError::EmptyToken);
+        }
         let header =
             decode_header(token).map_err(|_| GatewayPrincipalVerificationError::InvalidHeader)?;
         if header.alg != Algorithm::HS256 {
@@ -84,65 +98,106 @@ impl GatewayPrincipalTokenVerifier {
             })?
             .claims;
 
-        if claims.iss != self.trust.issuer
-            || claims.aud != self.trust.audience
-            || claims.iat >= claims.exp
-        {
+        if claims.iss != self.trust.issuer || claims.aud != self.trust.audience {
             return Err(GatewayPrincipalVerificationError::InvalidClaims);
         }
+        validate_times(claims.iat, claims.exp, now)?;
 
         project_principals(claims.principals)
     }
 }
 
+fn validate_times(iat: u64, exp: u64, now: u64) -> Result<(), GatewayPrincipalVerificationError> {
+    let latest_allowed_iat = now.saturating_add(CLOCK_SKEW_SECONDS);
+    let expiration_with_skew = exp.saturating_add(CLOCK_SKEW_SECONDS);
+    if iat >= exp || iat > latest_allowed_iat || now >= expiration_with_skew {
+        return Err(GatewayPrincipalVerificationError::InvalidClaims);
+    }
+    Ok(())
+}
+
+fn is_non_blank(value: &str) -> bool {
+    !value.trim().is_empty()
+}
+
 fn project_principals(
     principals: Vec<GatewayPrincipal>,
 ) -> Result<AuthenticatedCaller, GatewayPrincipalVerificationError> {
-    let mut caller = AuthenticatedCaller {
-        tenant: String::new(),
-        user: None,
-        bot: None,
-        app: None,
-        access_key: None,
-    };
+    let mut tenant = None;
+    let mut user = None;
+    let mut bot_identity = None;
+    let mut app_identity = None;
+    let mut access_key_identity = None;
 
     for principal in principals {
         match principal {
-            GatewayPrincipal::User { tenant, subject } => {
-                caller.tenant = tenant;
-                let _ = subject.tenant_id;
-                caller.user = Some(AuthenticatedUserIdentity {
+            GatewayPrincipal::User {
+                tenant: outer_tenant,
+                subject,
+            } => {
+                validate_tenant(&mut tenant, &outer_tenant)?;
+                if user.is_some()
+                    || !is_non_blank(&subject.id)
+                    || !is_non_blank(&subject.username)
+                    || subject.tenant_id.as_ref().is_some_and(|nested_tenant| {
+                        !is_non_blank(nested_tenant) || nested_tenant != &outer_tenant
+                    })
+                {
+                    return Err(GatewayPrincipalVerificationError::InvalidPrincipalSet);
+                }
+                user = Some(AuthenticatedUserIdentity {
                     id: subject.id,
                     username: subject.username,
                     display_name: subject.display_name,
                     full_name: subject.full_name,
                 });
             }
-            GatewayPrincipal::Bot { tenant, bot } => {
-                caller.tenant = tenant;
-                let _ = bot.tenant;
-                caller.bot = Some(AuthenticatedBotIdentity {
+            GatewayPrincipal::Bot {
+                tenant: outer_tenant,
+                bot,
+            } => {
+                validate_tenant(&mut tenant, &outer_tenant)?;
+                if bot_identity.is_some()
+                    || bot.tenant != outer_tenant
+                    || !is_non_blank(&bot.bot_uuid)
+                    || !is_non_blank(&bot.owner_id)
+                    || !is_non_blank(&bot.agent_code)
+                {
+                    return Err(GatewayPrincipalVerificationError::InvalidPrincipalSet);
+                }
+                bot_identity = Some(AuthenticatedBotIdentity {
                     bot_uuid: bot.bot_uuid,
                     owner_id: bot.owner_id,
                     app_id: bot.app_id,
                     agent_code: bot.agent_code,
                 });
             }
-            GatewayPrincipal::App { tenant, app } => {
-                caller.tenant = tenant;
-                let _ = app.tenant;
-                caller.app = Some(AuthenticatedAppIdentity {
+            GatewayPrincipal::App {
+                tenant: outer_tenant,
+                app,
+            } => {
+                validate_tenant(&mut tenant, &outer_tenant)?;
+                if app_identity.is_some() || app.tenant != outer_tenant {
+                    return Err(GatewayPrincipalVerificationError::InvalidPrincipalSet);
+                }
+                app_identity = Some(AuthenticatedAppIdentity {
                     app_id: app.app_id,
                     app_name: app.app_name,
                     owners: app.owners,
                     app_type: app.app_type,
                 });
             }
-            GatewayPrincipal::AccessKey { tenant, access_key } => {
-                caller.tenant = tenant;
+            GatewayPrincipal::AccessKey {
+                tenant: outer_tenant,
+                access_key,
+            } => {
+                validate_tenant(&mut tenant, &outer_tenant)?;
+                if access_key_identity.is_some() || !is_non_blank(&access_key.access_key) {
+                    return Err(GatewayPrincipalVerificationError::InvalidPrincipalSet);
+                }
                 let expire_at = OffsetDateTime::parse(&access_key.expire_at, &Rfc3339)
                     .map_err(|_| GatewayPrincipalVerificationError::InvalidPrincipalSet)?;
-                caller.access_key = Some(AuthenticatedAccessKeyIdentity {
+                access_key_identity = Some(AuthenticatedAccessKeyIdentity {
                     access_key: access_key.access_key,
                     expire_at,
                 });
@@ -150,7 +205,30 @@ fn project_principals(
         }
     }
 
-    Ok(caller)
+    Ok(AuthenticatedCaller {
+        tenant: tenant.ok_or(GatewayPrincipalVerificationError::InvalidPrincipalSet)?,
+        user,
+        bot: bot_identity,
+        app: app_identity,
+        access_key: access_key_identity,
+    })
+}
+
+fn validate_tenant(
+    normalized: &mut Option<String>,
+    candidate: &str,
+) -> Result<(), GatewayPrincipalVerificationError> {
+    if !is_non_blank(candidate)
+        || normalized
+            .as_ref()
+            .is_some_and(|expected| expected != candidate)
+    {
+        return Err(GatewayPrincipalVerificationError::InvalidPrincipalSet);
+    }
+    if normalized.is_none() {
+        *normalized = Some(candidate.to_owned());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

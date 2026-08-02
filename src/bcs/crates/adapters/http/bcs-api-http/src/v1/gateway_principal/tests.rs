@@ -1,9 +1,11 @@
+use bcs_service_api::application::v1::AuthenticatedCaller;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{
     GatewayPrincipalTokenVerifier, GatewayPrincipalTrust, GatewayPrincipalVerificationError,
+    GatewayPrincipalVerifierBuildError,
 };
 
 const NOW: u64 = 1_785_657_600;
@@ -58,6 +60,38 @@ fn verifier_from(fixture: &ContractFixture) -> GatewayPrincipalTokenVerifier {
     )
     .expect("valid trust");
     GatewayPrincipalTokenVerifier::new(TEST_KEY, trust).expect("valid verifier")
+}
+
+fn verifier() -> GatewayPrincipalTokenVerifier {
+    let fixture = fixture();
+    verifier_from(&fixture)
+}
+
+fn valid_claims() -> Value {
+    let fixture = fixture();
+    json!({
+        "iss": fixture.issuer,
+        "aud": fixture.audience,
+        "iat": NOW,
+        "exp": NOW + 60,
+        "principals": fixture.principals,
+    })
+}
+
+fn token_with_times(iat: u64, exp: u64) -> String {
+    let mut claims = valid_claims();
+    claims["iat"] = json!(iat);
+    claims["exp"] = json!(exp);
+    mint_with(header("JWT", "bare"), &claims, TEST_KEY)
+}
+
+fn verify_principals(
+    principals: Value,
+) -> Result<AuthenticatedCaller, GatewayPrincipalVerificationError> {
+    let mut claims = valid_claims();
+    claims["principals"] = principals;
+    let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+    verifier().verify_at(&token, NOW)
 }
 
 fn select_principals(principals: &Value, kinds: &[&str]) -> Value {
@@ -175,5 +209,247 @@ fn rejects_untrusted_algorithm_token_type_and_key_id() {
             verifier_from(&fixture).verify_at(&token, NOW),
             Err(expected)
         );
+    }
+}
+
+#[test]
+fn rejects_empty_trust_material() {
+    let valid = GatewayPrincipalTrust::new("gateway", "bcs", "bare").expect("valid trust");
+    assert_eq!(
+        GatewayPrincipalTokenVerifier::new(b"", valid).err(),
+        Some(GatewayPrincipalVerifierBuildError::EmptySigningKey),
+    );
+    for values in [
+        ("", "bcs", "bare"),
+        ("gateway", "", "bare"),
+        ("gateway", "bcs", ""),
+        ("   ", "bcs", "bare"),
+    ] {
+        assert!(matches!(
+            GatewayPrincipalTrust::new(values.0, values.1, values.2),
+            Err(GatewayPrincipalVerifierBuildError::InvalidTrustConfiguration),
+        ));
+    }
+}
+
+#[test]
+fn rejects_empty_malformed_and_unsigned_tokens() {
+    let verifier = verifier();
+    assert_eq!(
+        verifier.verify_at("", NOW),
+        Err(GatewayPrincipalVerificationError::EmptyToken),
+    );
+    for token in ["not-a-jwt", "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.e30."] {
+        assert_eq!(
+            verifier.verify_at(token, NOW),
+            Err(GatewayPrincipalVerificationError::InvalidHeader),
+        );
+    }
+}
+
+#[test]
+fn rejects_wrong_signature_issuer_and_audience() {
+    let claims = valid_claims();
+    let wrong_key = mint_with(header("JWT", "bare"), &claims, b"different-test-key");
+    assert_eq!(
+        verifier().verify_at(&wrong_key, NOW),
+        Err(GatewayPrincipalVerificationError::InvalidSignature),
+    );
+    for (claim, value) in [("iss", "other-gateway"), ("aud", "backend")] {
+        let mut claims = valid_claims();
+        claims[claim] = json!(value);
+        let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+        assert_eq!(
+            verifier().verify_at(&token, NOW),
+            Err(GatewayPrincipalVerificationError::InvalidClaims),
+        );
+    }
+}
+
+#[test]
+fn rejects_missing_required_claims_and_invalid_shapes() {
+    for claim in ["iss", "aud", "iat", "exp", "principals"] {
+        let mut claims = valid_claims();
+        claims.as_object_mut().expect("claims object").remove(claim);
+        let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+        assert_eq!(
+            verifier().verify_at(&token, NOW),
+            Err(GatewayPrincipalVerificationError::InvalidClaims),
+            "missing {claim}",
+        );
+    }
+
+    for (claim, value) in [
+        ("iat", json!("1785657600")),
+        ("exp", json!(null)),
+        ("principals", json!({})),
+    ] {
+        let mut claims = valid_claims();
+        claims[claim] = value;
+        let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+        assert_eq!(
+            verifier().verify_at(&token, NOW),
+            Err(GatewayPrincipalVerificationError::InvalidClaims),
+            "invalid shape for {claim}",
+        );
+    }
+}
+
+#[test]
+fn enforces_exact_five_second_clock_skew() {
+    let accepted_future = token_with_times(NOW + 5, NOW + 65);
+    let rejected_future = token_with_times(NOW + 6, NOW + 66);
+    let accepted_expired = token_with_times(NOW - 65, NOW - 4);
+    let rejected_expired = token_with_times(NOW - 66, NOW - 5);
+    assert!(verifier().verify_at(&accepted_future, NOW).is_ok());
+    assert_eq!(
+        verifier().verify_at(&rejected_future, NOW),
+        Err(GatewayPrincipalVerificationError::InvalidClaims),
+    );
+    assert!(verifier().verify_at(&accepted_expired, NOW).is_ok());
+    assert_eq!(
+        verifier().verify_at(&rejected_expired, NOW),
+        Err(GatewayPrincipalVerificationError::InvalidClaims),
+    );
+}
+
+#[test]
+fn rejects_non_positive_token_lifetime() {
+    for (iat, exp) in [(NOW, NOW), (NOW + 1, NOW)] {
+        let token = token_with_times(iat, exp);
+        assert_eq!(
+            verifier().verify_at(&token, NOW),
+            Err(GatewayPrincipalVerificationError::InvalidClaims),
+        );
+    }
+}
+
+#[test]
+fn rejects_empty_unknown_and_duplicate_principal_types() {
+    assert_eq!(
+        verify_principals(json!([])),
+        Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
+    );
+
+    let mut unknown = fixture().principals;
+    unknown[0]["type"] = json!("future_identity");
+    assert_eq!(
+        verify_principals(unknown),
+        Err(GatewayPrincipalVerificationError::InvalidClaims),
+    );
+
+    let mut duplicate = fixture().principals;
+    let repeated_user = duplicate[0].clone();
+    duplicate
+        .as_array_mut()
+        .expect("principals array")
+        .push(repeated_user);
+    assert_eq!(
+        verify_principals(duplicate),
+        Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
+    );
+}
+
+#[test]
+fn rejects_missing_required_known_principal_fields() {
+    for (index, field) in [(0, "subject"), (1, "bot"), (2, "app"), (3, "access_key")] {
+        let mut principals = fixture().principals;
+        principals[index]
+            .as_object_mut()
+            .expect("principal object")
+            .remove(field);
+        assert_eq!(
+            verify_principals(principals),
+            Err(GatewayPrincipalVerificationError::InvalidClaims),
+            "missing {field}",
+        );
+    }
+}
+
+#[test]
+fn rejects_mixed_and_contradictory_tenants() {
+    for pointer in [
+        "/1/tenant",
+        "/1/bot/tenant",
+        "/2/app/tenant",
+        "/0/subject/tenant_id",
+    ] {
+        let mut principals = fixture().principals;
+        *principals.pointer_mut(pointer).expect("fixture pointer") = json!("tenant-b");
+        assert_eq!(
+            verify_principals(principals),
+            Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
+            "tenant mutation at {pointer}",
+        );
+    }
+
+    for value in ["", "   "] {
+        let mut principals = fixture().principals;
+        principals[0]["subject"]["tenant_id"] = json!(value);
+        assert_eq!(
+            verify_principals(principals),
+            Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
+        );
+    }
+}
+
+#[test]
+fn rejects_blank_stable_identities_and_invalid_access_key_time() {
+    for pointer in [
+        "/0/tenant",
+        "/0/subject/id",
+        "/0/subject/username",
+        "/1/bot/bot_uuid",
+        "/1/bot/owner_id",
+        "/1/bot/agent_code",
+        "/3/access_key/access_key",
+    ] {
+        let mut principals = fixture().principals;
+        *principals.pointer_mut(pointer).expect("fixture pointer") = json!("   ");
+        assert_eq!(
+            verify_principals(principals),
+            Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
+            "blank identity at {pointer}",
+        );
+    }
+
+    let mut principals = fixture().principals;
+    principals[3]["access_key"]["expire_at"] = json!("not-rfc3339");
+    assert_eq!(
+        verify_principals(principals),
+        Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
+    );
+}
+
+#[test]
+fn ignores_future_fields_within_known_principal_types() {
+    let mut principals = fixture().principals;
+    principals[0]["future_principal_field"] = json!(true);
+    principals[0]["subject"]["future_user_field"] = json!(1);
+    principals[1]["bot"]["future_bot_field"] = json!(2);
+    principals[2]["app"]["future_app_field"] = json!(3);
+    principals[3]["access_key"]["future_access_key_field"] = json!(4);
+    assert!(verify_principals(principals).is_ok());
+}
+
+#[test]
+fn verification_errors_do_not_expose_tokens_or_keys() {
+    let mut principals = fixture().principals;
+    principals[0]["tenant"] = json!("   ");
+    let mut claims = valid_claims();
+    claims["principals"] = principals;
+    let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+
+    let error = verifier()
+        .verify_at(&token, NOW)
+        .expect_err("blank tenant must fail");
+    let message = error.to_string();
+    for forbidden in [
+        "TEST_ONLY_BOT_TOKEN_MARKER",
+        "TEST_ONLY_ACCESS_KEY_TOKEN_MARKER",
+        token.as_str(),
+        std::str::from_utf8(TEST_KEY).expect("ASCII test key"),
+    ] {
+        assert!(!message.contains(forbidden));
     }
 }
