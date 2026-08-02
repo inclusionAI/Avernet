@@ -129,44 +129,115 @@ def test_user_token_yields_tenant_and_owner():
     assert isinstance(caller.principals[0], UserPrincipal)
 
 
-def test_bot_token_scopes_to_the_bots_owner():
-    caller = verify_principal_token(mint([bot_principal()]), CONFIG)
-
-    assert isinstance(caller.principals[0], BotPrincipal)
-    assert caller.user_id == "owner-9"
-
-
 def test_user_wins_over_app_when_both_identities_are_present():
     """A route may require a user and also accept an app; the person is the owner."""
     caller = verify_principal_token(mint([app_principal(), user_principal()]), CONFIG)
 
     assert len(caller.principals) == 2
+    # The extra identity is carried, not dropped: admission requires a user, it
+    # does not strip everything else out of the set.
+    assert isinstance(caller.principals[0], AppPrincipal)
     assert caller.user_id == "u-1"
     assert caller.tenant == TENANT
 
 
 def test_user_wins_over_bot_when_both_identities_are_present():
+    """A bot alongside a user is carried, not refused — the person is the owner."""
     caller = verify_principal_token(mint([bot_principal(), user_principal()]), CONFIG)
 
+    assert len(caller.principals) == 2
+    assert isinstance(caller.principals[0], BotPrincipal)
     assert caller.user_id == "u-1"
 
 
-def test_app_only_caller_yields_no_owner():
-    """``app.owners`` is free-text org attribution, not a user id — never guessed."""
-    caller = verify_principal_token(mint([app_principal()]), CONFIG)
-
-    assert isinstance(caller.principals[0], AppPrincipal)
-    assert caller.tenant == TENANT
-    assert caller.user_id == ""
-
-
-def test_access_key_only_caller_yields_no_owner():
-    """The gateway's access-key registry has no owner column; nothing to scope to."""
-    caller = verify_principal_token(mint([access_key_principal()]), CONFIG)
+def test_access_key_alongside_a_user_is_carried():
+    """The gateway forwards every identity it resolved; only the user is required."""
+    caller = verify_principal_token(
+        mint([access_key_principal(), user_principal()]), CONFIG
+    )
 
     assert isinstance(caller.principals[0], AccessKeyPrincipal)
-    assert caller.tenant == TENANT
-    assert caller.user_id == ""
+    assert caller.user_id == "u-1"
+
+
+# ── identity-set admission (only callers that name an end user) ───────────────
+
+
+@pytest.mark.parametrize(
+    ("label", "payload"),
+    [
+        ("app", app_principal()),
+        ("access_key", access_key_principal()),
+        ("bot", bot_principal()),
+    ],
+)
+def test_a_set_naming_no_end_user_is_refused(label: str, payload: dict):
+    """Refused at verification, so no handler can be reached with an unscopeable caller.
+
+    ``app.owners`` is free-text org attribution and the access-key registry has
+    no owner column, so neither names a person. ``bot`` does carry ``owner_id``,
+    but a bot acting as its own owner across the public contract is a grant
+    nobody made — see ``_require_user_principal``.
+    """
+    with pytest.raises(PrincipalVerificationError, match="no user identity"):
+        verify_principal_token(mint([payload]), CONFIG)
+
+
+def test_a_set_of_several_non_user_identities_is_refused():
+    """Two identities that each name no person still name no person."""
+    with pytest.raises(PrincipalVerificationError, match="no user identity"):
+        verify_principal_token(
+            mint([app_principal(), access_key_principal()]), CONFIG
+        )
+
+
+def test_the_refusal_names_the_types_carried_for_the_operator():
+    """The log line has to be diagnosable; the caller still sees one fixed 401."""
+    with pytest.raises(PrincipalVerificationError) as exc_info:
+        verify_principal_token(
+            mint([access_key_principal(), app_principal()]), CONFIG
+        )
+
+    assert "access_key" in str(exc_info.value)
+    assert "app" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_a_user_with_a_blank_subject_id_is_refused(blank: str):
+    """A type check alone is not enough — both sides model the id as a bare ``str``.
+
+    Reachable rather than theoretical: the gateway's google strategy reads
+    ``body["sub"]``, which raises on a *missing* claim but passes an empty one
+    through. Such a caller names an owner no better than an access key does, and
+    the handlers that never call ``caller_owner_id`` would run for it.
+    """
+    with pytest.raises(PrincipalVerificationError, match="blank subject id"):
+        verify_principal_token(mint([user_principal(user_id=blank)]), CONFIG)
+
+
+def test_a_blank_first_user_is_refused_even_behind_a_usable_one():
+    """The admission check and ``user_id`` must agree on *which* user is the owner.
+
+    The gateway resolves at most one identity per type, but ``principals`` is a
+    list, so a token can present two users. Asking "does some user have an id?"
+    while deriving the owner from the *first* user would admit this set and then
+    scope by nothing at all.
+    """
+    token = mint([user_principal(user_id=""), user_principal(user_id="u-2")])
+
+    with pytest.raises(PrincipalVerificationError, match="blank subject id"):
+        verify_principal_token(token, CONFIG)
+
+
+def test_a_blank_subject_id_is_refused_distinctly_from_a_missing_user():
+    """Two different operator diagnoses, so two different messages."""
+    with pytest.raises(PrincipalVerificationError) as blank:
+        verify_principal_token(mint([user_principal(user_id="")]), CONFIG)
+    with pytest.raises(PrincipalVerificationError) as missing:
+        verify_principal_token(mint([app_principal()]), CONFIG)
+
+    assert "no user identity" not in str(blank.value)
+    assert "blank subject id" not in str(missing.value)
 
 
 def test_unknown_fields_do_not_break_verification():
@@ -181,9 +252,18 @@ def test_unknown_fields_do_not_break_verification():
 
 
 def test_forwarded_secrets_are_not_projected():
-    """We are told the bot's session token and the access-key token; we drop both."""
-    bot_caller = verify_principal_token(mint([bot_principal()]), CONFIG)
-    key_caller = verify_principal_token(mint([access_key_principal()]), CONFIG)
+    """We are told the bot's session token and the access-key token; we drop both.
+
+    Each is minted alongside a user because a set naming no end user is now
+    refused before projection — the secrets still ride the wire, so dropping
+    them is still this module's job.
+    """
+    bot_caller = verify_principal_token(
+        mint([bot_principal(), user_principal()]), CONFIG
+    )
+    key_caller = verify_principal_token(
+        mint([access_key_principal(), user_principal()]), CONFIG
+    )
 
     assert not hasattr(bot_caller.principals[0].bot, "token")
     assert "SECRET" not in bot_caller.principals[0].bot.model_dump_json()

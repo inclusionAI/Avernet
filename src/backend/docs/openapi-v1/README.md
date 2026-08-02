@@ -41,14 +41,16 @@ with stub handlers**.
 > 🔒 **The surface is still not callable end-to-end, but no longer because of a
 > stub.** `require_principal` now really verifies the gateway's signed
 > `X-Avernet-Principal` token and `resolve_avernet_tenant` really reads the
-> tenant out of it (see **The auth seam** below). Two things upstream still stand
-> between an external tenant and a `200`: the gateway's signing PR
-> ([#599](https://github.com/inclusionAI/Avernet/pull/599)) is open, so on `dev`
-> nothing forwards the header yet; and the gateway's `route_security.yaml`
-> requires a `user` identity resolved by the Google chain, which an external
-> tenant presenting an access key cannot satisfy. Until both move, every real
-> request still answers `401` — now by denying rather than by stubbing. "bots is
-> done" still means handlers, contracts and tests are done.
+> tenant out of it (see **The auth seam** below). The gateway's signing PR
+> ([#599](https://github.com/inclusionAI/Avernet/pull/599)) **has merged**, so
+> `dev` does forward the header — a `user` caller now round-trips end to end
+> (verified against the real signer, 2026-08-02). What still stands between an
+> **external tenant** and a `200` is who may call: `route_security` requires a
+> `user` identity resolved by the Google chain, which a tenant presenting an
+> access key cannot satisfy, and since 2026-08-02 the backend independently
+> refuses any identity set that names no end user. Widening that is the
+> delegation workstream, not a config line. "bots is done" still means handlers,
+> contracts and tests are done.
 
 The catch: the internal `/api/...` surface and the public `/openapi/v1` surface
 share the **same tables, repositories, and services**. So a public endpoint
@@ -191,7 +193,9 @@ DDL. Full ruling and per-endpoint mapping in
 ### Cross-cutting (not per-stage)
 | Item | State | Note |
 |---|---|---|
-| Real caller-identity verifier (auth workstream) | ✅ **BACKEND HALF DONE — PR [#634](https://github.com/inclusionAI/Avernet/pull/634)** (gateway half: [#599](https://github.com/inclusionAI/Avernet/pull/599), open) | `require_principal` + `resolve_avernet_tenant` now verify the gateway's signed `X-Avernet-Principal` (HS256, `aud=backend`) and read tenant + owner from it. **The surface is still not callable end-to-end:** #599 must merge (until then nothing forwards the header) and the gateway's `route_security.yaml` must admit the public API's actual callers — see the two open questions below |
+| Real caller-identity verifier (auth workstream) | ✅ **DONE both halves** — backend PR [#634](https://github.com/inclusionAI/Avernet/pull/634), gateway PR [#599](https://github.com/inclusionAI/Avernet/pull/599) **merged** | `require_principal` + `resolve_avernet_tenant` verify the gateway's signed `X-Avernet-Principal` (HS256, `aud=backend`) and read tenant + owner from it. The wire contract was checked by round-tripping the **real** gateway signer into the **real** backend verifier (2026-08-02): user/bot/app/access_key shapes, secret non-projection, `aud`/`iss` refusal. **A `user` caller works end to end.** What remains is *which* callers are admitted — see the identity-admission row below |
+| **Identity admission: `user` only** | ✅ **DONE 2026-08-02** | `verify_principal_token` refuses an identity set naming no end user, so `bot` / `app` / `access_key` callers get `401` by design rather than by whether a handler asks for the owner. Widening it is delegation (auth design §15), not config. SDD: `specs/2026-08-02-public-api-user-only-principal/` |
+| **No cross-repo test pins the principal wire shape** | ⬜ TODO | Both sides are tested against their own hand-written idea of the payload (`test_verifier.py` builds dicts; the gateway tests its own models). Renaming a field on one side leaves both suites green and 401s production |
 | Tenant-leading indexes (F2, **MANDATORY** policy) | ⬜ TODO | before multi-tenant go-live |
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
 | **Bot identity keys collide across tenants** ([#556](https://github.com/inclusionAI/Avernet/issues/556)) | ⬜ TODO (totalfrank) | Passport, auth relationships, BCN, policy row are keyed on `bot_id`/`owner_id` with no tenant axis, and every owner's first bot is literally `"default"`. **Should gate enabling multi-tenancy.** Stopgapped in #494 by `sync_to_bcn=False` on the public update path |
@@ -371,20 +375,28 @@ route dependency        → require_principal(request)       ─┘  cache on sc
 - What gets rejected, all as an identical `401`: bad signature, `alg: none`, an
   `aud` for another upstream, wrong `iss`, expired, a missing required claim, an
   unknown `type` tag, a renamed contract field, an identity set that disagrees
-  about its tenant, and **a tenant claiming to be `teamclaw`** (that one would
-  hand an external caller every internal row).
+  about its tenant, **a tenant claiming to be `teamclaw`** (that one would
+  hand an external caller every internal row), and **an identity set naming no
+  end user** (see below).
 - The gateway's tenant id **is** the `avernet_tenant` value — no mapping table.
   So a real external tenant reads an empty dataset until it has data; that is
   isolation working, not a bug.
 
 **Two things you inherit if you own a Track B category:**
 
-1. **`app` and `access_key` callers currently 401.** Owner id is derived only from
-   a `user` or `bot` principal. The gateway's `app.owners` is free-text org
-   attribution and its access-key registry has no owner column, so neither names
-   a person to scope by — and guessing is a cross-account data bug. Since the
-   public API's callers are *external registered tenants*, this likely needs
-   settling before any category goes live.
+1. **Only a `user` caller is admitted — `bot`, `app` and `access_key` are refused
+   at verification.** _Decided 2026-08-02._ Owner id is derived only from a
+   `user` principal. `app.owners` is free-text org attribution and the
+   access-key registry has no owner column, so neither names a person to scope
+   by; `bot` does carry `owner_id`, but letting a bot act as its owner across
+   the whole public contract is a grant nobody made. **The refusal happens in
+   `verify_principal_token`, not in `caller_owner_id`** — that is the load-bearing
+   part. A per-handler refusal only covers handlers that ask for the owner, and
+   four in `resources/router.py` don't; refusing the identity set means an
+   unscopeable caller cannot reach *any* route, present or future. What an `app`
+   / `access_key` caller should own is still unsettled (auth design §14 Q4);
+   delegation (§15) is the designed way to widen this. SDD:
+   `src/backend/specs/2026-08-02-public-api-user-only-principal/`.
 2. **A mapped error raised in a dependency is now enveloped too.** `@envelope_errors`
    only wraps the handler, so the seam's 401 (raised in a dependency) escaped it;
    the lookup now lives in `responses.py::mapped_error_response` and the app's
@@ -703,8 +715,10 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 6. `require_principal` / `resolve_avernet_tenant` wired to the real verifier
    (auth workstream) — the point at which a second tenant can safely hold real
    data, and the point at which the public surface stops answering 401.
-   — _🔧 backend half done; needs gateway [#599](https://github.com/inclusionAI/Avernet/pull/599) merged **and** a `route_security.yaml`
-   rule admitting this surface's real callers._
+   — _✅ both halves merged ([#634](https://github.com/inclusionAI/Avernet/pull/634), [#599](https://github.com/inclusionAI/Avernet/pull/599)); a `user` caller round-trips.
+   Admitting an **external tenant** is now a separate, deliberate step:
+   `route_security` must accept its credential **and** delegation must give that
+   credential an end user to scope by (auth design §15)._
 7. **Cross-tenant external identity settled ([#556](https://github.com/inclusionAI/Avernet/issues/556))** — Passport, auth
    relationships and BCN carry a tenant axis, so the BCN sync can be re-enabled
    on the public path. — _⬜ (added 2026-07-29; gates enabling multi-tenancy)._
@@ -727,12 +741,16 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   index's name to its columns; create before drop so there's no index-less
   window). Leave low-cardinality (`idx_status`, `idx_is_delete`) and
   unique-lookup (`idx_binding_id`) indexes alone.
-- ~~**Real caller-identity verifier.**~~ **DONE on the backend side** — see **The
-  auth seam** above. `caller_owner_id`'s tolerance of an object exposing
-  `user_id` is what let this land with zero handler changes, exactly as intended.
-  What remains is upstream: gateway [#599](https://github.com/inclusionAI/Avernet/pull/599)
-  merged, a `route_security.yaml` rule for this surface's callers, and the
-  owner-semantics question for `app` / `access_key` callers.
+- ~~**Real caller-identity verifier.**~~ **DONE, both halves** — see **The auth
+  seam** above. `caller_owner_id`'s tolerance of an object exposing `user_id` is
+  what let this land with zero handler changes, exactly as intended. Gateway
+  [#599](https://github.com/inclusionAI/Avernet/pull/599) has merged and the wire
+  shapes were verified by round-trip, so a `user` caller works end to end.
+- **Owner semantics for `app` / `access_key` callers.** Still open, and now
+  explicit: those callers are **refused at verification** (2026-08-02), not
+  silently unscoped. Settling what they own is the delegation workstream (auth
+  design §15); a `route_security` rule alone would not be enough, because a
+  credential that names no person still cannot be owner-scoped.
 - **Background/scheduled work.** Resolves to the default tenant now (correct
   while all data is `teamclaw`); revisit before a 2nd tenant holds real data
   (scheduled scans, pollers, sync loops in skill_center / governance / dormant /
@@ -964,3 +982,38 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   Full inventory, per-endpoint mapping and the ruling on every non-wrapped
   engine route: **[`engine-surface.md`](engine-surface.md)**. Board moved: Track
   C section added (0 of 6 groups), DoD item 8 added. **Owners still unassigned.**
+- **2026-08-02** — **Identity admission decided: `user` only.** `verify_principal_token`
+  now refuses an identity set that names no end user, so `bot` / `app` /
+  `access_key` callers answer `401` **by design** rather than as a side effect of
+  `caller_owner_id` raising on an empty owner. Four things worth knowing:
+  1. **The refusal moved because the old placement was skippable.** A 401 that
+     comes from `caller_owner_id` only covers handlers that call it — and four in
+     `resources/router.py` (`list_resources`, `create_resource`, `get_resource`,
+     `update_resource`) never do; they scope on a caller-supplied `bot_id`. An
+     unscopeable caller reached them and got data. Refusing the identity set
+     during verification makes the rule hold for every route, including ones not
+     written yet. An invariant every handler must remember is not an invariant.
+  2. **`bot` lost its owner fallback.** `VerifiedCaller.user_id` no longer falls
+     back to `bot.owner_id`. It was unreachable (no `route_security` rule
+     requires or accepts `bot`), but it was a standing grant — a bot acting as
+     its owner across the whole public contract — that nobody had decided to
+     make. A bot-facing surface should re-add it deliberately.
+  3. **A user *plus* other identities is still accepted.** The gateway forwards
+     the whole set it resolved, so a route declaring `user: required, app:
+     optional` yields two principals. The rule is "must contain a user", not
+     "must contain nothing else" — the strict form would refuse a request the
+     gateway considers valid.
+  4. **Auth is now attached at `build_public_router()`**, alongside
+     `ERROR_RESPONSES`, so a future route cannot omit it by construction rather
+     than by `test_public_routes_require_principal` catching it afterwards.
+     Zero behaviour change — every route already declared `PrincipalDep`, and
+     FastAPI caches the dependency, so it resolves once per request.
+
+  Also corrected on this board: gateway [#599](https://github.com/inclusionAI/Avernet/pull/599)
+  **has merged** (it was still recorded as open in three places), and the
+  principal wire contract was verified by round-tripping the real gateway signer
+  into the real backend verifier — the shapes match, forwarded secrets are not
+  projected, and `aud`/`iss` mismatches are refused. **Filed as still-open:** no
+  cross-repo test pins that contract, so a rename on either side leaves both
+  suites green and 401s production. Full suite 10204 passed / 3 skipped. SDD:
+  `src/backend/specs/2026-08-02-public-api-user-only-principal/`.

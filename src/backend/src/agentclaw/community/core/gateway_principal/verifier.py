@@ -11,7 +11,8 @@ about earning the right to believe it:
 3. ``iss`` must be the gateway and ``exp`` must not have passed,
 4. the ``principals`` payload must parse onto :mod:`.models`,
 5. every principal in the set must agree on one tenant, and that tenant must not
-   be the internal one.
+   be the internal one,
+6. the set must name an end user — see :func:`_require_user_principal`.
 
 Any failure raises :class:`PrincipalVerificationError`. There is no partial
 success and no fallback: a token we cannot fully verify yields no caller, and the
@@ -34,7 +35,6 @@ from agentclaw.community.core.gateway_principal.errors import (
     PrincipalVerificationError,
 )
 from agentclaw.community.core.gateway_principal.models import (
-    BotPrincipal,
     GatewayPrincipal,
     UserPrincipal,
 )
@@ -99,35 +99,31 @@ class VerifiedCaller:
 
     @property
     def user_id(self) -> str:
-        """The owner id to scope data by, or ``""`` when none can be derived.
+        """The owner id to scope data by — a ``user`` principal's subject id.
 
         Named ``user_id`` because that is the attribute
         ``openapi_v1/principal.py::caller_owner_id`` looks for — it was written
         against "whatever shape the auth workstream's verified principal takes",
         so satisfying it needs no change to any handler.
 
-        Derivable for the two identities that name a person: a ``user``
-        principal's subject, and a ``bot`` principal's owner. **Not** derivable
-        for ``app`` or ``access_key``:
+        A ``user`` principal is the only source, and
+        :func:`_require_user_principal` admits no set that lacks one carrying a
+        usable id — so a caller reaching this property always has an owner. The
+        two facts are the same decision seen from two sides: this surface scopes
+        by an owner, so it serves only callers that name one.
 
-        - the gateway's ``app.owners`` is a free-text "developer/org" field
-          (``varchar(1024)``, plural), not a user id — feeding it to an
-          owner-scoped query would either silently match nothing or, worse,
-          match somebody;
-        - its access-key registry has no owner column at all, so an access-key
-          caller identifies a tenant and nothing finer.
+        Both read the set through :func:`_first_user_principal`, so the
+        admission check and this property cannot disagree about *which*
+        principal supplies the owner.
 
-        Returning ``""`` makes ``caller_owner_id`` raise, so such a caller gets
-        ``401`` instead of a guess. Settling what those callers should scope to
-        is a cross-team decision, not something to paper over here.
+        The ``""`` fallback is unreachable through
+        :func:`verify_principal_token`. It stays so that a hand-constructed
+        instance — a test fixture, say — degrades to "no owner", which
+        ``caller_owner_id`` turns into a ``401``, rather than raising something
+        no caller-facing code is written to catch.
         """
-        for principal in self.principals:
-            if isinstance(principal, UserPrincipal):
-                return principal.subject.id
-        for principal in self.principals:
-            if isinstance(principal, BotPrincipal):
-                return principal.bot.owner_id
-        return ""
+        principal = _first_user_principal(self.principals)
+        return principal.subject.id if principal is not None else ""
 
 
 def verify_principal_token(
@@ -136,8 +132,8 @@ def verify_principal_token(
     """Verify ``token`` and return the caller it carries.
 
     Raises :class:`PrincipalVerificationError` on any failure — bad signature,
-    wrong audience, expired, unparseable payload, contradictory tenants, or no
-    signing key configured at all.
+    wrong audience, expired, unparseable payload, contradictory tenants, an
+    identity set that names no end user, or no signing key configured at all.
     """
     if not config.signing_key:
         # No key means we cannot tell a gateway token from a forged one. The
@@ -161,6 +157,7 @@ def verify_principal_token(
 
     principals = _parse_principals(claims.get("principals"))
     _reject_contradictory_tenant(principals)
+    _require_user_principal(principals)
     return VerifiedCaller(principals=principals)
 
 
@@ -203,4 +200,87 @@ def _reject_contradictory_tenant(principals: tuple[GatewayPrincipal, ...]) -> No
         raise PrincipalVerificationError(
             "principal token names the internal tenant, which is not routable "
             "from the public surface"
+        )
+
+
+def _first_user_principal(
+    principals: tuple[GatewayPrincipal, ...],
+) -> UserPrincipal | None:
+    """The user principal an owner is derived from, or ``None`` when there is none.
+
+    ``None`` is a real state of the contract here — "this identity set names no
+    end user" is exactly what :func:`_require_user_principal` exists to detect —
+    so the optional return is the state, not a widened type.
+
+    One function rather than two loops so the admission check and
+    :attr:`VerifiedCaller.user_id` cannot disagree about *which* principal
+    supplies the owner. That matters for a set carrying two user principals: the
+    gateway never produces one (it resolves at most a single identity per type),
+    but the ``principals`` claim is a list, so a token can present two. Checking
+    "some user has a usable id" while deriving the owner from "the first user"
+    would admit a set whose first user has a blank id and then scope by nothing.
+    """
+    for principal in principals:
+        if isinstance(principal, UserPrincipal):
+            return principal
+    return None
+
+
+def _require_user_principal(principals: tuple[GatewayPrincipal, ...]) -> None:
+    """Refuse an identity set that names no end user.
+
+    The public surface scopes every read and write to an owner, and a ``user``
+    principal is the only identity that names one. ``app.owners`` is free-text
+    "developer/org" attribution (``varchar(1024)``, plural), and the gateway's
+    access-key registry has no owner column at all — so neither identifies a
+    person, and guessing one is a cross-account data bug. A ``bot`` principal
+    does carry ``owner_id``, but a bot calling on its own behalf is not a caller
+    this API is defined for; admitting it would silently let a bot act as its
+    owner across the whole public contract.
+
+    Enforced **here** rather than at each handler's owner lookup, and that is the
+    point. Refusing in ``caller_owner_id`` only refuses handlers that call it —
+    the four in ``openapi_v1/resources/router.py`` that scope on a caller-supplied
+    ``bot_id`` never do, so an unscopeable caller reached them. A rule every
+    handler has to remember is not a rule. Refusing during verification makes it
+    hold for every route that exists and every route added later.
+
+    Sets carrying *extra* identities alongside the user are accepted, not
+    refused: the gateway forwards the whole set it resolved, so a route declaring
+    ``user: required, app: optional`` legitimately yields two principals.
+    Rejecting a set that merely *contains* a non-user identity would refuse a
+    request the gateway considers valid. The user is required; the rest are
+    ignored.
+
+    This is the narrow reading of an open question, not an answer to it. What an
+    ``app`` or ``access_key`` caller should own is still unsettled (auth design
+    §14 Q4); delegation — a partner acting for a verified end user, which *does*
+    name a person — is the designed way to widen this (§15). Lift the guard
+    there, deliberately.
+    """
+    user = _first_user_principal(principals)
+    if user is None:
+        # The types are named for the operator reading the log, never for the
+        # caller: ``require_principal`` answers one fixed 401 for every
+        # verification failure, so a caller cannot tell a refused identity type
+        # from a bad signature.
+        carried = ", ".join(sorted({principal.type.value for principal in principals}))
+        raise PrincipalVerificationError(
+            f"principal token names no user identity (carries: {carried}); the "
+            "public surface admits only callers that name an end user"
+        )
+    # A ``user`` principal with a blank subject id names an end user no better
+    # than an access key does — and the type check alone would admit it, because
+    # both sides model the id as an unconstrained ``str``. It is reachable: the
+    # gateway's google strategy reads ``body["sub"]``, which raises on a
+    # *missing* claim but passes an empty one straight through.
+    #
+    # Whitespace is stripped for the test rather than merely checked falsy (the
+    # empty-tenant guard above can be laxer because a tenant is compared, not
+    # used as a key): an id of ``"   "`` would be carried into owner-scoped
+    # queries as a real value.
+    if not user.subject.id.strip():
+        raise PrincipalVerificationError(
+            "principal token carries a user identity with a blank subject id, "
+            "which names no owner to scope by"
         )
