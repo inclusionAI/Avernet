@@ -121,10 +121,16 @@ Both keys are optional and their defaults reproduce today's behaviour exactly.
 ### `Server`
 
 One standard for every upstream, enforced in `__post_init__` rather than at the
-point of use: a `base_url` carries a scheme from `{http, https, ws, wss}`, and a
-value without one fails the boot with the server named. `http_base_url` and
-`websocket_base_url` re-spell it per plane, since the scheme encodes the origin
-and TLS-or-not, not which planes the upstream serves.
+point of use: a `base_url` carries a scheme from `{http, https, ws, wss}` **and**
+names a host, and a value missing either fails the boot with the server named.
+`http_base_url` and `websocket_base_url` re-spell it per plane, since the scheme
+encodes the origin and TLS-or-not, not which planes the upstream serves.
+
+The host is a separate check because a scheme alone does not make a URL
+dialable: `https:///engine-proxy` has a scheme and a non-empty remainder, but
+its authority is empty, so `wss:///engine-proxy/...` names no host and fails at
+call time — which is exactly what this validation exists to prevent. A
+non-numeric port is refused for the same reason.
 
 This also fixes a latent bug: the shipped `backend.sample.com` /
 `baas.sample.com` samples produced a relative URL with an empty host when

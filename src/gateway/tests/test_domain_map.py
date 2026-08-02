@@ -300,7 +300,7 @@ def test_a_server_is_addressable_on_either_plane(
 
 @pytest.mark.parametrize(
     "base_url",
-    ["up.example.com", "up.example.com:8080", "ftp://up.example", "https://"],
+    ["up.example.com", "up.example.com:8080", "ftp://up.example"],
 )
 def test_a_base_url_without_a_usable_scheme_is_refused(base_url: str) -> None:
     """Held to the same standard for every server, HTTP-only ones included.
@@ -313,12 +313,66 @@ def test_a_base_url_without_a_usable_scheme_is_refused(base_url: str) -> None:
         Server(name="up", base_url=base_url)
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://",  # a scheme and nothing else
+        "https:///engine-proxy",  # an empty authority; the path only *looks* like a host
+        "wss:///",
+        "https://:8080/x",  # a port with no host in front of it
+        "https://a b/x",  # whitespace never resolves
+    ],
+)
+def test_a_base_url_that_names_no_host_is_refused(base_url: str) -> None:
+    """A scheme alone does not make a URL dialable.
+
+    ``https:///engine-proxy`` passes any scheme check — the remainder is
+    non-empty — but its authority is empty, so the derived
+    ``wss:///engine-proxy/...`` has no hostname and every dial fails at call
+    time. That is the failure this validation exists to move to the boot.
+    """
+    with pytest.raises(ValueError, match="must name a host"):
+        Server(name="up", base_url=base_url)
+
+
+def test_a_base_url_with_an_unusable_port_is_refused() -> None:
+    """``urlsplit(...).port`` raises on a non-numeric port; boot is where it should."""
+    with pytest.raises(ValueError, match="unusable port"):
+        Server(name="up", base_url="wss://up.example:notaport/x")
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://up.example",
+        "https://up.example:8443",
+        "http://up_internal:8080",  # underscores appear in internal service names
+        "https://127.0.0.1:9000",
+        "wss://[::1]:9000/x",  # an IPv6 literal, brackets and all
+        "https://up.example/base/path",  # a base path is still allowed
+    ],
+)
+def test_a_base_url_that_names_a_host_is_accepted(base_url: str) -> None:
+    assert Server(name="up", base_url=base_url).base_url == base_url
+
+
 def test_the_standard_applies_through_config_too() -> None:
     with pytest.raises(ValueError, match="must carry a scheme"):
         DomainMap.from_config(
             {
                 "domains": {"bots": {"server": "s"}},
                 "servers": {"s": {"base_url": "backend.sample.com"}},
+            },
+            variables={},
+        )
+
+
+def test_the_host_requirement_applies_through_config_too() -> None:
+    with pytest.raises(ValueError, match="must name a host"):
+        DomainMap.from_config(
+            {
+                "domains": {"engine": {"server": "s"}},
+                "servers": {"s": {"base_url": "https:///engine-proxy"}},
             },
             variables={},
         )

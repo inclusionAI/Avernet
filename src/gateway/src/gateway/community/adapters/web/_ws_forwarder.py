@@ -45,6 +45,20 @@ from gateway.community.spi.ws_forwarder import (
 _HANDSHAKE_TIMEOUT_SECONDS = 10.0
 
 
+def _closed(exc: ConnectionClosed) -> WebSocketClosedError:
+    """The library's close, in the SPI's terms.
+
+    Translated at this seam so the caller relays a close code and a reason
+    without importing this library's exception hierarchy. The peer's own close
+    frame wins over ours; neither having arrived is 1006, which the caller
+    translates before putting it on the wire.
+    """
+    close = exc.rcvd or exc.sent
+    code = close.code if close is not None else 1006
+    reason = close.reason if close is not None else ""
+    return WebSocketClosedError(code, reason)
+
+
 class _WebsocketsUpstream(WebSocketUpstream):
     """One open ``websockets`` connection, behind the SPI's duplex surface."""
 
@@ -56,20 +70,21 @@ class _WebsocketsUpstream(WebSocketUpstream):
         return self._connection.subprotocol or ""
 
     async def send(self, message: str | bytes) -> None:
-        await self._connection.send(message)
+        # Both directions translate, because either can be the one that notices.
+        # A client sending while the upstream is closing races the receive pump,
+        # and if the send wins, an untranslated exception reaches a caller that
+        # cannot recognise it — the peer's real close code is then lost and the
+        # relay reports a gateway fault instead.
+        try:
+            await self._connection.send(message)
+        except ConnectionClosed as exc:
+            raise _closed(exc) from exc
 
     async def receive(self) -> str | bytes:
         try:
             return await self._connection.recv()
         except ConnectionClosed as exc:
-            # Translated at this seam so the caller relays a close code and a
-            # reason without importing this library's exception hierarchy. The
-            # peer's own close frame wins over ours; neither having arrived is
-            # 1006, which the caller translates before putting it on the wire.
-            close = exc.rcvd or exc.sent
-            code = close.code if close is not None else 1006
-            reason = close.reason if close is not None else ""
-            raise WebSocketClosedError(code, reason) from exc
+            raise _closed(exc) from exc
 
     async def close(self, code: int, reason: str) -> None:
         await self._connection.close(code, reason)

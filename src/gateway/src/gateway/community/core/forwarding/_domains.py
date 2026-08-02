@@ -22,10 +22,12 @@ No web framework here (Rule 7): this is pure resolution logic.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -56,6 +58,23 @@ _DEFAULT_PROTOCOLS = frozenset({HTTP})
 _SCHEME_IS_SECURE = {"http": False, "https": True, "ws": False, "wss": True}
 
 
+#: A host we are willing to dial: a DNS name or an IPv4 literal. Underscores are
+#: tolerated because internal service names use them; anything else — a space, a
+#: slash, an empty label — is a configuration error, not an exotic hostname.
+_REG_NAME = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def _names_a_host(host: str) -> bool:
+    """Whether *host* is something a client can actually resolve and dial."""
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return _REG_NAME.fullmatch(host) is not None
+    return True
+
+
 def _expand_vars(value: str, variables: dict[str, str]) -> str:
     """Expand ``${VAR}`` references from *variables* (missing key → empty)."""
     return _ENV_REF.sub(lambda m: variables.get(m.group(1), ""), value)
@@ -66,28 +85,55 @@ class Server:
     """A resolved upstream target, addressable on either plane.
 
     ``base_url`` must carry a scheme — ``http``, ``https``, ``ws`` or ``wss`` —
-    and it is validated here rather than at the point of use, so a bad value
-    fails the boot with the server named instead of producing a broken request
-    URL at the first call. (A scheme-less value is not merely untidy: the
-    forwarder concatenates it with the path, and ``backend.example/openapi/v1``
-    parses as a *relative* URL with an empty host.)
+    **and** name a host, and both are validated here rather than at the point of
+    use, so a bad value fails the boot with the server named instead of
+    producing a broken request URL at the first call. (A scheme-less value is
+    not merely untidy: the forwarder concatenates it with the path, and
+    ``backend.example/openapi/v1`` parses as a *relative* URL with an empty
+    host.)
 
-    Which of the four is written does not decide which planes the upstream can
-    serve; the domain does that. The scheme only says TLS or not, and
-    :attr:`http_base_url` / :attr:`websocket_base_url` spell that for whichever
-    plane is asking.
+    A scheme alone is not enough to make a URL dialable, which is why the host
+    is checked separately: ``https:///engine-proxy`` has a scheme and a
+    non-empty remainder, yet its authority is empty, so the derived
+    ``wss:///engine-proxy`` names no host and every dial fails at runtime —
+    exactly the failure this validation exists to move to the boot.
+
+    Which of the four schemes is written does not decide which planes the
+    upstream can serve; the domain does that. The scheme only says TLS or not,
+    and :attr:`http_base_url` / :attr:`websocket_base_url` spell that for
+    whichever plane is asking.
     """
 
     name: str
     base_url: str
 
     def __post_init__(self) -> None:
-        scheme, separator, rest = self.base_url.partition("://")
-        if not separator or scheme.lower() not in _SCHEME_IS_SECURE or not rest:
+        scheme, separator, _ = self.base_url.partition("://")
+        if not separator or scheme.lower() not in _SCHEME_IS_SECURE:
             raise ValueError(
                 f"upstream server {self.name!r}: base_url {self.base_url!r} must "
                 f"carry a scheme (one of {sorted(_SCHEME_IS_SECURE)}) — a value "
                 f"without one is a relative URL with no host"
+            )
+        self._validate_authority()
+
+    def _validate_authority(self) -> None:
+        """Refuse an authority that names no reachable host, or a broken port."""
+        split = urlsplit(self.base_url)
+        try:
+            split.port
+        except ValueError:
+            raise ValueError(
+                f"upstream server {self.name!r}: base_url {self.base_url!r} has "
+                f"an unusable port — it must be a number"
+            ) from None
+        # ``hostname`` is None for an empty authority and unwraps an IPv6
+        # literal's brackets, so this covers both spellings.
+        if not _names_a_host(split.hostname or ""):
+            raise ValueError(
+                f"upstream server {self.name!r}: base_url {self.base_url!r} must "
+                f"name a host — a scheme on its own leaves nothing to dial, so "
+                f"every request for this server would fail at call time"
             )
 
     @property

@@ -157,6 +157,28 @@ async def test_upstream_close_surfaces_as_the_spi_error(upstream) -> None:  # no
     assert caught.value.reason == "server said so"
 
 
+async def test_a_send_onto_a_closing_upstream_surfaces_as_the_spi_error(
+    upstream,
+) -> None:  # noqa: ANN001
+    """Sending races receiving, so *both* directions must translate.
+
+    If the send pump is the one that notices the upstream closing, an
+    untranslated ``ConnectionClosed`` would reach a caller that only recognises
+    the SPI error — losing the peer's real close code and reporting a
+    gateway-side fault in its place.
+    """
+    _, base = upstream
+    async with _forwarder().connect(
+        WebSocketForwardRequest(url=f"{base}/proxypass/t")
+    ) as ws:
+        await ws.send("bye")
+        await asyncio.sleep(0.2)  # let the upstream's close frame land first
+        with pytest.raises(WebSocketClosedError) as caught:
+            await ws.send("a frame sent while it was closing")
+    assert caught.value.code == 4200
+    assert caught.value.reason == "server said so"
+
+
 async def test_close_carries_the_code_and_reason_upstream(upstream) -> None:  # noqa: ANN001
     recorder, base = upstream
     async with _forwarder().connect(

@@ -38,12 +38,17 @@ class _StubUpstream(WebSocketUpstream):
         self._inbox: asyncio.Queue[str | bytes | WebSocketClosedError] = asyncio.Queue()
         self.sent: list[str | bytes] = []
         self.closed_with: tuple[int, str] | None = None
+        #: None until the test makes the *send* direction the one that notices
+        #: the upstream closing, which is the race the receive pump usually wins.
+        self._send_closes_with: tuple[int, str] | None = None
 
     @property
     def subprotocol(self) -> str:
         return self._subprotocol
 
     async def send(self, message: str | bytes) -> None:
+        if self._send_closes_with is not None:
+            raise WebSocketClosedError(*self._send_closes_with)
         self.sent.append(message)
         if isinstance(message, str):
             await self._inbox.put(f"echo:{message}")
@@ -62,6 +67,10 @@ class _StubUpstream(WebSocketUpstream):
     def close_soon(self, code: int, reason: str) -> None:
         """Make the next queued read report the upstream closing."""
         self._inbox.put_nowait(WebSocketClosedError(code, reason))
+
+    def close_on_send(self, code: int, reason: str) -> None:
+        """Make the next *write* report the upstream closing, leaving reads blocked."""
+        self._send_closes_with = (code, reason)
 
 
 class _StubForwarder:
@@ -280,6 +289,25 @@ def test_an_upstream_close_is_carried_to_the_client() -> None:
         with pytest.raises(WebSocketDisconnect) as caught:
             with client.websocket_connect(_PATH) as ws:
                 forwarder.opened[0].close_soon(4200, "upstream done")
+                ws.receive_text()
+    assert caught.value.code == 4200
+    assert caught.value.reason == "upstream done"
+
+
+def test_an_upstream_close_noticed_while_sending_is_carried_to_the_client() -> None:
+    """The send pump can be the one that notices, and it must decide the close too.
+
+    A client writing while the upstream closes races the receive pump. If the
+    write wins, the relay must still relay the peer's code — reporting a
+    gateway-side 1011 would blame the gateway for the upstream's goodbye.
+    """
+    forwarder = _StubForwarder()
+    app, _, _ = _build(forwarder=forwarder)
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as caught:
+            with client.websocket_connect(_PATH) as ws:
+                forwarder.opened[0].close_on_send(4200, "upstream done")
+                ws.send_text("a frame sent while it was closing")
                 ws.receive_text()
     assert caught.value.code == 4200
     assert caught.value.reason == "upstream done"
