@@ -16,11 +16,8 @@ from typing import Any
 from fastapi import FastAPI
 
 from gateway.community import __version__
-from gateway.community.adapters.web._engine_ws import (
-    ENGINE_WS_ROUTE,
-    forward_websocket,
-)
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
+from gateway.community.adapters.web._relay_ws import forward_websocket, relay_route
 from gateway.community.adapters.web.admin import router as admin_router
 from gateway.community.config import ConfigLoader
 from gateway.community.logger import get_logger, get_logger_plugin
@@ -101,7 +98,6 @@ def create_app() -> FastAPI:
     app.state.domain_map = bs.forwarding.domain_map
     app.state.forwarder = bs.forwarding.forwarder
     app.state.ws_forwarder = bs.forwarding.ws_forwarder
-    app.state.engine_route = bs.forwarding.engine_route
     app.state.principal_signer = bs.principal_signer
     app.state.access_key_issuer = bs.access_key_issuer
     app.state.app_registrar = bs.app_registrar
@@ -128,11 +124,15 @@ def create_app() -> FastAPI:
     # they win over the catch-all forward. Unauthenticated (single-box/dev only).
     app.include_router(admin_router, prefix="/admin")
 
-    # The tenant engine socket. A WebSocket route, so it never competes with
-    # the HTTP catch-all below: an HTTP request under /engine has no configured
-    # domain and stays a 404, which is what this prefix publishes — one socket,
-    # nothing else.
-    app.add_api_websocket_route(ENGINE_WS_ROUTE, forward_websocket)
+    # One socket entrypoint per domain declaring the websocket protocol. Driven
+    # from configuration, so no domain is named here; a domain that declares
+    # only http gets no socket route, and a socket domain is refused by the HTTP
+    # catch-all below.
+    domain_map = bs.forwarding.domain_map
+    for name in domain_map.websocket_domains():
+        app.add_api_websocket_route(
+            relay_route(domain_map.base_path, name), forward_websocket
+        )
 
     app.add_api_route(
         "/{full_path:path}",

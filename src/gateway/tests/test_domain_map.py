@@ -13,6 +13,7 @@ _CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
 _VARS = {
     "backend_server_url": "http://backend:8080",
     "baas_server_url": "http://baas:9090",
+    "engine_proxy_server_url": "https://engineproxy:20003",
 }
 
 
@@ -67,6 +68,177 @@ def test_shipped_config_loads() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
     assert dm.domain_for("/openapi/v1/bots") is not None
+
+
+# ── protocols ────────────────────────────────────────────────────────────────
+
+
+def _protocol_map() -> DomainMap:
+    return DomainMap.from_config(
+        {
+            "domains": {
+                "bots": {"server": "backend"},
+                "engine": {
+                    "server": "proxy",
+                    "protocols": ["websocket"],
+                    "rewrite": {"from": "/openapi/v1/engine", "to": "/proxypass"},
+                },
+                "both": {"server": "backend", "protocols": ["http", "websocket"]},
+            },
+            "servers": {
+                "backend": {"base_url": "http://backend:8080"},
+                "proxy": {"base_url": "https://proxy:20003"},
+            },
+        },
+        variables={},
+    )
+
+
+def test_protocols_default_to_http_only() -> None:
+    """Every domain predating the declaration keeps behaving identically."""
+    bots = _protocol_map().domain_for("/openapi/v1/bots/x")
+    assert bots is not None
+    assert bots.serves_http
+    assert not bots.serves_websocket
+
+
+def test_a_socket_domain_does_not_serve_http() -> None:
+    engine = _protocol_map().domain_for("/openapi/v1/engine/t/ws")
+    assert engine is not None
+    assert engine.serves_websocket
+    assert not engine.serves_http
+
+
+def test_a_domain_may_declare_both_planes() -> None:
+    both = _protocol_map().domain_for("/openapi/v1/both/x")
+    assert both is not None
+    assert both.serves_http and both.serves_websocket
+
+
+def test_websocket_domains_lists_only_socket_domains() -> None:
+    assert set(_protocol_map().websocket_domains()) == {"engine", "both"}
+
+
+def test_unknown_protocol_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown protocol"):
+        DomainMap.from_config(
+            {
+                "domains": {"x": {"server": "s", "protocols": ["grpc"]}},
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
+# ── rewrite ──────────────────────────────────────────────────────────────────
+
+
+def test_no_rewrite_means_the_path_travels_verbatim() -> None:
+    bots = _protocol_map().domain_for("/openapi/v1/bots/x")
+    assert bots is not None
+    assert bots.rewrite is None
+    assert bots.upstream_path("/openapi/v1/bots/a%2Fb") == "/openapi/v1/bots/a%2Fb"
+
+
+def test_a_declared_rewrite_substitutes_only_the_prefix() -> None:
+    engine = _protocol_map().domain_for("/openapi/v1/engine/t/ws")
+    assert engine is not None
+    assert (
+        engine.upstream_path("/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws")
+        == "/proxypass/ARCA_x@0:20003/api/openclaw/ws"
+    )
+
+
+def test_a_rewrite_never_re_encodes_the_tail() -> None:
+    engine = _protocol_map().domain_for("/openapi/v1/engine/t/ws")
+    assert engine is not None
+    assert (
+        engine.upstream_path("/openapi/v1/engine/ARCA%5Fx%400%3A2/api/x%20y")
+        == "/proxypass/ARCA%5Fx%400%3A2/api/x%20y"
+    )
+
+
+def test_a_rewrite_anchored_off_the_domain_is_rejected() -> None:
+    """A rule that could never fire is a config mistake, not a silent no-op."""
+    with pytest.raises(ValueError, match="can never match"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "engine": {
+                        "server": "s",
+                        "rewrite": {"from": "/somewhere/else", "to": "/proxypass"},
+                    }
+                },
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
+def test_a_rewrite_needs_both_ends() -> None:
+    with pytest.raises(ValueError, match="needs both"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "engine": {"server": "s", "rewrite": {"from": "/openapi/v1/engine"}}
+                },
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
+# ── socket origin ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("https://proxy.example", "wss://proxy.example"),
+        ("http://proxy.example:8080", "ws://proxy.example:8080"),
+        ("wss://proxy.example", "wss://proxy.example"),
+        ("ws://proxy.example", "ws://proxy.example"),
+        ("HTTPS://proxy.example/", "wss://proxy.example"),
+    ],
+)
+def test_socket_origin_is_derived_from_the_server_scheme(
+    base_url: str, expected: str
+) -> None:
+    dm = DomainMap.from_config(
+        {
+            "domains": {"engine": {"server": "s", "protocols": ["websocket"]}},
+            "servers": {"s": {"base_url": base_url}},
+        },
+        variables={},
+    )
+    engine = dm.domain_for("/openapi/v1/engine/x")
+    assert engine is not None
+    assert engine.websocket_base_url == expected
+
+
+def test_a_socket_domain_without_a_usable_scheme_fails_at_startup() -> None:
+    with pytest.raises(ValueError, match="no scheme a websocket can be opened with"):
+        DomainMap.from_config(
+            {
+                "domains": {"engine": {"server": "s", "protocols": ["websocket"]}},
+                "servers": {"s": {"base_url": "engineproxy.example.com"}},
+            },
+            variables={},
+        )
+
+
+def test_an_http_domain_needs_no_socket_scheme() -> None:
+    """The bare-host samples the shipped config uses must keep loading."""
+    dm = DomainMap.from_config(
+        {
+            "domains": {"bots": {"server": "s"}},
+            "servers": {"s": {"base_url": "backend.sample.com"}},
+        },
+        variables={},
+    )
+    bots = dm.domain_for("/openapi/v1/bots")
+    assert bots is not None
+    assert bots.websocket_base_url == ""
 
 
 def test_unknown_server_reference_is_rejected() -> None:

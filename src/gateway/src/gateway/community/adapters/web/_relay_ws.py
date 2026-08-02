@@ -1,25 +1,29 @@
-"""Engine-socket entrypoint — the `/engine` WebSocket relay.
+"""WebSocket relay entrypoint — the socket half of the forwarding plane.
 
-The backend's public connection endpoint publishes a finished socket address
-under this prefix; this is what serves it:
+The counterpart of :func:`~gateway.community.adapters.web._forward.forward_request`.
+That one serves domains declaring the ``http`` protocol; this one serves domains
+declaring ``websocket``. It names no domain of its own — the composition root
+mounts it once per socket domain, so which prefix it answers is configuration.
 
-1. resolve the upstream from the root-anchored ``/engine`` route (unconfigured
-   or off-prefix → refuse the handshake; the gateway relays only into the
-   configured engine proxy, never as an open socket proxy);
-2. authenticate — the same route-security table the HTTP plane uses, which is
-   where this prefix's exemption is *declared* rather than implied by the code
-   path serving it;
-3. open the upstream socket **before** accepting the client, so a hop we cannot
-   reach refuses the handshake instead of leaving a caller holding an accepted
-   socket the gateway cannot serve;
+Per handshake:
+
+1. resolve the domain from the path, exactly as the HTTP plane does (unknown, or
+   a domain that does not answer the socket plane → refuse; the gateway relays
+   only into configured upstreams, never as an open socket proxy);
+2. authenticate against the same route-security table the HTTP plane uses, which
+   is where a socket domain's exemption is *declared* rather than implied by the
+   code path serving it;
+3. open the upstream socket **before** accepting the client, so an upstream we
+   cannot reach refuses the handshake instead of leaving a caller holding an
+   accepted socket the gateway cannot serve;
 4. relay frames both ways, unchanged, until a side closes.
 
-The gateway imposes **no idle deadline** on a relayed socket. The credential in
-the query string is checked once, by the hop behind the gateway, at the
-handshake; the socket is designed to outlive that credential's expiry, so a read
+The gateway imposes **no idle deadline** on a relayed socket. The engine
+socket's credential, for one, is checked once by the hop behind the gateway at
+handshake time and the connection is designed to outlive its expiry, so a read
 timeout here would tear down healthy connections. Any L7 hop a deployment puts
 in *front* of the gateway has to hold the same two properties — pass the Upgrade
-through, and impose no read timeout on this prefix.
+through, and impose no read timeout on these paths.
 """
 
 from __future__ import annotations
@@ -43,13 +47,17 @@ from gateway.community.spi.ws_forwarder import (
 
 from ._forward import _INBOUND_STRIP, _PRINCIPAL_HEADER, _bundle
 
-logger = get_logger("engine_ws")
+logger = get_logger("relay_ws")
 
-#: Path the WebSocket route is mounted on. The ``{rest}`` wildcard is the target,
-#: the engine path and nothing else — the rewrite is anchored at the root of the
-#: gateway's host, which is why the backend refuses a gateway base url carrying a
-#: path component.
-ENGINE_WS_ROUTE = "/engine/{full_path:path}"
+
+def relay_route(base_path: str, domain: str) -> str:
+    """The path a socket domain's entrypoint is mounted on.
+
+    Built from configuration rather than written down, so adding a socket domain
+    is a config edit and this module never names one.
+    """
+    return f"{base_path.rstrip('/')}/{domain}/{{full_path:path}}"
+
 
 #: A WebSocket handshake is an HTTP ``GET``; route security is resolved for it
 #: the same way it is for any other request.
@@ -85,18 +93,12 @@ class _ClientClosedError(Exception):
 async def forward_websocket(websocket: WebSocket) -> None:
     """Resolve → authenticate → dial upstream → accept → relay both ways."""
     state = websocket.app.state
-    route = getattr(state, "engine_route", None)
-    if route is None:
-        # A deployment that fronts no engine proxy serves no socket. The
-        # community build's normal state, and the mirror of the backend's
-        # neutral-empty gateway block.
-        await _refuse(websocket, _CLOSE_NO_ROUTE, "no engine route configured")
-        return
-
-    path = _raw_path(websocket)
-    query = websocket.scope.get("query_string", b"").decode("latin-1")
-    url = route.upstream_url(path, query)
-    if url is None:
+    # Resolved and authenticated on the *decoded* path, exactly as the HTTP
+    # plane does, so one request cannot be routed or authorised differently
+    # depending on which entrypoint serves it.
+    path = websocket.url.path
+    domain = state.domain_map.domain_for(path)
+    if domain is None or not domain.serves_websocket:
         await _refuse(websocket, _CLOSE_NO_ROUTE, "no route for path")
         return
 
@@ -108,12 +110,20 @@ async def forward_websocket(websocket: WebSocket) -> None:
         await _refuse(websocket, _CLOSE_UNAUTHENTICATED, str(exc))
         return
 
+    # Forwarded from the *raw* path, so the tail reaches the upstream byte for
+    # byte. Only the domain's declared prefix is substituted; everything past it
+    # — the routing target, the upstream path, any encoding its author chose —
+    # is carried through untouched.
+    query = websocket.scope.get("query_string", b"").decode("latin-1")
+    upstream_path = domain.upstream_path(_raw_path(websocket))
+    url = f"{domain.websocket_base_url}{upstream_path}" + (f"?{query}" if query else "")
+
     try:
         headers = await _upstream_headers(
             websocket,
             identities,
             signer=state.principal_signer,
-            audience=route.server.name,
+            audience=domain.server.name,
         )
     except Exception:
         logger.exception("principal signing failed")
@@ -129,7 +139,7 @@ async def forward_websocket(websocket: WebSocket) -> None:
         cm = state.ws_forwarder.connect(request)
         upstream = await cm.__aenter__()
     except Exception:
-        logger.warning("engine upstream unavailable", exc_info=True)
+        logger.warning("relay upstream unavailable", exc_info=True)
         await _refuse(websocket, _CLOSE_UPSTREAM_UNAVAILABLE, "upstream unavailable")
         return
 
@@ -146,10 +156,11 @@ def _raw_path(websocket: WebSocket) -> str:
     """The request path **as it arrived**, still percent-encoded.
 
     ``websocket.url.path`` is percent-*decoded*, so relaying it would re-encode
-    the routing target (``ARCA_x@0:20003``) and any encoded segment of the engine
-    path into something the hop behind the gateway never published. Everything
-    past the prefix has to travel verbatim, so the raw path is what is sliced.
-    The decoded path is the fallback for a server that sets no ``raw_path``.
+    the routing target (``ARCA_x@0:20003``) and any encoded segment of the
+    upstream path into something the upstream never published. Everything past
+    the domain's prefix has to travel verbatim, so the raw path is what is
+    rewritten. The decoded path is the fallback for a server that sets no
+    ``raw_path``.
     """
     raw = websocket.scope.get("raw_path")
     if isinstance(raw, bytes):

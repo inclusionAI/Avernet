@@ -29,7 +29,7 @@ def test_shipped_config_exempts_the_engine_socket_prefix() -> None:
     """
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
-    req = rs.resolve("GET", "/engine/ARCA_x@0:20003/api/openclaw/ws")
+    req = rs.resolve("GET", "/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws")
     assert req == {}
 
 

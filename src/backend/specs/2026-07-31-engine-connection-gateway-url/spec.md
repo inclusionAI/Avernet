@@ -68,8 +68,9 @@ loop or, worse, tear down healthy connections on a timer.
 
 - [x] The socket URL published by the connection endpoint addresses the gateway,
       not the internal engine proxy.
-- [x] The published URL carries an `engine` path prefix directly after the host,
-      and does not contain the internal proxy's routing prefix anywhere.
+- [x] The published URL carries an `engine` path prefix, and does not contain
+      the internal proxy's routing prefix anywhere. *(Amended 2026-08-02 — this
+      originally read "directly after the host"; see Resolved Question 4.)*
 - [x] The credential is carried as a query parameter on the published URL, under
       the same parameter name the upstream already accepts.
 - [x] The response no longer carries a headers field for a socket. The field is
@@ -150,3 +151,27 @@ loop or, worse, tear down healthy connections on a timer.
    engine path directly. A guard refuses any other shape rather than trusting the
    assumption silently, so if it ever stops holding it surfaces as a named
    server-side error instead of a socket that will not open.
+
+4. **Whether the `engine` prefix sits at the host root or inside `/openapi/v1`.**
+   *Resolved 2026-08-02: inside — `/openapi/v1/engine/{target}{path}`.* This
+   **supersedes** the original acceptance criterion above, which required the
+   prefix to sit directly after the host, and the reasoning in
+   `_gateway_ws_base` that a gateway `base_url` with a path component would
+   "push `/engine` off the root".
+
+   Root anchoring was chosen when the gateway route did not exist. Building it
+   showed the root is the more expensive place: the gateway resolves upstreams
+   by the leading path segment *after* its version base, so a root-anchored
+   prefix could not be an ordinary domain and needed a parallel routing concept
+   of its own, configured in its own block, with its own "is it configured"
+   state. Inside the namespace, `engine` is just another domain beside `bots`
+   — same lookup, same config shape, same failure mode when absent — and the
+   socket lives in the same published surface as the endpoint that hands it out.
+
+   The base-url guard survives with a new reason: the prefix now carries the
+   namespace, so a base url with a path of its own would double it
+   (`https://gw.example/api` → `/api/openapi/v1/engine/…`).
+
+   *Free to make now, not later:* the endpoint is absent from the published
+   `bots.openapi.json` and has no integrators, so the address can move at no
+   cost. Once published, moving a tenant's socket is a breaking change.

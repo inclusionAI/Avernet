@@ -1,8 +1,9 @@
-"""Integration tests for the `/engine` WebSocket relay.
+"""Integration tests for the WebSocket relay entrypoint.
 
-Wires the real endpoint to a stub upstream through ``TestClient``, so the
-handshake, the rewrite, the authentication seam and the duplex pump are all
-exercised together.
+Wires the real endpoint to a stub upstream through ``TestClient``, so domain
+resolution, the declared prefix rewrite, the authentication seam and the duplex
+pump are all exercised together. The `engine` domain is the worked example; the
+entrypoint itself names no domain.
 """
 
 from __future__ import annotations
@@ -17,12 +18,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from gateway.community.adapters.web._engine_ws import (
-    ENGINE_WS_ROUTE,
-    forward_websocket,
-)
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
-from gateway.community.core.forwarding import DomainMap, build_engine_route
+from gateway.community.adapters.web._relay_ws import forward_websocket, relay_route
+from gateway.community.core.forwarding import DomainMap
 from gateway.community.spi.auth import AuthError
 from gateway.community.spi.ws_forwarder import (
     WebSocketClosedError,
@@ -99,7 +97,7 @@ def _settled(forwarder: _StubForwarder, timeout: float = 5.0) -> None:
         if forwarder.released:
             return
         time.sleep(0.005)
-    raise AssertionError("the engine socket endpoint did not release its upstream")
+    raise AssertionError("the relay endpoint did not release its upstream")
 
 
 class _FakeAuth:
@@ -120,6 +118,13 @@ class _FixedSigner:
         return f"signed-for-{audience}"
 
 
+_ENGINE_DOMAIN = {
+    "server": "engine_proxy",
+    "protocols": ["websocket"],
+    "rewrite": {"from": "/openapi/v1/engine", "to": "/proxypass"},
+}
+
+
 def _build(
     *,
     forwarder: _StubForwarder | None = None,
@@ -131,31 +136,39 @@ def _build(
     app.state.authenticator = auth
     app.state.principal_signer = _FixedSigner()
     app.state.ws_forwarder = ws_forwarder
-    app.state.engine_route = (
-        build_engine_route(
-            {
-                "engine": {"server": "engine_proxy"},
-                "servers": {"engine_proxy": {"base_url": "https://proxy.internal"}},
-            },
-            variables={},
-        )
-        if engine_configured
-        else None
-    )
-    app.state.domain_map = DomainMap.from_config(
+
+    domains: dict[str, object] = {"bots": {"server": "up"}}
+    if engine_configured:
+        domains["engine"] = _ENGINE_DOMAIN
+    domain_map = DomainMap.from_config(
         {
-            "domains": {"bots": {"server": "up"}},
-            "servers": {"up": {"base_url": "http://upstream"}},
+            "domains": domains,
+            "servers": {
+                "up": {"base_url": "http://upstream"},
+                "engine_proxy": {"base_url": "https://proxy.internal"},
+            },
         },
         variables={},
     )
+    app.state.domain_map = domain_map
     app.state.forwarder = None
-    app.add_api_websocket_route(ENGINE_WS_ROUTE, forward_websocket)
+
+    # Mounted the way the composition root does it: one route per socket domain,
+    # driven from config. With no engine domain configured, nothing is mounted
+    # under that prefix at all — which is the behaviour under test.
+    for name in domain_map.websocket_domains():
+        app.add_api_websocket_route(
+            relay_route(domain_map.base_path, name), forward_websocket
+        )
+    # An always-present route so an unconfigured prefix is refused by the
+    # endpoint rather than by Starlette's router, keeping the assertion about
+    # our own behaviour.
+    app.add_api_websocket_route("/{full_path:path}", forward_websocket)
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
     return app, auth, ws_forwarder
 
 
-_PATH = "/engine/ARCA_x@0:20003/api/openclaw/ws?x-proxypass-token=t.o.k"
+_PATH = "/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws?x-proxypass-token=t.o.k"
 
 
 # ── the happy path ───────────────────────────────────────────────────────────
@@ -189,7 +202,7 @@ def test_the_prefix_is_rewritten_onto_proxypass_verbatim() -> None:
 def test_an_encoded_target_is_not_decoded_on_the_way_through() -> None:
     app, _, forwarder = _build()
     with TestClient(app) as client:
-        with client.websocket_connect("/engine/a%2Fb/api/openclaw/ws") as ws:
+        with client.websocket_connect("/openapi/v1/engine/a%2Fb/api/openclaw/ws") as ws:
             ws.close(1000)
             _settled(forwarder)
     # %2F must not become a path separator on the upstream.
@@ -245,7 +258,7 @@ def test_route_security_is_consulted_for_the_handshake() -> None:
         with client.websocket_connect(_PATH) as ws:
             ws.close(1000)
             _settled(forwarder)
-    assert auth.calls == [("GET", "/engine/ARCA_x@0:20003/api/openclaw/ws")]
+    assert auth.calls == [("GET", "/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws")]
 
 
 # ── closing ──────────────────────────────────────────────────────────────────
@@ -275,7 +288,7 @@ def test_an_upstream_close_is_carried_to_the_client() -> None:
 # ── refusals ─────────────────────────────────────────────────────────────────
 
 
-def test_no_engine_route_configured_refuses_the_handshake() -> None:
+def test_a_domain_that_is_not_configured_refuses_the_handshake() -> None:
     app, auth, forwarder = _build(engine_configured=False)
     with TestClient(app) as client:
         with pytest.raises(WebSocketDisconnect) as caught:
@@ -310,9 +323,38 @@ def test_an_unreachable_upstream_refuses_the_handshake() -> None:
 # ── the prefix publishes a socket and nothing else ───────────────────────────
 
 
-def test_http_under_the_engine_prefix_is_still_an_unknown_route() -> None:
-    app, _, _ = _build()
+def test_http_on_a_socket_only_domain_is_an_unknown_route() -> None:
+    """The domain resolves, but it does not answer this plane."""
+    app, _, forwarder = _build()
     with TestClient(app) as client:
-        response = client.get("/engine/ARCA_x@0:20003/api/openclaw/ws")
+        response = client.get("/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws")
     assert response.status_code == 404
     assert response.json()["code"] == 404001
+    assert forwarder.opened == []  # never dialled the upstream
+
+
+def test_a_traversal_under_the_socket_domain_never_reaches_http() -> None:
+    """`%2e%2e` decodes to `..`, which httpx would collapse — but the HTTP
+    plane refuses this domain outright, so there is nothing to collapse."""
+    app, _, forwarder = _build()
+    with TestClient(app) as client:
+        response = client.get("/openapi/v1/engine/%2e%2e/%2e%2e/admin/keys")
+    assert response.status_code == 404
+    assert forwarder.opened == []
+
+
+def test_an_http_domain_still_forwards_verbatim() -> None:
+    """The default is unchanged: no protocols, no rewrite, path as it arrived."""
+    from gateway.community.core.forwarding import DomainMap
+
+    domain_map = DomainMap.from_config(
+        {
+            "domains": {"bots": {"server": "up"}},
+            "servers": {"up": {"base_url": "http://upstream"}},
+        },
+        variables={},
+    )
+    bots = domain_map.domain_for("/openapi/v1/bots/x")
+    assert bots is not None
+    assert bots.serves_http and not bots.serves_websocket
+    assert bots.upstream_path("/openapi/v1/bots/x") == "/openapi/v1/bots/x"

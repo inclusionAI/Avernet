@@ -1,9 +1,9 @@
 """Forwarding subsystem orchestration — transport-agnostic domain class.
 
-``Forwarding`` composes the domain map, the engine route, both forwarders, and
-the schema catalog, and owns the catalog's background refresh lifecycle. It is a
-domain object, not bootstrap wiring — adapters receive it via ``app.state`` and
-never import plugins or core.
+``Forwarding`` composes the domain map, both forwarders, and the schema catalog,
+and owns the catalog's background refresh lifecycle. It is a domain object, not
+bootstrap wiring — adapters receive it via ``app.state`` and never import
+plugins or core.
 """
 
 from __future__ import annotations
@@ -12,11 +12,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from gateway.community.core.authn import RouteSecurity
-from gateway.community.core.forwarding import (
-    DomainMap,
-    EngineRoute,
-    build_served_openapi,
-)
+from gateway.community.core.forwarding import DomainMap, build_served_openapi
 from gateway.community.spi.forwarder import Forwarder
 from gateway.community.spi.schema_catalog import SchemaCatalog
 from gateway.community.spi.ws_forwarder import WebSocketForwarder
@@ -32,11 +28,6 @@ class Forwarding:
     forwarder: Forwarder
     catalog: SchemaCatalog
     ws_forwarder: WebSocketForwarder
-    #: The root-anchored ``/engine`` socket route, or ``None`` when this
-    #: deployment fronts no engine proxy — a real state, not a missing value,
-    #: and the community build's normal one. Required rather than defaulted so
-    #: every construction site states which it is.
-    engine_route: EngineRoute | None
     refresh_seconds: float = _DEFAULT_REFRESH_SECONDS
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _task: asyncio.Task[None] | None = field(default=None)
