@@ -178,7 +178,7 @@ def mapping_sources_use_pool(
         raise ValueError("mapping sources mix Legacy and Pool managed roots")
     if has_pool:
         return True
-    if has_legacy or not sources:
+    if has_legacy:
         return False
     return _active_marker_selects_pool(layout=layout, engine=engine)
 
