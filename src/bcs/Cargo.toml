@@ -151,6 +151,9 @@ futures     = "0.3"
 # HTTP client
 reqwest = { version = "0.12", features = ["http2", "json", "stream", "rustls-tls-native-roots"], default-features = false }
 
+# JWT verification
+jsonwebtoken = { version = "11.0.0", default-features = false, features = ["rust_crypto"] }
+
 # UUID
 uuid = { version = "1", features = ["v4"] }
 
