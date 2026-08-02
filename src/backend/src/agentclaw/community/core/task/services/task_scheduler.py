@@ -31,11 +31,10 @@ from agentclaw.community.core.task.protocols import (
 )
 from agentclaw.community.core.task.domain.events import EventKind
 from agentclaw.community.core.task.services.scheduler_ops import (
+    DEFAULT_MAX_ATTEMPTS,
     SchedulerOpsMixin,
 )
 from agentclaw.community.core.task.domain.models import (
-    NodeStatus,
-    RouteClass,
     Task,
     TaskStatus,
 )
@@ -45,9 +44,6 @@ from agentclaw.community.core.task.domain.state_machine import (
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
-
-# 同执行方重派上限(NODE_FAILED → 有限次 inline 重派,超限 reroute C5;T-13/§18.1-12)。
-DEFAULT_MAX_ATTEMPTS = 2
 
 
 class TaskScheduler(SchedulerOpsMixin):
@@ -120,37 +116,17 @@ class TaskScheduler(SchedulerOpsMixin):
     # --- on_event (编排 reactions, plan §3.4) ------------------------------
 
     def on_event(self, event: Any) -> Optional[Task]:
-        task_id, kind, payload = self._unpack(event)
-        task = self._svc.get(task_id)
-        if task is None:
-            return None
+        """编排反应入口(design 双 on_event 的编排半)。
+
+        retry/reroute 统一由 ``tick`` 驱动(T-13,修订 §18.1-12):NODE_FAILED 经
+        ``TaskService.on_event`` 落态 fold(置 FAILED)后,这里**泵一次 tick**,让
+        ``_retry_failed`` 按计数同执行方重派 / 到上限派 reroute 判定给失败方 skill。
+        其他事件不在此反应 —— 其编排后果(聚合触发 / 终验 / 新节点派发等)由后续
+        tick 扫图检测。tick 是唯一驱动权威,scheduler 不裸 dispatch/reroute。"""
+        task_id, kind, _payload = self._unpack(event)
         if kind is EventKind.NODE_FAILED:
-            return self._handle_node_failed(task, payload)
-        return task
-
-    def _handle_node_failed(self, task: Task, payload: dict) -> Task:
-        """NODE_FAILED → 同执行方有限次重派(T-13);超限 → reroute C5。
-
-        R7:不只 set RUNNING,须再 fire ``ExecutionPort`` 把同一执行方真正重派下去;
-        完成仍由 skill on_event 异步回投。"""
-        node_id = payload.get("node_id") or ""
-        node = self._svc._find_node(task, node_id)  # noqa: SLF001
-        if node is None:
-            return task
-        max_attempts = int(node.properties.get("max_attempts") or DEFAULT_MAX_ATTEMPTS)
-        if len(node.attempted_executors) < max_attempts:
-            last_executor = node.attempted_executors[-1].executor_id if node.attempted_executors else ""
-            if last_executor:
-                try:
-                    self._svc.set_node_status(task, node_id, NodeStatus.RUNNING)
-                except IllegalTransitionError:
-                    pass
-                self._execution.dispatch_single_bot(task.id, node_id, last_executor)
-                self._svc._task_repo.save(task)  # noqa: SLF001
-                return self._svc.get(task.id)
-        # exceeded retries → reroute C5
-        self._driver.redispatch(task.id, node_id, RouteClass.C5)
-        return self._svc.get(task.id)
+            self.tick(task_id)
+        return self._svc.get(task_id)
 
     # --- envelope ---------------------------------------------------------
 

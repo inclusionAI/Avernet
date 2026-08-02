@@ -204,14 +204,19 @@ def report_event(
     task_id: str,
     req: EventReportRequest,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),
+    scheduler: TaskSchedulerProtocol = Injected(TaskSchedulerProtocol),
 ) -> Any:
-    """Owner-bot SKILL 回投 entrypoint — folds an event via ``on_event``.
+    """Owner-bot SKILL 回投 entrypoint — folds an event via ``on_event``。
 
     Phase 0.6 passes a lightweight envelope; the service impl (Phase 2) will
-    reconstruct a proper :class:`TaskEvent` from ``kind`` + ``payload``.
-    """
+    reconstruct a proper :class:`TaskEvent` from ``kind`` + ``payload``。
+
+    design 双 on_event:先 ``TaskService.on_event`` 落态 fold,再 ``Scheduler.on_event``
+    编排反应(NODE_FAILED → 泵 tick 驱动 _retry_failed 重派/派 reroute 判定)。"""
     envelope = {"task_id": task_id, "kind": req.kind, "seq": req.seq, "payload": req.payload}
-    task = service.on_event(envelope)  # type: ignore[arg-type]
+    task = service.on_event(envelope)  # type: ignore[arg-type]  # 落态 fold
+    if task is not None:
+        task = scheduler.on_event(envelope) or task  # type: ignore[arg-type]  # 编排反应(泵 tick)
     return EventReportResponse(
         task_id=_task_id_of(task),
         accepted=True,

@@ -176,8 +176,22 @@ class _StubTaskService:
         return [e for e in all_events if e.seq > after_seq]
 
 
+class _StubTaskScheduler:
+    """Minimal stub satisfying the TaskScheduler Protocol face used by router
+    (start / tick / on_event). /events 落态 fold 后泵 on_event → 此 stub 不真跑。"""
+
+    def start(self, task_id: str) -> Any:
+        return None
+
+    def tick(self, task_id: str) -> Any:
+        return {"task_id": task_id, "action": "noop", "reason": "stub"}
+
+    def on_event(self, event: Any) -> Any:
+        return None
+
+
 def _client_with_stub() -> TestClient:
-    from agentclaw.community.api.task import TaskServiceProtocol
+    from agentclaw.community.api.task import TaskSchedulerProtocol, TaskServiceProtocol
     from agentclaw.community.adapters.http.task.router import router
     app = FastAPI()
     app.include_router(router)
@@ -185,6 +199,8 @@ def _client_with_stub() -> TestClient:
     # Router resolves Injected(TaskServiceProtocol) — the api-layer service api
     # (adapters → api, not → core). The stub structurally satisfies it.
     inj.binder.bind(TaskServiceProtocol, to=_StubTaskService(), scope=singleton)
+    # /events 折叠后泵 scheduler.on_event(编排反应);start/tick 亦注入 scheduler。
+    inj.binder.bind(TaskSchedulerProtocol, to=_StubTaskScheduler(), scope=singleton)
     attach_injector(app, inj)
     return TestClient(app)
 

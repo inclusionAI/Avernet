@@ -29,12 +29,17 @@ from agentclaw.community.core.task.domain.models import (
     TaskStatus,
 )
 from agentclaw.community.core.task.protocols import aggregate_verdict
+from agentclaw.community.core.task.domain.state_machine import IllegalTransitionError
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
 # 递归深度上限(plan §11):children depth≥MAX → MARK_HANG(等人确认,非直升 BBS)。
 MAX_RECURSION_DEPTH = 3
+
+# 同执行方 inline 重派上限(T-13,plan §18.1-12):NODE_FAILED → attempts<max 由 tick
+# re-claim+fire 同执行方重派;到 max → 派 reroute 判定给失败方 exec-bot skill。
+DEFAULT_MAX_ATTEMPTS = 2
 
 
 class SchedulerOpsMixin:
@@ -121,11 +126,14 @@ class SchedulerOpsMixin:
             return {"task_id": task_id, "action": "noop", "reason": "no_graph"}
 
         for n in list(g.nodes):
-            if n.status is not NodeStatus.PENDING:
+            if n.status is NodeStatus.PENDING:
+                if not self._unlocked(task, n.node_id):
+                    continue
+                acted = self._advance_node(task, n)
+            elif n.status is NodeStatus.FAILED and n.node_type is NodeType.DISPATCH:
+                acted = self._retry_failed(task, n)  # tick 驱动重试/重路由(T-13)
+            else:
                 continue
-            if not self._unlocked(task, n.node_id):
-                continue
-            acted = self._advance_node(task, n)
             if acted:
                 progressed = True
                 # 每次推进后重读图(add_node 内部 get_by_id+save,本地 task 过期)
@@ -283,6 +291,63 @@ class SchedulerOpsMixin:
         logger.info("[SchedulerV2] bbs-dispatch node=%s", n.node_id)
         return True
 
+    # --- tick 驱动的失败重试/重路由(T-13,plan §18.1-12)-----------------------
+
+    def _retry_failed(self, task: Task, n: Node) -> bool:
+        """tick 驱动 FAILED-Dispatch 节点的重试 / 重路由(T-13)。
+
+        - ``attempts < max`` → 同执行方 re-claim + fire:``claim_node`` 推进
+          ``attempted_executors`` 计数 + 状态机 FAILED→RUNNING + fire ExecutionPort。
+          完成仍由 skill 经 ``on_event`` 异步回投(NODE_ACCEPTED/NODE_FAILED)。
+        - 到 ``max`` → 向失败方 exec-bot 派发"重路由判定请求"(``ExecutionPort.probe``,
+          只派一次,guard ``__reroute_probe_sent__``):由该 bot 的 task-plan-skill 判
+          是否 reroute → 发起 gap bot-search(retrieve-state 上下文)→ ``add_node``
+          (BOT_SEARCH) → 后续 tick 处理(命中 dispatch / 未匹配 decomposition)。
+          **reroute 是 skill 判定 + 图操作,非 scheduler 的 ``redispatch(C5)`` 规则**。"""
+        node_id = n.node_id
+        max_attempts = int(n.properties.get("max_attempts") or DEFAULT_MAX_ATTEMPTS)
+        attempts = len(n.attempted_executors)
+        if attempts < max_attempts:
+            last = n.attempted_executors[-1].executor_id if n.attempted_executors else (n.assignee or "")
+            if not last:
+                return False
+            try:
+                self._svc.claim_node(task.id, node_id, last)  # FAILED→RUNNING + 追加 AttemptedRecord
+            except IllegalTransitionError:
+                return False
+            self._execution.dispatch_single_bot(task.id, node_id, last)
+            self._sync_subtask_running(task.id, node_id)
+            logger.info(
+                "[Scheduler] retry node=%s executor=%s attempt=%d/%d",
+                node_id, last, attempts + 1, max_attempts,
+            )
+            return True
+        # 到 max → 派 reroute 判定给失败方 exec-bot skill(只派一次,免每 tick 重复派)
+        if n.properties.get("__reroute_probe_sent__"):
+            return False
+        fresh = self._svc.get(task.id)
+        fn = self._svc._find_node(fresh, node_id)  # noqa: SLF001
+        if fn is None:
+            return False
+        fn.properties["__reroute_probe_sent__"] = True
+        self._svc._task_repo.save(fresh)  # noqa: SLF001
+        last = n.attempted_executors[-1].executor_id if n.attempted_executors else (n.assignee or "")
+        if last:
+            self._execution.probe(task.id, node_id, last)
+            logger.info(
+                "[Scheduler] retry-exhausted node=%s → probe skill for reroute judgment", node_id,
+            )
+            return True
+        return False
+
+    def _sync_subtask_running(self, task_id: str, node_id: str) -> None:
+        """claim 只写 Node 维;实体维 SubtaskState 在此同步 RUNNING(与 ``_dispatch`` 一致)。"""
+        fresh = self._svc.get(task_id)
+        st = fresh.execution_graph.state.subtasks.get(node_id)  # type: ignore[union-attr]
+        if st is not None and st.status is not NodeStatus.RUNNING:
+            st.status = NodeStatus.RUNNING
+            self._svc._task_repo.save(fresh)  # noqa: SLF001
+
     # --- exec-aggregate 触发(O-8)------------------------------------------
 
     def _detect_and_aggregate(self, task: Task) -> bool:
@@ -380,4 +445,4 @@ class SchedulerOpsMixin:
         return True
 
 
-__all__ = ["SchedulerOpsMixin", "MAX_RECURSION_DEPTH"]
+__all__ = ["SchedulerOpsMixin", "MAX_RECURSION_DEPTH", "DEFAULT_MAX_ATTEMPTS"]

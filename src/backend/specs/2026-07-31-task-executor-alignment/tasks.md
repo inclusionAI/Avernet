@@ -101,11 +101,25 @@
 - done-when:`U-fold` 四语义 + 去重 + depth 单调。
 - 测试:U-fold
 
-### T-13 [开源] `compute_gap` 不短路 + retry 语义
-- 依赖:T-11 ｜ 输入:plan §7.1/§16 R-1/§18.1-12 ｜ spec FR-LOOP-04
-- 改动:`task_scheduler.compute_gap` 不短路 task FAILED(`unrecoverable_failed` 留待 n_goal 或 MARK_HANG);`_handle_node_failed` retry 语义定:**同执行方 inline 重派有限次**(修现"只 set RUNNING 不 dispatch"偏差,§18.1-12)。
-- done-when:`U-gap-no-shortcut` unrecoverable 不直接 FAILED;`U-retry-redispatch` 重派被调。
-- 测试:U-gap-no-shortcut, U-retry-redispatch
+### T-13 [开源] retry/reroute 统一到 tick 驱动 + reroute 交 skill
+- 依赖:T-11 ｜ 输入:plan §7.1/§16 R-1/§18.1-12 ｜ spec FR-LOOP-04/FR-GRAPH-08
+- 改动(修订 §18.1-12,原"`_handle_node_failed` 同执行方 inline 重派"旁路退场):
+  - **retry 由 `tick` 驱动**:`_tick` 放开"只推进 PENDING"的限制,对 FAILED-Dispatch 节点
+    调 `_retry_failed` —— `attempts < max` 经 `claim_node` 同执行方 re-claim+fire(状态机
+    FAILED→RUNNING + **追加 AttemptedRecord 推进计数** + fire ExecutionPort),修掉"重派不经
+    claim、计数不涨→死循环"bug;完成仍由 skill 经 `on_event` 异步回投。
+  - **reroute 由失败方 exec-bot skill 判**(FR-GRAPH-08):到 `max` 不再重派,tick 向失败方
+    exec-bot 派"重路由判定请求"(`ExecutionPort.probe`,guard `__reroute_probe_sent__` 只派一次);
+    该 bot 的 `task-plan-skill` 判是否 reroute → 发起 gap `bot-search`(retrieve-state 上下文)
+    → `add_node(BOT_SEARCH)` → 后续 tick 处理(命中 dispatch / 未匹配 decomposition)。
+    **reroute 是 skill 判定 + 图操作,非 scheduler 的 `redispatch(C5)` 规则** → 删 `_handle_node_failed`
+    的 C5 reroute 分支;`TaskScheduler.on_event` 改为"NODE_FAILED 落态 fold 后泵一次 `tick`",tick 为
+    唯一驱动权威。
+  - router `POST /events`:`TaskService.on_event`(落态 fold)+ `Scheduler.on_event`(泵 tick)
+    双调,补上原 design §... 漏接的编排反应半。
+- done-when:`U-retry-redispatch` 同执行方 re-claim 重派、计数真实推进;`U-retry-exhausted` 到上限
+  停止重派 + 派 reroute 判定给 skill(probe 被调一次);`U-no-c5-rule` `driver.redispatch(C5)` 不被调。
+- 测试:U-retry-redispatch, U-retry-exhausted, U-no-c5-rule(e2e:test_node_failed_retries_same_executor_then_asks_skill_reroute)
 
 ### T-14 [开源] `graph_checkpoint` 回溯
 - 依赖:T-11 ｜ 输入:plan §8.3 ｜ spec FR-GRAPH-03c/AC-S-09
