@@ -1,4 +1,5 @@
 """Thin HTTP adapter for Backend-triggered materialization."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,26 +7,27 @@ import hashlib
 import logging
 from collections.abc import AsyncIterator
 
-from engine.community.core.resource_materialization.models import (
-    MaterializationRequest,
-)
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi.responses import StreamingResponse
+
+from engine.community.core.resource_materialization.models import MaterializationRequest
 from engine.community.core.resource_materialization.service import (
     ResourceMaterializationService,
     ResourceNotMaterializedError,
 )
 from engine.community.di import Injected
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from fastapi.responses import StreamingResponse
 
 log = logging.getLogger("engine.resource_materialization.api")
-router = APIRouter(prefix="/api/resource-materializations", tags=["resource-materializations"])
+router = APIRouter(
+    prefix="/api/resource-materializations", tags=["resource-materializations"]
+)
 
 
 @router.post("")
 async def create_resource_materialization(
     request: MaterializationRequest,
     background_tasks: BackgroundTasks,
-    service: ResourceMaterializationService = Injected(ResourceMaterializationService),
+    service: ResourceMaterializationService = Injected(ResourceMaterializationService),  # noqa: B008
 ) -> dict:
     """Accept a Backend task after BaaS proxypass authenticates the route.
 
@@ -52,7 +54,7 @@ async def create_resource_materialization(
 async def stream_resource_content(
     resource_id: str,
     disposition: str = Query("inline", pattern="^(inline|attachment)$"),
-    service: ResourceMaterializationService = Injected(ResourceMaterializationService),
+    service: ResourceMaterializationService = Injected(ResourceMaterializationService),  # noqa: B008
 ) -> StreamingResponse:
     """Stream manifest-controlled content over the Backend-only route."""
     try:
@@ -63,7 +65,9 @@ async def stream_resource_content(
         )
     except ResourceNotMaterializedError as exc:
         log.info("engine.resource_content.missing resource_id=%s", resource_id)
-        raise HTTPException(status_code=409, detail="resource_not_materialized") from exc
+        raise HTTPException(
+            status_code=409, detail="resource_not_materialized"
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
