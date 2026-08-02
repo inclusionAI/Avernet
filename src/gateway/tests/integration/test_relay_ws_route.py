@@ -434,6 +434,53 @@ def test_a_traversal_on_the_socket_plane_is_refused_before_dialling(path: str) -
     assert forwarder.opened == []  # never dialled
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/openapi/v1/%65ngine/t/ws",  # 'e' encoded — decodes to the domain
+        "/openapi/v1/engin%65/t/ws",
+        "/openapi/v1/engine%2Ft/ws",  # the separator itself encoded
+        "/openapi%2Fv1/engine/t/ws",
+    ],
+)
+def test_an_encoded_routing_prefix_is_refused(path: str) -> None:
+    """Routing reads the decoded path; the dial is built from the raw one.
+
+    Encoding a character of the prefix makes those two disagree: the decoded
+    path resolves to the anonymous `engine` domain, while the raw path no longer
+    carries the rewrite's literal `from`, so the rewrite does not fire and the
+    upstream is dialled *outside* `/proxypass` — the prefix whose credential
+    check the whole design leans on. One request must not be authorised as one
+    resource and dialled as another.
+    """
+    app, _, forwarder = _build()
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as caught:
+            with client.websocket_connect(path):
+                pass
+    assert caught.value.code == 4400
+    assert forwarder.opened == []  # never dialled
+
+
+def test_an_encoded_tail_still_relays_verbatim() -> None:
+    """Only the routing prefix is constrained — the tail may encode freely.
+
+    That is the property the raw-path relay exists to preserve: the routing
+    target reaches the upstream exactly as its author wrote it.
+    """
+    app, _, forwarder = _build()
+    with TestClient(app) as client:
+        with client.websocket_connect(
+            "/openapi/v1/engine/ARCA_x%400%3A20003/api/ws"
+        ) as ws:
+            ws.send_text("ping")
+            ws.receive_text()
+        _settled(forwarder)
+    assert forwarder.opened[0].request.url == (
+        "wss://proxy.internal/proxypass/ARCA_x%400%3A20003/api/ws"
+    )
+
+
 def test_a_dot_inside_a_name_still_relays() -> None:
     """Only whole `.`/`..` segments are traversal; a dot inside a name is not.
 

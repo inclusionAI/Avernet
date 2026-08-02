@@ -68,7 +68,7 @@ _HANDSHAKE_METHOD = "GET"
 # 403 for all three — so these distinguish causes in our own logs and tests
 # rather than forming a client-facing contract.
 _CLOSE_NO_ROUTE = 4404
-_CLOSE_TRAVERSAL = 4400
+_CLOSE_BAD_PATH = 4400
 _CLOSE_UNAUTHENTICATED = 4401
 _CLOSE_INTERNAL = 4500
 _CLOSE_UPSTREAM_UNAVAILABLE = 4502
@@ -109,9 +109,18 @@ async def forward_websocket(websocket: WebSocket) -> None:
         return
 
     if _has_dot_segment(path):
-        await _refuse(websocket, _CLOSE_TRAVERSAL, "path contains a traversal segment")
+        await _refuse(websocket, _CLOSE_BAD_PATH, "path contains a traversal segment")
         return
+
+    # Routing and authentication read the decoded path; the dial is built from
+    # the raw one. Those two views must agree about the part that decided the
+    # route, or the request is authorised as one resource and dialled as
+    # another — see _routes_the_same_way.
     raw_path = _raw_path(websocket)
+    routing_prefix = f"{state.domain_map.base_path.rstrip('/')}/{domain.name}"
+    if not _starts_at(raw_path, routing_prefix):
+        await _refuse(websocket, _CLOSE_BAD_PATH, "routing prefix is encoded")
+        return
 
     try:
         identities = await state.authenticator.authenticate(
@@ -183,6 +192,25 @@ def _has_dot_segment(path: str) -> bool:
     again here would collapse that distinction and refuse a legitimate path.
     """
     return any(segment in _DOT_SEGMENTS for segment in path.split("/"))
+
+
+def _starts_at(path: str, prefix: str) -> bool:
+    """Whether *path* begins with *prefix* on a segment boundary.
+
+    Used to check the **raw** path against the prefix that routing already
+    matched on the *decoded* one. Percent-encoding a character of that prefix —
+    ``/openapi/v1/%65ngine/...`` — decodes to the domain and so resolves and
+    authenticates as it, while the raw path keeps ``%65ngine`` and no longer
+    carries the rewrite's literal ``from``. The rewrite then silently does not
+    fire and the upstream is dialled outside the prefix its credential check is
+    scoped to. Refusing keeps one request from being authorised as one resource
+    and dialled as another.
+
+    Only the routing prefix is constrained. Everything past it may be encoded
+    however its author wrote it — that is the property the relay exists to
+    preserve.
+    """
+    return path == prefix or path.startswith(f"{prefix}/")
 
 
 def _raw_path(websocket: WebSocket) -> str:
