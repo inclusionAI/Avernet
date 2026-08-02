@@ -35,11 +35,12 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 > 🔒 **这套界面端到端仍不可被真正调用，但原因已不再是"桩"。**
 > `require_principal` 现在会真正校验网关签发的 `X-Avernet-Principal` 令牌，
 > `resolve_avernet_tenant` 也会真正从中读出租户（见下文**认证接缝**一节）。上游还有
-> 两件事挡在外部租户与 `200` 之间：网关的签发 PR
-> （[#599](https://github.com/inclusionAI/Avernet/pull/599)）尚未合并，因此 `dev` 上
-> 还没有任何东西会转发这个头；以及网关的 `route_security.yaml` 要求由 Google 链解析出
-> 的 `user` 身份，而持访问密钥（access key）的外部租户满足不了它。在这两件事推进之前，
-> 任何真实请求依然返回 `401` —— 只不过现在是**因为拒绝**，而不是因为打桩。
+> 网关的签发 PR（[#599](https://github.com/inclusionAI/Avernet/pull/599)）**已合并**，
+> 因此 `dev` 上确实会转发这个头 —— `user` 调用方现已端到端跑通（2026-08-02 对着真实
+> 签名器验证过）。仍挡在**外部租户**与 `200` 之间的是"谁可以调用"：网关的
+> `route_security` 要求由 Google 链解析出的 `user` 身份，而持访问密钥（access key）的
+> 租户满足不了它；且自 2026-08-02 起后端会独立拒绝任何不指向终端用户的身份集合。
+> 放宽它属于委托工作线，不是改一行配置。
 > "bots 做完了"的含义不变：处理器、契约和测试做完了。
 
 关键难点：内部的 `/api/...` 界面与公共的 `/openapi/v1` 界面**共享同一批表、仓储
@@ -168,7 +169,9 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 ### 横切事项（非按阶段划分）
 | 事项 | 状态 | 备注 |
 |---|---|---|
-| 真实的调用方身份验证器（认证工作线） | ✅ **后端这一半已完成 —— PR [#634](https://github.com/inclusionAI/Avernet/pull/634)**（网关那一半：[#599](https://github.com/inclusionAI/Avernet/pull/599)，未合并） | `require_principal` 与 `resolve_avernet_tenant` 现在会校验网关签发的 `X-Avernet-Principal`（HS256、`aud=backend`），并从中读出租户与 owner。**端到端仍不可调用**：#599 必须先合并（否则没有东西转发这个头），且网关的 `route_security.yaml` 必须允许本界面真实的调用方 —— 见下方两个待定问题 |
+| 真实的调用方身份验证器（认证工作线） | ✅ **两半均已完成** —— 后端 PR [#634](https://github.com/inclusionAI/Avernet/pull/634)、网关 PR [#599](https://github.com/inclusionAI/Avernet/pull/599) **已合并** | `require_principal` 与 `resolve_avernet_tenant` 会校验网关签发的 `X-Avernet-Principal`（HS256、`aud=backend`），并从中读出租户与 owner。线上契约已通过把**真实**网关签名器接进**真实**后端验证器做往返验证（2026-08-02）：user/bot/app/access_key 四种形状、机密不外投、`aud`/`iss` 不符即拒。**`user` 调用方已可端到端跑通。** 剩下的是*哪些*调用方被接纳 —— 见下一行 |
+| **身份接纳：仅 `user`** | ✅ **2026-08-02 完成** | `verify_principal_token` 拒绝任何不指向终端用户的身份集合，因此 `bot` / `app` / `access_key` 调用方是**按设计**返回 `401`，而不是取决于某个 handler 是否去取 owner。放宽它靠委托（认证设计 §15），不是改配置。SDD：`specs/2026-08-02-public-api-user-only-principal/` |
+| **没有跨仓测试钉住 principal 线上形状** | ⬜ TODO | 两侧各自对着自己手写的 payload 认知做测试（`test_verifier.py` 拼 dict；网关测自己的 model）。任一侧改个字段名，两边测试都还是绿的，线上却全 401 |
 | 租户前导索引（F2，**强制**策略） | ⬜ TODO | 多租户上线前必须完成 |
 | 后台/定时任务的复查 | ⬜ TODO | 在第二个租户持有真实数据之前完成 |
 | **Agent 身份标识在租户之间会撞车**（[#556](https://github.com/inclusionAI/Avernet/issues/556)） | ⬜ TODO（totalfrank） | Passport、授权关系、BCN、策略行都只用 `bot_id`/`owner_id` 作键，没有租户维度，而每个 owner 的第一个 bot 的 id 就是字符串 `"default"`。**应当成为开启多租户的前置闸口。** #494 里以公共更新路径上的 `sync_to_bcn=False` 做了临时止血 |
@@ -334,17 +337,23 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
     校验。
 - 会被拒绝的情形，全部返回**完全一致**的 `401`：签名错误、`alg: none`、`aud` 指向别的
   上游、`iss` 不对、已过期、缺少必需 claim、未知的 `type` tag、契约字段被改名、身份集合
-  内部租户不一致，以及**声称自己是 `teamclaw` 的租户**（后者会把全部内部数据交给外部
-  调用方）。
+  内部租户不一致、**声称自己是 `teamclaw` 的租户**（后者会把全部内部数据交给外部
+  调用方），以及**没有指向任何终端用户的身份集合**（见下）。
 - 网关的租户 id **就是** `avernet_tenant` 的值 —— 没有映射表。因此真实外部租户在拥有
   自己的数据之前读到的是空集；这是隔离在正常工作，不是 bug。
 
 **如果你负责某个 Track B 类别，有两件事会传导到你：**
 
-1. **`app` 与 `access_key` 调用方目前一律 401。** owner id 只从 `user` 或 `bot`
-   principal 推导。网关的 `app.owners` 是自由文本的组织归属，其访问密钥注册表根本没有
-   owner 列，两者都指不出一个可用于作用域的人 —— 而"猜"出来的就是跨账号数据 bug。鉴于
-   公共 API 的调用方本就是*外部注册租户*，这件事很可能要在任何类别对外开放之前定案。
+1. **只接纳 `user` 调用方 —— `bot` / `app` / `access_key` 在校验阶段即被拒绝。**
+   _2026-08-02 定案。_ owner id 只从 `user` principal 推导。网关的 `app.owners` 是
+   自由文本的组织归属，其访问密钥注册表根本没有 owner 列，两者都指不出一个可用于作用域
+   的人；`bot` 虽然带 `owner_id`，但让一个 bot 在整个公共契约上以其 owner 的身份行事，
+   是没有人做过的授权。**拒绝发生在 `verify_principal_token`，而不是
+   `caller_owner_id`** —— 这才是关键：放在 handler 里的拒绝只覆盖会去取 owner 的
+   handler，而 `resources/router.py` 里有四个并不取；拒绝整个身份集合，意味着无法作用域
+   的调用方**任何**路由都进不来（包括以后新增的）。`app` / `access_key` 究竟该拥有什么
+   仍未定（认证设计 §14 Q4）；委托（§15）才是放宽它的设计路径。SDD：
+   `src/backend/specs/2026-08-02-public-api-user-only-principal/`。
 2. **依赖（dependency）里抛出的已映射错误现在也会被套上信封。** `@envelope_errors`
    只包裹 handler，所以接缝的 401（在依赖里抛出）会绕过它；现在查表逻辑落在
    `responses.py::mapped_error_response`，应用的 catch-all 查的是同一张表。你新增的依赖
@@ -626,7 +635,9 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 5. 后台/定时任务已针对按租户正确性完成复查。—— _⬜_
 6. `require_principal` / `resolve_avernet_tenant` 已接到真实验证器（认证工作线）——
    到此，第二个租户才能安全地持有真实数据，公共界面也才会停止一律返回 401。
-   —— _🔧 后端这一半已完成；还需网关 [#599](https://github.com/inclusionAI/Avernet/pull/599) 合并**并且** `route_security.yaml` 增加允许本界面真实调用方的规则。_
+   —— _✅ 两半均已合并（[#634](https://github.com/inclusionAI/Avernet/pull/634)、[#599](https://github.com/inclusionAI/Avernet/pull/599)），`user` 调用方已可往返。
+   接纳**外部租户**如今是一个独立且需要刻意为之的步骤：`route_security` 必须接受其凭证，
+   **并且**委托必须给这份凭证一个可用于作用域的终端用户（认证设计 §15）。_
 7. **跨租户的外部身份问题已定案（[#556](https://github.com/inclusionAI/Avernet/issues/556)）** —— Passport、授权关系与 BCN 都带上
    租户维度，从而可以在公共路径上重新打开 BCN 同步。—— _⬜（2026-07-29 新增；它是开启
    多租户的前置闸口）。_
@@ -645,11 +656,14 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   `idx_entity`、搜索索引），采用**先建新、再删旧**（命名约定把索引名与其列绑定，因此先建后删，
   避免出现无索引的窗口）。低基数索引（`idx_status`、`idx_is_delete`）与唯一查找索引
   （`idx_binding_id`）保持不动。
-- ~~**真实的调用方身份验证器。**~~ **后端侧已完成** —— 见上文**认证接缝**一节。
-  `caller_owner_id` 本来就接受带 `user_id` 的对象，这正是它能零改动落地的原因。
-  剩下的都在上游：网关 [#599](https://github.com/inclusionAI/Avernet/pull/599) 合并、
-  `route_security.yaml` 为本界面的调用方加规则，以及 `app` / `access_key` 调用方的
-  owner 语义问题。
+- ~~**真实的调用方身份验证器。**~~ **两半均已完成** —— 见上文**认证接缝**一节。
+  `caller_owner_id` 本来就接受带 `user_id` 的对象，这正是它能零改动落地的原因。网关
+  [#599](https://github.com/inclusionAI/Avernet/pull/599) 已合并，线上形状也已通过往返
+  验证，`user` 调用方端到端可用。
+- **`app` / `access_key` 调用方的 owner 语义。** 仍未定，但现在是显式的：这类调用方在
+  校验阶段即被**拒绝**（2026-08-02），而不是悄悄地没有作用域。要定它属于委托工作线
+  （认证设计 §15）；只加一条 `route_security` 规则是不够的 —— 一个指不出人的凭证，
+  依然无法按 owner 作用域。
 - **后台/定时任务。** 现在都解析为默认租户（在全部数据都是 `teamclaw` 时是正确的）；在第二个
   租户持有真实数据之前需复查（skill_center / governance / dormant / 设备轮询器中的定时扫描、
   轮询器、同步循环）。
@@ -831,3 +845,30 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   完整清单、逐端点映射，以及每一条未包装 engine 路由的裁定：
   **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**。看板变动：新增 Track C
   小节（6 组完成 0 组），新增 DoD 第 8 条。**负责人仍未分配。**
+- **2026-08-02** —— **身份接纳定案：仅 `user`。** `verify_principal_token` 现在会拒绝
+  任何不指向终端用户的身份集合，因此 `bot` / `app` / `access_key` 调用方是**按设计**
+  返回 `401`，而不是因为 `caller_owner_id` 拿到空 owner 才抛错。四点值得知道：
+  1. **拒绝之所以挪位置，是因为原来的位置可以被绕过。** 来自 `caller_owner_id` 的 401
+     只覆盖会调用它的 handler —— 而 `resources/router.py` 里有四个不调用
+     （`list_resources`、`create_resource`、`get_resource`、`update_resource`），它们按
+     调用方自带的 `bot_id` 作用域。无法作用域的调用方能进到这些 handler 并拿到数据。把
+     拒绝放到校验阶段，这条规则对所有路由都成立，包括还没写的。**每个 handler 都得记住
+     的不变量，不是不变量。**
+  2. **`bot` 失去了 owner 兜底。** `VerifiedCaller.user_id` 不再回退到 `bot.owner_id`。
+     它原本不可达（没有任何 `route_security` 规则要求或接受 `bot`），但那是一份没人决定
+     过的常设授权 —— 让 bot 在整个公共契约上以其 owner 的身份行事。要做面向 bot 的界面，
+     应当刻意重新加回来。
+  3. **user **加上**其他身份依然被接受。** 网关会转发它解析出的整个集合，因此声明
+     `user: required, app: optional` 的路由会产生两个 principal。规则是"必须含 user"，
+     不是"不能含别的" —— 后者会拒掉网关认为合法的请求。
+  4. **认证现在挂在 `build_public_router()`**，与 `ERROR_RESPONSES` 并列，因此以后新增
+     的路由**在构造上**无法遗漏，而不是靠 `test_public_routes_require_principal` 事后
+     抓到。行为零变化 —— 每个路由本就声明了 `PrincipalDep`，且 FastAPI 会缓存依赖，
+     每请求只解析一次。
+
+  本次同时更正了看板：网关 [#599](https://github.com/inclusionAI/Avernet/pull/599)
+  **已合并**（此前有三处仍记为未合并）；principal 线上契约已通过把真实网关签名器接进
+  真实后端验证器做往返验证 —— 形状一致、转发来的机密不外投、`aud`/`iss` 不符即拒。
+  **新记为待办：** 没有任何跨仓测试钉住这份契约，任一侧改字段名都会让两边测试保持绿色
+  而线上全 401。整套测试 10204 通过 / 3 跳过。SDD：
+  `src/backend/specs/2026-08-02-public-api-user-only-principal/`。
