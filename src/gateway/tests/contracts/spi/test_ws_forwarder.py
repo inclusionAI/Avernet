@@ -16,10 +16,7 @@ import pytest
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
-from gateway.community.plugins.ws_forwarder.websockets import (
-    WebsocketsForwarder,
-    _plugin,
-)
+from gateway.community.adapters.web import WebsocketsForwarder
 from gateway.community.spi.ws_forwarder import (
     WEBSOCKET_HANDSHAKE_HEADERS,
     WebSocketClosedError,
@@ -195,7 +192,7 @@ async def test_no_read_deadline_is_imposed(upstream) -> None:  # noqa: ANN001
         await ws.send("still here")
         assert await ws.receive() == "echo:still here"
 
-    source = inspect.getsource(_plugin.WebsocketsForwarder.connect)
+    source = inspect.getsource(WebsocketsForwarder.connect)
     assert "max_size=None" in source
     assert "close_timeout" not in source
     assert "ping_timeout" not in source

@@ -16,11 +16,23 @@ assigns it, plus configuration.
    `core/engine_runtime/connection.py`) — so the gateway must not make the
    anchor configurable either.
 
-2. **The upstream socket (SPI + plugin).** A `WebSocketForwarder` SPI mirroring
-   the existing `Forwarder`: an async context manager yielding a duplex
-   `WebSocketUpstream`. The community flavour is backed by `websockets`. The SPI
-   carries its own `WebSocketClosedError` error so the adapter never imports the
-   client library, exactly as `ForwardResponse` keeps `httpx` out of `_forward`.
+2. **The upstream socket (SPI + web adapter).** A `WebSocketForwarder` SPI
+   mirroring the existing `Forwarder`: an async context manager yielding a duplex
+   `WebSocketUpstream`, implemented by `WebsocketsForwarder` in `adapters/web/`.
+
+   It is deliberately **not** under `plugins/`. That directory means an
+   edition-swappable implementation of a plugin contract — every other entry has
+   a real or documented second flavour (`database/sqlite`,
+   `secret_resolver/community`, `schema_catalog/file`, `runner/bare`) — and there
+   is no corp variant of "dial a WebSocket". A selector there would have been a
+   config knob with one legal value, which Rule 8 calls role ambiguity and
+   AGENTS.md calls speculative configurability. `adapters/web` is also where
+   Rule 7 puts a socket library by construction: the rule bans transport
+   frameworks in *core*, which makes the transport layer their home.
+
+   The SPI stays regardless: it is what lets the composition root hand the web
+   adapter a typed collaborator and lets tests relay against a stub instead of a
+   live socket.
 
 3. **The relay (web adapter).** A Starlette WebSocket endpoint at
    `/engine/{full_path:path}` that resolves the route, authenticates, dials the
@@ -54,8 +66,8 @@ New:
   the prefix constants, and the config reader.
 - `src/gateway/src/gateway/community/spi/ws_forwarder/{_models,_protocols,__init__}.py`
   — the duplex forwarding contract.
-- `src/gateway/src/gateway/community/plugins/ws_forwarder/websockets/{_plugin,__init__}.py`
-  — the `websockets`-backed flavour.
+- `src/gateway/src/gateway/community/adapters/web/_ws_forwarder.py` — the
+  `websockets`-backed outbound transport.
 - `src/gateway/src/gateway/community/adapters/web/_engine_ws.py` — the endpoint
   and the bidirectional pump.
 
@@ -67,17 +79,17 @@ Changed:
   it needs through one object.
 - `bootstrap/_forwarding.py` — build the engine route from the same
   `user_config.upstreams` section the domain map is built from.
-- `bootstrap/plugins/_plugin_core.py`, `bootstrap/_container.py` — select and
-  inject the WebSocket forwarder.
-- `config/_models.py` — `PluginConfig.ws_forwarder`.
+- `bootstrap/_container.py` — construct and inject the WebSocket forwarder
+  directly (no plugin selector).
+- `adapters/web/__init__.py` — re-export `WebsocketsForwarder` so the
+  composition root reaches it without an absolute private-module import.
 - `adapters/web/app.py` — register the WebSocket route and publish the new
   `app.state` entries.
 - `adapters/web/_forward.py` — `_bundle` retyped to `HTTPConnection` so the
   WebSocket endpoint builds its credential bundle the same way. No behaviour
   change.
-- `configs/application.yaml` — the `ws_forwarder` selector, the `/engine/**`
-  route-security exemption, and the documented (commented) `engine` upstream
-  block.
+- `configs/application.yaml` — the `/engine/**` route-security exemption and
+  the documented (commented) `engine` upstream block.
 - `pyproject.toml`, `uv.lock` — `websockets`.
 
 ## Data Model Changes
@@ -175,7 +187,7 @@ Close-code translation: 1005 (no status) and 1006 (abnormal) cannot be sent in a
 close frame, so they become 1000 and 1011 respectively; reasons are truncated to
 the 123-byte limit. Everything else crosses unchanged.
 
-### `plugins/ws_forwarder/websockets/_plugin.py`
+### `adapters/web/_ws_forwarder.py`
 
 - `max_size=None` — the gateway is transparent, and the library's 1 MiB default
   would close a large chat frame with 1009 as though the peer had misbehaved.

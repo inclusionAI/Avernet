@@ -30,9 +30,6 @@ user_config:
   # Enterprise overrides specific selectors via config overlay.
   plugins:
     forwarder: "httpx"
-    # Duplex forwarder for the /engine socket route. The same library also makes
-    # the gateway's own server accept an Upgrade at all.
-    ws_forwarder: "websockets"
     schema_catalog: "file"
     cache: "stub"
     auth: "stub"

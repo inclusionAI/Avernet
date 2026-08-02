@@ -1,4 +1,16 @@
-"""Bare WebSocket forwarder plugin — ``websockets``-backed duplex relay.
+"""Outbound WebSocket transport — the ``websockets``-backed duplex relay.
+
+The other half of :mod:`._engine_ws`: that module terminates the client's
+socket, this one opens the upstream's. Both are transport, so both live in the
+web adapter — a socket library belongs in the layer whose job is speaking
+protocols, and Rule 7 exists to keep exactly this out of core.
+
+Not a plugin. ``plugins/`` means an edition-swappable implementation of a plugin
+contract, and this has one implementation: there is no corp variant of "dial a
+WebSocket". The :class:`~gateway.community.spi.ws_forwarder.WebSocketForwarder`
+Protocol is kept regardless — it is what lets the composition root hand the web
+adapter a typed collaborator and lets tests relay against a stub instead of a
+live socket.
 
 Relays frames unchanged in both directions so the gateway is transparent: a
 text frame arrives as text, a binary frame as binary, and neither is inspected,

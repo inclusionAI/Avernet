@@ -83,7 +83,6 @@ class PluginConfig(BaseSettings):
     config_section: ClassVar[str] = "plugins"
 
     forwarder: str = Field(default="httpx", min_length=1)
-    ws_forwarder: str = Field(default="websockets", min_length=1)
     schema_catalog: str = Field(default="file", min_length=1)
     cache: str = Field(default="stub", min_length=1)
     auth: str = Field(default="stub", min_length=1)

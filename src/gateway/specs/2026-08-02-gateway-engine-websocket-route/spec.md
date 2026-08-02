@@ -162,3 +162,30 @@ its life.
    backend's neutral-empty `gateway` block: the community build fronts no
    gateway and no engine proxy, and both sides say so rather than publishing or
    serving an address nothing answers.
+
+4. **Where the outbound socket transport lives.** *Resolved 2026-08-02:*
+   `adapters/web/`, not `plugins/`. `plugins/` means an edition-swappable
+   implementation of a plugin contract, and every other entry there earns that —
+   `database/sqlite`, `secret_resolver/community`, `schema_catalog/file` and
+   `runner/bare` each have a real or documented second flavour. There is no corp
+   variant of "dial a WebSocket", so filing it under `plugins/` would advertise a
+   split that does not exist and carry a config selector with exactly one legal
+   value. Rule 8 forbids one path serving two roles; AGENTS.md forbids
+   speculative configurability.
+
+   The transport layer is also where Rule 7 puts a socket library by
+   construction: the rule bans transport frameworks in *core*, which makes
+   `adapters/web` — the layer whose job is speaking protocols — their home.
+   `_ws_forwarder.py` opens the upstream socket and `_engine_ws.py` terminates
+   the client's; they are two halves of one concern and now sit together.
+
+   The SPI Protocol is kept either way. It is what lets the composition root
+   hand the web adapter a typed collaborator, lets tests relay against a stub
+   instead of a live socket, and gives the device-direct upstream a place to
+   land if the gateway later absorbs the proxypass hop.
+
+   *Not settled here:* the HTTP `Forwarder` sits in `plugins/forwarder/httpx`,
+   and whether the same reasoning applies to it depends on whether the
+   enterprise flavour its SPI docstring anticipates is real — if it is, that
+   placement is correct and the asymmetry is meaningful rather than sloppy.
+   Owned by that code's authors and deliberately left alone by this feature.

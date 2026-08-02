@@ -13,7 +13,6 @@ from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
 from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
-from gateway.community.plugins.ws_forwarder.websockets import WebsocketsForwarder
 
 
 def _default(value, fallback):
@@ -31,11 +30,6 @@ class PluginContainer(containers.DeclarativeContainer):
     forwarder = providers.Selector(
         config.plugins.forwarder,
         httpx=providers.Singleton(HttpxForwarder),
-    )
-
-    ws_forwarder = providers.Selector(
-        config.plugins.ws_forwarder,
-        websockets=providers.Singleton(WebsocketsForwarder),
     )
 
     schema_catalog = providers.Selector(

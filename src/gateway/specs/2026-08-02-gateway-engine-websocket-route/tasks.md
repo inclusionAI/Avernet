@@ -27,14 +27,15 @@
   - [x] `__all__` declared; no imports from core, adapters, plugins, or bootstrap.
 - **Depends on:** —
 
-## Task 3: `websockets` plugin `[x]`
-- **Goal:** The community flavour of the SPI.
-- **Files:** `src/gateway/src/gateway/community/plugins/ws_forwarder/websockets/{_plugin,__init__}.py` (new), `plugins/ws_forwarder/__init__.py` (new), `pyproject.toml`, `uv.lock`
+## Task 3: `websockets` outbound transport `[x]`
+- **Goal:** The one implementation of the SPI, in the layer that speaks protocols.
+- **Files:** `src/gateway/src/gateway/community/adapters/web/_ws_forwarder.py` (new), `adapters/web/__init__.py`, `pyproject.toml`, `uv.lock`
 - **Done when:**
   - [x] Dials with `max_size=None` (transparent to frame size) and a bounded handshake timeout.
   - [x] **No read deadline** on receive — the socket outlives its one-time credential by design.
   - [x] `ConnectionClosed` is translated to the SPI's `WebSocketClosedError`, code and reason preserved.
   - [x] `websockets` added as a runtime dependency and locked.
+  - [x] Lives in `adapters/web/`, not `plugins/`: there is no edition-specific flavour, and a socket library belongs in the transport layer (Rule 7 bans it from core, Rule 8 forbids `plugins/` doubling as a home for non-swappable implementations).
 - **Depends on:** Task 2
 
 ## Task 4: WebSocket endpoint and bidirectional pump `[x]`
@@ -52,10 +53,10 @@
 
 ## Task 5: Composition and configuration `[x]`
 - **Goal:** Wire the route and the plugin through the composition root, and declare the prefix's upstream and identity requirement in configuration.
-- **Files:** `core/forwarding/_orchestration.py`, `bootstrap/_forwarding.py`, `bootstrap/_container.py`, `bootstrap/plugins/_plugin_core.py`, `config/_models.py`, `adapters/web/app.py`, `configs/application.yaml`
+- **Files:** `core/forwarding/_orchestration.py`, `bootstrap/_forwarding.py`, `bootstrap/_container.py`, `adapters/web/{__init__,app}.py`, `configs/application.yaml`
 - **Done when:**
   - [x] `Forwarding` carries `ws_forwarder` and `engine_route`; `app.state` publishes both.
-  - [x] `plugins.ws_forwarder` selector defaults to `websockets`.
+  - [x] The forwarder is constructed in the composition root, with **no** config selector — one implementation, so a knob would have a single legal value.
   - [x] `route_security` declares `"/engine/**": {}` — no identity required, stated rather than implied.
   - [x] The `upstreams.engine` block is documented in the shipped config and left unset, so the community build refuses the route; the comment records that any L7 hop in front must pass Upgrade through with no read timeout.
   - [x] `application.yaml` still loads and every existing forwarded path behaves as before.
@@ -66,7 +67,7 @@
 - **Files:** `tests/test_engine_route.py` (new), `tests/contracts/spi/test_ws_forwarder.py` (new), `tests/integration/test_engine_ws_route.py` (new), `tests/test_route_security.py`
 - **Done when:**
   - [x] Unit: prefix match/non-match, `/proxypass` swap, query preservation, verbatim encoding, scheme mapping, config errors, absent block.
-  - [x] Contract: the plugin against a real `websockets` server — text, binary, subprotocol, headers, close propagation, no read deadline.
+  - [x] Contract: the forwarder against a real `websockets` server — text, binary, subprotocol, headers, close propagation, no read deadline.
   - [x] Integration: duplex exchange, upstream path and query as the upstream saw them, and refusal for no-route, off-prefix, auth failure, and unreachable upstream; HTTP under `/engine` still 404s.
   - [x] Config: the shipped table resolves `/engine/**` to an empty requirement and leaves the version base requiring a user.
   - [x] `ruff`, `mypy`, and `basedpyright` clean for the new code.
