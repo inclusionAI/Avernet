@@ -883,6 +883,42 @@ async fn group_detail_accepts_human_or_exact_owned_bot_participation_only() {
 }
 
 #[tokio::test]
+async fn group_detail_propagates_owned_bot_lookup_database_failure() {
+    let bots = Arc::new(BotCore::with_repo(Arc::new(
+        PersistentBotRepo::with_plugins(
+            Arc::new(InMemoryCachePlugin::new()),
+            Arc::new(FailingDb),
+        ),
+    )));
+    let fixture = Fixture::new_with_bots(bots).await;
+    fixture
+        .groups
+        .upsert(normal_group(
+            "owned-bot-lookup-failure",
+            "driver",
+            vec![Participant::bot("owned", ParticipantRole::Consultant)],
+            GroupStrategy::Chat,
+            1,
+        ))
+        .await
+        .expect("store Group");
+
+    let error = fixture
+        .service
+        .get(GetGroup {
+            caller: bot_principal("alice"),
+            group_id: "owned-bot-lookup-failure".into(),
+        })
+        .await
+        .expect_err("owned-Bot lookup failure must not be reported as forbidden");
+
+    assert!(matches!(
+        error,
+        ApplicationError::Internal(message) if message.contains("bot database unavailable")
+    ));
+}
+
+#[tokio::test]
 async fn list_groups_sorts_by_created_at_desc_not_updated_at() {
     // V1 contract declares `created_at DESC, group_id ASC`. The legacy
     // `updated_at DESC` ordering would put a recently-edited but older group

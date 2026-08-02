@@ -254,8 +254,9 @@ impl SessionServiceImpl {
         }
         let owned_bot_ids = self
             .registry
-            .list_bots_by_creator(&user.id)
+            .try_list_bots_by_creator(&user.id)
             .await
+            .map_err(map_service_error)?
             .into_iter()
             .filter(|bot| bot.actor_kind == ActorKind::Bot)
             .map(|bot| bot.bot_uuid)

@@ -760,21 +760,16 @@ impl PersistentBotRepo {
         &self,
         created_by: &str,
         env: &str,
-    ) -> Vec<RegisteredBot> {
+    ) -> ServiceResult<Vec<RegisteredBot>> {
         let sql = "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, created_by FROM bcs_bots WHERE created_by = ? AND env = ? AND COALESCE(is_deleted, 0) = 0";
 
-        let rows = match self
+        let rows = self
             .db_query(sql, vec![Value::from(created_by), Value::from(env)])
             .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                warn!(created_by = %created_by, error = %e, "list_bots_by_creator_from_db: failed");
-                return Vec::new();
-            }
-        };
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
 
-        rows.iter()
+        Ok(rows
+            .iter()
             .filter_map(|row| {
                 let bot_uuid: String = db_get_column_opt(row, "bot_uuid").ok().flatten()?;
                 let name: Option<String> = db_get_column_opt(row, "name").ok().flatten();
@@ -836,7 +831,7 @@ impl PersistentBotRepo {
                     status,
                 })
             })
-            .collect()
+            .collect())
     }
 
     /// Load session token from the configured database.
@@ -1601,6 +1596,23 @@ impl BotRepoPort for PersistentBotRepo {
         // D-F: unified DB query — always query the database to include offline bots.
         // InMemory dynamic_status is supplemented at the handler layer via
         // `bot_is_effectively_online`, not here.
+        match self
+            .list_bots_by_creator_from_db(created_by, &current_env)
+            .await
+        {
+            Ok(bots) => bots,
+            Err(error) => {
+                warn!(created_by = %created_by, error = %error, "list_bots_by_creator_from_db: failed");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn try_list_bots_by_creator(
+        &self,
+        created_by: &str,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        let current_env = resolve_env();
         self.list_bots_by_creator_from_db(created_by, &current_env)
             .await
     }
@@ -2885,7 +2897,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             .db_execute_affected(&sql, params)
             .await
             .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-        if affected == 0 {
+        if affected == 0 && self.get_control_plane(bot_id, env).await?.is_none() {
             return Ok(None);
         }
 

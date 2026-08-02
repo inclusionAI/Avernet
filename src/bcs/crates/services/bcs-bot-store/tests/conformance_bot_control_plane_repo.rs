@@ -3,12 +3,16 @@
     reason = "test assertions intentionally fail fast"
 )]
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
 use bcs_cache_local::InMemoryCachePlugin;
-use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue as Value};
+use bcs_db_api::{
+    DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbSqlFlavor, DbStatement,
+    DbTransactionStep, DbTransactionStepResult, DbValue as Value,
+};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities,
@@ -454,6 +458,71 @@ async fn persistent_control_plane_owned_filters_and_patch_replace_descriptor_arr
         credential[0].get("session_token").and_then(Value::as_str),
         Some("token-owned")
     );
+}
+
+#[tokio::test]
+async fn persistent_control_plane_patch_returns_existing_row_when_mysql_changes_nothing() {
+    let repo = PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
+        Arc::new(InMemoryCachePlugin::new()),
+        Arc::new(UnchangedUpdateDb),
+        DbSqlFlavor::Mysql,
+        "test:",
+    );
+
+    let updated = repo
+        .patch_control_plane(
+            "unchanged",
+            "dev",
+            BotControlPlanePatch {
+                name: Some("Unchanged".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("unchanged patch must not fail")
+        .expect("an unchanged existing row must not be reported as missing");
+
+    assert_eq!(updated.bot_id, "unchanged");
+    assert_eq!(updated.name, "Unchanged");
+}
+
+struct UnchangedUpdateDb;
+
+#[async_trait]
+impl DbPlugin for UnchangedUpdateDb {
+    async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        Ok(vec![DbRow::new(BTreeMap::from([
+            ("bot_uuid".to_string(), Value::from("unchanged")),
+            ("name".to_string(), Value::from("Unchanged")),
+            ("bot_info".to_string(), Value::from("{}")),
+            ("visibility".to_string(), Value::from("protected")),
+            ("status".to_string(), Value::from("online")),
+            ("actor_kind".to_string(), Value::from("bot")),
+            ("env".to_string(), Value::from("dev")),
+            ("created_by".to_string(), Value::from("staff-1")),
+            ("agent_code".to_string(), Value::Null),
+            ("gmt_create_ms".to_string(), Value::from(1_000_i64)),
+            ("gmt_modified_ms".to_string(), Value::from(1_000_i64)),
+        ]))])
+    }
+
+    async fn execute(&self, _statement: DbStatement) -> DbResult<DbExecuteResult> {
+        Ok(DbExecuteResult {
+            affected_rows: 0,
+            last_insert_id: None,
+        })
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        Ok(Vec::new())
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Ok(DbHealth::healthy())
+    }
 }
 
 async fn fixture() -> (PersistentBotRepo, Arc<dyn DbPlugin>) {

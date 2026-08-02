@@ -8,7 +8,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use bcs_bot::BotCore;
+use bcs_bot_store::PersistentBotRepo;
+use bcs_cache_local::InMemoryCachePlugin;
+use bcs_db_api::{
+    DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement,
+    DbTransactionStep, DbTransactionStepResult,
+};
 use bcs_domain::{NewMessage, SenderType};
 use bcs_friend::FriendCore;
 use bcs_group::{GroupCore, MemoryGroupRepo};
@@ -40,10 +47,13 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
+        Self::new_with_bots(Arc::new(BotCore::memory())).await
+    }
+
+    async fn new_with_bots(bots: Arc<BotCore>) -> Self {
         let group_repo: Arc<dyn bcs_service_api::port::repo::GroupRepoPort> =
             Arc::new(MemoryGroupRepo::new());
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-        let bots = Arc::new(BotCore::memory());
         let relation = Arc::new(RelationCore::memory());
         let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
         let session_repo: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
@@ -146,6 +156,30 @@ impl Fixture {
         group.group_strategy = GroupStrategy::ManagerWorker;
         group.context = context.map(str::to_string);
         self.groups.upsert(group).await.expect("store group");
+    }
+}
+
+struct FailingDb;
+
+#[async_trait]
+impl DbPlugin for FailingDb {
+    async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        Err(DbError::Backend("bot database unavailable".into()))
+    }
+
+    async fn execute(&self, _statement: DbStatement) -> DbResult<DbExecuteResult> {
+        Err(DbError::Backend("bot database unavailable".into()))
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        Err(DbError::Backend("bot database unavailable".into()))
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Ok(DbHealth::unhealthy("bot database unavailable"))
     }
 }
 
@@ -557,6 +591,49 @@ async fn session_detail_accepts_human_or_exact_owned_bot_participation_only() {
     assert!(matches!(
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+}
+
+#[tokio::test]
+async fn session_detail_propagates_owned_bot_lookup_database_failure() {
+    let bots = Arc::new(BotCore::with_repo(Arc::new(
+        PersistentBotRepo::with_plugins(
+            Arc::new(InMemoryCachePlugin::new()),
+            Arc::new(FailingDb),
+        ),
+    )));
+    let fixture = Fixture::new_with_bots(bots).await;
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot(
+                    "owned",
+                    ParticipantRole::Consultant,
+                )],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let error = fixture
+        .service
+        .get(GetSession {
+            caller: human_principal("alice"),
+            session_id: session.id,
+        })
+        .await
+        .expect_err("owned-Bot lookup failure must not be reported as forbidden");
+
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Internal(message)
+            if message.contains("bot database unavailable")
     ));
 }
 
