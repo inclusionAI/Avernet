@@ -1,9 +1,27 @@
-"""图操作层端到端(已实现的 v2 图操作写口 ``add_node``/``update_state``/
-``retrieve_state`` + ``aggregate_verdict`` + ``mark_graph_status`` 串起执行链路)。
+"""图操作**层**集成测试(非 tick 驱动的端到端)。
 
-测试原则:任务与分解的**内容**用真实需求 case(交付用户登录功能,见
-``_login_case``),只在 skill 验收回投上 mock(编程化置 SubtaskState/调用纯函数),
-以切换不同执行分支。完整 tick 驱动的 E2E 见 ``test_e2e_tick``。
+定位 —— 测的是"图操作 + State + 纯函数"这一层,不是执行驱动链:
+
+测到的真实实现(✓):
+- 图操作写/读口 ``add_node`` / ``update_state`` / ``retrieve_state`` / ``_ensure_subtask_state``;
+- ``mark_graph_status`` / ``_advance_phase`` / ``mark_terminal`` / ``_render_kind``;
+- 纯函数 ``aggregate_verdict``;以及**真实** ``DecomposerService.decompose_subtasks``
+  (E2E-5/6 靠它验 depth=父+1 的真实语义,非 mock)。
+- 任务/分解**内容**用真实需求 case(交付用户登录功能,见 ``_login_case``)。
+
+**故意绕过、不在此测**的(✗ 交给 ``test_e2e_tick``):
+- **执行驱动**:节点序列由测试替 scheduler 用 ``add_node`` 手拼出来,**不走真实
+  ``tick``/``_advance_node``/``_bot_search``/``_decomposition``/``_dispatch``。
+- **skill 验收回投**:_set_subtask_done / _accept_fail_round **直接戳 Node/SubtaskState**
+  (置 status、append AttemptedRecord/GapRecord),**绕过真实 ``on_event`` fold**
+  (NODE_ACCEPTED/NODE_REJECTED/NODE_FAILED 的落态回写)。此处按"图操作层"职责只验
+  写口产出,验收 fold 的真实通道在 ``test_e2e_tick`` 走 ``on_event`` 验。
+- **聚合/终验**:`aggregate_verdict` 由测试**直接调用并断言**,不走真实
+  ``_detect_and_aggregate`` / ``_maybe_goal_verify`` 的 tick 扫图触发。
+
+即:这些用例验证"给定某图操作序列 + 某 State,图写口/读口/纯函数行为正确",用来隔离
+锁定图操作层契约;**完整执行流程(谁驱动落节点、验收经事件回投折叠、tick 扫图聚合终验)
+的端到端推演在 ``test_e2e_tick``**。
 
 覆盖 E2E-1 happy / E2E-3 搜推未匹配→分解→中间层聚合→终验 / E2E-6 递归上限→hang→升 BBS /
 E2E-7 不升→FAILED / E2E-2 协作群 / E2E-4 验收fail重路由命中 / E2E-5 fail→未匹配→递归拆解 /
