@@ -87,6 +87,7 @@ impl GatewayPrincipalTokenVerifier {
         validation.set_audience(&[&self.trust.audience]);
         validation.set_issuer(&[&self.trust.issuer]);
         validation.set_required_spec_claims(&["exp", "iss", "aud"]);
+        validation.leeway = 0;
         validation.validate_exp = false;
 
         let claims = decode::<GatewayClaims>(token, &self.decoding_key, &validation)

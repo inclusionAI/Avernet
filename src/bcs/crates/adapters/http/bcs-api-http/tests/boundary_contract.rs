@@ -12,6 +12,17 @@ fn rust_files_under(directory: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+fn manifest_declares_dependency(manifest: &str, dependency: &str) -> bool {
+    manifest.lines().any(|line| {
+        let line = line.trim_start();
+        if line.starts_with('#') {
+            return false;
+        }
+        line.split_once('=')
+            .is_some_and(|(name, _)| name.trim().trim_matches('"') == dependency)
+    })
+}
+
 #[test]
 fn manifest_does_not_depend_on_legacy_or_concrete_bcs_crates() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -28,11 +39,8 @@ fn manifest_does_not_depend_on_legacy_or_concrete_bcs_crates() {
         "bcs-bot",
         "bcs-relation",
     ] {
-        let dependency_prefix = format!("{forbidden} ");
         assert!(
-            !manifest
-                .lines()
-                .any(|line| line.trim_start().starts_with(&dependency_prefix)),
+            !manifest_declares_dependency(&manifest, forbidden),
             "versioned HTTP adapter must not depend on {forbidden}"
         );
     }
@@ -48,9 +56,7 @@ fn production_bootstrap_does_not_mount_the_versioned_http_adapter() {
         };
 
     assert!(
-        !bootstrap_manifest
-            .lines()
-            .any(|line| { line.trim_start().starts_with("bcs-api-http ") }),
+        !manifest_declares_dependency(&bootstrap_manifest, "bcs-api-http"),
         "production bootstrap must not mount bcs-api-http in this preparatory change"
     );
 }

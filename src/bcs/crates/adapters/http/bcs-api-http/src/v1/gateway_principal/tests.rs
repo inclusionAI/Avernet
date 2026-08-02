@@ -478,3 +478,11 @@ fn verification_errors_do_not_expose_tokens_or_keys() {
         assert!(!message.contains(forbidden));
     }
 }
+
+#[test]
+fn public_verify_uses_the_current_system_time() {
+    let now = jsonwebtoken::get_current_timestamp();
+    let token = token_with_times(now, now + 60);
+
+    assert!(verifier().verify(&token).is_ok());
+}
