@@ -22,7 +22,7 @@ Avernet 源于一个简单理念：
 
 Avernet 正是为此而设计的运行环境：为持久化 Agent、结构化协作、可治理执行和持续积累的组织智能提供可信、模块化的基础设施。
 
-Avernet 已在蚂蚁集团生产环境运行，截至 2026 年 7 月初，支撑超过 10,000 个 bot。
+> **已在蚂蚁集团生产环境验证** —— 截至 2026 年 7 月初，Avernet 的多 Agent 部署已覆盖 **12 个业务板块（BG）**，在已统计的多 Agent 工作流中，**任务完成率超过 90%**。
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/b275e7ff-b9b1-4982-8418-fdbdeda24f1c" width="80%" controls></video>
