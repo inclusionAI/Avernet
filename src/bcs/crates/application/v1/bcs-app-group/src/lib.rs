@@ -10,10 +10,11 @@ use bcs_service_api::application::v1::{
     CreateDirectMessageGroup, CreateGroup, CreateGroupOutcome, CreateGroupSpec, CreateParticipant,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DirectMessageGroupDetail,
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter, GroupService, GroupStatus,
-    GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, HumanPrincipal, ListBotGroups,
+    GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, HumanPrincipal, ListGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
     Participant as V1Participant, Principal, StateMachineConfiguration, StateMachineDefinitionReference,
     StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
+    require_authenticated_user, require_human,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, AuthenticatedHumanCaller, BotRegistryCoreService,
@@ -21,7 +22,7 @@ use bcs_service_api::{
     ConfigureGroupRuntimeCommand, DefaultDelivery, DmCreateCommand, FriendCoreService,
     Group as DomainGroup, GroupAddMemberCommand, GroupCoreService, GroupCreateCommand,
     GroupCreateParticipantCommand, GroupDeleteCommand, GroupKind, GroupManagementService,
-    GroupMutableFieldsPatch, GroupParticipantModeCommand, GroupParticipantView,
+    GroupMutableFieldsPatch, GroupParticipantView,
     GroupRemoveMemberCommand, GroupStrategy, GroupUseCaseError, ParticipantMode,
     RelationCoreService, RoutingMode, RoutingPolicy, RuntimeParticipantBinding, ServiceError,
     SessionManagementService, StartStateMachineRunCommand,
@@ -35,7 +36,7 @@ pub struct GroupServiceConfig {
 
 /// OpenAPI v1 Group facade.
 ///
-/// It owns Principal-based resource authorization and V1 projections while
+/// It owns authenticated-Caller resource authorization and V1 projections while
 /// delegating existing group creation/deletion side effects to the legacy-
 /// compatible application service. No HTTP type crosses this boundary.
 pub struct GroupServiceImpl {
@@ -96,37 +97,74 @@ impl GroupServiceImpl {
             })
     }
 
-    async fn authorize_bot_resource(
+    async fn resolve_view_actor(
         &self,
-        principal: &Principal,
-        bot_uuid: &str,
-    ) -> Result<(), ApplicationError> {
-        match principal {
-            Principal::Bot(bot) if bot.bot_uuid == bot_uuid => {
-                self.load_bot(bot_uuid).await?;
-                Ok(())
-            }
-            Principal::Bot(_) => Err(ApplicationError::forbidden(
-                "Bot Principal may query only its own bot_uuid",
-            )),
-            Principal::Human(human) => {
-                let bot = self.load_bot(bot_uuid).await?;
-                if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                    return Ok(());
-                }
-                let creator_edge = self
-                    .relation
-                    .get_edge(&principal.actor_id(), bot_uuid, &self.config.relation_env)
-                    .await
-                    .map_err(map_service_error)?;
-                if creator_edge.is_some_and(|edge| edge.is_creator) {
-                    return Ok(());
-                }
-                Err(ApplicationError::forbidden(format!(
-                    "Human Principal cannot manage Bot '{bot_uuid}'"
-                )))
-            }
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+        requested: Option<&str>,
+    ) -> Result<String, ApplicationError> {
+        let user = require_authenticated_user(caller)?;
+        let human_actor_id = format!("human_{}", user.id);
+        let Some(requested) = requested else {
+            return Ok(human_actor_id);
+        };
+        if requested == human_actor_id {
+            return Ok(human_actor_id);
         }
+        if requested.starts_with("human_") {
+            return Err(ApplicationError::forbidden(
+                "The explicit Human View Actor must identify the authenticated User",
+            ));
+        }
+        let bot = self.load_bot(requested).await.map_err(|error| match error {
+            ApplicationError::NotFound { .. } => {
+                ApplicationError::forbidden("The explicit View Actor is not authorized")
+            }
+            other => other,
+        })?;
+        if bot.actor_kind == ActorKind::Bot
+            && bot.created_by.as_deref() == Some(user.id.as_str())
+        {
+            Ok(requested.to_string())
+        } else {
+            Err(ApplicationError::forbidden(
+                "The explicit View Actor is not authorized",
+            ))
+        }
+    }
+
+    async fn can_read_group_detail(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
+        let user = require_authenticated_user(caller)?;
+        let human_actor_id = format!("human_{}", user.id);
+        if group
+            .participants
+            .iter()
+            .any(|participant| {
+                participant.actor_kind == ActorKind::Human
+                    && participant.bot_uuid == human_actor_id
+            })
+        {
+            return Ok(true);
+        }
+        let owned_bot_ids = self
+            .registry
+            .try_list_bots_by_creator(&user.id)
+            .await
+            .map_err(map_service_error)?
+            .into_iter()
+            .filter(|bot| bot.actor_kind == ActorKind::Bot)
+            .map(|bot| bot.bot_uuid)
+            .collect::<HashSet<_>>();
+        Ok(group
+            .participants
+            .iter()
+            .any(|participant| {
+                participant.actor_kind == ActorKind::Bot
+                    && owned_bot_ids.contains(&participant.bot_uuid)
+            }))
     }
 
     async fn ensure_collaboration_eligible(
@@ -231,6 +269,30 @@ impl GroupServiceImpl {
         if !self.can_read_group(principal, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Principal has no readable relation to this Group",
+            ));
+        }
+        Ok(group)
+    }
+
+    async fn load_group_detail_for_caller(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+        group_id: &str,
+    ) -> Result<DomainGroup, ApplicationError> {
+        let group = self
+            .groups
+            .try_get(group_id)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "group_not_found",
+                    format!("Group '{group_id}' was not found"),
+                )
+            })?;
+        if !self.can_read_group_detail(caller, &group).await? {
+            return Err(ApplicationError::forbidden(
+                "Neither the Human Actor nor an owned Bot is a Group Participant",
             ));
         }
         Ok(group)
@@ -477,12 +539,7 @@ impl GroupServiceImpl {
         }
 
         let principal_actor_id = principal.actor_id();
-        if let Principal::Human(human) = &principal
-            && request
-                .participants
-                .iter()
-                .any(|participant| participant.actor_id == principal_actor_id)
-        {
+        if let Principal::Human(human) = &principal {
             self.registry
                 .ensure_human_actor(&human.subject.id, &human_display_name(human))
                 .await
@@ -495,16 +552,7 @@ impl GroupServiceImpl {
             }),
             Principal::Bot(_) => None,
         };
-        let principal_is_participant = request
-            .participants
-            .iter()
-            .any(|participant| participant.actor_id == principal_actor_id)
-            || request.driver_bot_uuid == principal_actor_id;
-        let originator = if principal_is_participant {
-            principal_actor_id.clone()
-        } else {
-            request.driver_bot_uuid.clone()
-        };
+        let originator = principal_actor_id.clone();
         let (strategy, routing_policy, state_machine) =
             map_create_collaboration(request.collaboration.clone());
         let lead_role = strategy.lead_role();
@@ -876,11 +924,12 @@ impl GroupServiceImpl {
 
 #[async_trait]
 impl GroupService for GroupServiceImpl {
-    async fn list_bot_groups(
+    async fn list_groups(
         &self,
-        command: ListBotGroups,
+        command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
-        self.authorize_bot_resource(&command.principal, &command.bot_uuid)
+        let view_actor_id = self
+            .resolve_view_actor(&command.caller, command.view_bot_id.as_deref())
             .await?;
         if command.limit == 0 || command.limit > 100 {
             return Err(ApplicationError::invalid(
@@ -897,7 +946,7 @@ impl GroupService for GroupServiceImpl {
 
         let direct = self
             .groups
-            .try_find_by_participant(&command.bot_uuid)
+            .try_find_by_participant(&view_actor_id)
             .await
             .map_err(map_service_error)?
             .into_iter()
@@ -905,7 +954,7 @@ impl GroupService for GroupServiceImpl {
             .collect::<HashMap<_, _>>();
         let session_group_ids = self
             .sessions
-            .list_group_ids_by_session_participant(&command.bot_uuid)
+            .list_group_ids_by_session_participant(&view_actor_id)
             .await
             .map_err(|error| ApplicationError::internal(error.to_string()))?;
         let mut related = direct;
@@ -973,7 +1022,7 @@ impl GroupService for GroupServiceImpl {
         let mut items = Vec::with_capacity(page.len());
         for (group, membership) in page {
             items.push(
-                self.project_summary(group, &command.bot_uuid, membership)
+                self.project_summary(group, &view_actor_id, membership)
                     .await?,
             );
         }
@@ -993,27 +1042,29 @@ impl GroupService for GroupServiceImpl {
         &self,
         command: CreateGroup,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         match command.group {
             CreateGroupSpec::Collaboration(request) => Ok(CreateGroupOutcome {
                 group: self
-                    .create_collaboration(command.principal, request)
+                    .create_collaboration(principal, request)
                     .await?,
                 created: true,
             }),
             CreateGroupSpec::DirectMessage(request) => {
-                self.create_dm(command.principal, request).await
+                self.create_dm(principal, request).await
             }
         }
     }
 
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError> {
         let group = self
-            .load_readable_group(&query.principal, &query.group_id)
+            .load_group_detail_for_caller(&query.caller, &query.group_id)
             .await?;
         self.project_detail(group).await
     }
 
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         if command.patch.is_empty() {
             return Err(ApplicationError::invalid(
                 "invalid_request",
@@ -1021,7 +1072,7 @@ impl GroupService for GroupServiceImpl {
             ));
         }
         let mut group = self
-            .load_manageable_group(&command.principal, &command.group_id)
+            .load_manageable_group(&principal, &command.group_id)
             .await?;
         if group.group_kind == GroupKind::Dm {
             if command.patch.delivery_policy.is_some()
@@ -1102,6 +1153,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         let Some(group) = self
             .groups
             .try_get(&command.group_id)
@@ -1122,7 +1174,7 @@ impl GroupService for GroupServiceImpl {
                 deleted: false,
             });
         };
-        if !Self::can_manage_group(&command.principal, &group) {
+        if !Self::can_manage_group(&principal, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal cannot delete the group",
             ));
@@ -1139,7 +1191,7 @@ impl GroupService for GroupServiceImpl {
         let result = self
             .management
             .delete_group(GroupDeleteCommand {
-                caller_actor_id: command.principal.actor_id(),
+                caller_actor_id: principal.actor_id(),
                 group_id: command.group_id,
             })
             .await
@@ -1163,10 +1215,11 @@ impl GroupService for GroupServiceImpl {
         &self,
         command: AddGroupParticipant,
     ) -> Result<V1Participant, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         let group = self
-            .load_readable_group(&command.principal, &command.group_id)
+            .load_readable_group(&principal, &command.group_id)
             .await?;
-        if !Self::can_manage_group(&command.principal, &group) {
+        if !Self::can_manage_group(&principal, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal cannot manage the group",
             ));
@@ -1191,7 +1244,7 @@ impl GroupService for GroupServiceImpl {
         let result = self
             .management
             .add_member(GroupAddMemberCommand {
-                caller_actor_id: Some(command.principal.actor_id()),
+                caller_actor_id: Some(principal.actor_id()),
                 human_actor_id,
                 group_id: command.group_id.clone(),
                 bot_id,
@@ -1206,26 +1259,32 @@ impl GroupService for GroupServiceImpl {
         &self,
         command: UpdateGroupParticipant,
     ) -> Result<V1Participant, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         let group = self
-            .load_readable_group(&command.principal, &command.group_id)
+            .load_readable_group(&principal, &command.group_id)
             .await?;
         // Design §8.7: the target Actor may update its own participant mode
         // (self-service) in addition to the driver/originator/manager path.
-        let is_self = command.principal.actor_id() == command.actor_id;
-        if !is_self && !Self::can_manage_group(&command.principal, &group) {
+        let is_self = principal.actor_id() == command.actor_id;
+        if !is_self && !Self::can_manage_group(&principal, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal cannot manage the group",
             ));
         }
-        self.management
-            .update_participant_mode(GroupParticipantModeCommand {
-                caller_actor_id: command.principal.actor_id(),
-                group_id: command.group_id.clone(),
-                actor_id: command.actor_id.clone(),
-                mode: command.mode,
-            })
+        let target = self.load_bot(&command.actor_id).await?;
+        if !command.mode.is_valid_for(target.actor_kind) {
+            return Err(ApplicationError::invalid(
+                "invalid_participant_mode",
+                format!(
+                    "Participant mode '{:?}' is invalid for actor kind '{:?}'",
+                    command.mode, target.actor_kind
+                ),
+            ));
+        }
+        self.groups
+            .update_participant_mode(&command.group_id, &command.actor_id, command.mode)
             .await
-            .map_err(map_group_error)?;
+            .map_err(map_service_error)?;
         // Reload the group and project the updated participant via the shared
         // domain Participant -> V1 Participant projection used by get/create.
         let group = self
@@ -1256,15 +1315,16 @@ impl GroupService for GroupServiceImpl {
         &self,
         command: DeleteGroupParticipant,
     ) -> Result<DeleteResult, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         let group = self
-            .load_readable_group(&command.principal, &command.group_id)
+            .load_readable_group(&principal, &command.group_id)
             .await?;
         // Design §8.7: the target Actor may leave the group (self-service
         // delete) in addition to the driver/originator/manager path. The legacy
         // `remove_member` still rejects driver/originator removal, preserving
         // the role invariant; non-driver self-leave proceeds.
-        let is_self = command.principal.actor_id() == command.actor_id;
-        if !is_self && !Self::can_manage_group(&command.principal, &group) {
+        let is_self = principal.actor_id() == command.actor_id;
+        if !is_self && !Self::can_manage_group(&principal, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal cannot manage the group",
             ));
@@ -1277,7 +1337,7 @@ impl GroupService for GroupServiceImpl {
         match self
             .management
             .remove_member(GroupRemoveMemberCommand {
-                caller_actor_id: Some(command.principal.actor_id()),
+                caller_actor_id: Some(principal.actor_id()),
                 group_id: command.group_id.clone(),
                 bot_id: command.actor_id.clone(),
             })

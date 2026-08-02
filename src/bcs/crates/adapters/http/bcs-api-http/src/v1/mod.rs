@@ -1,4 +1,5 @@
 pub mod common;
+pub mod gateway_principal;
 pub mod internal;
 pub mod openapi;
 

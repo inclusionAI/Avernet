@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::{ApplicationError, Principal};
+use super::{ApplicationError, AuthenticatedCaller};
 
 pub use bcs_domain::{ActorKind, ParticipantMode, ParticipantRole};
 
@@ -232,9 +232,9 @@ impl<T> Page<T> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ListBotGroups {
-    pub principal: Principal,
-    pub bot_uuid: String,
+pub struct ListGroups {
+    pub caller: AuthenticatedCaller,
+    pub view_bot_id: Option<String>,
     pub offset: u64,
     pub limit: u64,
     pub q: Option<String>,
@@ -274,7 +274,7 @@ pub enum CreateGroupSpec {
 
 #[derive(Debug, Clone)]
 pub struct CreateGroup {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group: CreateGroupSpec,
 }
 
@@ -286,7 +286,7 @@ pub struct CreateGroupOutcome {
 
 #[derive(Debug, Clone)]
 pub struct GetGroup {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
 }
 
@@ -309,20 +309,20 @@ impl GroupPatch {
 
 #[derive(Debug, Clone)]
 pub struct UpdateGroup {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub patch: GroupPatch,
 }
 
 #[derive(Debug, Clone)]
 pub struct DeleteGroup {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct AddGroupParticipant {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub actor_id: String,
     pub role: ParticipantRole,
@@ -330,7 +330,7 @@ pub struct AddGroupParticipant {
 
 #[derive(Debug, Clone)]
 pub struct UpdateGroupParticipant {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub actor_id: String,
     pub mode: ParticipantMode,
@@ -338,7 +338,7 @@ pub struct UpdateGroupParticipant {
 
 #[derive(Debug, Clone)]
 pub struct DeleteGroupParticipant {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub actor_id: String,
 }
@@ -350,9 +350,9 @@ pub struct DeleteResult {
 
 #[async_trait]
 pub trait GroupService: Send + Sync {
-    async fn list_bot_groups(
+    async fn list_groups(
         &self,
-        command: ListBotGroups,
+        command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError>;
 
     async fn create(&self, command: CreateGroup) -> Result<GroupDetail, ApplicationError>;

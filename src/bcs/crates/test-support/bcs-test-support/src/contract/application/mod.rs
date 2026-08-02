@@ -9,6 +9,31 @@ use bcs_service_api::{
     OrganizationMemberAuth, ServiceError, SystemMessageService, WorkbenchSessionService,
     WorkerProfileService,
 };
+use bcs_service_api::application::v1::{
+    AuthenticatedBotIdentity, AuthenticatedCaller, BotService, QueryBots,
+};
+
+pub async fn bot_service_contract_tests<T: BotService + ?Sized>(svc: &T) {
+    let error = svc
+        .query(QueryBots {
+            caller: AuthenticatedCaller {
+                tenant: "contract".into(),
+                user: None,
+                bot: Some(AuthenticatedBotIdentity {
+                    bot_uuid: "contract-bot".into(),
+                    owner_id: "owner".into(),
+                    app_id: 1,
+                    agent_code: "contract-agent".into(),
+                }),
+                app: None,
+                access_key: None,
+            },
+            bot_ids: Vec::new(),
+        })
+        .await
+        .expect_err("Bot control-plane service rejects callers without User");
+    assert_eq!(error.code(), "forbidden");
+}
 
 pub async fn a2a_chat_service_contract_tests<T: A2aChatService + ?Sized>(_svc: &T) {}
 

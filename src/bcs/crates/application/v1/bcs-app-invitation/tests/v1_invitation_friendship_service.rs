@@ -5,7 +5,6 @@
 //! / FriendCore / FriendRequestCore / RelationCore), mirroring the sibling
 //! `bcs-app-group` / `bcs-app-session` test harnesses.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,10 +20,11 @@ use bcs_relation::RelationCore;
 use bcs_service_api::application::invite::InviteService;
 use bcs_service_api::application::session::{CreateOrReactivateCommand, SessionManagementService};
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedUser, CreateBotFriendRequest,
+    AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedCaller,
+    AuthenticatedUserIdentity, CreateBotFriendRequest,
     CreateGroupInvitation, CreateSessionInvitation, DeleteResult, FriendshipService,
     FriendRequestDirection, FriendRequestStatus, Friendship, InvitationService,
-    InvitationState, InvitationTargetType, ListBotFriendRequests, ListBotFriendships, Page, Principal,
+    InvitationState, InvitationTargetType, ListBotFriendRequests, ListBotFriendships, Page,
     RejectFriendRequest, DeleteBotFriendship,
 };
 use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
@@ -52,9 +52,7 @@ struct Fixture {
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
     friends: Arc<FriendCore>,
-    friend_requests: Arc<FriendRequestCore>,
     sessions: Arc<SessionManagementServiceImpl>,
-    relation: Arc<RelationCore>,
     invite: Arc<dyn InviteService>,
 }
 
@@ -97,11 +95,9 @@ impl Fixture {
             groups.clone(),
             sessions.clone(),
             bots.clone(),
-            relation.clone(),
             invite.clone(),
             SECRET.to_vec(),
             InvitationFriendshipServiceConfig {
-                relation_env: "dev".to_string(),
                 default_ttl_seconds: 3600,
             },
         );
@@ -110,9 +106,7 @@ impl Fixture {
             groups,
             bots,
             friends,
-            friend_requests,
             sessions,
-            relation,
             invite,
         }
     }
@@ -131,11 +125,9 @@ impl Fixture {
             self.groups.clone(),
             self.sessions.clone(),
             self.bots.clone(),
-            self.relation.clone(),
             self.invite.clone(),
             SECRET.to_vec(),
             InvitationFriendshipServiceConfig {
-                relation_env: "dev".to_string(),
                 default_ttl_seconds: 3600,
             },
         )
@@ -153,6 +145,7 @@ impl Fixture {
     }
 
     async fn add_bot_with_visibility(&self, bot_uuid: &str, visibility: &str) {
+        let owner = Self::bot_owner(bot_uuid);
         self.bots
             .register(
                 bot_uuid.to_string(),
@@ -164,6 +157,10 @@ impl Fixture {
             )
             .await
             .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, owner, true)
+            .await
+            .expect("assign test Bot owner");
     }
 
     async fn store_group(&self, group_id: &str, driver: &str) {
@@ -172,7 +169,7 @@ impl Fixture {
             driver,
             vec![Participant::bot(driver, ParticipantRole::Driver)],
         );
-        group.originator = Some(driver.to_string());
+        group.originator = Some(Self::human_actor_id("staff-1"));
         group.label = Some(group_id.to_string());
         group.group_strategy = GroupStrategy::Chat;
         self.groups.upsert(group).await.expect("store group");
@@ -191,7 +188,7 @@ impl Fixture {
             driver,
             vec![Participant::bot(driver, ParticipantRole::Driver)],
         );
-        group.originator = Some(driver.to_string());
+        group.originator = Some(Self::human_actor_id("staff-1"));
         group.label = Some(group_id.to_string());
         group.group_strategy = GroupStrategy::Chat;
         group.status = status;
@@ -209,7 +206,7 @@ impl Fixture {
                 Participant::bot(other, ParticipantRole::Consultant),
             ],
         );
-        group.originator = Some(driver.to_string());
+        group.originator = Some(Self::human_actor_id("staff-1"));
         group.label = Some(group_id.to_string());
         group.group_strategy = GroupStrategy::Chat;
         group.group_kind = GroupKind::Dm;
@@ -252,34 +249,63 @@ impl Fixture {
         outcome.session.id
     }
 
-    fn bot_principal(bot_uuid: &str) -> Principal {
-        Principal::bot(bot_uuid, "dev", BTreeSet::new())
+    fn bot_owner(bot_uuid: &str) -> &str {
+        match bot_uuid {
+            "bot-a" => "staff-1",
+            "bot-b" => "staff-2",
+            "bot-c" => "staff-3",
+            "bot-x" => "staff-x",
+            _ => "staff-owner",
+        }
     }
 
-    fn human_principal(subject_id: &str) -> Principal {
-        Principal::human(
-            AuthenticatedUser {
+    fn bot_principal(bot_uuid: &str) -> AuthenticatedCaller {
+        Self::human_principal(Self::bot_owner(bot_uuid))
+    }
+
+    fn human_principal(subject_id: &str) -> AuthenticatedCaller {
+        AuthenticatedCaller {
+            tenant: "dev".into(),
+            user: Some(AuthenticatedUserIdentity {
                 id: subject_id.to_string(),
                 username: subject_id.to_string(),
                 display_name: None,
                 full_name: None,
-            },
-            "dev",
-            BTreeSet::new(),
-        )
+            }),
+            bot: None,
+            app: None,
+            access_key: None,
+        }
     }
 
-    fn human_principal_with_display(subject_id: &str, display_name: &str) -> Principal {
-        Principal::human(
-            AuthenticatedUser {
+    fn human_principal_with_display(subject_id: &str, display_name: &str) -> AuthenticatedCaller {
+        AuthenticatedCaller {
+            tenant: "dev".into(),
+            user: Some(AuthenticatedUserIdentity {
                 id: subject_id.to_string(),
                 username: subject_id.to_string(),
                 display_name: Some(display_name.to_string()),
                 full_name: None,
-            },
-            "dev",
-            BTreeSet::new(),
-        )
+            }),
+            bot: None,
+            app: None,
+            access_key: None,
+        }
+    }
+
+    fn bot_only_caller(bot_uuid: &str) -> AuthenticatedCaller {
+        AuthenticatedCaller {
+            tenant: "dev".into(),
+            user: None,
+            bot: Some(bcs_service_api::application::v1::AuthenticatedBotIdentity {
+                bot_uuid: bot_uuid.into(),
+                owner_id: "staff-1".into(),
+                app_id: 1,
+                agent_code: "agent".into(),
+            }),
+            app: None,
+            access_key: None,
+        }
     }
 
     /// Actor ID legacy `ensure_human` records for the given staff_no. Used in
@@ -360,7 +386,7 @@ async fn create_group_invitation_manager_ok() {
     let invitation = fx
         .service
         .create_group_invitation(CreateGroupInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             group_id: "grp-1".to_string(),
             expires_in_seconds: Some(1800),
         })
@@ -390,7 +416,7 @@ async fn create_group_invitation_non_manager_forbidden() {
     let error = fx
         .service
         .create_group_invitation(CreateGroupInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            caller: Fixture::bot_principal("bot-b"),
             group_id: "grp-1".to_string(),
             expires_in_seconds: None,
         })
@@ -427,7 +453,7 @@ async fn create_group_invitation_dm_group_rejected() {
     let error = fx
         .service
         .create_group_invitation(CreateGroupInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             group_id: "dm-1".to_string(),
             expires_in_seconds: None,
         })
@@ -452,7 +478,7 @@ async fn create_session_invitation_manager_ok() {
     let invitation = fx
         .service
         .create_session_invitation(CreateSessionInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             session_id: session_id.clone(),
             expires_in_seconds: None,
         })
@@ -480,7 +506,7 @@ async fn create_group_invitation_inactive_group_rejected() {
     let error = fx
         .service
         .create_group_invitation(CreateGroupInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             group_id: "grp-1".to_string(),
             expires_in_seconds: None,
         })
@@ -508,7 +534,7 @@ async fn create_session_invitation_dm_parent_group_rejected() {
     let error = fx
         .service
         .create_session_invitation(CreateSessionInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             session_id: session_id.clone(),
             expires_in_seconds: None,
         })
@@ -537,7 +563,7 @@ async fn create_session_invitation_inactive_parent_group_rejected() {
     let error = fx
         .service
         .create_session_invitation(CreateSessionInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             session_id,
             expires_in_seconds: None,
         })
@@ -563,7 +589,7 @@ async fn accept_invitation_human_joins_group() {
     let invitation = fx
         .service
         .create_group_invitation(CreateGroupInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             group_id: "grp-1".to_string(),
             expires_in_seconds: None,
         })
@@ -573,7 +599,7 @@ async fn accept_invitation_human_joins_group() {
     let result = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("staff-1"),
+            caller: Fixture::human_principal("staff-1"),
             token: invitation.token,
         })
         .await
@@ -612,7 +638,7 @@ async fn accept_invitation_human_display_name_provides_nick_name() {
     let invitation = fx
         .service
         .create_group_invitation(CreateGroupInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             group_id: "grp-1".to_string(),
             expires_in_seconds: None,
         })
@@ -622,7 +648,7 @@ async fn accept_invitation_human_display_name_provides_nick_name() {
     let result = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal_with_display("staff-1", "Alice"),
+            caller: Fixture::human_principal_with_display("staff-1", "Alice"),
             token: invitation.token,
         })
         .await
@@ -640,11 +666,9 @@ async fn accept_invitation_human_display_name_provides_nick_name() {
 }
 
 #[tokio::test]
-async fn accept_invitation_bot_principal_rejected() {
-    // Vcj6H: a Bot Principal may not accept invitations at all. The V1 facade
-    // rejects it up-front with `forbidden`, before any legacy `join_*` side
-    // effects. This naturally subsumes the removed `bot_uuid` field: there is
-    // no way for a Bot Principal to masquerade as another identity.
+async fn accept_invitation_caller_without_user_rejected() {
+    // Vcj6H: a valid Caller without User may not accept invitations. In
+    // particular, Bot owner_id is not a Human fallback.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
     fx.add_bot("bot-b").await;
@@ -653,7 +677,7 @@ async fn accept_invitation_bot_principal_rejected() {
     let invitation = fx
         .service
         .create_group_invitation(CreateGroupInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             group_id: "grp-1".to_string(),
             expires_in_seconds: None,
         })
@@ -663,11 +687,11 @@ async fn accept_invitation_bot_principal_rejected() {
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::bot_principal("bot-b"),
+            caller: Fixture::bot_only_caller("bot-b"),
             token: invitation.token,
         })
         .await
-        .expect_err("bot principal rejected");
+        .expect_err("caller without User rejected");
 
     assert!(
         matches!(error, ApplicationError::Forbidden(_)),
@@ -705,7 +729,7 @@ async fn accept_invitation_expired_is_gone() {
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("staff-1"),
+            caller: Fixture::human_principal("staff-1"),
             token: expired,
         })
         .await
@@ -734,7 +758,7 @@ async fn accept_invitation_legacy_token_without_target_type_rejected() {
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("staff-1"),
+            caller: Fixture::human_principal("staff-1"),
             token: legacy,
         })
         .await
@@ -752,7 +776,7 @@ async fn accept_invitation_already_member_is_idempotent() {
     let invitation = fx
         .service
         .create_group_invitation(CreateGroupInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             group_id: "grp-1".to_string(),
             expires_in_seconds: None,
         })
@@ -761,7 +785,7 @@ async fn accept_invitation_already_member_is_idempotent() {
 
     fx.service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("staff-1"),
+            caller: Fixture::human_principal("staff-1"),
             token: invitation.token.clone(),
         })
         .await
@@ -770,7 +794,7 @@ async fn accept_invitation_already_member_is_idempotent() {
     let result = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("staff-1"),
+            caller: Fixture::human_principal("staff-1"),
             token: invitation.token,
         })
         .await
@@ -790,7 +814,7 @@ async fn accept_invitation_session_target_joins() {
     let invitation = fx
         .service
         .create_session_invitation(CreateSessionInvitation {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             session_id: session_id.clone(),
             expires_in_seconds: None,
         })
@@ -800,7 +824,7 @@ async fn accept_invitation_session_target_joins() {
     let result = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("staff-1"),
+            caller: Fixture::human_principal("staff-1"),
             token: invitation.token,
         })
         .await
@@ -849,7 +873,7 @@ async fn accept_invitation_target_group_deleted_returns_invitation_not_found() {
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("staff-1"),
+            caller: Fixture::human_principal("staff-1"),
             token,
         })
         .await
@@ -889,7 +913,7 @@ async fn accept_invitation_target_session_deleted_returns_invitation_not_found()
     let error = fx
         .service
         .accept_invitation(AcceptInvitation {
-            principal: Fixture::human_principal("staff-1"),
+            caller: Fixture::human_principal("staff-1"),
             token,
         })
         .await
@@ -928,7 +952,7 @@ async fn list_friendships_sorted_desc_with_pagination() {
     let page = fx
         .service
         .list_bot_friendships(ListBotFriendships {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             offset: 0,
             limit: 100,
@@ -944,7 +968,7 @@ async fn list_friendships_sorted_desc_with_pagination() {
     let page_two = fx
         .service
         .list_bot_friendships(ListBotFriendships {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             offset: 1,
             limit: 1,
@@ -965,7 +989,7 @@ async fn list_friendships_non_owner_forbidden() {
     let error = fx
         .service
         .list_bot_friendships(ListBotFriendships {
-            principal: Fixture::bot_principal("bot-x"),
+            caller: Fixture::bot_principal("bot-x"),
             bot_uuid: "bot-a".to_string(),
             offset: 0,
             limit: 10,
@@ -974,6 +998,25 @@ async fn list_friendships_non_owner_forbidden() {
         .expect_err("non-owner forbidden");
 
     assert!(matches!(error, ApplicationError::Forbidden(_)));
+}
+
+#[tokio::test]
+async fn list_friendships_does_not_use_authenticated_bot_owner_as_human() {
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+
+    let error = fx
+        .service
+        .list_bot_friendships(ListBotFriendships {
+            caller: Fixture::bot_only_caller("bot-a"),
+            bot_uuid: "bot-a".to_string(),
+            offset: 0,
+            limit: 10,
+        })
+        .await
+        .expect_err("Bot identity must not supply Human ownership");
+
+    assert_eq!(error.code(), "forbidden");
 }
 
 #[tokio::test]
@@ -989,7 +1032,7 @@ async fn remove_friendship_is_idempotent() {
     let first = fx
         .service
         .delete_bot_friendship(DeleteBotFriendship {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             friend_bot_uuid: "bot-b".to_string(),
         })
@@ -1000,7 +1043,7 @@ async fn remove_friendship_is_idempotent() {
     let second = fx
         .service
         .delete_bot_friendship(DeleteBotFriendship {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             friend_bot_uuid: "bot-b".to_string(),
         })
@@ -1018,7 +1061,7 @@ async fn create_friend_request_bot_self() {
     let request = fx
         .service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
         })
@@ -1040,7 +1083,7 @@ async fn create_friend_request_cannot_add_self() {
     let error = fx
         .service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-a".to_string(),
         })
@@ -1058,7 +1101,7 @@ async fn create_friend_request_duplicate_is_conflict() {
 
     fx.service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
         })
@@ -1068,7 +1111,7 @@ async fn create_friend_request_duplicate_is_conflict() {
     let error = fx
         .service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
         })
@@ -1086,7 +1129,7 @@ async fn create_friend_request_unknown_target_is_not_found() {
     let error = fx
         .service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-ghost".to_string(),
         })
@@ -1105,7 +1148,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
 
     fx.service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
         })
@@ -1114,7 +1157,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
     tokio::time::sleep(Duration::from_millis(25)).await;
     fx.service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-c".to_string(),
         })
@@ -1125,7 +1168,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
     let sent = fx
         .service
         .list_bot_friend_requests(ListBotFriendRequests {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             direction: FriendRequestDirection::Sent,
             status: None,
@@ -1142,7 +1185,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
     let received = fx
         .service
         .list_bot_friend_requests(ListBotFriendRequests {
-            principal: Fixture::bot_principal("bot-b"),
+            caller: Fixture::bot_principal("bot-b"),
             bot_uuid: "bot-b".to_string(),
             direction: FriendRequestDirection::Received,
             status: None,
@@ -1158,7 +1201,7 @@ async fn list_friend_requests_direction_filter_and_sort() {
     let paged = fx
         .service
         .list_bot_friend_requests(ListBotFriendRequests {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             direction: FriendRequestDirection::Sent,
             status: None,
@@ -1186,7 +1229,7 @@ async fn list_bot_friend_requests_propagates_repo_failure_as_internal() {
 
     let error = service
         .list_bot_friend_requests(ListBotFriendRequests {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             direction: FriendRequestDirection::Sent,
             status: None,
@@ -1211,7 +1254,7 @@ async fn accept_friend_request_receiver_ok() {
     let created = fx
         .service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
         })
@@ -1221,7 +1264,7 @@ async fn accept_friend_request_receiver_ok() {
     let accepted = fx
         .service
         .accept_friend_request(AcceptFriendRequest {
-            principal: Fixture::bot_principal("bot-b"),
+            caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id.clone(),
         })
         .await
@@ -1241,7 +1284,7 @@ async fn accept_friend_request_non_receiver_forbidden() {
     let created = fx
         .service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
         })
@@ -1251,7 +1294,7 @@ async fn accept_friend_request_non_receiver_forbidden() {
     let error = fx
         .service
         .accept_friend_request(AcceptFriendRequest {
-            principal: Fixture::bot_principal("bot-c"),
+            caller: Fixture::bot_principal("bot-c"),
             request_id: created.request_id,
         })
         .await
@@ -1269,7 +1312,7 @@ async fn accept_friend_request_cannot_accept_rejected() {
     let created = fx
         .service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
         })
@@ -1278,7 +1321,7 @@ async fn accept_friend_request_cannot_accept_rejected() {
 
     fx.service
         .reject_friend_request(RejectFriendRequest {
-            principal: Fixture::bot_principal("bot-b"),
+            caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id.clone(),
         })
         .await
@@ -1287,7 +1330,7 @@ async fn accept_friend_request_cannot_accept_rejected() {
     let error = fx
         .service
         .accept_friend_request(AcceptFriendRequest {
-            principal: Fixture::bot_principal("bot-b"),
+            caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id,
         })
         .await
@@ -1305,7 +1348,7 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
     let created = fx
         .service
         .create_bot_friend_request(CreateBotFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             to_bot_uuid: "bot-b".to_string(),
         })
@@ -1316,7 +1359,7 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
     let sender_err = fx
         .service
         .reject_friend_request(RejectFriendRequest {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             request_id: created.request_id.clone(),
         })
         .await
@@ -1326,7 +1369,7 @@ async fn reject_friend_request_receiver_ok_and_sender_forbidden() {
     let rejected = fx
         .service
         .reject_friend_request(RejectFriendRequest {
-            principal: Fixture::bot_principal("bot-b"),
+            caller: Fixture::bot_principal("bot-b"),
             request_id: created.request_id,
         })
         .await
@@ -1346,7 +1389,7 @@ async fn friendship_page_shape_is_identity_projected() {
     let page: Page<Friendship> = fx
         .service
         .list_bot_friendships(ListBotFriendships {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             offset: 0,
             limit: 10,
@@ -1362,7 +1405,7 @@ async fn friendship_page_shape_is_identity_projected() {
     let del = fx
         .service
         .delete_bot_friendship(DeleteBotFriendship {
-            principal: Fixture::bot_principal("bot-a"),
+            caller: Fixture::bot_principal("bot-a"),
             bot_uuid: "bot-a".to_string(),
             friend_bot_uuid: "bot-b".to_string(),
         })

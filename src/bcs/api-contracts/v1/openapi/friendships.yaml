@@ -12,7 +12,7 @@ ListFriendshipsPath:
     operationId: list_bot_friendships
     summary: List a Bot's friendships.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/BotUuidPath
       - name: offset
@@ -77,7 +77,7 @@ FriendshipPath:
     operationId: delete_bot_friendship
     summary: Remove a friendship symmetrically and idempotently.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/BotUuidPath
       - $ref: ../shared.yaml#/FriendBotUuidPath
@@ -128,7 +128,7 @@ BotFriendRequestsPath:
     operationId: create_bot_friend_request
     summary: Send a friend request from the path Bot to a target Bot.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/BotUuidPath
     requestBody:
@@ -194,7 +194,7 @@ BotFriendRequestsPath:
     operationId: list_bot_friend_requests
     summary: List friend requests sent by or received by a Bot.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/BotUuidPath
       - name: offset
@@ -267,7 +267,7 @@ AcceptFriendRequestPath:
     operationId: accept_friend_request
     summary: Accept a friend request as the receiver; idempotent after acceptance.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/FriendRequestIdPath
     responses:
@@ -326,7 +326,7 @@ RejectFriendRequestPath:
     operationId: reject_friend_request
     summary: Reject a friend request as the receiver; idempotent after rejection.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/FriendRequestIdPath
     responses:

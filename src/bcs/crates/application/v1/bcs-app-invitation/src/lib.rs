@@ -1,7 +1,7 @@
 //! Versioned Invitation + Friendship application facade for the BCN V1 API.
 //!
 //! Implements both [`InvitationService`] and [`FriendshipService`]. The facade
-//! owns Principal-based resource authorization and V1 projections while
+//! owns Caller-based resource authorization and V1 projections while
 //! delegating friendship/friend-request side effects to the legacy
 //! [`FriendCoreService`] / [`FriendRequestCoreService`] cores and invitation
 //! accept-join side effects to the legacy [`InviteService`]
@@ -16,8 +16,8 @@
 //! - V1 `create_*_invitation` mirrors the legacy DM/active-group guards but
 //!   mints tokens directly (the legacy `create_*_invite_token` paths are not
 //!   reused because they emit legacy join URLs).
-//! - Accept pivots to the legacy Human-only join path. A Bot Principal is
-//!   rejected outright; a Human Principal's `staff_no` is forwarded to
+//! - Accept pivots to the legacy Human-only join path. A Caller without User
+//!   is rejected; the User's subject id is forwarded to
 //!   `InviteService::join_*_by_invite`, which `ensure_human`s the actor and
 //!   creates a Human Participant (Consultant role, Present mode). This matches
 //!   the legacy invite-link accept semantics exactly.
@@ -36,22 +36,18 @@ use bcs_service_api::application::v1::{
     CreateGroupInvitation, CreateSessionInvitation, DeleteBotFriendship, DeleteResult,
     FriendshipService, InvitationAcceptResult, InvitationService, InvitationTargetType,
     Invitation, ListBotFriendRequests, ListBotFriendships, Page, Principal,
-    RejectFriendRequest,
+    RejectFriendRequest, require_authenticated_user, require_human,
 };
 use bcs_service_api::{
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
     FriendRequest as DomainFriendRequest, FriendRequestDirection as DomainFriendRequestDirection,
     Friendship as DomainFriendship, Group as DomainGroup, GroupCoreService, GroupKind,
     GroupStatus, GroupStrategy, InviteService, InviteUseCaseError, JoinByInviteCommand,
-    ParticipantRole, RegisteredBot, RelationCoreService,
-    ServiceError, SessionManagementService, SessionUseCaseError,
+    ParticipantRole, RegisteredBot, ServiceError, SessionManagementService, SessionUseCaseError,
 };
 
 #[derive(Debug, Clone)]
 pub struct InvitationFriendshipServiceConfig {
-    /// Relation environment tag used for creator-edge authorization, mirroring
-    /// the sibling Group V1 facade's `relation_env`.
-    pub relation_env: String,
     /// Default invitation token lifetime in seconds when the caller does not
     /// supply `expires_in_seconds`.
     pub default_ttl_seconds: u64,
@@ -71,7 +67,6 @@ pub struct InvitationFriendshipServiceImpl {
     groups: Arc<dyn GroupCoreService>,
     sessions: Arc<dyn SessionManagementService>,
     registry: Arc<dyn BotRegistryCoreService>,
-    relation: Arc<dyn RelationCoreService>,
     invite: Arc<dyn InviteService>,
     token_secret: Vec<u8>,
     config: InvitationFriendshipServiceConfig,
@@ -85,7 +80,6 @@ impl InvitationFriendshipServiceImpl {
         groups: Arc<dyn GroupCoreService>,
         sessions: Arc<dyn SessionManagementService>,
         registry: Arc<dyn BotRegistryCoreService>,
-        relation: Arc<dyn RelationCoreService>,
         invite: Arc<dyn InviteService>,
         token_secret: Vec<u8>,
         config: InvitationFriendshipServiceConfig,
@@ -96,7 +90,6 @@ impl InvitationFriendshipServiceImpl {
             groups,
             sessions,
             registry,
-            relation,
             invite,
             token_secret,
             config,
@@ -118,43 +111,20 @@ impl InvitationFriendshipServiceImpl {
             })
     }
 
-    /// Principal must be the Bot itself or a Human that owns it (via
-    /// `created_by` or a creator relation edge). Mirrors
-    /// `bcs-app-group::authorize_bot_resource`.
+    /// The authenticated User must own the Bot through exact `created_by`.
     async fn authorize_bot_resource(
         &self,
-        principal: &Principal,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         bot_uuid: &str,
     ) -> Result<(), ApplicationError> {
-        match principal {
-            Principal::Bot(bot) if bot.bot_uuid == bot_uuid => {
-                self.load_bot(bot_uuid).await?;
-                Ok(())
-            }
-            Principal::Bot(_) => Err(ApplicationError::forbidden(
-                "Bot Principal may act only on its own bot_uuid",
-            )),
-            Principal::Human(human) => {
-                let bot = self.load_bot(bot_uuid).await?;
-                if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                    return Ok(());
-                }
-                let creator_edge = self
-                    .relation
-                    .get_edge(
-                        &principal.actor_id(),
-                        bot_uuid,
-                        &self.config.relation_env,
-                    )
-                    .await
-                    .map_err(map_service_error)?;
-                if creator_edge.is_some_and(|edge| edge.is_creator) {
-                    return Ok(());
-                }
-                Err(ApplicationError::forbidden(format!(
-                    "Human Principal cannot manage Bot '{bot_uuid}'"
-                )))
-            }
+        let user = require_authenticated_user(caller)?;
+        let bot = self.load_bot(bot_uuid).await?;
+        if bot.created_by.as_deref() == Some(user.id.as_str()) {
+            Ok(())
+        } else {
+            Err(ApplicationError::forbidden(format!(
+                "Authenticated User cannot manage Bot '{bot_uuid}'"
+            )))
         }
     }
 
@@ -225,10 +195,10 @@ impl InvitationFriendshipServiceImpl {
 
     async fn ensure_bot_resource(
         &self,
-        principal: &Principal,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         bot_uuid: &str,
     ) -> Result<(), ApplicationError> {
-        self.authorize_bot_resource(principal, bot_uuid).await
+        self.authorize_bot_resource(caller, bot_uuid).await
     }
 }
 
@@ -238,8 +208,9 @@ impl InvitationService for InvitationFriendshipServiceImpl {
         &self,
         command: CreateGroupInvitation,
     ) -> Result<Invitation, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         let group = self
-            .load_manageable_group(&command.principal, &command.group_id)
+            .load_manageable_group(&principal, &command.group_id)
             .await?;
         // VaGQI: DM (DirectMessage) groups are pairwise (participant_count=2);
         // minting an invitation + accept would add a third participant. Mirror
@@ -269,6 +240,7 @@ impl InvitationService for InvitationFriendshipServiceImpl {
         &self,
         command: CreateSessionInvitation,
     ) -> Result<Invitation, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         let session = self
             .sessions
             .get(&command.session_id)
@@ -293,7 +265,7 @@ impl InvitationService for InvitationFriendshipServiceImpl {
                     format!("Group '{}' was not found", session.group_id),
                 )
             })?;
-        if !Self::can_manage_group(&command.principal, &group) {
+        if !Self::can_manage_group(&principal, &group) {
             return Err(ApplicationError::forbidden(
                 "Only the Group originator, driver, or manager may manage Sessions",
             ));
@@ -335,36 +307,15 @@ impl InvitationService for InvitationFriendshipServiceImpl {
                 "legacy invitation token without target_type is not supported by V1",
             )
         })?;
-        // Vcj6H: pivot to legacy Human-only accept. A Bot Principal cannot
-        // accept invitations regardless of `bot_uuid` (which is no longer on
-        // the request). The legacy `join_*_by_invite` path enforces this via
-        // `ensure_actor_is_human`, which rejects Bot actors; the V1 facade
-        // mirrors that up-front so the Bot case never reaches the legacy path.
-        let (staff_no, nick_name) = match &command.principal {
-            Principal::Bot(_) => {
-                return Err(ApplicationError::forbidden(
-                    "Only Human Principals can accept invitations",
-                ));
-            }
-            Principal::Human(human) => {
-                let nick = human
-                    .subject
-                    .display_name
-                    .clone()
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| {
-                        if human.subject.username.is_empty() {
-                            None
-                        } else {
-                            Some(human.subject.username.clone())
-                        }
-                    });
-                (human.subject.id.clone(), nick)
-            }
-        };
+        let user = require_authenticated_user(&command.caller)?;
+        let nick_name = user
+            .display_name
+            .clone()
+            .filter(|value| !value.is_empty())
+            .or_else(|| (!user.username.is_empty()).then(|| user.username.clone()));
         let join_command = JoinByInviteCommand {
             token: command.token.clone(),
-            staff_no,
+            staff_no: user.id.clone(),
             nick_name,
         };
         let result = match target_type {
@@ -395,7 +346,7 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         &self,
         command: ListBotFriendships,
     ) -> Result<Page<Friendship>, ApplicationError> {
-        self.ensure_bot_resource(&command.principal, &command.bot_uuid)
+        self.ensure_bot_resource(&command.caller, &command.bot_uuid)
             .await?;
         if command.limit == 0 || command.limit > 100 {
             return Err(ApplicationError::invalid(
@@ -425,12 +376,12 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         // deletion ("Principal cannot manage either friendship endpoint").
         // Try the primary bot_uuid first; fall back to the friend endpoint.
         match self
-            .ensure_bot_resource(&command.principal, &command.bot_uuid)
+            .ensure_bot_resource(&command.caller, &command.bot_uuid)
             .await
         {
             Ok(()) => {}
             Err(_) => {
-                self.ensure_bot_resource(&command.principal, &command.friend_bot_uuid)
+                self.ensure_bot_resource(&command.caller, &command.friend_bot_uuid)
                     .await?;
             }
         }
@@ -446,7 +397,7 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         &self,
         command: CreateBotFriendRequest,
     ) -> Result<FriendRequest, ApplicationError> {
-        self.ensure_bot_resource(&command.principal, &command.bot_uuid)
+        self.ensure_bot_resource(&command.caller, &command.bot_uuid)
             .await?;
         let request = self
             .friend_requests
@@ -460,7 +411,7 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         &self,
         command: ListBotFriendRequests,
     ) -> Result<Page<FriendRequest>, ApplicationError> {
-        self.ensure_bot_resource(&command.principal, &command.bot_uuid)
+        self.ensure_bot_resource(&command.caller, &command.bot_uuid)
             .await?;
         if command.limit == 0 || command.limit > 100 {
             return Err(ApplicationError::invalid(
@@ -513,7 +464,7 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
             .map_err(map_service_error)?;
         // Only the receiver may accept; this also covers Human-owned bots via
         // `authorize_bot_resource`.
-        self.ensure_bot_resource(&command.principal, &request.to_bot)
+        self.ensure_bot_resource(&command.caller, &request.to_bot)
             .await?;
         self.friend_requests
             .accept_request(&command.request_id)
@@ -536,7 +487,7 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
             .get_request(&command.request_id)
             .await
             .map_err(map_service_error)?;
-        self.ensure_bot_resource(&command.principal, &request.to_bot)
+        self.ensure_bot_resource(&command.caller, &request.to_bot)
             .await?;
         self.friend_requests
             .reject_request(&command.request_id)

@@ -1,6 +1,6 @@
 use bcs_service_api::application::v1::{
-    BotParticipantMode, CreateSession, Principal, SessionInput, SessionParticipantInput as ServiceParticipantInput,
-    SessionStatus, UpdateSession,
+    AuthenticatedCaller, BotParticipantMode, CreateSession, SessionInput,
+    SessionParticipantInput as ServiceParticipantInput, SessionStatus, UpdateSession,
 };
 use serde::Deserialize;
 
@@ -61,9 +61,9 @@ pub struct CreateSessionRequest {
 }
 
 impl CreateSessionRequest {
-    pub fn into_command(self, principal: Principal, group_id: String) -> CreateSession {
+    pub fn into_command(self, caller: AuthenticatedCaller, group_id: String) -> CreateSession {
         CreateSession {
-            principal,
+            caller,
             group_id,
             driver_bot_uuid: self.driver_bot_uuid,
             title: self.title,
@@ -85,9 +85,9 @@ pub struct UpdateSessionRequest {
 }
 
 impl UpdateSessionRequest {
-    pub fn into_command(self, principal: Principal, session_id: String) -> UpdateSession {
+    pub fn into_command(self, caller: AuthenticatedCaller, session_id: String) -> UpdateSession {
         UpdateSession {
-            principal,
+            caller,
             session_id,
             title: self.title,
         }
@@ -103,6 +103,8 @@ pub struct UpdateSessionParticipantRequest {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListSessionsQuery {
+    #[serde(default)]
+    pub view_bot_id: Option<String>,
     #[serde(default)]
     pub offset: u64,
     #[serde(default = "default_limit")]
@@ -121,8 +123,7 @@ pub struct ListSessionMessagesQuery {
     pub before: Option<String>,
     #[serde(default = "default_messages_limit")]
     pub limit: u64,
-    /// Optional viewer identity for message history visibility scoping. The
-    /// V1 facade applies Principal-based authz; see `ListSessionMessages`.
+    /// Optional viewer identity for message history visibility scoping.
     #[serde(default)]
     pub view_bot_id: Option<String>,
 }

@@ -5,11 +5,14 @@
 - Versioned `/openapi/v1/**` and `/internal/v1/**` HTTP delivery boundaries.
 - Request/response DTO translation and the common response envelope.
 - An injectable Gateway Principal verification boundary.
+- A preparatory V1 Gateway wire projection and HS256 token verifier that
+  returns a complete, secret-free authenticated caller.
 
 ## Consumes
 
 - `bcs-service-api::application::v1` contracts.
 - HTTP framework crates such as `axum`.
+- JWT, time, and serialization utilities used only by the V1 delivery adapter.
 
 ## Allowed dependencies
 
@@ -26,15 +29,16 @@
 
 ## Configuration
 
-- Bootstrap injects V1 Application services and a Principal verifier.
+- Production bootstrap does not mount this crate yet.
 - The adapter must not read environment variables or select a production
   Principal trust mechanism.
 
 ## Runtime ownership
 
-This crate owns HTTP parsing, versioned wire DTOs, request IDs, envelopes, and
-HTTP error mapping. Resource authorization and business policy remain in V1
-Application services.
+This crate owns HTTP parsing, versioned wire DTOs, Gateway token verification,
+request IDs, envelopes, and HTTP error mapping. Header extraction, production
+trust selection, router mounting, resource authorization, Actor selection, and
+business policy remain outside this preparatory verifier slice.
 
 ## Tests
 

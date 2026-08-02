@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::{ApplicationError, Principal};
+use super::{ApplicationError, AuthenticatedCaller};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -34,7 +34,7 @@ pub struct SessionMessage {
 
 #[derive(Debug, Clone)]
 pub struct ListSessionMessages {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub session_id: String,
     /// Opaque composite cursor for cursor-based pagination (VYQHI). Encoded
     /// by the V1 facade as `"created_at:session_seq"` (e.g. `"1234567890:42"`)
@@ -43,11 +43,10 @@ pub struct ListSessionMessages {
     /// previous response's `next_cursor`.
     pub before: Option<String>,
     pub limit: u64,
-    /// Optional viewer identity for message history visibility scoping. The
-    /// V1 facade applies Principal-based authz: a Bot Principal may omit
-    /// (auto-derives self) or pass self; a Human Principal may omit (manager
-    /// god-view, no cutoff), pass `"human_<staff_no>"` for self cutoff, or
-    /// pass an owned Bot's UUID (ownership verified via `is_owned_bot`).
+    /// Optional viewer identity for message history visibility scoping. Omit
+    /// for the authenticated User's `human_<id>` Participant view, explicitly
+    /// pass that same Human Actor ID, or pass an exact-`created_by` owned Bot.
+    /// The selected Actor must be a Session Participant.
     pub view_bot_id: Option<String>,
 }
 

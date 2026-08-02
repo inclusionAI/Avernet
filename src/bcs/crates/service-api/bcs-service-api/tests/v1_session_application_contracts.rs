@@ -1,14 +1,28 @@
-use std::collections::BTreeSet;
-
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedUser, BotParticipantMode,
-    CompleteSession, CreateSession, CreateSessionOutcome, DeleteResult, DeleteSession,
+    ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedCaller,
+    AuthenticatedUserIdentity, BotParticipantMode, CompleteSession, CreateSession,
+    CreateSessionOutcome, DeleteResult, DeleteSession,
     DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, MessageSenderKind,
-    Page, ParticipantMode, Principal, SessionCompletionResult, SessionDetail, SessionMessage,
+    Page, ParticipantMode, SessionCompletionResult, SessionDetail, SessionMessage,
     SessionMessageKind, SessionMessagePage, SessionMessageService, SessionParticipant,
     SessionParticipantInput, SessionService, SessionStatus, UpdateSession, UpdateSessionParticipant,
 };
+
+fn human_caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-1".into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
+}
 
 struct NoopSessionService;
 
@@ -91,10 +105,10 @@ fn session_service_is_object_safe() {
 }
 
 #[test]
-fn session_commands_carry_principal_and_no_raw_credentials() {
-    let principal = Principal::bot("bot-1", "tenant-a", BTreeSet::new());
+fn session_commands_carry_caller_and_no_raw_credentials() {
+    let caller = human_caller();
     let create = CreateSession {
-        principal: principal.clone(),
+        caller: caller.clone(),
         group_id: "g1".into(),
         driver_bot_uuid: "bot-1".into(),
         title: Some("plan".into()),
@@ -105,56 +119,57 @@ fn session_commands_carry_principal_and_no_raw_credentials() {
         }],
     };
     let list = ListSessions {
-        principal: principal.clone(),
+        caller: caller.clone(),
         group_id: "g1".into(),
+        view_bot_id: Some("bot-1".into()),
         offset: 0,
         limit: 25,
         status: Some(SessionStatus::Running),
     };
     let get = GetSession {
-        principal: principal.clone(),
+        caller: caller.clone(),
         session_id: "s1".into(),
     };
     let update = UpdateSession {
-        principal: principal.clone(),
+        caller: caller.clone(),
         session_id: "s1".into(),
         title: Some("renamed".into()),
     };
     let delete = DeleteSession {
-        principal: principal.clone(),
+        caller: caller.clone(),
         session_id: "s1".into(),
     };
     let complete = CompleteSession {
-        principal: principal.clone(),
+        caller: caller.clone(),
         session_id: "s1".into(),
     };
     let add = AddSessionParticipant {
-        principal: principal.clone(),
+        caller: caller.clone(),
         session_id: "s1".into(),
         bot_uuid: "bot-3".into(),
         mode: Some(BotParticipantMode::Muted),
     };
     let update_p = UpdateSessionParticipant {
-        principal: principal.clone(),
+        caller: caller.clone(),
         session_id: "s1".into(),
         bot_uuid: "bot-3".into(),
         mode: BotParticipantMode::Auto,
     };
     let remove_p = DeleteSessionParticipant {
-        principal,
+        caller,
         session_id: "s1".into(),
         bot_uuid: "bot-3".into(),
     };
     for cmd in [
-        &create.principal as &Principal,
-        &list.principal,
-        &get.principal,
-        &update.principal,
-        &delete.principal,
-        &complete.principal,
-        &add.principal,
-        &update_p.principal,
-        &remove_p.principal,
+        &create.caller,
+        &list.caller,
+        &get.caller,
+        &update.caller,
+        &delete.caller,
+        &complete.caller,
+        &add.caller,
+        &update_p.caller,
+        &remove_p.caller,
     ] {
         let s = format!("{cmd:?}");
         assert!(!s.contains("Cookie") && !s.contains("Bearer") && !s.contains("sender"));
@@ -238,24 +253,14 @@ fn session_participant_serializes_bot_and_human_actors() {
 }
 
 #[test]
-fn human_principal_can_be_carried_in_session_command() {
-    let human = Principal::human(
-        AuthenticatedUser {
-            id: "staff-1".into(),
-            username: "alice".into(),
-            display_name: None,
-            full_name: None,
-        },
-        "tenant-a",
-        BTreeSet::new(),
-    );
+fn authenticated_caller_can_be_carried_in_session_command() {
     let command = ListSessionMessages {
-        principal: human,
+        caller: human_caller(),
         session_id: "s1".into(),
         before: None,
         limit: 10,
         view_bot_id: None,
     };
-    assert_eq!(command.principal.actor_id(), "human_staff-1");
+    assert_eq!(command.caller.user.expect("User").id, "staff-1");
     assert_eq!(command.session_id, "s1");
 }

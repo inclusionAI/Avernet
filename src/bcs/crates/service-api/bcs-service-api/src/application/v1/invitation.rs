@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::{ApplicationError, Principal};
+use super::{ApplicationError, AuthenticatedCaller};
 
 /// Kind of resource an invitation grants access to.
 ///
@@ -59,7 +59,7 @@ pub struct InvitationAcceptResult {
 /// `expires_in_seconds` overrides the server default lifetime when supplied.
 #[derive(Debug, Clone)]
 pub struct CreateGroupInvitation {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub expires_in_seconds: Option<u64>,
 }
@@ -69,21 +69,20 @@ pub struct CreateGroupInvitation {
 /// `expires_in_seconds` overrides the server default lifetime when supplied.
 #[derive(Debug, Clone)]
 pub struct CreateSessionInvitation {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub expires_in_seconds: Option<u64>,
 }
 
 /// Accept an invitation token and join its target.
 ///
-/// Only a Human Principal authenticated by the Gateway may accept; the V1
-/// facade rejects `Principal::Bot` outright. The joining Human actor is
-/// derived from the Principal's `staff_no` (subject id) and delegated to the
+/// Only a Caller with User identity authenticated by Gateway may accept. The
+/// joining Human actor is derived from the User subject id and delegated to the
 /// legacy `InviteService::join_*_by_invite`, mirroring the legacy Human-only
 /// join path that creates a Human Participant (Consultant role, Present mode).
 #[derive(Debug, Clone)]
 pub struct AcceptInvitation {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub token: String,
 }
 

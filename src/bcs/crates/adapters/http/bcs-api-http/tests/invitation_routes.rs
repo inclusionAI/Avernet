@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -7,13 +6,15 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
-    ApplicationError, CompleteSession, CreateBotFriendRequest, CreateGroup, CreateGroupInvitation,
+    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, CompleteSession,
+    CreateBotFriendRequest, CreateGroup, CreateGroupInvitation,
     CreateSession, CreateSessionInvitation, CreateSessionOutcome, DeleteGroup,
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
     Friendship, FriendshipService, FriendRequest, GetGroup, GetSession, GroupDetail, GroupService,
     GroupSummary, Invitation, InvitationAcceptResult, InvitationService, InvitationState,
-    InvitationTargetType, ListBotGroups, ListBotFriendRequests, ListBotFriendships, ListSessionMessages,
-    ListSessions, Page, Principal, RejectFriendRequest, DeleteBotFriendship, SessionCompletionResult,
+    InvitationTargetType, ListGroups, ListBotFriendRequests, ListBotFriendships,
+    ListSessionMessages, ListSessions, Page, RejectFriendRequest, DeleteBotFriendship,
+    SessionCompletionResult,
     SessionDetail, SessionMessagePage, SessionMessageService, SessionParticipant, SessionService,
     SessionSummary, UpdateGroup, UpdateGroupParticipant, UpdateSession,
     UpdateSessionParticipant,
@@ -27,26 +28,44 @@ use tower::ServiceExt;
 // ---------------------------------------------------------------------------
 
 struct HeaderVerifier {
-    principal: Principal,
+    caller: AuthenticatedCaller,
 }
 
 #[async_trait]
 impl PrincipalVerifier for HeaderVerifier {
-    async fn verify(&self, headers: &HeaderMap) -> Result<Principal, PrincipalVerificationError> {
+    async fn verify(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.principal.clone())
+            Ok(self.caller.clone())
         } else {
             Err(PrincipalVerificationError::Missing)
         }
     }
 }
 
-fn principal() -> Principal {
-    Principal::bot("bot-1", "tenant-a", BTreeSet::new())
+fn caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-1".into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
+}
+
+fn caller_user_id(caller: &AuthenticatedCaller) -> &str {
+    caller.user.as_ref().expect("User identity").id.as_str()
 }
 
 fn authenticated_request(method: &str, uri: &str, body: Value) -> Request<Body> {
@@ -76,9 +95,9 @@ struct NoopGroupService;
 
 #[async_trait]
 impl GroupService for NoopGroupService {
-    async fn list_bot_groups(
+    async fn list_groups(
         &self,
-        _command: ListBotGroups,
+        _command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
         Err(ApplicationError::internal("group not configured"))
     }
@@ -308,7 +327,7 @@ fn test_router(service: Arc<FakeInvitationService>) -> axum::Router {
         service,
         Arc::new(NoopFriendshipService),
         Arc::new(HeaderVerifier {
-            principal: principal(),
+            caller: caller(),
         }),
     ))
 }
@@ -343,7 +362,7 @@ async fn create_group_invitation_returns_created_and_forwards_principal() {
     {
         let created = service.created_group.lock().expect("create group lock");
         let created = created.as_ref().expect("create group command");
-        assert_eq!(created.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&created.caller), "staff-1");
         assert_eq!(created.group_id, "group-1");
         assert_eq!(created.expires_in_seconds, Some(3600));
     }
@@ -442,7 +461,7 @@ async fn create_session_invitation_returns_created_and_forwards_principal() {
     {
         let created = service.created_session.lock().expect("create session lock");
         let created = created.as_ref().expect("create session command");
-        assert_eq!(created.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&created.caller), "staff-1");
         assert_eq!(created.session_id, "session-1");
     }
 }
@@ -470,7 +489,7 @@ async fn accept_invitation_returns_ok_and_forwards_principal() {
     {
         let accepted = service.accepted.lock().expect("accept lock");
         let accepted = accepted.as_ref().expect("accept command");
-        assert_eq!(accepted.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&accepted.caller), "staff-1");
         assert_eq!(accepted.token, "token-1");
     }
 }

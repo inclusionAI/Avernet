@@ -352,6 +352,13 @@ impl BotRegistryCoreService for BotCore {
         self.repo.list_bots_by_creator(created_by).await
     }
 
+    async fn try_list_bots_by_creator(
+        &self,
+        created_by: &str,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        self.repo.try_list_bots_by_creator(created_by).await
+    }
+
     async fn discover(&self, query: &str) -> Vec<RegisteredBot> {
         self.repo.discover(query).await
     }

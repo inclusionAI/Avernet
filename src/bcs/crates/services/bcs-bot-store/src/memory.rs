@@ -15,9 +15,18 @@ use tracing::{debug, info, warn};
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
-    BindingChannels, BotCapabilities, BotDynamicStatus, BotMetricCount, BotMetricsSnapshotPort,
-    RegisteredBot, ServiceError, ServiceResult, Skill,
+    BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
+    BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
 };
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// Check whether a `bot_uuid` has the form `{namespace}:{staff_no}` where
 /// `namespace` is one of the whitelisted legacy patterns:
@@ -67,6 +76,8 @@ pub struct BotConnection {
 #[derive(Debug)]
 pub struct MemoryBotRepo {
     bots: RwLock<BTreeMap<String, RegisteredBotInner>>,
+    /// Audit timestamps for the local control-plane projection.
+    control_plane_audit: RwLock<HashMap<String, (u64, u64)>>,
     /// Token to bot_uuid mapping for authentication.
     /// Tokens persist across streaming disconnects for reconnection.
     token_to_bot: RwLock<HashMap<String, String>>,
@@ -235,6 +246,7 @@ impl MemoryBotRepo {
     pub fn with_base_dir(bots_base_dir: PathBuf) -> Self {
         Self {
             bots: RwLock::new(BTreeMap::new()),
+            control_plane_audit: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             deleted_bot_ids: RwLock::new(HashSet::new()),
             binding_channel_index: RwLock::new(HashMap::new()),
@@ -356,6 +368,7 @@ impl Default for MemoryBotRepo {
     fn default() -> Self {
         Self {
             bots: RwLock::new(BTreeMap::new()),
+            control_plane_audit: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             deleted_bot_ids: RwLock::new(HashSet::new()),
             binding_channel_index: RwLock::new(HashMap::new()),
@@ -482,6 +495,11 @@ impl BotRepoPort for MemoryBotRepo {
             info!(bot_id = %bot_id, "Bot registered");
         }
 
+        let now = unix_millis();
+        let mut audit = self.control_plane_audit.write().await;
+        let entry = audit.entry(bot_id).or_insert((now, now));
+        entry.1 = now;
+
         Ok(())
     }
 
@@ -598,6 +616,11 @@ impl BotRepoPort for MemoryBotRepo {
             token_to_bot.remove(&previous_token);
         }
         token_to_bot.insert(token.to_string(), bot_id.clone());
+
+        let now = unix_millis();
+        let mut audit = self.control_plane_audit.write().await;
+        let entry = audit.entry(bot_id.clone()).or_insert((now, now));
+        entry.1 = now;
 
         info!(bot_id = %bot_id, "Bot registered with owner and token");
         Ok(())
@@ -1023,6 +1046,12 @@ impl BotRepoPort for MemoryBotRepo {
                 protocol_version: 1,
             },
         );
+
+        let now = unix_millis();
+        self.control_plane_audit
+            .write()
+            .await
+            .insert(bot_uuid.clone(), (now, now));
 
         info!(
             bot_uuid = %bot_uuid,
@@ -1608,6 +1637,250 @@ impl BotRepoPort for MemoryBotRepo {
         if let Some(tx) = pending.remove(request_id) {
             let _ = tx.send(response);
         }
+    }
+}
+
+#[async_trait]
+impl BotControlPlaneRepoPort for MemoryBotRepo {
+    async fn get_control_plane(
+        &self,
+        bot_id: &str,
+        env: &str,
+    ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        if self.deleted_bot_ids.read().await.contains(bot_id) {
+            return Ok(None);
+        }
+        let audit = self
+            .control_plane_audit
+            .read()
+            .await
+            .get(bot_id)
+            .copied()
+            .unwrap_or((0, 0));
+        let bots = self.bots.read().await;
+        let Some(bot) = bots.get(bot_id) else {
+            return Ok(None);
+        };
+        let record_env = bot.env.clone().unwrap_or_else(resolve_env);
+        if record_env != env {
+            return Ok(None);
+        }
+        let Some(name) = bot
+            .capabilities
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            return Ok(None);
+        };
+        Ok(Some(BotControlPlaneRecord {
+            bot_id: bot.bot_id.clone(),
+            kind: bot.actor_kind,
+            name: name.to_string(),
+            visibility: if bot.capabilities.visibility.is_empty() {
+                "protected".to_string()
+            } else {
+                bot.capabilities.visibility.clone()
+            },
+            status: bot.status,
+            env: record_env,
+            created_by: bot.created_by.clone(),
+            descriptor: BotControlPlaneDescriptor {
+                summary: bot.capabilities.summary.clone().unwrap_or_default(),
+                domains: bot.capabilities.domains.clone(),
+                skills: bot.capabilities.skills.clone(),
+                scopes: bot.capabilities.scopes.clone(),
+            },
+            agent_code: bot.capabilities.agent_code.clone(),
+            created_at: audit.0,
+            updated_at: audit.1,
+        }))
+    }
+
+    async fn list_control_plane_candidates(
+        &self,
+        query: BotCandidateReadQuery,
+    ) -> ServiceResult<(Vec<BotCandidateReadRecord>, u64)> {
+        let ids = self.bots.read().await.keys().cloned().collect::<Vec<_>>();
+        let name = query
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_lowercase);
+        let mut records = Vec::new();
+        for bot_id in ids {
+            let Some(bot) = self.get_control_plane(&bot_id, &query.env).await? else {
+                continue;
+            };
+            if bot.bot_id == query.acting_bot_id || bot.kind != bcs_service_api::ActorKind::Bot {
+                continue;
+            }
+            if name
+                .as_ref()
+                .is_some_and(|name| !bot.name.to_lowercase().contains(name))
+            {
+                continue;
+            }
+            let is_friend = query.friend_ids.contains(&bot.bot_id);
+            let visible = match query.visibility {
+                BotCandidateVisibility::Discovery => {
+                    matches!(bot.visibility.as_str(), "public" | "protected")
+                }
+                BotCandidateVisibility::Collaboration => bot.visibility == "public" || is_friend,
+            };
+            if visible {
+                records.push(BotCandidateReadRecord { bot, is_friend });
+            }
+        }
+        records.sort_by(|left, right| {
+            right
+                .bot
+                .created_at
+                .cmp(&left.bot.created_at)
+                .then_with(|| left.bot.bot_id.cmp(&right.bot.bot_id))
+        });
+        let total = records.len() as u64;
+        let page = records
+            .into_iter()
+            .skip(query.offset as usize)
+            .take(query.limit as usize)
+            .collect();
+        Ok((page, total))
+    }
+
+    async fn list_control_plane_by_creator(
+        &self,
+        query: BotControlPlaneOwnedQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
+        let ids = self.bots.read().await.keys().cloned().collect::<Vec<_>>();
+        let name = query
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_lowercase);
+        let mut records = Vec::new();
+        for bot_id in ids {
+            let Some(bot) = self.get_control_plane(&bot_id, &query.env).await? else {
+                continue;
+            };
+            if bot.created_by.as_deref() != Some(query.created_by.as_str())
+                || query.kind.is_some_and(|kind| bot.kind != kind)
+                || query.status.is_some_and(|status| bot.status != status)
+                || name
+                    .as_ref()
+                    .is_some_and(|name| !bot.name.to_lowercase().contains(name))
+            {
+                continue;
+            }
+            records.push(bot);
+        }
+        records.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.bot_id.cmp(&right.bot_id))
+        });
+        Ok(records)
+    }
+
+    async fn patch_control_plane(
+        &self,
+        bot_id: &str,
+        env: &str,
+        patch: BotControlPlanePatch,
+    ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        if self.deleted_bot_ids.read().await.contains(bot_id) {
+            return Ok(None);
+        }
+        let (mut capabilities, token, created_by, record_env) = {
+            let bots = self.bots.read().await;
+            let Some(bot) = bots.get(bot_id) else {
+                return Ok(None);
+            };
+            let record_env = bot.env.clone().unwrap_or_else(resolve_env);
+            if record_env != env {
+                return Ok(None);
+            }
+            (
+                bot.capabilities.clone(),
+                bot.session_token.clone(),
+                bot.created_by.clone(),
+                record_env,
+            )
+        };
+
+        if let Some(name) = patch.name.as_ref() {
+            capabilities.name = Some(name.clone());
+        }
+        if let Some(visibility) = patch.visibility.as_ref() {
+            capabilities.visibility = visibility.clone();
+        }
+        if let Some(descriptor) = patch.descriptor.as_ref() {
+            if let Some(summary) = descriptor.summary.as_ref() {
+                capabilities.summary = Some(summary.clone());
+            }
+            if let Some(domains) = descriptor.domains.as_ref() {
+                capabilities.domains = domains.clone();
+            }
+            if let Some(skills) = descriptor.skills.as_ref() {
+                capabilities.skills = skills.clone();
+            }
+            if let Some(scopes) = descriptor.scopes.as_ref() {
+                capabilities.scopes = scopes.clone();
+            }
+        }
+
+        let now = unix_millis();
+        let created_at = self
+            .control_plane_audit
+            .read()
+            .await
+            .get(bot_id)
+            .map(|audit| audit.0)
+            .unwrap_or(now);
+        let persisted = PersistedCapabilities {
+            bot_id: bot_id.to_string(),
+            name: capabilities.name.clone(),
+            summary: capabilities.summary.clone(),
+            domains: capabilities.domains.clone(),
+            skills: capabilities.skills.clone(),
+            scopes: capabilities.scopes.clone(),
+            binding_channels: capabilities.binding_channels.clone(),
+            token,
+            registered_at: created_at,
+            hidden: false,
+            created_by: created_by.clone(),
+            visibility: Some(capabilities.visibility.clone()),
+            agent_code: capabilities.agent_code.clone(),
+            agent_token: capabilities.agent_token.clone(),
+        };
+        let path = self.bot_info_path(bot_id);
+        let directory = path.parent().ok_or_else(|| {
+            ServiceError::InternalError(format!("Invalid path for bot: {bot_id}"))
+        })?;
+        fs::create_dir_all(directory).await?;
+        fs::write(&path, serde_json::to_string_pretty(&persisted)?).await?;
+
+        {
+            let mut bots = self.bots.write().await;
+            let Some(bot) = bots.get_mut(bot_id) else {
+                return Ok(None);
+            };
+            bot.capabilities = capabilities;
+            bot.created_by = created_by;
+            bot.env = Some(record_env);
+            if let Some(status) = patch.status {
+                bot.status = status;
+            }
+        }
+        self.control_plane_audit
+            .write()
+            .await
+            .insert(bot_id.to_string(), (created_at, now));
+        self.get_control_plane(bot_id, env).await
     }
 }
 

@@ -3,10 +3,8 @@
 //! The harness mirrors `tests/v1_group_service.rs`: it wires
 //! `GroupServiceImpl` with the in-memory real services (`GroupCore`,
 //! `BotCore`, `FriendCore`, `RelationCore`, `SessionManagementServiceImpl`,
-//! `GroupManagement`) and seeds a Chat group whose driver is `bot-driver`
-//! with a plain Consultant participant `bot-a`.
+//! `GroupManagement`) and seeds a Chat group managed by a Human originator.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bcs_bot::BotCore;
@@ -14,12 +12,12 @@ use bcs_friend::FriendCore;
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
-    AddGroupParticipant, ApplicationError, DeleteGroupParticipant, GroupService, ParticipantRole,
-    Principal, UpdateGroupParticipant,
+    AddGroupParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
+    DeleteGroupParticipant, GroupService, ParticipantRole, UpdateGroupParticipant,
 };
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, Group, GroupCoreService, GroupStrategy, Participant,
-    ParticipantMode, RelationCoreService, RelationEdge, SystemMessageService,
+    ParticipantMode, SystemMessageService,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -33,7 +31,6 @@ struct Fixture {
     service: GroupServiceImpl,
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
-    relation: Arc<RelationCore>,
 }
 
 impl Fixture {
@@ -75,7 +72,6 @@ impl Fixture {
             service,
             groups,
             bots,
-            relation,
         }
     }
 
@@ -92,8 +88,19 @@ impl Fixture {
     }
 }
 
-fn bot_principal(bot_uuid: &str) -> Principal {
-    Principal::bot(bot_uuid, "tenant-a", BTreeSet::new())
+fn human_caller(staff_no: &str) -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: staff_no.into(),
+            username: staff_no.into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
 }
 
 fn normal_group(
@@ -111,57 +118,49 @@ fn normal_group(
     group
 }
 
-/// Build a fixture with a Chat group `GROUP_ID` whose driver is `bot-driver`
-/// and a plain Consultant participant `bot-a`. `bot-b` is registered as a
-/// public bot but is not yet a participant, so the add-participant path can
-/// target it. The driver is also seeded as a creator of `bot-a` so the legacy
-/// `update_participant_mode` actor-level authorization accepts the caller.
+/// Build a fixture with a Chat group `GROUP_ID` whose Human originator manages
+/// the Group. A second Human is a plain participant for self-service tests.
 async fn seed() -> Fixture {
     let fixture = Fixture::new().await;
     for bot in ["bot-driver", "bot-a", "bot-b"] {
         fixture.add_public_bot(bot).await;
     }
+    for staff_no in ["staff-manager", "staff-member"] {
+        fixture
+            .bots
+            .ensure_human_actor(staff_no, staff_no)
+            .await
+            .expect("register Human actor");
+    }
+    let mut group = normal_group(
+        GROUP_ID,
+        "bot-driver",
+        vec![
+            Participant::bot("bot-driver", ParticipantRole::Driver),
+            Participant::bot("bot-a", ParticipantRole::Consultant),
+            Participant::human("human_staff-manager", ParticipantRole::Observer),
+            Participant::human("human_staff-member", ParticipantRole::Observer),
+        ],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.originator = Some("human_staff-manager".into());
     fixture
         .groups
-        .upsert(normal_group(
-            GROUP_ID,
-            "bot-driver",
-            vec![
-                Participant::bot("bot-driver", ParticipantRole::Driver),
-                Participant::bot("bot-a", ParticipantRole::Consultant),
-            ],
-            GroupStrategy::Chat,
-            1,
-        ))
+        .upsert(group)
         .await
         .expect("store group");
-    // Legacy `update_participant_mode` authorizes the caller as the actor
-    // itself or its creator; seed a creator edge driver -> bot-a so the
-    // driver-managed mode update is allowed.
-    fixture
-        .relation
-        .upsert_edge(RelationEdge {
-            from_id: "bot-driver".into(),
-            to_id: "bot-a".into(),
-            env: "dev".into(),
-            kinds: 0,
-            allow: 0,
-            deny: 0,
-            is_creator: true,
-        })
-        .await
-        .expect("seed creator edge");
     fixture
 }
 
 #[tokio::test]
-async fn driver_can_add_bot_participant() {
+async fn human_manager_can_add_bot_participant() {
     let fixture = seed().await;
-    let principal = bot_principal("bot-driver");
+    let caller = human_caller("staff-manager");
     let added = fixture
         .service
         .add_participant(AddGroupParticipant {
-            principal,
+            caller,
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
             role: ParticipantRole::Consultant,
@@ -175,11 +174,11 @@ async fn driver_can_add_bot_participant() {
 #[tokio::test]
 async fn non_manager_cannot_add_participant() {
     let fixture = seed().await;
-    let principal = bot_principal("bot-a");
+    let caller = human_caller("staff-member");
     let err = fixture
         .service
         .add_participant(AddGroupParticipant {
-            principal,
+            caller,
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
             role: ParticipantRole::Consultant,
@@ -192,11 +191,11 @@ async fn non_manager_cannot_add_participant() {
 #[tokio::test]
 async fn update_participant_mode_returns_participant() {
     let fixture = seed().await;
-    let principal = bot_principal("bot-driver");
+    let caller = human_caller("staff-manager");
     let updated = fixture
         .service
         .update_participant(UpdateGroupParticipant {
-            principal,
+            caller,
             group_id: GROUP_ID.into(),
             actor_id: "bot-a".into(),
             mode: ParticipantMode::Muted,
@@ -214,7 +213,7 @@ async fn delete_participant_is_idempotent_for_bot() {
     let first = fixture
         .service
         .delete_participant(DeleteGroupParticipant {
-            principal: bot_principal("bot-driver"),
+            caller: human_caller("staff-manager"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-a".into(),
         })
@@ -228,7 +227,7 @@ async fn delete_participant_is_idempotent_for_bot() {
     let second = fixture
         .service
         .delete_participant(DeleteGroupParticipant {
-            principal: bot_principal("bot-driver"),
+            caller: human_caller("staff-manager"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-a".into(),
         })
@@ -247,15 +246,15 @@ async fn participant_can_update_own_mode() {
     let updated = fixture
         .service
         .update_participant(UpdateGroupParticipant {
-            principal: bot_principal("bot-a"),
+            caller: human_caller("staff-member"),
             group_id: GROUP_ID.into(),
-            actor_id: "bot-a".into(),
-            mode: ParticipantMode::Muted,
+            actor_id: "human_staff-member".into(),
+            mode: ParticipantMode::Absent,
         })
         .await
         .expect("plain participant can update own mode");
-    assert_eq!(updated.actor_id, "bot-a");
-    assert_eq!(updated.mode, ParticipantMode::Muted);
+    assert_eq!(updated.actor_id, "human_staff-member");
+    assert_eq!(updated.mode, ParticipantMode::Absent);
 }
 
 #[tokio::test]
@@ -268,9 +267,9 @@ async fn participant_can_leave_via_delete() {
     let result = fixture
         .service
         .delete_participant(DeleteGroupParticipant {
-            principal: bot_principal("bot-a"),
+            caller: human_caller("staff-member"),
             group_id: GROUP_ID.into(),
-            actor_id: "bot-a".into(),
+            actor_id: "human_staff-member".into(),
         })
         .await
         .expect("plain participant can leave via delete");
@@ -287,8 +286,8 @@ async fn participant_can_leave_via_delete() {
         !group
             .participants
             .iter()
-            .any(|p| p.bot_uuid == "bot-a"),
-        "bot-a should have left the group"
+            .any(|p| p.bot_uuid == "human_staff-member"),
+        "the Human participant should have left the group"
     );
 }
 
@@ -301,7 +300,7 @@ async fn participant_cannot_update_others() {
     let err = fixture
         .service
         .update_participant(UpdateGroupParticipant {
-            principal: bot_principal("bot-a"),
+            caller: human_caller("staff-member"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-driver".into(),
             mode: ParticipantMode::Muted,

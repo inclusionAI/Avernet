@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::group::{DeleteResult, Page};
-use super::{ApplicationError, Principal};
+use super::{ApplicationError, AuthenticatedCaller};
 
 pub use bcs_domain::{ActorKind, ParticipantMode, ParticipantRole};
 
@@ -103,7 +103,7 @@ pub struct CreateSessionOutcome {
 
 #[derive(Debug, Clone)]
 pub struct CreateSession {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub driver_bot_uuid: String,
     pub title: Option<String>,
@@ -113,8 +113,9 @@ pub struct CreateSession {
 
 #[derive(Debug, Clone)]
 pub struct ListSessions {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
+    pub view_bot_id: Option<String>,
     pub offset: u64,
     pub limit: u64,
     pub status: Option<SessionStatus>,
@@ -122,32 +123,32 @@ pub struct ListSessions {
 
 #[derive(Debug, Clone)]
 pub struct GetSession {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub session_id: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct UpdateSession {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub title: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DeleteSession {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub session_id: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct CompleteSession {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub session_id: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct AddSessionParticipant {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub bot_uuid: String,
     pub mode: Option<BotParticipantMode>,
@@ -155,7 +156,7 @@ pub struct AddSessionParticipant {
 
 #[derive(Debug, Clone)]
 pub struct UpdateSessionParticipant {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub bot_uuid: String,
     pub mode: BotParticipantMode,
@@ -163,7 +164,7 @@ pub struct UpdateSessionParticipant {
 
 #[derive(Debug, Clone)]
 pub struct DeleteSessionParticipant {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub bot_uuid: String,
 }
