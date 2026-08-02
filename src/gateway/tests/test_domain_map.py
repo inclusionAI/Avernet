@@ -158,21 +158,48 @@ def test_a_rewrite_never_re_encodes_the_tail() -> None:
     )
 
 
-def test_a_rewrite_anchored_off_the_domain_is_rejected() -> None:
+def _rewrite_map(from_prefix: str) -> DomainMap:
+    return DomainMap.from_config(
+        {
+            "domains": {
+                "engine": {
+                    "server": "s",
+                    "rewrite": {"from": from_prefix, "to": "/proxypass"},
+                }
+            },
+            "servers": {"s": {"base_url": "http://s"}},
+        },
+        variables={},
+    )
+
+
+@pytest.mark.parametrize(
+    "from_prefix",
+    [
+        "/somewhere/else",
+        # Textually a prefix of `/openapi/v1/engine`, but not on a segment
+        # boundary: `/openapi/v1/engine-v2/...` resolves to a domain *named*
+        # `engine-v2`, never to this one, so the rule would be accepted at
+        # startup and then silently never fire.
+        "/openapi/v1/engine-v2",
+        "/openapi/v1/engineering",
+    ],
+)
+def test_a_rewrite_anchored_off_the_domain_is_rejected(from_prefix: str) -> None:
     """A rule that could never fire is a config mistake, not a silent no-op."""
     with pytest.raises(ValueError, match="can never match"):
-        DomainMap.from_config(
-            {
-                "domains": {
-                    "engine": {
-                        "server": "s",
-                        "rewrite": {"from": "/somewhere/else", "to": "/proxypass"},
-                    }
-                },
-                "servers": {"s": {"base_url": "http://s"}},
-            },
-            variables={},
-        )
+        _rewrite_map(from_prefix)
+
+
+@pytest.mark.parametrize(
+    "from_prefix",
+    ["/openapi/v1/engine", "/openapi/v1/engine/", "/openapi/v1/engine/v2"],
+)
+def test_a_rewrite_on_the_domain_boundary_is_accepted(from_prefix: str) -> None:
+    """The domain's own prefix, and any path beneath it, can both fire."""
+    engine = _rewrite_map(from_prefix).domain_for("/openapi/v1/engine/t")
+    assert engine is not None
+    assert engine.rewrite is not None
 
 
 def test_a_rewrite_needs_both_ends() -> None:

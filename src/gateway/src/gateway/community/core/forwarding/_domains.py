@@ -312,10 +312,18 @@ def _validated_protocols(name: str, protocols: frozenset[str]) -> frozenset[str]
 def _parse_rewrite(name: str, raw: Any, domain_prefix: str) -> PathRewrite | None:
     """The domain's declared prefix substitution, or ``None`` for verbatim.
 
-    ``from`` must begin at the domain's own prefix. A rewrite anchored anywhere
-    else could never fire — the domain map only routes paths under that
-    prefix — so it is a configuration mistake worth refusing at startup rather
-    than a rule that silently never matches.
+    ``from`` must begin at the domain's own prefix, **on a segment boundary**. A
+    rewrite anchored anywhere else could never fire — the domain map matches the
+    leading segment exactly, so nothing routed here can carry another prefix —
+    and it is a configuration mistake worth refusing at startup rather than a
+    rule that silently never matches.
+
+    The boundary is the whole point of the check. A textual ``startswith`` would
+    accept ``/openapi/v1/engine-v2`` for the ``engine`` domain, since it does
+    begin with those characters; but ``/openapi/v1/engine-v2/…`` resolves to a
+    domain *named* ``engine-v2``, never to this one, so the rule would be
+    accepted and then never apply — the exact silent no-op being guarded
+    against.
     """
     if not raw:
         return None
@@ -328,10 +336,12 @@ def _parse_rewrite(name: str, raw: Any, domain_prefix: str) -> PathRewrite | Non
     to_prefix = str(spec.get("to", ""))
     if not from_prefix or not to_prefix:
         raise ValueError(f"domain {name!r}: rewrite needs both 'from' and 'to'")
-    if not from_prefix.startswith(domain_prefix):
+    anchored = from_prefix.rstrip("/")
+    if anchored != domain_prefix and not anchored.startswith(f"{domain_prefix}/"):
         raise ValueError(
-            f"domain {name!r}: rewrite.from {from_prefix!r} must start with "
-            f"{domain_prefix!r} — a rewrite anchored elsewhere can never match"
+            f"domain {name!r}: rewrite.from {from_prefix!r} must be "
+            f"{domain_prefix!r} or a path beneath it — a rewrite anchored "
+            f"elsewhere can never match"
         )
     return PathRewrite(
         from_prefix=from_prefix.rstrip("/"), to_prefix=to_prefix.rstrip("/")

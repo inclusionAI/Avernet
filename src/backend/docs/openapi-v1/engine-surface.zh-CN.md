@@ -148,7 +148,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
   "sockets": [
     {
       "kind": "chat",
-      "url": "wss://<gateway>/engine/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
+      "url": "wss://<gateway>/openapi/v1/engine/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
     }
   ]
 }
@@ -175,17 +175,20 @@ socket 也是干净的。
   `new WebSocket(url, protocols)` 不接受 header，URL 是它唯一能承载凭据的位置。
   内部 console 打开同一条 socket 用的就是同样的方式。_2026-07-31 更正。_
 - **地址是网关的，不是它背后那一跳的。** 对外发布的 origin 取自 `gateway` 配置块
-  （`base_url` / `base_url_pre`，按环境选择），前缀是 `/engine/{target}{path}`，
-  由网关改写到那一跳上。前面没有网关的部署 —— 也就是 community 构建的常态 ——
-  是一个有名字的 upstream 错误，不是 500，也不是发布一个没人服务的地址。
-  _2026-07-31 更正。_
+  （`base_url` / `base_url_pre`，按环境选择），前缀是
+  `/openapi/v1/engine/{target}{path}`，由网关改写到那一跳上。前面没有网关的部署
+  —— 也就是 community 构建的常态 —— 是一个有名字的 upstream 错误，不是 500，
+  也不是发布一个没人服务的地址。该前缀位于对外发布的 API 命名空间之内，而不是
+  主机根路径：`engine` 就是一个普通的网关 domain，和 `bots` 用同一套按首段解析的
+  查找逻辑，因此这条 socket 与分发它地址的那个端点处在同一张对外表面上。
+  _2026-08-02 更正。_
 - **provider 给的 URL 是被改写地址，不是被重新拼装。** 获取设备连接时仍然请求
   **`ws_conn_mode="relay"`**，provider 也仍然围绕我们给它的引擎 path 拼出一条完整
   URL —— 正是这个 path 透传，才让 `claude_code` bot 不会拿到 openclaw 的默认路径、
   在连接时被 4001 拒掉。之后只改两处：origin 换成网关的，`/proxypass/` 前缀换成
-  `/engine/`。该前缀之后的一切 —— target、引擎 path、provider 自己带的 query ——
+  `/openapi/v1/engine/`。该前缀之后的一切 —— target、引擎 path、provider 自己带的 query ——
   原封不动透传，因此本端点对一套并不属于它的 URL 语法不持任何假设，也不会悄悄丢掉
-  没预料到的部分。若 provider 给回的形状是 `/engine` 前缀无法表达的 —— BaaS 的
+  没预料到的部分。若 provider 给回的形状是 `/openapi/v1/engine` 前缀无法表达的 —— BaaS 的
   LOCAL 平台返回 `/wsrelay/{session_id}` —— 则直接拒绝而不是发布，这样错误的假设会在
   服务端暴露，而不是变成一条连不上的 socket。_2026-07-31 更正。_
 - **`expires_at` 必填**，让调用方知道该重新获取，而不是在 token 过期后静默失败。
