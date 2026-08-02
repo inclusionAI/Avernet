@@ -1,8 +1,10 @@
 """FastAPI Web application entry point.
 
 The gateway serves no hand-written per-operation routes: one catch-all forwards
-every ``/openapi/v1`` request to its domain's upstream, and ``/openapi.json`` is
-generated from each upstream's published description (via the schema catalog).
+every ``/openapi/v1`` request to its domain's upstream, one WebSocket route is
+mounted per domain declaring the socket plane (so which prefix it answers is
+configuration, not code), and ``/openapi.json`` is generated from each
+upstream's published description (via the schema catalog).
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ from fastapi import FastAPI
 
 from gateway.community import __version__
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
+from gateway.community.adapters.web._log_redaction import install_credential_redaction
+from gateway.community.adapters.web._relay_ws import forward_websocket, relay_routes
 from gateway.community.adapters.web.admin import router as admin_router
 from gateway.community.config import ConfigLoader
 from gateway.community.logger import get_logger, get_logger_plugin
@@ -40,6 +44,12 @@ def create_app() -> FastAPI:
         app_name=config.app_name,
         trace_log_dir=config.log_config.trace_log_dir,
     )
+
+    # Before anything is served: a socket credential travels in the query string
+    # (a WebSocket client cannot set headers), and uvicorn logs the request
+    # target with its query on every handshake. Installed here rather than in a
+    # runner plugin so every runner gets it, bare and otherwise.
+    install_credential_redaction()
 
     enable_docs = (
         config.module_config.web.enable_api_docs if config.module_config.web else True
@@ -94,6 +104,7 @@ def create_app() -> FastAPI:
     app.state.authenticator = bs.authenticator
     app.state.domain_map = bs.forwarding.domain_map
     app.state.forwarder = bs.forwarding.forwarder
+    app.state.ws_forwarder = bs.forwarding.ws_forwarder
     app.state.principal_signer = bs.principal_signer
     app.state.access_key_issuer = bs.access_key_issuer
     app.state.app_registrar = bs.app_registrar
@@ -119,6 +130,15 @@ def create_app() -> FastAPI:
     # Admin endpoints (credential issuance/registration) — explicit routes, so
     # they win over the catch-all forward. Unauthenticated (single-box/dev only).
     app.include_router(admin_router, prefix="/admin")
+
+    # One socket entrypoint per domain declaring the websocket protocol. Driven
+    # from configuration, so no domain is named here; a domain that declares
+    # only http gets no socket route, and a socket domain is refused by the HTTP
+    # catch-all below.
+    domain_map = bs.forwarding.domain_map
+    for name in domain_map.websocket_domains():
+        for route in relay_routes(domain_map.base_path, name):
+            app.add_api_websocket_route(route, forward_websocket)
 
     app.add_api_route(
         "/{full_path:path}",

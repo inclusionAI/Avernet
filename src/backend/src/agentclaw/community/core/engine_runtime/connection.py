@@ -7,7 +7,8 @@ topology and a raw device credential, both of which become things we cannot
 change without breaking integrators.
 
 This service returns **finished** socket URLs instead, addressed to the public
-gateway under ``/engine``. The target and the credential do travel *inside* that
+gateway under ``/openapi/v1/engine``. The target and the credential do travel
+*inside* that
 URL — a browser's WebSocket handshake can carry a credential nowhere else — but
 no field beside it hands a caller the pieces to assemble a different one, and
 nothing names the hop behind the gateway.
@@ -54,8 +55,11 @@ CONNECTION_TTL_SECONDS = 120 * 60
 #: console already opens this socket the same way.
 _PROXY_TOKEN_PARAM = "x-proxypass-token"
 
-#: Path prefix the gateway routes on, directly after the host.
-_ENGINE_PREFIX = "/engine"
+#: Path prefix the gateway routes on. It sits *inside* the published API
+#: namespace rather than at the host root: ``engine`` is an ordinary gateway
+#: domain, resolved by the same leading-segment lookup as ``bots``, and the
+#: socket is part of the same public surface as the endpoint that hands it out.
+_ENGINE_PREFIX = "/openapi/v1/engine"
 
 #: The routing prefix the hop behind the gateway serves. Recognised, then swapped
 #: for :data:`_ENGINE_PREFIX` — see :meth:`_readdress_onto_gateway`.
@@ -339,10 +343,10 @@ class EngineConnectionService:
         """The provider's relay URL, re-pointed at the gateway.
 
         Exactly two things change: the origin becomes the gateway's, and the
-        hop's ``/proxypass/`` routing prefix becomes ``/engine/``. Everything
-        past that prefix — the target, the engine path, any query the provider
-        set — is carried through as the provider wrote it, so this endpoint
-        holds no opinion about a URL grammar it does not own.
+        hop's ``/proxypass/`` routing prefix becomes ``/openapi/v1/engine/``.
+        Everything past that prefix — the target, the engine path, any query the
+        provider set — is carried through as the provider wrote it, so this
+        endpoint holds no opinion about a URL grammar it does not own.
 
         Refused rather than published when the provider's URL is missing,
         unparseable, or not the ``/proxypass/`` shape: BaaS's LOCAL platform
@@ -427,12 +431,12 @@ class EngineConnectionService:
             raise EngineUpstreamError(
                 f"gateway base url has no usable scheme: {base!r}"
             )
-        # A bare origin is all this may be. A path would push ``/engine`` off the
-        # root — ``https://gw.example/api`` publishes ``/api/engine/…``, which the
-        # gateway's rewrite is not rooted at, so the socket is unopenable rather
-        # than misconfigured-and-named. A ``#`` or ``?`` is worse still: it ends
-        # the path before the prefix is even appended, putting the credential
-        # somewhere a browser never sends.
+        # A bare origin is all this may be. The prefix appended below already
+        # carries the API namespace, so a base url with a path of its own would
+        # double it — ``https://gw.example/api`` would publish
+        # ``/api/openapi/v1/engine/…``, which no gateway domain resolves. A
+        # ``#`` or ``?`` is worse still: it ends the path before the prefix is
+        # even appended, putting the credential somewhere a browser never sends.
         if any(delimiter in rest for delimiter in "/#?") or not rest:
             raise EngineUpstreamError(
                 f"gateway base url is not a bare origin: {base!r}"

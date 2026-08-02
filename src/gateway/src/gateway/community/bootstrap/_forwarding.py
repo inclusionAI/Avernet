@@ -14,6 +14,7 @@ from gateway.community.config import Config
 from gateway.community.core.forwarding import DomainMap, Forwarding
 from gateway.community.spi.forwarder import Forwarder
 from gateway.community.spi.schema_catalog import SchemaCatalog
+from gateway.community.spi.ws_forwarder import WebSocketForwarder
 
 _logger = logging.getLogger("bootstrap")
 
@@ -23,6 +24,7 @@ _DEFAULT_REFRESH_SECONDS = 300.0
 def build_forwarding(
     forwarder: Forwarder,
     catalog: SchemaCatalog,
+    ws_forwarder: WebSocketForwarder,
 ) -> Forwarding:
     """Build the forwarding subsystem (called once from ``create_app``).
 
@@ -49,6 +51,7 @@ def build_forwarding(
         domain_map=domain_map,
         forwarder=forwarder,
         catalog=catalog,
+        ws_forwarder=ws_forwarder,
         refresh_seconds=refresh_seconds,
     )
 

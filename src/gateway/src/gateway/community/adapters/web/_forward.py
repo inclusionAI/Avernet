@@ -21,6 +21,7 @@ from dataclasses import replace
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.requests import HTTPConnection
 from starlette.responses import Response
 
 from gateway.community.logger import get_logger
@@ -55,18 +56,27 @@ def _error(status: int, subcode: int, message: str) -> JSONResponse:
     )
 
 
-def _bundle(request: Request) -> CredentialBundle:
+def _bundle(connection: HTTPConnection) -> CredentialBundle:
+    """Credentials as they arrived, for any connection kind.
+
+    Typed on ``HTTPConnection`` rather than ``Request`` so the engine socket's
+    handshake builds its bundle exactly the way a forwarded request does — a
+    WebSocket carries the same headers, cookies and query a request does, and
+    the two must not drift into reading credentials differently.
+    """
     return CredentialBundle(
-        headers={k.lower(): v for k, v in request.headers.items()},
-        cookies=dict(request.cookies),
-        query=dict(request.query_params),
+        headers={k.lower(): v for k, v in connection.headers.items()},
+        cookies=dict(connection.cookies),
+        query=dict(connection.query_params),
     )
 
 
-def _target_url(base_url: str, request: Request) -> str:
+def _target_url(base_url: str, path: str, request: Request) -> str:
+    """The upstream URL for *path* — the domain's, already rewritten if it
+    declares one; otherwise the caller's path verbatim."""
     base = base_url.rstrip("/")
     query = request.url.query
-    return f"{base}{request.url.path}" + (f"?{query}" if query else "")
+    return f"{base}{path}" + (f"?{query}" if query else "")
 
 
 _PRINCIPAL_HEADER = "X-Avernet-Principal"
@@ -100,9 +110,15 @@ async def _attach_identities(
 async def forward_request(request: Request) -> Response:
     """Resolve domain → authenticate → forward verbatim, streaming the response."""
     path = request.url.path
-    server = request.app.state.domain_map.resolve(path)
-    if server is None:
+    domain = request.app.state.domain_map.domain_for(path)
+    # A domain that does not answer HTTP is as unknown here as one that is not
+    # configured at all. Socket domains are served by the WebSocket entrypoint
+    # and must not become an HTTP proxy into their upstream as a side effect of
+    # sharing the domain map.
+    if domain is None or not domain.serves_http:
         return _error(404, 1, "no route for path")
+    server = domain.server
+    upstream_path = domain.upstream_path(path)
 
     try:
         identities = await request.app.state.authenticator.authenticate(
@@ -116,7 +132,7 @@ async def forward_request(request: Request) -> Response:
         forward = await _attach_identities(
             ForwardRequest(
                 method=request.method,
-                url=_target_url(server.base_url, request),
+                url=_target_url(server.http_base_url, upstream_path, request),
                 # Drop Host (httpx sets it from the upstream URL) and any
                 # caller-supplied X-Avernet-Principal (forgery guard).
                 headers={

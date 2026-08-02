@@ -15,7 +15,7 @@ class Socket(BaseModel):
             "example": {
                 "kind": "chat",
                 "url": (
-                    "wss://gateway.example/engine/abc/api/openclaw/ws"
+                    "wss://gateway.example/openapi/v1/engine/abc/api/openclaw/ws"
                     "?x-proxypass-token=…"
                 ),
             }
@@ -43,7 +43,7 @@ class Connection(BaseModel):
                     {
                         "kind": "chat",
                         "url": (
-                            "wss://gateway.example/engine/abc/api/openclaw/ws"
+                            "wss://gateway.example/openapi/v1/engine/abc/api/openclaw/ws"
                             "?x-proxypass-token=…"
                         ),
                     }

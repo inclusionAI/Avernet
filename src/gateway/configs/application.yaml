@@ -61,9 +61,21 @@ user_config:
     ttl_seconds: 60
 
   # Values used to expand ${...} placeholders in upstreams.servers.*.base_url.
+  #
+  # Every value carries a SCHEME — http, https, ws or wss — and startup refuses
+  # one that does not, naming the server. This is not style: the forwarder
+  # concatenates the base url with the request path, and `backend.example/x`
+  # parses as a *relative* URL with an empty host, so a scheme-less value fails
+  # at the first call rather than at boot.
+  #
+  # The scheme says the origin and whether the connection is TLS; it does not
+  # decide which planes the upstream serves. The router re-spells it per plane
+  # (https ⇄ wss, http ⇄ ws), so one configured value works for both and no
+  # operator has to know which planes a given upstream is used for.
   upstream_vars:
-    backend_server_url: backend.sample.com
-    baas_server_url: baas.sample.com
+    backend_server_url: https://backend.sample.com
+    baas_server_url: https://baas.sample.com
+    engine_proxy_server_url: https://engineproxy.sample.com
 
   # Per-identity strategy chain (system-level config).
   # Each identity type runs its strategies in order; the first to recognise the
@@ -91,6 +103,19 @@ user_config:
     "/openapi/v1/bots/**":
       user: required
 
+    # The tenant engine socket, and the FIRST rule under /openapi/v1 that
+    # requires no identity at all. Deliberate: the credential is already in the
+    # handshake's query string and is checked by the proxypass hop behind the
+    # gateway, and a browser's WebSocket API can attach nothing else — it takes
+    # a URL and a subprotocol, no headers.
+    #
+    # Written down as an explicit empty requirement rather than left out — an
+    # omitted rule falls through to "/**" above and fails closed, so silence
+    # here would refuse every socket. Stating it keeps this table an honest
+    # description of what the gateway requires, and makes tightening the prefix
+    # a config edit rather than a code change.
+    "/openapi/v1/engine/**": {}
+
   # Domain → upstream-server map for the gateway.
   #
   # The leading path segment after `base_path` is the DOMAIN; it selects the
@@ -109,6 +134,22 @@ user_config:
   # routing/auth/forwarding never read it.
   upstreams:
     base_path: /openapi/v1
+
+    # Each domain may also declare:
+    #
+    #   protocols: [http] | [websocket] | [http, websocket]
+    #     Which plane serves it. Unset means `[http]`, so every domain below
+    #     behaves exactly as it always has. The two planes have different
+    #     handling and different forwarders, and the entrypoint for a plane a
+    #     domain does not declare refuses it — a socket domain must not become
+    #     an HTTP proxy into its upstream just because both read this map.
+    #
+    #   rewrite: {from: <gateway prefix>, to: <upstream prefix>}
+    #     Unset means the path forwards VERBATIM and only the origin changes,
+    #     which is the property this whole design rests on. Declare one prefix
+    #     substitution when the upstream serves the same resources under a
+    #     different prefix. `from` must start at the domain's own prefix, or the
+    #     rule could never match and startup refuses it.
 
     domains:
       bots:
@@ -141,8 +182,36 @@ user_config:
           path: schemas/baas.openapi.json
           refresh_seconds: 300
 
+      # The tenant engine socket. The backend's connection endpoint publishes
+      # `wss://<gateway>/openapi/v1/engine/<target><engine-path>?x-proxypass-token=…`
+      # and this is what serves it.
+      #
+      # Socket-only: an HTTP request here is an unknown route, because the one
+      # thing this domain publishes is a relayed socket.
+      #
+      # The engine proxy serves the same targets under `/proxypass/`, so the
+      # prefix is substituted; everything past it — the routing target, the
+      # engine path, the credential in the query — travels byte for byte.
+      #
+      # No `schema:` — a WebSocket has no OpenAPI representation, so this domain
+      # contributes nothing to the served document.
+      #
+      # Operational note for any L7 hop a deployment puts in front of the
+      # gateway: it must pass the Upgrade through and impose NO read timeout on
+      # this path. The credential is checked once, at the handshake, and the
+      # connection is designed to outlive its expiry — an idle deadline tears
+      # down healthy sockets.
+      engine:
+        server: engine_proxy
+        protocols: [websocket]
+        rewrite:
+          from: /openapi/v1/engine
+          to: /proxypass
+
     servers:
       backend:
         base_url: "${backend_server_url}"
       baas:
         base_url: "${baas_server_url}"
+      engine_proxy:
+        base_url: "${engine_proxy_server_url}"
