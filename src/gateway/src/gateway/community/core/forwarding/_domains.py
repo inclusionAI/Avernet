@@ -320,10 +320,35 @@ def _segments(path: str) -> list[str]:
     return [seg for seg in path.split("/") if seg]
 
 
+#: Every key each block of the ``upstreams`` section understands. An unknown one
+#: is refused rather than ignored: a key that is silently dropped falls back to
+#: a default, and for ``protocols`` that default decides *which plane* a domain
+#: exposes. ``protcols: [websocket]`` would otherwise turn the socket domain
+#: into an HTTP route — on the one prefix the shipped table exempts from
+#: authentication.
+_DOMAIN_KEYS = frozenset({"server", "schema", "protocols", "rewrite"})
+_SERVER_KEYS = frozenset({"base_url"})
+_REWRITE_KEYS = frozenset({"from", "to"})
+_SCHEMA_KEYS = frozenset({"source", "path", "url", "refresh_seconds"})
+
+
+def _reject_unknown_keys(
+    what: str, spec: dict[str, Any], allowed: frozenset[str]
+) -> None:
+    unknown = sorted(str(key) for key in spec if str(key) not in allowed)
+    if unknown:
+        raise ValueError(
+            f"{what}: unknown key(s) {unknown} (expected any of {sorted(allowed)}) "
+            f"— refused rather than ignored, because a dropped key silently "
+            f"takes the default instead of what was written"
+        )
+
+
 def _parse_servers(raw: dict[str, Any], variables: dict[str, str]) -> dict[str, Server]:
     servers: dict[str, Server] = {}
-    for name, spec in raw.items():
-        spec = spec or {}
+    for name, raw_spec in raw.items():
+        spec = cast("dict[str, Any]", raw_spec or {})
+        _reject_unknown_keys(f"upstream server {name!r}", spec, _SERVER_KEYS)
         raw_base_url = str(spec.get("base_url", ""))
         base_url = _expand_vars(raw_base_url, variables)
         if not base_url:
@@ -348,8 +373,9 @@ def _parse_domains(
     raw: dict[str, Any], servers: dict[str, Server], base_path: str
 ) -> dict[str, Domain]:
     domains: dict[str, Domain] = {}
-    for name, spec in raw.items():
-        spec = spec or {}
+    for name, raw_spec in raw.items():
+        spec = cast("dict[str, Any]", raw_spec or {})
+        _reject_unknown_keys(f"domain {name!r}", spec, _DOMAIN_KEYS)
         server_name = str(spec.get("server", ""))
         server = servers.get(server_name)
         if server is None:
@@ -360,7 +386,7 @@ def _parse_domains(
         domains[name] = Domain(
             name=name,
             server=server,
-            schema=_parse_schema(spec.get("schema") or {}),
+            schema=_parse_schema(name, spec.get("schema") or {}),
             protocols=_parse_protocols(name, spec.get("protocols")),
             rewrite=_parse_rewrite(name, spec.get("rewrite"), domain_prefix),
         )
@@ -413,10 +439,21 @@ def _parse_rewrite(name: str, raw: Any, domain_prefix: str) -> PathRewrite | Non
             f"domain {name!r}: rewrite must be a mapping with 'from' and 'to'"
         )
     spec = cast(dict[str, Any], raw)
+    _reject_unknown_keys(f"domain {name!r}: rewrite", spec, _REWRITE_KEYS)
     from_prefix = str(spec.get("from", ""))
     to_prefix = str(spec.get("to", ""))
     if not from_prefix or not to_prefix:
         raise ValueError(f"domain {name!r}: rewrite needs both 'from' and 'to'")
+    if "?" in from_prefix or "#" in from_prefix:
+        # A request path never carries either, so such a rule could not match —
+        # the same silent no-op the anchor check below exists to prevent. The
+        # anchor check alone does not catch it: `/openapi/v1/engine/v2?x` does
+        # begin with the domain prefix and a `/`, so it passes that test.
+        raise ValueError(
+            f"domain {name!r}: rewrite.from {from_prefix!r} must be a path "
+            f"prefix with no query or fragment — a request path contains "
+            f"neither, so this rule could never match"
+        )
     if not to_prefix.startswith("/"):
         # The relay concatenates this straight onto the upstream origin, so a
         # relative value silently becomes part of the *host*: `to: proxypass`
@@ -448,7 +485,8 @@ def _parse_rewrite(name: str, raw: Any, domain_prefix: str) -> PathRewrite | Non
     )
 
 
-def _parse_schema(raw: dict[str, Any]) -> SchemaSource:
+def _parse_schema(name: str, raw: dict[str, Any]) -> SchemaSource:
+    _reject_unknown_keys(f"domain {name!r}: schema", raw, _SCHEMA_KEYS)
     source = str(raw.get("source", "file"))
     location = str(raw.get("path") or raw.get("url") or "")
     refresh = int(raw.get("refresh_seconds", _DEFAULT_REFRESH_SECONDS))

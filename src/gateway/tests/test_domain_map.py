@@ -243,6 +243,32 @@ def test_a_rewrite_target_must_be_an_absolute_path(to_prefix: str) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "from_prefix", ["/openapi/v1/engine/v2?fixed=1", "/openapi/v1/engine/v2#fragment"]
+)
+def test_a_rewrite_source_may_not_carry_a_query_or_fragment(from_prefix: str) -> None:
+    """A request path carries neither, so such a rule could never fire.
+
+    The anchor check does not catch this on its own: `/openapi/v1/engine/v2?x`
+    *does* begin with the domain prefix followed by `/`, so it passes that test
+    and lands as a silent no-op — the very thing the anchor check exists to
+    prevent.
+    """
+    with pytest.raises(ValueError, match="no query or fragment"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "engine": {
+                        "server": "s",
+                        "rewrite": {"from": from_prefix, "to": "/proxypass"},
+                    }
+                },
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
 @pytest.mark.parametrize("to_prefix", ["/proxypass?fixed=1", "/proxypass#fragment"])
 def test_a_rewrite_target_may_not_carry_a_query_or_fragment(to_prefix: str) -> None:
     """Absolute is not sufficient — the request tail is appended to this prefix.
@@ -583,3 +609,77 @@ def test_from_yaml_user_config_not_dict_uses_empty(tmp_path) -> None:
     cfg.write_text("user_config: not-a-dict\n")
     dm = DomainMap.from_yaml(cfg, variables={})
     assert dm.resolve("/openapi/v1/bots/123") is None
+
+
+# ── unknown configuration keys ───────────────────────────────────────────────
+
+
+def test_a_misspelled_domain_key_is_refused_not_ignored() -> None:
+    """The reason this matters is which *plane* the default exposes.
+
+    `protcols` is dropped, `protocols` reads as unset, and the domain falls back
+    to `[http]`. For the shipped `engine` domain that silently converts a
+    socket-only route into an HTTP forwarding one — on the single prefix
+    `route_security` exempts from authentication, and on the plane that has no
+    traversal guard. A one-character typo, and no error anywhere.
+    """
+    with pytest.raises(ValueError, match=r"unknown key\(s\) \['protcols'\]"):
+        DomainMap.from_config(
+            {
+                "domains": {"engine": {"server": "s", "protcols": ["websocket"]}},
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        (
+            {
+                "domains": {"e": {"server": "s", "schema": {"sourcee": "file"}}},
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            r"unknown key\(s\) \['sourcee'\]",
+        ),
+        (
+            {
+                "domains": {
+                    "e": {
+                        "server": "s",
+                        "rewrite": {"from": "/openapi/v1/e", "too": "/x"},
+                    }
+                },
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            r"unknown key\(s\) \['too'\]",
+        ),
+        (
+            {
+                "domains": {"e": {"server": "s"}},
+                "servers": {"s": {"base_urll": "http://s"}},
+            },
+            r"unknown key\(s\) \['base_urll'\]",
+        ),
+    ],
+)
+def test_unknown_keys_are_refused_in_every_upstreams_block(
+    config: dict, expected: str
+) -> None:
+    """Not only the domain block — the same silent-default trap applies to each."""
+    with pytest.raises(ValueError, match=expected):
+        DomainMap.from_config(config, variables={})
+
+
+def test_every_key_the_shipped_config_uses_is_recognised() -> None:
+    """Guards the tightening itself: no shipped key may trip the new check.
+
+    `test_shipped_config_loads` covers `bots`; this one pins the socket domain,
+    whose `protocols` and `rewrite` keys are exactly what the check is about.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    domain_map = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+    engine = domain_map.domain_for("/openapi/v1/engine/t/ws")
+    assert engine is not None
+    assert engine.serves_websocket and not engine.serves_http
