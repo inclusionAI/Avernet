@@ -32,7 +32,7 @@ It is built for teams that need to:
 - support **shared context, governed execution, and long-lived collaboration**
 - operate **human-agent collaboration** in real environments
 
-> **Production-tested at Ant Group** — Avernet supports **large-scale internal bot deployments** as of early July 2026.
+> **Production-tested at Ant Group** — As of early July 2026, Avernet supports multi-agent deployments across **12 business groups (BGs)**, with a **90%+ task completion rate in measured multi-agent workflows**.
 
 ## Capabilities & Status
 
