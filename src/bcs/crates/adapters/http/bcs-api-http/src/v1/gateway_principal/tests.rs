@@ -1,4 +1,5 @@
 use bcs_service_api::application::v1::AuthenticatedCaller;
+use axum::http::{HeaderMap, HeaderValue};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -7,6 +8,7 @@ use super::{
     GatewayPrincipalTokenVerifier, GatewayPrincipalTrust, GatewayPrincipalVerificationError,
     GatewayPrincipalVerifierBuildError,
 };
+use crate::v1::common::{PrincipalVerificationError, PrincipalVerifier};
 
 const NOW: u64 = 1_785_657_600;
 const TEST_KEY_TEXT: &str = "TEST-ONLY-bcs-principal-contract-key-32-bytes";
@@ -117,6 +119,23 @@ fn token_with_times(iat: u64, exp: u64) -> String {
     mint_with(header("JWT", "bare"), &claims, TEST_KEY)
 }
 
+fn current_token() -> String {
+    let fixture = fixture();
+    let now = u64::try_from(time::OffsetDateTime::now_utc().unix_timestamp())
+        .expect("current timestamp is positive");
+    mint_with(
+        header("JWT", &fixture.key_id),
+        &json!({
+            "iss": fixture.issuer,
+            "aud": fixture.audience,
+            "iat": now.saturating_sub(1),
+            "exp": now + 60,
+            "principals": fixture.principals,
+        }),
+        TEST_KEY,
+    )
+}
+
 fn verify_principals(
     principals: Value,
 ) -> Result<AuthenticatedCaller, GatewayPrincipalVerificationError> {
@@ -170,6 +189,55 @@ fn verifies_the_shared_all_identity_fixture_without_projecting_secrets() {
     let debug = format!("{caller:?}");
     assert!(!debug.contains("TEST_ONLY_BOT_TOKEN_MARKER"));
     assert!(!debug.contains("TEST_ONLY_ACCESS_KEY_TOKEN_MARKER"));
+}
+
+#[tokio::test]
+async fn header_verifier_extracts_one_signed_gateway_principal_token() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-avernet-principal",
+        HeaderValue::from_str(&current_token()).expect("valid header value"),
+    );
+
+    let caller = PrincipalVerifier::verify(&verifier(), &headers)
+        .await
+        .expect("valid signed Gateway caller");
+
+    assert_eq!(caller.tenant, "tenant-a");
+    assert_eq!(caller.user.as_ref().map(|user| user.id.as_str()), Some("user-1"));
+    assert_eq!(caller.bot.as_ref().map(|bot| bot.bot_uuid.as_str()), Some("bot-1"));
+    assert!(caller.app.is_some());
+    assert!(caller.access_key.is_some());
+}
+
+#[tokio::test]
+async fn header_verifier_rejects_missing_duplicate_blank_and_non_utf8_values() {
+    let verifier = verifier();
+    assert!(matches!(
+        PrincipalVerifier::verify(&verifier, &HeaderMap::new()).await,
+        Err(PrincipalVerificationError::Missing)
+    ));
+
+    let mut duplicate = HeaderMap::new();
+    duplicate.append("x-avernet-principal", HeaderValue::from_static("one"));
+    duplicate.append("x-avernet-principal", HeaderValue::from_static("two"));
+    assert!(matches!(
+        PrincipalVerifier::verify(&verifier, &duplicate).await,
+        Err(PrincipalVerificationError::Invalid(_))
+    ));
+
+    for value in [
+        HeaderValue::from_static(""),
+        HeaderValue::from_static("   "),
+        HeaderValue::from_bytes(&[0xff]).expect("opaque non-UTF-8 header"),
+    ] {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-avernet-principal", value);
+        assert!(matches!(
+            PrincipalVerifier::verify(&verifier, &headers).await,
+            Err(PrincipalVerificationError::Invalid(_))
+        ));
+    }
 }
 
 #[test]

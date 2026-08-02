@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -7,11 +6,12 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
-    AddGroupParticipant, ApplicationError, BotFinalDelivery, ChatConfiguration,
-    CollaborationConfiguration, CollaborationGroupDetail, CreateGroup, CreateGroupOutcome,
+    AddGroupParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
+    BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CollaborationGroupDetail,
+    CreateGroup, CreateGroupOutcome,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail,
-    GroupService, GroupStatus, GroupStrategy, GroupVisibility, ListBotGroups, Page, Participant,
-    Principal, UpdateGroup, UpdateGroupParticipant,
+    GroupService, GroupStatus, GroupStrategy, GroupVisibility, ListGroups, Page, Participant,
+    UpdateGroup, UpdateGroupParticipant,
 };
 use bcs_service_api::application::v1::{
     AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome,
@@ -31,18 +31,21 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 struct HeaderVerifier {
-    principal: Principal,
+    caller: AuthenticatedCaller,
 }
 
 #[async_trait]
 impl PrincipalVerifier for HeaderVerifier {
-    async fn verify(&self, headers: &HeaderMap) -> Result<Principal, PrincipalVerificationError> {
+    async fn verify(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.principal.clone())
+            Ok(self.caller.clone())
         } else {
             Err(PrincipalVerificationError::Missing)
         }
@@ -51,7 +54,7 @@ impl PrincipalVerifier for HeaderVerifier {
 
 #[derive(Default)]
 struct FakeGroupService {
-    list: Mutex<Option<ListBotGroups>>,
+    list: Mutex<Option<ListGroups>>,
     created: Mutex<Option<CreateGroup>>,
     reuse_dm: AtomicBool,
     get: Mutex<Option<GetGroup>>,
@@ -64,9 +67,9 @@ struct FakeGroupService {
 
 #[async_trait]
 impl GroupService for FakeGroupService {
-    async fn list_bot_groups(
+    async fn list_groups(
         &self,
-        command: ListBotGroups,
+        command: ListGroups,
     ) -> Result<Page<bcs_service_api::application::v1::GroupSummary>, ApplicationError> {
         *self.list.lock().expect("list lock") = Some(command);
         Ok(Page::empty(0, 20))
@@ -289,8 +292,23 @@ impl FriendshipService for NoopFriendshipService {
     }
 }
 
-fn principal() -> Principal {
-    Principal::bot("bot-1", "tenant-a", BTreeSet::new())
+fn caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-1".into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
+}
+
+fn caller_user_id(caller: &AuthenticatedCaller) -> &str {
+    caller.user.as_ref().expect("User identity").id.as_str()
 }
 
 fn group_detail() -> GroupDetail {
@@ -328,7 +346,7 @@ fn test_router(service: Arc<FakeGroupService>) -> axum::Router {
         Arc::new(NoopInvitationService),
         Arc::new(NoopFriendshipService),
         Arc::new(HeaderVerifier {
-            principal: principal(),
+            caller: caller(),
         }),
     ))
 }
@@ -352,7 +370,7 @@ fn authenticated_request(method: &str, uri: &str, body: Value) -> Request<Body> 
 }
 
 #[tokio::test]
-async fn all_five_group_routes_forward_the_verified_principal() {
+async fn group_routes_forward_the_verified_caller() {
     let service = Arc::new(FakeGroupService::default());
     let app = test_router(service.clone());
 
@@ -360,7 +378,7 @@ async fn all_five_group_routes_forward_the_verified_principal() {
         .clone()
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/bots/collaboration/bot-1/groups?offset=5&limit=10&membership=session_only&kind=all&strategy=state_machine",
+            "/openapi/v1/groups?view_bot_id=bot-1&offset=5&limit=10&membership=session_only&kind=all&strategy=state_machine",
             Value::Null,
         ))
         .await
@@ -373,7 +391,8 @@ async fn all_five_group_routes_forward_the_verified_principal() {
     {
         let list = service.list.lock().expect("list lock");
         let list = list.as_ref().expect("list command");
-        assert_eq!(list.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&list.caller), "staff-1");
+        assert_eq!(list.view_bot_id.as_deref(), Some("bot-1"));
         assert_eq!(list.offset, 5);
         assert_eq!(list.limit, 10);
         assert_eq!(list.strategy, Some(GroupStrategy::StateMachine));
@@ -410,9 +429,12 @@ async fn all_five_group_routes_forward_the_verified_principal() {
             .expect("create lock")
             .as_ref()
             .expect("create command")
-            .principal
-            .actor_id(),
-        "bot-1"
+            .caller
+            .user
+            .as_ref()
+            .expect("User identity")
+            .id,
+        "staff-1"
     );
 
     let get_response = app
@@ -469,7 +491,7 @@ async fn all_five_group_routes_forward_the_verified_principal() {
             .lock()
             .expect("add participant lock");
         let added = added.as_ref().expect("add participant command");
-        assert_eq!(added.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&added.caller), "staff-1");
         assert_eq!(added.group_id, "group-1");
         assert_eq!(added.actor_id, "bot-2");
         assert_eq!(added.role, ParticipantRole::Consultant);
@@ -491,7 +513,7 @@ async fn all_five_group_routes_forward_the_verified_principal() {
             .lock()
             .expect("update participant lock");
         let updated = updated.as_ref().expect("update participant command");
-        assert_eq!(updated.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&updated.caller), "staff-1");
         assert_eq!(updated.group_id, "group-1");
         assert_eq!(updated.actor_id, "bot-2");
         assert_eq!(updated.mode, ParticipantMode::Muted);
@@ -512,7 +534,7 @@ async fn all_five_group_routes_forward_the_verified_principal() {
             .lock()
             .expect("remove participant lock");
         let removed = removed.as_ref().expect("remove participant command");
-        assert_eq!(removed.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&removed.caller), "staff-1");
         assert_eq!(removed.group_id, "group-1");
         assert_eq!(removed.actor_id, "bot-2");
     }
@@ -589,11 +611,6 @@ async fn malformed_percent_encoded_paths_use_the_common_error_envelope() {
     let app = test_router(service);
 
     for (method, uri, body) in [
-        (
-            "GET",
-            "/openapi/v1/bots/collaboration/%FF/groups",
-            Value::Null,
-        ),
         ("GET", "/openapi/v1/groups/%FF", Value::Null),
         (
             "PATCH",

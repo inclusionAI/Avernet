@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::{ApplicationError, Page, Principal};
+use super::{ApplicationError, AuthenticatedCaller, Page};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -132,7 +132,7 @@ pub struct BotList {
 
 #[derive(Debug, Clone)]
 pub struct ListBotCandidates {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub bot_id: String,
     pub purpose: BotCandidatePurpose,
     pub name: Option<String>,
@@ -142,13 +142,13 @@ pub struct ListBotCandidates {
 
 #[derive(Debug, Clone)]
 pub struct QueryBots {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub bot_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct GetBot {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub bot_id: String,
 }
 
@@ -188,14 +188,14 @@ impl BotPatch {
 
 #[derive(Debug, Clone)]
 pub struct UpdateBot {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub bot_id: String,
     pub patch: BotPatch,
 }
 
 #[derive(Debug, Clone)]
 pub struct ListMyBots {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub kind: Option<BotKind>,
     pub name: Option<String>,
     pub status: Option<BotStatus>,

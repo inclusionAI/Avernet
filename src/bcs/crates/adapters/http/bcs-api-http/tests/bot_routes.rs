@@ -3,7 +3,6 @@
     reason = "test assertions intentionally fail fast"
 )]
 
-use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -18,22 +17,27 @@ struct HeaderVerifier;
 
 #[async_trait]
 impl PrincipalVerifier for HeaderVerifier {
-    async fn verify(&self, headers: &HeaderMap) -> Result<Principal, PrincipalVerificationError> {
+    async fn verify(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(Principal::human(
-                AuthenticatedUser {
+            Ok(AuthenticatedCaller {
+                tenant: "tenant-1".into(),
+                user: Some(AuthenticatedUserIdentity {
                     id: "staff-1".to_string(),
                     username: "staff-1".to_string(),
                     display_name: None,
                     full_name: None,
-                },
-                "tenant-1",
-                BTreeSet::new(),
-            ))
+                }),
+                bot: None,
+                app: None,
+                access_key: None,
+            })
         } else {
             Err(PrincipalVerificationError::Missing)
         }
@@ -97,9 +101,9 @@ struct NoopGroupService;
 
 #[async_trait]
 impl GroupService for NoopGroupService {
-    async fn list_bot_groups(
+    async fn list_groups(
         &self,
-        _: ListBotGroups,
+        _: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
         Err(ApplicationError::internal("not configured"))
     }
@@ -340,10 +344,7 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
     let candidates = service.candidates.lock().expect("candidates lock");
     let candidates = candidates.as_ref().expect("candidates command");
     assert_eq!(
-        candidates
-            .principal
-            .authenticated_user()
-            .map(|user| user.id.as_str()),
+        candidates.caller.user.as_ref().map(|user| user.id.as_str()),
         Some("staff-1")
     );
     assert_eq!(candidates.bot_id, "acting");

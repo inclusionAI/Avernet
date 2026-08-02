@@ -3,7 +3,7 @@ use axum::extract::{Request, State};
 use axum::http::HeaderMap;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use bcs_service_api::application::v1::Principal;
+use bcs_service_api::application::v1::AuthenticatedCaller;
 
 use super::{ApiState, ErrorResponse, RequestId};
 
@@ -21,7 +21,10 @@ pub enum PrincipalVerificationError {
 /// not provide a verifier that trusts an unsigned Principal header.
 #[async_trait]
 pub trait PrincipalVerifier: Send + Sync {
-    async fn verify(&self, headers: &HeaderMap) -> Result<Principal, PrincipalVerificationError>;
+    async fn verify(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<AuthenticatedCaller, PrincipalVerificationError>;
 }
 
 pub async fn verify_principal(
@@ -31,8 +34,8 @@ pub async fn verify_principal(
 ) -> Response {
     let request_id = RequestId::from_headers(request.headers());
     match state.principal_verifier.verify(request.headers()).await {
-        Ok(principal) => {
-            request.extensions_mut().insert(principal);
+        Ok(caller) => {
+            request.extensions_mut().insert(caller);
             request.extensions_mut().insert(request_id);
             next.run(request).await
         }

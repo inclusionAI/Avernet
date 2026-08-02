@@ -4,7 +4,7 @@ use axum::extract::{Extension, Json, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use bcs_service_api::application::v1::Principal;
+use bcs_service_api::application::v1::AuthenticatedCaller;
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
@@ -29,7 +29,7 @@ pub fn router() -> Router<ApiState> {
 
 async fn create_group_invitation(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<CreateInvitationRequest>, JsonRejection>,
@@ -38,7 +38,7 @@ async fn create_group_invitation(
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .invitation_service
-        .create_group_invitation(body.into_group_command(principal, group_id))
+        .create_group_invitation(body.into_group_command(caller, group_id))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
@@ -50,7 +50,7 @@ async fn create_group_invitation(
 
 async fn create_session_invitation(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<CreateInvitationRequest>, JsonRejection>,
@@ -59,7 +59,7 @@ async fn create_session_invitation(
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .invitation_service
-        .create_session_invitation(body.into_session_command(principal, session_id))
+        .create_session_invitation(body.into_session_command(caller, session_id))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
@@ -71,7 +71,7 @@ async fn create_session_invitation(
 
 async fn accept_invitation(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<AcceptInvitationRequest>, JsonRejection>,
@@ -80,7 +80,7 @@ async fn accept_invitation(
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .invitation_service
-        .accept_invitation(body.into_command(principal, token))
+        .accept_invitation(body.into_command(caller, token))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((

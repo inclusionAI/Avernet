@@ -1,5 +1,5 @@
 use bcs_service_api::application::v1::{
-    AcceptInvitation, CreateGroupInvitation, CreateSessionInvitation, Principal,
+    AcceptInvitation, AuthenticatedCaller, CreateGroupInvitation, CreateSessionInvitation,
 };
 use serde::Deserialize;
 
@@ -35,11 +35,11 @@ where
 impl CreateInvitationRequest {
     pub fn into_group_command(
         self,
-        principal: Principal,
+        caller: AuthenticatedCaller,
         group_id: String,
     ) -> CreateGroupInvitation {
         CreateGroupInvitation {
-            principal,
+            caller,
             group_id,
             expires_in_seconds: self.expires_in_seconds,
         }
@@ -47,11 +47,11 @@ impl CreateInvitationRequest {
 
     pub fn into_session_command(
         self,
-        principal: Principal,
+        caller: AuthenticatedCaller,
         session_id: String,
     ) -> CreateSessionInvitation {
         CreateSessionInvitation {
-            principal,
+            caller,
             session_id,
             expires_in_seconds: self.expires_in_seconds,
         }
@@ -60,18 +60,18 @@ impl CreateInvitationRequest {
 
 /// Request body for accepting an invitation token.
 ///
-/// The body is empty: only a Human Principal authenticated by the Gateway may
-/// accept, and the joining Human actor is derived from the Principal's
-/// `staff_no`. `deny_unknown_fields` rejects any supplied `bot_uuid` (legacy
+/// The body is empty: only a Caller with User identity may accept, and the
+/// joining Human actor is derived from the User subject id.
+/// `deny_unknown_fields` rejects any supplied `bot_uuid` (legacy
 /// V1 pre-pivot field, now removed) with a 400 `invalid_request`.
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct AcceptInvitationRequest {}
 
 impl AcceptInvitationRequest {
-    pub fn into_command(self, principal: Principal, token: String) -> AcceptInvitation {
+    pub fn into_command(self, caller: AuthenticatedCaller, token: String) -> AcceptInvitation {
         AcceptInvitation {
-            principal,
+            caller,
             token,
         }
     }

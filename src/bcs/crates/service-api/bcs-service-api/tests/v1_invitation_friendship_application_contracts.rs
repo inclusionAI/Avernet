@@ -1,13 +1,27 @@
-use std::collections::BTreeSet;
-
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedUser, CreateBotFriendRequest,
-    CreateGroupInvitation, CreateSessionInvitation, DeleteResult, Friendship, FriendshipService,
-    FriendRequest, FriendRequestDirection, FriendRequestStatus, Invitation, InvitationAcceptResult,
-    InvitationService, InvitationState, InvitationTargetType, ListBotFriendRequests, ListBotFriendships,
-    Page, Principal, RejectFriendRequest, DeleteBotFriendship,
+    AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedCaller,
+    AuthenticatedUserIdentity, CreateBotFriendRequest, CreateGroupInvitation,
+    CreateSessionInvitation, DeleteBotFriendship, DeleteResult, FriendRequest,
+    FriendRequestDirection, FriendRequestStatus, Friendship, FriendshipService, Invitation,
+    InvitationAcceptResult, InvitationService, InvitationState, InvitationTargetType,
+    ListBotFriendRequests, ListBotFriendships, Page, RejectFriendRequest,
 };
+
+fn human_caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-1".into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
+}
 
 struct NoopInvitationService;
 
@@ -95,26 +109,26 @@ fn friendship_service_is_object_safe() {
 }
 
 #[test]
-fn invitation_commands_carry_principal_and_no_raw_credentials() {
-    let principal = Principal::bot("bot-1", "tenant-a", BTreeSet::new());
+fn invitation_commands_carry_caller_and_no_raw_credentials() {
+    let caller = human_caller();
     let create_group = CreateGroupInvitation {
-        principal: principal.clone(),
+        caller: caller.clone(),
         group_id: "g1".into(),
         expires_in_seconds: Some(3600),
     };
     let create_session = CreateSessionInvitation {
-        principal: principal.clone(),
+        caller: caller.clone(),
         session_id: "s1".into(),
         expires_in_seconds: None,
     };
     let accept = AcceptInvitation {
-        principal: principal.clone(),
+        caller: caller.clone(),
         token: "tok-1".into(),
     };
     for cmd in [
-        &create_group.principal as &Principal,
-        &create_session.principal,
-        &accept.principal,
+        &create_group.caller,
+        &create_session.caller,
+        &accept.caller,
     ] {
         let s = format!("{cmd:?}");
         assert!(!s.contains("Cookie") && !s.contains("Bearer") && !s.contains("sender"));
@@ -126,26 +140,26 @@ fn invitation_commands_carry_principal_and_no_raw_credentials() {
 }
 
 #[test]
-fn friendship_commands_carry_principal_and_no_raw_credentials() {
-    let principal = Principal::bot("bot-1", "tenant-a", BTreeSet::new());
+fn friendship_commands_carry_caller_and_no_raw_credentials() {
+    let caller = human_caller();
     let list_bot_friendships = ListBotFriendships {
-        principal: principal.clone(),
+        caller: caller.clone(),
         bot_uuid: "bot-1".into(),
         offset: 0,
         limit: 25,
     };
     let remove = DeleteBotFriendship {
-        principal: principal.clone(),
+        caller: caller.clone(),
         bot_uuid: "bot-1".into(),
         friend_bot_uuid: "bot-2".into(),
     };
     let create_req = CreateBotFriendRequest {
-        principal: principal.clone(),
+        caller: caller.clone(),
         bot_uuid: "bot-1".into(),
         to_bot_uuid: "bot-2".into(),
     };
     let list_reqs = ListBotFriendRequests {
-        principal: principal.clone(),
+        caller: caller.clone(),
         bot_uuid: "bot-1".into(),
         direction: FriendRequestDirection::Sent,
         status: Some(FriendRequestStatus::Pending),
@@ -153,20 +167,20 @@ fn friendship_commands_carry_principal_and_no_raw_credentials() {
         limit: 10,
     };
     let accept_req = AcceptFriendRequest {
-        principal: principal.clone(),
+        caller: caller.clone(),
         request_id: "req-1".into(),
     };
     let reject_req = RejectFriendRequest {
-        principal,
+        caller,
         request_id: "req-1".into(),
     };
     for cmd in [
-        &list_bot_friendships.principal as &Principal,
-        &remove.principal,
-        &create_req.principal,
-        &list_reqs.principal,
-        &accept_req.principal,
-        &reject_req.principal,
+        &list_bot_friendships.caller,
+        &remove.caller,
+        &create_req.caller,
+        &list_reqs.caller,
+        &accept_req.caller,
+        &reject_req.caller,
     ] {
         let s = format!("{cmd:?}");
         assert!(!s.contains("Cookie") && !s.contains("Bearer") && !s.contains("sender"));
@@ -313,21 +327,11 @@ fn friend_request_serializes_with_v1_field_names() {
 }
 
 #[test]
-fn human_principal_can_be_carried_in_invitation_command() {
-    let human = Principal::human(
-        AuthenticatedUser {
-            id: "staff-1".into(),
-            username: "alice".into(),
-            display_name: None,
-            full_name: None,
-        },
-        "tenant-a",
-        BTreeSet::new(),
-    );
+fn authenticated_caller_can_be_carried_in_invitation_command() {
     let command = AcceptInvitation {
-        principal: human,
+        caller: human_caller(),
         token: "tok-1".into(),
     };
-    assert_eq!(command.principal.actor_id(), "human_staff-1");
+    assert_eq!(command.caller.user.expect("User").id, "staff-1");
     assert_eq!(command.token, "tok-1");
 }

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::group::{DeleteResult, Page};
-use super::{ApplicationError, Principal};
+use super::{ApplicationError, AuthenticatedCaller};
 
 /// Reuse the domain friend-request status vocabulary.
 ///
@@ -60,7 +60,7 @@ pub struct FriendRequest {
 /// List a bot's friendships, ordered by `created_at` descending.
 #[derive(Debug, Clone)]
 pub struct ListBotFriendships {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub bot_uuid: String,
     pub offset: u64,
     pub limit: u64,
@@ -69,7 +69,7 @@ pub struct ListBotFriendships {
 /// Remove a friendship symmetrically and idempotently.
 #[derive(Debug, Clone)]
 pub struct DeleteBotFriendship {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub bot_uuid: String,
     pub friend_bot_uuid: String,
 }
@@ -78,7 +78,7 @@ pub struct DeleteBotFriendship {
 /// used) to `to_bot_uuid` (the receiver).
 #[derive(Debug, Clone)]
 pub struct CreateBotFriendRequest {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub bot_uuid: String,
     pub to_bot_uuid: String,
 }
@@ -86,7 +86,7 @@ pub struct CreateBotFriendRequest {
 /// List friend requests sent by or received by `bot_uuid`.
 #[derive(Debug, Clone)]
 pub struct ListBotFriendRequests {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub bot_uuid: String,
     pub direction: FriendRequestDirection,
     pub status: Option<FriendRequestStatus>,
@@ -97,14 +97,14 @@ pub struct ListBotFriendRequests {
 /// Accept a friend request as the receiver; idempotent after acceptance.
 #[derive(Debug, Clone)]
 pub struct AcceptFriendRequest {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub request_id: String,
 }
 
 /// Reject a friend request as the receiver; idempotent after rejection.
 #[derive(Debug, Clone)]
 pub struct RejectFriendRequest {
-    pub principal: Principal,
+    pub caller: AuthenticatedCaller,
     pub request_id: String,
 }
 

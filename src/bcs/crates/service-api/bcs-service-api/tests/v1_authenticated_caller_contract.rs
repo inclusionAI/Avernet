@@ -1,6 +1,6 @@
 use bcs_service_api::application::v1::{
     AuthenticatedAccessKeyIdentity, AuthenticatedAppIdentity, AuthenticatedBotIdentity,
-    AuthenticatedCaller, AuthenticatedUserIdentity,
+    AuthenticatedCaller, AuthenticatedUserIdentity, Principal, require_human,
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
@@ -53,4 +53,50 @@ fn authenticated_caller_preserves_all_identity_kinds_without_selecting_an_actor(
             .map(|value| value.access_key.as_str()),
         Some("ak-test-1"),
     );
+}
+
+#[test]
+fn require_human_projects_only_the_authenticated_user() {
+    let caller = AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-1".into(),
+            username: "alice".into(),
+            display_name: Some("Alice".into()),
+            full_name: Some("Alice Example".into()),
+        }),
+        bot: Some(AuthenticatedBotIdentity {
+            bot_uuid: "bot-extra".into(),
+            owner_id: "someone-else".into(),
+            app_id: 7,
+            agent_code: "agent-extra".into(),
+        }),
+        app: None,
+        access_key: None,
+    };
+
+    let principal = require_human(&caller).expect("caller has User");
+    assert_eq!(principal.actor_id(), "human_staff-1");
+    assert_eq!(principal.tenant(), "tenant-a");
+    assert!(principal.scopes().is_empty());
+    assert!(matches!(principal, Principal::Human(_)));
+}
+
+#[test]
+fn require_human_rejects_a_valid_caller_without_user() {
+    let caller = AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: None,
+        bot: Some(AuthenticatedBotIdentity {
+            bot_uuid: "bot-only".into(),
+            owner_id: "staff-1".into(),
+            app_id: 7,
+            agent_code: "agent-only".into(),
+        }),
+        app: None,
+        access_key: None,
+    };
+
+    let error = require_human(&caller).expect_err("Bot-only caller is not Human");
+    assert_eq!(error.code(), "forbidden");
 }

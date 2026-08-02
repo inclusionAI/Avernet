@@ -44,6 +44,8 @@ impl Default for KindQuery {
 #[serde(deny_unknown_fields)]
 pub struct ListGroupsQuery {
     #[serde(default)]
+    pub view_bot_id: Option<String>,
+    #[serde(default)]
     pub offset: u64,
     #[serde(default = "default_limit")]
     pub limit: u64,

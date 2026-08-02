@@ -7,7 +7,8 @@ use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     ApplicationError, Bot, BotCandidate, BotCandidatePurpose, BotDescriptor, BotKind, BotProvider,
     BotReachability, BotService, BotSkill, BotStatus, BotVisibility, GetBot, HumanBot,
-    ListBotCandidates, ListMyBots, Page, PhysicalBot, Principal, QueryBots, UpdateBot,
+    ListBotCandidates, ListMyBots, Page, PhysicalBot, QueryBots, UpdateBot,
+    require_authenticated_user,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility,
@@ -49,13 +50,10 @@ impl BotServiceImpl {
         }
     }
 
-    fn human_staff_no(principal: &Principal) -> Result<&str, ApplicationError> {
-        match principal {
-            Principal::Human(human) => Ok(&human.subject.id),
-            Principal::Bot(_) => Err(ApplicationError::forbidden(
-                "Bot control-plane operations require a Human Principal",
-            )),
-        }
+    fn human_staff_no(
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+    ) -> Result<String, ApplicationError> {
+        Ok(require_authenticated_user(caller)?.id.clone())
     }
 
     fn validate_pagination(offset: u64, limit: u64) -> Result<(), ApplicationError> {
@@ -214,7 +212,7 @@ impl BotService for BotServiceImpl {
         &self,
         command: ListBotCandidates,
     ) -> Result<Page<BotCandidate>, ApplicationError> {
-        let staff_no = Self::human_staff_no(&command.principal)?;
+        let staff_no = Self::human_staff_no(&command.caller)?;
         Self::validate_bot_id(&command.bot_id)?;
         Self::validate_pagination(command.offset, command.limit)?;
         let acting = self.load_record(&command.bot_id).await?;
@@ -224,7 +222,7 @@ impl BotService for BotServiceImpl {
                 "Candidate search requires a physical acting Bot",
             ));
         }
-        if acting.created_by.as_deref() != Some(staff_no) {
+        if acting.created_by.as_deref() != Some(staff_no.as_str()) {
             return Err(ApplicationError::forbidden(format!(
                 "Current Human does not manage Bot '{}'",
                 command.bot_id
@@ -278,7 +276,7 @@ impl BotService for BotServiceImpl {
     }
 
     async fn query(&self, command: QueryBots) -> Result<Vec<Bot>, ApplicationError> {
-        Self::human_staff_no(&command.principal)?;
+        Self::human_staff_no(&command.caller)?;
         if command.bot_ids.len() > 100
             || command
                 .bot_ids
@@ -299,14 +297,14 @@ impl BotService for BotServiceImpl {
     }
 
     async fn get(&self, query: GetBot) -> Result<Bot, ApplicationError> {
-        Self::human_staff_no(&query.principal)?;
+        Self::human_staff_no(&query.caller)?;
         Self::validate_bot_id(&query.bot_id)?;
         self.project_one(self.load_record(&query.bot_id).await?)
             .await
     }
 
     async fn update(&self, command: UpdateBot) -> Result<Bot, ApplicationError> {
-        let staff_no = Self::human_staff_no(&command.principal)?;
+        let staff_no = Self::human_staff_no(&command.caller)?;
         Self::validate_bot_id(&command.bot_id)?;
         if command.patch.is_empty() {
             return Err(ApplicationError::invalid(
@@ -326,7 +324,7 @@ impl BotService for BotServiceImpl {
             ));
         }
         let record = self.load_record(&command.bot_id).await?;
-        if record.created_by.as_deref() != Some(staff_no) {
+        if record.created_by.as_deref() != Some(staff_no.as_str()) {
             return Err(ApplicationError::forbidden(format!(
                 "Current Human does not own Bot '{}'",
                 command.bot_id
@@ -405,12 +403,12 @@ impl BotService for BotServiceImpl {
     }
 
     async fn list_mine(&self, command: ListMyBots) -> Result<Page<Bot>, ApplicationError> {
-        let staff_no = Self::human_staff_no(&command.principal)?;
+        let staff_no = Self::human_staff_no(&command.caller)?;
         Self::validate_pagination(command.offset, command.limit)?;
         let records = self
             .control_plane
             .list_control_plane_by_creator(BotControlPlaneOwnedQuery {
-                created_by: staff_no.to_string(),
+                created_by: staff_no,
                 env: self.config.env.clone(),
                 kind: command.kind.map(|kind| match kind {
                     BotKind::Bot => ActorKind::Bot,

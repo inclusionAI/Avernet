@@ -7,8 +7,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use bcs_service_api::application::v1::{
-    ApplicationError, BotList, BotService, GetBot, ListBotCandidates, ListMyBots, Principal,
-    QueryBots, UpdateBot,
+    ApplicationError, AuthenticatedCaller, BotList, BotService, GetBot, ListBotCandidates,
+    ListMyBots, QueryBots, UpdateBot,
 };
 
 use crate::v1::common::{
@@ -37,7 +37,7 @@ fn service(state: &ApiState, request_id: &RequestId) -> Result<Arc<dyn BotServic
 
 async fn list_candidates(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<ListBotCandidatesQuery>, QueryRejection>,
@@ -46,7 +46,7 @@ async fn list_candidates(
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = service(&state, &request_id)?
         .list_candidates(ListBotCandidates {
-            principal,
+            caller,
             bot_id,
             purpose: query.purpose.into(),
             name: query.name,
@@ -64,14 +64,14 @@ async fn list_candidates(
 
 async fn query_bots(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     body: Result<Json<QueryBotsRequest>, JsonRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let items = service(&state, &request_id)?
         .query(QueryBots {
-            principal,
+            caller,
             bot_ids: body.bot_ids,
         })
         .await
@@ -90,13 +90,13 @@ async fn query_bots(
 
 async fn get_bot(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Path(bot_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = service(&state, &request_id)?
-        .get(GetBot { principal, bot_id })
+        .get(GetBot { caller, bot_id })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
@@ -108,7 +108,7 @@ async fn get_bot(
 
 async fn update_bot(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<UpdateBotRequest>, JsonRejection>,
@@ -117,7 +117,7 @@ async fn update_bot(
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = service(&state, &request_id)?
         .update(UpdateBot {
-            principal,
+            caller,
             bot_id,
             patch: body.into(),
         })
@@ -132,14 +132,14 @@ async fn update_bot(
 
 async fn list_mine(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     query: Result<Query<ListMyBotsQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = service(&state, &request_id)?
         .list_mine(ListMyBots {
-            principal,
+            caller,
             kind: query.kind,
             name: query.name,
             status: query.status,

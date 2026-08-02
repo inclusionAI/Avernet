@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -7,11 +6,12 @@ use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
-    AddGroupParticipant, AddSessionParticipant, ApplicationError, BotParticipantMode,
-    CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome,
+    AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedCaller,
+    AuthenticatedUserIdentity, BotParticipantMode, CompleteSession, CreateGroup, CreateSession,
+    CreateSessionOutcome,
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
-    GetGroup, GetSession, GroupDetail, GroupService, GroupSummary, ListBotGroups,
-    ListSessionMessages, ListSessions, MessageSenderKind, Page, Principal, SessionCompletionResult,
+    GetGroup, GetSession, GroupDetail, GroupService, GroupSummary, ListGroups,
+    ListSessionMessages, ListSessions, MessageSenderKind, Page, SessionCompletionResult,
     SessionDetail, SessionMessage, SessionMessageKind, SessionMessagePage, SessionMessageService, SessionParticipant,
     SessionService, SessionStatus, SessionSummary, UpdateGroup, UpdateGroupParticipant,
     UpdateSession, UpdateSessionParticipant,
@@ -32,26 +32,44 @@ use tower::ServiceExt;
 // ---------------------------------------------------------------------------
 
 struct HeaderVerifier {
-    principal: Principal,
+    caller: AuthenticatedCaller,
 }
 
 #[async_trait]
 impl PrincipalVerifier for HeaderVerifier {
-    async fn verify(&self, headers: &HeaderMap) -> Result<Principal, PrincipalVerificationError> {
+    async fn verify(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.principal.clone())
+            Ok(self.caller.clone())
         } else {
             Err(PrincipalVerificationError::Missing)
         }
     }
 }
 
-fn principal() -> Principal {
-    Principal::bot("bot-1", "tenant-a", BTreeSet::new())
+fn caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-1".into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
+}
+
+fn caller_user_id(caller: &AuthenticatedCaller) -> &str {
+    caller.user.as_ref().expect("User identity").id.as_str()
 }
 
 fn authenticated_request(method: &str, uri: &str, body: Value) -> Request<Body> {
@@ -80,9 +98,9 @@ struct NoopGroupService;
 
 #[async_trait]
 impl GroupService for NoopGroupService {
-    async fn list_bot_groups(
+    async fn list_groups(
         &self,
-        _command: ListBotGroups,
+        _command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
         Err(ApplicationError::internal("group not configured"))
     }
@@ -418,7 +436,7 @@ fn test_session_router(
         Arc::new(NoopInvitationService),
         Arc::new(NoopFriendshipService),
         Arc::new(HeaderVerifier {
-            principal: principal(),
+            caller: caller(),
         }),
     ))
 }
@@ -459,7 +477,7 @@ async fn create_session_returns_created_and_forwards_principal() {
     {
         let created = session.created.lock().expect("create lock");
         let created = created.as_ref().expect("create command");
-        assert_eq!(created.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&created.caller), "staff-1");
         assert_eq!(created.group_id, "group-1");
         assert_eq!(created.driver_bot_uuid, "bot-1");
         assert_eq!(created.title.as_deref(), Some("Planning"));
@@ -505,7 +523,7 @@ async fn list_sessions_returns_page_and_forwards_filters() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/groups/group-1/sessions?offset=5&limit=10&status=running",
+            "/openapi/v1/groups/group-1/sessions?view_bot_id=bot-1&offset=5&limit=10&status=running",
             Value::Null,
         ))
         .await
@@ -521,7 +539,8 @@ async fn list_sessions_returns_page_and_forwards_filters() {
     {
         let listed = session.listed.lock().expect("list lock");
         let listed = listed.as_ref().expect("list command");
-        assert_eq!(listed.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&listed.caller), "staff-1");
+        assert_eq!(listed.view_bot_id.as_deref(), Some("bot-1"));
         assert_eq!(listed.group_id, "group-1");
         assert_eq!(listed.offset, 5);
         assert_eq!(listed.limit, 10);
@@ -550,7 +569,7 @@ async fn get_session_returns_detail() {
     {
         let got = session.got.lock().expect("get lock");
         let got = got.as_ref().expect("get command");
-        assert_eq!(got.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&got.caller), "staff-1");
         assert_eq!(got.session_id, "session-1");
     }
 }
@@ -576,7 +595,7 @@ async fn update_session_returns_updated_detail() {
     {
         let updated = session.updated.lock().expect("update lock");
         let updated = updated.as_ref().expect("update command");
-        assert_eq!(updated.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&updated.caller), "staff-1");
         assert_eq!(updated.session_id, "session-1");
         assert_eq!(updated.title.as_deref(), Some("Renamed"));
     }
@@ -603,7 +622,7 @@ async fn delete_session_returns_deleted() {
     {
         let deleted = session.deleted.lock().expect("delete lock");
         let deleted = deleted.as_ref().expect("delete command");
-        assert_eq!(deleted.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&deleted.caller), "staff-1");
         assert_eq!(deleted.session_id, "session-1");
     }
 }
@@ -631,7 +650,7 @@ async fn complete_session_returns_completion_result() {
     {
         let completed = session.completed.lock().expect("complete lock");
         let completed = completed.as_ref().expect("complete command");
-        assert_eq!(completed.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&completed.caller), "staff-1");
         assert_eq!(completed.session_id, "session-1");
     }
 }
@@ -659,7 +678,7 @@ async fn list_session_messages_returns_cursor_page() {
     {
         let listed = message.listed.lock().expect("list messages lock");
         let listed = listed.as_ref().expect("list messages command");
-        assert_eq!(listed.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&listed.caller), "staff-1");
         assert_eq!(listed.session_id, "session-1");
         assert_eq!(listed.before, None);
         assert_eq!(listed.limit, 50);
@@ -778,7 +797,7 @@ async fn add_session_participant_returns_participant() {
     {
         let added = session.added_participant.lock().expect("add participant lock");
         let added = added.as_ref().expect("add participant command");
-        assert_eq!(added.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&added.caller), "staff-1");
         assert_eq!(added.session_id, "session-1");
         assert_eq!(added.bot_uuid, "bot-2");
         assert_eq!(added.mode, Some(BotParticipantMode::Muted));
@@ -806,7 +825,7 @@ async fn update_session_participant_returns_updated_mode() {
     {
         let updated = session.updated_participant.lock().expect("update participant lock");
         let updated = updated.as_ref().expect("update participant command");
-        assert_eq!(updated.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&updated.caller), "staff-1");
         assert_eq!(updated.session_id, "session-1");
         assert_eq!(updated.bot_uuid, "bot-2");
         assert_eq!(updated.mode, BotParticipantMode::Muted);
@@ -834,7 +853,7 @@ async fn remove_session_participant_returns_deleted() {
     {
         let removed = session.removed_participant.lock().expect("remove participant lock");
         let removed = removed.as_ref().expect("remove participant command");
-        assert_eq!(removed.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&removed.caller), "staff-1");
         assert_eq!(removed.session_id, "session-1");
         assert_eq!(removed.bot_uuid, "bot-2");
     }

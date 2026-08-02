@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -15,11 +15,12 @@ use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
 use bcs_group_store::MySqlGroupStore;
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedUser, BotFinalDelivery, ChatConfiguration,
+    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, BotFinalDelivery,
+    ChatConfiguration,
     CollaborationConfiguration, CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroup,
     CreateGroupSpec, CreateParticipant, DeleteGroup, GetGroup, GroupDeliveryPolicy, GroupDetail,
     GroupKindFilter, GroupPatch, GroupService, GroupStrategy as V1GroupStrategy, GroupSummary,
-    GroupVisibility, ListBotGroups, Membership, MembershipFilter, Principal, UpdateGroup,
+    GroupVisibility, ListGroups, Membership, MembershipFilter, UpdateGroup,
 };
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand, CollaborationDefinition,
@@ -28,7 +29,8 @@ use bcs_service_api::{
     DefaultDelivery, DefinitionYamlSource, FriendCoreService, FriendRepoPort, Group,
     GroupCollaborationDefinitionView, GroupCoreService, GroupStrategy,
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, NewSessionParams, Participant,
-    ParticipantRole, RoutingMode, RoutingPolicy, ServiceError, ServiceResult, SessionHistoryResult,
+    ParticipantRole, RelationCoreService, RoutingMode, RoutingPolicy, ServiceError, ServiceResult,
+    SessionHistoryResult,
     SessionManagementService, StartStateMachineRunCommand, StartStateMachineRunOutcome,
     StateMachineDeliveryCorrelation, StateMachineRun, StateMachineRunStatus, StateMachineRunView,
     SystemMessageService,
@@ -44,6 +46,7 @@ struct Fixture {
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
     friends: Arc<FriendCore>,
+    relation: Arc<RelationCore>,
     sessions: Arc<SessionManagementServiceImpl>,
 }
 
@@ -95,7 +98,7 @@ impl Fixture {
             groups.clone(),
             bots.clone(),
             friends.clone(),
-            relation,
+            relation.clone(),
             sessions.clone(),
             management,
             GroupServiceConfig {
@@ -107,6 +110,7 @@ impl Fixture {
             groups,
             bots,
             friends,
+            relation: relation.clone(),
             sessions,
         }
     }
@@ -141,7 +145,7 @@ impl Fixture {
             groups.clone(),
             bots.clone(),
             friends.clone(),
-            relation,
+            relation.clone(),
             sessions.clone(),
             management,
             GroupServiceConfig {
@@ -154,6 +158,7 @@ impl Fixture {
             groups,
             bots,
             friends,
+            relation,
             sessions,
         }
     }
@@ -190,7 +195,7 @@ impl Fixture {
             groups.clone(),
             bots.clone(),
             friends.clone(),
-            relation,
+            relation.clone(),
             sessions.clone(),
             management,
             GroupServiceConfig {
@@ -205,6 +210,7 @@ impl Fixture {
             groups,
             bots,
             friends,
+            relation,
             sessions,
         }
     }
@@ -219,6 +225,10 @@ impl Fixture {
             .register(bot_uuid.to_string(), capabilities)
             .await
             .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, bot_uuid, true)
+            .await
+            .expect("assign test Bot owner");
     }
 
     async fn add_protected_bot(&self, bot_uuid: &str) {
@@ -231,6 +241,10 @@ impl Fixture {
             .register(bot_uuid.to_string(), capabilities)
             .await
             .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, bot_uuid, true)
+            .await
+            .expect("assign test Bot owner");
     }
 }
 
@@ -537,12 +551,23 @@ impl CollaborationRuntimeService for RecordingRuntime {
     }
 }
 
-fn bot_principal(bot_uuid: &str) -> Principal {
-    Principal::bot(bot_uuid, "tenant-a", BTreeSet::new())
+fn bot_principal(bot_uuid: &str) -> AuthenticatedCaller {
+    human_principal_with_profile(bot_uuid, bot_uuid, None, None)
 }
 
-fn bot_principal_in_tenant(bot_uuid: &str, tenant: &str) -> Principal {
-    Principal::bot(bot_uuid, tenant, BTreeSet::new())
+fn bot_principal_in_tenant(bot_uuid: &str, tenant: &str) -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: tenant.to_string(),
+        user: Some(AuthenticatedUserIdentity {
+            id: bot_uuid.to_string(),
+            username: bot_uuid.to_string(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
 }
 
 fn human_principal_with_profile(
@@ -550,17 +575,19 @@ fn human_principal_with_profile(
     username: &str,
     display_name: Option<&str>,
     full_name: Option<&str>,
-) -> Principal {
-    Principal::human(
-        AuthenticatedUser {
+) -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
             id: subject_id.into(),
             username: username.into(),
             display_name: display_name.map(str::to_string),
             full_name: full_name.map(str::to_string),
-        },
-        "tenant-a",
-        BTreeSet::new(),
-    )
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
 }
 
 fn normal_group(
@@ -571,11 +598,11 @@ fn normal_group(
     updated_at: u64,
 ) -> Group {
     let mut group = Group::new(group_id, driver, participants);
-    group.originator = Some(driver.to_string());
+    group.originator = Some(format!("human_{driver}"));
     group.label = Some(group_id.to_string());
     group.group_strategy = strategy;
     group.updated_at = updated_at;
-    // V1 list_bot_groups sorts by `created_at DESC, group_id ASC`; pin both
+    // V1 list_groups sorts by `created_at DESC, group_id ASC`; pin both
     // timestamps to the same value so existing ordering assertions remain
     // deterministic under the new comparator.
     group.created_at = updated_at;
@@ -646,9 +673,9 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
 
     let page = fixture
         .service
-        .list_bot_groups(ListBotGroups {
-            principal: bot_principal("target"),
-            bot_uuid: "target".into(),
+        .list_groups(ListGroups {
+            caller: bot_principal("target"),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 10,
             q: None,
@@ -678,9 +705,9 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
 
     let session_only = fixture
         .service
-        .list_bot_groups(ListBotGroups {
-            principal: bot_principal("target"),
-            bot_uuid: "target".into(),
+        .list_groups(ListGroups {
+            caller: bot_principal("target"),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 1,
             q: None,
@@ -695,7 +722,168 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
 }
 
 #[tokio::test]
-async fn list_bot_groups_sorts_by_created_at_desc_not_updated_at() {
+async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_views() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("owned-by-someone-else").await;
+    fixture
+        .bots
+        .register(
+            "owned-by-alice".into(),
+            BotCapabilities {
+                visibility: "public".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register Alice's Bot");
+    fixture
+        .bots
+        .save_created_by("owned-by-alice", "alice", true)
+        .await
+        .expect("assign Alice's Bot ownership");
+    for (group_id, actor_id) in [
+        ("human-group", "human_alice"),
+        ("owned-bot-group", "owned-by-alice"),
+    ] {
+        fixture
+            .groups
+            .upsert(normal_group(
+                group_id,
+                "owned-by-someone-else",
+                vec![Participant::bot(actor_id, ParticipantRole::Consultant)],
+                GroupStrategy::Chat,
+                1,
+            ))
+            .await
+            .expect("store Group");
+    }
+
+    let list = |view_bot_id| ListGroups {
+        caller: bot_principal("alice"),
+        view_bot_id,
+        offset: 0,
+        limit: 20,
+        q: None,
+        membership: MembershipFilter::All,
+        kind: GroupKindFilter::All,
+        strategy: None,
+    };
+
+    let default_view = fixture
+        .service
+        .list_groups(list(None))
+        .await
+        .expect("omission selects the Human Actor");
+    assert_eq!(default_view.total, 1);
+    let explicit_human = fixture
+        .service
+        .list_groups(list(Some("human_alice".into())))
+        .await
+        .expect("the caller's Human Actor is an explicit valid view");
+    assert_eq!(explicit_human.total, 1);
+    let owned_bot = fixture
+        .service
+        .list_groups(list(Some("owned-by-alice".into())))
+        .await
+        .expect("an exact-created_by Bot is an explicit valid view");
+    assert_eq!(owned_bot.total, 1);
+
+    for invalid_view in ["human_bob", "owned-by-someone-else", "unknown-bot"] {
+        let error = fixture
+            .service
+            .list_groups(list(Some(invalid_view.into())))
+            .await
+            .expect_err("unauthorized View Actor must not fall back");
+        assert!(matches!(error, ApplicationError::Forbidden(_)));
+    }
+}
+
+#[tokio::test]
+async fn group_detail_accepts_human_or_exact_owned_bot_participation_only() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "relation-only"] {
+        fixture.add_public_bot(bot).await;
+    }
+    fixture
+        .bots
+        .register(
+            "owned".into(),
+            BotCapabilities {
+                visibility: "public".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register Alice's Bot");
+    fixture
+        .bots
+        .save_created_by("owned", "alice", true)
+        .await
+        .expect("assign Alice's Bot ownership");
+    fixture
+        .relation
+        .upsert_edge(bcs_service_api::RelationEdge {
+            from_id: "human_alice".into(),
+            to_id: "relation-only".into(),
+            env: "dev".into(),
+            kinds: 0,
+            allow: 0,
+            deny: 0,
+            is_creator: true,
+        })
+        .await
+        .expect("seed legacy creator relation");
+
+    for (group_id, participant) in [
+        (
+            "human-detail",
+            Participant::human("human_alice", ParticipantRole::Observer),
+        ),
+        (
+            "owned-detail",
+            Participant::bot("owned", ParticipantRole::Consultant),
+        ),
+        (
+            "relation-detail",
+            Participant::bot("relation-only", ParticipantRole::Consultant),
+        ),
+    ] {
+        fixture
+            .groups
+            .upsert(normal_group(
+                group_id,
+                "driver",
+                vec![participant],
+                GroupStrategy::Chat,
+                1,
+            ))
+            .await
+            .expect("store Group");
+    }
+
+    for group_id in ["human-detail", "owned-detail"] {
+        fixture
+            .service
+            .get(GetGroup {
+                caller: bot_principal("alice"),
+                group_id: group_id.into(),
+            })
+            .await
+            .expect("direct Human or exact owned Bot participation grants detail read");
+    }
+    let error = fixture
+        .service
+        .get(GetGroup {
+            caller: bot_principal("alice"),
+            group_id: "relation-detail".into(),
+        })
+        .await
+        .expect_err("creator relation alone is not Bot ownership");
+    assert!(matches!(error, ApplicationError::Forbidden(_)));
+}
+
+#[tokio::test]
+async fn list_groups_sorts_by_created_at_desc_not_updated_at() {
     // V1 contract declares `created_at DESC, group_id ASC`. The legacy
     // `updated_at DESC` ordering would put a recently-edited but older group
     // first, violating the contract. Seed three groups where the sort keys
@@ -751,9 +939,9 @@ async fn list_bot_groups_sorts_by_created_at_desc_not_updated_at() {
 
     let page = fixture
         .service
-        .list_bot_groups(ListBotGroups {
-            principal: bot_principal("target"),
-            bot_uuid: "target".into(),
+        .list_groups(ListGroups {
+            caller: bot_principal("target"),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 10,
             q: None,
@@ -780,7 +968,7 @@ async fn list_bot_groups_sorts_by_created_at_desc_not_updated_at() {
 }
 
 #[tokio::test]
-async fn create_derives_originator_after_driver_is_added_to_canonical_participants() {
+async fn create_uses_the_authenticated_human_as_originator() {
     let fixture = Fixture::new().await;
     for bot in ["requester", "driver", "helper"] {
         fixture.add_public_bot(bot).await;
@@ -789,7 +977,7 @@ async fn create_derives_originator_after_driver_is_added_to_canonical_participan
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("requester"),
+            caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("Planning".into()),
                 context: Some("Plan the release".into()),
@@ -815,7 +1003,7 @@ async fn create_derives_originator_after_driver_is_added_to_canonical_participan
         panic!("expected collaboration detail");
     };
     assert_eq!(detail.driver_bot_uuid, "driver");
-    assert_eq!(detail.originator_actor_id, "driver");
+    assert_eq!(detail.originator_actor_id, "human_requester");
     assert!(
         detail
             .participants
@@ -838,7 +1026,7 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: human_principal_with_profile(
+            caller: human_principal_with_profile(
                 "staff-1",
                 "alice-login",
                 Some("Alice"),
@@ -892,7 +1080,7 @@ async fn dm_create_uses_target_actor_id_and_projects_two_symmetric_participants(
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("bot-a"),
+            caller: bot_principal("bot-a"),
             group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
                 name: Some("A and B".into()),
                 context: None,
@@ -906,7 +1094,12 @@ async fn dm_create_uses_target_actor_id_and_projects_two_symmetric_participants(
         panic!("expected DM detail");
     };
     assert_eq!(detail.participants.len(), 2);
-    assert!(detail.participants.iter().any(|p| p.actor_id == "bot-a"));
+    assert!(
+        detail
+            .participants
+            .iter()
+            .any(|p| p.actor_id == "human_bot-a")
+    );
     assert!(detail.participants.iter().any(|p| p.actor_id == "bot-b"));
     let json = serde_json::to_value(&detail).expect("serialize DM detail");
     assert!(json.get("driver_bot_uuid").is_none());
@@ -921,9 +1114,9 @@ async fn dm_kind_rejects_a_strategy_filter() {
 
     let result = fixture
         .service
-        .list_bot_groups(ListBotGroups {
-            principal: bot_principal("target"),
-            bot_uuid: "target".into(),
+        .list_groups(ListGroups {
+            caller: bot_principal("target"),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 20,
             q: None,
@@ -940,14 +1133,14 @@ async fn dm_kind_rejects_a_strategy_filter() {
 }
 
 #[tokio::test]
-async fn bot_principal_list_requires_the_target_bot_to_exist() {
+async fn explicit_view_requires_the_target_bot_to_exist_and_be_owned() {
     let fixture = Fixture::new().await;
 
     let result = fixture
         .service
-        .list_bot_groups(ListBotGroups {
-            principal: bot_principal("missing"),
-            bot_uuid: "missing".into(),
+        .list_groups(ListGroups {
+            caller: bot_principal("missing"),
+            view_bot_id: Some("missing".into()),
             offset: 0,
             limit: 20,
             q: None,
@@ -959,12 +1152,12 @@ async fn bot_principal_list_requires_the_target_bot_to_exist() {
 
     assert!(matches!(
         result,
-        Err(ApplicationError::NotFound { code, .. }) if code == "bot_not_found"
+        Err(ApplicationError::Forbidden(_))
     ));
 }
 
 #[tokio::test]
-async fn bot_principal_list_propagates_registry_database_failure() {
+async fn explicit_view_propagates_registry_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
         PersistentBotRepo::with_plugins(
             Arc::new(InMemoryCachePlugin::new()),
@@ -975,9 +1168,9 @@ async fn bot_principal_list_propagates_registry_database_failure() {
 
     let result = fixture
         .service
-        .list_bot_groups(ListBotGroups {
-            principal: bot_principal("stored-bot"),
-            bot_uuid: "stored-bot".into(),
+        .list_groups(ListGroups {
+            caller: bot_principal("stored-bot"),
+            view_bot_id: Some("stored-bot".into()),
             offset: 0,
             limit: 20,
             q: None,
@@ -1002,7 +1195,7 @@ async fn create_group_propagates_quota_lookup_database_failure() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 driver_bot_uuid: "driver".into(),
                 name: Some("quota lookup failure".into()),
@@ -1038,7 +1231,7 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 driver_bot_uuid: "driver".into(),
                 name: Some("registry failure".into()),
@@ -1077,7 +1270,7 @@ async fn bot_dm_propagates_caller_registry_failure_after_target_validation() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("caller"),
+            caller: bot_principal("caller"),
             group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
                 name: None,
                 context: None,
@@ -1105,7 +1298,7 @@ async fn bot_dm_propagates_friendship_failure_after_initial_validation() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("caller"),
+            caller: bot_principal("caller"),
             group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
                 name: None,
                 context: None,
@@ -1134,7 +1327,7 @@ async fn create_rejects_non_bot_driver_and_dm_target_with_declared_code() {
     let driver = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("requester"),
+            caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: None,
                 context: None,
@@ -1159,7 +1352,7 @@ async fn create_rejects_non_bot_driver_and_dm_target_with_declared_code() {
     let target = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("requester"),
+            caller: bot_principal("requester"),
             group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
                 name: None,
                 context: None,
@@ -1184,7 +1377,7 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("State machine".into()),
                 context: None,
@@ -1228,7 +1421,7 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("State machine".into()),
                 context: None,
@@ -1283,7 +1476,7 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("State machine".into()),
                 context: None,
@@ -1325,7 +1518,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("State machine".into()),
                 context: Some("Execute the workflow".into()),
@@ -1406,7 +1599,7 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
     assert_eq!(started.len(), 1);
     assert_eq!(started[0].group_id, detail.group_id);
     assert!(started[0].session_id.is_some());
-    assert_eq!(started[0].caller_id.as_deref(), Some("driver"));
+    assert_eq!(started[0].caller_id.as_deref(), Some("human_driver"));
 }
 
 #[tokio::test]
@@ -1423,7 +1616,7 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("Human review".into()),
                 context: None,
@@ -1467,7 +1660,7 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("State machine".into()),
                 context: None,
@@ -1515,7 +1708,7 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
+            caller: human_principal_with_profile("staff-1", "alice", Some("Alice"), None),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("State machine".into()),
                 context: Some("Review the release".into()),
@@ -1542,7 +1735,7 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
     let GroupDetail::Collaboration(detail) = detail else {
         panic!("expected collaboration detail");
     };
-    assert_eq!(detail.originator_actor_id, "driver");
+    assert_eq!(detail.originator_actor_id, "human_staff-1");
 
     let sessions = fixture
         .sessions
@@ -1581,7 +1774,7 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("State machine".into()),
                 context: None,
@@ -1619,7 +1812,7 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("State machine".into()),
                 context: None,
@@ -1684,7 +1877,7 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("State machine".into()),
                 context: None,
@@ -1715,7 +1908,7 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
     let deleted = fixture
         .service
         .delete(DeleteGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: detail.group_id.clone(),
         })
         .await
@@ -1761,7 +1954,7 @@ async fn failed_group_delete_does_not_cancel_runs_before_group_rollback() {
     let error = fixture
         .service
         .delete(DeleteGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: "group-1".into(),
         })
         .await
@@ -1814,7 +2007,7 @@ async fn update_preserves_hidden_legacy_routing_fields() {
     let detail = fixture
         .service
         .update(UpdateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: "group-1".into(),
             patch: GroupPatch {
                 name: Some("Renamed".into()),
@@ -1865,7 +2058,7 @@ async fn get_requires_a_group_relation_and_delete_is_idempotent() {
     let denied = fixture
         .service
         .get(GetGroup {
-            principal: bot_principal("outsider"),
+            caller: bot_principal("outsider"),
             group_id: "group-1".into(),
         })
         .await;
@@ -1877,7 +2070,7 @@ async fn get_requires_a_group_relation_and_delete_is_idempotent() {
     let first = fixture
         .service
         .delete(DeleteGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: "group-1".into(),
         })
         .await
@@ -1887,7 +2080,7 @@ async fn get_requires_a_group_relation_and_delete_is_idempotent() {
     let second = fixture
         .service
         .delete(DeleteGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: "group-1".into(),
         })
         .await
@@ -1905,7 +2098,7 @@ async fn tenant_metadata_does_not_restrict_bot_collaboration() {
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal_in_tenant("driver", "tenant-b"),
+            caller: bot_principal_in_tenant("driver", "tenant-b"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("Cross-tenant collaboration".into()),
                 context: None,
@@ -1929,7 +2122,7 @@ async fn tenant_metadata_does_not_restrict_bot_collaboration() {
 }
 
 #[tokio::test]
-async fn manager_worker_manager_can_update_and_delete_group() {
+async fn human_originator_can_update_and_delete_group() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "manager", "worker"] {
         fixture.add_public_bot(bot).await;
@@ -1945,13 +2138,13 @@ async fn manager_worker_manager_can_update_and_delete_group() {
         GroupStrategy::ManagerWorker,
         1,
     );
-    group.originator = Some("driver".into());
+    group.originator = Some("human_manager".into());
     fixture.groups.upsert(group).await.expect("store group");
 
     fixture
         .service
         .update(UpdateGroup {
-            principal: bot_principal("manager"),
+            caller: bot_principal("manager"),
             group_id: "group-1".into(),
             patch: GroupPatch {
                 name: Some("Managed".into()),
@@ -1964,7 +2157,7 @@ async fn manager_worker_manager_can_update_and_delete_group() {
     let deleted = fixture
         .service
         .delete(DeleteGroup {
-            principal: bot_principal("manager"),
+            caller: bot_principal("manager"),
             group_id: "group-1".into(),
         })
         .await
@@ -1997,7 +2190,7 @@ async fn delete_group_unauthorized_principal_forbidden() {
     let err = fixture
         .service
         .delete(DeleteGroup {
-            principal: bot_principal("outsider"),
+            caller: bot_principal("outsider"),
             group_id: "group-1".into(),
         })
         .await
@@ -2019,7 +2212,7 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
     fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: Some("Before".into()),
                 context: None,
@@ -2060,7 +2253,7 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
     let result = fixture
         .service
         .update(UpdateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: group_id.clone(),
             patch: GroupPatch {
                 name: Some("After".into()),
@@ -2091,7 +2284,7 @@ async fn create_propagates_friendship_lookup_failure() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("requester"),
+            caller: bot_principal("requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: None,
                 context: None,
@@ -2123,7 +2316,7 @@ async fn create_propagates_protected_participant_friendship_lookup_failure() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: None,
                 context: None,
@@ -2173,7 +2366,7 @@ async fn update_rejects_delivery_policy_for_non_chat_strategy() {
     let result = fixture
         .service
         .update(UpdateGroup {
-            principal: bot_principal("manager"),
+            caller: bot_principal("manager"),
             group_id: "manager-worker".into(),
             patch: GroupPatch {
                 delivery_policy: Some(GroupDeliveryPolicy {
@@ -2200,7 +2393,7 @@ async fn create_rejects_duplicate_participant_actor_ids() {
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: None,
                 context: None,
@@ -2241,7 +2434,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
     let invalid_chat = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: None,
                 context: None,
@@ -2269,7 +2462,7 @@ async fn create_rejects_roles_that_do_not_match_the_strategy_lead() {
     let invalid_manager_worker = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: None,
                 context: None,
@@ -2323,7 +2516,7 @@ async fn human_principal_creates_legacy_actor_with_current_display_name_priority
         let detail = fixture
             .service
             .create(CreateGroup {
-                principal: human_principal_with_profile(
+                caller: human_principal_with_profile(
                     staff_no,
                     username,
                     display_name,
@@ -2371,7 +2564,7 @@ async fn human_principal_preserves_existing_legacy_actor_display_name() {
     fixture
         .service
         .create(CreateGroup {
-            principal: human_principal_with_profile(
+            caller: human_principal_with_profile(
                 "staff-1",
                 "alice-login",
                 Some("Changed Name"),
@@ -2400,7 +2593,7 @@ async fn dm_create_outcome_reports_when_the_existing_pair_is_reused() {
     fixture.add_public_bot("bot-a").await;
     fixture.add_public_bot("bot-b").await;
     let command = || CreateGroup {
-        principal: bot_principal("bot-a"),
+        caller: bot_principal("bot-a"),
         group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
             name: Some("A and B".into()),
             context: Some("original context".into()),
@@ -2441,26 +2634,10 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
         .await
         .expect("driver/protected friendship");
 
-    let self_dm = fixture
-        .service
-        .create(CreateGroup {
-            principal: bot_principal("driver"),
-            group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
-                name: None,
-                context: None,
-                target_actor_id: "driver".into(),
-            }),
-        })
-        .await;
-    assert!(matches!(
-        self_dm,
-        Err(ApplicationError::InvalidInput { code, .. }) if code == "invalid_request"
-    ));
-
     let public_with_protected = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 name: None,
                 context: None,
@@ -2487,14 +2664,14 @@ async fn client_caused_group_errors_map_to_documented_4xx_classes() {
 }
 
 #[tokio::test]
-async fn missing_bot_caller_uses_the_documented_bot_not_found_code() {
+async fn human_caller_does_not_require_a_same_named_bot() {
     let fixture = Fixture::new().await;
     fixture.add_public_bot("target").await;
 
     let result = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("missing-caller"),
+            caller: bot_principal("missing-caller"),
             group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
                 name: None,
                 context: None,
@@ -2503,10 +2680,7 @@ async fn missing_bot_caller_uses_the_documented_bot_not_found_code() {
         })
         .await;
 
-    assert!(matches!(
-        result,
-        Err(ApplicationError::NotFound { code, .. }) if code == "bot_not_found"
-    ));
+    assert!(result.is_ok());
 }
 
 #[tokio::test]
@@ -2517,7 +2691,7 @@ async fn deleting_dm_maps_the_legacy_rejection_to_contract_conflict() {
     let detail = fixture
         .service
         .create(CreateGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
                 name: None,
                 context: None,
@@ -2533,7 +2707,7 @@ async fn deleting_dm_maps_the_legacy_rejection_to_contract_conflict() {
     let result = fixture
         .service
         .delete(DeleteGroup {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: detail.group_id,
         })
         .await;
@@ -2586,9 +2760,9 @@ async fn session_only_nonmember_dm_summary_omits_peer_actor() {
 
     let page = fixture
         .service
-        .list_bot_groups(ListBotGroups {
-            principal: bot_principal("target"),
-            bot_uuid: "target".into(),
+        .list_groups(ListGroups {
+            caller: bot_principal("target"),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 20,
             q: None,

@@ -15,7 +15,9 @@ pub mod message;
 pub mod principal;
 pub mod session;
 
-pub use authorization::{Action, AuthorizationService, ResourceRef};
+pub use authorization::{
+    Action, AuthorizationService, ResourceRef, require_authenticated_user, require_human,
+};
 pub use bot::*;
 pub use error::ApplicationError;
 pub use friendship::*;
