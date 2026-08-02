@@ -40,7 +40,13 @@ implicit Human/Bot priority rule now.
    `bot.owner_id`, App owner metadata, or AccessKey metadata.
 7. A `bot_uuid` in a path or request body identifies a managed resource. It
    does not turn the Human caller into that Bot Actor.
-8. Bot-facing APIs, `act_as`, Human-first/Bot-first policies, and duplicated
+8. The three read operations that expose an Actor-relative collaboration view
+   use one explicit View Actor rule: omit `view_bot_id` for the authenticated
+   User's Human Actor, pass that same Human Actor ID explicitly, or pass the
+   UUID of a Bot whose `created_by` equals the authenticated User ID.
+9. Selecting a View Actor scopes returned data. It does not change the caller,
+   impersonate the selected Bot, or grant Group/Session management authority.
+10. Bot-facing APIs, `act_as`, Human-first/Bot-first policies, and duplicated
    Human/Bot HTTP surfaces are out of scope.
 
 ## Goals
@@ -61,7 +67,8 @@ implicit Human/Bot priority rule now.
 
 - Do not add a Bot-facing V1 operation.
 - Do not add `act_as`, Actor-selection headers, or request fields.
-- Do not let a Human impersonate an owned Bot.
+- Do not let a Human impersonate an owned Bot. Selecting an owned Bot as a
+  read-only View Actor is data scoping, not caller substitution.
 - Do not infer Human identity from `AuthenticatedBotIdentity.owner_id`.
 - Do not make App or AccessKey a BCS business Actor.
 - Do not add scopes that Gateway does not provide.
@@ -185,14 +192,17 @@ requirements. App and AccessKey are not evaluated in this batch.
 
 ## Operation semantics
 
-All 32 OpenAPI operations declare `x-avernet-security.principal: human`.
+All 32 OpenAPI operations declare the Gateway-recognized extension
+`x-avernet-security.user: required`. This is the transport contract requiring
+a usable User identity; BCS still receives and retains the complete
+`AuthenticatedCaller`.
 
 | Operation group | Count | Human semantics |
 | --- | ---: | --- |
 | Bot control plane | 5 | Human queries or mutates Bot registry/control-plane records; ownership uses raw User ID against `created_by`. |
-| Bot-scoped Group/Friendship | 7 | Human manages the path or request Bot through `created_by` or creator relations. The Bot remains a target resource, not the caller Actor. |
-| Group | 7 | Human is an independent Group Actor using `human_<subject.id>` for participant, originator, driver, and manager comparisons. |
-| Session | 10 | Human is an independent Session Actor; read/manage/message visibility follows the existing Human Principal rules. |
+| Bot-scoped Friendship | 6 | Human manages the path, request, or resolved receiver Bot only when its `created_by` equals the authenticated User ID. The Bot remains a target resource, not the caller Actor. |
+| Group | 8 | Human is an independent Group Actor using `human_<subject.id>` for participant, originator, driver, and manager comparisons. Group listing may use the authenticated Human or an owned Bot as its View Actor. |
+| Session | 10 | Human is an independent Session Actor. Session listing and message history use the authenticated Human by default and accept an explicitly authorized View Actor. |
 | Invitation | 3 | Human must be authorized to create invitations and is the joining Actor when accepting one. |
 
 ### Bot control-plane operations
@@ -209,20 +219,19 @@ Their Application service continues to compare `caller.user.id` with the
 stored `created_by` value where ownership is required. The other authenticated
 identity kinds neither grant nor deny access.
 
-### Bot-scoped resource operations
+### Bot-scoped Friendship operations
 
 Paths such as:
 
 ```text
 /openapi/v1/bots/collaboration/{bot_uuid}/friendships
-/openapi/v1/bots/collaboration/{bot_uuid}/groups
 ```
 
 remain Human APIs for this batch. The Application service checks that the
-Human manages the named Bot through its `created_by` value or the existing
-creator relation edge. It must not compare `caller.bot.bot_uuid` with the path,
-select the Bot identity, or fall back to Bot after a Human authorization
-failure.
+named Bot's `created_by` equals `caller.user.id`. Creator relation edges, a
+legacy Bot UUID suffix, missing-`created_by` auto-claim, and
+`caller.bot.bot_uuid` do not grant ownership. Application must not select the
+Bot identity or fall back to Bot after a Human authorization failure.
 
 For friend-request acceptance and rejection, Application first loads the
 request, resolves the receiver Bot, then applies the same Human-to-managed-Bot
@@ -236,14 +245,84 @@ its own right. Existing comparisons against Group participants, originator,
 driver, ManagerWorker manager, Session participants, and Session creator use
 `human_<subject.id>`.
 
-Human ownership of a Bot does not imply permission to act as that Bot inside a
-Group or Session. If a Bot is the driver or manager but the Human is not an
-independently authorized Human Actor, the request remains forbidden.
+Human ownership of a Bot does not imply permission to act as that Bot or to
+manage the Bot's Group or Session. If a Bot is the driver or manager but the
+Human is not an independently authorized Human Actor, management requests
+remain forbidden. The read-only View Actor selection below is the only
+exception and scopes data rather than changing the business caller.
 
-Session message visibility continues to use the Human branch of the existing
-policy. An explicit `view_bot_id` may be accepted only when the existing
-Human-to-owned-Bot check permits that view; the Caller having a Bot identity
-does not bypass the ownership check.
+### Unified View Actor contract
+
+These Human HTTP operations use the same optional `view_bot_id` query
+parameter:
+
+```text
+GET /openapi/v1/groups
+GET /openapi/v1/groups/{group_id}/sessions
+GET /openapi/v1/sessions/{session_id}/messages
+```
+
+The first path replaces the Bot-scoped
+`GET /openapi/v1/bots/collaboration/{bot_uuid}/groups` list operation. The
+operation count remains 32 and its operation ID becomes `list_groups`.
+
+Application resolves one effective View Actor before querying data:
+
+| Request value | Effective View Actor | Required authorization |
+| --- | --- | --- |
+| `view_bot_id` omitted | `human_<caller.user.id>` | A usable authenticated User is already required. |
+| `view_bot_id=human_<staff_no>` | The supplied Human Actor | It must equal `human_<caller.user.id>`. |
+| `view_bot_id=<bot_uuid>` | The supplied Bot | The Bot must exist and `bot.created_by == caller.user.id`. |
+
+The parameter name remains `view_bot_id` for compatibility even though it may
+contain the caller's Human Actor ID. A different Human Actor, an unknown Bot,
+a Bot without `created_by`, or a Bot created by another User is rejected with
+the same generic `403 forbidden`. The check never uses a creator relation edge
+and never auto-claims a legacy Bot. Extra Bot/App/AccessKey identities in the
+authenticated Caller do not change the result.
+
+The selected Actor affects only these read operations:
+
+- `list_groups` applies the existing `membership=all|direct|session_only`,
+  search, kind, and strategy filters to the selected Actor's Group relations.
+  Omitting `view_bot_id` therefore lists the authenticated Human Actor's
+  Groups, not Groups belonging to all Bots that the Human created.
+- `list_sessions` returns only Sessions under `group_id` where the selected
+  Actor is a Session Participant. Group membership, ownership, creator, or
+  manager status does not broaden the result set.
+- `list_session_messages` requires the selected Actor to be a Participant of
+  the requested Session and applies that Participant's history cutoff and
+  message-owner visibility rules.
+
+Explicit and default View Actor branches are mutually exclusive. A failed
+explicit View Actor check never falls back to the Human Actor's direct
+permissions. For both list operations, an authorized View Actor with no
+matching relation returns `200` with an empty page. Both `items` and `total`
+must be filtered by the selected Actor before `offset`/`limit` pagination.
+
+For message history, omitting `view_bot_id` is exactly equivalent to passing
+the authenticated Human Actor ID. The Human must be a Session Participant;
+being Group/Session creator, driver, or manager does not create an implicit
+manager view. Likewise, an explicitly selected owned Bot must be a Session
+Participant. A selected Actor that is not a Session Participant is rejected
+with the same generic `403 forbidden`.
+
+View Actor selection does not apply to `get_group`, `get_session`, or any
+Group/Session mutation. In particular, neither detail operation accepts a
+`view_bot_id` query parameter.
+
+Detail reads instead use an implicit read relation derived from the
+authenticated User. `get_group` is readable when the Group participants
+contain either the User's `human_<caller.user.id>` Actor or at least one Bot
+whose `created_by` equals `caller.user.id`. `get_session` applies the same rule
+to Session participants. This owned-Bot intersection grants only the detail
+read: the caller remains Human, no Bot message perspective is selected, and
+no Group or Session management authority is granted. Bot ownership is still
+determined only by exact `created_by`; creator relation edges, UUID suffixes,
+and auto-claim do not count.
+
+All Group and Session mutations continue to evaluate the authenticated Human
+Actor and their operation-specific direct management relations.
 
 ## Error semantics
 
@@ -256,7 +335,10 @@ authorization:
 | JWT valid but `AuthenticatedCaller.user` absent | `403 forbidden` |
 | User present with additional Bot/App/AccessKey identities | Continue as Human |
 | Human does not own or manage a target Bot | `403 forbidden` |
-| Human lacks required Group/Session relation or role | `403 forbidden` |
+| Explicit View Actor is another Human, unknown, unowned, or not a required Session Participant | `403 forbidden` |
+| Authorized View Actor has no matching Group or Session relation in a list operation | `200` with an empty page |
+| Neither the Human Actor nor any Bot created by that Human is a participant for a Group/Session detail read | `403 forbidden` |
+| Human lacks a required Group/Session mutation relation or role | `403 forbidden` |
 | Resource is absent or deliberately hidden by an existing use case | Existing `404` behavior |
 | Request shape or state is invalid | Existing `400`/`409` behavior |
 
@@ -267,34 +349,52 @@ contents.
 
 ## OpenAPI contract changes
 
-The original 27 operations currently use the broader marker:
+Gateway derives route requirements from this extension:
 
 ```yaml
 x-avernet-security:
-  principal: required
+  user: required
 ```
 
-They change to:
+Contract tests must assert that every one of the 32 operations uses exactly
+`{user: required}`. The older `{principal: required}` and locally invented
+`{principal: human}` shapes are not recognized by Gateway and must not appear.
+Invalid Gateway authentication remains `401`; a valid Caller that reaches
+Application without User remains `403` as a defense-in-depth rule.
 
-```yaml
-x-avernet-security:
-  principal: human
+The Group list operation also moves from:
+
+```text
+GET /openapi/v1/bots/collaboration/{bot_uuid}/groups
 ```
 
-The five Bot control-plane operations already use `human` and establish the
-desired response split: invalid Gateway authentication is `401`; a valid
-non-Human Caller is `403`.
+to:
 
-Contract tests must assert that every one of the 32 operations uses `human` and
-that no operation silently reintroduces `required`, `bot`, or an implicit
-multi-Actor contract.
+```text
+GET /openapi/v1/groups?view_bot_id=<optional-view-actor>
+```
+
+The existing `POST /openapi/v1/groups` operation remains on the same path. The
+Group list retains `offset`, `limit`, `q`, `membership`, `kind`, and `strategy`.
+The Session list adds the same optional `view_bot_id` parameter; Session
+message history changes the default from an implicit manager view to the
+authenticated Human Actor's Participant view. All three parameter descriptions
+must document that an explicit Human value may only identify the caller and an
+explicit Bot value requires `created_by` ownership.
+
+`GET /openapi/v1/groups/{group_id}` and
+`GET /openapi/v1/sessions/{session_id}` deliberately do not add
+`view_bot_id`. Their `403` contract documents the implicit participant
+intersection across the caller's Human Actor and Bots created by that User.
 
 ## Compatibility and risk
 
-This is a deliberate narrowing of the unmounted V1 contract. The current
-branch's test verifier can inject Bot Principals into the original 27 routes,
-but production bootstrap does not mount `bcs-api-http`; therefore the change
-does not remove a deployed Bot API.
+This is a deliberate narrowing and path revision of the unmounted V1 contract.
+The current branch's test verifier can inject Bot Principals into the original
+27 routes and the current Group list path embeds a Bot UUID, but production
+bootstrap does not mount `bcs-api-http`; therefore the change does not remove a
+deployed Bot API. Generated V1 clients must update from `list_bot_groups` to
+`list_groups` before this V1 surface is mounted.
 
 Legacy HTTP routes, bot-token authentication, WebSocket behavior, and
 `bcs-cli` remain unchanged. Bot callers continue to use those Legacy surfaces
@@ -329,11 +429,22 @@ Focused contract and regression tests must pin all three boundaries.
 ### Operation-family tests
 
 - All five Bot control-plane operations require Human.
-- All seven Bot-scoped operations authorize only through Human ownership or
-  creator relations.
+- All six Bot-scoped Friendship operations authorize only when the target or
+  resolved Bot's `created_by` equals the authenticated User ID.
 - Group operations use the Human Actor ID for participant and manager rules.
 - Session operations use the Human Actor ID for read, manage, completion,
   participant, and message-visibility rules.
+- Group and Session detail reads succeed when either the Human Actor or an
+  exact-`created_by` owned Bot is a participant, but that implicit relation
+  grants neither management access nor a message perspective.
+- Omitting `view_bot_id` on all three View Actor operations selects the
+  authenticated Human Actor and never expands to owned Bots.
+- Passing the caller's Human Actor is equivalent to omission; passing an owned
+  Bot scopes to that Bot; every other explicit value is Forbidden without
+  fallback.
+- Group and Session list `items` and `total` are both scoped before pagination.
+- Session history requires the selected Human or Bot to be a Session
+  Participant, including when the Human is a creator or manager.
 - Invitation creation uses Human Group/Session authorization and invitation
   acceptance joins as Human.
 - A User+Bot Caller never changes outcome merely because the extra Bot
@@ -342,7 +453,13 @@ Focused contract and regression tests must pin all three boundaries.
 ### Contract and regression tests
 
 - OpenAPI validation counts 32 operations and requires
-  `x-avernet-security.principal: human` on every operation.
+  `x-avernet-security.user: required` on every operation.
+- The operation inventory contains `GET /openapi/v1/groups` with
+  `operationId: list_groups` and excludes the old Bot-scoped Group list path.
+- Group list, Session list, and Session message history expose the documented
+  optional `view_bot_id` parameter.
+- Group and Session detail expose no `view_bot_id` parameter and document the
+  Human-or-created-Bot participant read rule.
 - HTTP route tests distinguish invalid authentication (`401`) from valid
   non-Human callers (`403`).
 - Existing Human behavior and error mappings remain covered.

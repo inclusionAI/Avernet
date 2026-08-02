@@ -12,8 +12,6 @@ paths:
     $ref: ./openapi/bots.yaml#/BotPath
   /openapi/v1/bots/{bot_id}/candidates:
     $ref: ./openapi/bots.yaml#/BotCandidatesPath
-  /openapi/v1/bots/collaboration/{bot_uuid}/groups:
-    $ref: ./openapi/groups.yaml#/ListBotGroupsPath
   /openapi/v1/bots/collaboration/{bot_uuid}/friendships:
     $ref: ./openapi/friendships.yaml#/ListFriendshipsPath
   /openapi/v1/bots/collaboration/{bot_uuid}/friendships/{friend_bot_uuid}:
@@ -25,7 +23,7 @@ paths:
   /openapi/v1/friend-requests/{request_id}/reject:
     $ref: ./openapi/friendships.yaml#/RejectFriendRequestPath
   /openapi/v1/groups:
-    $ref: ./openapi/groups.yaml#/CreateGroupPath
+    $ref: ./openapi/groups.yaml#/GroupsPath
   /openapi/v1/groups/{group_id}:
     $ref: ./openapi/groups.yaml#/GroupPath
   /openapi/v1/groups/{group_id}/participants:

@@ -1,11 +1,11 @@
-ListBotGroupsPath:
+GroupsPath:
   get:
-    operationId: list_bot_groups
-    summary: List groups visible from a Bot collaboration identity.
+    operationId: list_groups
+    summary: List groups visible from the selected View Actor.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
-      - $ref: ../shared.yaml#/BotUuidPath
+      - $ref: ../shared.yaml#/ViewBotIdQuery
       - name: offset
         in: query
         schema:
@@ -53,8 +53,10 @@ ListBotGroupsPath:
       "200":
         description: >-
           Groups ordered by created_at descending (group_id ascending
-          tie-breaker) after relation/strategy/kind filtering and
-          deduplication, then paginated with offset/limit.
+          tie-breaker) after selected-Actor relation, strategy, kind, and
+          search filtering and deduplication, then paginated with offset/limit.
+          Both items and total are scoped before pagination. An authorized View
+          Actor with no matching Group relation receives an empty page.
         content:
           application/json:
             schema:
@@ -76,17 +78,11 @@ ListBotGroupsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the target Bot identity.
+        description: >-
+          The explicit View Actor is not the authenticated Human or a Bot
+          created by that Human.
         x-error-codes:
           - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "404":
-        description: Target Bot is missing.
-        x-error-codes:
-          - bot_not_found
         content:
           application/json:
             schema:
@@ -94,12 +90,11 @@ ListBotGroupsPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
 
-CreateGroupPath:
   post:
     operationId: create_group
     summary: Create a collaboration group or direct-message group.
     x-avernet-security:
-      principal: required
+      user: required
     requestBody:
       required: true
       content:
@@ -175,7 +170,7 @@ GroupPath:
     operationId: get_group
     summary: Get target-independent group detail.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     responses:
@@ -202,7 +197,9 @@ GroupPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot read the group.
+        description: >-
+          Neither the authenticated User's Human Actor nor a Bot created by
+          that Human is a Group Participant.
         x-error-codes:
           - forbidden
         content:
@@ -231,7 +228,7 @@ GroupPath:
     operationId: update_group
     summary: Update the explicitly mutable group properties.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     requestBody:
@@ -296,7 +293,7 @@ GroupPath:
     operationId: delete_group
     summary: Delete a group using the authenticated Principal as caller.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     responses:
@@ -485,7 +482,7 @@ AddGroupParticipantPath:
     operationId: add_group_participant
     summary: Add a Human or Bot actor as a Group participant.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     requestBody:
@@ -554,7 +551,7 @@ GroupParticipantPath:
     operationId: update_group_participant
     summary: Update the mutable properties of a Group participant.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
       - $ref: ../shared.yaml#/ActorIdPath
@@ -619,7 +616,7 @@ GroupParticipantPath:
     operationId: remove_group_participant
     summary: Remove a participant or let an actor leave the group.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
       - $ref: ../shared.yaml#/ActorIdPath

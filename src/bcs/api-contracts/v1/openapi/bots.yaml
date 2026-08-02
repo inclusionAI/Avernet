@@ -10,7 +10,7 @@ BotCandidatesPath:
       a trimmed case-insensitive substring. Status and reachability do not
       remove candidates.
     x-avernet-security:
-      principal: human
+      user: required
     x-avernet-behavior:
       acting_bot: managed_physical_bot
       result_kind: bot
@@ -115,7 +115,7 @@ QueryBotsPath:
       their first occurrence; missing, deleted, and unonboarded rows are
       silently omitted. An empty bot_ids array returns an empty items array.
     x-avernet-security:
-      principal: human
+      user: required
     x-avernet-behavior:
       result_kinds:
         - bot
@@ -176,7 +176,7 @@ BotPath:
       row. No acting Bot, ownership filter, or visibility filter is applied;
       visibility controls directory discovery rather than explicit hydration.
     x-avernet-security:
-      principal: human
+      user: required
     x-avernet-behavior:
       result_kinds:
         - bot
@@ -236,7 +236,7 @@ BotPath:
       arrays. bot_id, kind, env, created_by, timestamps, reachability, provider,
       and agent_code are immutable through this operation.
     x-avernet-security:
-      principal: human
+      user: required
     x-avernet-behavior:
       authorization: created_by_matches_current_staff_no
       missing_created_by: forbidden
@@ -305,7 +305,7 @@ MyBotsPath:
       kinds; reachability only matches physical Bots, so combining kind=human
       with reachability produces an empty page.
     x-avernet-security:
-      principal: human
+      user: required
     x-avernet-behavior:
       owner_field: created_by
       owner_value: current_staff_no
@@ -442,4 +442,3 @@ UpdateBotRequest:
       $ref: ../domain-models.yaml#/BotStatus
     descriptor:
       $ref: "#/UpdateBotDescriptor"
-
