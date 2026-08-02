@@ -20,6 +20,7 @@ members = [
     "crates/services/bcs-friend-store",
     "crates/services/bcs-group",
     "crates/application/v1/bcs-app-group",
+    "crates/application/v1/bcs-app-bot",
     "crates/services/bcs-group-store",
     "crates/services/bcs-message",
     "crates/services/bcs-message-flow",
@@ -227,6 +228,7 @@ bcs-collaboration-store = { path = "crates/services/bcs-collaboration-store" }
 bcs-judge = { path = "crates/services/bcs-judge" }
 bcs-jwt = { path = "crates/services/bcs-jwt" }
 bcs-group      = { path = "crates/services/bcs-group" }
+bcs-app-bot   = { path = "crates/application/v1/bcs-app-bot" }
 bcs-app-group   = { path = "crates/application/v1/bcs-app-group" }
 bcs-group-store = { path = "crates/services/bcs-group-store" }
 bcs-message = { path = "crates/services/bcs-message" }
