@@ -75,3 +75,8 @@ class TaskEventRepo(Protocol):
     def latest_seq(self, task_id: str) -> Optional[int]:
         """Return the highest ``seq`` appended for ``task_id`` (None if no events)."""
         ...
+
+    def truncate(self, task_id: str, after_seq: int) -> None:
+        """Drop events with ``seq > after_seq`` for ``task_id`` (rollback / checkpoint
+        only; the log is otherwise append-only). impls MUST keep ``seq ≤ after_seq``."""
+        ...

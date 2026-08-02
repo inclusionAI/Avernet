@@ -1,10 +1,10 @@
 """TDD for the 6.5.4 local in-process ExecutionPort doubles.
 
-:class:`LocalBotExecutorPort` fakes a well-behaved bot: dispatch self-reports
-``NODE_ACCEPTED`` through the public :meth:`TaskService.on_event` (instant, or
-deferred via :meth:`pump`). :class:`HangingBotExecutor` fakes a hung bot that
-never self-reports — the scheduler watchdog (6.5) then drives it to ESCALATE
-with zero kernel change.
+Covers the doubles' shape/contract + pump mechanics. The scheduler-driven happy
+path (dispatch → self-report → settle) is exercised under the new action-node
+tick in ``tests/community/core/task/services/test_e2e_tick.py``; here we keep
+the doubles' own behavior (dispatch result shape, deferred pump queue, runtime
+conformance to :class:`ExecutionPort`).
 """
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ from agentclaw.community.core.task.domain.models import (
     RouteClass,
     RunMode,
     SubTaskSpec,
-    TaskStatus,
 )
 from agentclaw.community.core.task.services import TaskScheduler, TaskService
 from agentclaw.community.core.task.services.decomposer_service import DecomposerService
@@ -86,36 +85,7 @@ def _scheduler(svc: TaskService, exec_port) -> TaskScheduler:
     )
 
 
-# --- LocalBotExecutorPort: instant ----------------------------------------
-
-
-def test_local_instant_dispatch_self_reports_node_done_and_advances():
-    """Instant: the start tick dispatches n1 AND the bot self-reports DONE → all
-    settled → REVIEWING, in a single ``start`` call (full self-drive)."""
-    svc = _svc()
-    tid = _planned(svc)
-    exec_port = LocalBotExecutorPort(svc, settle_mode="instant")
-    sched = _scheduler(svc, exec_port)
-    sched.start(tid)
-    task = svc.get(tid)
-    assert task.execution_graph.nodes[0].status is NodeStatus.DONE
-    assert task.status is TaskStatus.REVIEWING
-    assert exec_port.single_bots == [(tid, "n1", "bot-1")]
-
-
-def test_local_instant_multi_node_closes_to_reviewing():
-    """n1 self-reports in the start tick; n2 (locked behind n1 in the stale tick
-    view) is dispatched on the next tick and self-reports → all DONE →
-    REVIEWING."""
-    svc = _svc()
-    tid = _planned(svc, nodes=("n1", "n2"), edges=(("n1", "n2"),))
-    exec_port = LocalBotExecutorPort(svc, settle_mode="instant")
-    sched = _scheduler(svc, exec_port)
-    sched.start(tid)
-    sched.tick(tid)
-    task = svc.get(tid)
-    assert all(n.status is NodeStatus.DONE for n in task.execution_graph.nodes)
-    assert task.status is TaskStatus.REVIEWING
+# --- LocalBotExecutorPort: dispatch result shape ---------------------------
 
 
 def test_local_instant_dispatch_result_shape():
@@ -138,15 +108,17 @@ def test_local_deferred_dispatch_enqueues_until_pump():
     exec_port = LocalBotExecutorPort(svc, settle_mode="deferred")
     sched = _scheduler(svc, exec_port)
     sched.start(tid)
-    # dispatched but NOT yet self-reported → n1 still RUNNING
-    assert svc.get(tid).execution_graph.nodes[0].status is NodeStatus.RUNNING
+    # dispatched but NOT yet self-reported → 工作节点仍 RUNNING
+    work = next(
+        n for n in svc.get(tid).execution_graph.nodes if n.node_id == "n1"
+    )
+    assert work.status is NodeStatus.RUNNING
     delivered = exec_port.pump()
     assert delivered == 1
-    assert svc.get(tid).execution_graph.nodes[0].status is NodeStatus.DONE
-    # next tick sees the settled node → REVIEWING
-    result = sched.tick(tid)
-    assert result["action"] == "advance_reviewing"
-    assert svc.get(tid).status is TaskStatus.REVIEWING
+    work = next(
+        n for n in svc.get(tid).execution_graph.nodes if n.node_id == "n1"
+    )
+    assert work.status is NodeStatus.DONE
 
 
 def test_local_deferred_pump_returns_zero_when_nothing_pending():
@@ -179,32 +151,6 @@ def test_local_invalid_settle_mode_raises():
 
 
 # --- HangingBotExecutor: never self-reports --------------------------------
-
-
-def test_hanging_bot_drives_watchdog_to_escalate():
-    """A hung bot (never self-reports) → the scheduler watchdog (6.5) drives the
-    node PROBE→…→ESCALATE→``FAILED`` with zero kernel change. Mirrors the 6.5.3
-    scheduler integration test but via the packaged community double."""
-    from agentclaw.community.core.task.services.task_scheduler import (
-        MAX_PROBES,
-        MAX_REDRIVES,
-    )
-
-    svc = _svc()
-    tid = _planned(svc)
-    exec_port = HangingBotExecutor()
-    sched = _scheduler(svc, exec_port)
-    sched.start(tid)
-    for _ in range(40):
-        sched.tick(tid)
-        if svc.get(tid).execution_graph.nodes[0].status is NodeStatus.FAILED:
-            break
-    node = svc.get(tid).execution_graph.nodes[0]
-    assert node.status is NodeStatus.FAILED  # only reachable via ESCALATE
-    assert len(exec_port.redispatches) == MAX_REDRIVES
-    # 2 probes × 3 windows (2 redrives + 1 final escalate window) = 6 probes
-    assert len(exec_port.probes) == MAX_PROBES * (MAX_REDRIVES + 1)
-    assert exec_port.single_bots == [(tid, "n1", "bot-1")]
 
 
 def test_hanging_bot_structurally_conforms_to_execution_port():

@@ -1,6 +1,6 @@
 """v2 端到端(走 TaskScheduler.tick,plan §20 完整 tick 驱动补充)。
 
-与 ``test_v2_e2e.py``(图操作层)互补:本文件经真实 ``TaskScheduler._tick_v2``
+与 ``test_e2e.py``(图操作层)互补:本文件经真实 ``TaskScheduler._tick``
 驱动 NodeType 动作链,搜推/分解/派发/执行 全 mock,skill 判验以"直接置 SubtaskState
 DONE"mock(对齐 plan §19.1)。覆盖:
 - happy path 全程 tick(规划链→搜推命中→派发→skill 回投→终验 DONE/VERIFIED)
@@ -13,6 +13,9 @@ from __future__ import annotations
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     AcceptanceCriteriaKind,
+    AttemptedRecord,
+    AttemptOutcome,
+    AttemptTrigger,
     GraphStatus,
     NodeStatus,
     NodeType,
@@ -24,6 +27,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskStatus,
     TaskState,
 )
+from agentclaw.community.core.task.domain.events import EventKind, TaskEvent
 from agentclaw.community.core.task.protocols import (
     BotCandidate,
     DispatchResult,
@@ -153,20 +157,23 @@ def _goal(acceptances: int = 1):
     )
 
 
-def _v2_task(svc: TaskService, acceptances: int = 1):
-    """建 task(带 goal)+ spawn_build_dag_v2 动作骨架。返回 task + 启动到 EXECUTING。"""
+def _task(svc: TaskService, acceptances: int = 1):
+    """建 task(带 goal)+ spawn_build_dag 动作骨架(无 plan sub_tasks → 根 BOT_SEARCH)。
+
+    返回 task + 启动到 EXECUTING / graph ON_PLAZA。spawn_build_dag 自持久化。"""
     t = svc.create(title="t", background="obj")
     task = svc.get(t.id)
     task.spec.goal = _goal(acceptances)
     svc._task_repo.save(task)  # noqa: SLF001
-    task = svc.get(t.id)
-    # DRAFTING → DEFINED(给一个最小 plan 过 finalize_plan 守旧契约;v2 走 spawn_build_dag_v2)
-    svc.finalize_plan(task.id, Plan(sub_tasks=[SubTaskSpec(node_id="n_root", spec="root")], confidence=0.9))
+    task = svc.get(task.id)
+    # DRAFTING → DEFINED(finalize 一个空 plan:task.plan 存在但无 sub_tasks →
+    # spawn_build_dag 走根 BOT_SEARCH 分支,即 plan §2.2 伪代码 n4 搜推先行)。
+    svc.finalize_plan(task.id, Plan(sub_tasks=[], confidence=0.9))
     task = svc.get(task.id)
     task.status = TaskStatus.EXECUTING
-    task.execution_graph = None  # 让 spawn_build_dag_v2 重建
+    task.execution_graph = None  # 让 spawn_build_dag 重建
     svc._task_repo.save(task)  # noqa: SLF001
-    svc.spawn_build_dag_v2(task)
+    svc.spawn_build_dag(task)
     # ON_PLAZA
     from agentclaw.community.core.task.domain.models import GraphStatus as GS
 
@@ -187,6 +194,67 @@ def _set_leaf_done(svc: TaskService, task_id: str, node_id: str):
     svc._task_repo.save(task)  # noqa: SLF001
 
 
+def _planned_task(svc: TaskService, node_id: str = "n_work"):
+    """带 1 个 plan subtask 的 v2 task(spawn 建 planning 链 + 该 subtask DISPATCH)。"""
+    t = svc.create(title="t", background="obj")
+    task = svc.get(t.id)
+    task.spec.goal = _goal(1)
+    svc._task_repo.save(task)  # noqa: SLF001
+    task = svc.get(t.id)
+    svc.finalize_plan(
+        task.id,
+        Plan(sub_tasks=[SubTaskSpec(node_id=node_id, spec="work")], confidence=0.9),
+    )
+    task = svc.get(task.id)
+    task.status = TaskStatus.EXECUTING
+    task.execution_graph = None
+    svc._task_repo.save(task)  # noqa: SLF001
+    svc.spawn_build_dag(task)
+    task = svc.get(task.id)
+    svc.mark_graph_status(task, GraphStatus.ON_PLAZA)
+    return svc.get(task.id)
+
+
+# --- NODE_FAILED 同执行方重派 / 超限 reroute C5(T-13,§18.1-12)---------------
+
+
+def test_node_failed_retries_same_executor_then_reroutes_c5():
+    svc = _svc()
+    task = _planned_task(svc, "n_work")
+    discover = FakeDiscover(default_hit=True)  # discover hit bot1
+    driver = FakeDriver()
+    sched = _scheduler(svc, discover, driver=driver)
+    # tick:DISPATCH n_work 无 assignee → discover 命中 bot1 → claim+fire → RUNNING
+    sched.tick(task.id)
+    task = svc.get(task.id)
+    work = next(n for n in task.execution_graph.nodes if n.node_id == "n_work")
+    assert work.assignee == "bot1"
+    # skill 回投 NODE_FAILED(1 次 fail < max_attempts=2)→ 同执行方重派
+    work.status = NodeStatus.FAILED
+    work.attempted_executors = [
+        AttemptedRecord(
+            executor_id="bot1", paradigm=RunMode.SINGLE_BOT, round=1,
+            outcome=AttemptOutcome.FAIL, trigger=AttemptTrigger.ROUTED,
+        ),
+    ]
+    svc._task_repo.save(task)  # noqa: SLF001
+    sched.on_event(TaskEvent(task_id=task.id, seq=99, kind=EventKind.NODE_FAILED, payload={"node_id": "n_work"}))
+    # set RUNNING + 再 fire 同一 bot(未走 C5 reroute)
+    assert (task.id, "n_work", "bot1") in sched._execution.single_bots  # noqa: SLF001
+    assert driver.redispatched == []
+    # 超限(2 fails ≥ max)→ reroute C5
+    task = svc.get(task.id)
+    work = next(n for n in task.execution_graph.nodes if n.node_id == "n_work")
+    work.status = NodeStatus.FAILED
+    work.attempted_executors = [
+        AttemptedRecord(executor_id="bot1", paradigm=RunMode.SINGLE_BOT, round=1, outcome=AttemptOutcome.FAIL, trigger=AttemptTrigger.ROUTED),
+        AttemptedRecord(executor_id="bot1", paradigm=RunMode.SINGLE_BOT, round=2, outcome=AttemptOutcome.FAIL, trigger=AttemptTrigger.ROUTED),
+    ]
+    svc._task_repo.save(task)  # noqa: SLF001
+    sched.on_event(TaskEvent(task_id=task.id, seq=100, kind=EventKind.NODE_FAILED, payload={"node_id": "n_work"}))
+    assert ("n_work", RouteClass.C5) in driver.redispatched
+
+
 def _scheduler(svc, discover, decomposer=None, driver=None, execution=None):
     return TaskScheduler(
         svc,
@@ -200,14 +268,14 @@ def _scheduler(svc, discover, decomposer=None, driver=None, execution=None):
 # --- happy path 全程 tick ---------------------------------------------------
 
 
-def test_v2_tick_single_bot_happy_path():
+def test_tick_single_bot_happy_path():
     svc = _svc()
-    task = _v2_task(svc, acceptances=1)
+    task = _task(svc, acceptances=1)
     discover = FakeDiscover(default_hit=True)  # 搜推恒命中 bot1
     sched = _scheduler(svc, discover)
     # tick1:规划链 n_rec/n_clar/n_exec → DONE;n_search 搜推命中 → 加 n_search_disp
     r1 = sched.tick(task.id)
-    assert r1["action"] == "ticked_v2"
+    assert r1["action"] == "ticked"
     task = svc.get(task.id)
     types = {n.node_id: n.node_type for n in task.execution_graph.nodes}
     assert types["n_recognition"] is NodeType.RECOGNITION
@@ -234,9 +302,9 @@ def test_v2_tick_single_bot_happy_path():
 # --- 搜推未匹配→分解→子各命中→exec-aggregate→终验 ------------------------
 
 
-def test_v2_tick_search_miss_decompose_aggregate():
+def test_tick_search_miss_decompose_aggregate():
     svc = _svc()
-    task = _v2_task(svc, acceptances=1)
+    task = _task(svc, acceptances=1)
     # n_search 未匹配;后续各 child bot_search 命中
     discover = FakeDiscover(hits={"n_bot_search": []}, default_hit=True)
     decomposer = FakeDecomposer()
@@ -271,11 +339,11 @@ def test_v2_tick_search_miss_decompose_aggregate():
 # --- 递归上限→mark-hang→AWAITING_HUMAN_ACCEPT ------------------------------
 
 
-def test_v2_tick_recursion_limit_mark_hang():
+def test_tick_recursion_limit_mark_hang():
     svc = _svc()
-    task = _v2_task(svc, acceptances=1)
+    task = _task(svc, acceptances=1)
     # n_search 未匹配;decompose 产 depth≥MAX children → mark-hang
-    from agentclaw.community.core.task.services.scheduler_v2_ops import MAX_RECURSION_DEPTH
+    from agentclaw.community.core.task.services.scheduler_ops import MAX_RECURSION_DEPTH
 
     discover = FakeDiscover(hits={"n_bot_search": []}, default_hit=True)
     decomposer = FakeDecomposer(depth_override=MAX_RECURSION_DEPTH)  # children depth=MAX → hang
@@ -286,3 +354,48 @@ def test_v2_tick_recursion_limit_mark_hang():
     assert any(n.node_type is NodeType.MARK_HANG for n in task.execution_graph.nodes)
     assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
     assert not any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)  # 不直升 BBS
+
+
+# --- hang → 人确认升 BBS → 同图延续(三终止②,T-22/T-24 U-bbs-escalate)--------
+
+
+def test_tick_hang_confirm_bbs_continue_same_graph():
+    from agentclaw.community.core.task.domain.events import EventKind, next_seq
+    from agentclaw.community.core.task.services import BbsExecutorService
+
+    svc = _svc()
+    task = _task(svc, acceptances=1)
+    from agentclaw.community.core.task.services.scheduler_ops import MAX_RECURSION_DEPTH
+
+    discover = FakeDiscover(hits={"n_bot_search": []}, default_hit=True)
+    decomposer = FakeDecomposer(depth_override=MAX_RECURSION_DEPTH)
+    sched = _scheduler(svc, discover, decomposer)
+    sched.tick(task.id)
+    sched.tick(task.id)  # → mark-hang + AWAITING_HUMAN_ACCEPT
+    task = svc.get(task.id)
+    assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+    hang_node = next(n for n in task.execution_graph.nodes if n.node_type is NodeType.MARK_HANG)
+    # 人确认升 BBS(经 POST /events 回投 BBS_CONFIRMED)→ ON_PLAZA + BBS_DISPATCH
+    svc.on_event({
+        "task_id": task.id, "kind": EventKind.BBS_CONFIRMED,
+        "seq": next_seq(svc._event_repo.latest_seq(task.id)),  # noqa: SLF001
+        "payload": {"node_id": hang_node.node_id},
+    })
+    task = svc.get(task.id)
+    assert task.execution_graph.graph_status is GraphStatus.ON_PLAZA
+    assert any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)
+    # BbsExecutor.claim 调用方:升 BBS 后,BBS bot 在同一 TaskExecutionGraph 上认领待办节点。
+    # 加一个 PENDING 节点供 BBS 认领(模拟 BBS 阶段续图)。
+    from agentclaw.community.core.task.domain.models import SubTaskSpec
+
+    svc.add_node(task.id, SubTaskSpec(node_id="n_bbs_work", spec="bbs task"), None, NodeType.DISPATCH)
+    bbs = BbsExecutorService(svc)
+    claimed = bbs.claim(task.id, "bbs-bot-1")
+    assert claimed is not None
+    assert claimed.run_mode is RunMode.BBS
+    # 同图延续:同一 TaskExecutionGraph,BBS_DISPATCH + 被 BBS 认领节点共存
+    g = svc.get(task.id).execution_graph
+    assert any(n.node_type is NodeType.BBS_DISPATCH for n in g.nodes)
+    work = next(n for n in g.nodes if n.node_id == "n_bbs_work")
+    assert work.status is NodeStatus.RUNNING
+    assert work.assignee == "bbs-bot-1"

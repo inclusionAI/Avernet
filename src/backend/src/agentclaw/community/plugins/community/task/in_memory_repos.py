@@ -74,5 +74,12 @@ class InMemoryTaskEventRepo:
             return None
         return events[-1].seq
 
+    def truncate(self, task_id: str, after_seq: int) -> None:
+        """Drop events with seq > after_seq (rollback/checkpoint; log otherwise append-only)."""
+        events = self._log.get(task_id)
+        if not events:
+            return
+        self._log[task_id] = [e for e in events if e.seq <= after_seq]
+
 
 __all__ = ["InMemoryTaskEventRepo", "InMemoryTaskRepo"]

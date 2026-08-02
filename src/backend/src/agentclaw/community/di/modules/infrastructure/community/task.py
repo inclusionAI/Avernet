@@ -39,6 +39,7 @@ from agentclaw.community.core.task.domain.repository import (
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugins.community.task.panel_carrier import TaskPanelCarrier
 from agentclaw.community.core.task.services.bot_catalog import BotCatalogPort
+from agentclaw.community.core.task.services.graph_checkpoint import GraphCheckpoint
 
 
 class CommunityTaskModule(Module):
@@ -137,6 +138,17 @@ class CommunityTaskModule(Module):
         # query face, writes via on_event (no Scheduler tick).
         from agentclaw.community.core.task.services import BbsExecutorService
         return BbsExecutorService(task_service)
+
+    @singleton
+    @provider
+    def graph_checkpoint(
+        self,
+        task_service: TaskService,
+        event_repo: TaskEventRepo,
+        task_repo: TaskRepo,
+    ) -> "GraphCheckpoint":
+        # plan §8.3 / T-14:回溯 / 断点重跑 / 回滚(snapshot/replay/rollback)。
+        return GraphCheckpoint(task_service, event_repo, task_repo)
 
     @singleton
     @provider

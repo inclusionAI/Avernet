@@ -100,6 +100,17 @@ class OrmTaskEventRepository:
             )
             return row.seq if row is not None else None
 
+    def truncate(self, task_id: str, after_seq: int) -> None:
+        """Drop events with seq > after_seq (rollback/checkpoint; log otherwise append-only)."""
+        with self._db.orm_session() as session:
+            session.query(AcTaskEventModel).filter(
+                and_(
+                    AcTaskEventModel.task_id == task_id,
+                    AcTaskEventModel.seq > after_seq,
+                )
+            ).delete(synchronize_session=False)
+            session.flush()
+
 
 def _row_to_event(row: AcTaskEventModel) -> TaskEvent:
     kind = EventKind(row.kind)

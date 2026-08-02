@@ -18,11 +18,6 @@ from agentclaw.community.core.task.domain.models import (
     SubDagRef,
     SubTaskSpec,
     Task,
-    TaskExecutionGraph,
-    TaskSource,
-    TaskSpec,
-    TaskSpecMetadata,
-    TaskStatus,
 )
 from agentclaw.community.core.task.domain.state_machine import (
     IllegalTransitionError,
@@ -55,22 +50,27 @@ def _planned_task(svc: TaskService) -> Task:
 # --- spawn_build_dag --------------------------------------------------------
 
 
-def test_spawn_build_dag_materializes_nodes_from_plan():
+def test_spawn_build_dag_materializes_planning_chain_and_subtasks():
+    """新设计(§2.2):spawn_build_dag 建规划链(recognition/clarify/execute_start,
+    落图即 DONE)+ plan.sub_tasks 作 DISPATCH 节点(PENDING),并持久化。"""
+    from agentclaw.community.core.task.domain.models import NodeType
+
     svc = _service()
     task = _planned_task(svc)
     svc.spawn_build_dag(task)
     g = task.execution_graph
     assert g is not None
-    assert [n.node_id for n in g.nodes] == ["n1", "n2"]
-    assert all(n.status is NodeStatus.PENDING for n in g.nodes)
-
-
-def test_spawn_build_dag_no_plan_yields_empty_graph():
-    svc = _service()
-    t = svc.create(title="t")
-    svc.spawn_build_dag(t)  # no plan yet — no-op, graph stays root-only
-    assert t.execution_graph is not None
-    assert t.execution_graph.nodes == []
+    ids = [n.node_id for n in g.nodes]
+    # 规划三节点 DONE + 两个 subtask DISPATCH(PENDING)
+    assert ids[:3] == ["n_recognition", "n_clarify", "n_execute_start"]
+    assert set(ids[3:]) == {"n1", "n2"}
+    planning = [n for n in g.nodes if n.node_type in (
+        NodeType.RECOGNITION, NodeType.CLARIFY, NodeType.EXECUTE_START,
+    )]
+    assert all(n.status is NodeStatus.DONE for n in planning)
+    subtasks = [n for n in g.nodes if n.node_type is NodeType.DISPATCH]
+    assert all(n.status is NodeStatus.PENDING for n in subtasks)
+    assert all(n.node_id in g.state.subtasks for n in g.nodes)
 
 
 # --- spawn_sub_dag writes ref, never child state ---------------------------

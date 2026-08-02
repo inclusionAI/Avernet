@@ -144,7 +144,7 @@ def test_post_progress_unknown_task_returns_none():
 
 
 def test_retrieve_state_reads_shared_blackboard():
-    # v2 §18.1-10:progress_snapshot 不存在;广场 bot 读经 retrieve_state。
+    # §18.1-10:progress_snapshot 不存在;广场 bot 读经 retrieve_state。
     from agentclaw.community.core.task.domain.models import StateSemantics
 
     svc, bbs = _service()
@@ -152,9 +152,10 @@ def test_retrieve_state_reads_shared_blackboard():
     out = bbs.retrieve_state(tid, None)
     assert out["scope"] == "public"
     assert "public" in out
-    # scope=未建分区(legacy spawn_build_dag 不建 SubtaskState)→ subtask None
+    # 新设计:spawn_build_dag 为每个节点建 SubtaskState 分区 → n1 分区已存在(空执行上下文)。
     out_n1 = bbs.retrieve_state(tid, "n1")
-    assert out_n1["subtask"] is None
+    assert out_n1["subtask"]["node_id"] == "n1"
+    assert out_n1["subtask"]["execution_context"] == {}
     # 写分区后可读(广场 bot 读执行上下文)
     svc.update_state(tid, "n1", {"execution_context": {"k": "v"}}, StateSemantics.MERGE)
     out_n1b = bbs.retrieve_state(tid, "n1")

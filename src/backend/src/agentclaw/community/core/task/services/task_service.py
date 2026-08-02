@@ -51,6 +51,7 @@ from agentclaw.community.core.task.domain.models import (
     RunMode,
     SubDagRef,
     SubTaskSpec,
+    SubtaskState,
     Task,
     TaskExecutionGraph,
     TaskSource,
@@ -305,7 +306,14 @@ class TaskService(GraphStateOpsMixin):
         if task is None:
             return {}
         graph = task.execution_graph
-        nodes = graph.nodes if graph else []
+        # 进度只计执行子任务;recognition/clarify/execute_start 是历史规划脚手架(落图即
+        # DONE),不计入进度分子,免得 3 个 DONE 规划节点虚增 done/total(§2.2)。
+        nodes = [
+            n for n in (graph.nodes if graph else [])
+            if n.node_type not in (
+                NodeType.RECOGNITION, NodeType.CLARIFY, NodeType.EXECUTE_START,
+            )
+        ]
         done = sum(1 for n in nodes if n.status == NodeStatus.DONE)
         return {
             "task_id": task_id,
@@ -554,6 +562,74 @@ class TaskService(GraphStateOpsMixin):
         if kind == EventKind.CANCELLED:
             self._advance_phase(task, TaskStatus.CANCELLED)
             return
+        # --- v2 判定节点 fold + BBS 确认/cancel 通道(plan §5.2/§12A/§13/§18.1-10) ---
+        if kind == EventKind.EXEC_AGGREGATED:
+            # exec-aggregate 判验回投:verdict=pass → EXEC_AGGREGATE 节点 + SubtaskState
+            # =DONE(父 subtask 闭合);verdict=fail → FAILED(回 gap 由 scheduler 续处理)。
+            node = self._find_node(task, node_id)
+            verdict = str(payload.get("verdict") or "pass")
+            next_status = NodeStatus.DONE if verdict == "pass" else NodeStatus.FAILED
+            if node is not None:
+                node.properties["acceptance_result"] = verdict
+                if node.status not in (NodeStatus.DONE, NodeStatus.FAILED):
+                    node.status = next_status
+            st = task.execution_graph.state.subtasks.get(node_id)  # type: ignore[union-attr]
+            if st is not None:
+                st.status = next_status
+            return
+        if kind == EventKind.NODE_HANG:
+            # mark-hang 挂起:node → HUMAN_REQUIRED;graph ON_PLAZA → AWAITING_HUMAN_ACCEPT
+            # (等人确认升 BBS / 不升)。直接 fold(与 _apply_goal_verdict 同;不经 mark_graph_status
+            # 以免重读覆盖正在 fold 的 task)。
+            node = self._find_node(task, node_id)
+            if node is not None and node.status not in (
+                NodeStatus.DONE,
+                NodeStatus.FAILED,
+                NodeStatus.HUMAN_REQUIRED,
+            ):
+                node.status = NodeStatus.HUMAN_REQUIRED
+            if (
+                graph is not None
+                and graph.graph_status is GraphStatus.ON_PLAZA
+            ):
+                graph.graph_status = GraphStatus.AWAITING_HUMAN_ACCEPT
+            return
+        if kind == EventKind.BBS_CONFIRMED:
+            # 人确认升 BBS(§13/§18.1-10,经 POST /events 回投):AWAITING_HUMAN_ACCEPT
+            # → ON_PLAZA + 落 BBS_DISPATCH 节点(同图延续)。直接 append 到正在 fold 的 task,
+            # 不走 add_node(内部 get_by_id+save 会覆盖本 fold)。
+            if (
+                graph is not None
+                and graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+            ):
+                graph.graph_status = GraphStatus.ON_PLAZA
+            if graph is not None:
+                bbs_id = f"{node_id}_bbs" if node_id else "n_bbs"
+                graph.nodes.append(
+                    Node(
+                        node_id=bbs_id,
+                        spec="bbs-dispatch",
+                        node_type=NodeType.BBS_DISPATCH,
+                        status=NodeStatus.DONE,  # system-bridge 记录,落图即完成,不供 BbsExecutor 认领
+                    )
+                )
+                graph.state.subtasks[bbs_id] = SubtaskState(node_id=bbs_id, status=NodeStatus.DONE)
+                if node_id:
+                    graph.edges.append(
+                        Edge(
+                            edge_id=f"e-{node_id}-{bbs_id}",
+                            from_node=node_id,
+                            to_node=bbs_id,
+                            kind=EdgeKind.DEPENDENCY,
+                        )
+                    )
+            return
+        if kind == EventKind.HANG_CANCELLED:
+            # 人确认不升 → task FAILED 终态(§13 三终止之一)。
+            if task.status is TaskStatus.REVIEWING:
+                self._advance_phase(task, TaskStatus.EXECUTING)
+            self._advance_phase(task, TaskStatus.FAILED)
+            return
         # EventKind.HUNG is retained on the enum for forward-compat of the event
         # log, but has no writer now (task-level HUNG terminal removed). Unknown
         # kinds — ignore (forward-compat).
@@ -646,60 +722,52 @@ class TaskService(GraphStateOpsMixin):
     # --- internal: spawn_build_dag / spawn_sub_dag (plan §2.2) -----------
 
     def spawn_build_dag(self, task: Task, plan: Optional[Plan] = None) -> None:
-        """Materialize plan.sub_tasks / plan.edges into the runtime graph's
-        Node/Edge骨架 (plan §2.2). Called by Scheduler.start (Phase 3)."""
-        if task.execution_graph is None:
-            task.execution_graph = TaskExecutionGraph(root_phase=task.status)
-        g = task.execution_graph
-        g.nodes = []
-        g.edges = []
-        p = plan or task.plan
-        if p is None:
-            return
-        for sub in p.sub_tasks:
-            g.nodes.append(
-                Node(
-                    node_id=sub.node_id,
-                    spec=sub.spec,
-                    run_mode=sub.run_mode,
-                )
-            )
-        for e in p.edges:
-            g.edges.append(
-                Edge(
-                    edge_id=e.edge_id,
-                    from_node=e.from_node,
-                    to_node=e.to_node,
-                    kind=e.kind,
-                )
-            )
+        """构建全生命周期动作节点骨架(plan §2.2 伪代码 n1..n4)并持久化。
 
-    def spawn_build_dag_v2(self, task: Task) -> None:
-        """v2:构建全生命周期动作节点骨架(plan §2.2 伪代码 n1..n4)。
-
-        recognition→clarify→execute_start→bot_search(根,depth 0)。规划三节点由
-        skill 在 task 创建/澄清/批准时跑过;``tick_v2`` 遇 PENDING 规划节点标 DONE
-        推进链。后续 bot_search/decomposition/dispatch/... 由 ``TaskScheduler._tick_v2``
-        按 NodeType 推进(搜推先行 / 分解 / 聚合 / hang / bbs / 终验)。图中节点带
-        显式 NodeType → ``is_v2_graph`` 判真 → 走 v2 tick 门控。
-        """
+        直接 mutate 本地图(不走 add_node,免内部重读覆盖),构建完成后 ``save`` 一次,
+        调用方随后可安全 re-fetch。recognition→clarify→execute_start 规划链(skill 在
+        创建/澄清/批准时已跑)落图即 DONE,不参与 tick 推进 / 不被 BbsExecutor 认领。
+        有计划时 plan.sub_tasks 为 DISPATCH 节点(已搜推,直接派发);无计划时根
+        BOT_SEARCH(搜推 task-spec)。"""
         if task.execution_graph is None:
             task.execution_graph = TaskExecutionGraph(root_phase=task.status)
         g = task.execution_graph
         g.nodes = []
         g.edges = []
         g.state = TaskState()
-        self._task_repo.save(task)
+
+        def _append(
+            nt: NodeType, nid: str, spec: str, parent: Optional[str],
+            done: bool = False, run_mode: Optional[RunMode] = None,
+        ) -> str:
+            node = Node(node_id=nid, spec=spec, node_type=nt, run_mode=run_mode)
+            st = SubtaskState(node_id=nid)
+            if done:
+                node.status = NodeStatus.DONE
+                st.status = NodeStatus.DONE
+            g.nodes.append(node)
+            g.state.subtasks[nid] = st
+            if parent:
+                g.edges.append(
+                    Edge(edge_id=f"e-{parent}-{nid}", from_node=parent, to_node=nid, kind=EdgeKind.DEPENDENCY)
+                )
+            return nid
+
+        # 规划链:recognition/clarify/execute_start 是已完成的历史动作(skill 在创建/
+        # 澄清/批准时跑过)→ 落图即 DONE,不参与 tick 推进 / 不被 BbsExecutor 认领。
         prev: Optional[str] = None
-        for nt in (
-            NodeType.RECOGNITION,
-            NodeType.CLARIFY,
-            NodeType.EXECUTE_START,
-            NodeType.BOT_SEARCH,
-        ):
-            nid = f"n_{nt.value}"
-            self.add_node(task.id, SubTaskSpec(node_id=nid, spec=nt.value), prev, nt)
-            prev = nid
+        for nt in (NodeType.RECOGNITION, NodeType.CLARIFY, NodeType.EXECUTE_START):
+            prev = _append(nt, f"n_{nt.value}", nt.value, prev, done=True)
+        execute_start_id = prev
+        p = plan or task.plan
+        if p is not None and p.sub_tasks:
+            for sub in p.sub_tasks:
+                _append(NodeType.DISPATCH, sub.node_id, sub.spec, execute_start_id, run_mode=sub.run_mode)
+            for e in p.edges:
+                g.edges.append(Edge(edge_id=e.edge_id, from_node=e.from_node, to_node=e.to_node, kind=e.kind))
+        else:
+            _append(NodeType.BOT_SEARCH, "n_bot_search", "bot-search", execute_start_id)
+        self._task_repo.save(task)
 
     def spawn_sub_dag(
         self,
@@ -847,7 +915,6 @@ class TaskService(GraphStateOpsMixin):
             return Plan()
         from agentclaw.community.core.task.domain.models import (
             EdgeSpec,
-            SubTaskSpec,
         )
 
         plan = Plan(confidence=float(data.get("confidence") or 0.0))

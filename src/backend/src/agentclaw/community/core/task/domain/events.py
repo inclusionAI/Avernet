@@ -50,6 +50,9 @@ class EventKind(StrEnum):
     PLAN_REQUESTED = "task.plan_requested"  # EXECUTE_START 后请 owner-bot 规划(§12)
     EXEC_AGGREGATED = "node.aggregated"  # exec-aggregate 聚合验收结果(父 subtask DONE/REJECTED)
     NODE_HANG = "node.hang"            # mark-hang 挂起(graph → AWAITING_HUMAN_ACCEPT)
+    # v2 BBS 确认/cancel 通道(plan §13/§18.1-10,经 POST /tasks/{id}/events 回投):
+    BBS_CONFIRMED = "bbs.confirmed"    # 人确认升 BBS:AWAITING_HUMAN_ACCEPT→ON_PLAZA + BBS_DISPATCH
+    HANG_CANCELLED = "hang.cancelled"  # 人确认不升 → task FAILED 终态
     # (spec §2 — "被 hung 住" is node-level HUMAN_REQUIRED; unrecoverable → FAILED).
     # Retained on the enum so the event-log deserializer can still read historical
     # HUNG entries; new code must not emit it.

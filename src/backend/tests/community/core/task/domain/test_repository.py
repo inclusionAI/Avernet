@@ -74,6 +74,10 @@ class _InMemoryEventRepo:
         log = self._logs.get(task_id)
         return log[-1].seq if log else None
 
+    def truncate(self, task_id: str, after_seq: int) -> None:
+        log = self._logs.get(task_id, [])
+        self._logs[task_id] = [e for e in log if e.seq <= after_seq]
+
 
 # --- protocol structural checks ---------------------------------------------
 
