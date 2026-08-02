@@ -94,7 +94,7 @@ This is called during `get_container()` before any providers are resolved.
 ```text
 src/gateway/
 ├── configs/                    # Single application.yaml plus schema artifacts
-├── docs/                       # OpenAPI docs
+├── docs/                       # Design notes (auth, delegated OAuth)
 ├── scripts/                    # CI and utility scripts
 ├── specs/                      # Architecture specifications
 ├── src/gateway/community/

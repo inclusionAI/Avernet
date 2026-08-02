@@ -35,8 +35,8 @@ that file holds the inventory.
 **Goal:** implement the public `/openapi/v1` API, whose callers are **external
 registered tenants**. It lives under
 `src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**
-category is implemented (PR #494); the other six are still **route definitions
-with stub handlers**.
+and **mcp** categories are implemented (PRs #494, #610); the other four are
+still **route definitions with stub handlers**.
 
 > 🔒 **The surface is still not callable end-to-end, but no longer because of a
 > stub.** `require_principal` now really verifies the gateway's signed
@@ -62,10 +62,10 @@ The work therefore splits into **three tracks**:
 - **Track A — Tenant-isolation foundation.** Make every data category
   tenant-scoped *underneath both API surfaces*, before any public endpoint is
   wired. **Track A implements NO endpoint by design** — it's plumbing.
-- **Track B — Public API implementation.** Wire the seven `/openapi/v1`
+- **Track B — Public API implementation.** Wire the six `/openapi/v1`
   category handlers to the existing services. **This is where the endpoint/API
   code actually lands.** Each category depends on its data being isolated
-  (Track A) first. **2 of 7 done: bots (PR #494), mcp (PR #610).**
+  (Track A) first. **2 of 6 done: bots (PR #494), mcp (PR #610).**
 - **Track C — Engine (runtime) surface.** _Added 2026-07-30._ Wrap the engine
   adapter's client-facing HTTP behind `/openapi/v1/bots/{bot_id}/…`, and replace
   the `get_device_connection` hand-off with one sanitised socket-info endpoint.
@@ -74,7 +74,7 @@ The work therefore splits into **three tracks**:
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
 > reusable mechanism + that category's records). The API endpoints land in
-> Track B — done for bots, still stubs for the other six.
+> Track B — done for bots and mcp, still stubs for the other four.
 >
 > ⚠️ **Track C has no Track A stage, and that is correct.** Tracks A and B pair
 > up (isolate a category, then wire its endpoints); Track C does not. Its data
@@ -96,7 +96,7 @@ owner.)
 
 | Person | Owns (vertical slices) | Track A stages | Track B endpoint groups |
 |---|---|---|---|
-| **totalfrank** | bots, mcp, channels, **skills** (shared) | 1 (bots ✅), 5 (mcp), 3 (channels), 4 (skills, shared) | bots, mcp, channels, skills (shared) |
+| **totalfrank** | bots, mcp, **skills** (shared) | 1 (bots ✅), 5 (mcp), 4 (skills, shared) | bots, mcp, skills (shared) |
 | **lucas-xzp** | resources, routines, identity, **skills** (shared) | 2 (resources), 6 (routines), 4 (skills, shared) | resources, routines, identity, skills (shared) |
 
 - **totalfrank** also owns the **reusable Track A mechanism** (built in Stage 1 /
@@ -114,7 +114,7 @@ owner.)
 | Tier | Categories | Owners |
 |---|---|---|
 | **P1 — first** | bots, mcp, resources, routines | bots + mcp → totalfrank; resources + routines → lucas-xzp |
-| **P2 — second** | channels, identity | channels → totalfrank; identity → lucas-xzp |
+| **P2 — second** | identity | identity → lucas-xzp |
 | **P3 — third** | skills | **co-owned** (totalfrank + lucas-xzp) — the most involved category |
 
 Within each lane, do your **P1** slices before P2 before P3. Skills (P3) is the
@@ -136,7 +136,6 @@ must implement._
 |---|---|---|---|---|---|
 | 1 | Bot records (`ac_bots` / `BotModel`) | totalfrank | P1 | ✅ **DONE — PR #456 merged 2026-07-27** | — |
 | 2 | Resources (`ac_resource`) | lucas-xzp | P1 | ✅ DONE — Phase 0 (branch `rongzhi_0727`) | column + guards + tests green; internal API unchanged — verified: `to_dict()` excludes tenant, guard uses direct expression not lambda |
-| 3 | Channels (`ac_channel_config`) | totalfrank | 🅳 **DEPRIORITIZED** | ⏸️ PARKED — scope intact, not cancelled | same, if picked back up |
 | 4 | Skills (skill tables) | totalfrank + lucas-xzp | P3 | ⬜ TODO | same |
 | 5 | MCP configuration (`ac_user_mcp_config` + `ac_bot_mcp_call_config`) | totalfrank | P1 | ✅ DONE — **PR #564** | PR #564 merges |
 | 6 | Routines | lucas-xzp | P1 | ⬜ TODO | same |
@@ -144,7 +143,7 @@ must implement._
 > Stage 1 also builds the **reusable mechanism** (see below) that every later
 > stage copies. It's the foundation, not just "bots."
 
-### Track B — Public API implementation (where the endpoints land — 2 of 7 done)
+### Track B — Public API implementation (where the endpoints land — 2 of 6 done)
 _Ordered by priority tier._
 | Category | Owner | Pri | Router | State | Depends on |
 |---|---|---|---|---|---|
@@ -152,7 +151,6 @@ _Ordered by priority tier._
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 9 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 9 endpoints wired stub→service; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
-| channels | totalfrank | 🅳 **DEPRIORITIZED** | `openapi_v1/channels/router.py` *(stub)* | ⏸️ PARKED — scope intact, not cancelled | Track A stage 3 (also parked) |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(stub)* | ⬜ TODO | Track A skills (shared) |
 
@@ -208,11 +206,14 @@ DDL. Full ruling and per-endpoint mapping in
 > that must be settled before a second tenant holds real data.
 | **Stage 5 unique-key swap on `ac_user_mcp_config`** | ⬜ TODO (DDL below) | **before a 2nd tenant writes MCP config** — not before deploy |
 
-> **⏸️ Why channels are parked (2026-07-29).** The product does not need
-> channels at this point, so they must stop presenting as the next thing to
-> pick up. This is a **deprioritization, not a cancellation** — both rows keep
-> their full scope and can be picked back up unchanged. If channels are ever
-> actually cancelled, delete the rows rather than leaving them parked.
+> **🗑️ Channels removed (2026-08-02).** Parked on 2026-07-29, now **cancelled**
+> — the product does not need them, and a never-implemented stub group was
+> still advertising six endpoints in the gateway's published description. The
+> router, its schemas and both status-board rows are deleted, per the standing
+> rule that a cancelled category gets its rows removed rather than left parked.
+> This does **not** touch the internal `/api/channels` surface
+> (`adapters/http/channel/`), which is unrelated and still live. If channels
+> come back, they come back as new work, not by un-parking these rows.
 
 ---
 
@@ -440,7 +441,7 @@ CI all-green. Then **update the status board above.**
 ## Track B — the reusable primitives (built with bots, PR #494)
 
 **Read this before starting any category.** The bots slice built the shared
-public-API layer once; the remaining six categories are meant to *use* it, not
+public-API layer once; the remaining five categories are meant to *use* it, not
 rebuild it. Everything below is category-agnostic and lives in
 `adapters/http/openapi_v1/`:
 
@@ -537,14 +538,14 @@ as reference).
 > `/openapi/v1/bots/mcp`). PR #363's overview used **top-level** paths
 > (`/openapi/v1/resources`, `/openapi/v1/mcp`, …). **Ruling (mcp owner, PR #610):
 > the nested router shape stays** — the router is authoritative and the churn of
-> a re-prefix buys nothing while the surface is pre-auth. The remaining five
+> a re-prefix buys nothing while the surface is pre-auth. The remaining four
 > groups inherit this precedent unless their owner decides otherwise; if you do
 > want the top-level shape, change the router `prefix` and update this section in
 > the same PR. _(bots is unaffected: it is `/openapi/v1/bots` under either
 > reading, and shipped that way in #494.)_
 >
-> **Mount order is load-bearing.** `build_public_router()` includes the six
-> literal sub-groups **before** the bots group, so `/openapi/v1/bots/channels`
+> **Mount order is load-bearing.** `build_public_router()` includes the five
+> literal sub-groups **before** the bots group, so `/openapi/v1/bots/skills`
 > resolves ahead of the `/openapi/v1/bots/{bot_id}` wildcard. Keep any new group
 > in the `_SUBGROUPS` list, above the bots router.
 
@@ -553,7 +554,7 @@ All responses use the `Envelope[T]` / `Page[T]` shapes from
 
 ### ✅ totalfrank · P1 — bots (13 endpoints) · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494)**
 All 13 wired to the internal bot services. Kept here as the reference shape for
-the other six: this is what "done" looks like per category.
+the other five: this is what "done" looks like per category.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
@@ -582,20 +583,6 @@ the external Passport application); create persists the configured engine
 registry widened to include the bot's own active engine; update's duplicate-name
 check compares owner **and** `bot_id` together; deleting the default bot raises
 `BotOperationNotAllowedError` (internal response shape unchanged, public → 409)._
-
-### 🟦 totalfrank · P2 — channels (6 endpoints) · `openapi_v1/channels/router.py`
-DingTalk (`dingding`) config CRUD + status toggle.
-| Method | Path | Purpose | Success |
-|---|---|---|---|
-| GET | `/openapi/v1/bots/channels` | List channels (optional `bot_id`) | `Envelope[list[Channel]]` |
-| POST | `/openapi/v1/bots/channels` | Create channel (starts inactive) | `201 Envelope[Channel]` |
-| GET | `/openapi/v1/bots/channels/{channel_id}` | Get channel | `Envelope[Channel]` |
-| PUT | `/openapi/v1/bots/channels/{channel_id}` | Full update | `Envelope[Channel]` |
-| PATCH | `/openapi/v1/bots/channels/{channel_id}` | Toggle active/inactive | `Envelope[Channel]` |
-| DELETE | `/openapi/v1/bots/channels/{channel_id}` | Delete | `Envelope[Deleted]` |
-
-_Note: the stub returns `Envelope[list[Channel]]` for list (not `Page`); PR #363
-showed `Page[Channel]`. Confirm which you want when you wire it._
 
 ### ✅ totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED (PR #610)**
 Marketplace + tenants + the caller's unified per-server config. All 6 wired to
@@ -702,14 +689,14 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 ## Definition of done (whole `/openapi/v1` effort)
 
-1. **Track A:** every data category (bots, resources, channels, skills, mcp,
-   routines) carries `avernet_tenant` and is guarded, Stage-1 test shape green.
-   — _2 of 6 (bots ✅, mcp ✅ PR #564)._
+1. **Track A:** every data category (bots, resources, skills, mcp, routines)
+   carries `avernet_tenant` and is guarded, Stage-1 test shape green.
+   — _2 of 5 (bots ✅, mcp ✅ PR #564)._
 2. Internal API unchanged throughout (no `to_dict()` leaks; internal suites
    unmodified). — _holding: full `tests/community` green at #494 (9171 passed,
    3 skipped)._
-3. **Track B:** the seven `/openapi/v1` categories' handlers implemented and
-   tenant-safe, each with its own tests + PR. — _2 of 7 (bots ✅, mcp ✅)._
+3. **Track B:** the six `/openapi/v1` categories' handlers implemented and
+   tenant-safe, each with its own tests + PR. — _2 of 6 (bots ✅, mcp ✅)._
 4. F2 tenant-leading indexes in place (mandatory policy). — _⬜_
 5. Background/scheduled work revisited for per-tenant correctness. — _⬜_
 6. `require_principal` / `resolve_avernet_tenant` wired to the real verifier
@@ -1017,3 +1004,20 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   cross-repo test pins that contract, so a rename on either side leaves both
   suites green and 401s production. Full suite 10204 passed / 3 skipped. SDD:
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`.
+
+- **2026-08-02** — **Channels deleted (cancelled, not parked).** The
+  `openapi_v1/channels/` group — six routes and eight schemas that never had a
+  handler — is removed, along with its Track A stage 3 and Track B rows, its
+  six `coverage_baseline.txt` debt lines, and its endpoint table above. Parked
+  since 2026-07-29; deleting the rows is what this board's own parking note
+  prescribes for a cancellation. The internal `/api/channels` surface
+  (`adapters/http/channel/`) is untouched and unrelated. **Also republished the
+  gateway's stale description:** `configs/schemas/bots.openapi.json` had been
+  pinned at 32 paths since before Track C, so it advertised six channel routes
+  that 501'd and none of the 11 engine-runtime routes that actually ship. It is
+  now regenerated from the live surface at **41 paths**. The compat gate
+  reported 35 breaking changes and was run with `--allow-breaking`: 6 are the
+  channel removals, the other 29 are drift the artifact never picked up
+  (`bot_id` now required on resources/routines, `engine_options` /
+  `cluster_name` / `sync_mode` dropped, validation schemas renamed). Nothing
+  regressed here — the description caught up with `dev`.
