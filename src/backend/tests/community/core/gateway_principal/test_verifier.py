@@ -202,6 +202,44 @@ def test_the_refusal_names_the_types_carried_for_the_operator():
     assert "app" in str(exc_info.value)
 
 
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_a_user_with_a_blank_subject_id_is_refused(blank: str):
+    """A type check alone is not enough — both sides model the id as a bare ``str``.
+
+    Reachable rather than theoretical: the gateway's google strategy reads
+    ``body["sub"]``, which raises on a *missing* claim but passes an empty one
+    through. Such a caller names an owner no better than an access key does, and
+    the handlers that never call ``caller_owner_id`` would run for it.
+    """
+    with pytest.raises(PrincipalVerificationError, match="blank subject id"):
+        verify_principal_token(mint([user_principal(user_id=blank)]), CONFIG)
+
+
+def test_a_blank_first_user_is_refused_even_behind_a_usable_one():
+    """The admission check and ``user_id`` must agree on *which* user is the owner.
+
+    The gateway resolves at most one identity per type, but ``principals`` is a
+    list, so a token can present two users. Asking "does some user have an id?"
+    while deriving the owner from the *first* user would admit this set and then
+    scope by nothing at all.
+    """
+    token = mint([user_principal(user_id=""), user_principal(user_id="u-2")])
+
+    with pytest.raises(PrincipalVerificationError, match="blank subject id"):
+        verify_principal_token(token, CONFIG)
+
+
+def test_a_blank_subject_id_is_refused_distinctly_from_a_missing_user():
+    """Two different operator diagnoses, so two different messages."""
+    with pytest.raises(PrincipalVerificationError) as blank:
+        verify_principal_token(mint([user_principal(user_id="")]), CONFIG)
+    with pytest.raises(PrincipalVerificationError) as missing:
+        verify_principal_token(mint([app_principal()]), CONFIG)
+
+    assert "no user identity" not in str(blank.value)
+    assert "blank subject id" not in str(missing.value)
+
+
 def test_unknown_fields_do_not_break_verification():
     """The gateway must be able to add a field without taking this surface down."""
     payload = user_principal()

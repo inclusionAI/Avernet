@@ -106,11 +106,15 @@ class VerifiedCaller:
         against "whatever shape the auth workstream's verified principal takes",
         so satisfying it needs no change to any handler.
 
-        A ``user`` principal is the only source. It is also the only identity
-        type :func:`_require_user_principal` admits, so a caller reaching this
-        property always has one and the loop always finds it. The two facts are
-        the same decision seen from two sides: this surface scopes by an owner,
-        so it serves only callers that name one.
+        A ``user`` principal is the only source, and
+        :func:`_require_user_principal` admits no set that lacks one carrying a
+        usable id — so a caller reaching this property always has an owner. The
+        two facts are the same decision seen from two sides: this surface scopes
+        by an owner, so it serves only callers that name one.
+
+        Both read the set through :func:`_first_user_principal`, so the
+        admission check and this property cannot disagree about *which*
+        principal supplies the owner.
 
         The ``""`` fallback is unreachable through
         :func:`verify_principal_token`. It stays so that a hand-constructed
@@ -118,10 +122,8 @@ class VerifiedCaller:
         ``caller_owner_id`` turns into a ``401``, rather than raising something
         no caller-facing code is written to catch.
         """
-        for principal in self.principals:
-            if isinstance(principal, UserPrincipal):
-                return principal.subject.id
-        return ""
+        principal = _first_user_principal(self.principals)
+        return principal.subject.id if principal is not None else ""
 
 
 def verify_principal_token(
@@ -201,6 +203,29 @@ def _reject_contradictory_tenant(principals: tuple[GatewayPrincipal, ...]) -> No
         )
 
 
+def _first_user_principal(
+    principals: tuple[GatewayPrincipal, ...],
+) -> UserPrincipal | None:
+    """The user principal an owner is derived from, or ``None`` when there is none.
+
+    ``None`` is a real state of the contract here — "this identity set names no
+    end user" is exactly what :func:`_require_user_principal` exists to detect —
+    so the optional return is the state, not a widened type.
+
+    One function rather than two loops so the admission check and
+    :attr:`VerifiedCaller.user_id` cannot disagree about *which* principal
+    supplies the owner. That matters for a set carrying two user principals: the
+    gateway never produces one (it resolves at most a single identity per type),
+    but the ``principals`` claim is a list, so a token can present two. Checking
+    "some user has a usable id" while deriving the owner from "the first user"
+    would admit a set whose first user has a blank id and then scope by nothing.
+    """
+    for principal in principals:
+        if isinstance(principal, UserPrincipal):
+            return principal
+    return None
+
+
 def _require_user_principal(principals: tuple[GatewayPrincipal, ...]) -> None:
     """Refuse an identity set that names no end user.
 
@@ -233,14 +258,29 @@ def _require_user_principal(principals: tuple[GatewayPrincipal, ...]) -> None:
     name a person — is the designed way to widen this (§15). Lift the guard
     there, deliberately.
     """
-    if any(isinstance(principal, UserPrincipal) for principal in principals):
-        return
-    # The types are named for the operator reading the log, never for the
-    # caller: ``require_principal`` answers one fixed 401 for every verification
-    # failure, so a caller cannot tell a refused identity type from a bad
-    # signature.
-    carried = ", ".join(sorted({principal.type.value for principal in principals}))
-    raise PrincipalVerificationError(
-        f"principal token names no user identity (carries: {carried}); the "
-        "public surface admits only callers that name an end user"
-    )
+    user = _first_user_principal(principals)
+    if user is None:
+        # The types are named for the operator reading the log, never for the
+        # caller: ``require_principal`` answers one fixed 401 for every
+        # verification failure, so a caller cannot tell a refused identity type
+        # from a bad signature.
+        carried = ", ".join(sorted({principal.type.value for principal in principals}))
+        raise PrincipalVerificationError(
+            f"principal token names no user identity (carries: {carried}); the "
+            "public surface admits only callers that name an end user"
+        )
+    # A ``user`` principal with a blank subject id names an end user no better
+    # than an access key does — and the type check alone would admit it, because
+    # both sides model the id as an unconstrained ``str``. It is reachable: the
+    # gateway's google strategy reads ``body["sub"]``, which raises on a
+    # *missing* claim but passes an empty one straight through.
+    #
+    # Whitespace is stripped for the test rather than merely checked falsy (the
+    # empty-tenant guard above can be laxer because a tenant is compared, not
+    # used as a key): an id of ``"   "`` would be carried into owner-scoped
+    # queries as a real value.
+    if not user.subject.id.strip():
+        raise PrincipalVerificationError(
+            "principal token carries a user identity with a blank subject id, "
+            "which names no owner to scope by"
+        )

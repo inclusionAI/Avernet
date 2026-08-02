@@ -68,6 +68,13 @@ describes.
 
 - [ ] An identity set carrying no `user` principal fails verification.
 - [ ] A `bot`-only, `app`-only, or `access_key`-only identity set is refused.
+- [ ] A `user` principal whose subject id is empty or whitespace-only is
+      refused: it names an owner no better than an access key does, and both
+      sides model the id as an unconstrained string, so a type check alone does
+      not establish that an owner exists.
+- [ ] The principal the admission check validates is the same one the owner is
+      derived from, so a set whose first `user` has a blank id cannot be
+      admitted on the strength of a second one.
 - [ ] A set carrying a `user` principal alongside any other identity is
       accepted, and the user remains the owner anchor.
 - [ ] A refused set yields the same fixed `401` response as every other
@@ -138,3 +145,13 @@ describes.
    The response is the same fixed 401 envelope; only the log line differs. A
    caller cannot tell a refused identity type from a bad signature, which is the
    existing posture for every verification failure.
+
+5. **Is "carries a `user` principal" the same as "has an owner"?** *Resolved:*
+   no, and conflating them reopens the gap this feature closes. Both sides model
+   the subject id as an unconstrained `str`, and the gateway's google strategy
+   reads `body["sub"]` — which raises on a *missing* claim but passes an empty
+   one straight through. A `user` principal with a blank id therefore verifies,
+   yields no owner, and reaches the handlers that never ask for one. The
+   admission rule is about a usable owner, not a type tag, so it checks the
+   value; and it checks it on the same principal the owner is derived from,
+   since a set may present more than one `user`.
