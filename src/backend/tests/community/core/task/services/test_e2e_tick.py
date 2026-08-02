@@ -53,6 +53,7 @@ from agentclaw.community.plugins.community.task.panel_publisher import (
 
 from tests.community.core.task.services._login_case import (
     ACCEPTANCES,
+    HASH_CHILDREN,
     HIT_BOTS,
     OBJECTIVE,
     TEST_CHILDREN,
@@ -111,6 +112,8 @@ class FakeDecomposer:
             base = TOP_CHILDREN
         elif "编写登录接口回归测试" in spec_text:
             base = TEST_CHILDREN
+        elif "密码哈希比对" in spec_text:
+            base = HASH_CHILDREN  # reroute(decompose)“实现密码哈希比对”→ 真实子任务
         else:
             base = TEST_CHILDREN  # 兜底:仍给真实子任务内容
         return [
@@ -459,3 +462,74 @@ def test_node_failed_retries_same_executor_then_asks_skill_reroute():
     assert (task.id, "n_impl_hash", "crypto-bot") in sched._execution.probes  # noqa: SLF001  派给 skill 判
     assert sum(1 for (_t, nid, b) in sched._execution.single_bots if nid == "n_impl_hash" and b == "crypto-bot") == 2  # noqa: SLF001  不再重派
     assert driver.redispatched == []  # reroute 是 skill 判,非 scheduler C5 规则
+
+# --- ⑥ reroute 后半段:skill 判定后发起 gap bot-search(FR-GRAPH-08 / T-28)---------
+
+def _drive_to_reroute_handoff(svc, sched, task_id, leaf_id):
+    """把失败叶子驱动到"到上限 + 已派 reroute 判定给 skill"的交接点,返回最新 task。"""
+    _report_event(svc, sched, task_id, EventKind.NODE_FAILED, {"node_id": leaf_id})  # retry #1
+    _report_event(svc, sched, task_id, EventKind.NODE_FAILED, {"node_id": leaf_id})  # max → probe skill
+    return svc.get(task_id)
+
+
+def test_node_failed_reroute_hit_dispatches_new_executor():
+    """reroute 命中:skill 经 open_reroute_search 发起 gap bot-search → tick _bot_search
+    命中新执行方 → dispatch 重派(节点身份变为新 reroute 派发链,执行方变 crypto-bot2)。"""
+    svc = _svc()
+    discover = FakeDiscover(hits={"n_impl_hash": ["crypto-bot"], "n_impl_hash_reroute": ["crypto-bot2"]})
+    driver = FakeDriver()
+    sched = _scheduler(svc, discover, driver=driver)
+    task = _planned_task(svc, sched, "n_impl_hash", "实现登录密码哈希比对")
+    task = _drive_to_reroute_handoff(svc, sched, task.id, "n_impl_hash")
+    assert (task.id, "n_impl_hash", "crypto-bot") in sched._execution.probes  # noqa: SLF001  已派给 skill 判
+    # skill 判定需重路由 → 发起 gap bot-search(真实图操作:挂兄弟 BOT_SEARCH,非 failures 下作子)
+    reroute = svc.open_reroute_search(task.id, "n_impl_hash", "重路由:实现登录密码哈希比对(gap:哈希比对未通过)")
+    assert reroute.node_id == "n_impl_hash_reroute"
+    sched.tick(task.id)  # tick 处理 reroute BOT_SEARCH:搜推命中 crypto-bot2 → 落 _disp 子
+    sched.tick(task.id)  # _disp → claim crypto-bot2 + fire → RUNNING
+    task = svc.get(task.id)
+    disp = next(n for n in task.execution_graph.nodes if n.node_id == "n_impl_hash_reroute_disp")
+    assert disp.assignee == "crypto-bot2"  # 重路由到**新执行方**(非原 crypto-bot)
+    assert disp.status is NodeStatus.RUNNING
+    assert (task.id, "n_impl_hash_reroute_disp", "crypto-bot2") in sched._execution.single_bots  # noqa: SLF001
+    assert driver.redispatched == []  # 无 scheduler C5 规则
+
+
+def test_node_failed_reroute_miss_recursive_decompose_depth_plus_one():
+    """reroute 未匹配:skill 经 open_reroute_search 发起 gap bot-search → tick _bot_search
+    未匹配 → DECOMPOSITION → decompose_subtasks(真实子任务,depth=失败节点+1)。"""
+    svc = _svc()
+    discover = FakeDiscover(hits={"n_impl_hash": ["crypto-bot"]})  # reroute node 未映射 → miss
+    decomposer = FakeDecomposer()
+    driver = FakeDriver()
+    sched = _scheduler(svc, discover, decomposer, driver=driver)
+    task = _planned_task(svc, sched, "n_impl_hash", "实现登录密码哈希比对")
+    task = _drive_to_reroute_handoff(svc, sched, task.id, "n_impl_hash")
+    assert (task.id, "n_impl_hash", "crypto-bot") in sched._execution.probes  # noqa: SLF001
+    # skill 判 reroute → 发起 gap bot-search;reroute node 未命中 → decomposition
+    svc.open_reroute_search(task.id, "n_impl_hash", "重路由:实现登录密码哈希比对(gap:哈希比对未通过)")
+    sched.tick(task.id)  # reroute BOT_SEARCH miss → 落 DECOMPOSITION 子(spec=gap)
+    sched.tick(task.id)  # DECOMPOSITION → decompose_subtasks(gap) → children BOT_SEARCH(depth=1)
+    task = svc.get(task.id)
+    # decomposer 收到的入参 = 真实 gap 文本(非占位)
+    assert any("密码哈希比对" in s for s, _d in decomposer.sub_calls)
+    # reroute 的 DECOMPOSITION 子节点
+    dec = next(
+        n for n in task.execution_graph.nodes
+        if n.node_type is NodeType.DECOMPOSITION and n.node_id.startswith("n_impl_hash_reroute")
+    )
+    assert dec is not None
+    # 3 个真实子任务(HASH_CHILDREN),depth = 失败节点(0)+1 = 1
+    child_ids = ("h_hash_fn", "h_salt", "h_compare_test")
+    children = [n for n in task.execution_graph.nodes if n.node_id in child_ids]
+    assert len(children) == 3
+    for cid in child_ids:
+        assert task.execution_graph.state.subtasks[cid].depth == 1  # 递归 depth+1
+    # 后续 tick 把 children 各自派发(crypto-bot),证明 reroute-miss→拆解→派发链由 tick 跑通
+    for _ in range(3):
+        sched.tick(task.id)
+    assert any(
+        b == "crypto-bot" for (_t, nid, b) in sched._execution.single_bots  # noqa: SLF001
+        if nid in (f"{c}_disp" for c in child_ids)
+    )
+    assert driver.redispatched == []  # 无 scheduler C5 规则

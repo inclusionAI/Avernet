@@ -219,11 +219,19 @@
 ### T-28 E2E-4 验收 fail→重路由命中(节点身份不变)
 - 依赖:T-23 ｜ spec FR-GRAPH-08/FR-TASK-04;AC-S-04
 - done-when:NODE_REJECTED→bot-search(retrieve-state 带上轮 gap)→redispatch 同 node_id(`attempted_executors` 追加)→accept→聚合→终验 DONE。
+- 实现(NODE_FAILED reroute 后半段,与 T-13 衔接):失败方 skill 经 `TaskService.open_reroute_search`
+  发起 gap bot-search(挂失败节点父下兄弟 BOT_SEARCH,带 gap_spec)→ `tick._bot_search` 命中 →
+  落 DISPATCH 重派新执行方 → claim+fire。测试:`test_node_failed_reroute_hit_dispatches_new_executor`。
 - 测试:E2E-4
 
 ### T-29 E2E-5 重路由未匹配→递归拆解(depth+1)
 - 依赖:T-19 ｜ spec FR-GRAPH-05/08/09;AC-S-04
 - done-when:重路由未匹配→decomposition(children depth=父+1)→各命中→父聚合 DONE→终验 DONE。
+- 实现(reroute-miss):`open_reroute_search` 发起的 BOT_SEARCH 未命中 → `tick._bot_search` 落
+  DECOMPOSITION 子(spec=gap)→ `decompose_subtasks` 产 children(depth=失败节点+1)→ 各命中派发。
+  测试:`test_node_failed_reroute_miss_recursive_decompose_depth_plus_one`。
+- 配套修正:`_maybe_goal_verify` 增判"有未解决 FAILED 节点不终验"(否则 FAILED 叶子在、无 PENDING/RUNNING
+  时会误判 PASS 终态,把 retry/reroute 中的 task 提前 DONE)。
 - 测试:E2E-5
 
 ### T-30 E2E-6 递归上限→hang→升 BBS→同图延续→终验

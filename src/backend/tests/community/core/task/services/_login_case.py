@@ -41,6 +41,13 @@ TEST_CHILDREN = [
     SubTaskSpec(node_id="s3_wire_ci", spec="接入CI跑回归", run_mode=RunMode.SINGLE_BOT),
 ]
 
+# “实现登录密码哈希比对” reroute 未匹配 → 再分解一层(真实内容,供 E2E-5 reroute-miss)
+HASH_CHILDREN = [
+    SubTaskSpec(node_id="h_hash_fn", spec="实现密码哈希函数(加盐)", run_mode=RunMode.SINGLE_BOT),
+    SubTaskSpec(node_id="h_salt", spec="确定盐值生成与存储策略", run_mode=RunMode.SINGLE_BOT),
+    SubTaskSpec(node_id="h_compare_test", spec="编写哈希比对单测", run_mode=RunMode.SINGLE_BOT),
+]
+
 # 真实搜推映射:子任务 → 命中的执行方(BOT_SEARCH 与其 _disp 派发节点都要能搜到)。
 # n_bot_search / s_write_tests 不在内 → 未匹配(触发分解)。
 HIT_BOTS = {
@@ -49,4 +56,8 @@ HIT_BOTS = {
     "s3_setup_env": ["test-bot"], "s3_setup_env_disp": ["test-bot"],
     "s3_write_cases": ["test-bot"], "s3_write_cases_disp": ["test-bot"],
     "s3_wire_ci": ["test-bot"], "s3_wire_ci_disp": ["test-bot"],
+    # “实现登录密码哈希比对” reroute 分解的子任务 → crypto-bot
+    "h_hash_fn": ["crypto-bot"], "h_hash_fn_disp": ["crypto-bot"],
+    "h_salt": ["crypto-bot"], "h_salt_disp": ["crypto-bot"],
+    "h_compare_test": ["crypto-bot"], "h_compare_test_disp": ["crypto-bot"],
 }

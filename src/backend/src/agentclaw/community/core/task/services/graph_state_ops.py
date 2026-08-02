@@ -13,6 +13,7 @@ from agentclaw.community.core.task.domain.models import (
     GraphSnapshot,
     Node,
     NodeType,
+    RunMode,
     StateSemantics,
     SubTaskSpec,
     SubtaskState,
@@ -102,6 +103,44 @@ class GraphStateOpsMixin:
         task.execution_graph.edges.append(edge)
         self._task_repo.save(task)
         return edge
+
+    def open_reroute_search(
+        self,
+        task_id: str,
+        failed_node_id: str,
+        gap_spec: str,
+    ) -> Node:
+        """失败方 exec-bot skill 判定需重路由后,发起 gap bot-search(FR-GRAPH-08/T-28)。
+
+        在失败节点的**父节点**下挂一个 BOT_SEARCH **兄弟**节点(spec=gap_spec,depth
+        =失败节点同层),供后续 ``tick._bot_search`` 处理:命中 → dispatch 重派(新执行
+        方)/ 未匹配 → decomposition 递归拆解(depth+1)。
+
+        失败节点本身保留 FAILED 作历史,**不**作新节点的父 —— FAILED 不在 DONE/SKIPPED,
+        作父会因 ``_unlocked`` 前驱检查锁住子节点,使 tick 永远推不进去。挂兄弟(父为失败
+        节点的父,已 DONE)则新节点前驱解锁,tick 可正常推进。
+
+        gap 上下文由调用方(skill)从 ``retrieve_state(failed_node_id)`` 的 gap_records
+        组装进 ``gap_spec``;本方法只负责落图。"""
+        task = self._task_repo.get_by_id(task_id)
+        if task.execution_graph is None:
+            raise IllegalTransitionError("graph not initialized")
+        # 沿入边找失败节点的父(reroute 作兄弟,避免 FAILED 父锁子)。
+        parent: Optional[str] = None
+        for e in task.execution_graph.edges:
+            if e.to_node == failed_node_id:
+                parent = e.from_node
+                break
+        # reroute 与失败节点同层(继承其 subtask 深度);miss→decompose 时 children=父+1。
+        failed_st = task.execution_graph.state.subtasks.get(failed_node_id)
+        depth = failed_st.depth if failed_st is not None else 0
+        sub = SubTaskSpec(
+            node_id=f"{failed_node_id}_reroute",
+            spec=gap_spec,
+            run_mode=RunMode.SINGLE_BOT,
+            depth=depth,
+        )
+        return self.add_node(task_id, sub, parent, NodeType.BOT_SEARCH)
 
     def update_state(
         self,

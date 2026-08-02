@@ -427,8 +427,13 @@ class SchedulerOpsMixin:
         # 仅 ON_PLAZA(活跃执行)可终验;AWAITING_HUMAN_ACCEPT(hang/BBS 等人确认)不终验。
         if g.graph_status is not GraphStatus.ON_PLAZA:
             return False
-        # 仍有未闭合动作节点 → 不终验
-        if any(n.status in (NodeStatus.PENDING, NodeStatus.RUNNING) for n in g.nodes):
+        # 仍有未闭合动作节点(PENDING/RUNNING)或有未解决 FAILED 节点 → 不终验。
+        # FAILED 节点表示失败待 tick 重派/skill 判 reroute,未解决前不能判整图 DONE
+        # (否则 goal-verify 用聚合 verdict 会在 FAILED 叶子仍在时误判 PASS 终态)。
+        if any(
+            n.status in (NodeStatus.PENDING, NodeStatus.RUNNING, NodeStatus.FAILED)
+            for n in g.nodes
+        ):
             return False
         if task.status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED):
             return False
