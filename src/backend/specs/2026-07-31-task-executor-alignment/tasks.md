@@ -55,7 +55,11 @@
 - 依赖:— ｜ 输入:plan §6 ｜ spec FR-GRAPH-03b
 - 改动:`domain/events.py` 加 `NODE_ADDED/EDGE_ADDED/STATE_UPDATED/PLAN_REQUESTED/EXEC_AGGREGATED/NODE_HANG`;节点事件 payload 带 `state_patch{scope,patch,semantics}`;`HUNG` 保留 deprecated(无 writer)。
 - done-when:`U-events` 枚举 + state_patch payload 结构。
-- 测试:U-events
+- 落地说明:State 在执行过程中的读写走**已实现的图操作写口** `update_state`/`retrieve_state`
+  (T-11,FR-GRAPH-03):skill 执行中 `update_state` 写产出/gap,reroute 前 `retrieve_state` 读 gap
+  拼决策(见 e2e `test_execution_writes_state_and_reroute_reads_it`)。事件 payload 带 state_patch、
+  on_event fold 时一并 update_state 的机制(plan §286)**未实现**——State 更新走直接图操作,非事件回流。
+- 测试:U-events,e2e:test_execution_writes_state_and_reroute_reads_it
 
 ---
 

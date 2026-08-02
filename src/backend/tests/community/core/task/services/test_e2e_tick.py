@@ -18,6 +18,8 @@
 - 递归上限 → mark-hang(不直升 BBS)
 - hang → 人确认升 BBS → 同图延续
 - NODE_FAILED tick 驱动同执行方重派 / 到上限派 reroute 判定给 skill(非 C5 规则)
+- reroute 命中重派 / 未匹配再拆 / 不可恢复 → 挂起 → 人不升 → task FAILED
+- 执行过程中 State 演进:skill 经 update_state 写产出/gap,reroute 经 retrieve_state 读(FR-GRAPH-03)
 """
 from __future__ import annotations
 
@@ -569,3 +571,59 @@ def test_node_failed_unrecoverable_hang_then_human_decline_task_failed():
     task = svc.get(task.id)
     assert task.status is TaskStatus.FAILED
     assert driver.redispatched == []  # 无 scheduler C5 规则;不可恢复走人确认→FAILED,非计数 reroute
+
+
+# --- ⑧ 执行过程中 State 演进:update_state 写产出/gap,retrieve_state 被下游读(方案 B)---
+
+def test_execution_writes_state_and_reroute_reads_it():
+    """State 在执行过程中演进 + 被下游消费(走已实现的图操作写口 update_state/retrieve_state,
+    非事件 state_patch):
+
+    - skill 执行中(节点 RUNNING)经 ``update_state`` 把中间结果/上下文写进 subtask State;
+    - 验收 fail 后把 gap 写进 State(retrieve-state 的 gap 读取源);
+    - reroute 前 ``retrieve_state`` 读 gap 上下文 → 拼 gap_spec(非测试写死)→ open_reroute_search;
+    - reroute 成功 → superseded → task DONE。
+
+    覆盖 spec FR-GRAPH-03(更新 State / retrieve-state 读写契约)+ FR-GRAPH-08(gap 重路由读 State)。"""
+    from agentclaw.community.core.task.domain.models import StateSemantics
+
+    svc = _svc()
+    discover = FakeDiscover(hits={"n_impl_hash": ["crypto-bot"], "n_impl_hash_reroute": ["crypto-bot2"]})
+    driver = FakeDriver()
+    sched = _scheduler(svc, discover, driver=driver)
+    task = _planned_task(svc, sched, "n_impl_hash", "实现登录密码哈希比对")
+    leaf = "n_impl_hash"
+    assert next(n for n in task.execution_graph.nodes if n.node_id == leaf).status is NodeStatus.RUNNING
+
+    # ① skill 执行中:写中间结果 + 执行上下文进 State(执行过程 state 演进,MERGE/APPEND)
+    svc.update_state(task.id, leaf, {"execution_context": {"attempt": 1, "approach": "bcrypt"}}, StateSemantics.MERGE)
+    svc.update_state(task.id, leaf, {"intermediate_results": ["登录比对逻辑初版"]}, StateSemantics.APPEND)
+    st = svc.retrieve_state(task.id, leaf)["subtask"]
+    assert st["intermediate_results"] == ["登录比对逻辑初版"]
+    assert st["execution_context"]["approach"] == "bcrypt"  # 执行中写的上下文 retrieve 得到
+
+    # ② retry 到上限(2× NODE_FAILED)→ skill 把 gap 写进 State(retrieve-state 的 gap 源)
+    _report_event(svc, sched, task.id, EventKind.NODE_FAILED, {"node_id": leaf})  # retry #1
+    _report_event(svc, sched, task.id, EventKind.NODE_FAILED, {"node_id": leaf})  # max → probe skill
+    svc.update_state(task.id, leaf, {"execution_context": {"last_gap": "哈希比对结果不一致"}}, StateSemantics.MERGE)
+
+    # ③ reroute 前:retrieve_state 读 gap → 拼 gap_spec(非写死),发起 gap bot-search
+    st = svc.retrieve_state(task.id, leaf)["subtask"]
+    gap = st["execution_context"].get("last_gap", "")
+    assert gap == "哈希比对结果不一致"
+    gap_spec = f"重路由:实现登录密码哈希比对(gap:{gap})"
+    svc.open_reroute_search(task.id, leaf, gap_spec)
+
+    # ④ tick 处理 reroute:命中 crypto-bot2 → 重派新执行方;原失败节点 superseded(DONE)
+    sched.tick(task.id)  # reroute BOT_SEARCH 命中 → 落 _disp
+    sched.tick(task.id)  # _disp → claim crypto-bot2 → RUNNING
+    task = svc.get(task.id)
+    disp = next(n for n in task.execution_graph.nodes if n.node_id == "n_impl_hash_reroute_disp")
+    assert disp.assignee == "crypto-bot2"
+    assert next(n for n in task.execution_graph.nodes if n.node_id == leaf).status is NodeStatus.DONE
+
+    # ⑤ reroute 验收 PASS → 全图 DONE → 终验 DONE(rerouted 成功自行 DONE)
+    _accept_leaf(svc, task.id, "n_impl_hash_reroute_disp")
+    task = _tick_until(svc, sched, task.id, lambda t: t.status is TaskStatus.DONE)
+    assert task.status is TaskStatus.DONE
+    assert task.execution_graph.graph_status is GraphStatus.VERIFIED
