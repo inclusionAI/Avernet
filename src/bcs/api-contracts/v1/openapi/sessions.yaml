@@ -50,7 +50,7 @@ GroupSessionsPath:
     operationId: create_session
     summary: Create a Session under a Group.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     requestBody:
@@ -114,11 +114,12 @@ GroupSessionsPath:
 
   get:
     operationId: list_sessions
-    summary: List Sessions under a Group.
+    summary: List Sessions under a Group for the selected View Actor.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
+      - $ref: ../shared.yaml#/ViewBotIdQuery
       - name: offset
         in: query
         schema:
@@ -139,8 +140,11 @@ GroupSessionsPath:
     responses:
       "200":
         description: >-
-          Sessions ordered by created_at descending (session_id ascending
-          tie-breaker), then paginated with offset/limit.
+          Sessions in which the selected View Actor is a Participant, ordered
+          by created_at descending (session_id ascending tie-breaker), then
+          paginated with offset/limit. Both items and total are scoped before
+          pagination. An authorized View Actor with no matching Session returns
+          an empty page.
         content:
           application/json:
             schema:
@@ -162,7 +166,9 @@ GroupSessionsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot read the group.
+        description: >-
+          The explicit View Actor is not the authenticated Human or a Bot
+          created by that Human.
         x-error-codes:
           - forbidden
         content:
@@ -185,7 +191,7 @@ SessionPath:
     operationId: get_session
     summary: Get session detail.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     responses:
@@ -212,7 +218,9 @@ SessionPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot read the session.
+        description: >-
+          Neither the authenticated User's Human Actor nor a Bot created by
+          that Human is a Session Participant.
         x-error-codes:
           - forbidden
         content:
@@ -233,7 +241,7 @@ SessionPath:
     operationId: update_session
     summary: Update the explicitly mutable session properties.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
@@ -295,7 +303,7 @@ SessionPath:
     operationId: delete_session
     summary: Delete a session using the authenticated Principal as caller.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     responses:
@@ -337,7 +345,7 @@ SessionCompletionPath:
     operationId: complete_session
     summary: Complete a running chat session; idempotent after completion.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     responses:
@@ -387,7 +395,7 @@ SessionMessagesPath:
     operationId: list_session_messages
     summary: List session message history (cursor-based).
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - name: before
@@ -408,21 +416,15 @@ SessionMessagesPath:
           minimum: 1
           maximum: 100
           default: 50
-      - name: view_bot_id
-        in: query
-        description: >-
-          Optional viewer identity for message history visibility scoping.
-          Bot callers: omit (defaults to self) or pass self bot_uuid.
-          Human callers: omit for full manager-view; pass "human_<staff_no>"
-          for own participant cutoff; or pass an owned Bot's UUID for that
-          Bot's perspective (ownership verified server-side).
-        schema:
-          type: string
+      - $ref: ../shared.yaml#/ViewBotIdQuery
     responses:
       "200":
         description: >-
-          Messages ordered by created_at descending, session_seq descending
-          (legacy behavior); cursor-based pagination.
+          Messages visible to the selected Session Participant, ordered by
+          created_at descending and session_seq descending (legacy behavior),
+          with cursor-based pagination. Omitting view_bot_id selects the
+          authenticated Human Participant; creator or manager status does not
+          create an implicit manager view.
         content:
           application/json:
             schema:
@@ -444,7 +446,9 @@ SessionMessagesPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot read the session.
+        description: >-
+          The View Actor is unauthorized or is not a Participant of the
+          requested Session.
         x-error-codes:
           - forbidden
         content:
@@ -467,7 +471,7 @@ AddSessionParticipantPath:
     operationId: add_session_participant
     summary: Add a Bot as a Session participant.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
@@ -534,7 +538,7 @@ SessionParticipantPath:
     operationId: update_session_participant
     summary: Update a Session participant mode.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - $ref: ../shared.yaml#/BotUuidPath
@@ -598,7 +602,7 @@ SessionParticipantPath:
     operationId: remove_session_participant
     summary: Remove a Session participant or let a Bot leave.
     x-avernet-security:
-      principal: required
+      user: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - $ref: ../shared.yaml#/BotUuidPath

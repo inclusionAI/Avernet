@@ -31,9 +31,8 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     assert "sender_routes" not in serialized
     assert "routing_policy" not in serialized
 
-    list_operation = contract["paths"][
-        "/openapi/v1/bots/collaboration/{bot_uuid}/groups"
-    ]["get"]
+    list_operation = contract["paths"]["/openapi/v1/groups"]["get"]
+    assert list_operation["operationId"] == "list_groups"
     query_names = {
         parameter["name"]
         for parameter in list_operation["parameters"]
@@ -46,7 +45,15 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "membership",
         "kind",
         "strategy",
+        "view_bot_id",
     }
+    view_actor = next(
+        parameter
+        for parameter in list_operation["parameters"]
+        if parameter["name"] == "view_bot_id"
+    )
+    assert view_actor["schema"] == {"type": "string", "minLength": 1}
+    assert view_actor.get("required", False) is False
 
     assert (
         contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["201"]["content"][
@@ -118,6 +125,23 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     )
 
 
+def test_group_detail_uses_implicit_human_or_owned_bot_participant_access() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]
+
+    assert "view_bot_id" not in {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+    forbidden = operation["responses"]["403"]
+    assert forbidden["x-error-codes"] == ["forbidden"]
+    description = forbidden["description"]
+    assert "Human Actor" in description
+    assert "created by that Human" in description
+    assert "Group Participant" in description
+
+
 def test_contract_bundles_to_a_deterministic_document(
     tmp_path: Path,
 ) -> None:
@@ -127,7 +151,7 @@ def test_contract_bundles_to_a_deterministic_document(
 
     assert first == second
     assert "$ref:" not in first
-    assert "operationId: list_bot_groups" in first
+    assert "operationId: list_groups" in first
 
 
 def test_bundled_discriminator_mappings_resolve_inside_the_document(

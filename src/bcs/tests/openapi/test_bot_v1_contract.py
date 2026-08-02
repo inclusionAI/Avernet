@@ -42,7 +42,7 @@ def test_bot_management_operations_are_human_control_plane_only() -> None:
 
     for method, path in BOT_OPERATIONS:
         operation = contract["paths"][path][method]
-        assert operation["x-avernet-security"] == {"principal": "human"}
+        assert operation["x-avernet-security"] == {"user": "required"}
 
 
 def test_bot_domain_model_is_a_strict_bot_human_union() -> None:
@@ -223,4 +223,3 @@ def test_mine_filters_both_kinds_without_an_all_enum_value() -> None:
 
     data = _success_data(operation)
     assert data["properties"]["items"]["items"]["discriminator"]["propertyName"] == "kind"
-
