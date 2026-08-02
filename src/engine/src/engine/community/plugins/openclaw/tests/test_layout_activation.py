@@ -133,6 +133,38 @@ def test_external_only_mapping_uses_active_marker_as_layout_authority(
     )
 
 
+def test_empty_mapping_uses_active_marker_as_layout_authority(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+
+    assert not mapping_sources_use_pool(
+        engine="hermes",
+        sources=[],
+        home=home,
+    )
+
+    active_marker = home / ".hermes" / "workspace" / "skills-pool" / ".pool-active"
+    active_marker.parent.mkdir(parents=True)
+    active_marker.write_text(
+        json.dumps(
+            {
+                "engine": "hermes",
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "preparation_id": PREPARATION_ID,
+                "migration_generation": "generation-1",
+                "activation_state": "active",
+            }
+        )
+    )
+
+    assert mapping_sources_use_pool(
+        engine="hermes",
+        sources=[],
+        home=home,
+    )
+
+
 def _prepared_home(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     home = tmp_path / "home" / "admin"
     workspace = home / ".openclaw" / "workspace"
