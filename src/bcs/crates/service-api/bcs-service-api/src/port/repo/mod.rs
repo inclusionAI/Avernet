@@ -1,4 +1,5 @@
 pub mod bot;
+pub mod bot_control_plane;
 pub mod channel;
 pub mod collaboration;
 pub mod collaboration_template;
@@ -13,6 +14,7 @@ pub mod session_file;
 pub mod user_identity;
 
 pub use bot::BotRepoPort;
+pub use bot_control_plane::*;
 pub use channel::{
     ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
     HumanInputRequestRepoPort, ImParticipantRepoPort,

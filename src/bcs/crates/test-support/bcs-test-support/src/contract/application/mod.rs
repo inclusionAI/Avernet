@@ -1,5 +1,7 @@
 //! Application service contract harnesses.
 
+use std::collections::BTreeSet;
+
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, ActorDirectoryService, BotDiscoveryService,
     BotManagementService, BotOnboardingService, BotQueryService, BotRuntimeConnectionService,
@@ -9,6 +11,18 @@ use bcs_service_api::{
     OrganizationMemberAuth, ServiceError, SystemMessageService, WorkbenchSessionService,
     WorkerProfileService,
 };
+use bcs_service_api::application::v1::{BotService, Principal, QueryBots};
+
+pub async fn bot_service_contract_tests<T: BotService + ?Sized>(svc: &T) {
+    let error = svc
+        .query(QueryBots {
+            principal: Principal::bot("contract-bot", "contract", BTreeSet::new()),
+            bot_ids: Vec::new(),
+        })
+        .await
+        .expect_err("Bot control-plane service rejects Bot Principals");
+    assert_eq!(error.code(), "forbidden");
+}
 
 pub async fn a2a_chat_service_contract_tests<T: A2aChatService + ?Sized>(_svc: &T) {}
 

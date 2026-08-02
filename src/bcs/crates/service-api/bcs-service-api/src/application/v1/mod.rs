@@ -5,6 +5,7 @@
 //! request-supplied caller identities into domain services.
 
 pub mod authorization;
+pub mod bot;
 pub mod error;
 pub mod friendship;
 pub mod group;
@@ -15,6 +16,7 @@ pub mod principal;
 pub mod session;
 
 pub use authorization::{Action, AuthorizationService, ResourceRef};
+pub use bot::*;
 pub use error::ApplicationError;
 pub use friendship::*;
 pub use group::*;

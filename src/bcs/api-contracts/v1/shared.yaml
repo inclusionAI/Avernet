@@ -50,6 +50,14 @@ BotUuidPath:
     type: string
     minLength: 1
 
+BotIdPath:
+  name: bot_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
 GroupIdPath:
   name: group_id
   in: path

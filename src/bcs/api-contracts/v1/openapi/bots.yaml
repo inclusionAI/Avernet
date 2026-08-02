@@ -1,0 +1,445 @@
+BotCandidatesPath:
+  get:
+    operationId: list_bot_candidates
+    summary: List candidate physical Bots from a managed Bot's perspective.
+    description: >-
+      Human control-plane operation. The path bot_id must identify a physical
+      Bot managed by the current Human. Results stay in that Bot's environment,
+      exclude the acting Bot, Humans, deleted rows, and unonboarded rows. An
+      empty or whitespace-only name is treated as absent; otherwise matching is
+      a trimmed case-insensitive substring. Status and reachability do not
+      remove candidates.
+    x-avernet-security:
+      principal: human
+    x-avernet-behavior:
+      acting_bot: managed_physical_bot
+      result_kind: bot
+      environment: same_as_acting_bot
+      exclude_self: true
+      purpose_visibility:
+        discovery:
+          - public
+          - protected
+        collaboration:
+          - public
+          - friend
+      status_filter: none
+      reachability_filter: none
+      ordering:
+        - created_at_desc
+        - bot_id_asc
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+      - name: purpose
+        in: query
+        description: >-
+          discovery returns public and protected Bots. collaboration returns
+          public Bots plus accepted friends regardless of non-public visibility.
+        schema:
+          type: string
+          enum:
+            - discovery
+            - collaboration
+          default: discovery
+      - name: name
+        in: query
+        description: Optional trimmed, case-insensitive name substring.
+        schema:
+          type: string
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    responses:
+      "200":
+        description: >-
+          Candidate Bots ordered by created_at descending with bot_id ascending
+          as the deterministic tie-breaker, then paginated.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotCandidatePageEnvelope
+      "400":
+        description: Invalid filter or the acting identity is not a physical Bot.
+        x-error-codes:
+          - invalid_request
+          - invalid_bot_kind
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Current Human does not manage the acting physical Bot.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Acting Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+QueryBotsPath:
+  post:
+    operationId: query_bots
+    summary: Query Bot domain objects by explicit identifiers.
+    description: >-
+      Human control-plane operation for deterministic explicit-ID hydration.
+      Both physical Bot and Human rows can be returned. The operation does not
+      apply ownership or visibility filtering. Duplicate IDs are collapsed at
+      their first occurrence; missing, deleted, and unonboarded rows are
+      silently omitted. An empty bot_ids array returns an empty items array.
+    x-avernet-security:
+      principal: human
+    x-avernet-behavior:
+      result_kinds:
+        - bot
+        - human
+      authorization_filter: none
+      visibility_filter: none
+      deduplicate: first_occurrence
+      ordering: request_order
+      missing: omit
+      deleted: omit
+      unonboarded: omit
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/QueryBotsRequest"
+    responses:
+      "200":
+        description: Bot objects in first-occurrence request order.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotListEnvelope
+      "400":
+        description: Invalid JSON body, identifier, or batch size.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Authenticated Principal is not a Human control-plane caller.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+BotPath:
+  get:
+    operationId: get_bot
+    summary: Get one Bot domain object by exact identifier.
+    description: >-
+      Human control-plane exact-ID lookup for either a physical Bot or a Human
+      row. No acting Bot, ownership filter, or visibility filter is applied;
+      visibility controls directory discovery rather than explicit hydration.
+    x-avernet-security:
+      principal: human
+    x-avernet-behavior:
+      result_kinds:
+        - bot
+        - human
+      visibility_filter: none
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+    responses:
+      "200":
+        description: Full Bot domain object selected by kind.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotEnvelope
+      "400":
+        description: Invalid Bot identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Authenticated Principal is not a Human control-plane caller.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  patch:
+    operationId: update_bot
+    summary: Update the explicitly mutable Bot properties.
+    description: >-
+      Human control-plane owner update. The current Human staff_no must equal
+      the target row's created_by; a missing created_by is not special-cased and
+      is therefore forbidden. descriptor is a nested partial update available
+      only for a physical Bot. Descriptor arrays replace their complete stored
+      arrays. bot_id, kind, env, created_by, timestamps, reachability, provider,
+      and agent_code are immutable through this operation.
+    x-avernet-security:
+      principal: human
+    x-avernet-behavior:
+      authorization: created_by_matches_current_staff_no
+      missing_created_by: forbidden
+      descriptor_kind: bot_only
+      descriptor_arrays: replace
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/UpdateBotRequest"
+    responses:
+      "200":
+        description: Updated full Bot domain object with refreshed updated_at.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotEnvelope
+      "400":
+        description: >-
+          Empty or invalid patch, or a descriptor patch targeting a Human row.
+        x-error-codes:
+          - invalid_request
+          - invalid_bot_kind
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Current Human is not the target row's created_by.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+MyBotsPath:
+  get:
+    operationId: list_my_bots
+    summary: List Bot rows created by the current Human.
+    description: >-
+      Human control-plane operation. Ownership is selected by comparing the
+      current Human staff_no with created_by, without kind-specific handling.
+      Both physical Bot and Human rows can be returned. Omitting kind means all
+      kinds; reachability only matches physical Bots, so combining kind=human
+      with reachability produces an empty page.
+    x-avernet-security:
+      principal: human
+    x-avernet-behavior:
+      owner_field: created_by
+      owner_value: current_staff_no
+      omitted_kind: all
+      reachability_applies_to: bot
+      ordering:
+        - created_at_desc
+        - bot_id_asc
+    parameters:
+      - name: kind
+        in: query
+        description: Bot kind filter; omission returns both kinds.
+        schema:
+          type: string
+          enum:
+            - bot
+            - human
+      - name: name
+        in: query
+        description: >-
+          Optional trimmed, case-insensitive name substring; empty is absent.
+        schema:
+          type: string
+      - name: status
+        in: query
+        description: Raw persisted status filter.
+        schema:
+          $ref: ../domain-models.yaml#/BotStatus
+      - name: reachability
+        in: query
+        description: Computed reachability filter for physical Bots only.
+        schema:
+          $ref: ../domain-models.yaml#/BotReachability
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    responses:
+      "200":
+        description: >-
+          Owned rows ordered by created_at descending with bot_id ascending as
+          the deterministic tie-breaker, then paginated.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotPageEnvelope
+      "400":
+        description: Invalid filter or pagination parameter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Authenticated Principal is not a Human control-plane caller.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+QueryBotsRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_ids
+  properties:
+    bot_ids:
+      type: array
+      maxItems: 100
+      description: >-
+        Explicit IDs. Duplicates are accepted and collapsed at their first
+        occurrence. An empty array is valid.
+      items:
+        type: string
+        minLength: 1
+
+UpdateBotDescriptor:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    summary:
+      type: string
+      description: New summary; omission keeps the stored value.
+    domains:
+      type: array
+      description: Complete replacement; an empty array clears the value.
+      items:
+        type: string
+    skills:
+      type: array
+      description: Complete replacement; an empty array clears the value.
+      items:
+        $ref: ../domain-models.yaml#/BotSkill
+    scopes:
+      type: array
+      description: Complete replacement; an empty array clears the value.
+      items:
+        type: string
+
+UpdateBotRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    name:
+      type: string
+      minLength: 1
+    visibility:
+      $ref: ../domain-models.yaml#/BotVisibility
+    status:
+      $ref: ../domain-models.yaml#/BotStatus
+    descriptor:
+      $ref: "#/UpdateBotDescriptor"
+

@@ -28,8 +28,10 @@ use bcs_db_api::{
     DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue as Value, db_get_column, db_get_column_opt,
 };
 use bcs_service_api::{
-    BindingChannels, BotCapabilities, BotDynamicStatus, BotMetricCount, BotMetricsSnapshotPort,
-    RegisteredBot, ServiceError, ServiceResult, Skill,
+    BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
+    BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
 };
 
 pub mod memory;
@@ -2548,6 +2550,372 @@ impl BotRepoPort for PersistentBotRepo {
         if let Some(tx) = pending.remove(request_id) {
             let _ = tx.send(response);
         }
+    }
+}
+
+fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRecord> {
+    let bot_id: String = db_get_column(row, "bot_uuid")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+    let name: String = db_get_column(row, "name")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+    let env: String = db_get_column(row, "env")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+    let visibility = db_get_column_opt::<String>(row, "visibility")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "protected".to_string());
+    let kind = match db_get_column_opt::<String>(row, "actor_kind")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .as_deref()
+    {
+        Some("human") => bcs_service_api::ActorKind::Human,
+        _ => bcs_service_api::ActorKind::Bot,
+    };
+    let status = match db_get_column_opt::<String>(row, "status")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .as_deref()
+    {
+        Some("hidden") => bcs_service_api::ActorStatus::Hidden,
+        _ => bcs_service_api::ActorStatus::Online,
+    };
+    let created_by = db_get_column_opt(row, "created_by")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+    let bot_info = db_get_column_opt::<String>(row, "bot_info")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .and_then(|value| serde_json::from_str::<BotInfo>(&value).ok())
+        .unwrap_or_default();
+    let agent_code = db_get_column_opt::<String>(row, "agent_code")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .or(bot_info.agent_code);
+    let created_at = db_get_column::<i64>(row, "gmt_create_ms")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .max(0) as u64;
+    let updated_at = db_get_column::<i64>(row, "gmt_modified_ms")
+        .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        .max(0) as u64;
+
+    Ok(BotControlPlaneRecord {
+        bot_id,
+        kind,
+        name,
+        visibility,
+        status,
+        env,
+        created_by,
+        descriptor: BotControlPlaneDescriptor {
+            summary: bot_info.summary.unwrap_or_default(),
+            domains: bot_info.domains,
+            skills: bot_info.skills,
+            scopes: bot_info.scopes,
+        },
+        agent_code,
+        created_at,
+        updated_at,
+    })
+}
+
+#[async_trait]
+impl BotControlPlaneRepoPort for PersistentBotRepo {
+    async fn get_control_plane(
+        &self,
+        bot_id: &str,
+        env: &str,
+    ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        let sql = format!(
+            "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
+                    created_by, agent_code, ({}) * 1000 AS gmt_create_ms, \
+                    ({}) * 1000 AS gmt_modified_ms \
+             FROM bcs_bots \
+             WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 \
+             LIMIT 1",
+            self.flavor.unix_ts("gmt_create"),
+            self.flavor.unix_ts("gmt_modified")
+        );
+        let rows = self
+            .db_query(&sql, vec![Value::from(bot_id), Value::from(env)])
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        rows.first().map(control_plane_record_from_row).transpose()
+    }
+
+    async fn list_control_plane_candidates(
+        &self,
+        query: BotCandidateReadQuery,
+    ) -> ServiceResult<(Vec<BotCandidateReadRecord>, u64)> {
+        let name = query
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let name_filter = name.unwrap_or_default().to_lowercase();
+        let mut friend_ids = query.friend_ids.iter().cloned().collect::<Vec<_>>();
+        friend_ids.sort_unstable();
+        let visibility_filter = match query.visibility {
+            BotCandidateVisibility::Discovery => "b.visibility IN ('public', 'protected')",
+            BotCandidateVisibility::Collaboration => {
+                "b.visibility = 'public' OR f.bot_uuid IS NOT NULL"
+            }
+        };
+        let friend_rows = if friend_ids.is_empty() {
+            "SELECT NULL AS bot_uuid WHERE 1 = 0".to_string()
+        } else {
+            friend_ids
+                .iter()
+                .enumerate()
+                .map(|(index, _)| {
+                    if index == 0 {
+                        "SELECT ? AS bot_uuid"
+                    } else {
+                        "SELECT ?"
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" UNION ALL ")
+        };
+        let common = format!("WITH friend_uuids AS ({friend_rows}) ");
+        let page_sql = format!(
+            "{common}\
+             SELECT b.bot_uuid, b.name, b.bot_info, b.visibility, b.status, \
+                    b.actor_kind, b.env, b.created_by, b.agent_code, \
+                    ({} ) * 1000 AS gmt_create_ms, \
+                    ({} ) * 1000 AS gmt_modified_ms, \
+                    CASE WHEN f.bot_uuid IS NULL THEN 0 ELSE 1 END AS is_friend \
+             FROM bcs_bots b \
+             LEFT JOIN friend_uuids f ON b.bot_uuid = f.bot_uuid \
+             WHERE b.env = ? AND COALESCE(b.is_deleted, 0) = 0 \
+               AND COALESCE(b.actor_kind, 'bot') = 'bot' \
+               AND b.bot_uuid != ? AND INSTR(LOWER(b.name), ?) > 0 \
+               AND ({visibility_filter}) \
+             ORDER BY b.gmt_create DESC, b.bot_uuid ASC \
+             LIMIT ? OFFSET ?",
+            self.flavor.unix_ts("b.gmt_create"),
+            self.flavor.unix_ts("b.gmt_modified"),
+        );
+        let mut base_params = friend_ids
+            .iter()
+            .map(|friend_id| Value::from(friend_id.as_str()))
+            .collect::<Vec<_>>();
+        base_params.extend([
+            Value::from(query.env.as_str()),
+            Value::from(query.acting_bot_id.as_str()),
+            Value::from(name_filter.as_str()),
+        ]);
+        let mut page_params = base_params.clone();
+        page_params.push(Value::from(query.limit as i64));
+        page_params.push(Value::from(query.offset as i64));
+        let rows = self
+            .db_query(&page_sql, page_params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        let mut records = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let is_friend = db_get_column::<i64>(row, "is_friend")
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?
+                != 0;
+            records.push(BotCandidateReadRecord {
+                bot: control_plane_record_from_row(row)?,
+                is_friend,
+            });
+        }
+
+        let count_sql = format!(
+            "{common}\
+             SELECT COUNT(*) AS total \
+             FROM bcs_bots b \
+             LEFT JOIN friend_uuids f ON b.bot_uuid = f.bot_uuid \
+             WHERE b.env = ? AND COALESCE(b.is_deleted, 0) = 0 \
+               AND COALESCE(b.actor_kind, 'bot') = 'bot' \
+               AND b.bot_uuid != ? AND INSTR(LOWER(b.name), ?) > 0 \
+               AND ({visibility_filter})"
+        );
+        let count_rows = self
+            .db_query(&count_sql, base_params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        let total = count_rows
+            .first()
+            .map(|row| db_get_column::<i64>(row, "total"))
+            .transpose()
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?
+            .unwrap_or(0)
+            .max(0) as u64;
+        Ok((records, total))
+    }
+
+    async fn list_control_plane_by_creator(
+        &self,
+        query: BotControlPlaneOwnedQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneRecord>> {
+        let mut sql = format!(
+            "SELECT bot_uuid, name, bot_info, visibility, status, actor_kind, env, \
+                    created_by, agent_code, ({}) * 1000 AS gmt_create_ms, \
+                    ({}) * 1000 AS gmt_modified_ms \
+             FROM bcs_bots \
+             WHERE created_by = ? AND env = ? AND COALESCE(is_deleted, 0) = 0",
+            self.flavor.unix_ts("gmt_create"),
+            self.flavor.unix_ts("gmt_modified")
+        );
+        let mut params = vec![
+            Value::from(query.created_by.as_str()),
+            Value::from(query.env.as_str()),
+        ];
+        if let Some(kind) = query.kind {
+            sql.push_str(" AND COALESCE(actor_kind, 'bot') = ?");
+            params.push(Value::from(match kind {
+                bcs_service_api::ActorKind::Bot => "bot",
+                bcs_service_api::ActorKind::Human => "human",
+            }));
+        }
+        if let Some(name) = query
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            sql.push_str(" AND INSTR(LOWER(name), ?) > 0");
+            params.push(Value::from(name.to_lowercase()));
+        }
+        if let Some(status) = query.status {
+            sql.push_str(" AND status = ?");
+            params.push(Value::from(match status {
+                bcs_service_api::ActorStatus::Online => "online",
+                bcs_service_api::ActorStatus::Hidden => "hidden",
+            }));
+        }
+        sql.push_str(" ORDER BY gmt_create DESC, bot_uuid ASC");
+        let rows = self
+            .db_query(&sql, params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        rows.iter().map(control_plane_record_from_row).collect()
+    }
+
+    async fn patch_control_plane(
+        &self,
+        bot_id: &str,
+        env: &str,
+        patch: BotControlPlanePatch,
+    ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        let existing = self.get_control_plane(bot_id, env).await?;
+        if existing.is_none() {
+            return Ok(None);
+        }
+
+        let mut assignments = Vec::new();
+        let mut params = Vec::new();
+        if let Some(name) = patch.name.as_deref() {
+            assignments.push("name = ?");
+            params.push(Value::from(name));
+        }
+        if let Some(visibility) = patch.visibility.as_deref() {
+            assignments.push("visibility = ?");
+            params.push(Value::from(visibility));
+        }
+        if let Some(status) = patch.status {
+            assignments.push("status = ?");
+            params.push(Value::from(match status {
+                bcs_service_api::ActorStatus::Online => "online",
+                bcs_service_api::ActorStatus::Hidden => "hidden",
+            }));
+        }
+        if let Some(descriptor) = patch.descriptor.as_ref() {
+            let rows = self
+                .db_query(
+                    "SELECT bot_info FROM bcs_bots WHERE bot_uuid = ? AND env = ? \
+                     AND COALESCE(is_deleted, 0) = 0 LIMIT 1",
+                    vec![Value::from(bot_id), Value::from(env)],
+                )
+                .await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+            let raw = rows
+                .first()
+                .map(|row| db_get_column_opt::<String>(row, "bot_info"))
+                .transpose()
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?
+                .flatten();
+            let mut value = raw
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                .filter(serde_json::Value::is_object)
+                .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+            let object = value.as_object_mut().ok_or_else(|| {
+                ServiceError::InternalError("Bot descriptor is not a JSON object".to_string())
+            })?;
+            if let Some(summary) = descriptor.summary.as_ref() {
+                object.insert(
+                    "summary".to_string(),
+                    serde_json::Value::String(summary.clone()),
+                );
+            }
+            if let Some(domains) = descriptor.domains.as_ref() {
+                object.insert(
+                    "domains".to_string(),
+                    serde_json::to_value(domains)
+                        .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+                );
+            }
+            if let Some(skills) = descriptor.skills.as_ref() {
+                object.insert(
+                    "skills".to_string(),
+                    serde_json::to_value(skills)
+                        .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+                );
+            }
+            if let Some(scopes) = descriptor.scopes.as_ref() {
+                object.insert(
+                    "scopes".to_string(),
+                    serde_json::to_value(scopes)
+                        .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+                );
+            }
+            assignments.push("bot_info = ?");
+            params.push(Value::from(value.to_string()));
+        }
+
+        assignments.push("gmt_modified = CURRENT_TIMESTAMP");
+        assignments.push("updated_at = CURRENT_TIMESTAMP");
+        params.push(Value::from(bot_id));
+        params.push(Value::from(env));
+        let sql = format!(
+            "UPDATE bcs_bots SET {} WHERE bot_uuid = ? AND env = ? \
+             AND COALESCE(is_deleted, 0) = 0",
+            assignments.join(", ")
+        );
+        let affected = self
+            .db_execute_affected(&sql, params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        if affected == 0 {
+            return Ok(None);
+        }
+
+        if let Some(bot) = self.bots.write().await.get_mut(bot_id) {
+            if let Some(name) = patch.name {
+                bot.capabilities.name = Some(name);
+            }
+            if let Some(visibility) = patch.visibility {
+                bot.capabilities.visibility = visibility;
+            }
+            if let Some(status) = patch.status {
+                bot.status = status;
+            }
+            if let Some(descriptor) = patch.descriptor {
+                if let Some(summary) = descriptor.summary {
+                    bot.capabilities.summary = Some(summary);
+                }
+                if let Some(domains) = descriptor.domains {
+                    bot.capabilities.domains = domains;
+                }
+                if let Some(skills) = descriptor.skills {
+                    bot.capabilities.skills = skills;
+                }
+                if let Some(scopes) = descriptor.scopes {
+                    bot.capabilities.scopes = scopes;
+                }
+            }
+        }
+
+        self.get_control_plane(bot_id, env).await
     }
 }
 

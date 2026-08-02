@@ -4,6 +4,14 @@ info:
   version: 1.0.0
   description: Versioned public contract for Bot Collaboration Network resources.
 paths:
+  /openapi/v1/bots/mine:
+    $ref: ./openapi/bots.yaml#/MyBotsPath
+  /openapi/v1/bots/query:
+    $ref: ./openapi/bots.yaml#/QueryBotsPath
+  /openapi/v1/bots/{bot_id}:
+    $ref: ./openapi/bots.yaml#/BotPath
+  /openapi/v1/bots/{bot_id}/candidates:
+    $ref: ./openapi/bots.yaml#/BotCandidatesPath
   /openapi/v1/bots/collaboration/{bot_uuid}/groups:
     $ref: ./openapi/groups.yaml#/ListBotGroupsPath
   /openapi/v1/bots/collaboration/{bot_uuid}/friendships:
@@ -44,6 +52,18 @@ paths:
     $ref: ./openapi/invitations.yaml#/AcceptInvitationPath
 components:
   schemas:
+    Bot:
+      $ref: ./domain-models.yaml#/Bot
+    PhysicalBot:
+      $ref: ./domain-models.yaml#/PhysicalBot
+    HumanBot:
+      $ref: ./domain-models.yaml#/HumanBot
+    BotDescriptor:
+      $ref: ./domain-models.yaml#/BotDescriptor
+    BotCandidate:
+      $ref: ./domain-models.yaml#/BotCandidate
+    BotPage:
+      $ref: ./domain-models.yaml#/BotPage
     GroupSummary:
       $ref: ./domain-models.yaml#/GroupSummary
     GroupDetail:
