@@ -1249,13 +1249,33 @@ Run both boundary test binaries; they should PASS immediately and then guard fut
 
 Update `bcs-api-http/CONTEXT.md` to state that V1 owns the Gateway wire projection and injectable verifier implementation, while HTTP header extraction, production trust selection, and router mounting remain deferred. Update `bcs-service-api/CONTEXT.md` to state that Application V1 owns secret-free `AuthenticatedCaller` contract types but no JWT or HTTP semantics.
 
-- [ ] **Step 4: Format and run focused Rust verification**
+- [ ] **Step 4: Format only touched Rust files and run focused verification**
 
 Run:
 
 ```bash
-cargo fmt --manifest-path src/bcs/Cargo.toml --all
-cargo fmt --manifest-path src/bcs/Cargo.toml --all -- --check
+rustfmt --edition 2024 \
+  src/bcs/crates/service-api/bcs-service-api/src/application/v1/identity.rs \
+  src/bcs/crates/service-api/bcs-service-api/src/application/v1/mod.rs \
+  src/bcs/crates/service-api/bcs-service-api/tests/v1_authenticated_caller_contract.rs \
+  src/bcs/crates/service-api/bcs-service-api/tests/boundary_contracts.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/mod.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/mod.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/wire.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/verifier.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/tests.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/tests/boundary_contract.rs
+rustfmt --edition 2024 --check \
+  src/bcs/crates/service-api/bcs-service-api/src/application/v1/identity.rs \
+  src/bcs/crates/service-api/bcs-service-api/src/application/v1/mod.rs \
+  src/bcs/crates/service-api/bcs-service-api/tests/v1_authenticated_caller_contract.rs \
+  src/bcs/crates/service-api/bcs-service-api/tests/boundary_contracts.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/mod.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/mod.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/wire.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/verifier.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/src/v1/gateway_principal/tests.rs \
+  src/bcs/crates/adapters/http/bcs-api-http/tests/boundary_contract.rs
 cargo test --manifest-path src/bcs/Cargo.toml \
   --package bcs-service-api \
   --package bcs-api-http
@@ -1269,7 +1289,9 @@ cargo clippy --manifest-path src/bcs/Cargo.toml \
   --all-targets -- -D warnings
 ```
 
-Expected: every command exits 0; existing 27-route tests remain green.
+Expected: every command exits 0; only touched Rust files are formatted and the
+existing 27-route tests remain green. Do not run `cargo fmt` or any workspace
+formatter, per `src/bcs/AGENTS.md` and `src/bcs/CLAUDE.md`.
 
 - [ ] **Step 5: Run Gateway provider verification**
 
