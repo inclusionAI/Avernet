@@ -65,8 +65,8 @@ def test_noop_task_service_intake_faces():
     t = s.create(title="x", source="api", background="b")
     assert t is not None
     assert getattr(t, "id", None) is not None
-    # amend / finalize_plan are no-ops returning None (no real impl yet)
-    assert s.amend("t1", {"g": "x"}) is None
+    # clarify / finalize_plan are no-ops returning None (no real impl yet)
+    assert s.clarify("t1", {"g": "x"}) is None
     assert s.finalize_plan("t1", Plan()) is None
 
 

@@ -51,7 +51,7 @@ def _service(bcs=None) -> tuple[TaskService, _FakeBcs]:
 
 def _task_with_coop_node(svc: TaskService) -> str:
     t = svc.create(title="t")
-    svc.amend(t.id, {"summary": "s"})
+    svc.clarify(t.id, {"summary": "s"})
     svc.finalize_plan(
         t.id,
         Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="a"), SubTaskSpec(node_id="n2", spec="b")], confidence=0.8),

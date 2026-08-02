@@ -8,12 +8,13 @@ concrete ``TaskService``. Core never imports this router or the api Protocols.
 Plan §2.1 — TaskService is the *only* write path (``on_event``). Scheduler
 orchestration (dispatch/reroute) and owner-bot SKILL verification both enter as
 events; this router exposes:
-  - POST /api/tasks                         create
+  - POST /api/tasks/create                 create           (n1 recognition)
   - GET  /api/tasks?user_id=...             list_by_user
   - GET  /api/tasks/{task_id}               get
   - GET  /api/tasks/{task_id}/progress      progress
-  - POST /api/tasks/{task_id}/amend         amend spec
-  - POST /api/tasks/{task_id}/plan          finalize_plan
+  - POST /api/tasks/{task_id}/clarify       clarify spec       (n2 clarify)
+  - POST /api/tasks/{task_id}/plan          finalize_plan    (DRAFTING→DEFINED)
+  - POST /api/tasks/{task_id}/start         scheduler.start  (n3 execute_start)
   - POST /api/tasks/{task_id}/events        owner-bot 回投 (on_event)
 
 Canvas (secondary panel, plan §1.4b/§7.2) — dynamic-workflow graph + drill-down:
@@ -31,21 +32,19 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from agentclaw.community.api.task import TaskSchedulerProtocol, TaskServiceProtocol
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.schemas import (
-    AmendTaskRequest,
+    ClarifyTaskRequest,
     CreateTaskRequest,
     EventReportRequest,
     EventReportResponse,
     FinalizePlanRequest,
     TaskCreatedResponse,
     TaskDetailResponse,
-    TaskEdgeView,
     TaskEventItem,
     TaskGraphView,
     TaskHistoryResponse,
     TaskListItem,
     TaskListResponse,
     TaskNodeDetailView,
-    TaskNodeView,
     TaskProgressResponse,
 )
 
@@ -104,7 +103,7 @@ def _execution_graph_dict(task: Any) -> Optional[dict]:
 
 # --- endpoints --------------------------------------------------------------
 
-@router.post("", response_model=TaskCreatedResponse)
+@router.post("/create", response_model=TaskCreatedResponse)
 def create_task(req: CreateTaskRequest, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
     task = service.create(title=req.title, source=req.source, background=req.background)
     return TaskCreatedResponse(
@@ -164,13 +163,13 @@ def get_progress(task_id: str, service: TaskServiceProtocol = Injected(TaskServi
     )
 
 
-@router.post("/{task_id}/amend", response_model=TaskDetailResponse)
-def amend_task(
+@router.post("/{task_id}/clarify", response_model=TaskDetailResponse)
+def clarify_task(
     task_id: str,
-    req: AmendTaskRequest,
+    req: ClarifyTaskRequest,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),
 ) -> Any:
-    task = service.amend(task_id, req.patch)
+    task = service.clarify(task_id, req.patch)
     return TaskDetailResponse(
         task_id=_task_id_of(task),
         user_id=_user_id_of(task),
@@ -224,8 +223,8 @@ def report_event(
 # --- scheduler orchestration endpoints (Phase 3.5, plan §3) -----------------
 
 
-@router.post("/{task_id}/approve", response_model=TaskDetailResponse)
-def approve_plan(
+@router.post("/{task_id}/start", response_model=TaskDetailResponse)
+def start_task(
     task_id: str,
     scheduler: TaskSchedulerProtocol = Injected(TaskSchedulerProtocol),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),

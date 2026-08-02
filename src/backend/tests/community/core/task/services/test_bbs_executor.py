@@ -33,7 +33,7 @@ def _service() -> tuple[TaskService, BbsExecutorService]:
 
 def _planned_with_dag(svc: TaskService, nodes=("n1", "n2")) -> str:
     t = svc.create(title="t")
-    svc.amend(t.id, {"summary": "s"})
+    svc.clarify(t.id, {"summary": "s"})
     svc.finalize_plan(
         t.id,
         Plan(sub_tasks=[SubTaskSpec(node_id=n, spec=f"do {n}") for n in nodes], confidence=0.7),

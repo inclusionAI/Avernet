@@ -16,7 +16,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, singleton
 
 from agentclaw.community.adapters.http.task.schemas import (
-    AmendTaskRequest,
+    ClarifyTaskRequest,
     CreateTaskRequest,
     EventReportRequest,
     FinalizePlanRequest,
@@ -55,8 +55,8 @@ def test_task_detail_response_minimal():
     assert r.nodes == []
 
 
-def test_amend_and_finalize_request_shapes():
-    a = AmendTaskRequest(patch={"goal": "x"})
+def test_clarify_and_finalize_request_shapes():
+    a = ClarifyTaskRequest(patch={"goal": "x"})
     assert a.patch == {"goal": "x"}
     f = FinalizePlanRequest(plan_payload={"sub_tasks": []})
     assert f.plan_payload == {"sub_tasks": []}
@@ -85,9 +85,10 @@ def _make_app() -> FastAPI:
 def test_router_imports_and_registers_routes():
     from agentclaw.community.adapters.http.task.router import router
     paths = {getattr(r, "path", None) for r in router.routes}
-    assert "/api/tasks" in paths                      # POST create, GET list
+    assert "/api/tasks" in paths                      # GET list
+    assert "/api/tasks/create" in paths                # POST create (n1 recognition)
     assert "/api/tasks/{task_id}" in paths            # GET detail
-    assert "/api/tasks/{task_id}/amend" in paths       # POST amend
+    assert "/api/tasks/{task_id}/clarify" in paths       # POST clarify
     assert "/api/tasks/{task_id}/plan" in paths        # POST finalize_plan
     assert "/api/tasks/{task_id}/progress" in paths    # GET progress
     assert "/api/tasks/{task_id}/events" in paths      # POST owner-bot 回投
@@ -123,7 +124,7 @@ class _StubTaskService:
     def create(self, title: str, source: str = "api", background: str = "") -> Any:
         return {"task_id": "t1", "status": "drafting", "seq": 1}
 
-    def amend(self, task_id: str, patch: dict) -> Any:
+    def clarify(self, task_id: str, patch: dict) -> Any:
         return self.get(task_id)
 
     def finalize_plan(self, task_id: str, plan: Any) -> Any:
@@ -190,7 +191,7 @@ def _client_with_stub() -> TestClient:
 
 def test_post_create_task_returns_200():
     client = _client_with_stub()
-    r = client.post("/api/tasks", json={"title": "fix PR", "source": "api"})
+    r = client.post("/api/tasks/create", json={"title": "fix PR", "source": "api"})
     assert r.status_code == 200
     body = r.json()
     assert body["task_id"] == "t1"
@@ -213,9 +214,9 @@ def test_get_progress_returns_200():
     assert body["loop_round"] == 1
 
 
-def test_post_amend_returns_200():
+def test_post_clarify_returns_200():
     client = _client_with_stub()
-    r = client.post("/api/tasks/t1/amend", json={"patch": {"goal": "x"}})
+    r = client.post("/api/tasks/t1/clarify", json={"patch": {"goal": "x"}})
     assert r.status_code == 200
 
 

@@ -36,7 +36,7 @@ def _service() -> TaskService:
 
 
 def _planned_with_dag(svc: TaskService, task_id: str) -> None:
-    svc.amend(task_id, {"summary": "s"})
+    svc.clarify(task_id, {"summary": "s"})
     svc.finalize_plan(
         task_id,
         Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="a")], confidence=0.7),

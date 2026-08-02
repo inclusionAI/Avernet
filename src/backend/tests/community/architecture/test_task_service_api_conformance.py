@@ -77,7 +77,7 @@ def test_api_protocol_surface_is_stable():
         "list_by_user",
         "progress",
         "create",
-        "amend",
+        "clarify",
         "finalize_plan",
         "on_event",
         "claim_node",

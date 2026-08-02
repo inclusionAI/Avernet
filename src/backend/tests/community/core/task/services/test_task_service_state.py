@@ -38,7 +38,7 @@ def _service() -> TaskService:
 
 def _planned_task(svc: TaskService) -> Task:
     t = svc.create(title="t")
-    svc.amend(t.id, {"summary": "s"})
+    svc.clarify(t.id, {"summary": "s"})
     p = Plan(
         sub_tasks=[SubTaskSpec(node_id="n1", spec="a"), SubTaskSpec(node_id="n2", spec="b")],
         confidence=0.7,

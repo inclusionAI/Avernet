@@ -1,7 +1,7 @@
 """TDD for task module API Protocols (Phase 0.5).
 
 api/task/ is Protocol-only (no impl). 6 Protocols align plan §2.1/§2.4:
-- TaskService (unified: query get/list/progress + intake create/amend/
+- TaskService (unified: query get/list/progress + intake create/clarify/
   finalize_plan + on_event fold / claim_node guard). One Protocol, per spec/plan
   定稿 — NOT split into Query/Intake.
 - TaskDriverPort (Scheduler dispatch/redispatch/escalate_to_bbs)
@@ -54,7 +54,7 @@ class _NoopTaskService:
     def create(self, title: str, source: str = "api", background: str = "") -> Any:
         return None
 
-    def amend(self, task_id: str, patch: dict) -> Any:
+    def clarify(self, task_id: str, patch: dict) -> Any:
         return None
 
     def finalize_plan(self, task_id: str, plan: Any) -> Any:
@@ -173,7 +173,7 @@ def test_task_service_unified_has_query_and_intake_and_event_faces():
     # one Protocol carries query + intake + on_event/claim_node (NOT split)
     noop = _NoopTaskService()
     assert isinstance(noop, TaskService)
-    for m in ("get", "list_by_user", "progress", "create", "amend",
+    for m in ("get", "list_by_user", "progress", "create", "clarify",
               "finalize_plan", "on_event", "claim_node"):
         assert callable(getattr(noop, m)), f"TaskService missing {m}"
 

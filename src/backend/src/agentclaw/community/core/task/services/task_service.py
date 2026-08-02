@@ -170,12 +170,12 @@ class TaskService(GraphStateOpsMixin):
         )
         return self._task_repo.get_by_id(task_id)
 
-    def amend(self, task_id: str, patch: dict) -> Optional[Task]:
+    def clarify(self, task_id: str, patch: dict) -> Optional[Task]:
         task = self._load(task_id)
         if task is None:
             return None
         self._apply_spec_patch(task, patch)
-        # amend does NOT transition (spec R2): the task stays DRAFTING through
+        # clarify does NOT transition (spec R2): the task stays DRAFTING through
         # the entire element-completion phase until finalize_plan → DEFINED.
         self._emit(task, EventKind.SPEC_AMENDED, patch=patch)
         self._task_repo.save(task)
@@ -183,7 +183,7 @@ class TaskService(GraphStateOpsMixin):
 
     def finalize_plan(self, task_id: str, plan: Plan) -> Optional[Task]:
         # Accept a dict plan_payload (HTTP /plan endpoint) by coercing it into a
-        # Plan via the same _plan_from_dict used by amend; e2e callers pass a
+        # Plan via the same _plan_from_dict used by clarify; e2e callers pass a
         # Plan object unchanged. Phase 6.9 smoke gap ② fix.
         if isinstance(plan, dict):
             plan = self._plan_from_dict(plan)
@@ -191,7 +191,7 @@ class TaskService(GraphStateOpsMixin):
         if task is None:
             return None
         # Plan freeze is legal from DRAFTING → DEFINED (spec R2/R3). Re-plan from a
-# later phase is not allowed; amend+refinalize must restart at DRAFTING.
+# later phase is not allowed; clarify+refinalize must restart at DRAFTING.
         if task.status not in {TaskStatus.DRAFTING}:
             raise IllegalTransitionError(
                 f"finalize_plan illegal from {task.status.value}"
@@ -232,7 +232,7 @@ class TaskService(GraphStateOpsMixin):
         if task is None:
             return None
         # Persist the event to the log first (single writer assigns seq) so the
-        # log is the complete source of truth — internal emits (create/amend)
+        # log is the complete source of truth — internal emits (create/clarify)
         # and external 回投 both land here.
         log_event = TaskEvent(
             task_id=task_id,
@@ -492,7 +492,7 @@ class TaskService(GraphStateOpsMixin):
             return
         if kind == EventKind.SPEC_AMENDED:
             self._apply_spec_patch(task, payload.get("patch") or {})
-            # amend does NOT transition (spec R2): task stays DRAFTING.
+            # clarify does NOT transition (spec R2): task stays DRAFTING.
             return
         if kind == EventKind.PLAN_FINALIZED:
             # Plan already set by finalize_plan; just ensure phase.
@@ -683,9 +683,7 @@ class TaskService(GraphStateOpsMixin):
             meta.tags = list(patch["tags"])
         if "background" in patch:
             task.spec.context.background = str(patch.get("background") or "")
-        if "plan" in patch and patch["plan"] is not None:
-            # plan payload is a dict-shaped Plan; best-effort merge.
-            task.plan = self._plan_from_dict(patch["plan"])
+        # plan 只经 finalize_plan(/plan 端点)入库;clarify 只补 spec,不再回挂 plan。
 
     def _find_node(self, task: Task, node_id: str) -> Optional[Node]:
         if task.execution_graph is None:

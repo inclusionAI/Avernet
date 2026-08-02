@@ -46,7 +46,7 @@ def _svc() -> TaskService:
 
 def _planned(svc: TaskService, nodes=("n1",), edges=()) -> str:
     t = svc.create(title="t")
-    svc.amend(t.id, {"summary": "s"})
+    svc.clarify(t.id, {"summary": "s"})
     plan = Plan(
         sub_tasks=[SubTaskSpec(node_id=n, spec=f"do {n}") for n in nodes],
         edges=[EdgeSpec(edge_id=f"e{i}", from_node=a, to_node=b) for i, (a, b) in enumerate(edges)],

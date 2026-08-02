@@ -5,7 +5,7 @@ Validates the full wiring chain against a REAL SQLite-backed injector:
   TaskService (Phase 2 swapped the Phase-0 Noop override, plan §2.5) backed by
   the ORM repos (Phase 1, ``ac_task`` / ``ac_task_event``).
 - the FastAPI ``app`` mounts the task router (routes present).
-- POST /api/tasks returns 200 with the real drafting Task payload (not 501) and
+- POST /api/tasks/create returns 200 with the real drafting Task payload (not 501) and
   actually persists (Phase 1.6: events land in the log).
 - get/progress on an unknown id return 404 / {} — proves the handler ran against
   the real binding (a 501 would mean unwired DI).
@@ -107,7 +107,7 @@ def test_smoke_create_task_200_with_noop():
     client_gen = _client()
     client = next(client_gen)
     try:
-        r = client.post("/api/tasks", json={"title": "smoke", "source": "api"})
+        r = client.post("/api/tasks/create", json={"title": "smoke", "source": "api"})
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "drafting"
@@ -174,13 +174,13 @@ def test_smoke_create_persists_and_events_land_in_log(client):
     from agentclaw.community.core.task.domain.repository import TaskEventRepo
 
     # create
-    r = client.post("/api/tasks", json={"title": "persist-e2e", "source": "api"})
+    r = client.post("/api/tasks/create", json={"title": "persist-e2e", "source": "api"})
     assert r.status_code == 200
     task_id = r.json()["task_id"]
 
     inj = client.app.state.injector
     event_repo = inj.get(TaskEventRepo)
-    # TASK_CREATED + (no amend yet) → 1 event in the log (create emits one)
+    # TASK_CREATED + (no clarify yet) → 1 event in the log (create emits one)
     assert event_repo.latest_seq(task_id) == 1
 
     # POST an owner-bot 回投 event (kind/payload envelope)

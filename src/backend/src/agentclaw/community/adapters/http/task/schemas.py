@@ -20,7 +20,7 @@ class CreateTaskRequest(BaseModel):
     background: str = Field("", description="Optional context background.")
 
 
-class AmendTaskRequest(BaseModel):
+class ClarifyTaskRequest(BaseModel):
     patch: dict = Field(default_factory=dict, description="Spec patch merged into the task.")
 
 

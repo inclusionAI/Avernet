@@ -160,7 +160,7 @@ class TaskService(Protocol):
         """Create a task at INTAKE; returns the new aggregate."""
         ...
 
-    def amend(self, task_id: str, patch: dict) -> Task:
+    def clarify(self, task_id: str, patch: dict) -> Task:
         """Amend the spec (intro>DICUSSING); returns updated aggregate."""
         ...
 

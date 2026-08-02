@@ -1,6 +1,6 @@
 """TDD for TaskService intake/定义组 (Phase 2.1, plan §2.1).
 
-Covers the drafting推进闭环 (amend keeps DRAFTING → finalize_plan → DEFINED),
+Covers the drafting推进闭环 (clarify keeps DRAFTING → finalize_plan → DEFINED),
 the state_machine guard on非法 moves, and the FR-OBS-11 create-time副屏 panel
 popup (publishes a ``PanelMessage`` with component ``taskPanel.TaskWorkflowView``
 + task_id param).
@@ -68,13 +68,13 @@ def test_create_emits_task_created_event_with_monotonic_seq():
     assert events[0].seq == 1
 
 
-# --- drafting→defined 推进 (amend keeps DRAFTING; finalize_plan → DEFINED) ---
+# --- drafting→defined 推进 (clarify keeps DRAFTING; finalize_plan → DEFINED) ---
 
 
 def test_amend_keeps_drafting():
     svc, _ = _service()
     task = svc.create(title="t")
-    amended = svc.amend(task.id, {"summary": "refined goal"})
+    amended = svc.clarify(task.id, {"summary": "refined goal"})
     assert amended.status is TaskStatus.DRAFTING
     assert amended.spec.metadata.summary == "refined goal"
 
@@ -82,7 +82,7 @@ def test_amend_keeps_drafting():
 def test_finalize_plan_advances_drafting_to_defined():
     svc, _ = _service()
     task = svc.create(title="t")
-    svc.amend(task.id, {"summary": "x"})
+    svc.clarify(task.id, {"summary": "x"})
     planned = svc.finalize_plan(task.id, _plan())
     assert planned.status is TaskStatus.DEFINED
     assert planned.plan is not None
@@ -91,7 +91,7 @@ def test_finalize_plan_advances_drafting_to_defined():
 
 def test_finalize_plan_legal_direct_from_drafting():
     """New SM: DRAFTING → DEFINED is a legal direct edge, so finalize_plan
-    succeeds even without a prior amend (amend no longer transitions)."""
+    succeeds even without a prior clarify (clarify no longer transitions)."""
     svc, _ = _service()
     task = svc.create(title="t")
     planned = svc.finalize_plan(task.id, _plan())
@@ -100,10 +100,10 @@ def test_finalize_plan_legal_direct_from_drafting():
 
 
 def test_intake_loop_P3_close_to_defined():
-    """P3 = plan–propose–approve闭环: create → amend → finalize_plan."""
+    """P3 = plan–propose–approve闭环: create → clarify → finalize_plan."""
     svc, _ = _service()
     t = svc.create(title="goal")
-    t = svc.amend(t.id, {"summary": "s", "tags": ["x"]})
+    t = svc.clarify(t.id, {"summary": "s", "tags": ["x"]})
     t = svc.finalize_plan(t.id, _plan("n1"))
     assert t.status is TaskStatus.DEFINED
     assert t.spec.metadata.tags == ["x"]
@@ -112,7 +112,7 @@ def test_intake_loop_P3_close_to_defined():
 def test_cancel_from_defined_legal():
     svc, _ = _service()
     t = svc.create(title="t")
-    svc.amend(t.id, {"summary": "s"})
+    svc.clarify(t.id, {"summary": "s"})
     svc.finalize_plan(t.id, _plan())
     cancelled = svc.cancel(t.id, reason="user abort")
     assert cancelled.status is TaskStatus.CANCELLED
@@ -120,5 +120,5 @@ def test_cancel_from_defined_legal():
 
 def test_amend_unknown_task_returns_none():
     svc, _ = _service()
-    assert svc.amend("nope", {"x": 1}) is None
+    assert svc.clarify("nope", {"x": 1}) is None
     assert svc.finalize_plan("nope", _plan()) is None

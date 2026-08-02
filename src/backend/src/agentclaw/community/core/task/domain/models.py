@@ -24,7 +24,7 @@ from typing import Optional
 class TaskStatus(StrEnum):
     """Task lifecycle (spec §2.1). 7 states; 3 terminals: DONE/CANCELLED/FAILED.
 
-    DRAFTING covers the entire element-completion phase (create + amend do NOT
+    DRAFTING covers the entire element-completion phase (create + clarify do NOT
     transition out — spec R2); finalize_plan moves to DEFINED."""
 
     DRAFTING = "drafting"
@@ -463,7 +463,7 @@ class Task:
     spec: TaskSpec
     status: TaskStatus = TaskStatus.DRAFTING
     execution_graph: Optional[TaskExecutionGraph] = None
-    plan: Optional[Plan] = None  # deprecated(§3.7):分解并入图;保留过渡,新代码读 execution_graph
+    plan: Optional[Plan] = None  # 预规划桥(方案a):finalize_plan 冻结的分解;spawn_build_dag 读此建 DISPATCH 骨架。运行态读 execution_graph。
     owner_bot_id: Optional[str] = None  # v2 task-owner 绑定(§3.6/O-7③);OwnerResolver.resolve_task_owner 读此
     latest_event_seq: int = 0
     loop_round: int = 0

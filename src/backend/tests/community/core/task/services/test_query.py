@@ -36,7 +36,7 @@ def _service() -> TaskService:
 
 def _task_with_graph(svc: TaskService) -> str:
     t = svc.create(title="t")
-    svc.amend(t.id, {"summary": "s"})
+    svc.clarify(t.id, {"summary": "s"})
     svc.finalize_plan(
         t.id,
         Plan(
