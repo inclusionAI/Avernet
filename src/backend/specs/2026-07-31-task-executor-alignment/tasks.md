@@ -224,7 +224,10 @@
 - done-when:NODE_REJECTED→bot-search(retrieve-state 带上轮 gap)→redispatch 同 node_id(`attempted_executors` 追加)→accept→聚合→终验 DONE。
 - 实现(NODE_FAILED reroute 后半段,与 T-13 衔接):失败方 skill 经 `TaskService.open_reroute_search`
   发起 gap bot-search(挂失败节点父下兄弟 BOT_SEARCH,带 gap_spec)→ `tick._bot_search` 命中 →
-  落 DISPATCH 重派新执行方 → claim+fire。测试:`test_node_failed_reroute_hit_dispatches_new_executor`。
+  落 DISPATCH 重派新执行方 → claim+fire。`open_reroute_search` 同时把原失败节点标 superseded
+  (FAILED→DONE,状态机合法),免常驻 FAILED 挡 `_maybe_goal_verify` 的"有 FAILED 不终验"guard,
+  使 reroute 成功后全图 DONE 能终验。测试:`test_node_failed_reroute_hit_dispatches_new_executor`
+  (含 reroute 成功 → task DONE 终验)。
 - 测试:E2E-4
 
 ### T-29 E2E-5 重路由未匹配→递归拆解(depth+1)

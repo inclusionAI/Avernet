@@ -493,6 +493,14 @@ def test_node_failed_reroute_hit_dispatches_new_executor():
     assert disp.status is NodeStatus.RUNNING
     assert (task.id, "n_impl_hash_reroute_disp", "crypto-bot2") in sched._execution.single_bots  # noqa: SLF001
     assert driver.redispatched == []  # 无 scheduler C5 规则
+    # 原失败节点已被 reroute 接管 → 标 superseded(FAILED→DONE),不再挡终验
+    task = svc.get(task.id)
+    assert next(n for n in task.execution_graph.nodes if n.node_id == "n_impl_hash").status is NodeStatus.DONE
+    # reroute 成功:skill 回投验收 PASS → 全图 DONE → goal-verify 终验 → task DONE
+    _accept_leaf(svc, task.id, "n_impl_hash_reroute_disp")
+    task = _tick_until(svc, sched, task.id, lambda t: t.status is TaskStatus.DONE)
+    assert task.status is TaskStatus.DONE
+    assert task.execution_graph.graph_status is GraphStatus.VERIFIED
 
 
 def test_node_failed_reroute_miss_recursive_decompose_depth_plus_one():

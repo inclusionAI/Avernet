@@ -12,6 +12,7 @@ from agentclaw.community.core.task.domain.models import (
     EdgeKind,
     GraphSnapshot,
     Node,
+    NodeStatus,
     NodeType,
     RunMode,
     StateSemantics,
@@ -120,6 +121,10 @@ class GraphStateOpsMixin:
         作父会因 ``_unlocked`` 前驱检查锁住子节点,使 tick 永远推不进去。挂兄弟(父为失败
         节点的父,已 DONE)则新节点前驱解锁,tick 可正常推进。
 
+        发起 reroute 时把原失败节点标 **superseded**(FAILED→DONE,状态机合法):该失败
+        尝试已被 reroute 接管/闭合,不再挡 ``_maybe_goal_verify`` 的"有 FAILED 不终验"guard,
+        这样 reroute 成功后全图 DONE 能正常终验;实体维 SubtaskState 保留 FAILED 作失败历史。
+
         gap 上下文由调用方(skill)从 ``retrieve_state(failed_node_id)`` 的 gap_records
         组装进 ``gap_spec``;本方法只负责落图。"""
         task = self._task_repo.get_by_id(task_id)
@@ -140,7 +145,16 @@ class GraphStateOpsMixin:
             run_mode=RunMode.SINGLE_BOT,
             depth=depth,
         )
-        return self.add_node(task_id, sub, parent, NodeType.BOT_SEARCH)
+        new_node = self.add_node(task_id, sub, parent, NodeType.BOT_SEARCH)
+        # 原失败尝试已被 reroute 接管 → 标 superseded(FAILED→DONE),免常驻 FAILED 挡终验。
+        fresh = self._task_repo.get_by_id(task_id)
+        assert fresh.execution_graph is not None
+        for nd in fresh.execution_graph.nodes:
+            if nd.node_id == failed_node_id and nd.status is NodeStatus.FAILED:
+                nd.status = NodeStatus.DONE
+                break
+        self._task_repo.save(fresh)
+        return new_node
 
     def update_state(
         self,
