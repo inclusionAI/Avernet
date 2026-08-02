@@ -22,10 +22,10 @@ use bcs_service_api::{
 
 #[test]
 fn v1_bot_commands_expose_the_approved_control_plane_surface() {
-    let principal = human_principal("staff-1");
+    let caller = human_caller("staff-1");
 
     let _ = ListBotCandidates {
-        principal: principal.clone(),
+        caller: caller.clone(),
         bot_id: "bot-1".to_string(),
         purpose: Default::default(),
         name: None,
@@ -33,15 +33,15 @@ fn v1_bot_commands_expose_the_approved_control_plane_surface() {
         limit: 20,
     };
     let _ = QueryBots {
-        principal: principal.clone(),
+        caller: caller.clone(),
         bot_ids: vec!["bot-1".to_string()],
     };
     let _ = GetBot {
-        principal: principal.clone(),
+        caller: caller.clone(),
         bot_id: "bot-1".to_string(),
     };
     let _ = UpdateBot {
-        principal: principal.clone(),
+        caller: caller.clone(),
         bot_id: "bot-1".to_string(),
         patch: BotPatch {
             name: Some("Renamed".to_string()),
@@ -56,7 +56,7 @@ fn v1_bot_commands_expose_the_approved_control_plane_surface() {
         },
     };
     let _ = ListMyBots {
-        principal,
+        caller,
         kind: Some(BotKind::Bot),
         name: None,
         status: None,
@@ -145,7 +145,7 @@ async fn candidates_require_a_human_owner_and_a_physical_acting_bot() {
     let error = fixture
         .service
         .list_candidates(ListBotCandidates {
-            principal: human_principal("staff-2"),
+            caller: human_caller("staff-2"),
             bot_id: "acting".to_string(),
             purpose: BotCandidatePurpose::Discovery,
             name: None,
@@ -159,7 +159,7 @@ async fn candidates_require_a_human_owner_and_a_physical_acting_bot() {
     let error = fixture
         .service
         .list_candidates(ListBotCandidates {
-            principal: human_principal("staff-1"),
+            caller: human_caller("staff-1"),
             bot_id: "human_staff-1".to_string(),
             purpose: BotCandidatePurpose::Discovery,
             name: None,
@@ -189,7 +189,7 @@ async fn collaboration_candidates_include_private_friends_without_status_filteri
     let page = fixture
         .service
         .list_candidates(ListBotCandidates {
-            principal: human_principal("staff-1"),
+            caller: human_caller("staff-1"),
             bot_id: "acting".to_string(),
             purpose: BotCandidatePurpose::Collaboration,
             name: Some(" FRIEND ".to_string()),
@@ -251,7 +251,7 @@ async fn query_preserves_first_occurrence_and_projects_both_kinds_provider_and_r
     let bots = fixture
         .service
         .query(QueryBots {
-            principal: human_principal("staff-2"),
+            caller: human_caller("staff-2"),
             bot_ids: vec![
                 "human_staff-1".to_string(),
                 "missing".to_string(),
@@ -291,7 +291,7 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
     let error = fixture
         .service
         .update(UpdateBot {
-            principal: human_principal("staff-2"),
+            caller: human_caller("staff-2"),
             bot_id: "owned".to_string(),
             patch: BotPatch {
                 name: Some("Nope".to_string()),
@@ -305,7 +305,7 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
     let error = fixture
         .service
         .update(UpdateBot {
-            principal: human_principal("staff-1"),
+            caller: human_caller("staff-1"),
             bot_id: "human_staff-1".to_string(),
             patch: BotPatch {
                 descriptor: Some(BotDescriptorPatch {
@@ -322,7 +322,7 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
     let updated = fixture
         .service
         .update(UpdateBot {
-            principal: human_principal("staff-1"),
+            caller: human_caller("staff-1"),
             bot_id: "owned".to_string(),
             patch: BotPatch {
                 name: Some(" Renamed ".to_string()),
@@ -348,7 +348,7 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
 }
 
 #[tokio::test]
-async fn mine_applies_reachability_before_pagination_and_bot_principals_are_forbidden() {
+async fn mine_applies_reachability_before_pagination_and_callers_without_user_are_forbidden() {
     let fixture = Fixture::new();
     fixture
         .add_bot("reachable", "staff-1", "public", ActorStatus::Online)
@@ -370,7 +370,7 @@ async fn mine_applies_reachability_before_pagination_and_bot_principals_are_forb
     let page = fixture
         .service
         .list_mine(ListMyBots {
-            principal: human_principal("staff-1"),
+            caller: human_caller("staff-1"),
             kind: None,
             name: None,
             status: None,
@@ -387,15 +387,11 @@ async fn mine_applies_reachability_before_pagination_and_bot_principals_are_forb
     let error = fixture
         .service
         .get(GetBot {
-            principal: bcs_service_api::application::v1::Principal::bot(
-                "reachable",
-                "tenant-1",
-                Default::default(),
-            ),
+            caller: bot_only_caller("reachable"),
             bot_id: "reachable".to_string(),
         })
         .await
-        .expect_err("Bot Principal must be rejected");
+        .expect_err("caller without User must be rejected");
     assert_eq!(error.code(), "forbidden");
 }
 
@@ -405,7 +401,7 @@ async fn invalid_application_inputs_use_stable_codes() {
     let error = fixture
         .service
         .query(QueryBots {
-            principal: human_principal("staff-1"),
+            caller: human_caller("staff-1"),
             bot_ids: (0..101).map(|index| format!("bot-{index}")).collect(),
         })
         .await
@@ -414,15 +410,32 @@ async fn invalid_application_inputs_use_stable_codes() {
     assert_eq!(error.code(), "invalid_request");
 }
 
-fn human_principal(staff_no: &str) -> bcs_service_api::application::v1::Principal {
-    bcs_service_api::application::v1::Principal::human(
-        bcs_service_api::application::v1::AuthenticatedUser {
+fn human_caller(staff_no: &str) -> bcs_service_api::application::v1::AuthenticatedCaller {
+    bcs_service_api::application::v1::AuthenticatedCaller {
+        tenant: "tenant-1".into(),
+        user: Some(bcs_service_api::application::v1::AuthenticatedUserIdentity {
             id: staff_no.to_string(),
             username: staff_no.to_string(),
             display_name: None,
             full_name: None,
-        },
-        "tenant-1",
-        Default::default(),
-    )
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
+}
+
+fn bot_only_caller(bot_uuid: &str) -> bcs_service_api::application::v1::AuthenticatedCaller {
+    bcs_service_api::application::v1::AuthenticatedCaller {
+        tenant: "tenant-1".into(),
+        user: None,
+        bot: Some(bcs_service_api::application::v1::AuthenticatedBotIdentity {
+            bot_uuid: bot_uuid.into(),
+            owner_id: "staff-1".into(),
+            app_id: 1,
+            agent_code: "agent".into(),
+        }),
+        app: None,
+        access_key: None,
+    }
 }

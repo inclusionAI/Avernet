@@ -5,8 +5,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use bcs_service_api::application::v1::{
-    AddSessionParticipant, CompleteSession, DeleteSession, DeleteSessionParticipant,
-    GetSession, ListSessionMessages, ListSessions, Principal, UpdateSessionParticipant,
+    AddSessionParticipant, AuthenticatedCaller, CompleteSession, DeleteSession,
+    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
+    UpdateSessionParticipant,
 };
 
 use crate::v1::common::{
@@ -49,7 +50,7 @@ pub fn router() -> Router<ApiState> {
 
 async fn create_session(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<CreateSessionRequest>, JsonRejection>,
@@ -58,7 +59,7 @@ async fn create_session(
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .session_service
-        .create(body.into_command(principal, group_id))
+        .create(body.into_command(caller, group_id))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     let (status, code, message) = if result.created {
@@ -75,7 +76,7 @@ async fn create_session(
 
 async fn list_sessions(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<ListSessionsQuery>, QueryRejection>,
@@ -85,8 +86,9 @@ async fn list_sessions(
     let result = state
         .session_service
         .list(ListSessions {
-            principal,
+            caller,
             group_id,
+            view_bot_id: query.view_bot_id,
             offset: query.offset,
             limit: query.limit,
             status: query.status,
@@ -102,7 +104,7 @@ async fn list_sessions(
 
 async fn get_session(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -110,7 +112,7 @@ async fn get_session(
     let result = state
         .session_service
         .get(GetSession {
-            principal,
+            caller,
             session_id,
         })
         .await
@@ -124,7 +126,7 @@ async fn get_session(
 
 async fn update_session(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<UpdateSessionRequest>, JsonRejection>,
@@ -133,7 +135,7 @@ async fn update_session(
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .session_service
-        .update(body.into_command(principal, session_id))
+        .update(body.into_command(caller, session_id))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
@@ -145,7 +147,7 @@ async fn update_session(
 
 async fn delete_session(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -153,7 +155,7 @@ async fn delete_session(
     let result = state
         .session_service
         .delete(DeleteSession {
-            principal,
+            caller,
             session_id,
         })
         .await
@@ -167,7 +169,7 @@ async fn delete_session(
 
 async fn complete_session(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -175,7 +177,7 @@ async fn complete_session(
     let result = state
         .session_service
         .complete(CompleteSession {
-            principal,
+            caller,
             session_id,
         })
         .await
@@ -189,7 +191,7 @@ async fn complete_session(
 
 async fn list_session_messages(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<ListSessionMessagesQuery>, QueryRejection>,
@@ -199,7 +201,7 @@ async fn list_session_messages(
     let result = state
         .message_service
         .list(ListSessionMessages {
-            principal,
+            caller,
             session_id,
             before: query.before,
             limit: query.limit,
@@ -216,7 +218,7 @@ async fn list_session_messages(
 
 async fn add_session_participant(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<SessionParticipantInput>, JsonRejection>,
@@ -226,7 +228,7 @@ async fn add_session_participant(
     let result = state
         .session_service
         .add_participant(AddSessionParticipant {
-            principal,
+            caller,
             session_id,
             bot_uuid: body.bot_uuid,
             mode: body.mode,
@@ -242,7 +244,7 @@ async fn add_session_participant(
 
 async fn update_session_participant(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
     body: Result<Json<UpdateSessionParticipantRequest>, JsonRejection>,
@@ -253,7 +255,7 @@ async fn update_session_participant(
     let result = state
         .session_service
         .update_participant(UpdateSessionParticipant {
-            principal,
+            caller,
             session_id,
             bot_uuid,
             mode: body.mode,
@@ -269,7 +271,7 @@ async fn update_session_participant(
 
 async fn remove_session_participant(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -278,7 +280,7 @@ async fn remove_session_participant(
     let result = state
         .session_service
         .delete_participant(DeleteSessionParticipant {
-            principal,
+            caller,
             session_id,
             bot_uuid,
         })

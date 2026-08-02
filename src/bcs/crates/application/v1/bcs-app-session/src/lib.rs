@@ -1,16 +1,13 @@
 //! Versioned Session application facade for the BCN V1 API.
 //!
 //! Implements both [`SessionService`] and [`SessionMessageService`]. The
-//! facade owns Principal-based resource authorization and V1 projections
+//! facade owns authenticated-Caller resource authorization and V1 projections
 //! while delegating the legacy session lifecycle to
 //! [`SessionManagementService`]. No HTTP type crosses this boundary.
 //!
-//! Authorization model (design §8.7):
-//! - Manage operations (create / update / complete / participant mutations)
-//!   require the caller to be a group manager (driver / originator /
-//!   ManagerWorker manager) or the session creator.
-//! - Read operations (get / list / list messages) additionally allow session
-//!   participants and group members.
+//! All current V1 operations are Human-facing. Detail reads, actor-relative
+//! lists, message history, and mutations intentionally use separate
+//! authorization rules defined by the V1 contract.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -30,7 +27,8 @@ use bcs_service_api::application::v1::{
         SessionParticipantInput, SessionService, SessionStatus as V1SessionStatus,
         SessionSummary, UpdateSession, UpdateSessionParticipant,
     },
-    ApplicationError, DeleteResult, HumanPrincipal, Page, Principal,
+    ApplicationError, AuthenticatedCaller, DeleteResult, Page, Principal,
+    require_authenticated_user, require_human,
 };
 use bcs_service_api::application::session::{
     CreateOrReactivateCommand, SessionManagementService, SessionUseCaseError,
@@ -118,41 +116,6 @@ impl SessionServiceImpl {
                 .is_some_and(|creator| creator == principal.actor_id())
     }
 
-    /// Read a group's sessions: group participant, group manager, or a
-    /// session-only participant (a Bot added to a session but not to
-    /// `group.participants`). Mirrors `bcs-app-group::can_read_group`
-    /// (lib.rs:180-199) so an invitation-accept that adds the Bot to the
-    /// session (not the group) still authorizes `list_sessions`.
-    async fn can_read_group(
-        &self,
-        principal: &Principal,
-        group: &DomainGroup,
-    ) -> Result<bool, ApplicationError> {
-        let principal_actor_id = principal.actor_id();
-        if Self::can_manage_group(principal, group)
-            || group
-                .participants
-                .iter()
-                .any(|participant| participant.bot_uuid == principal_actor_id)
-        {
-            return Ok(true);
-        }
-        let session_group_ids = self
-            .sessions
-            .list_group_ids_by_session_participant(&principal_actor_id)
-            .await
-            .map_err(|error| ApplicationError::internal(error.to_string()))?;
-        Ok(session_group_ids.iter().any(|id| id == &group.id))
-    }
-
-    /// Read a specific session: session participant, group manager, or the
-    /// session's creator.
-    fn can_read_session(principal: &Principal, session: &Session, group: &DomainGroup) -> bool {
-        let actor_id = principal.actor_id();
-        session.participants.iter().any(|p| p.bot_uuid == actor_id)
-            || Self::can_manage_session(principal, session, group)
-    }
-
     async fn load_group(&self, group_id: &str) -> Result<DomainGroup, ApplicationError> {
         self.groups
             .try_get(group_id)
@@ -175,20 +138,6 @@ impl SessionServiceImpl {
         if !Self::can_manage_group(principal, &group) {
             return Err(ApplicationError::forbidden(
                 "Only the Group originator, driver, or manager may manage Sessions",
-            ));
-        }
-        Ok(group)
-    }
-
-    async fn load_readable_group(
-        &self,
-        principal: &Principal,
-        group_id: &str,
-    ) -> Result<DomainGroup, ApplicationError> {
-        let group = self.load_group(group_id).await?;
-        if !self.can_read_group(principal, &group).await? {
-            return Err(ApplicationError::forbidden(
-                "Principal has no readable relation to this Group",
             ));
         }
         Ok(group)
@@ -220,12 +169,7 @@ impl SessionServiceImpl {
         Ok((session, group))
     }
 
-    /// Load a session and its parent group, authorizing read access.
-    async fn load_session_for_read(
-        &self,
-        principal: &Principal,
-        session_id: &str,
-    ) -> Result<Session, ApplicationError> {
+    async fn load_session(&self, session_id: &str) -> Result<Session, ApplicationError> {
         let session = self
             .sessions
             .get(session_id)
@@ -237,12 +181,6 @@ impl SessionServiceImpl {
                     format!("Session '{session_id}' was not found"),
                 )
             })?;
-        let group = self.load_group(&session.group_id).await?;
-        if !Self::can_read_session(principal, &session, &group) {
-            return Err(ApplicationError::forbidden(
-                "Principal has no readable relation to this Session",
-            ));
-        }
         Ok(session)
     }
 
@@ -260,6 +198,90 @@ impl SessionServiceImpl {
                     format!("Bot '{bot_uuid}' was not found"),
                 )
             })
+    }
+
+    async fn resolve_view_actor(
+        &self,
+        caller: &AuthenticatedCaller,
+        requested: Option<&str>,
+    ) -> Result<String, ApplicationError> {
+        let user = require_authenticated_user(caller)?;
+        let human_actor_id = format!("human_{}", user.id);
+        let Some(requested) = requested else {
+            return Ok(human_actor_id);
+        };
+        if requested == human_actor_id {
+            return Ok(human_actor_id);
+        }
+        if requested.starts_with("human_") {
+            return Err(ApplicationError::forbidden(
+                "The explicit Human View Actor must identify the authenticated User",
+            ));
+        }
+        let bot = self.load_bot(requested).await.map_err(|error| match error {
+            ApplicationError::NotFound { .. } => {
+                ApplicationError::forbidden("The explicit View Actor is not authorized")
+            }
+            other => other,
+        })?;
+        if bot.actor_kind == ActorKind::Bot
+            && bot.created_by.as_deref() == Some(user.id.as_str())
+        {
+            Ok(requested.to_string())
+        } else {
+            Err(ApplicationError::forbidden(
+                "The explicit View Actor is not authorized",
+            ))
+        }
+    }
+
+    async fn can_read_session_detail(
+        &self,
+        caller: &AuthenticatedCaller,
+        session: &Session,
+    ) -> Result<bool, ApplicationError> {
+        let user = require_authenticated_user(caller)?;
+        let human_actor_id = format!("human_{}", user.id);
+        if session
+            .participants
+            .iter()
+            .any(|participant| {
+                participant.actor_kind == ActorKind::Human
+                    && participant.bot_uuid == human_actor_id
+            })
+        {
+            return Ok(true);
+        }
+        let owned_bot_ids = self
+            .registry
+            .list_bots_by_creator(&user.id)
+            .await
+            .into_iter()
+            .filter(|bot| bot.actor_kind == ActorKind::Bot)
+            .map(|bot| bot.bot_uuid)
+            .collect::<HashSet<_>>();
+        Ok(session
+            .participants
+            .iter()
+            .any(|participant| {
+                participant.actor_kind == ActorKind::Bot
+                    && owned_bot_ids.contains(&participant.bot_uuid)
+            }))
+    }
+
+    async fn load_session_for_detail(
+        &self,
+        caller: &AuthenticatedCaller,
+        session_id: &str,
+    ) -> Result<Session, ApplicationError> {
+        let session = self.load_session(session_id).await?;
+        self.load_group(&session.group_id).await?;
+        if !self.can_read_session_detail(caller, &session).await? {
+            return Err(ApplicationError::forbidden(
+                "Neither the Human Actor nor an owned Bot is a Session Participant",
+            ));
+        }
+        Ok(session)
     }
 
     /// VSN7B: Mirror `bcs-app-group`'s `ensure_collaboration_eligible`. A
@@ -324,62 +346,6 @@ impl SessionServiceImpl {
         )))
     }
 
-    /// VYQHN: a Human principal may self-service mutate (update / remove) a
-    /// Session participant when the Human owns the target Bot — i.e.
-    /// `bot.created_by == human.subject.id` or a creator relation edge from
-    /// the Human actor to the Bot exists. Mirrors the Human branch of
-    /// [`ensure_collaboration_eligible`] and `bcs-app-group::authorize_bot_resource`
-    /// so a Human owner is authorized without group-level manager permissions
-    /// (design §8.7 line 557 explicitly allows Human owners to remove owned
-    /// Bots from sessions they can read).
-    async fn is_owned_bot(
-        &self,
-        human: &HumanPrincipal,
-        bot_uuid: &str,
-    ) -> Result<bool, ApplicationError> {
-        let bot = self.load_bot(bot_uuid).await?;
-        if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-            return Ok(true);
-        }
-        let actor_id = format!("human_{}", human.subject.id);
-        let edge = self
-            .relation
-            .get_edge(&actor_id, bot_uuid, &self.config.relation_env)
-            .await
-            .map_err(map_service_error)?;
-        Ok(edge.is_some_and(|edge| edge.is_creator))
-    }
-
-    /// Load a session + parent group WITHOUT the read-authorization gate,
-    /// used only by the participant-mutation endpoints (VSN7L self-service
-    /// and VYQHN Human-owner self-service). The legacy read gate
-    /// ([`can_read_session`]) refuses a non-creator/non-manager Human owner
-    /// of a session participant Bot, which would short-circuit the
-    /// participant-mutation path with a 403 before the ownership check
-    /// ([`is_owned_bot`]) could authorize the Human owner. The unified
-    /// `is_self || is_human_owner || can_manage_session` gate performed by
-    /// the caller after this fetch subsumes the read gate for this path:
-    /// `is_self` implies the Bot is a session participant; `can_manage_session`
-    /// implies `can_read_session`; and `is_human_owner` is the VYQHN addition.
-    async fn load_session_and_group_for_participant_mutation(
-        &self,
-        session_id: &str,
-    ) -> Result<(Session, DomainGroup), ApplicationError> {
-        let session = self
-            .sessions
-            .get(session_id)
-            .await
-            .map_err(map_session_error)?
-            .ok_or_else(|| {
-                ApplicationError::not_found(
-                    "session_not_found",
-                    format!("Session '{session_id}' was not found"),
-                )
-            })?;
-        let group = self.load_group(&session.group_id).await?;
-        Ok((session, group))
-    }
-
     // ── projections ────────────────────────────────────────────────────
 
     async fn project_detail(&self, session: &Session) -> Result<SessionDetail, ApplicationError> {
@@ -428,8 +394,9 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: CreateSession,
     ) -> Result<CreateSessionOutcome, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         let group = self
-            .load_manageable_group(&command.principal, &command.group_id)
+            .load_manageable_group(&principal, &command.group_id)
             .await?;
 
         // The contract marks `driver_bot_uuid` as required and 404s on an
@@ -441,7 +408,7 @@ impl SessionService for SessionServiceImpl {
         // for the caller (visible + friend/creator relation) before the session
         // is materialized, mirroring the sibling Group V1 facade.
         self.ensure_collaboration_eligible(
-            &command.principal,
+            &principal,
             &command.driver_bot_uuid,
             "driver_bot_uuid",
         )
@@ -469,7 +436,7 @@ impl SessionService for SessionServiceImpl {
         }
         for input in &command.participants {
             self.ensure_collaboration_eligible(
-                &command.principal,
+                &principal,
                 &input.bot_uuid,
                 "participants",
             )
@@ -521,7 +488,7 @@ impl SessionService for SessionServiceImpl {
             )),
         }
 
-        let caller_actor_id = command.principal.actor_id();
+        let caller_actor_id = principal.actor_id();
         let params = NewSessionParams {
             session_kind: SessionKind::Chat,
             participants,
@@ -551,37 +518,17 @@ impl SessionService for SessionServiceImpl {
     }
 
     async fn list(&self, command: ListSessions) -> Result<Page<SessionSummary>, ApplicationError> {
+        let view_actor_id = self
+            .resolve_view_actor(&command.caller, command.view_bot_id.as_deref())
+            .await?;
         if command.limit == 0 || command.limit > 100 {
             return Err(ApplicationError::invalid(
                 "invalid_request",
                 "limit must be between 1 and 100",
             ));
         }
-        let group = self
-            .load_readable_group(&command.principal, &command.group_id)
-            .await?;
-        // Vcj5: scope the listing + count to the caller's own sessions when
-        // the caller's read authority derives solely from session membership
-        // (a Bot added to a session but NOT to `group.participants`).
-        // `can_read_group` already authorized the call above via either the
-        // direct path (group participant / group manager) OR the
-        // session-only fallback (`list_group_ids_by_session_participant`).
-        // When access is direct, the caller has group-level read authority
-        // and sees the full group session pool (`participant_id=None`). When
-        // access is session-only, scope both `list_by_group` and
-        // `count_by_group` to `Some(principal.actor_id())` so a session-only
-        // Bot only sees / counts the sessions it actually participates in.
-        let principal_actor_id = command.principal.actor_id();
-        let is_direct = Self::can_manage_group(&command.principal, &group)
-            || group
-                .participants
-                .iter()
-                .any(|p| p.bot_uuid == principal_actor_id);
-        let participant_id: Option<&str> = if is_direct {
-            None
-        } else {
-            Some(principal_actor_id.as_str())
-        };
+        self.load_group(&command.group_id).await?;
+        let participant_id = Some(view_actor_id.as_str());
         let status = command.status.map(map_status_to_domain);
         let mut sessions = self
             .sessions
@@ -618,11 +565,14 @@ impl SessionService for SessionServiceImpl {
     }
 
     async fn get(&self, query: GetSession) -> Result<SessionDetail, ApplicationError> {
-        let session = self.load_session_for_read(&query.principal, &query.session_id).await?;
+        let session = self
+            .load_session_for_detail(&query.caller, &query.session_id)
+            .await?;
         self.project_detail(&session).await
     }
 
     async fn update(&self, command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         // Only `title` is mutable in phase one; a request carrying no field is
         // rejected (mirrors the sibling Group V1 facade).
         if command.title.is_none() {
@@ -631,7 +581,7 @@ impl SessionService for SessionServiceImpl {
                 "at least one mutable field is required",
             ));
         }
-        self.load_session_for_manage(&command.principal, &command.session_id)
+        self.load_session_for_manage(&principal, &command.session_id)
             .await?;
         let session = self
             .sessions
@@ -642,6 +592,7 @@ impl SessionService for SessionServiceImpl {
     }
 
     async fn delete(&self, command: DeleteSession) -> Result<DeleteResult, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         // Idempotent: a missing session yields `deleted: false` rather than a
         // 404 so repeat deletes converge. Non-managers still get 403.
         let session = match self
@@ -654,7 +605,7 @@ impl SessionService for SessionServiceImpl {
             None => return Ok(DeleteResult { deleted: false }),
         };
         let group = self.load_group(&session.group_id).await?;
-        if !Self::can_manage_session(&command.principal, &session, &group) {
+        if !Self::can_manage_session(&principal, &session, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal may not delete this Session",
             ));
@@ -671,8 +622,9 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: CompleteSession,
     ) -> Result<SessionCompletionResult, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         let (session, _) = self
-            .load_session_for_manage(&command.principal, &command.session_id)
+            .load_session_for_manage(&principal, &command.session_id)
             .await?;
         // VaGQN: ServiceInvocation sessions have their own callback/output
         // lifecycle and must not be completed via this V1 endpoint (legacy
@@ -726,12 +678,13 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: AddSessionParticipant,
     ) -> Result<SessionParticipant, ApplicationError> {
+        let principal = require_human(&command.caller)?;
         let (session, group) = self
-            .load_session_for_manage(&command.principal, &command.session_id)
+            .load_session_for_manage(&principal, &command.session_id)
             .await?;
         // VSN7B: the added Bot must be collaboration-eligible for the caller
         // (visible + friend/creator relation), not merely registered.
-        self.ensure_collaboration_eligible(&command.principal, &command.bot_uuid, "bot_uuid")
+        self.ensure_collaboration_eligible(&principal, &command.bot_uuid, "bot_uuid")
             .await?;
         // VfhG3: explicit 409 if the target Bot is already a session participant.
         // The legacy memory repo silently skipped duplicates (idempotent); the V1
@@ -788,29 +741,9 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: UpdateSessionParticipant,
     ) -> Result<SessionParticipant, ApplicationError> {
-        // VSN7L: the target Actor may update its own participant mode
-        // (self-service) in addition to the driver/originator/manager path,
-        // mirroring the sibling Group V1 facade's participant self-service.
-        // VYQHN: a Human principal who owns the target Bot (via created_by
-        // or a creator relation edge) is also authorized to self-service. The
-        // legacy read gate is bypassed here because it would 403 a
-        // non-creator/non-manager Human owner before the ownership check
-        // could authorize them; the unified check below (is_self ||
-        // is_human_owner || can_manage_session) subsumes the read gate for
-        // this path.
-        let (session, group) = self
-            .load_session_and_group_for_participant_mutation(&command.session_id)
+        let principal = require_human(&command.caller)?;
+        self.load_session_for_manage(&principal, &command.session_id)
             .await?;
-        let is_self = command.principal.actor_id() == command.bot_uuid;
-        let is_human_owner = match &command.principal {
-            Principal::Human(human) => self.is_owned_bot(human, &command.bot_uuid).await?,
-            Principal::Bot(_) => false,
-        };
-        if !is_self && !is_human_owner && !Self::can_manage_session(&command.principal, &session, &group) {
-            return Err(ApplicationError::forbidden(
-                "Principal may not manage this Session's participants",
-            ));
-        }
         let domain_mode = map_v1_mode_to_domain(command.mode);
         let mut updated = self
             .sessions
@@ -837,28 +770,10 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: DeleteSessionParticipant,
     ) -> Result<DeleteResult, ApplicationError> {
-        // VSN7L: the target Actor may leave the session (self-service delete)
-        // in addition to the driver/originator/manager path, mirroring the
-        // sibling Group V1 facade's participant self-leave.
-        // VYQHN: a Human principal who owns the target Bot (via created_by
-        // or a creator relation edge) is also authorized to self-service. As
-        // in update_participant, the legacy read gate is bypassed so the
-        // ownership check is reachable for a non-creator/non-manager Human
-        // owner; the unified check below (is_self || is_human_owner ||
-        // can_manage_session) subsumes the read gate for this path.
-        let (session, group) = self
-            .load_session_and_group_for_participant_mutation(&command.session_id)
+        let principal = require_human(&command.caller)?;
+        let (session, _) = self
+            .load_session_for_manage(&principal, &command.session_id)
             .await?;
-        let is_self = command.principal.actor_id() == command.bot_uuid;
-        let is_human_owner = match &command.principal {
-            Principal::Human(human) => self.is_owned_bot(human, &command.bot_uuid).await?,
-            Principal::Bot(_) => false,
-        };
-        if !is_self && !is_human_owner && !Self::can_manage_session(&command.principal, &session, &group) {
-            return Err(ApplicationError::forbidden(
-                "Principal may not manage this Session's participants",
-            ));
-        }
         // Idempotent: if the target is not a current participant, return
         // `deleted: false` without invoking the legacy removal (which would
         // surface a `SessionInvalidParams` "not in session" error otherwise).
@@ -889,9 +804,19 @@ impl SessionMessageService for SessionServiceImpl {
                 "limit must be between 1 and 100",
             ));
         }
-        let session = self
-            .load_session_for_read(&query.principal, &query.session_id)
+        let view_actor_id = self
+            .resolve_view_actor(&query.caller, query.view_bot_id.as_deref())
             .await?;
+        let session = self.load_session(&query.session_id).await?;
+        if !session
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == view_actor_id)
+        {
+            return Err(ApplicationError::forbidden(
+                "The selected View Actor is not a Session Participant",
+            ));
+        }
         // VSN7A/VUlai/VHxMU — reuse the legacy `bcs-message` visibility helper
         // (single source of truth) so the V1 session list applies the EXACT
         // same scoping the group history path does: the full 3-state
@@ -899,44 +824,11 @@ impl SessionMessageService for SessionServiceImpl {
         // the spec §5.2 new-participant `visible_from_seq` cutoff. The V1 facade
         // no longer reimplements these predicates.
         let group = self.load_group(&session.group_id).await?;
-        // view_bot_id authz (design §8.7 visibility scoping): the optional
-        // `view_bot_id` query param is resolved to the `Option<&str>` cutoff
-        // identity passed into the legacy helper.
-        // - Bot Principal: omit → auto-derive self; explicit → must equal self.
-        // - Human Principal: omit → None (manager god-view, no cutoff);
-        //   `"human_<self>"` → own participant cutoff; any other Bot UUID →
-        //   ownership verified via `is_owned_bot` (`created_by` or creator
-        //   relation edge), else forbidden. Reuses the same Human→Bot ownership
-        //   path as `update_participant`/`delete_participant` (VYQHN).
-        let view_bot_id: Option<String> = match &query.principal {
-            Principal::Bot(bot) => match &query.view_bot_id {
-                None => Some(bot.bot_uuid.clone()),
-                Some(explicit) if explicit == &bot.bot_uuid => Some(bot.bot_uuid.clone()),
-                Some(_) => {
-                    return Err(ApplicationError::forbidden(
-                        "Bot Principal may only view as self",
-                    ));
-                }
-            },
-            Principal::Human(human) => match &query.view_bot_id {
-                None => None,
-                Some(vid) if vid == &format!("human_{}", human.subject.id) => Some(vid.clone()),
-                Some(vid) => {
-                    let owned = self.is_owned_bot(human, vid.as_str()).await?;
-                    if !owned {
-                        return Err(ApplicationError::forbidden(
-                            "Human Principal may only view as self or an owned Bot",
-                        ));
-                    }
-                    Some(vid.clone())
-                }
-            },
-        };
         let (owner_filter, visible_from_seq) =
             MessageService::compute_session_history_query(
                 &group,
                 &session,
-                view_bot_id.as_deref(),
+                Some(&view_actor_id),
                 NEW_PARTICIPANT_VISIBLE_LIMIT as u64,
             )
             .map_err(map_group_use_case_error)?;

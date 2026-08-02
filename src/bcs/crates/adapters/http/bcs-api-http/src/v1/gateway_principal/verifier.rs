@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+use axum::http::HeaderMap;
 use bcs_service_api::application::v1::{
     AuthenticatedAccessKeyIdentity, AuthenticatedAppIdentity, AuthenticatedBotIdentity,
     AuthenticatedCaller, AuthenticatedUserIdentity,
@@ -6,8 +8,10 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use super::wire::{GatewayClaims, GatewayPrincipal};
+use crate::v1::common::{PrincipalVerificationError, PrincipalVerifier};
 
 const CLOCK_SKEW_SECONDS: u64 = 5;
+const GATEWAY_PRINCIPAL_HEADER: &str = "x-avernet-principal";
 
 pub struct GatewayPrincipalTrust {
     issuer: String,
@@ -105,6 +109,35 @@ impl GatewayPrincipalTokenVerifier {
         validate_times(claims.iat, claims.exp, now)?;
 
         project_principals(claims.principals)
+    }
+}
+
+#[async_trait]
+impl PrincipalVerifier for GatewayPrincipalTokenVerifier {
+    async fn verify(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+        let mut values = headers.get_all(GATEWAY_PRINCIPAL_HEADER).iter();
+        let value = values.next().ok_or(PrincipalVerificationError::Missing)?;
+        if values.next().is_some() {
+            return Err(PrincipalVerificationError::Invalid(
+                "Gateway Principal header must occur exactly once".into(),
+            ));
+        }
+        let token = value.to_str().map_err(|_| {
+            PrincipalVerificationError::Invalid(
+                "Gateway Principal header is not valid text".into(),
+            )
+        })?;
+        if token.is_empty() || token.trim() != token {
+            return Err(PrincipalVerificationError::Invalid(
+                "Gateway Principal header is empty or padded".into(),
+            ));
+        }
+        GatewayPrincipalTokenVerifier::verify(self, token).map_err(|_| {
+            PrincipalVerificationError::Invalid("Gateway Principal token is invalid".into())
+        })
     }
 }
 

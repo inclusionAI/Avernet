@@ -5,7 +5,6 @@
 //! / MemorySessionRepo / MemoryMessageRepo), mirroring the sibling
 //! `bcs-app-group` test harness.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,9 +15,10 @@ use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_message_store::MemoryMessageRepo;
 use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
-    AddSessionParticipant, AuthenticatedUser, BotParticipantMode, CompleteSession, CreateSession,
-    DeleteSession, DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions,
-    SessionInput, SessionMessageService, SessionParticipantInput, SessionService,
+    AddSessionParticipant, AuthenticatedBotIdentity, AuthenticatedCaller,
+    AuthenticatedUserIdentity, BotParticipantMode, CompleteSession, CreateSession, DeleteSession,
+    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionInput,
+    SessionMessageService, SessionParticipantInput, SessionService,
     SessionStatus as V1SessionStatus, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::port::repo::{MessageRepoPort, NewSessionParams, SessionRepoPort};
@@ -85,17 +85,24 @@ impl Fixture {
             )
             .await
             .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, bot_uuid, true)
+            .await
+            .expect("assign test Bot owner");
     }
 
     async fn store_group(&self, group_id: &str, driver: &str, context: Option<&str>) {
-        self.store_group_with_originator(group_id, driver, driver, context)
-            .await;
+        self.store_group_with_originator(
+            group_id,
+            driver,
+            &format!("human_{driver}"),
+            context,
+        )
+        .await;
     }
 
     /// Like `store_group` but lets the caller name a distinct group
-    /// `originator` — used by the Human-view authz tests where the Human must
-    /// be a group manager (originator) to pass `can_read_session` before the
-    /// `view_bot_id` authz runs.
+    /// `originator` for direct Human management tests.
     async fn store_group_with_originator(
         &self,
         group_id: &str,
@@ -142,25 +149,38 @@ impl Fixture {
     }
 }
 
-fn bot_principal(bot_uuid: &str) -> bcs_service_api::application::v1::Principal {
-    bcs_service_api::application::v1::Principal::bot(
-        bot_uuid.to_string(),
-        "tenant-a".to_string(),
-        BTreeSet::new(),
-    )
+fn bot_principal(bot_uuid: &str) -> AuthenticatedCaller {
+    human_principal(bot_uuid)
 }
 
-fn human_principal(staff_no: &str) -> bcs_service_api::application::v1::Principal {
-    bcs_service_api::application::v1::Principal::human(
-        AuthenticatedUser {
+fn human_principal(staff_no: &str) -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
             id: staff_no.to_string(),
             username: staff_no.to_string(),
             display_name: None,
             full_name: None,
-        },
-        "tenant-a".to_string(),
-        BTreeSet::new(),
-    )
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
+}
+
+fn bot_only_caller(bot_uuid: &str) -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: None,
+        bot: Some(AuthenticatedBotIdentity {
+            bot_uuid: bot_uuid.into(),
+            owner_id: "alice".into(),
+            app_id: 1,
+            agent_code: "test".into(),
+        }),
+        app: None,
+        access_key: None,
+    }
 }
 
 fn participant_input(bot_uuid: &str, mode: Option<BotParticipantMode>) -> SessionParticipantInput {
@@ -172,7 +192,7 @@ fn participant_input(bot_uuid: &str, mode: Option<BotParticipantMode>) -> Sessio
 
 async fn create_session(
     fixture: &Fixture,
-    principal: bcs_service_api::application::v1::Principal,
+    caller: AuthenticatedCaller,
     group_id: &str,
     driver: &str,
     participants: Vec<SessionParticipantInput>,
@@ -182,7 +202,7 @@ async fn create_session(
     fixture
         .service
         .create(CreateSession {
-            principal,
+            caller,
             group_id: group_id.to_string(),
             driver_bot_uuid: driver.to_string(),
             title: title.map(str::to_string),
@@ -304,7 +324,7 @@ async fn create_as_non_manager_is_forbidden() {
     let error = fixture
         .service
         .create(CreateSession {
-            principal: bot_principal("outsider"),
+            caller: bot_principal("outsider"),
             group_id: "g1".into(),
             driver_bot_uuid: "driver".into(),
             title: None,
@@ -328,7 +348,7 @@ async fn create_with_unknown_driver_bot_is_not_found() {
     let error = fixture
         .service
         .create(CreateSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: "g1".into(),
             driver_bot_uuid: "ghost".into(),
             title: None,
@@ -367,8 +387,9 @@ async fn list_sorts_desc_and_reports_total() {
     let page = SessionService::list(
         &fixture.service,
         ListSessions {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: "g1".into(),
+            view_bot_id: Some("driver".into()),
             offset: 0,
             limit: 10,
             status: None,
@@ -389,7 +410,7 @@ async fn list_sorts_desc_and_reports_total() {
 }
 
 #[tokio::test]
-async fn list_non_member_is_forbidden() {
+async fn list_authorized_human_with_no_participating_sessions_is_empty() {
     let fixture = Fixture::new().await;
     fixture.add_bot("driver").await;
     fixture.store_group("g1", "driver", None).await;
@@ -397,15 +418,166 @@ async fn list_non_member_is_forbidden() {
     let error = SessionService::list(
         &fixture.service,
         ListSessions {
-            principal: bot_principal("outsider"),
+            caller: bot_principal("outsider"),
             group_id: "g1".into(),
+            view_bot_id: None,
             offset: 0,
             limit: 10,
             status: None,
         },
     )
     .await
-    .expect_err("non-member should be forbidden");
+    .expect("an authorized Human view with no matching sessions is empty");
+    assert_eq!(error.total, 0);
+    assert!(error.items.is_empty());
+}
+
+#[tokio::test]
+async fn session_list_uses_only_the_selected_authorized_view_actor() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "owned", "unowned"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("owned", "alice", true)
+        .await
+        .expect("assign Alice's Bot ownership");
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    for participant in ["human_alice", "owned", "unowned"] {
+        fixture
+            .session_repo
+            .create(
+                "g1",
+                NewSessionParams {
+                    participants: vec![if participant.starts_with("human_") {
+                        Participant::human(participant, ParticipantRole::Observer)
+                    } else {
+                        Participant::bot(participant, ParticipantRole::Consultant)
+                    }],
+                    group_version: Some(group.version),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("seed actor-scoped Session");
+    }
+
+    let list = |view_bot_id| ListSessions {
+        caller: human_principal("alice"),
+        group_id: "g1".into(),
+        view_bot_id,
+        offset: 0,
+        limit: 20,
+        status: None,
+    };
+    let default_human = SessionService::list(&fixture.service, list(None))
+        .await
+        .expect("omission selects the authenticated Human");
+    assert_eq!(default_human.total, 1);
+    let explicit_human = SessionService::list(
+        &fixture.service,
+        list(Some("human_alice".into())),
+    )
+    .await
+    .expect("the authenticated Human is a valid explicit view");
+    assert_eq!(explicit_human.total, 1);
+    let owned_bot = SessionService::list(&fixture.service, list(Some("owned".into())))
+        .await
+        .expect("an exact-created_by Bot is a valid explicit view");
+    assert_eq!(owned_bot.total, 1);
+
+    for invalid_view in ["human_bob", "unowned", "missing"] {
+        let error = SessionService::list(
+            &fixture.service,
+            list(Some(invalid_view.into())),
+        )
+        .await
+        .expect_err("an unauthorized explicit view never falls back to Human");
+        assert!(matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn session_detail_accepts_human_or_exact_owned_bot_participation_only() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "owned", "unowned"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("owned", "alice", true)
+        .await
+        .expect("assign Alice's Bot ownership");
+    fixture.store_group("g1", "driver", None).await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let mut ids = Vec::new();
+    for participant in ["human_alice", "owned", "unowned"] {
+        let session = fixture
+            .session_repo
+            .create(
+                "g1",
+                NewSessionParams {
+                    participants: vec![if participant.starts_with("human_") {
+                        Participant::human(participant, ParticipantRole::Observer)
+                    } else {
+                        Participant::bot(participant, ParticipantRole::Consultant)
+                    }],
+                    group_version: Some(group.version),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("seed Session");
+        ids.push(session.id);
+    }
+
+    for session_id in &ids[..2] {
+        fixture
+            .service
+            .get(GetSession {
+                caller: human_principal("alice"),
+                session_id: session_id.clone(),
+            })
+            .await
+            .expect("Human or exact owned Bot participation grants detail read");
+    }
+    let error = fixture
+        .service
+        .get(GetSession {
+            caller: human_principal("alice"),
+            session_id: ids[2].clone(),
+        })
+        .await
+        .expect_err("an unowned Bot participant grants no detail read");
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+}
+
+#[tokio::test]
+async fn session_v1_rejects_a_caller_without_user_identity() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.store_group("g1", "driver", None).await;
+    let error = SessionService::list(
+        &fixture.service,
+        ListSessions {
+            caller: bot_only_caller("driver"),
+            group_id: "g1".into(),
+            view_bot_id: Some("driver".into()),
+            offset: 0,
+            limit: 20,
+            status: None,
+        },
+    )
+    .await
+    .expect_err("current V1 operations require an authenticated User");
     assert!(matches!(
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
@@ -433,7 +605,7 @@ async fn get_returns_detail_and_not_found_for_missing() {
     let detail = fixture
         .service
         .get(GetSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: outcome.session.session_id.clone(),
         })
         .await
@@ -444,7 +616,7 @@ async fn get_returns_detail_and_not_found_for_missing() {
     let error = fixture
         .service
         .get(GetSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: "g1:deadbeef".into(),
         })
         .await
@@ -473,7 +645,7 @@ async fn update_changes_title() {
     let detail = fixture
         .service
         .update(UpdateSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: outcome.session.session_id.clone(),
             title: Some("new title".into()),
         })
@@ -503,7 +675,7 @@ async fn update_requires_a_field() {
     let error = fixture
         .service
         .update(UpdateSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: outcome.session.session_id,
             title: None,
         })
@@ -534,7 +706,7 @@ async fn delete_is_idempotent() {
     let first = fixture
         .service
         .delete(DeleteSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
         })
         .await
@@ -544,7 +716,7 @@ async fn delete_is_idempotent() {
     let second = fixture
         .service
         .delete(DeleteSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id,
         })
         .await
@@ -575,7 +747,7 @@ async fn complete_is_idempotent() {
     let first = fixture
         .service
         .complete(CompleteSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
         })
         .await
@@ -586,7 +758,7 @@ async fn complete_is_idempotent() {
     let second = fixture
         .service
         .complete(CompleteSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id,
         })
         .await
@@ -637,11 +809,11 @@ async fn list_messages_returns_descending_with_cursor() {
     let page = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             before: None,
             limit: 50,
-            view_bot_id: None,
+            view_bot_id: Some("driver".into()),
         },
     )
     .await
@@ -712,11 +884,11 @@ async fn list_messages_composite_cursor_no_skip_tied_created_at() {
     let page = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             before: None,
             limit: 2,
-            view_bot_id: None,
+            view_bot_id: Some("driver".into()),
         },
     )
     .await
@@ -732,11 +904,11 @@ async fn list_messages_composite_cursor_no_skip_tied_created_at() {
     let page = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             before: page.next_cursor,
             limit: 2,
-            view_bot_id: None,
+            view_bot_id: Some("driver".into()),
         },
     )
     .await
@@ -752,11 +924,11 @@ async fn list_messages_composite_cursor_no_skip_tied_created_at() {
     let page = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id,
             before: page.next_cursor,
             limit: 2,
-            view_bot_id: None,
+            view_bot_id: Some("driver".into()),
         },
     )
     .await
@@ -790,11 +962,11 @@ async fn list_messages_rejects_malformed_before_cursor() {
     let error = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: outcome.session.session_id.clone(),
             before: Some("not-a-cursor".to_string()),
             limit: 10,
-            view_bot_id: None,
+            view_bot_id: Some("driver".into()),
         },
     )
     .await
@@ -825,7 +997,7 @@ async fn participant_add_update_remove_lifecycle() {
     let added = fixture
         .service
         .add_participant(AddSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
             mode: Some(BotParticipantMode::Auto),
@@ -840,7 +1012,7 @@ async fn participant_add_update_remove_lifecycle() {
     let error = fixture
         .service
         .add_participant(AddSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
             mode: None,
@@ -853,7 +1025,7 @@ async fn participant_add_update_remove_lifecycle() {
     let updated = fixture
         .service
         .update_participant(UpdateSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
             mode: BotParticipantMode::Muted,
@@ -866,7 +1038,7 @@ async fn participant_add_update_remove_lifecycle() {
     let removed = fixture
         .service
         .delete_participant(DeleteSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
         })
@@ -878,7 +1050,7 @@ async fn participant_add_update_remove_lifecycle() {
     let again = fixture
         .service
         .delete_participant(DeleteSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id,
             bot_uuid: "newcomer".into(),
         })
@@ -888,10 +1060,7 @@ async fn participant_add_update_remove_lifecycle() {
 }
 
 #[tokio::test]
-async fn delete_participant_human_owner_succeeds_and_non_owner_forbidden() {
-    // VYQHN: a Human principal who owns the target Bot (via created_by) may
-    // self-service-remove it from a session they can neither manage nor read
-    // otherwise; a Human without ownership is still forbidden.
+async fn owned_bot_does_not_grant_session_participant_removal_permission() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "bot-a"] {
         fixture.add_bot(bot).await;
@@ -915,38 +1084,26 @@ async fn delete_participant_human_owner_succeeds_and_non_owner_forbidden() {
     .await;
     let session_id = outcome.session.session_id.clone();
 
-    // Owner Human removes the owned Bot (not self, not manager, not creator
-    // of this session): authorized solely by is_human_owner.
-    let removed = fixture
+    let owner_error = fixture
         .service
         .delete_participant(DeleteSessionParticipant {
-            principal: human_principal("staff-1"),
+            caller: human_principal("staff-1"),
             session_id: session_id.clone(),
             bot_uuid: "bot-a".into(),
         })
         .await
-        .expect("owner human removes owned bot");
-    assert!(removed.deleted);
-
-    // Re-add bot-a (the driver is a manager and bot-a is public) so the
-    // non-owner scenario starts from the same participant state.
-    fixture
-        .service
-        .add_participant(AddSessionParticipant {
-            principal: bot_principal("driver"),
-            session_id: session_id.clone(),
-            bot_uuid: "bot-a".into(),
-            mode: Some(BotParticipantMode::Auto),
-        })
-        .await
-        .expect("re-add bot-a");
+        .expect_err("Bot ownership grants detail read only, not management");
+    assert!(matches!(
+        owner_error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
 
     // Non-owner Human (staff-2) is forbidden — neither self, owner, nor
     // manager/creator.
     let error = fixture
         .service
         .delete_participant(DeleteSessionParticipant {
-            principal: human_principal("staff-2"),
+            caller: human_principal("staff-2"),
             session_id,
             bot_uuid: "bot-a".into(),
         })
@@ -959,9 +1116,7 @@ async fn delete_participant_human_owner_succeeds_and_non_owner_forbidden() {
 }
 
 #[tokio::test]
-async fn update_participant_human_owner_succeeds_and_non_owner_forbidden() {
-    // VYQHN symmetric: the same Human-owner authorization applies to the
-    // participant mode update path.
+async fn owned_bot_does_not_grant_session_participant_update_permission() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "bot-a"] {
         fixture.add_bot(bot).await;
@@ -984,24 +1139,26 @@ async fn update_participant_human_owner_succeeds_and_non_owner_forbidden() {
     .await;
     let session_id = outcome.session.session_id.clone();
 
-    // Owner Human mutates the owned Bot's participant mode.
-    let updated = fixture
+    let owner_error = fixture
         .service
         .update_participant(UpdateSessionParticipant {
-            principal: human_principal("staff-1"),
+            caller: human_principal("staff-1"),
             session_id: session_id.clone(),
             bot_uuid: "bot-a".into(),
             mode: BotParticipantMode::Muted,
         })
         .await
-        .expect("owner human updates owned bot");
-    assert_eq!(updated.mode, ParticipantMode::Muted);
+        .expect_err("Bot ownership grants detail read only, not management");
+    assert!(matches!(
+        owner_error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
 
     // Non-owner Human is forbidden.
     let error = fixture
         .service
         .update_participant(UpdateSessionParticipant {
-            principal: human_principal("staff-2"),
+            caller: human_principal("staff-2"),
             session_id,
             bot_uuid: "bot-a".into(),
             mode: BotParticipantMode::Auto,
@@ -1050,7 +1207,7 @@ async fn complete_service_invocation_session_rejected() {
     let error = fixture
         .service
         .complete(CompleteSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session.id,
         })
         .await
@@ -1095,7 +1252,7 @@ async fn session_only_participant_can_list_sessions() {
     fixture
         .service
         .add_participant(AddSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
             mode: Some(BotParticipantMode::Auto),
@@ -1117,8 +1274,9 @@ async fn session_only_participant_can_list_sessions() {
     let page = SessionService::list(
         &fixture.service,
         ListSessions {
-            principal: bot_principal("newcomer"),
+            caller: bot_principal("newcomer"),
             group_id: "g1".into(),
+            view_bot_id: Some("newcomer".into()),
             offset: 0,
             limit: 10,
             status: None,
@@ -1163,7 +1321,7 @@ async fn session_only_participant_list_sessions_scoped() {
     fixture
         .service
         .add_participant(AddSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: s1_id.clone(),
             bot_uuid: "newcomer".into(),
             mode: Some(BotParticipantMode::Auto),
@@ -1208,8 +1366,9 @@ async fn session_only_participant_list_sessions_scoped() {
     let page = SessionService::list(
         &fixture.service,
         ListSessions {
-            principal: bot_principal("newcomer"),
+            caller: bot_principal("newcomer"),
             group_id: "g1".into(),
+            view_bot_id: Some("newcomer".into()),
             offset: 0,
             limit: 10,
             status: None,
@@ -1240,7 +1399,7 @@ async fn create_session_duplicate_participant_rejected() {
     let error = fixture
         .service
         .create(CreateSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: "g1".into(),
             driver_bot_uuid: "driver".into(),
             title: None,
@@ -1265,8 +1424,9 @@ async fn create_session_duplicate_participant_rejected() {
     let page = SessionService::list(
         &fixture.service,
         ListSessions {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             group_id: "g1".into(),
+            view_bot_id: Some("driver".into()),
             offset: 0,
             limit: 10,
             status: None,
@@ -1277,16 +1437,11 @@ async fn create_session_duplicate_participant_rejected() {
     assert_eq!(page.total, 0, "no session should be persisted on rejection");
 }
 
-// ── view_bot_id authz (Principal-based visibility scoping) ──────────────
+// ── view_bot_id authz (Human-facing visibility scoping) ─────────────────
 //
-// The optional `view_bot_id` query param on `list_session_messages` is
-// resolved by the V1 facade into the `Option<&str>` cutoff identity passed
-// to the legacy `compute_session_history_query` helper. Authz rules:
-// - Bot Principal: omit → self; explicit → must equal self; else forbidden.
-// - Human Principal (must be a group manager/originator to read the session):
-//   omit → None (manager view); `"human_<self>"` → own view; any other Bot
-//   UUID → ownership verified via `is_owned_bot` (`created_by` or creator
-//   relation edge), else forbidden.
+// Omission selects the authenticated User's Human Actor. An explicit Human
+// must be that same Actor; an explicit Bot requires exact `created_by`
+// ownership. The selected Actor must be a Session Participant.
 //
 // These tests use a ManagerWorker group + owner-tagged messages so the
 // `MessageOwnerFilter` scoping (`IsNull` public vs `Eq(worker)`) is the
@@ -1312,6 +1467,7 @@ async fn setup_manager_worker_session(fixture: &Fixture) -> String {
                     Participant::bot("driver", ParticipantRole::Driver),
                     Participant::bot("worker-a", ParticipantRole::Worker),
                     Participant::bot("worker-b", ParticipantRole::Worker),
+                    Participant::human("human_staff-1", ParticipantRole::Observer),
                 ],
                 group_version: Some(group.version),
                 caller_id: Some("driver".to_string()),
@@ -1330,79 +1486,7 @@ async fn setup_manager_worker_session(fixture: &Fixture) -> String {
 }
 
 #[tokio::test]
-async fn bot_view_session_messages_defaults_to_self() {
-    let fixture = Fixture::new().await;
-    for bot in ["driver", "worker-a", "worker-b"] {
-        fixture.add_bot(bot).await;
-    }
-    fixture
-        .store_manager_worker_group_with_originator(
-            "g1",
-            "driver",
-            &["worker-a", "worker-b"],
-            "driver",
-            None,
-        )
-        .await;
-    let session_id = setup_manager_worker_session(&fixture).await;
-
-    let page = SessionMessageService::list(
-        &fixture.service,
-        ListSessionMessages {
-            principal: bot_principal("worker-a"),
-            session_id: session_id.clone(),
-            before: None,
-            limit: 100,
-            view_bot_id: None,
-        },
-    )
-    .await
-    .expect("list messages");
-
-    // Omitted view_bot_id auto-derives self ("worker-a"); as a Worker this
-    // resolves to owner_filter=Eq("worker-a") → only worker-a's message.
-    assert_eq!(page.messages.len(), 1);
-    assert!(!page.has_more);
-    assert_eq!(page.messages[0].session_seq, 2);
-}
-
-#[tokio::test]
-async fn bot_view_session_messages_explicitly_self() {
-    let fixture = Fixture::new().await;
-    for bot in ["driver", "worker-a", "worker-b"] {
-        fixture.add_bot(bot).await;
-    }
-    fixture
-        .store_manager_worker_group_with_originator(
-            "g1",
-            "driver",
-            &["worker-a", "worker-b"],
-            "driver",
-            None,
-        )
-        .await;
-    let session_id = setup_manager_worker_session(&fixture).await;
-
-    let page = SessionMessageService::list(
-        &fixture.service,
-        ListSessionMessages {
-            principal: bot_principal("worker-a"),
-            session_id: session_id.clone(),
-            before: None,
-            limit: 100,
-            view_bot_id: Some("worker-a".to_string()),
-        },
-    )
-    .await
-    .expect("list messages");
-
-    // Explicit self == omitted self: same Eq("worker-a") scoping.
-    assert_eq!(page.messages.len(), 1);
-    assert_eq!(page.messages[0].session_seq, 2);
-}
-
-#[tokio::test]
-async fn bot_view_session_messages_as_other_bot_forbidden() {
+async fn omitted_message_view_selects_human_and_requires_session_participation() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "worker-a", "worker-b"] {
         fixture.add_bot(bot).await;
@@ -1421,15 +1505,15 @@ async fn bot_view_session_messages_as_other_bot_forbidden() {
     let error = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: bot_principal("worker-a"),
-            session_id,
+            caller: bot_principal("worker-a"),
+            session_id: session_id.clone(),
             before: None,
             limit: 100,
-            view_bot_id: Some("worker-b".to_string()),
+            view_bot_id: None,
         },
     )
     .await
-    .expect_err("bot impersonating another bot should be forbidden");
+    .expect_err("omission selects human_worker-a, which is not a participant");
     assert!(matches!(
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
@@ -1437,7 +1521,77 @@ async fn bot_view_session_messages_as_other_bot_forbidden() {
 }
 
 #[tokio::test]
-async fn human_view_session_messages_god_view_no_cutoff() {
+async fn human_caller_can_explicitly_select_an_owned_bot_message_view() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a", "worker-b"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a", "worker-b"],
+            "driver",
+            None,
+        )
+        .await;
+    let session_id = setup_manager_worker_session(&fixture).await;
+
+    let page = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            caller: bot_principal("worker-a"),
+            session_id: session_id.clone(),
+            before: None,
+            limit: 100,
+            view_bot_id: Some("worker-a".to_string()),
+        },
+    )
+    .await
+    .expect("list messages");
+
+    // Explicit owned Bot resolves to Eq("worker-a") scoping.
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(page.messages[0].session_seq, 2);
+}
+
+#[tokio::test]
+async fn human_caller_cannot_select_an_unowned_bot_message_view() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a", "worker-b"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a", "worker-b"],
+            "driver",
+            None,
+        )
+        .await;
+    let session_id = setup_manager_worker_session(&fixture).await;
+
+    let error = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            caller: bot_principal("worker-a"),
+            session_id,
+            before: None,
+            limit: 100,
+            view_bot_id: Some("worker-b".to_string()),
+        },
+    )
+    .await
+    .expect_err("an unowned Bot view should be forbidden");
+    assert!(matches!(
+        error,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+}
+
+#[tokio::test]
+async fn omitted_human_message_view_equals_the_human_participant_view() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "worker-a", "worker-b"] {
         fixture.add_bot(bot).await;
@@ -1456,7 +1610,7 @@ async fn human_view_session_messages_god_view_no_cutoff() {
     let page = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: human_principal("staff-1"),
+            caller: human_principal("staff-1"),
             session_id: session_id.clone(),
             before: None,
             limit: 100,
@@ -1466,9 +1620,8 @@ async fn human_view_session_messages_god_view_no_cutoff() {
     .await
     .expect("list messages");
 
-    // Omitted → None → manager god-view: ManagerWorker Public (IsNull) →
-    // only the public message (worker-private messages are hidden from the
-    // unscoped manager view, distinct from the worker-a bot view above).
+    // Omitted selects human_staff-1. Human ManagerWorker views are Public
+    // (IsNull), so only the public message is visible.
     assert_eq!(page.messages.len(), 1);
     assert_eq!(page.messages[0].session_seq, 1);
 }
@@ -1493,7 +1646,7 @@ async fn human_view_session_messages_as_self_human() {
     let page = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: human_principal("staff-1"),
+            caller: human_principal("staff-1"),
             session_id: session_id.clone(),
             before: None,
             limit: 100,
@@ -1535,7 +1688,7 @@ async fn human_view_session_messages_as_owned_bot() {
     let page = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: human_principal("staff-1"),
+            caller: human_principal("staff-1"),
             session_id: session_id.clone(),
             before: None,
             limit: 100,
@@ -1572,7 +1725,7 @@ async fn human_view_session_messages_as_unowned_bot_forbidden() {
     let error = SessionMessageService::list(
         &fixture.service,
         ListSessionMessages {
-            principal: human_principal("staff-1"),
+            caller: human_principal("staff-1"),
             session_id,
             before: None,
             limit: 100,
@@ -1633,7 +1786,7 @@ async fn get_preserves_human_participant_from_legacy_invitation_join() {
     let detail = fixture
         .service
         .get(GetSession {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session.id.clone(),
         })
         .await
@@ -1683,7 +1836,7 @@ async fn create_session_preserves_manager_worker_worker_role() {
             "g1",
             "driver",
             &["worker"],
-            "driver",
+            "human_driver",
             Some("the task"),
         )
         .await;
@@ -1783,7 +1936,7 @@ async fn add_participant_duplication_rejects_409() {
     fixture
         .service
         .add_participant(AddSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
             mode: Some(BotParticipantMode::Auto),
@@ -1795,7 +1948,7 @@ async fn add_participant_duplication_rejects_409() {
     let error = fixture
         .service
         .add_participant(AddSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
             mode: None,
@@ -1827,7 +1980,7 @@ async fn add_participant_derives_worker_role_for_manager_worker() {
             "g1",
             "driver",
             &["worker"],
-            "driver",
+            "human_driver",
             None,
         )
         .await;
@@ -1848,7 +2001,7 @@ async fn add_participant_derives_worker_role_for_manager_worker() {
     let added = fixture
         .service
         .add_participant(AddSessionParticipant {
-            principal: bot_principal("driver"),
+            caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "worker".into(),
             mode: Some(BotParticipantMode::Auto),

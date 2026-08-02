@@ -5,8 +5,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, DeleteBotFriendship, ListBotFriendRequests, ListBotFriendships,
-    Principal, RejectFriendRequest,
+    AcceptFriendRequest, AuthenticatedCaller, DeleteBotFriendship, ListBotFriendRequests,
+    ListBotFriendships, RejectFriendRequest,
 };
 
 use crate::v1::common::{
@@ -42,7 +42,7 @@ pub fn router() -> Router<ApiState> {
 
 async fn list_bot_friendships(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<ListFriendshipsQuery>, QueryRejection>,
@@ -52,7 +52,7 @@ async fn list_bot_friendships(
     let result = state
         .friendship_service
         .list_bot_friendships(ListBotFriendships {
-            principal,
+            caller,
             bot_uuid,
             offset: query.offset,
             limit: query.limit,
@@ -68,7 +68,7 @@ async fn list_bot_friendships(
 
 async fn delete_bot_friendship(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -77,7 +77,7 @@ async fn delete_bot_friendship(
     let result = state
         .friendship_service
         .delete_bot_friendship(DeleteBotFriendship {
-            principal,
+            caller,
             bot_uuid,
             friend_bot_uuid,
         })
@@ -92,7 +92,7 @@ async fn delete_bot_friendship(
 
 async fn create_bot_friend_request(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<CreateFriendRequestRequest>, JsonRejection>,
@@ -101,7 +101,7 @@ async fn create_bot_friend_request(
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .friendship_service
-        .create_bot_friend_request(body.into_command(principal, bot_uuid))
+        .create_bot_friend_request(body.into_command(caller, bot_uuid))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
@@ -113,7 +113,7 @@ async fn create_bot_friend_request(
 
 async fn list_bot_friend_requests(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<ListFriendRequestsQuery>, QueryRejection>,
@@ -123,7 +123,7 @@ async fn list_bot_friend_requests(
     let result = state
         .friendship_service
         .list_bot_friend_requests(ListBotFriendRequests {
-            principal,
+            caller,
             bot_uuid,
             direction: query.direction.unwrap_or_default(),
             status: query.status,
@@ -141,7 +141,7 @@ async fn list_bot_friend_requests(
 
 async fn accept_friend_request(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -150,7 +150,7 @@ async fn accept_friend_request(
     let result = state
         .friendship_service
         .accept_friend_request(AcceptFriendRequest {
-            principal,
+            caller,
             request_id: request_id_path,
         })
         .await
@@ -164,7 +164,7 @@ async fn accept_friend_request(
 
 async fn reject_friend_request(
     State(state): State<ApiState>,
-    Extension(principal): Extension<Principal>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
@@ -173,7 +173,7 @@ async fn reject_friend_request(
     let result = state
         .friendship_service
         .reject_friend_request(RejectFriendRequest {
-            principal,
+            caller,
             request_id: request_id_path,
         })
         .await

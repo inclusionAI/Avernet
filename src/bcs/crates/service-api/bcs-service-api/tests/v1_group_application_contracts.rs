@@ -2,10 +2,10 @@ use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    AddGroupParticipant, ApplicationError, AuthenticatedUser, BotFinalDelivery, DeleteGroup,
-    DeleteGroupParticipant, DeleteResult,
+    AddGroupParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUser,
+    AuthenticatedUserIdentity, BotFinalDelivery, DeleteGroup, DeleteGroupParticipant, DeleteResult,
     DirectMessageGroupSummary, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupKindFilter,
-    GroupService, GroupStatus, GroupSummary, GroupVisibility, ListBotGroups, Membership,
+    GroupService, GroupStatus, GroupSummary, GroupVisibility, ListGroups, Membership,
     MembershipFilter, Page, Participant, ParticipantMode, ParticipantRole, Principal, UpdateGroup,
     UpdateGroupParticipant,
 };
@@ -14,9 +14,9 @@ struct NoopGroupService;
 
 #[async_trait]
 impl GroupService for NoopGroupService {
-    async fn list_bot_groups(
+    async fn list_groups(
         &self,
-        _command: ListBotGroups,
+        _command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
         Ok(Page::empty(0, 20))
     }
@@ -64,6 +64,21 @@ impl GroupService for NoopGroupService {
     }
 }
 
+fn human_caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-1".into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
+}
+
 #[test]
 fn principal_preserves_gateway_identity_without_bot_impersonation() {
     let bot = Principal::bot("bot-123", "tenant-a", BTreeSet::new());
@@ -91,10 +106,10 @@ fn principal_preserves_gateway_identity_without_bot_impersonation() {
 }
 
 #[test]
-fn list_command_carries_principal_and_all_approved_filters() {
-    let command = ListBotGroups {
-        principal: Principal::bot("bot-1", "tenant-a", BTreeSet::new()),
-        bot_uuid: "bot-1".into(),
+fn list_command_carries_caller_view_actor_and_all_approved_filters() {
+    let command = ListGroups {
+        caller: human_caller(),
+        view_bot_id: Some("bot-1".into()),
         offset: 10,
         limit: 25,
         q: Some("planning".into()),
@@ -103,7 +118,8 @@ fn list_command_carries_principal_and_all_approved_filters() {
         strategy: Some(bcs_service_api::application::v1::GroupStrategy::StateMachine),
     };
 
-    assert_eq!(command.principal.actor_id(), "bot-1");
+    assert_eq!(command.caller.user.expect("User").id, "staff-1");
+    assert_eq!(command.view_bot_id.as_deref(), Some("bot-1"));
     assert_eq!(command.membership, MembershipFilter::SessionOnly);
     assert_eq!(command.kind, GroupKindFilter::All);
 }
@@ -150,26 +166,26 @@ fn group_service_is_object_safe() {
 }
 
 #[test]
-fn participant_commands_carry_principal_and_no_raw_credentials() {
-    let principal = Principal::bot("bot-1", "tenant-a", BTreeSet::new());
+fn participant_commands_carry_caller_and_no_raw_credentials() {
+    let caller = human_caller();
     let add = AddGroupParticipant {
-        principal: principal.clone(),
+        caller: caller.clone(),
         group_id: "g1".into(),
         actor_id: "bot-2".into(),
         role: ParticipantRole::Consultant,
     };
     let update = UpdateGroupParticipant {
-        principal: principal.clone(),
+        caller: caller.clone(),
         group_id: "g1".into(),
         actor_id: "bot-2".into(),
         mode: ParticipantMode::Muted,
     };
     let remove = DeleteGroupParticipant {
-        principal,
+        caller,
         group_id: "g1".into(),
         actor_id: "bot-2".into(),
     };
-    for cmd in [&add.principal as &Principal, &update.principal, &remove.principal] {
+    for cmd in [&add.caller, &update.caller, &remove.caller] {
         let s = format!("{cmd:?}");
         assert!(!s.contains("Cookie") && !s.contains("Bearer") && !s.contains("sender"));
     }

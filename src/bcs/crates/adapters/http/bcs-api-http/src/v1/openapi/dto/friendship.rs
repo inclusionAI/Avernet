@@ -1,5 +1,5 @@
 use bcs_service_api::application::v1::{
-    CreateBotFriendRequest, FriendRequestDirection, FriendRequestStatus, Principal,
+    AuthenticatedCaller, CreateBotFriendRequest, FriendRequestDirection, FriendRequestStatus,
 };
 use serde::Deserialize;
 
@@ -15,9 +15,13 @@ pub struct CreateFriendRequestRequest {
 }
 
 impl CreateFriendRequestRequest {
-    pub fn into_command(self, principal: Principal, bot_uuid: String) -> CreateBotFriendRequest {
+    pub fn into_command(
+        self,
+        caller: AuthenticatedCaller,
+        bot_uuid: String,
+    ) -> CreateBotFriendRequest {
         CreateBotFriendRequest {
-            principal,
+            caller,
             bot_uuid,
             to_bot_uuid: self.to_bot_uuid,
         }

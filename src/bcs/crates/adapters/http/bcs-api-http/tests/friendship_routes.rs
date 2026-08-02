@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -7,13 +6,15 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
-    ApplicationError, CompleteSession, CreateBotFriendRequest, CreateGroup, CreateGroupInvitation,
+    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, CompleteSession,
+    CreateBotFriendRequest, CreateGroup, CreateGroupInvitation,
     CreateSession, CreateSessionInvitation, CreateSessionOutcome, DeleteGroup,
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, Friendship,
     FriendshipService, FriendRequest, FriendRequestDirection, FriendRequestStatus, GetGroup,
     GetSession, GroupDetail, GroupService, GroupSummary, Invitation, InvitationAcceptResult,
-    InvitationService, ListBotGroups, ListBotFriendRequests, ListBotFriendships, ListSessionMessages,
-    ListSessions, Page, Principal, RejectFriendRequest, DeleteBotFriendship, SessionCompletionResult,
+    InvitationService, ListGroups, ListBotFriendRequests, ListBotFriendships,
+    ListSessionMessages, ListSessions, Page, RejectFriendRequest, DeleteBotFriendship,
+    SessionCompletionResult,
     SessionDetail, SessionMessagePage, SessionMessageService, SessionParticipant, SessionService,
     SessionSummary, UpdateGroup, UpdateGroupParticipant, UpdateSession,
     UpdateSessionParticipant,
@@ -27,26 +28,44 @@ use tower::ServiceExt;
 // ---------------------------------------------------------------------------
 
 struct HeaderVerifier {
-    principal: Principal,
+    caller: AuthenticatedCaller,
 }
 
 #[async_trait]
 impl PrincipalVerifier for HeaderVerifier {
-    async fn verify(&self, headers: &HeaderMap) -> Result<Principal, PrincipalVerificationError> {
+    async fn verify(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.principal.clone())
+            Ok(self.caller.clone())
         } else {
             Err(PrincipalVerificationError::Missing)
         }
     }
 }
 
-fn principal() -> Principal {
-    Principal::bot("bot-1", "tenant-a", BTreeSet::new())
+fn caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-1".into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    }
+}
+
+fn caller_user_id(caller: &AuthenticatedCaller) -> &str {
+    caller.user.as_ref().expect("User identity").id.as_str()
 }
 
 fn authenticated_request(method: &str, uri: &str, body: Value) -> Request<Body> {
@@ -76,9 +95,9 @@ struct NoopGroupService;
 
 #[async_trait]
 impl GroupService for NoopGroupService {
-    async fn list_bot_groups(
+    async fn list_groups(
         &self,
-        _command: ListBotGroups,
+        _command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
         Err(ApplicationError::internal("group not configured"))
     }
@@ -360,7 +379,7 @@ fn test_router(service: Arc<FakeFriendshipService>) -> axum::Router {
         Arc::new(NoopInvitationService),
         service,
         Arc::new(HeaderVerifier {
-            principal: principal(),
+            caller: caller(),
         }),
     ))
 }
@@ -395,7 +414,7 @@ async fn list_friendships_returns_page_and_forwards_principal() {
     {
         let listed = service.listed_friendships.lock().expect("list friendships lock");
         let listed = listed.as_ref().expect("list friendships command");
-        assert_eq!(listed.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&listed.caller), "staff-1");
         assert_eq!(listed.bot_uuid, "bot-1");
         assert_eq!(listed.offset, 5);
         assert_eq!(listed.limit, 10);
@@ -444,7 +463,7 @@ async fn remove_friendship_returns_deleted_and_forwards_principal() {
     {
         let removed = service.removed_friendship.lock().expect("remove friendship lock");
         let removed = removed.as_ref().expect("remove friendship command");
-        assert_eq!(removed.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&removed.caller), "staff-1");
         assert_eq!(removed.bot_uuid, "bot-1");
         assert_eq!(removed.friend_bot_uuid, "bot-2");
     }
@@ -477,7 +496,7 @@ async fn create_friend_request_returns_created_and_forwards_principal() {
             .lock()
             .expect("create friend request lock");
         let created = created.as_ref().expect("create friend request command");
-        assert_eq!(created.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&created.caller), "staff-1");
         assert_eq!(created.bot_uuid, "bot-1");
         assert_eq!(created.to_bot_uuid, "bot-2");
     }
@@ -509,7 +528,7 @@ async fn list_friend_requests_returns_page_and_forwards_filters() {
             .lock()
             .expect("list friend requests lock");
         let listed = listed.as_ref().expect("list friend requests command");
-        assert_eq!(listed.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&listed.caller), "staff-1");
         assert_eq!(listed.bot_uuid, "bot-1");
         assert_eq!(listed.direction, FriendRequestDirection::Sent);
         assert_eq!(listed.status, Some(FriendRequestStatus::Pending));
@@ -570,7 +589,7 @@ async fn accept_friend_request_returns_ok_and_forwards_principal() {
             .lock()
             .expect("accept friend request lock");
         let accepted = accepted.as_ref().expect("accept friend request command");
-        assert_eq!(accepted.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&accepted.caller), "staff-1");
         assert_eq!(accepted.request_id, "req-1");
     }
 }
@@ -599,7 +618,7 @@ async fn reject_friend_request_returns_ok_and_forwards_principal() {
             .lock()
             .expect("reject friend request lock");
         let rejected = rejected.as_ref().expect("reject friend request command");
-        assert_eq!(rejected.principal.actor_id(), "bot-1");
+        assert_eq!(caller_user_id(&rejected.caller), "staff-1");
         assert_eq!(rejected.request_id, "req-1");
     }
 }
