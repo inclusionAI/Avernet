@@ -1,20 +1,26 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from fastapi_injector import attach_injector
+from injector import Injector, InstanceProvider, Module, singleton
+
 from engine.community.api.session_files.router import router
 from engine.community.core.resource_materialization.models import (
     ManifestEntry,
     hash_identifier,
 )
 from engine.community.core.resource_materialization.service import ManifestStore
+from engine.community.core.session_files.export_service import SessionFileExportService
+from engine.community.core.session_files.models import (
+    BaasFileExportShareLink,
+)
 from engine.community.core.session_files.service import SessionFileService
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from fastapi_injector import attach_injector
-from injector import Injector, InstanceProvider, Module, singleton
 
 
 def _write_ready_file(root: Path, session_key: str, content: bytes = b"report") -> Path:
@@ -40,6 +46,7 @@ def _write_ready_file(root: Path, session_key: str, content: bytes = b"report") 
             observed_size=observed.st_size,
             observed_mtime_ns=observed.st_mtime_ns,
             observed_inode=observed.st_ino,
+            baas_tenant="team_claw",
         )
     )
     return target
@@ -49,9 +56,38 @@ def _write_ready_file(root: Path, session_key: str, content: bytes = b"report") 
 def client(tmp_path: Path):
     service = SessionFileService(workspace_root_provider=lambda: tmp_path)
 
+    class _ExportClient:
+        async def create_share_link(self, request, *, expire_seconds):
+            assert expire_seconds == 7200
+            return BaasFileExportShareLink(
+                download_url="https://oss.example/file?redacted",
+                expires_at="2099-08-02T12:00:00Z",
+            )
+
+        async def create_upload_grant(self, request, *, filename, size_bytes):
+            raise AssertionError("unchanged router fixture must not upload")
+
+        async def upload_file(self, grant, source_path, *, resource_id):
+            raise AssertionError("unchanged router fixture must not upload")
+
+        async def complete_upload(self, request):
+            raise AssertionError("unchanged router fixture must not upload")
+
+    export_service = SessionFileExportService(
+        session_file_service=service,
+        export_client=_ExportClient(),
+    )
+
     class _Module(Module):
         def configure(self, binder) -> None:
-            binder.bind(SessionFileService, to=InstanceProvider(service), scope=singleton)
+            binder.bind(
+                SessionFileService, to=InstanceProvider(service), scope=singleton
+            )
+            binder.bind(
+                SessionFileExportService,
+                to=InstanceProvider(export_service),
+                scope=singleton,
+            )
 
     app = FastAPI()
     attach_injector(app, Injector([_Module()]))
@@ -79,7 +115,7 @@ def test_list_and_content_are_scoped_to_manifest_session(client):
     )
     content = test_client.get(
         "/api/session-files/sr_001/content",
-        params={"sessionKey": "session-a", "disposition": "attachment"},
+        params={"sessionKey": "session-a", "disposition": "inline"},
     )
     cross_session = test_client.get(
         "/api/session-files/sr_001/content",
@@ -99,7 +135,7 @@ def test_list_and_content_are_scoped_to_manifest_session(client):
     }
     assert content.status_code == 200
     assert content.content == b"report"
-    assert content.headers["content-disposition"].startswith("attachment;")
+    assert content.headers["content-disposition"].startswith("inline;")
     assert cross_session.status_code == 404
 
 
@@ -133,6 +169,47 @@ def test_changed_and_missing_files_are_not_streamed(client):
     assert listed.json()["files"][0]["availability"] == "missing"
     assert missing.status_code == 409
     assert missing.json()["detail"] == "resource_missing"
+
+
+def test_small_attachment_streams_without_baas(client):
+    test_client, root = client
+    _write_ready_file(root, "session-a")
+    params = {"sessionKey": "session-a", "disposition": "attachment"}
+
+    response = test_client.get("/api/session-files/sr_001/content", params=params)
+
+    assert response.status_code == 200
+    assert response.content == b"report"
+    assert response.headers["content-disposition"].startswith("attachment;")
+
+
+def test_large_attachment_returns_preparing_then_external_url(client):
+    test_client, root = client
+    _write_ready_file(root, "session-a", b"x" * (30 * 1024 * 1024 + 1))
+    params = {"sessionKey": "session-a", "disposition": "attachment"}
+
+    preparing = test_client.get("/api/session-files/sr_001/content", params=params)
+    time.sleep(0.05)
+    ready = test_client.get("/api/session-files/sr_001/content", params=params)
+
+    assert preparing.status_code == 202
+    assert preparing.headers["retry-after"] == "2"
+    assert ready.status_code == 200
+    assert ready.json()["delivery"] == "external_url"
+    assert ready.headers["cache-control"] == "no-store"
+
+
+def test_inline_rejects_large_files_without_starting_export(client):
+    test_client, root = client
+    _write_ready_file(root, "session-a", b"x" * (30 * 1024 * 1024 + 1))
+
+    response = test_client.get(
+        "/api/session-files/sr_001/content",
+        params={"sessionKey": "session-a", "disposition": "inline"},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "resource_preview_too_large"
 
 
 def test_delete_removes_only_manifest_entry_and_local_file(client):

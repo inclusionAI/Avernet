@@ -53,8 +53,7 @@ def _request(content: bytes, **overrides) -> MaterializationRequest:
         "scope_key_hash": "scope_abc",
         "session_key_hash": "session_abc",
         "device_path": (
-            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
-            "sr_001/report.txt"
+            "workspace/.teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
         ),
         "filename": "report.txt",
         "size_bytes": len(content),
@@ -78,8 +77,7 @@ async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Pa
     result = await service.materialize(_request(content))
 
     expected = (
-        tmp_path
-        / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+        tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
     ).resolve()
     assert result.ready is True
     assert Path(result.canonical_bot_absolute_path) == expected
@@ -108,17 +106,14 @@ async def test_materialize_supports_filename_near_filesystem_segment_limit(
         content,
         filename=filename,
         device_path=(
-            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
-            f"sr_001/{filename}"
+            f"workspace/.teamclaw/session-files/scope_abc/session_abc/sr_001/{filename}"
         ),
     )
 
     result = await service.materialize(request)
 
     target = (
-        tmp_path
-        / ".teamclaw/session-files/scope_abc/session_abc/sr_001"
-        / filename
+        tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001" / filename
     )
     assert result.ready is True
     assert target.read_bytes() == content
@@ -138,17 +133,14 @@ async def test_materialize_supports_unicode_filename(tmp_path: Path):
         content,
         filename=filename,
         device_path=(
-            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
-            f"sr_001/{filename}"
+            f"workspace/.teamclaw/session-files/scope_abc/session_abc/sr_001/{filename}"
         ),
     )
 
     result = await service.materialize(request)
 
     target = (
-        tmp_path
-        / ".teamclaw/session-files/scope_abc/session_abc/sr_001"
-        / filename
+        tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001" / filename
     )
     assert result.ready is True
     assert target.read_bytes() == content
@@ -157,7 +149,14 @@ async def test_materialize_supports_unicode_filename(tmp_path: Path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "filename",
-    [".", "..", "folder/report.txt", r"folder\report.txt", "report?.txt", "report\n.txt"],
+    [
+        ".",
+        "..",
+        "folder/report.txt",
+        r"folder\report.txt",
+        "report?.txt",
+        "report\n.txt",
+    ],
 )
 async def test_materialize_rejects_unsafe_filename_characters(
     tmp_path: Path,
@@ -174,8 +173,7 @@ async def test_materialize_rejects_unsafe_filename_characters(
         content,
         filename=filename,
         device_path=(
-            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
-            f"sr_001/{filename}"
+            f"workspace/.teamclaw/session-files/scope_abc/session_abc/sr_001/{filename}"
         ),
     )
 
@@ -187,7 +185,9 @@ async def test_materialize_rejects_unsafe_filename_characters(
 
 
 @pytest.mark.asyncio
-async def test_materialize_rejects_filename_exceeding_utf8_segment_limit(tmp_path: Path):
+async def test_materialize_rejects_filename_exceeding_utf8_segment_limit(
+    tmp_path: Path,
+):
     content = b"too long unicode filename"
     filename = f"{'\u4e2d' * 86}.txt"
     callback = _CallbackClient()
@@ -200,8 +200,7 @@ async def test_materialize_rejects_filename_exceeding_utf8_segment_limit(tmp_pat
         content,
         filename=filename,
         device_path=(
-            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
-            f"sr_001/{filename}"
+            f"workspace/.teamclaw/session-files/scope_abc/session_abc/sr_001/{filename}"
         ),
     )
 
@@ -238,6 +237,9 @@ async def test_session_v2_materialization_never_persists_raw_session_id(tmp_path
     assert pull.requests[0].session_id == "session/raw-value"
     manifest_text = (tmp_path / ".teamclaw/session-files/.manifest.json").read_text()
     assert "session/raw-value" not in manifest_text
+    entry = service.manifest_store.get("sr_001")
+    assert entry is not None
+    assert entry.baas_tenant == "tenant-1"
 
 
 @pytest.mark.asyncio
@@ -296,7 +298,9 @@ async def test_hash_mismatch_removes_partial_file_and_reports_failure(tmp_path: 
 
     result = await service.materialize(_request(b"expected"))
 
-    target = tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    target = (
+        tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    )
     assert result.ready is False
     assert result.error_code == "hash_mismatch"
     assert not target.exists()
@@ -331,9 +335,7 @@ async def test_materialize_rejects_untrusted_device_path_escape(tmp_path: Path, 
 async def test_materialize_rejects_symlink_escape(tmp_path: Path):
     outside = tmp_path.parent / "outside-resource-target"
     outside.mkdir()
-    controlled_parent = (
-        tmp_path / ".teamclaw/session-files/scope_abc/session_abc"
-    )
+    controlled_parent = tmp_path / ".teamclaw/session-files/scope_abc/session_abc"
     controlled_parent.mkdir(parents=True)
     (controlled_parent / "sr_001").symlink_to(outside, target_is_directory=True)
     pull = _PullClient(b"x")
@@ -419,7 +421,9 @@ async def test_open_content_rejects_same_size_hash_changed_file(tmp_path: Path):
         workspace_root_provider=lambda: tmp_path,
     )
     await service.materialize(_request(content))
-    target = tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    target = (
+        tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    )
     target.write_bytes(b"changed bytes")
 
     with pytest.raises(ResourceNotMaterializedError, match="resource_not_materialized"):
@@ -435,7 +439,9 @@ async def test_open_content_rejects_file_replaced_by_outside_symlink(tmp_path: P
         workspace_root_provider=lambda: tmp_path,
     )
     await service.materialize(_request(content))
-    target = tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    target = (
+        tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    )
     outside = tmp_path.parent / "outside-content.txt"
     outside.write_bytes(content)
     target.unlink()
