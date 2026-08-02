@@ -153,9 +153,7 @@ pub use application::{
 pub use port::{
     BotConnectionControlPort, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
-    BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
-    BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
-    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort,
+    BotControlPlaneRepoPort,
     BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
     NoopBotTerminalObserver, NoopChannelBindingCleanupPort, ChatRunCleanupPort,
     ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
@@ -194,6 +192,9 @@ pub use workbench_use_cases::{
 };
 
 pub use types::{
+    BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
+    BotControlPlanePatch, BotControlPlaneRecord,
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
     CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
     ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
@@ -210,7 +211,9 @@ pub use types::{
 
 pub use core::{
     ActorKind, ActorStatus, AgentCredentials, AuditEntry, BindingChannel, BindingChannels,
-    BotCapabilities, BotConnectParams, BotConnectResult, BotDynamicStatus, BotRegistryCoreService,
+    BotCapabilities, BotConnectParams, BotConnectResult, BotControlPlaneCandidate,
+    BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
+    BotRegistryCoreService,
     BotSendResult, ChatEventRouting, ConnectError, ConnectionKind, ContextBotSummary, HiddenMentionInfo,
     ContextBotSummary as BotContextSummary, ContextConflict, ContextConflictPosition,
     ContextFusionRequest, ContextFusionResponse, ContextParticipantPerspective, DefaultDelivery,

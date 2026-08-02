@@ -5,8 +5,9 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
-use bcs_bot::BotCore;
+use bcs_bot::{BotControlPlaneCore, BotCore};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_friend::FriendCore;
 use bcs_service_api::application::v1::{
@@ -15,10 +16,12 @@ use bcs_service_api::application::v1::{
     QueryBots, UpdateBot,
 };
 use bcs_service_api::{
-    ActorStatus, BotCapabilities, BotControlPlaneRepoPort, BotRegistryCoreService, BotRepoPort,
+    ActorKind, ActorStatus, BotCapabilities, BotControlPlaneCoreService,
+    BotControlPlaneDescriptor, BotControlPlaneRecord, BotRegistryCoreService, BotRepoPort,
     FriendCoreService, ProviderBotBinding, ProviderBotBindingRepoPort, ProviderRecord,
-    ProviderRepoPort, Skill,
+    ProviderRepoPort, ServiceError, ServiceResult, Skill,
 };
+use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
 
 #[test]
 fn v1_bot_commands_expose_the_approved_control_plane_surface() {
@@ -81,18 +84,16 @@ impl Fixture {
         let temp = tempfile::tempdir().expect("temp dir");
         let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
         let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
-        let control_plane: Arc<dyn BotControlPlaneRepoPort> = repo.clone();
         let friends = Arc::new(FriendCore::memory());
         let providers = Arc::new(MemoryProviderStore::new());
-        let provider_repo: Arc<dyn ProviderRepoPort> = providers.clone();
-        let provider_bindings: Arc<dyn ProviderBotBindingRepoPort> = providers.clone();
+        let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(
+            BotControlPlaneCore::new(repo.clone(), providers.clone(), providers.clone()),
+        );
         let env = bcs_config::resolve_env_str();
         let service = BotServiceImpl::new(
             control_plane,
             registry,
             friends.clone(),
-            provider_repo,
-            provider_bindings,
             BotServiceConfig { env: env.clone() },
         );
         Self {
@@ -128,6 +129,107 @@ impl Fixture {
             .await
             .expect("update actor status");
     }
+}
+
+struct AuthorizationProbeCore {
+    record: BotControlPlaneRecord,
+}
+
+#[async_trait]
+impl BotControlPlaneCoreService for AuthorizationProbeCore {
+    async fn get_record(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        Ok(Some(self.record.clone()))
+    }
+
+    async fn get(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<bcs_service_api::BotControlPlaneView>> {
+        Err(ServiceError::InternalError(
+            "Provider hydration must happen after authorization".to_string(),
+        ))
+    }
+
+    async fn get_by_ids(
+        &self,
+        _bot_ids: &[String],
+        _env: &str,
+    ) -> ServiceResult<Vec<bcs_service_api::BotControlPlaneView>> {
+        unreachable!("not used by authorization-priority test")
+    }
+
+    async fn list_candidates(
+        &self,
+        _query: bcs_service_api::BotCandidateReadQuery,
+    ) -> ServiceResult<(Vec<bcs_service_api::BotControlPlaneCandidate>, u64)> {
+        unreachable!("not used by authorization-priority test")
+    }
+
+    async fn list_by_creator(
+        &self,
+        _query: bcs_service_api::BotControlPlaneOwnedQuery,
+    ) -> ServiceResult<Vec<bcs_service_api::BotControlPlaneView>> {
+        unreachable!("not used by authorization-priority test")
+    }
+
+    async fn patch(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+        _patch: bcs_service_api::BotControlPlanePatch,
+    ) -> ServiceResult<Option<bcs_service_api::BotControlPlaneView>> {
+        unreachable!("not used by authorization-priority test")
+    }
+}
+
+#[tokio::test]
+async fn ownership_denial_precedes_provider_hydration() {
+    let env = bcs_config::resolve_env_str();
+    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(AuthorizationProbeCore {
+        record: BotControlPlaneRecord {
+            bot_id: "owned".to_string(),
+            kind: ActorKind::Bot,
+            name: "Owned".to_string(),
+            visibility: "public".to_string(),
+            status: ActorStatus::Online,
+            env: env.clone(),
+            created_by: Some("staff-1".to_string()),
+            descriptor: BotControlPlaneDescriptor {
+                summary: String::new(),
+                domains: Vec::new(),
+                skills: Vec::new(),
+                scopes: Vec::new(),
+            },
+            agent_code: None,
+            created_at: 1,
+            updated_at: 1,
+        },
+    });
+    let service = BotServiceImpl::new(
+        control_plane,
+        Arc::new(NoopBotRegistryCoreService),
+        Arc::new(NoopFriendCoreService),
+        BotServiceConfig { env },
+    );
+
+    let error = service
+        .update(UpdateBot {
+            caller: human_caller("staff-2"),
+            bot_id: "owned".to_string(),
+            patch: BotPatch {
+                name: Some("Nope".to_string()),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect_err("ownership denial must not hydrate Provider metadata");
+
+    assert_eq!(error.code(), "forbidden");
 }
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 //! Versioned Bot control-plane application facade for the BCN V1 API.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -12,9 +12,9 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility,
-    BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRecord, BotControlPlaneRepoPort, BotRegistryCoreService, FriendCoreService,
-    ProviderBotBindingRepoPort, ProviderRepoPort, ServiceError,
+    BotControlPlaneCoreService, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
+    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView, BotRegistryCoreService,
+    FriendCoreService, ServiceError,
 };
 
 #[derive(Debug, Clone)]
@@ -23,29 +23,23 @@ pub struct BotServiceConfig {
 }
 
 pub struct BotServiceImpl {
-    control_plane: Arc<dyn BotControlPlaneRepoPort>,
+    control_plane: Arc<dyn BotControlPlaneCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
-    providers: Arc<dyn ProviderRepoPort>,
-    provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
     config: BotServiceConfig,
 }
 
 impl BotServiceImpl {
     pub fn new(
-        control_plane: Arc<dyn BotControlPlaneRepoPort>,
+        control_plane: Arc<dyn BotControlPlaneCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         friends: Arc<dyn FriendCoreService>,
-        providers: Arc<dyn ProviderRepoPort>,
-        provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
         config: BotServiceConfig,
     ) -> Self {
         Self {
             control_plane,
             registry,
             friends,
-            providers,
-            provider_bindings,
             config,
         }
     }
@@ -81,7 +75,20 @@ impl BotServiceImpl {
 
     async fn load_record(&self, bot_id: &str) -> Result<BotControlPlaneRecord, ApplicationError> {
         self.control_plane
-            .get_control_plane(bot_id, &self.config.env)
+            .get_record(bot_id, &self.config.env)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "bot_not_found",
+                    format!("Bot '{bot_id}' was not found"),
+                )
+            })
+    }
+
+    async fn load_view(&self, bot_id: &str) -> Result<BotControlPlaneView, ApplicationError> {
+        self.control_plane
+            .get(bot_id, &self.config.env)
             .await
             .map_err(map_service_error)?
             .ok_or_else(|| {
@@ -94,12 +101,12 @@ impl BotServiceImpl {
 
     async fn project_records(
         &self,
-        records: Vec<BotControlPlaneRecord>,
+        records: Vec<BotControlPlaneView>,
     ) -> Result<Vec<Bot>, ApplicationError> {
         let physical_ids = records
             .iter()
-            .filter(|record| record.kind == ActorKind::Bot)
-            .map(|record| record.bot_id.clone())
+            .filter(|bot| bot.record.kind == ActorKind::Bot)
+            .map(|bot| bot.record.bot_id.clone())
             .collect::<Vec<_>>();
         let runtime_active = self
             .registry
@@ -108,33 +115,10 @@ impl BotServiceImpl {
             .into_iter()
             .collect::<HashSet<_>>();
 
-        let bindings = self
-            .provider_bindings
-            .list_bindings_by_bot_uuids(&physical_ids)
-            .await
-            .map_err(map_service_error)?;
-        let provider_ids = bindings
-            .iter()
-            .map(|binding| binding.provider_id.clone())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        let providers = self
-            .providers
-            .list_providers_by_ids(&provider_ids)
-            .await
-            .map_err(map_service_error)?
-            .into_iter()
-            .map(|provider| (provider.provider_id.clone(), provider))
-            .collect::<HashMap<_, _>>();
-        let bindings = bindings
-            .into_iter()
-            .map(|binding| (binding.bot_uuid.clone(), binding))
-            .collect::<HashMap<_, _>>();
-
         records
             .into_iter()
-            .map(|record| {
+            .map(|bot| {
+                let BotControlPlaneView { record, provider } = bot;
                 let visibility = project_visibility(&record.visibility)?;
                 let status = project_status(record.status);
                 if record.kind == ActorKind::Human {
@@ -158,13 +142,10 @@ impl BotServiceImpl {
                 } else {
                     BotReachability::Unreachable
                 };
-                let provider = bindings
-                    .get(&record.bot_id)
-                    .and_then(|binding| providers.get(&binding.provider_id))
-                    .map(|provider| BotProvider {
-                        provider_id: provider.provider_id.clone(),
-                        name: provider.name.clone(),
-                    });
+                let provider = provider.map(|provider| BotProvider {
+                    provider_id: provider.provider_id,
+                    name: provider.name,
+                });
                 Ok(Bot::Physical(PhysicalBot {
                     bot_id: record.bot_id,
                     kind: BotKind::Bot,
@@ -197,7 +178,7 @@ impl BotServiceImpl {
             .collect()
     }
 
-    async fn project_one(&self, record: BotControlPlaneRecord) -> Result<Bot, ApplicationError> {
+    async fn project_one(&self, record: BotControlPlaneView) -> Result<Bot, ApplicationError> {
         self.project_records(vec![record])
             .await?
             .into_iter()
@@ -237,7 +218,7 @@ impl BotService for BotServiceImpl {
             .collect();
         let (records, total) = self
             .control_plane
-            .list_control_plane_candidates(BotCandidateReadQuery {
+            .list_candidates(BotCandidateReadQuery {
                 acting_bot_id: command.bot_id,
                 env: acting.env,
                 visibility: match command.purpose {
@@ -290,7 +271,7 @@ impl BotService for BotServiceImpl {
         }
         let records = self
             .control_plane
-            .get_control_plane_by_ids(&command.bot_ids, &self.config.env)
+            .get_by_ids(&command.bot_ids, &self.config.env)
             .await
             .map_err(map_service_error)?;
         self.project_records(records).await
@@ -299,7 +280,7 @@ impl BotService for BotServiceImpl {
     async fn get(&self, query: GetBot) -> Result<Bot, ApplicationError> {
         Self::human_staff_no(&query.caller)?;
         Self::validate_bot_id(&query.bot_id)?;
-        self.project_one(self.load_record(&query.bot_id).await?)
+        self.project_one(self.load_view(&query.bot_id).await?)
             .await
     }
 
@@ -381,7 +362,7 @@ impl BotService for BotServiceImpl {
             .transpose()?;
         let updated = self
             .control_plane
-            .patch_control_plane(
+            .patch(
                 &command.bot_id,
                 &self.config.env,
                 BotControlPlanePatch {
@@ -407,7 +388,7 @@ impl BotService for BotServiceImpl {
         Self::validate_pagination(command.offset, command.limit)?;
         let records = self
             .control_plane
-            .list_control_plane_by_creator(BotControlPlaneOwnedQuery {
+            .list_by_creator(BotControlPlaneOwnedQuery {
                 created_by: staff_no,
                 env: self.config.env.clone(),
                 kind: command.kind.map(|kind| match kind {

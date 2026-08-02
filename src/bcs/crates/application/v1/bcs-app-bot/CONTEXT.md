@@ -9,7 +9,8 @@
 
 ## Consumes
 
-- `bcs-service-api` application, core, and outbound-port contracts.
+- `bcs-service-api` application contracts, Core service contracts, and shared
+  transport-agnostic contract types.
 - Pure utility crates for asynchronous traits and standard collections.
 
 ## Allowed dependencies
@@ -23,10 +24,12 @@
 - `adapters/*`
 - Concrete `plugins/*`
 - Store or Legacy service implementations outside tests
+- Repository ports in production code; persistence orchestration belongs behind
+  a Core service contract
 
 ## Configuration
 
-- The composition root injects the environment and all contract
+- The composition root injects the environment and Core service
   implementations.
 - This crate must not select implementations or inspect environment variables.
 

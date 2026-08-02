@@ -21,7 +21,8 @@ package, or workspace crate.
 
 The implementation stays inside existing crates:
 
-- `bcs-service-api` owns the Core service contract and Core-facing DTOs.
+- `bcs-service-api` owns the Core service contract, Core-facing views, and
+  shared transport-agnostic control-plane values.
 - `bcs-bot` owns `BotControlPlaneCore`.
 - `bcs-bot-store` continues to own implementations of the repository ports.
 - `bcs-app-bot` continues to own V1 Human authorization and use-case policy.
@@ -35,7 +36,9 @@ storage implementation is introduced.
 
 The Core service exposes fallible operations for:
 
-- exact Bot/Human record lookup;
+- exact Bot/Human record lookup without Provider hydration for authorization
+  checks;
+- exact hydrated Bot/Human view lookup for response projection;
 - request-ordered batch lookup;
 - candidate selection with total-before-pagination semantics;
 - owner-scoped record listing;
@@ -89,10 +92,11 @@ does not gain the new repository dependencies.
 
 ## Contract Type Placement
 
-Core-facing control-plane records, queries, patches, candidate records, and
-Provider summaries belong to the `bcs-service-api::core` surface. The
-repository contract uses the shared transport-agnostic record/query types but
-remains declared under `port::repo`.
+Control-plane records, queries, patches, and candidate records are shared
+transport-agnostic values under `bcs-service-api::types`, which both Core and
+repository contracts may consume without a reverse dependency. The Core
+service contract, hydrated views, and Provider summaries belong to
+`bcs-service-api::core`. The repository contract remains under `port::repo`.
 
 `bcs-app-bot` may import the Core-facing types but not
 `BotControlPlaneRepoPort`, `ProviderRepoPort`, or
@@ -111,8 +115,8 @@ For exact lookup, batch lookup, owner listing, and patch:
 
 For candidate listing:
 
-1. `BotServiceImpl` authenticates the Human, loads the acting Bot through the
-   Core service, and checks ownership.
+1. `BotServiceImpl` authenticates the Human, loads the acting Bot record
+   through the Core service without Provider hydration, and checks ownership.
 2. `BotServiceImpl` obtains friend IDs from `FriendCoreService`.
 3. `BotControlPlaneCore` delegates candidate filtering and pagination to the
    repository and hydrates Provider summaries.
@@ -124,6 +128,8 @@ For candidate listing:
   `ApplicationError` decisions in `bcs-app-bot`.
 - Missing persisted records remain `None` at the Core boundary and are mapped
   by the Application service to the existing V1 `bot_not_found` behavior.
+- Acting-Bot and update ownership denials occur before Provider hydration, as
+  they did before this refactor.
 - Repository and Provider hydration failures remain `ServiceError` and are
   mapped to the existing V1 internal-error response.
 - This refactor does not add an onboarding predicate or redefine corrupted
