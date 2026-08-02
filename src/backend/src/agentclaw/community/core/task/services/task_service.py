@@ -52,6 +52,7 @@ from agentclaw.community.core.task.domain.models import (
     SubDagRef,
     SubTaskSpec,
     SubtaskState,
+    StateSemantics,
     Task,
     TaskExecutionGraph,
     TaskSource,
@@ -496,6 +497,18 @@ class TaskService(GraphStateOpsMixin):
             return
         if kind == EventKind.PLAN_FINALIZED:
             # Plan already set by finalize_plan; just ensure phase.
+            return
+        if kind == EventKind.STATE_UPDATED:
+            # State 写入事件(``update_state`` 经 ``on_event`` 记入日志;replay 据此还原
+            # TaskState,plan §3.2/§8.2/§286)。scope=None → public;else → subtasks[scope]。
+            scope = payload.get("scope")
+            patch = payload.get("patch") or {}
+            sem_raw = payload.get("semantics")
+            try:
+                semantics = StateSemantics(sem_raw) if sem_raw else StateSemantics.MERGE
+            except ValueError:
+                semantics = StateSemantics.MERGE
+            self._fold_state(task, scope, patch, semantics)
             return
         if kind == EventKind.NODE_DISPATCHED:
             node = self._find_node(task, node_id)

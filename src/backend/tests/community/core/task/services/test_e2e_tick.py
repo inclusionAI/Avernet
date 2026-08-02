@@ -627,3 +627,39 @@ def test_execution_writes_state_and_reroute_reads_it():
     task = _tick_until(svc, sched, task.id, lambda t: t.status is TaskStatus.DONE)
     assert task.status is TaskStatus.DONE
     assert task.execution_graph.graph_status is GraphStatus.VERIFIED
+
+
+# --- ⑨ State 变更事件溯源:update_state 记 STATE_UPDATED,GraphCheckpoint.replay 可还原 ---
+
+def test_state_changes_event_sourced_replayable():
+    """补 plan §286 缺口:State 变更进事件流(update_state 经 on_event 记 STATE_UPDATED),
+    GraphCheckpoint.replay 从写前快照重放事件能还原 State。State 不再是"只在内存里",
+    而是可溯源重放。"""
+    from agentclaw.community.core.task.domain.models import StateSemantics
+    from agentclaw.community.core.task.services.graph_checkpoint import GraphCheckpoint
+
+    svc = _svc()
+    discover = FakeDiscover(hits={"n_impl_hash": ["crypto-bot"]})
+    sched = _scheduler(svc, discover)
+    task = _planned_task(svc, sched, "n_impl_hash", "实现登录密码哈希比对")
+    leaf = "n_impl_hash"
+    chk = GraphCheckpoint(svc, svc._event_repo, svc._task_repo)  # noqa: SLF001
+    before_seq = int(svc._event_repo.latest_seq(task.id) or 0)  # noqa: SLF001 — 真实日志最新 seq
+    chk.snapshot(task.id, before_seq)  # 写 State 前的快照(replay 起点)
+
+    # skill 执行中写 State → update_state 经 on_event 记 STATE_UPDATED 入日志
+    svc.update_state(task.id, leaf, {"intermediate_results": ["哈希实现v1"]}, StateSemantics.APPEND)
+    svc.update_state(task.id, leaf, {"execution_context": {"approach": "bcrypt"}}, StateSemantics.MERGE)
+    task = svc.get(task.id)
+    assert task.execution_graph.state.subtasks[leaf].intermediate_results == ["哈希实现v1"]
+
+    # 事件日志里有 STATE_UPDATED(增量在日志里,可溯源)
+    events = svc._event_repo.load_events(task.id, before_seq)  # noqa: SLF001
+    assert any(e.kind is EventKind.STATE_UPDATED for e in events)
+    assert sum(1 for e in events if e.kind is EventKind.STATE_UPDATED) == 2
+
+    # replay 从写前快照重放(含 STATE_UPDATED)→ 还原出 State(不依赖内存,从事件流重建)
+    replayed = chk.replay(task.id, before_seq)
+    st = replayed.state.subtasks[leaf]
+    assert st.intermediate_results == ["哈希实现v1"]
+    assert st.execution_context.get("approach") == "bcrypt"

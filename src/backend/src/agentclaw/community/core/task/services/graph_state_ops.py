@@ -19,6 +19,7 @@ from agentclaw.community.core.task.domain.models import (
     SubTaskSpec,
     SubtaskState,
 )
+from agentclaw.community.core.task.domain.events import EventKind
 from agentclaw.community.core.task.domain.state_machine import IllegalTransitionError
 
 
@@ -163,12 +164,19 @@ class GraphStateOpsMixin:
         patch: dict,
         semantics: StateSemantics,
     ) -> None:
-        """State 写口(plan §3.2/§8.2)。scope=None → public;else → subtasks[scope]。"""
-        task = self._task_repo.get_by_id(task_id)
-        if task.execution_graph is None:
-            raise IllegalTransitionError("graph not initialized")
-        self._fold_state(task, scope, patch, semantics)
-        self._task_repo.save(task)
+        """State 写口(plan §3.2/§8.2/§8)。经 ``on_event`` 记一条 ``STATE_UPDATED`` 事件
+        (scope/patch/semantics 入 payload)→ 统一走"guard→fold→append 日志→save"写口,
+        使 State 变更进事件流、可被 ``GraphCheckpoint.replay`` 还原(事件溯源,§286)。
+        scope=None → public;else → subtasks[scope]。"""
+        self.on_event({  # type: ignore[attr-defined]
+            "task_id": task_id,
+            "kind": EventKind.STATE_UPDATED.value,
+            "payload": {
+                "scope": scope,
+                "patch": dict(patch),
+                "semantics": semantics.value,
+            },
+        })
 
     def _fold_state(self, task, scope: Optional[str], patch: dict, semantics: StateSemantics) -> None:
         assert task.execution_graph is not None
