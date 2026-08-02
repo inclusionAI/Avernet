@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gateway.community.core.forwarding import DomainMap
+from gateway.community.core.forwarding import DomainMap, Server
 from gateway.community.core.forwarding._domains import _expand_vars, _parse_servers
 
 _CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
@@ -188,57 +188,68 @@ def test_a_rewrite_needs_both_ends() -> None:
         )
 
 
-# ── socket origin ────────────────────────────────────────────────────────────
+# ── the base-url standard (one rule for every server) ────────────────────────
 
 
 @pytest.mark.parametrize(
-    ("base_url", "expected"),
+    ("base_url", "http_url", "ws_url"),
     [
-        ("https://proxy.example", "wss://proxy.example"),
-        ("http://proxy.example:8080", "ws://proxy.example:8080"),
-        ("wss://proxy.example", "wss://proxy.example"),
-        ("ws://proxy.example", "ws://proxy.example"),
-        ("HTTPS://proxy.example/", "wss://proxy.example"),
+        ("https://up.example", "https://up.example", "wss://up.example"),
+        ("http://up.example:8080", "http://up.example:8080", "ws://up.example:8080"),
+        # A socket spelling is accepted and re-spelled for the other plane too:
+        # the scheme says TLS-or-not, not which planes the upstream serves.
+        ("wss://up.example", "https://up.example", "wss://up.example"),
+        ("ws://up.example", "http://up.example", "ws://up.example"),
+        ("HTTPS://up.example/", "https://up.example", "wss://up.example"),
     ],
 )
-def test_socket_origin_is_derived_from_the_server_scheme(
-    base_url: str, expected: str
+def test_a_server_is_addressable_on_either_plane(
+    base_url: str, http_url: str, ws_url: str
 ) -> None:
-    dm = DomainMap.from_config(
-        {
-            "domains": {"engine": {"server": "s", "protocols": ["websocket"]}},
-            "servers": {"s": {"base_url": base_url}},
-        },
-        variables={},
-    )
-    engine = dm.domain_for("/openapi/v1/engine/x")
-    assert engine is not None
-    assert engine.websocket_base_url == expected
+    server = Server(name="up", base_url=base_url)
+    assert server.http_base_url == http_url
+    assert server.websocket_base_url == ws_url
 
 
-def test_a_socket_domain_without_a_usable_scheme_fails_at_startup() -> None:
-    with pytest.raises(ValueError, match="no scheme a websocket can be opened with"):
+@pytest.mark.parametrize(
+    "base_url",
+    ["up.example.com", "up.example.com:8080", "ftp://up.example", "https://"],
+)
+def test_a_base_url_without_a_usable_scheme_is_refused(base_url: str) -> None:
+    """Held to the same standard for every server, HTTP-only ones included.
+
+    Not style: the forwarder concatenates the base url with the request path,
+    and ``up.example.com/openapi/v1`` is a *relative* URL with an empty host, so
+    a scheme-less value would fail at the first call rather than at boot.
+    """
+    with pytest.raises(ValueError, match="must carry a scheme"):
+        Server(name="up", base_url=base_url)
+
+
+def test_the_standard_applies_through_config_too() -> None:
+    with pytest.raises(ValueError, match="must carry a scheme"):
         DomainMap.from_config(
             {
-                "domains": {"engine": {"server": "s", "protocols": ["websocket"]}},
-                "servers": {"s": {"base_url": "engineproxy.example.com"}},
+                "domains": {"bots": {"server": "s"}},
+                "servers": {"s": {"base_url": "backend.sample.com"}},
             },
             variables={},
         )
 
 
-def test_an_http_domain_needs_no_socket_scheme() -> None:
-    """The bare-host samples the shipped config uses must keep loading."""
+def test_an_http_only_domain_is_still_reachable_as_a_socket_origin() -> None:
+    """Nothing about the server decides its planes — the domain does."""
     dm = DomainMap.from_config(
         {
             "domains": {"bots": {"server": "s"}},
-            "servers": {"s": {"base_url": "backend.sample.com"}},
+            "servers": {"s": {"base_url": "https://backend.sample.com"}},
         },
         variables={},
     )
     bots = dm.domain_for("/openapi/v1/bots")
     assert bots is not None
-    assert bots.websocket_base_url == ""
+    assert not bots.serves_websocket
+    assert bots.server.websocket_base_url == "wss://backend.sample.com"
 
 
 def test_unknown_server_reference_is_rejected() -> None:

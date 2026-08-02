@@ -61,9 +61,20 @@ user_config:
     ttl_seconds: 60
 
   # Values used to expand ${...} placeholders in upstreams.servers.*.base_url.
+  #
+  # Every value carries a SCHEME — http, https, ws or wss — and startup refuses
+  # one that does not, naming the server. This is not style: the forwarder
+  # concatenates the base url with the request path, and `backend.example/x`
+  # parses as a *relative* URL with an empty host, so a scheme-less value fails
+  # at the first call rather than at boot.
+  #
+  # The scheme says the origin and whether the connection is TLS; it does not
+  # decide which planes the upstream serves. The router re-spells it per plane
+  # (https ⇄ wss, http ⇄ ws), so one configured value works for both and no
+  # operator has to know which planes a given upstream is used for.
   upstream_vars:
-    backend_server_url: backend.sample.com
-    baas_server_url: baas.sample.com
+    backend_server_url: https://backend.sample.com
+    baas_server_url: https://baas.sample.com
     engine_proxy_server_url: https://engineproxy.sample.com
 
   # Per-identity strategy chain (system-level config).
@@ -202,8 +213,5 @@ user_config:
         base_url: "${backend_server_url}"
       baas:
         base_url: "${baas_server_url}"
-      # Needs a scheme, unlike the two above: the socket origin is derived from
-      # it (`https://` → `wss://`, `http://` → `ws://`; `ws`/`wss` accepted as
-      # written), and guessing one would silently open a plaintext socket.
       engine_proxy:
         base_url: "${engine_proxy_server_url}"

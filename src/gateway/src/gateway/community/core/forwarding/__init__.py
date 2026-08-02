@@ -15,7 +15,6 @@ from ._domains import (
     PathRewrite,
     SchemaSource,
     Server,
-    websocket_base_url,
 )
 from ._openapi import build_served_openapi, generate_openapi
 from ._orchestration import Forwarding
@@ -33,5 +32,4 @@ __all__ = [
     "build_served_openapi",
     "check_compatible",
     "generate_openapi",
-    "websocket_base_url",
 ]

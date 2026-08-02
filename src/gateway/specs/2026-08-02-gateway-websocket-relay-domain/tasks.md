@@ -14,7 +14,7 @@
   - [x] `Domain.serves_http` / `.serves_websocket` are predicates, not a string-keyed lookup — delivery adapters may not import core, so a shared constant would be duplicated across the boundary.
   - [x] `PathRewrite` substitutes one prefix and carries the tail through untouched; no rewrite means verbatim.
   - [x] `rewrite.from` must start at the domain's own prefix — a rule that could never fire is refused at startup, not silently ignored.
-  - [x] `Domain.websocket_base_url` is derived at parse time (`http→ws`, `https→wss`, `ws`/`wss` as written); an unusable scheme fails the boot, and an HTTP-only domain needs no scheme.
+  - [x] One `base_url` standard for **every** server, enforced by `Server.__post_init__`: a scheme is required (`http`/`https`/`ws`/`wss`) and a value without one fails the boot, naming the server. `http_base_url` / `websocket_base_url` re-spell it per plane. This also fixed the shipped bare-host samples, which produced a relative URL with an empty host.
   - [x] `DomainMap.websocket_domains()` lists socket domains for the composition root.
   - [x] Unknown protocol, non-list protocols, and a half-specified rewrite all raise at startup.
 - **Depends on:** —

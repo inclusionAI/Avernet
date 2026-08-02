@@ -83,6 +83,11 @@ is what keeps one addition from meaning two.
 - [x] **The entrypoint for a plane a domain does not declare refuses it.** An
       HTTP request to a socket-only domain is an unknown route, indistinguishable
       from a domain that is not configured at all.
+- [x] Every `base_url` is held to one standard, enforced by the router: it
+      carries a scheme, and startup refuses one that does not, naming the
+      server. The scheme says the origin and whether the connection is TLS; the
+      router re-spells it per plane, so no operator has to know which planes a
+      given upstream is used for.
 - [x] Forwarding is verbatim by default: only the origin changes. A domain may
       declare exactly one prefix substitution instead, and a substitution
       anchored anywhere but the domain's own prefix is refused at startup rather
@@ -201,3 +206,19 @@ is what keeps one addition from meaning two.
    *Not settled here:* the HTTP `Forwarder` sits in `plugins/forwarder/httpx`,
    and whether the same reasoning applies depends on whether the enterprise
    flavour its SPI docstring anticipates is real. Owned by that code's authors.
+
+6. **Whether a socket upstream needs a different `base_url` standard.**
+   *Resolved 2026-08-02: no — one standard for every server, enforced by the
+   router.* The first implementation required a scheme on the socket upstream
+   and left the two HTTP samples bare, then explained the difference in a
+   comment. That put the rule in human knowledge, and it was documenting a bug:
+   `backend.sample.com` + `/openapi/v1/bots` is a **relative** URL with an empty
+   host, so those samples never worked — nothing forwarded to them in tests.
+
+   `Server` now validates its own `base_url` in `__post_init__`, so every
+   upstream is held to the rule however it was constructed, and a bad value
+   fails the boot with the server named rather than the first call. `http`,
+   `https`, `ws` and `wss` are all accepted, because what the scheme actually
+   encodes is the origin plus TLS-or-not; `http_base_url` and
+   `websocket_base_url` spell that for whichever plane is asking. Which planes
+   an upstream serves is the domain's declaration, not the scheme's.

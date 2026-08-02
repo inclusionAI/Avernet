@@ -67,7 +67,8 @@ New:
 Changed:
 
 - `core/forwarding/_domains.py` — `Domain.protocols`, `Domain.rewrite`,
-  `Domain.websocket_base_url`, `PathRewrite`, `DomainMap.websocket_domains()`,
+  `PathRewrite`, `DomainMap.websocket_domains()`, `Server` scheme validation and
+  its per-plane origins,
   and the parse-time validation for all three.
 - `core/forwarding/{__init__,_orchestration}.py` — exports; `Forwarding` gains
   `ws_forwarder`.
@@ -117,14 +118,26 @@ domains:
 
 Both keys are optional and their defaults reproduce today's behaviour exactly.
 
+### `Server`
+
+One standard for every upstream, enforced in `__post_init__` rather than at the
+point of use: a `base_url` carries a scheme from `{http, https, ws, wss}`, and a
+value without one fails the boot with the server named. `http_base_url` and
+`websocket_base_url` re-spell it per plane, since the scheme encodes the origin
+and TLS-or-not, not which planes the upstream serves.
+
+This also fixes a latent bug: the shipped `backend.sample.com` /
+`baas.sample.com` samples produced a relative URL with an empty host when
+concatenated with the request path.
+
 ### `Domain`
 
 `serves_http` / `serves_websocket` are predicates rather than a
 `serves(protocol)` taking a string, because the delivery adapters are the
 callers and may not import core — a shared constant would have to be duplicated
-across that boundary, where it could drift. `websocket_base_url` is derived once
-at parse time for the same reason, and so an unusable scheme fails the boot
-rather than every handshake.
+across that boundary, where it could drift. The socket entrypoint reaches the origin
+through `domain.server.websocket_base_url`, which is attribute access at
+runtime rather than an import, so the layer rule still holds.
 
 ### `Forwarding`
 

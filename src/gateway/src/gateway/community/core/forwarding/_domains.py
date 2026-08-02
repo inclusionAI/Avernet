@@ -45,11 +45,15 @@ _PROTOCOLS = frozenset({HTTP, WEBSOCKET})
 #: protocol declaration was HTTP-only, so this keeps them byte-identical.
 _DEFAULT_PROTOCOLS = frozenset({HTTP})
 
-#: WebSocket scheme for each scheme an upstream may be configured with.
-#: ``ws``/``wss`` are accepted so a deployment that spells a socket upstream out
-#: as a socket origin is not rejected for being explicit. Mirrors the backend's
-#: own map, so one configured value serves both sides.
-_WS_SCHEMES = {"http": "ws", "https": "wss", "ws": "ws", "wss": "wss"}
+#: Every scheme an upstream may be configured with, and whether it means TLS.
+#:
+#: One standard for every server: a ``base_url`` carries a scheme, always. What
+#: the scheme actually encodes is the origin plus "TLS or not" — ``https`` and
+#: ``wss`` say the same thing about the connection, they just spell it for
+#: different planes. So the router stores what was configured and re-spells it
+#: per plane, rather than each plane requiring its own vocabulary and an
+#: operator having to know which one this particular upstream serves.
+_SCHEME_IS_SECURE = {"http": False, "https": True, "ws": False, "wss": True}
 
 
 def _expand_vars(value: str, variables: dict[str, str]) -> str:
@@ -59,10 +63,50 @@ def _expand_vars(value: str, variables: dict[str, str]) -> str:
 
 @dataclass(frozen=True)
 class Server:
-    """A resolved upstream target."""
+    """A resolved upstream target, addressable on either plane.
+
+    ``base_url`` must carry a scheme — ``http``, ``https``, ``ws`` or ``wss`` —
+    and it is validated here rather than at the point of use, so a bad value
+    fails the boot with the server named instead of producing a broken request
+    URL at the first call. (A scheme-less value is not merely untidy: the
+    forwarder concatenates it with the path, and ``backend.example/openapi/v1``
+    parses as a *relative* URL with an empty host.)
+
+    Which of the four is written does not decide which planes the upstream can
+    serve; the domain does that. The scheme only says TLS or not, and
+    :attr:`http_base_url` / :attr:`websocket_base_url` spell that for whichever
+    plane is asking.
+    """
 
     name: str
     base_url: str
+
+    def __post_init__(self) -> None:
+        scheme, separator, rest = self.base_url.partition("://")
+        if not separator or scheme.lower() not in _SCHEME_IS_SECURE or not rest:
+            raise ValueError(
+                f"upstream server {self.name!r}: base_url {self.base_url!r} must "
+                f"carry a scheme (one of {sorted(_SCHEME_IS_SECURE)}) — a value "
+                f"without one is a relative URL with no host"
+            )
+
+    @property
+    def _secure(self) -> bool:
+        return _SCHEME_IS_SECURE[self.base_url.partition("://")[0].lower()]
+
+    @property
+    def _origin(self) -> str:
+        return self.base_url.partition("://")[2].rstrip("/")
+
+    @property
+    def http_base_url(self) -> str:
+        """The origin spelled for the request/response plane."""
+        return f"{'https' if self._secure else 'http'}://{self._origin}"
+
+    @property
+    def websocket_base_url(self) -> str:
+        """The origin spelled for the socket plane."""
+        return f"{'wss' if self._secure else 'ws'}://{self._origin}"
 
 
 @dataclass(frozen=True)
@@ -116,11 +160,6 @@ class Domain:
     #: ``None`` when the path forwards verbatim, which is the default and the
     #: case for every domain that does not declare otherwise.
     rewrite: PathRewrite | None = None
-    #: The server's origin with a socket scheme, derived once at parse time.
-    #: Empty for a domain that does not answer the socket plane, and read only
-    #: when :attr:`serves_websocket` — precomputed here so the delivery adapter
-    #: never has to import core to derive it.
-    websocket_base_url: str = ""
 
     @property
     def serves_http(self) -> bool:
@@ -196,27 +235,6 @@ class DomainMap:
         }
 
 
-def websocket_base_url(server: Server) -> str:
-    """*server*'s base url as a WebSocket origin, without a trailing slash.
-
-    Anchored on the scheme rather than substituted anywhere in the string: a
-    host that happens to contain ``http://`` must not be rewritten too. Schemes
-    are case-insensitive, and a value carrying none at all is refused rather
-    than guessed at — defaulting to ``ws`` would silently open a plaintext
-    socket for a base url that meant ``https``.
-    """
-    base = server.base_url.strip().rstrip("/")
-    scheme, separator, rest = base.partition("://")
-    ws_scheme = _WS_SCHEMES.get(scheme.lower(), "") if separator else ""
-    if not ws_scheme or not rest:
-        raise ValueError(
-            f"upstream server {server.name!r}: base_url {server.base_url!r} has no "
-            f"scheme a websocket can be opened with (expected one of "
-            f"{sorted(_WS_SCHEMES)})"
-        )
-    return f"{ws_scheme}://{rest}"
-
-
 def _segments(path: str) -> list[str]:
     return [seg for seg in path.split("/") if seg]
 
@@ -233,6 +251,8 @@ def _parse_servers(raw: dict[str, Any], variables: dict[str, str]) -> dict[str, 
                 f"empty — add '{_var_name(raw_base_url)}' to application.yaml "
                 f"user_config.upstream_vars"
             )
+        # Server validates the scheme itself, so every upstream is held to the
+        # same standard however it was constructed.
         servers[name] = Server(name=name, base_url=base_url)
     return servers
 
@@ -255,20 +275,13 @@ def _parse_domains(
             raise ValueError(
                 f"domain {name!r} references unknown server {server_name!r}"
             )
-        protocols = _parse_protocols(name, spec.get("protocols"))
         domain_prefix = f"{base_path.rstrip('/')}/{name}"
-        # Derived at startup, where an operator is looking, rather than at the
-        # first handshake: a socket domain's origin has to be one a socket can
-        # actually be opened against, and an unusable scheme should fail the
-        # boot rather than every connection.
-        ws_base_url = websocket_base_url(server) if WEBSOCKET in protocols else ""
         domains[name] = Domain(
             name=name,
             server=server,
             schema=_parse_schema(spec.get("schema") or {}),
-            protocols=protocols,
+            protocols=_parse_protocols(name, spec.get("protocols")),
             rewrite=_parse_rewrite(name, spec.get("rewrite"), domain_prefix),
-            websocket_base_url=ws_base_url,
         )
     return domains
 

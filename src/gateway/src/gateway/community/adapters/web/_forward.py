@@ -132,7 +132,7 @@ async def forward_request(request: Request) -> Response:
         forward = await _attach_identities(
             ForwardRequest(
                 method=request.method,
-                url=_target_url(server.base_url, upstream_path, request),
+                url=_target_url(server.http_base_url, upstream_path, request),
                 # Drop Host (httpx sets it from the upstream URL) and any
                 # caller-supplied X-Avernet-Principal (forgery guard).
                 headers={

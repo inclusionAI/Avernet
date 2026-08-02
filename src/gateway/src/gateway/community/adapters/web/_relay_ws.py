@@ -116,7 +116,9 @@ async def forward_websocket(websocket: WebSocket) -> None:
     # is carried through untouched.
     query = websocket.scope.get("query_string", b"").decode("latin-1")
     upstream_path = domain.upstream_path(_raw_path(websocket))
-    url = f"{domain.websocket_base_url}{upstream_path}" + (f"?{query}" if query else "")
+    url = f"{domain.server.websocket_base_url}{upstream_path}" + (
+        f"?{query}" if query else ""
+    )
 
     try:
         headers = await _upstream_headers(
