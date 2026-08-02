@@ -462,6 +462,76 @@ def test_an_encoded_routing_prefix_is_refused(path: str) -> None:
     assert forwarder.opened == []  # never dialled
 
 
+def _nested_rewrite_app(forwarder: _StubForwarder) -> FastAPI:
+    """A domain whose `rewrite.from` is *deeper* than the domain prefix.
+
+    `_parse_rewrite` accepts this, so the guard has to cover it: the domain
+    prefix alone is not what decided the upstream path here.
+    """
+    from gateway.community.core.forwarding import DomainMap
+
+    domain_map = DomainMap.from_config(
+        {
+            "domains": {
+                "engine": {
+                    "server": "p",
+                    "protocols": ["websocket"],
+                    "rewrite": {"from": "/openapi/v1/engine/v2", "to": "/proxypass"},
+                }
+            },
+            "servers": {"p": {"base_url": "wss://proxy.internal"}},
+        },
+        variables={},
+    )
+    app = FastAPI()
+    app.state.authenticator = _FakeAuth()
+    app.state.principal_signer = _FixedSigner()
+    app.state.ws_forwarder = forwarder
+    app.state.domain_map = domain_map
+    for name in domain_map.websocket_domains():
+        app.add_api_websocket_route(
+            relay_route(domain_map.base_path, name), forward_websocket
+        )
+    return app
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/openapi/v1/engine/%76%32/T/ws",  # 'v2' encoded — clears the domain prefix
+        "/openapi/v1/engine/v%32/T/ws",
+        "/openapi/v1/engine/other/T/ws",  # simply not under the declared `from`
+    ],
+)
+def test_a_raw_path_that_misses_a_nested_rewrite_is_refused(path: str) -> None:
+    """The rewrite's own `from` is what decided the upstream path, so it governs.
+
+    `/openapi/v1/engine/%76%32/...` decodes to `/openapi/v1/engine/v2/...`, so it
+    resolves and authenticates as the anonymous domain and clears the *domain*
+    prefix — but the raw path no longer carries the literal `from`, the
+    substitution misses, and the dial lands outside `/proxypass`. Checking only
+    the domain prefix was the gap.
+    """
+    forwarder = _StubForwarder()
+    with TestClient(_nested_rewrite_app(forwarder)) as client:
+        with pytest.raises(WebSocketDisconnect) as caught:
+            with client.websocket_connect(path):
+                pass
+    assert caught.value.code == 4400
+    assert forwarder.opened == []
+
+
+def test_a_nested_rewrite_still_relays_its_own_paths() -> None:
+    """The tightening must not close the configuration it is guarding."""
+    forwarder = _StubForwarder()
+    with TestClient(_nested_rewrite_app(forwarder)) as client:
+        with client.websocket_connect("/openapi/v1/engine/v2/T%40x/ws") as ws:
+            ws.send_text("ping")
+            ws.receive_text()
+        _settled(forwarder)
+    assert forwarder.opened[0].request.url == "wss://proxy.internal/proxypass/T%40x/ws"
+
+
 def test_an_encoded_tail_still_relays_verbatim() -> None:
     """Only the routing prefix is constrained — the tail may encode freely.
 

@@ -113,12 +113,11 @@ async def forward_websocket(websocket: WebSocket) -> None:
         return
 
     # Routing and authentication read the decoded path; the dial is built from
-    # the raw one. Those two views must agree about the part that decided the
-    # route, or the request is authorised as one resource and dialled as
-    # another — see _routes_the_same_way.
+    # the raw one. Those two views must agree about every prefix that decided
+    # something, or the request is authorised as one resource and dialled as
+    # another — see _required_raw_prefix.
     raw_path = _raw_path(websocket)
-    routing_prefix = f"{state.domain_map.base_path.rstrip('/')}/{domain.name}"
-    if not _starts_at(raw_path, routing_prefix):
+    if not _starts_at(raw_path, _required_raw_prefix(state.domain_map, domain)):
         await _refuse(websocket, _CLOSE_BAD_PATH, "routing prefix is encoded")
         return
 
@@ -194,22 +193,40 @@ def _has_dot_segment(path: str) -> bool:
     return any(segment in _DOT_SEGMENTS for segment in path.split("/"))
 
 
-def _starts_at(path: str, prefix: str) -> bool:
-    """Whether *path* begins with *prefix* on a segment boundary.
+def _required_raw_prefix(domain_map: Any, domain: Any) -> str:
+    """The prefix the **raw** path must carry literally, for this domain.
 
-    Used to check the **raw** path against the prefix that routing already
-    matched on the *decoded* one. Percent-encoding a character of that prefix —
-    ``/openapi/v1/%65ngine/...`` — decodes to the domain and so resolves and
-    authenticates as it, while the raw path keeps ``%65ngine`` and no longer
-    carries the rewrite's literal ``from``. The rewrite then silently does not
-    fire and the upstream is dialled outside the prefix its credential check is
-    scoped to. Refusing keeps one request from being authorised as one resource
-    and dialled as another.
+    Routing and authentication run on the decoded path; the dial is built from
+    the raw one. Anywhere those two views can disagree, a request is authorised
+    as one resource and dialled as another — so every prefix that *decided*
+    something has to be literal in the raw path too.
 
-    Only the routing prefix is constrained. Everything past it may be encoded
-    however its author wrote it — that is the property the relay exists to
-    preserve.
+    Two prefixes decide something, and the deeper one governs:
+
+    - the domain prefix, which chose the route and the authentication rule.
+      ``/openapi/v1/%65ngine/...`` decodes to the domain, so it resolves and
+      authenticates as it, while the raw path keeps ``%65ngine``.
+    - the rewrite's own ``from``, when one is declared — which may be *deeper*
+      than the domain prefix, since a nested ``from`` is accepted. With
+      ``from: /openapi/v1/engine/v2``, a raw ``/openapi/v1/engine/%76%32/...``
+      clears the domain prefix but defeats the substitution.
+
+    In both cases the rewrite silently fails to fire and the upstream is dialled
+    outside the prefix its credential check is scoped to. Requiring the rewrite's
+    own ``from`` also makes the guard and :meth:`PathRewrite.apply` agree by
+    construction: past this point a declared rewrite always applies, so no
+    request reaches the upstream on a path the configuration never described.
+
+    Only this prefix is constrained. Everything past it may be encoded however
+    its author wrote it — that is the property the relay exists to preserve.
     """
+    if domain.rewrite is not None:
+        return str(domain.rewrite.from_prefix)
+    return f"{domain_map.base_path.rstrip('/')}/{domain.name}"
+
+
+def _starts_at(path: str, prefix: str) -> bool:
+    """Whether *path* begins with *prefix* on a segment boundary."""
     return path == prefix or path.startswith(f"{prefix}/")
 
 
