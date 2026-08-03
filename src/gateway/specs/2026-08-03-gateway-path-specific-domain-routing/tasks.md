@@ -107,23 +107,23 @@
         against the new prefix.
 - **Depends on:** Task 4
 
-## Task 6: Move the shipped socket domain to `/openapi/v1/bots/messages`
+## [x] Task 6: Move the shipped socket domain to `/openapi/v1/bots/messages`
 
 - **Goal:** The gateway serves the socket at its new address and no longer at the
   old one — configuration only.
 - **Files:**
   - `src/gateway/configs/application.yaml`
 - **Done when:**
-  - [ ] The `engine` domain block becomes `bots-messages-ws` with
+  - [x] The `engine` domain block becomes `bots-messages-ws` with
         `match: /openapi/v1/bots/messages/**`, `protocols: [websocket]`, and
         `rewrite: {from: /openapi/v1/bots/messages, to: /proxypass}`.
-  - [ ] Its explanatory comment carries over: Upgrade pass-through, **no read
+  - [x] Its explanatory comment carries over: Upgrade pass-through, **no read
         timeout** on the path, and no `schema:` because a socket has no OpenAPI
         representation.
-  - [ ] `route_security` declares `"/openapi/v1/bots/messages/**": {}` and no
+  - [x] `route_security` declares `"/openapi/v1/bots/messages/**": {}` and no
         longer declares `"/openapi/v1/engine/**"`; the comment explaining why it
         requires no identity carries over.
-  - [ ] The `domains:` block comment documents the new `match:` key.
+  - [x] The `domains:` block comment documents the new `match:` key.
 - **Depends on:** Task 5
 
 ## Task 7: Re-point the gateway test suites at the new address

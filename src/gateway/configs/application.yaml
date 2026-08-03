@@ -103,8 +103,8 @@ user_config:
     "/openapi/v1/bots/**":
       user: required
 
-    # The tenant engine socket, and the FIRST rule under /openapi/v1 that
-    # requires no identity at all. Deliberate: the credential is already in the
+    # The tenant bot socket, and the ONLY rule under /openapi/v1 that requires
+    # no identity at all. Deliberate: the credential is already in the
     # handshake's query string and is checked by the proxypass hop behind the
     # gateway, and a browser's WebSocket API can attach nothing else — it takes
     # a URL and a subprotocol, no headers.
@@ -114,7 +114,12 @@ user_config:
     # here would refuse every socket. Stating it keeps this table an honest
     # description of what the gateway requires, and makes tightening the prefix
     # a config edit rather than a code change.
-    "/openapi/v1/engine/**": {}
+    #
+    # It sits INSIDE the authenticated "/openapi/v1/bots/**" prefix above, and
+    # wins there by being more specific: rules are ranked by literal segment
+    # count, and this one has four to that one's three. Only this exact prefix
+    # is exempt; every other path under /openapi/v1/bots still requires a user.
+    "/openapi/v1/bots/messages/**": {}
 
   # Domain → upstream-server map for the gateway.
   #
@@ -136,6 +141,23 @@ user_config:
     base_path: /openapi/v1
 
     # Each domain may also declare:
+    #
+    #   match: <path pattern>
+    #     Which paths this domain claims: literal segments, then `**`. Unset
+    #     means `<base_path>/<domain name>/**` — the leading-segment routing
+    #     every domain had before patterns, so a domain that says nothing keeps
+    #     its address exactly. Declare one to put a domain BENEATH another, on a
+    #     different upstream.
+    #
+    #     Resolution matches first and ranks second: every domain claiming the
+    #     path AND answering the request's plane is a candidate, and the most
+    #     specific (most literal segments) wins. The plane filters the
+    #     candidates, so claiming a prefix for one plane leaves the other
+    #     plane's resolution of the same path untouched.
+    #
+    #     Startup REFUSES a pattern that does not pin `base_path` plus at least
+    #     one more literal segment. `match: /**` is an open proxy into that
+    #     domain's upstream, and this is the check that makes it untypable.
     #
     #   protocols: [http] | [websocket] | [http, websocket]
     #     Which plane serves it. Unset means `[http]`, so every domain below
@@ -182,12 +204,21 @@ user_config:
           path: schemas/baas.openapi.json
           refresh_seconds: 300
 
-      # The tenant engine socket. The backend's connection endpoint publishes
-      # `wss://<gateway>/openapi/v1/engine/<target><engine-path>?x-proxypass-token=…`
+      # The tenant bot socket. The backend's connection endpoint publishes
+      # `wss://<gateway>/openapi/v1/bots/messages/<target><engine-path>?x-proxypass-token=…`
       # and this is what serves it.
       #
-      # Socket-only: an HTTP request here is an unknown route, because the one
-      # thing this domain publishes is a relayed socket.
+      # It sits BENEATH the `bots` domain above, on a different upstream, which
+      # is what `match` exists for: the whole bots scope — management on the
+      # backend, runtime on the engine proxy — is one team's surface and belongs
+      # under one public prefix. The leading segment names the OWNER, not the
+      # process, and the gateway is what decouples the two.
+      #
+      # Socket-only, and that is not a detail. `messages` is reserved for a
+      # future HTTP endpoint here; because a domain is only a candidate on the
+      # plane it declares, an HTTP request to this prefix is not served by this
+      # domain at all — it falls to `bots` above, and reaches the backend. The
+      # reservation therefore costs that endpoint nothing.
       #
       # The engine proxy serves the same targets under `/proxypass/`, so the
       # prefix is substituted; everything past it — the routing target, the
@@ -201,11 +232,12 @@ user_config:
       # this path. The credential is checked once, at the handshake, and the
       # connection is designed to outlive its expiry — an idle deadline tears
       # down healthy sockets.
-      engine:
+      bots-messages-ws:
+        match: /openapi/v1/bots/messages/**
         server: engine_proxy
         protocols: [websocket]
         rewrite:
-          from: /openapi/v1/engine
+          from: /openapi/v1/bots/messages
           to: /proxypass
 
     servers:
