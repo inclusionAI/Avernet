@@ -799,17 +799,12 @@ class DefaultBotManagementService(BotManageService):
                     bot_config.callback_timeout_seconds
                 )
 
-        # Determine effective auto_approve: merged config takes priority over parameter
-        effective_auto_approve = (
-            existing_config.auto_approve_publish or auto_approve_publish
-        )
-
         # Create publish via PublishService
         scale_amount = abs(target_count - current_count)
         scale_config = PublishConfig(
             replica_desired=target_count,
             batch_capacity=min(10, scale_amount),
-            auto_approve=effective_auto_approve,
+            auto_approve=auto_approve_publish,
             deploy_config=existing_config.deploy_config,
             callback_timeout_seconds=resolve_callback_timeout(
                 existing_config.callback_timeout_seconds, self._system_config_repo
@@ -830,7 +825,7 @@ class DefaultBotManagementService(BotManageService):
         )
 
         # Auto-approve publish stage gates when requested
-        if effective_auto_approve:
+        if auto_approve_publish:
             logger.info(
                 f"[scale_bot] auto_approve_publish=True, "
                 f"starting auto-approval loop for publish_id={publish.id}"
