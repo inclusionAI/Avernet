@@ -129,7 +129,7 @@ async def get_skill(
     responses={
         200: {
             "model": Envelope[SkillUpload],
-            "description": "Same-name Local Skill replaced successfully.",
+            "description": "Existing Local Skill safely replaced.",
         },
         413: {
             "model": ErrorEnvelope,
