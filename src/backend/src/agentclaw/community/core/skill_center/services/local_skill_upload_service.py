@@ -157,6 +157,7 @@ class LocalSkillUploadService:
             file_kind = (info.external_attr >> 16) & 0o170000
             if (
                 path.startswith(("/", "\\"))
+                or re.match(r"^[A-Za-z]:", path) is not None
                 or "\\" in path
                 or ".." in path.split("/")
                 or len(path) > 256
@@ -183,8 +184,6 @@ class LocalSkillUploadService:
         wrapper = skill_path.split("/")[0] if "/" in skill_path else None
         if wrapper is not None and len(roots) != 1:
             raise LocalSkillInvalidPackageError()
-        if wrapper is None and any("/" in path for path, _ in files):
-            raise LocalSkillInvalidPackageError()
         text = markdown.decode("utf-8", errors="strict")
         name_match = re.search(r"(?m)^name:\s*([^\n]+)\s*$", text)
         desc_match = re.search(r"(?m)^description:\s*([^\n]+)\s*$", text)
@@ -194,6 +193,10 @@ class LocalSkillUploadService:
         if not name or not description or not _NAME.fullmatch(name) or name.lower() in {"skills-local", "skills-repo"}:
             raise LocalSkillInvalidPackageError()
         if wrapper and wrapper != name:
+            raise LocalSkillInvalidPackageError()
+        if wrapper is not None and any(
+            not path.startswith(f"{wrapper}/") for path, _ in files
+        ):
             raise LocalSkillInvalidPackageError()
         normalized = [(p[len(wrapper) + 1:] if wrapper else p, c) for p, c in files]
         return name, description, normalized

@@ -161,3 +161,19 @@ def test_zip_security_rejects_traversal_and_requires_skill_metadata():
         service._unpack(_zip({"../SKILL.md": b"name: bad\ndescription: nope\n"}))
     with pytest.raises(LocalSkillInvalidPackageError):
         service._unpack(_zip({"SKILL.md": b"name: bad\n"}))
+
+
+def test_zip_accepts_root_skill_with_subdirectories_and_matching_wrapper():
+    service = _service(_Filesystem())
+    name, _, files = service._unpack(
+        _zip({
+            "SKILL.md": b"name: root-skill\ndescription: useful\n",
+            "scripts/main.py": b"print('ok')",
+        })
+    )
+    assert name == "root-skill"
+    assert [path for path, _ in files] == ["SKILL.md", "scripts/main.py"]
+    name, _, files = service._unpack(
+        _zip({"wrapped/SKILL.md": b"name: wrapped\ndescription: useful\n", "wrapped/a.txt": b"x"})
+    )
+    assert name == "wrapped" and [path for path, _ in files] == ["SKILL.md", "a.txt"]
