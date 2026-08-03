@@ -1029,6 +1029,8 @@ class SkillSetRepository:
                 query = query.filter(
                     self.SkillSet.engine_type == engine_type
                 )
+            if bolt_id is not None:
+                query = query.filter(self.SkillSet.bolt_id == bolt_id)
             ss = query.limit(1).first()
             return _skill_set_to_dict(ss) if ss else None
 

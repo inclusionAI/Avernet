@@ -18,6 +18,7 @@ provides:
   - "LocalSkillUploadService"
 consumes:
   - "BotRepository"
+  - "BotCollabLogRepositoryProtocol"
   - "CollaboratorServiceProtocol"
   - "Events"
   - "core/mcp services"
