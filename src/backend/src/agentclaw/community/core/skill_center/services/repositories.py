@@ -191,6 +191,16 @@ class SkillSetRepository(Protocol):
     def remove_skill_from_set(self, skill_set_id: str, skill_id: str) -> bool:
         ...
 
+    def add_default_skill_exclusion(
+        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
+    ) -> bool:
+        ...
+
+    def remove_default_skill_exclusion(
+        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
+    ) -> bool:
+        ...
+
     def add_mcp_to_set(self, skill_set_id: str, server_code: str, name: str,
                        description: str | None = None, icon: str | None = None,
                        user_id: str | None = None, env: str | None = None) -> bool:
