@@ -13,7 +13,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::web::{
     dispatch_client_frame, WebClientConnectionState, WebDispatchOutcome, WebDispatchState,
-    WebWsDispatchError,
+    WebWsDispatchError, WorkbenchConnectionAuth,
 };
 
 static CLIENT_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -29,7 +29,7 @@ struct PingFrame {
 pub async fn handle_client_connection(
     socket: WebSocket,
     state: Arc<WebDispatchState>,
-    bound_actor_id: Option<String>,
+    auth: WorkbenchConnectionAuth,
     metrics_hook: Arc<dyn WsLifecycleInstrumentationHook>,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
@@ -59,7 +59,7 @@ pub async fn handle_client_connection(
 
     info!(
         client_id = client_id,
-        bound_actor_id = ?bound_actor_id,
+        bound_actor_id = ?auth.actor_id(),
         "New frontend WebSocket connection established"
     );
 
@@ -81,7 +81,7 @@ pub async fn handle_client_connection(
                             &text,
                             &client_tx,
                             &mut connection_state,
-                            bound_actor_id.as_deref(),
+                            &auth,
                         ).await {
                             Ok(outcome) => {
                                 debug!(client_id = client_id, "Frame dispatched successfully");

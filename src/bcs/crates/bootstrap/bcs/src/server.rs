@@ -4500,7 +4500,14 @@ async fn ws_upgrade_handler(
     ws.on_upgrade(move |socket| {
         let ws_state = web_ws_dispatch_state(&state);
         let metrics_hook = ws_lifecycle_hook(&state);
-        bcs_ws::web::handle_client_connection(socket, ws_state, bound_actor_id, metrics_hook)
+        bcs_ws::web::handle_client_connection(
+            socket,
+            ws_state,
+            bcs_ws::web::WorkbenchConnectionAuth::UserBound {
+                actor_id: bound_actor_id,
+            },
+            metrics_hook,
+        )
     })
 }
 

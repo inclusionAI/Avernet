@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use crate::shared::RunChannelManager;
-use crate::web::WorkbenchConnectionRegistry;
+use crate::web::{WorkbenchConnectionAuth, WorkbenchConnectionRegistry};
 
 const STATE_MACHINE_EVENT_BOT_UUID: &str = "bcs_state_machine";
 
@@ -70,7 +70,7 @@ pub async fn dispatch_client_frame(
     text: &str,
     tx: &mpsc::Sender<String>,
     connection_state: &mut WebClientConnectionState,
-    bound_actor_id: Option<&str>,
+    auth: &WorkbenchConnectionAuth,
 ) -> Result<WebDispatchOutcome> {
     let frame: BcsFrame = serde_json::from_str(text)
         .map_err(|e| WebWsDispatchError::InvalidFrameFormat(e.to_string()))?;
@@ -80,7 +80,7 @@ pub async fn dispatch_client_frame(
             let is_connect = req.method == "connect";
             let subscribed_before = connection_state.subscribed_sessions.len();
             if let Err(error) =
-                handle_client_request(state, &req, tx, connection_state, bound_actor_id).await
+                handle_client_request(state, &req, tx, connection_state, auth).await
             {
                 if is_connect {
                     return Err(WebWsDispatchError::ClientConnectError(Box::new(error)));
@@ -109,20 +109,20 @@ async fn handle_client_request(
     req: &RequestFrame,
     tx: &mpsc::Sender<String>,
     connection_state: &mut WebClientConnectionState,
-    bound_actor_id: Option<&str>,
+    auth: &WorkbenchConnectionAuth,
 ) -> Result<()> {
     debug!(id = %req.id, method = %req.method, "Handling client RequestFrame");
     info!(method = %req.method, "Client request received");
 
     match req.method.as_str() {
         "connect" => {
-            handle_connect(state, req, tx, connection_state, bound_actor_id).await?;
+            handle_connect(state, req, tx, connection_state, auth).await?;
         }
         "chat.send" => {
-            handle_chat_send(state, req, tx, connection_state, bound_actor_id).await?;
+            handle_chat_send(state, req, tx, connection_state, auth).await?;
         }
         "chat.abort" => {
-            handle_chat_abort(state, req, tx).await?;
+            handle_chat_abort(state, req, tx, auth).await?;
         }
         _ => {
             send_error(
@@ -156,8 +156,9 @@ async fn handle_connect(
     req: &RequestFrame,
     tx: &mpsc::Sender<String>,
     connection_state: &mut WebClientConnectionState,
-    bound_actor_id: Option<&str>,
+    auth: &WorkbenchConnectionAuth,
 ) -> Result<()> {
+    let bound_actor_id = auth.actor_id();
     let params: ConnectParams = serde_json::from_value(req.params.clone().unwrap_or(Value::Null))
         .map_err(|e| {
         WebWsDispatchError::InvalidFrameFormat(format!("Invalid connect params: {}", e))
@@ -256,8 +257,9 @@ async fn handle_chat_send(
     req: &RequestFrame,
     tx: &mpsc::Sender<String>,
     connection_state: &mut WebClientConnectionState,
-    bound_actor_id: Option<&str>,
+    auth: &WorkbenchConnectionAuth,
 ) -> Result<()> {
+    let bound_actor_id = auth.actor_id();
     let params: ChatSendParams = serde_json::from_value(req.params.clone().unwrap_or(Value::Null))
         .map_err(|e| {
             WebWsDispatchError::InvalidFrameFormat(format!("Invalid chat.send params: {}", e))
@@ -472,6 +474,7 @@ async fn handle_chat_abort(
     state: &Arc<WebDispatchState>,
     req: &RequestFrame,
     tx: &mpsc::Sender<String>,
+    _auth: &WorkbenchConnectionAuth,
 ) -> Result<()> {
     let params: ClientChatAbortParams =
         serde_json::from_value(req.params.clone().unwrap_or(Value::Null)).map_err(|e| {
