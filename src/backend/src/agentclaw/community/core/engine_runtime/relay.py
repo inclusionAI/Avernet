@@ -1,7 +1,8 @@
 """EngineRuntimeRelay — one public request → one engine-adapter call.
 
 The single place Track C crosses into a bot's device. Every public
-``/openapi/v1/bots/{bot_id}/…`` runtime handler goes through here, so the four
+``/openapi/v1/bots/<component>/{bot_id}/…`` runtime handler goes through here,
+so the four
 things that must hold on *every* such request are enforced once:
 
 1. **The caller's bot is resolved owner-scoped, before any device work.** The

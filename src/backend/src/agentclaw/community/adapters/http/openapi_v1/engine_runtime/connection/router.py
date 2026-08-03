@@ -1,4 +1,4 @@
-"""Connection endpoint — ``GET /openapi/v1/bots/{bot_id}/connection``.
+"""Connection endpoint — ``GET /openapi/v1/bots/connection/{bot_id}``.
 
 The public replacement for the device-connection hand-off. Returns finished
 socket URLs; the caller opens the socket itself. Chat is not relayed through
@@ -31,12 +31,12 @@ from agentclaw.community.api.engine_connection_service import (
 )
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}", tags=["connection"])
+router = APIRouter(prefix="/openapi/v1/bots/connection", tags=["connection"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
-@router.get("/connection", response_model=Envelope[Connection])
+@router.get("/{bot_id}", response_model=Envelope[Connection])
 @envelope_errors
 async def get_connection(
     bot_id: str,

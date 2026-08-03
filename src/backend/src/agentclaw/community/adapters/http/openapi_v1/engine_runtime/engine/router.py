@@ -1,4 +1,4 @@
-"""Engine group (read-only) — ``/openapi/v1/bots/{bot_id}/engine``.
+"""Engine group (read-only) — ``/openapi/v1/bots/engine/{bot_id}``.
 
 Three reads. ``switch`` and ``restart`` are deliberately **not** wrapped:
 wrapping ``switch`` would be a back door around the rule that a bot's engine is
@@ -31,7 +31,7 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.core.engine_runtime.errors import EngineUpstreamError
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/engine", tags=["engine"])
+router = APIRouter(prefix="/openapi/v1/bots/engine", tags=["engine"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
@@ -51,7 +51,7 @@ def _names(raw: Any) -> list[str]:
     return []
 
 
-@router.get("/status", response_model=Envelope[EngineStatus])
+@router.get("/{bot_id}/status", response_model=Envelope[EngineStatus])
 @envelope_errors
 async def get_engine_status(
     bot_id: str,
@@ -81,7 +81,7 @@ async def get_engine_status(
     )
 
 
-@router.get("/capabilities", response_model=Envelope[EngineCapabilities])
+@router.get("/{bot_id}/capabilities", response_model=Envelope[EngineCapabilities])
 @envelope_errors
 async def get_engine_capabilities(
     bot_id: str,
@@ -114,7 +114,7 @@ async def get_engine_capabilities(
     )
 
 
-@router.get("/available", response_model=Envelope[list[EngineInfo]])
+@router.get("/{bot_id}/available", response_model=Envelope[list[EngineInfo]])
 @envelope_errors
 async def list_available_engines(
     bot_id: str,

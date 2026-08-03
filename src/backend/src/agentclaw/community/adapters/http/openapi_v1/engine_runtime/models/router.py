@@ -1,4 +1,4 @@
-"""Models group — ``/openapi/v1/bots/{bot_id}/models``."""
+"""Models group — ``/openapi/v1/bots/models/{bot_id}``."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/models", tags=["models"])
+router = APIRouter(prefix="/openapi/v1/bots/models", tags=["models"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
@@ -41,7 +41,7 @@ def _map_model(data: dict[str, Any]) -> Model:
     )
 
 
-@router.get("", response_model=Envelope[Page[Model]])
+@router.get("/{bot_id}", response_model=Envelope[Page[Model]])
 @envelope_errors
 async def list_models(
     bot_id: str,
@@ -69,7 +69,7 @@ async def list_models(
     return page_envelope(total, mapped[start : start + page.page_size], request)
 
 
-@router.get("/{model_id:path}", response_model=Envelope[Model])
+@router.get("/{bot_id}/{model_id:path}", response_model=Envelope[Model])
 @envelope_errors
 async def get_model(
     bot_id: str,
