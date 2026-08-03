@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from hashlib import sha256
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 
-from agentclaw.community.core.bot_chat.models import AcOtelLogTrace, AwLangfuseTrace
+from agentclaw.community.core.bot_chat.models import (
+    AcOtelLogBizRef,
+    AcOtelLogTrace,
+    AwLangfuseTrace,
+)
 from agentclaw.community.core.bot_chat.query_support import (
     enrich_bot_names,
-    enrich_group_labels,
-    enrich_task_labels,
 )
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationSession,
@@ -152,7 +155,12 @@ class OpenBotChatRepository:
                 .all()
             )
             detached = [self._detach_ocb(row) for row in rows]
-            self._enrich(session, detached)
+            self._enrich(
+                session,
+                detached,
+                user_id=user_id,
+                bot_id=bot_id,
+            )
             return [self._to_session(row) for row in detached], total
 
     def _list_legacy(
@@ -185,14 +193,100 @@ class OpenBotChatRepository:
                 .all()
             )
             detached = [self._detach_legacy(row) for row in rows]
-            self._enrich(session, detached)
+            self._enrich(
+                session,
+                detached,
+                user_id=user_id,
+                bot_id=bot_id,
+            )
             return [self._to_session(row) for row in detached], total
 
-    @staticmethod
-    def _enrich(session: Any, rows: list[Any]) -> None:
-        enrich_group_labels(session, rows)
-        enrich_task_labels(session, rows)
+    @classmethod
+    def _enrich(
+        cls,
+        session: Any,
+        rows: list[Any],
+        *,
+        user_id: str,
+        bot_id: str,
+    ) -> None:
+        cls._enrich_task_labels(
+            session,
+            rows,
+            user_id=user_id,
+            bot_id=bot_id,
+        )
         enrich_bot_names(session, rows)
+
+    @staticmethod
+    def _enrich_task_labels(
+        session: Any,
+        rows: list[Any],
+        *,
+        user_id: str,
+        bot_id: str,
+    ) -> None:
+        """Fill task labels from relations owned by the requested identity."""
+        candidate_rows: dict[tuple[str, str], list[Any]] = {}
+        digests_by_type: dict[str, set[str]] = {}
+        for row in rows:
+            for ref_type, attribute in (
+                ("trace_id", "trace_id"),
+                ("session_id", "session_id"),
+                ("session_key", "session_key"),
+            ):
+                ref_value = getattr(row, attribute, None)
+                if not ref_value:
+                    continue
+                candidate_rows.setdefault((ref_type, ref_value), []).append(row)
+                digest = f"sha256:{sha256(ref_value.encode('utf-8')).hexdigest()}"
+                digests_by_type.setdefault(ref_type, set()).add(digest)
+
+        if not candidate_rows:
+            return
+        ref_conditions = [
+            and_(
+                AcOtelLogBizRef.ref_type == ref_type,
+                AcOtelLogBizRef.ref_digest.in_(digests),
+            )
+            for ref_type, digests in digests_by_type.items()
+        ]
+        relations = (
+            session.query(AcOtelLogBizRef)
+            .filter(
+                AcOtelLogBizRef.user_id == user_id,
+                AcOtelLogBizRef.bot_id.in_(_bot_ids(user_id, bot_id)),
+                or_(*ref_conditions),
+            )
+            .order_by(
+                AcOtelLogBizRef.gmt_modified.desc(),
+                AcOtelLogBizRef.gmt_create.desc(),
+                AcOtelLogBizRef.id.desc(),
+            )
+            .all()
+        )
+        relations_by_row: dict[int, list[Any]] = {}
+        for relation in relations:
+            relation_type = getattr(relation, "ref_type", None)
+            relation_value = getattr(relation, "ref_value", None)
+            if not relation_type or not relation_value:
+                continue
+            for row in candidate_rows.get((relation_type, relation_value), ()):
+                relations_by_row.setdefault(id(row), []).append(relation)
+
+        for row in rows:
+            scene = getattr(row, "biz_scene", None)
+            task_id = getattr(row, "biz_task_id", None)
+            if scene and task_id:
+                continue
+            for relation in relations_by_row.get(id(row), ()):
+                if scene and relation.biz_scene != scene:
+                    continue
+                if task_id and relation.biz_task_id != task_id:
+                    continue
+                row.biz_scene = relation.biz_scene
+                row.biz_task_id = relation.biz_task_id
+                break
 
     @staticmethod
     def _detach_ocb(row: AcOtelLogTrace) -> Any:

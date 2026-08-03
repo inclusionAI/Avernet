@@ -56,7 +56,7 @@ def _write_ocb_trace(
     )
 
 
-def test_user_bot_query_is_exact_and_enriches_atomic_trace_labels() -> None:
+def test_user_bot_query_is_exact_and_enriches_owned_task_labels() -> None:
     db = _LocalDb()
     writer = BotChatDbRepository(db)
     session_key = "agent:main:open-user-bot"
@@ -117,7 +117,8 @@ def test_user_bot_query_is_exact_and_enriches_atomic_trace_labels() -> None:
         "scene-fixture",
         "task-fixture",
     )
-    assert (row.group_id, row.session_kind) == ("group-fixture", "chat")
+    assert row.group_id is None
+    assert row.session_kind is None
 
 
 def test_user_bot_query_falls_back_to_legacy_only_when_otel_is_empty() -> None:
@@ -147,3 +148,84 @@ def test_user_bot_query_falls_back_to_legacy_only_when_otel_is_empty() -> None:
     assert result.total == 1
     assert result.sessions[0].id == "legacy-match"
     assert result.sessions[0].session_id == "legacy-session"
+
+
+def test_task_enrichment_is_isolated_for_same_session_key() -> None:
+    db = _LocalDb()
+    writer = BotChatDbRepository(db)
+    session_key = "agent:main:shared-session"
+    _write_ocb_trace(
+        writer,
+        trace_id="trace-target",
+        user_id="target-user",
+        bot_id="target-bot",
+        session_key=session_key,
+    )
+    writer.upsert_biz_refs(
+        {
+            "biz_scene": "wrong-scene",
+            "biz_task_id": "wrong-task",
+            "user_id": "other-user",
+            "bot_id": "target-bot",
+            "refs": [{"ref_type": "session_key", "ref_value": session_key}],
+        }
+    )
+    writer.upsert_biz_refs(
+        {
+            "biz_scene": "target-scene",
+            "biz_task_id": "target-task",
+            "user_id": "target-user",
+            "bot_id": "target-bot",
+            "refs": [{"ref_type": "session_key", "ref_value": session_key}],
+        }
+    )
+
+    result = OpenBotChatRepository(db).list_user_bot_traces(
+        user_id="target-user",
+        bot_id="target-bot",
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+    )
+
+    assert result.total == 1
+    assert (result.sessions[0].biz_scene, result.sessions[0].biz_task_id) == (
+        "target-scene",
+        "target-task",
+    )
+
+
+def test_task_enrichment_ignores_unowned_relation() -> None:
+    db = _LocalDb()
+    writer = BotChatDbRepository(db)
+    session_key = "agent:main:unowned-session"
+    _write_ocb_trace(
+        writer,
+        trace_id="trace-target",
+        user_id="target-user",
+        bot_id="target-bot",
+        session_key=session_key,
+    )
+    writer.upsert_biz_refs(
+        {
+            "biz_scene": "wrong-scene",
+            "biz_task_id": "wrong-task",
+            "user_id": "other-user",
+            "bot_id": "target-bot",
+            "refs": [{"ref_type": "session_key", "ref_value": session_key}],
+        }
+    )
+
+    result = OpenBotChatRepository(db).list_user_bot_traces(
+        user_id="target-user",
+        bot_id="target-bot",
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+    )
+
+    assert result.total == 1
+    assert result.sessions[0].biz_scene is None
+    assert result.sessions[0].biz_task_id is None

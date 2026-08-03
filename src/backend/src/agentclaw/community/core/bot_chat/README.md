@@ -47,3 +47,10 @@ relations without identity remain readable for backward compatibility. ORM
 index declarations create indexes for new local databases only. Existing
 deployments must apply equivalent DDL through their normal database migration
 process.
+
+The OpenAPI user-and-Bot trace query is stricter than the product query: task
+label enrichment requires an exact relation `user_id` and requested `bot_id`
+(including the established `default` Bot alias). Identity-free legacy task
+relations are not used by this endpoint. Group labels are not enriched because
+`bcs_group_sessions` does not carry user or Bot identity and the OpenAPI query
+must not treat a session ID alone as an ownership source.

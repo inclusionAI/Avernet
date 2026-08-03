@@ -162,3 +162,20 @@ def open_bot_chat_detail_not_found():
 )
 def open_bot_chat_user_bot_list_happy():
     """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="GET",
+    path=_USER_BOT_PATH,
+    scenario="invalid_limit",
+    input=CaseInput(
+        path_params={
+            "user_id": "user_pair_fixture",
+            "bot_id": "bot_pair_fixture",
+        },
+        query_params={"limit": 101},
+    ),
+    expect=ExpectError(status=422),
+)
+def open_bot_chat_user_bot_list_invalid_limit():
+    """The framework owns invocation."""
