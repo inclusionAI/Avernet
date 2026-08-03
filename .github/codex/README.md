@@ -1,9 +1,18 @@
 # Codex GitHub automation
 
 `codex-review-autofix.yml` listens for new P1 or P2 inline review comments from
-`chatgpt-codex-connector[bot]` on pull requests whose head branch belongs to
-this repository. It asks Codex for the smallest applicable fix, then pushes a
-commit only when Codex leaves a non-empty, non-workflow diff.
+`chatgpt-codex-connector[bot]` only when the pull request author is
+`FreddieSun` and its head branch belongs to this repository. It asks Codex for
+the smallest applicable fix, then pushes a commit only when Codex leaves a
+non-empty, non-workflow diff.
+
+GitHub Actions workflows are repository-scoped. GitHub creates a run record
+for every matching review-comment event before evaluating the job condition, so
+other contributors can see a skipped run in the Actions UI. Their pull requests
+never invoke Codex, receive the personal API key, modify code, or consume the
+key's usage. A fully private event-driven workflow requires a separately hosted
+webhook receiver owned by FreddieSun rather than a workflow stored in this
+repository.
 
 ## Required secret
 

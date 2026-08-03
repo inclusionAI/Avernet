@@ -1,4 +1,4 @@
-name: Codex review autofix
+name: FreddieSun Codex review autofix
 
 on:
   pull_request_review_comment:
@@ -14,10 +14,12 @@ concurrency:
 
 jobs:
   autofix:
-    # Run only trusted, current P1/P2 inline findings on branches in this repo.
+    # Run only on FreddieSun's pull requests, for trusted, current P1/P2 inline
+    # findings on branches in this repository.
     # Fork pull requests are deliberately excluded: their code must never run
     # with the repository's write token or personal OpenAI API key.
     if: >-
+      github.event.pull_request.user.login == 'FreddieSun' &&
       github.event.sender.login == 'chatgpt-codex-connector[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.comment.commit_id == github.event.pull_request.head.sha &&
