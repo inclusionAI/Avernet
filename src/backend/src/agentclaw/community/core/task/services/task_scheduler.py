@@ -1,12 +1,12 @@
 """TaskScheduler — orchestration authority (Phase 3, plan §2.1/§3/§7.2).
 
-单一链路:全生命周期动作节点图(NodeType-aware)。Drives the EXECUTING → REVIEWING
+单一链路:全生命周期动作节点图(NodeType-aware)。Drives the RUNNING → REVIEWING
 loop. Holds NO state of its own: every write flows through :class:`TaskService`
 (which guards + folds + appends the event log). The Scheduler only decides
 *what to do next*:
 
-- :meth:`start` (approve 委派) — DEFINED → EXECUTING + ``spawn_build_dag`` +
-  ``mark_graph(ON_PLAZA)`` + 首个 tick。
+- :meth:`start` (approve 委派) — DEFINED → RUNNING + ``init_execution_graph`` +
+  ``mark_graph(RUNNING)`` + 首个 tick。
 - :meth:`tick` — 委派 :meth:`_tick`(NodeType-aware 推进;规划链/搜推先行/
   分解/派发/exec-aggregate 触发/终验,见 ``scheduler_ops``)。
 - :meth:`on_event` — ``NODE_FAILED`` → 同执行方有限次重派(T-13),超限 reroute C5。
@@ -36,7 +36,7 @@ from agentclaw.community.core.task.services.scheduler_ops import (
 )
 from agentclaw.community.core.task.domain.models import (
     Task,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.domain.state_machine import (
     IllegalTransitionError,
@@ -74,20 +74,16 @@ class TaskScheduler(SchedulerOpsMixin):
         task = self._svc.get(task_id)
         if task is None:
             return None
-        if task.status is not TaskStatus.DEFINED:
+        if task.status is not GraphStatus.DEFINED:
             raise IllegalTransitionError(
                 f"start requires DEFINED, task {task_id} is {task.status.value}"
             )
-        logger.info("[Scheduler] task=%s start defined→executing", task_id)
-        # DEFINED → EXECUTING (legal edge)
-        task.status = TaskStatus.EXECUTING
-        if task.execution_graph is not None:
-            task.execution_graph.root_phase = TaskStatus.EXECUTING
-        self._svc.spawn_build_dag(task)
-        task = self._svc.get(task_id)  # spawn 自持久化;重读续用
-        from agentclaw.community.core.task.domain.models import GraphStatus
-
-        self._svc.mark_graph_status(task, GraphStatus.ON_PLAZA)
+        logger.info("[Scheduler] task=%s start defined→running", task_id)
+        # DEFINED → RUNNING (legal edge)
+        task.status = GraphStatus.RUNNING
+        self._svc.init_execution_graph(task)
+        task = self._svc.get(task_id)  # init 自持久化;重读续用
+        self._svc.mark_graph_status(task, GraphStatus.RUNNING)
         # emit a dispatch tick
         self.tick(task_id)
         return self._svc.get(task_id)
@@ -98,20 +94,20 @@ class TaskScheduler(SchedulerOpsMixin):
         task = self._svc.get(task_id)
         if task is None:
             return {"task_id": task_id, "action": "noop", "reason": "not_found"}
-        if task.status not in {TaskStatus.EXECUTING}:
+        if task.status not in {GraphStatus.RUNNING}:
             return {"task_id": task_id, "action": "noop", "reason": f"status={task.status.value}"}
-        logger.info("[Scheduler] task=%s tick status=executing", task_id)
+        logger.info("[Scheduler] task=%s tick status=running", task_id)
         return self._tick(task)
 
-    def _advance(self, task: Task, target: TaskStatus) -> None:
+    def _advance(self, task: Task, target: GraphStatus) -> None:
         from agentclaw.community.core.task.domain.state_machine import (
-            require_task_transition,
+            require_graph_transition,
         )
 
-        require_task_transition(task.status, target)
+        require_graph_transition(task.status, target)
         task.status = target
         if task.execution_graph is not None:
-            task.execution_graph.root_phase = target
+            task.execution_graph.status = target
 
     # --- on_event (编排 reactions, plan §3.4) ------------------------------
 

@@ -48,15 +48,12 @@ from agentclaw.community.core.task.domain.models import (
     DeliverableType,
     Edge,
     EdgeKind,
-    GraphStatus,
     Node,
     NodeStatus,
     NodeType,
-    Plan,
     RouteClass,
     RunMode,
     SubDagRef,
-    SubTaskSpec,
     SubtaskState,
     StateSemantics,
     Task,
@@ -66,7 +63,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
     TaskSpecMetadata,
     TaskState,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.domain.repository import (
     TaskEventRepo,
@@ -75,9 +72,8 @@ from agentclaw.community.core.task.domain.repository import (
 )
 from agentclaw.community.core.task.domain.state_machine import (
     IllegalTransitionError,
-    require_graph_transition,
     require_node_transition,
-    require_task_transition,
+    require_graph_transition,
 )
 from agentclaw.community.core.task.services.graph_state_ops import GraphStateOpsMixin
 from agentclaw.community.log import get_logger
@@ -146,7 +142,7 @@ class TaskService(GraphStateOpsMixin):
             else TaskSource.API
         )
         task_id = _new_task_id()
-        graph = TaskExecutionGraph(root_phase=TaskStatus.DRAFTING)
+        graph = TaskExecutionGraph(status=GraphStatus.DRAFTING)
         task = Task(
             id=task_id,
             user_id=user_id,
@@ -178,44 +174,28 @@ class TaskService(GraphStateOpsMixin):
         )
         return self._task_repo.get_by_id(task_id)
 
-    def clarify(self, task_id: str, patch: dict) -> Optional[Task]:
+    def clarify(self, task_id: str, patch: dict, confirmed: bool = False) -> Optional[Task]:
+        """澄清 spec:``patch`` amend 要素;``confirmed=True`` → 用户确认澄清 →
+        DRAFTING→DEFINED(2026-08-03 方案 D:amend 与 confirm 合二为一)。
+
+        - 逐轮 amend(``confirmed=False``):apply patch,留 DRAFTING(R2:要素补全期不切态);
+          多轮 C2/C3 澄清都走此路径,中途持久化供副屏/崩溃恢复。
+        - 最终确认(``confirmed=True``):apply 最后一轮 patch + DRAFTING→DEFINED(guard)。
+          ``start`` 仍要求 DEFINED;顶层分解由 task-owner 经 task-plan-skill 运行期完成。
+
+        取代旧 ``finalize_plan``(冻结 Plan 已退场);Plan-free,不再有独立 confirm-spec。"""
         task = self._load(task_id)
         if task is None:
             return None
         self._apply_spec_patch(task, patch)
-        # clarify does NOT transition (spec R2): the task stays DRAFTING through
-        # the entire element-completion phase until finalize_plan → DEFINED.
-        self._emit(task, EventKind.SPEC_AMENDED, patch=patch)
-        self._task_repo.save(task)
-        return self._task_repo.get_by_id(task_id)
-
-    def finalize_plan(self, task_id: str, plan: Plan) -> Optional[Task]:
-        # Accept a dict plan_payload (HTTP /plan endpoint) by coercing it into a
-        # Plan via the same _plan_from_dict used by clarify; e2e callers pass a
-        # Plan object unchanged. Phase 6.9 smoke gap ② fix.
-        if isinstance(plan, dict):
-            plan = self._plan_from_dict(plan)
-        task = self._load(task_id)
-        if task is None:
-            return None
-        # Plan freeze is legal from DRAFTING → DEFINED (spec R2/R3). Re-plan from a
-# later phase is not allowed; clarify+refinalize must restart at DRAFTING.
-        if task.status not in {TaskStatus.DRAFTING}:
-            raise IllegalTransitionError(
-                f"finalize_plan illegal from {task.status.value}"
-            )
-        task.plan = plan
-        self._advance_phase(task, TaskStatus.DEFINED)
-        self._emit(
-            task,
-            EventKind.PLAN_FINALIZED,
-            node_count=len(plan.sub_tasks),
-            confidence=float(plan.confidence),
-        )
-        logger.info(
-            "[Task] task=%s finalize_plan nodes=%d confidence=%.2f → defined",
-            task_id, len(plan.sub_tasks), float(plan.confidence),
-        )
+        if confirmed:
+            if task.status not in {GraphStatus.DRAFTING}:
+                raise IllegalTransitionError(
+                    f"clarify(confirmed=True) illegal from {task.status.value}"
+                )
+            self._advance_phase(task, GraphStatus.DEFINED)
+            logger.info("[Task] task=%s clarify(confirmed) → defined", task_id)
+        self._emit(task, EventKind.TASK_CLARIFIED, patch=patch, confirmed=confirmed)
         self._task_repo.save(task)
         return self._task_repo.get_by_id(task_id)
 
@@ -223,7 +203,7 @@ class TaskService(GraphStateOpsMixin):
         task = self._load(task_id)
         if task is None:
             return None
-        self._advance_phase(task, TaskStatus.CANCELLED)
+        self._advance_phase(task, GraphStatus.CANCELLED)
         self._emit(task, EventKind.CANCELLED, by=by, reason=reason)
         self._task_repo.save(task)
         return self._task_repo.get_by_id(task_id)
@@ -249,7 +229,6 @@ class TaskService(GraphStateOpsMixin):
             payload=dict(payload),
         )
         self._event_repo.append(log_event)
-        task.latest_event_seq = log_event.seq
         self._apply_event(task, kind, payload)
         self._task_repo.save(task)
         logger.info(
@@ -305,6 +284,11 @@ class TaskService(GraphStateOpsMixin):
         execution trace). ``after_seq`` for incremental follow."""
         return self._event_repo.load_events(task_id, after_seq=after_seq)
 
+    def latest_seq(self, task_id: str) -> int:
+        """事件日志尾部水位(单写者 watermark)。聚合上不再驻 ``latest_event_seq``,
+        wire 层(/create /events 响应 seq、/history?after_seq 增量跟随)按需读此。"""
+        return self._event_repo.latest_seq(task_id)
+
     def list_by_user(self, user_id: str, limit: int = 50) -> list[Task]:
         tasks = self._task_repo.list_by_user(user_id)
         return tasks[:limit]
@@ -357,12 +341,19 @@ class TaskService(GraphStateOpsMixin):
             )
             return None
         g = task.execution_graph
+        history_types = (
+            NodeType.RECOGNITION, NodeType.CLARIFY, NodeType.EXECUTE_START,
+        )
+        actionable = [n for n in g.nodes if n.node_type not in history_types]
         return {
             "task_id": task_id,
-            "root_phase": g.root_phase.value,
-            "graph_status": g.graph_status.value,
+            "status": g.status.value,
             "loop_round": g.loop_round,
-            "definition_meta": self._definition_meta(task),
+            "definition_meta": {
+                # 退场 Plan 后,可执行节点 = 根 BOT_SEARCH + 各 DISPATCH/AGGREGATE
+                # 等动作节点(不含 recognition/clarify/execute_start 历史脚手架)。
+                "node_count": len(actionable),
+            },
             "nodes": [self._node_view(n) for n in g.nodes],
             "edges": [self._edge_view(e) for e in g.edges],
         }
@@ -437,8 +428,7 @@ class TaskService(GraphStateOpsMixin):
     def _stub_sub_dag(task_id: str, ref: SubDagRef) -> dict:
         return {
             "task_id": task_id,
-            "root_phase": "executing",
-            "graph_status": "on_plaza",
+            "status": "running",
             "loop_round": 0,
             "definition_meta": {
                 "ref_kind": ref.ref_kind,
@@ -494,16 +484,14 @@ class TaskService(GraphStateOpsMixin):
         node_id = payload.get("node_id") or ""
         if kind == EventKind.TASK_CREATED:
             if graph is None:
-                task.execution_graph = TaskExecutionGraph(root_phase=TaskStatus.DRAFTING)
+                task.execution_graph = TaskExecutionGraph(status=GraphStatus.DRAFTING)
             return
         if graph is None:
             return
-        if kind == EventKind.SPEC_AMENDED:
+        if kind == EventKind.TASK_CLARIFIED:
             self._apply_spec_patch(task, payload.get("patch") or {})
-            # clarify does NOT transition (spec R2): task stays DRAFTING.
-            return
-        if kind == EventKind.PLAN_FINALIZED:
-            # Plan already set by finalize_plan; just ensure phase.
+            # confirmed=True 时 phase 由 clarify 直接推进(快照,非事件溯源,与旧
+            # PLAN_FINALIZED 同);fold 仅 apply patch。
             return
         if kind == EventKind.STATE_UPDATED:
             # State 写入事件(``update_state`` 经 ``on_event`` 记入日志;replay 据此还原
@@ -554,9 +542,7 @@ class TaskService(GraphStateOpsMixin):
             self._sync_subtask_status(task, node_id, NodeStatus.FAILED)
             return
         if kind == EventKind.LOOP_REROUTED:
-            task.loop_round += 1
-            if graph is not None:
-                graph.loop_round = task.loop_round
+            task.loop_round += 1  # property → execution_graph.loop_round
             return
         if kind == EventKind.EXECUTION_ATTEMPTED:
             node = self._find_node(task, node_id)
@@ -577,14 +563,12 @@ class TaskService(GraphStateOpsMixin):
             self._apply_goal_verdict(task, verdict="pass")
             return
         if kind == EventKind.GOAL_REJECTED:
-            # v2 三终止(O-P2/§13):BBS 后 → FAILED 终态;BBS 前 → 回 gap 重跑(限轮次
-            # 由 scheduler 守,超限 force-hang)。由 run_mode 或图含 BBS_DISPATCH 判 BBS 后。
-            self._apply_goal_verdict(
-                task, verdict="fail", run_mode=str(payload.get("run_mode") or "")
-            )
+            # 三终止(§13):post-BBS(BBS_ACTIVE)→ FAILED 终态;pre-BBS → 回 gap 重跑
+            # (限轮次由 scheduler 守,超限挂起)。BBS 后由状态血统(task.status is BBS_ACTIVE)判。
+            self._apply_goal_verdict(task, verdict="fail")
             return
         if kind == EventKind.CANCELLED:
-            self._advance_phase(task, TaskStatus.CANCELLED)
+            self._advance_phase(task, GraphStatus.CANCELLED)
             return
         # --- v2 判定节点 fold + BBS 确认/cancel 通道(plan §5.2/§12A/§13/§18.1-10) ---
         if kind == EventKind.EXEC_AGGREGATED:
@@ -602,100 +586,48 @@ class TaskService(GraphStateOpsMixin):
                 st.status = next_status
             return
         if kind == EventKind.NODE_HANG:
-            # mark-hang 挂起:node → HUMAN_REQUIRED;graph ON_PLAZA → AWAITING_HUMAN_ACCEPT
-            # (等人确认升 BBS / 不升)。直接 fold(与 _apply_goal_verdict 同;不经 mark_graph_status
-            # 以免重读覆盖正在 fold 的 task)。
+            # mark-hang 挂起:node → HUNG;图 RUNNING → HUMAN_REQUIRED(等人确认升 BBS / 不升)。
             node = self._find_node(task, node_id)
             if node is not None and node.status not in (
                 NodeStatus.DONE,
                 NodeStatus.FAILED,
-                NodeStatus.HUMAN_REQUIRED,
+                NodeStatus.HUNG,
             ):
-                node.status = NodeStatus.HUMAN_REQUIRED
-            if (
-                graph is not None
-                and graph.graph_status is GraphStatus.ON_PLAZA
-            ):
-                graph.graph_status = GraphStatus.AWAITING_HUMAN_ACCEPT
+                node.status = NodeStatus.HUNG
+            if graph is not None and graph.status is GraphStatus.RUNNING:
+                graph.status = GraphStatus.HUMAN_REQUIRED
             return
         if kind == EventKind.BBS_CONFIRMED:
-            # 人确认升 BBS(§13/§18.1-10,经 POST /events 回投):AWAITING_HUMAN_ACCEPT
-            # → ON_PLAZA + 落 BBS_DISPATCH 节点(同图延续)。直接 append 到正在 fold 的 task,
-            # 不走 add_node(内部 get_by_id+save 会覆盖本 fold)。
-            if (
-                graph is not None
-                and graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
-            ):
-                graph.graph_status = GraphStatus.ON_PLAZA
-            if graph is not None:
-                bbs_id = f"{node_id}_bbs" if node_id else "n_bbs"
-                graph.nodes.append(
-                    Node(
-                        node_id=bbs_id,
-                        spec="bbs-dispatch",
-                        node_type=NodeType.BBS_DISPATCH,
-                        status=NodeStatus.DONE,  # system-bridge 记录,落图即完成,不供 BbsExecutor 认领
-                    )
-                )
-                graph.state.subtasks[bbs_id] = SubtaskState(node_id=bbs_id, status=NodeStatus.DONE)
-                if node_id:
-                    graph.edges.append(
-                        Edge(
-                            edge_id=f"e-{node_id}-{bbs_id}",
-                            from_node=node_id,
-                            to_node=bbs_id,
-                            kind=EdgeKind.DEPENDENCY,
-                        )
-                    )
+            # 人确认升 BBS(§13,经 POST /events 回投):HUMAN_REQUIRED → BBS_ACTIVE。
+            # BBS 为任务级模式:bots 读 State 自驱剩余子任务(非立即执行),不落节点。
+            if graph is not None and graph.status is GraphStatus.HUMAN_REQUIRED:
+                graph.status = GraphStatus.BBS_ACTIVE
             return
         if kind == EventKind.HANG_CANCELLED:
-            # 人确认不升 → task FAILED 终态(§13 三终止之一)。
-            if task.status is TaskStatus.REVIEWING:
-                self._advance_phase(task, TaskStatus.EXECUTING)
-            self._advance_phase(task, TaskStatus.FAILED)
+            # 人确认不升 → FAILED 终态(§13 三终止之一)。
+            self._advance_phase(task, GraphStatus.FAILED)
             return
-        # EventKind.HUNG is retained on the enum for forward-compat of the event
-        # log, but has no writer now (task-level HUNG terminal removed). Unknown
-        # kinds — ignore (forward-compat).
+        # Unknown kinds — ignore.
 
-    def _apply_goal_verdict(self, task: Task, verdict: str, run_mode: str = "") -> None:
-        graph = task.execution_graph
-        if graph is None:
+    def _apply_goal_verdict(self, task: Task, verdict: str) -> None:
+        if task.execution_graph is None:
             return
         if verdict == "pass":
-            graph.graph_status = GraphStatus.VERIFIED
-            self._advance_phase(task, TaskStatus.DONE)
+            self._advance_phase(task, GraphStatus.DONE)
             return
-        # FAIL — v2 三终止(O-P2/§13):BBS 后 → FAILED 终态;BBS 前 → 回 gap 重跑。
-        bbs_escalated = run_mode == "bbs" or any(
-            n.node_type is NodeType.BBS_DISPATCH for n in graph.nodes
-        )
-        if bbs_escalated:
-            # REVIEWING → EXECUTING → FAILED(两段合法边;BBS 后不回环/不再上升)
-            if task.status is TaskStatus.REVIEWING:
-                self._advance_phase(task, TaskStatus.EXECUTING)
-            self._advance_phase(task, TaskStatus.FAILED)
-            logger.info(
-                "[TaskService] goal rejected (post-BBS) task=%s → FAILED", task.id,
-            )
+        # FAIL(§13):post-BBS(BBS_ACTIVE)→ FAILED 终态不回环;pre-BBS(REVIEWING)→ 回 gap RUNNING。
+        if task.status is GraphStatus.BBS_ACTIVE:
+            self._advance_phase(task, GraphStatus.FAILED)
         else:
-            # BBS 前 → 回 gap:REVIEWING → EXECUTING(重跑 loop;限轮次由 scheduler 守)
-            graph.graph_status = GraphStatus.ON_PLAZA
-            if task.status is TaskStatus.REVIEWING:
-                self._advance_phase(task, TaskStatus.EXECUTING)
-            logger.info(
-                "[TaskService] goal rejected (pre-BBS) task=%s → gap loop", task.id,
-            )
+            self._advance_phase(task, GraphStatus.RUNNING)
 
     # --- internal: state-group helpers (plan §2.2) ------------------------
 
-    def _advance_phase(self, task: Task, target: TaskStatus) -> None:
-        require_task_transition(task.status, target)
-        # EXECUTING → EXECUTING is the loop_round++ self-edge (legal, no raise).
-        task.status = target
-        # keep execution_graph.root_phase in sync so a snapshot is self-describing
-        if task.execution_graph is not None:
-            task.execution_graph.root_phase = target
+    def _advance_phase(self, task: Task, target: GraphStatus) -> None:
+        if task.status is target:
+            return  # idempotent(重复终验/重复 mark)
+        require_graph_transition(task.status, target)
+        task.status = target  # property setter → execution_graph.status
 
     def _apply_spec_patch(self, task: Task, patch: dict) -> None:
         meta = task.spec.metadata
@@ -709,7 +641,7 @@ class TaskService(GraphStateOpsMixin):
             task.spec.context.background = str(patch.get("background") or "")
         # 五要素(skill 识别+澄清产出,经 clarify patch 写入 task.spec)。之前只接受
         # title/summary/tags/background 4 个扁平字段,goal/acceptances/deliverables/
-        # constraints 被默默丢弃 → spawn_build_dag 挂到规划节点上的 task_spec 是空的。
+        # constraints 被默默丢弃 → init_execution_graph 挂到历史节点上的 task_spec 是空的。
         # context 接受两种形式:嵌套 patch.context.{background,constraints}(SKILL
         # 约定)与顶层 background/constraints(扁平兼容)。
         context_patch = patch.get("context")
@@ -730,7 +662,7 @@ class TaskService(GraphStateOpsMixin):
             task.spec.deliverables = self._parse_deliverables(patch["deliverables"])
         if isinstance(patch.get("constraints"), list):
             task.spec.context.constraints = self._parse_constraints(patch["constraints"])
-        # plan 只经 finalize_plan(/plan 端点)入库;clarify 只补 spec,不再回挂 plan。
+        # clarify 经 /clarify 端点(confirmed=True → DEFINED);不再回挂 plan(已退场)。
 
     @staticmethod
     def _parse_acceptances(items: list) -> list[AcceptanceCriteria]:
@@ -804,18 +736,19 @@ class TaskService(GraphStateOpsMixin):
             outcome=outcome,
         )
 
-    # --- internal: spawn_build_dag / spawn_sub_dag (plan §2.2) -----------
+    # --- internal: init_execution_graph / spawn_sub_dag (plan §2.2) -------
 
-    def spawn_build_dag(self, task: Task, plan: Optional[Plan] = None) -> None:
-        """构建全生命周期动作节点骨架(plan §2.2 伪代码 n1..n4)并持久化。
+    def init_execution_graph(self, task: Task) -> None:
+        """构建全生命周期动作节点骨架并持久化(原 spawn_build_dag,2026-08-03 改名 +
+        砍 plan 分支)。只建 recognition→clarify→execute_start 历史链(已 DONE)+ 根
+        ``BOT_SEARCH(task-spec)``;顶层分解由 task-owner 经 task-plan-skill 在运行期完成
+        (搜推先行,FR-GRAPH-14)。无预拆 DISPATCH —— Plan 已退场。
 
         直接 mutate 本地图(不走 add_node,免内部重读覆盖),构建完成后 ``save`` 一次,
-        调用方随后可安全 re-fetch。recognition→clarify→execute_start 规划链(skill 在
-        创建/澄清/批准时已跑)落图即 DONE,不参与 tick 推进 / 不被 BbsExecutor 认领。
-        有计划时 plan.sub_tasks 为 DISPATCH 节点(已搜推,直接派发);无计划时根
-        BOT_SEARCH(搜推 task-spec)。"""
+        调用方随后可安全 re-fetch。recognition→clarify→execute_start 历史链落图即 DONE,
+        不参与 tick 推进 / 不被 BbsExecutor 认领。"""
         if task.execution_graph is None:
-            task.execution_graph = TaskExecutionGraph(root_phase=task.status)
+            task.execution_graph = TaskExecutionGraph(status=task.status)
         g = task.execution_graph
         g.nodes = []
         g.edges = []
@@ -841,14 +774,11 @@ class TaskService(GraphStateOpsMixin):
                 )
             return nid
 
-        # 规划链:recognition/clarify/execute_start 是已完成的历史动作(skill 在创建/
-        # 澄清/批准时跑过)→ 落图即 DONE,不参与 tick 推进 / 不被 BbsExecutor 认领。
-        # spec(=display_name)与 properties 挂真实任务内容(任务明细/任务Spec/执行计划),
-        # 否则画布只见类型名(plan §1.4b 副屏读 face)。
+        # 历史链:recognition/clarify/execute_start 是已完成的历史动作(skill 在创建/
+        # 澄清/确认时跑过)→ 落图即 DONE,不参与 tick 推进 / 不被 BbsExecutor 认领。
         tspec = task.spec
         meta = tspec.metadata
         goal = tspec.goal
-        p = plan or task.plan
         prev = _append(
             NodeType.RECOGNITION, "n_recognition",
             f"任务识别: {meta.title}" if meta.title else "任务识别",
@@ -893,34 +823,16 @@ class TaskService(GraphStateOpsMixin):
             "确认开始执行", prev, done=True,
             properties={
                 "phase_label": "确认开始执行",
-                "plan_summary": {
-                    "sub_task_count": (len(p.sub_tasks) if p and p.sub_tasks else 0),
-                    "confidence": (p.confidence if p else 0.0),
-                    "sub_tasks": [
-                        {"node_id": s.node_id, "spec": s.spec}
-                        for s in (p.sub_tasks if p and p.sub_tasks else [])
-                    ],
-                },
             },
         )
-        if p is not None and p.sub_tasks:
-            for sub in p.sub_tasks:
-                _append(NodeType.DISPATCH, sub.node_id, sub.spec, execute_start_id, run_mode=sub.run_mode)
-            for e in p.edges:
-                # 过滤空边:skill 的 finalize_plan 偶带空 edge 占位(edge_id/from/to 都空),
-                # 照搬会让画布出现 from/to 都空的野边。
-                if not e.from_node or not e.to_node:
-                    continue
-                g.edges.append(Edge(edge_id=e.edge_id, from_node=e.from_node, to_node=e.to_node, kind=e.kind))
-        else:
-            # 无计划 → 根 BOT_SEARCH:spec 用真实需求文本(目标/标题),让搜推与后续
-            # 分解拿得到真实内容,而非字面占位(plan §2.2 n4;搜推先行)。
-            objective = (
-                task.spec.goal.objective
-                if task.spec.goal and task.spec.goal.objective
-                else (task.spec.metadata.title or "task")
-            )
-            _append(NodeType.BOT_SEARCH, "n_bot_search", objective, execute_start_id)
+        # 根 BOT_SEARCH:spec 用真实需求文本(目标/标题),让搜推与后续分解拿得到真实
+        # 内容,而非字面占位(plan §2.2 n4;搜推先行)。顶层未搜推不拆、未匹配走分解。
+        objective = (
+            task.spec.goal.objective
+            if task.spec.goal and task.spec.goal.objective
+            else (task.spec.metadata.title or "task")
+        )
+        _append(NodeType.BOT_SEARCH, "n_bot_search", objective, execute_start_id)
         self._task_repo.save(task)
 
     def spawn_sub_dag(
@@ -949,14 +861,12 @@ class TaskService(GraphStateOpsMixin):
         if task.execution_graph is None:
             return
         g = task.execution_graph
-        # v2 guard(plan §5.1/§18.1-8):graph_status 迁移走 GRAPH_TRANSITIONS。
-        # 初始落 ON_PLAZA(从 None 状态首次赋值)不经 guard;其余迁移必经 guard。
-        if g.graph_status is not None and g.graph_status != status:
-            require_graph_transition(g.graph_status, status)
-        g.graph_status = status
+        if g.status != status:
+            require_graph_transition(g.status, status)
+        g.status = status
         self._task_repo.save(task)
 
-    def mark_terminal(self, task: Task, status: TaskStatus) -> None:
+    def mark_terminal(self, task: Task, status: GraphStatus) -> None:
         self._advance_phase(task, status)
         self._task_repo.save(task)
 
@@ -992,17 +902,6 @@ class TaskService(GraphStateOpsMixin):
 
     # --- internal: wire projections ---------------------------------------
 
-    def _definition_meta(self, task: Task) -> Optional[dict]:
-        p = task.plan
-        if p is None:
-            return None
-        return {
-            "node_count": len(p.sub_tasks),
-            "edge_count": len(p.edges),
-            "confidence": float(p.confidence),
-            "title": task.spec.metadata.title,
-        }
-
     def _node_view(self, n: Node) -> dict:
         rec = n.attempted_executors[-1] if n.attempted_executors else None
         return {
@@ -1030,8 +929,8 @@ class TaskService(GraphStateOpsMixin):
                 {"kind": c.kind.value, "properties": c.properties}
                 for c in n.targets_acceptance
             ],
-            # 透传完整 properties:spawn_build_dag 把任务明细/任务Spec/plan_summary 挂在
-            # node.properties 里(phase_label/task_spec/plan_summary + retry_count 等),
+            # 透传完整 properties:init_execution_graph 把任务明细/任务Spec 挂在
+            # node.properties 里(phase_label/task_spec + retry_count 等),
             # 副屏画布要读这些字段;漏了则 TaskNodeView.properties 取默认 {} → 画布空。
             "properties": dict(n.properties),
             "sub_dag_ref": self._sub_dag_ref_view(n.sub_dag),
@@ -1065,40 +964,6 @@ class TaskService(GraphStateOpsMixin):
             "bcs_run_id": ref.bcs_run_id,
             "group_id": ref.group_id,
         }
-
-    def _plan_from_dict(self, data: Any) -> Plan:
-        if isinstance(data, Plan):
-            return data
-        if not isinstance(data, dict):
-            return Plan()
-        from agentclaw.community.core.task.domain.models import (
-            EdgeSpec,
-        )
-
-        plan = Plan(confidence=float(data.get("confidence") or 0.0))
-        for s in data.get("sub_tasks") or []:
-            if not isinstance(s, dict):
-                continue
-            plan.sub_tasks.append(
-                SubTaskSpec(
-                    node_id=str(s.get("node_id") or ""),
-                    spec=str(s.get("spec") or ""),
-                    run_mode=_coerce_status(s.get("run_mode"), RunMode),
-                    depend_on=list(s.get("depend_on") or []),
-                )
-            )
-        for e in data.get("edges") or []:
-            if not isinstance(e, dict):
-                continue
-            plan.edges.append(
-                EdgeSpec(
-                    edge_id=str(e.get("edge_id") or ""),
-                    from_node=str(e.get("from_node") or ""),
-                    to_node=str(e.get("to_node") or ""),
-                    kind=_coerce_status(e.get("kind"), EdgeKind) or EdgeKind.DEPENDENCY,
-                )
-            )
-        return plan
 
     # --- internal: envelope unpack ---------------------------------------
 

@@ -5,7 +5,7 @@
 
 两维度(plan §2):Node = 动作维度(tick 推进),State = Task/SubTask 实体维度
 (动作 fold 驱动 status)。搜推先行(FR-GRAPH-14):BOT_SEARCH 先行,命中→DISPATCH,
-未匹配→DECOMPOSITION(depth+1),depth≥MAX→MARK_HANG(非直升 BBS)。exec-aggregate
+未匹配→DECOMPOSITION(depth+1),depth≥MAX→卡住(节点 HUNG + 图 HUMAN_REQUIRED,非直升 BBS)。exec-aggregate
 触发(O-8):tick 检测父 subtask 子全 DONE → 落 EXEC_AGGREGATE 节点 + aggregate_verdict
 fold。三判定节点(EXEC_ACCEPT/EXEC_AGGREGATE/GOAL_VERIFY)的判验结果由 skill 经
 ``on_event`` 回投驱动;tick 只推进动作拓扑 + 检测聚合触发 + hang/bbs/终验。
@@ -18,7 +18,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     AcceptanceCriteriaKind,
     AttemptOutcome,
-    GraphStatus,
     Node,
     NodeStatus,
     NodeType,
@@ -26,7 +25,7 @@ from agentclaw.community.core.task.domain.models import (
     SubTaskSpec,
     Task,
     TaskState,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.protocols import aggregate_verdict
 from agentclaw.community.core.task.domain.state_machine import IllegalTransitionError
@@ -34,7 +33,7 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-# 递归深度上限(plan §11):children depth≥MAX → MARK_HANG(等人确认,非直升 BBS)。
+# 递归深度上限(plan §11):children depth≥MAX → 卡住(节点 HUNG + 图 HUMAN_REQUIRED,等人确认,非直升 BBS)。
 MAX_RECURSION_DEPTH = 3
 
 # 同执行方 inline 重派上限(T-13,plan §18.1-12):NODE_FAILED → attempts<max 由 tick
@@ -157,7 +156,7 @@ class SchedulerOpsMixin:
             "task_id": task_id,
             "action": "ticked",
             "progressed": progressed,
-            "graph_status": task.execution_graph.graph_status.value if task.execution_graph else "",
+            "status": task.execution_graph.status.value if task.execution_graph else "",
         }
 
     def _unlocked(self, task: Task, node_id: str) -> bool:
@@ -185,17 +184,26 @@ class SchedulerOpsMixin:
             return self._decomposition(task, n)
         if nt is NodeType.DISPATCH:
             return self._dispatch(task, n)
-        if nt is NodeType.MARK_HANG:
-            return self._mark_hang(task, n)
-        if nt is NodeType.BBS_DISPATCH:
-            return self._bbs_dispatch(task, n)
         # 判定节点(EXEC_ACCEPT/EXEC_AGGREGATE/GOAL_VERIFY)由 skill on_event 回投驱动,
         # tick 中若仍 PENDING 表示等待判验 → 不推进。
         return False
 
+    def _set_hung(self, task: Task, node_id: str) -> None:
+        """卡住:节点 HUNG + 实体 SubtaskState HUNG + 图 HUMAN_REQUIRED(人确认升 BBS /
+        不升 FAILED)。重读+存,避免覆盖。"""
+        fresh = self._svc.get(task.id)
+        node = self._svc._find_node(fresh, node_id)  # noqa: SLF001
+        if node is not None and node.status is not NodeStatus.HUNG:
+            node.status = NodeStatus.HUNG
+        st = fresh.execution_graph.state.subtasks.get(node_id)  # type: ignore[union-attr]
+        if st is not None:
+            st.status = NodeStatus.HUNG
+        self._svc.mark_graph_status(fresh, GraphStatus.HUMAN_REQUIRED)
+        self._svc._task_repo.save(fresh)  # noqa: SLF001
+
     def _bot_search(self, task: Task, n: Node) -> bool:
-        """搜推先行(FR-GRAPH-14):先搜推;命中→DISPATCH 子;未匹配→
-        depth≥MAX 则 MARK_HANG,否则 DECOMPOSITION 子。"""
+        """搜推先行(FR-GRAPH-14):先搜推;命中→DISPATCH 子;未匹配→ depth≥MAX 则
+        卡住(节点 HUNG + 图 HUMAN_REQUIRED),否则 DECOMPOSITION 子。"""
         rec = self._discover.recommend(task.id, n.node_id)
         if rec.candidates:
             lead = rec.candidates[0].bot_id
@@ -206,15 +214,10 @@ class SchedulerOpsMixin:
             self._set_done(task, n.node_id)
             logger.info("[SchedulerV2] bot-search hit node=%s → dispatch %s", n.node_id, lead)
             return True
-        # 未匹配
         depth = self._subtask_depth(task, n.node_id)
         if depth >= MAX_RECURSION_DEPTH:
-            hang_id = f"{n.node_id}_hang"
-            self._add_child(task, n.node_id, hang_id, "mark-hang", NodeType.MARK_HANG)
-            self._set_done(task, n.node_id)
-            self._set_done(task, hang_id)  # hang 动作完成(graph 已 AWAITING)→ 节点 DONE,免下 tick 重挂
-            self._svc.mark_graph_status(self._svc.get(task.id), GraphStatus.AWAITING_HUMAN_ACCEPT)
-            logger.info("[SchedulerV2] bot-search miss node=%s depth=%d ≥MAX → mark-hang", n.node_id, depth)
+            self._set_hung(task, n.node_id)
+            logger.info("[SchedulerV2] bot-search miss node=%s depth=%d ≥MAX → hung", n.node_id, depth)
             return True
         # 未匹配 → 分解:DECOMPOSITION 子节点继承父 BOT_SEARCH 的 spec(真实需求文本),
         # 让 DecomposerPort.decompose_subtasks 拿到“要分解什么”,而非字面 "decomposition"。
@@ -226,17 +229,13 @@ class SchedulerOpsMixin:
     def _decomposition(self, task: Task, n: Node) -> bool:
         """分解:decompose_subtasks(spec, state with 父 depth)→ children BOT_SEARCH(depth+1)。
 
-        children depth≥MAX → MARK_HANG(不落 children)。"""
+        children depth≥MAX → 卡住(节点 HUNG + 图 HUMAN_REQUIRED,不落 children)。"""
         parent_depth = self._subtask_depth(task, n.node_id)
         state = TaskState(public={"__decompose_parent_depth__": parent_depth})
         subs = self._decomposer.decompose_subtasks(n.spec, state)
         if subs and all(s.depth >= MAX_RECURSION_DEPTH for s in subs):
-            hang_id = f"{n.node_id}_hang"
-            self._add_child(task, n.node_id, hang_id, "mark-hang", NodeType.MARK_HANG)
-            self._set_done(task, n.node_id)
-            self._set_done(task, hang_id)  # hang 动作完成 → 节点 DONE
-            self._svc.mark_graph_status(self._svc.get(task.id), GraphStatus.AWAITING_HUMAN_ACCEPT)
-            logger.info("[SchedulerV2] decomposition node=%s children depth≥MAX → mark-hang", n.node_id)
+            self._set_hung(task, n.node_id)
+            logger.info("[SchedulerV2] decomposition node=%s children depth≥MAX → hung", n.node_id)
             return True
         for s in subs:
             self._add_child(
@@ -279,18 +278,6 @@ class SchedulerOpsMixin:
         logger.info("[Scheduler] dispatch node=%s assignee=%s", n.node_id, lead)
         return True
 
-    def _mark_hang(self, task: Task, n: Node) -> bool:
-        self._svc.mark_graph_status(task, GraphStatus.AWAITING_HUMAN_ACCEPT)
-        self._set_done(task, n.node_id)
-        logger.info("[SchedulerV2] mark-hang node=%s → AWAITING_HUMAN_ACCEPT", n.node_id)
-        return True
-
-    def _bbs_dispatch(self, task: Task, n: Node) -> bool:
-        self._driver.escalate_to_bbs(task.id, reason=f"bbs-dispatch node={n.node_id}")
-        self._set_done(task, n.node_id)
-        logger.info("[SchedulerV2] bbs-dispatch node=%s", n.node_id)
-        return True
-
     # --- tick 驱动的失败重试/重路由(T-13,plan §18.1-12)-----------------------
 
     def _retry_failed(self, task: Task, n: Node) -> bool:
@@ -306,8 +293,8 @@ class SchedulerOpsMixin:
           **reroute 是 skill 判定 + 图操作,非 scheduler 的 ``redispatch(C5)`` 规则**。
         - probe 已派后:若 skill 已发起 reroute(兄弟 BOT_SEARCH ``{node_id}_reroute``
           存在)→ 等 tick 处理兄弟,不动;若 skill 未 reroute(无兄弟)→ **不可恢复**,
-          tick 自动挂起 ``AWAITING_HUMAN_ACCEPT`` 等人确认(升 BBS 经 BBS_CONFIRMED /
-          不升经 HANG_CANCELLED → task FAILED,T-13 §18.1-12 unrecoverable 留待 MARK_HANG)。"""
+          tick 自动挂起(节点 HUNG + 图 ``HUMAN_REQUIRED``)等人确认(升 BBS 经
+          BBS_CONFIRMED → ``BBS_ACTIVE`` / 不升经 HANG_CANCELLED → task FAILED)。"""
         node_id = n.node_id
         max_attempts = int(n.properties.get("max_attempts") or DEFAULT_MAX_ATTEMPTS)
         attempts = len(n.attempted_executors)
@@ -353,8 +340,8 @@ class SchedulerOpsMixin:
         if fn is not None:
             fn.properties["__unrecoverable_hung__"] = True
             self._svc._task_repo.save(fresh)  # noqa: SLF001
-        self._svc.mark_graph_status(self._svc.get(task.id), GraphStatus.AWAITING_HUMAN_ACCEPT)
-        logger.info("[Scheduler] unrecoverable node=%s → AWAITING_HUMAN_ACCEPT", node_id)
+        self._svc.mark_graph_status(self._svc.get(task.id), GraphStatus.HUMAN_REQUIRED)
+        logger.info("[Scheduler] unrecoverable node=%s → HUMAN_REQUIRED", node_id)
         return True
 
     def _has_reroute_sibling(self, task: Task, node_id: str) -> bool:
@@ -442,15 +429,15 @@ class SchedulerOpsMixin:
     def _maybe_goal_verify(self, task: Task) -> bool:
         """root 执行链全闭合(无 PENDING/RUNNING 且 root subtask DONE)→ goal-verify。
 
-        PASS → graph VERIFIED + Task DONE;FAIL → BBS 前回 gap(graph ON_PLAZA→AWAITING_HUMAN_ACCEPT)/
-        BBS 后 FAILED(此处仅落 PASS 终态;FAIL 路径由 on_event GOAL_REJECTED 驱动,见 §13)。"""
+        PASS → graph DONE;FAIL → BBS 前回 gap(REVIEWING→RUNNING)/BBS 后 FAILED(此处
+        仅落 PASS 终态;FAIL 路径由 on_event GOAL_REJECTED 驱动,见 §13)。"""
         g = task.execution_graph
         if g is None:
             return False
-        if g.graph_status is GraphStatus.VERIFIED:
+        if g.status is GraphStatus.DONE:
             return False
-        # 仅 ON_PLAZA(活跃执行)可终验;AWAITING_HUMAN_ACCEPT(hang/BBS 等人确认)不终验。
-        if g.graph_status is not GraphStatus.ON_PLAZA:
+        # 仅 RUNNING(活跃执行)可终验;HUMAN_REQUIRED(hang/BBS 等人确认)不终验。
+        if g.status is not GraphStatus.RUNNING:
             return False
         # 仍有未闭合动作节点(PENDING/RUNNING)或有未解决 FAILED 节点 → 不终验。
         # FAILED 节点表示失败待 tick 重派/skill 判 reroute,未解决前不能判整图 DONE
@@ -460,18 +447,18 @@ class SchedulerOpsMixin:
             for n in g.nodes
         ):
             return False
-        if task.status in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELLED):
+        if task.status in (GraphStatus.DONE, GraphStatus.FAILED, GraphStatus.CANCELLED):
             return False
         # root subtask(depth=0 的 DISPATCH/BOT_SEARCH 链)产出验收
         acs = list(task.spec.goal.acceptances) if task.spec.goal else []
         verdict, _unmet = aggregate_verdict(acs, [{"outcome": AttemptOutcome.PASS}])
         if verdict is not AttemptOutcome.PASS:
             return False  # FAIL 由 on_event 回投驱动,不在 tick 内硬落
-        # EXECUTING → REVIEWING(进终验)→ DONE;graph ON_PLAZA → VERIFIED
-        self._advance(task, TaskStatus.REVIEWING)
-        self._svc.mark_graph_status(task, GraphStatus.VERIFIED)
-        self._svc.mark_terminal(task, TaskStatus.DONE)
-        logger.info("[SchedulerV2] goal-verify PASS task=%s → DONE/VERIFIED", task.id)
+        # RUNNING → REVIEWING(进终验)→ DONE
+        self._advance(task, GraphStatus.REVIEWING)
+        self._svc.mark_graph_status(task, GraphStatus.DONE)
+        self._svc.mark_terminal(task, GraphStatus.DONE)
+        logger.info("[SchedulerV2] goal-verify PASS task=%s → DONE", task.id)
         return True
 
 

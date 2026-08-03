@@ -31,7 +31,6 @@ from agentclaw.community.core.task.protocols import (
     TaskService,
 )
 from agentclaw.community.core.task.domain.models import (
-    Plan,
     RouteClass,
     RunMode,
 )
@@ -54,10 +53,7 @@ class _NoopTaskService:
     def create(self, title: str, source: str = "api", background: str = "") -> Any:
         return None
 
-    def clarify(self, task_id: str, patch: dict) -> Any:
-        return None
-
-    def finalize_plan(self, task_id: str, plan: Any) -> Any:
+    def clarify(self, task_id: str, patch: dict, confirmed: bool = False) -> Any:
         return None
 
     # event fold / guard face (plan §2.1, §5.3)
@@ -174,7 +170,7 @@ def test_task_service_unified_has_query_and_intake_and_event_faces():
     noop = _NoopTaskService()
     assert isinstance(noop, TaskService)
     for m in ("get", "list_by_user", "progress", "create", "clarify",
-              "finalize_plan", "on_event", "claim_node"):
+              "on_event", "claim_node"):
         assert callable(getattr(noop, m)), f"TaskService missing {m}"
 
 
@@ -212,6 +208,8 @@ def test_dispatch_result_fields():
     assert d.accept_token == ""
 
 
-def test_decomposer_returns_plan_signable():
-    plan = Plan()
-    assert plan.sub_tasks == []
+def test_decomposer_single_sig_returns_subtask_list():
+    from agentclaw.community.core.task.domain.models import TaskState
+    from agentclaw.community.plugins.community.task import NoopDecomposerPort
+    subs = NoopDecomposerPort().decompose_subtasks("spec", TaskState())
+    assert subs == []

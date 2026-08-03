@@ -437,7 +437,7 @@ class TestProcessTaskForOthers:
         assert exc_info.value.detail == "Service unavailable"
 
 
-class TestUpdateTaskStatusForOthers:
+class TestUpdateGraphStatusForOthers:
     """Tests for update_task_status_for_others endpoint."""
 
     def test_anonymous_user_returns_400(self):

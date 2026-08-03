@@ -24,7 +24,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSource,
     TaskSpec,
     TaskSpecMetadata,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.domain.repository import (
     EventNotFoundError,
@@ -118,7 +118,7 @@ def test_task_repo_save_with_execution_graph_roundtrip():
         source=TaskSource.API,
         spec=TaskSpec(metadata=TaskSpecMetadata(id="t2", title="x")),
         execution_graph=TaskExecutionGraph(
-            root_phase=TaskStatus.EXECUTING,
+            status=GraphStatus.RUNNING,
             nodes=[Node(node_id="n1", spec="s", status=NodeStatus.RUNNING)],
         ),
     )

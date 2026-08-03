@@ -30,8 +30,7 @@ from .models import (
 
 class EventKind(StrEnum):
     TASK_CREATED = "task.created"
-    SPEC_AMENDED = "spec.amended"
-    PLAN_FINALIZED = "task.plan_finalized"
+    TASK_CLARIFIED = "task.clarified"  # clarify amend(逐轮补要素);confirmed=True → DRAFTING→DEFINED(2026-08-03 合二为一)
     NODE_DISPATCHED = "node.dispatched"
     NODE_RUNNING = "node.running"
     NODE_ACCEPTED = "node.accepted"
@@ -49,11 +48,10 @@ class EventKind(StrEnum):
     STATE_UPDATED = "state.updated"    # update_state(纯 State 写)
     PLAN_REQUESTED = "task.plan_requested"  # EXECUTE_START 后请 owner-bot 规划(§12)
     EXEC_AGGREGATED = "node.aggregated"  # exec-aggregate 聚合验收结果(父 subtask DONE/REJECTED)
-    NODE_HANG = "node.hang"            # mark-hang 挂起(graph → AWAITING_HUMAN_ACCEPT)
-    # v2 BBS 确认/cancel 通道(plan §13/§18.1-10,经 POST /tasks/{id}/events 回投):
-    BBS_CONFIRMED = "bbs.confirmed"    # 人确认升 BBS:AWAITING_HUMAN_ACCEPT→ON_PLAZA + BBS_DISPATCH
+    NODE_HANG = "node.hang"            # 卡住(节点 HUNG + graph → HUMAN_REQUIRED)
+    # BBS 确认/cancel 通道(plan §13/§18.1-10,经 POST /tasks/{id}/events 回投):
+    BBS_CONFIRMED = "bbs.confirmed"    # 人确认升 BBS:HUMAN_REQUIRED→BBS_ACTIVE(任务级模式,不落节点)
     HANG_CANCELLED = "hang.cancelled"  # 人确认不升 → task FAILED 终态
-    # (spec §2 — "被 hung 住" is node-level HUMAN_REQUIRED; unrecoverable → FAILED).
     # Retained on the enum so the event-log deserializer can still read historical
     # HUNG entries; new code must not emit it.
 
@@ -128,24 +126,14 @@ class TaskCreated(TaskEvent):
 
 
 @dataclass
-class SpecAmended(TaskEvent):
-    kind: EventKind = EventKind.SPEC_AMENDED
+class TaskClarified(TaskEvent):
+    kind: EventKind = EventKind.TASK_CLARIFIED
     patch: dict = field(default_factory=dict)
+    confirmed: bool = False  # True = 用户确认澄清 → DRAFTING→DEFINED
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        self.payload = {"patch": self.patch}
-
-
-@dataclass
-class PlanFinalized(TaskEvent):
-    kind: EventKind = EventKind.PLAN_FINALIZED
-    node_count: int = 0
-    confidence: float = 0.0
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        self.payload = {"node_count": self.node_count, "confidence": self.confidence}
+        self.payload = {"patch": self.patch, "confirmed": self.confirmed}
 
 
 @dataclass

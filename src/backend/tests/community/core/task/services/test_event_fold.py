@@ -2,8 +2,8 @@
 
 覆盖:
 - ``EXEC_AGGREGATED`` fold(pass→DONE / fail→FAILED,节点 + SubtaskState)
-- ``NODE_HANG`` fold(node→HUMAN_REQUIRED + graph→AWAITING_HUMAN_ACCEPT)
-- ``BBS_CONFIRMED`` 确认升 BBS(AWAITING_HUMAN_ACCEPT→ON_PLAZA + BBS_DISPATCH 节点)
+- ``NODE_HANG`` fold(node→HUNG + graph→HUMAN_REQUIRED)
+- ``BBS_CONFIRMED`` 确认升 BBS(HUMAN_REQUIRED→BBS_ACTIVE;BBS 为任务级模式,不落节点)
 - ``HANG_CANCELLED`` 不升 → FAILED 终态
 - 三终止分支(U-three-terminals)
 经真实 ``TaskService.on_event`` fold(POST /events 通道已在 router 暴露)。
@@ -15,9 +15,7 @@ from agentclaw.community.core.task.domain.models import (
     GraphStatus,
     NodeStatus,
     NodeType,
-    Plan,
     SubTaskSpec,
-    TaskStatus,
 )
 from agentclaw.community.core.task.services import TaskService
 from agentclaw.community.plugins.community.task.in_memory_repos import (
@@ -34,25 +32,18 @@ def _service() -> TaskService:
 
 
 def _task_on_plaza(svc: TaskService, acceptances: int = 1):
-    """建 v2 动作图 task + ON_PLAZA + EXECUTING,带一个 EXEC_AGGREGATE 节点供判验 fold。
+    """建 v2 动作图 task 并推进到 RUNNING,带一个 EXEC_AGGREGATE 节点供判验 fold。
 
-    空 plan(sub_tasks=[]) → spawn_build_dag 走根 BOT_SEARCH(n_bot_search);spawn 自持久化。"""
+    create→clarify(confirmed)走 DRAFTING→DEFINED;mark_graph_status DEFINED→RUNNING;
+    init_execution_graph 落 recognition/clarify/execute_start(已 DONE)+ 根 BOT_SEARCH。"""
     t = svc.create(title="t", background="obj")
+    svc.clarify(t.id, {}, confirmed=True)
     task = svc.get(t.id)
-    svc.finalize_plan(task.id, Plan(sub_tasks=[], confidence=0.9))
+    svc.mark_graph_status(task, GraphStatus.RUNNING)
+    svc.init_execution_graph(task)
     task = svc.get(task.id)
-    task.status = TaskStatus.EXECUTING
-    task.execution_graph = None
-    svc._task_repo.save(task)
-    svc.spawn_build_dag(task)
-    task = svc.get(task.id)
-    svc.mark_graph_status(task, GraphStatus.ON_PLAZA)
     # 落一个 EXEC_AGGREGATE 节点(挂 n_bot_search)
     svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec="exec-aggregate"), "n_bot_search", NodeType.EXEC_AGGREGATE)
-    task = svc.get(task.id)
-    # 起 EXECUTING(root_phase 同步)
-    task.execution_graph.root_phase = TaskStatus.EXECUTING
-    svc._task_repo.save(task)
     return svc.get(task.id)
 
 
@@ -91,37 +82,29 @@ def test_exec_aggregated_fail_marks_failed():
 def test_node_hang_parks_awaiting_human_accept():
     svc = _service()
     task = _task_on_plaza(svc)
-    assert task.execution_graph.graph_status is GraphStatus.ON_PLAZA
+    assert task.execution_graph.status is GraphStatus.RUNNING
     svc.on_event(_ev(task.id, EventKind.NODE_HANG, next_seq(0), node_id="n_bot_search"))
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+    assert task.execution_graph.status is GraphStatus.HUMAN_REQUIRED
     node = svc._find_node(task, "n_bot_search")  # noqa: SLF001
-    assert node.status is NodeStatus.HUMAN_REQUIRED
+    assert node.status is NodeStatus.HUNG
 
 
 # --- BBS_CONFIRMED / HANG_CANCELLED 通道(T-24)-----------------------------
 
 
-def test_bbs_confirmed_channel_escalates_on_plaza_and_adds_bbs_node():
+def test_bbs_confirmed_channel_escalates_to_bbs_active():
     svc = _service()
     task = _task_on_plaza(svc)
-    # 先 hang 到 AWAITING_HUMAN_ACCEPT
+    # 先 hang 到 HUMAN_REQUIRED
     svc.on_event(_ev(task.id, EventKind.NODE_HANG, next_seq(0), node_id="n_bot_search", hang=True))
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
-    # 人确认升 BBS → ON_PLAZA + BBS_DISPATCH 节点(经 POST /events 回投)
+    assert task.execution_graph.status is GraphStatus.HUMAN_REQUIRED
+    # 人确认升 BBS → BBS_ACTIVE(任务级模式,bots 读 State 自驱剩余子任务,不落节点)
     svc.on_event(_ev(task.id, EventKind.BBS_CONFIRMED, next_seq(1), node_id="n_bot_search"))
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.ON_PLAZA
-    assert any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)
-    # 同图延续(同一 TaskExecutionGraph,无新图)
-    bbs = next(n for n in task.execution_graph.nodes if n.node_type is NodeType.BBS_DISPATCH)
-    assert bbs.node_id == "n_bot_search_bbs"
-    # BBS_DISPATCH 与 hang 节点经 DEPENDENCY 边衔接
-    assert any(
-        e.from_node == "n_bot_search" and e.to_node == "n_bot_search_bbs"
-        for e in task.execution_graph.edges
-    )
+    assert task.execution_graph.status is GraphStatus.BBS_ACTIVE
+    assert task.status is GraphStatus.BBS_ACTIVE
 
 
 def test_hang_cancelled_channel_routes_to_failed_terminal():
@@ -131,8 +114,7 @@ def test_hang_cancelled_channel_routes_to_failed_terminal():
     # 人确认不升 → FAILED 终态
     svc.on_event(_ev(task.id, EventKind.HANG_CANCELLED, next_seq(1)))
     task = svc.get(task.id)
-    assert task.status is TaskStatus.FAILED
-    assert not any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)
+    assert task.status is GraphStatus.FAILED
 
 
 # --- 三终止分支(U-three-terminals,T-23)------------------------------------
@@ -145,25 +127,23 @@ def test_three_terminals_aggregate_pass_done():
     svc.on_event(_ev(task.id, EventKind.EXEC_AGGREGATED, next_seq(0), node_id="n_agg", verdict="pass"))
     # goal-verify 发生在 REVIEWING 阶段(scheduler 推进后)
     task = svc.get(task.id)
-    task.status = TaskStatus.REVIEWING
-    task.execution_graph.root_phase = TaskStatus.REVIEWING
+    task.status = GraphStatus.REVIEWING
     svc._task_repo.save(task)  # noqa: SLF001
     svc.on_event(_ev(task.id, EventKind.GOAL_VERIFIED, next_seq(1), node_id="n_agg", verdict="pass"))
     task = svc.get(task.id)
-    assert task.status is TaskStatus.DONE
-    assert task.execution_graph.graph_status is GraphStatus.VERIFIED
+    assert task.status is GraphStatus.DONE
+    assert task.execution_graph.status is GraphStatus.DONE
 
 
 def test_three_terminals_hang_escalate_bbs():
-    # 终止②:hang → 人确认升 BBS → 同图延续(非终态)
+    # 终止②:hang → 人确认升 BBS → BBS_ACTIVE 同图延续(非终态)
     svc = _service()
     task = _task_on_plaza(svc)
     svc.on_event(_ev(task.id, EventKind.NODE_HANG, next_seq(0), node_id="n_bot_search", hang=True))
     svc.on_event(_ev(task.id, EventKind.BBS_CONFIRMED, next_seq(1), node_id="n_bot_search"))
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.ON_PLAZA
-    assert any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)
-    assert task.status is not TaskStatus.FAILED  # 同图延续,非终态
+    assert task.execution_graph.status is GraphStatus.BBS_ACTIVE
+    assert task.status is not GraphStatus.FAILED  # 同图延续,非终态
 
 
 def test_three_terminals_hang_cancel_failed():
@@ -172,4 +152,4 @@ def test_three_terminals_hang_cancel_failed():
     task = _task_on_plaza(svc)
     svc.on_event(_ev(task.id, EventKind.NODE_HANG, next_seq(0), node_id="n_bot_search", hang=True))
     svc.on_event(_ev(task.id, EventKind.HANG_CANCELLED, next_seq(1)))
-    assert svc.get(task.id).status is TaskStatus.FAILED
+    assert svc.get(task.id).status is GraphStatus.FAILED

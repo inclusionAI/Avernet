@@ -4,6 +4,8 @@
 > 落点域:ocb backend 任务内核(开源);代码落点(枚举 / 状态机 / service / router / 测试 / skill / 副屏)属 HOW,见 `plan.md`。
 > 日期:2026-07-30。
 
+> **修订(2026-08-03)**:DEFINED 与"计划冻结"解耦 —— `DEFINED` 重定义为"四要素齐 + 用户确认(spec 冻结)",触发者 `finalize_plan` → `confirm-spec`(Plan-free)。源于 `2026-08-03-execution-stage-bot-skills/`(执行阶段 skill + 规划期分解退场)。转移合法性不变(DEFINED 仍合法,仅触发者变)。详见 §1.2/§2.2/§4。
+
 ---
 
 ## 1. 概述
@@ -17,7 +19,7 @@ ocb 任务内核需要一套与产品设计一致、清晰、稳定的任务生�
 **任务级**生命周期状态机,7 态:
 
 - `DRAFTING` —— 要素补全中;创建即进入,要素补全期间留在此态。
-- `DEFINED` —— 四要素齐 + 计划冻结,等用户确认执行。
+- `DEFINED` —— 四要素齐 + 用户确认(spec 冻结),等用户确认执行。
 - `EXECUTING` —— 执行中。
 - `REVIEWING` —— 验收中。
 - `DONE` —— 交付完成(终态)。
@@ -26,7 +28,7 @@ ocb 任务内核需要一套与产品设计一致、清晰、稳定的任务生�
 
 迁移:
 
-- `DRAFTING ──(四要素齐 + finalize_plan)──► DEFINED`
+- `DRAFTING ──(四要素齐 + 用户确认澄清 / confirm-spec)──► DEFINED`
 - `DEFINED ──(approve / 用户确认执行)──► EXECUTING`
 - `EXECUTING ──(全节点 settled)──► REVIEWING`
 - `REVIEWING ──(用户验收通过)──► DONE`
@@ -66,7 +68,7 @@ ocb 任务内核需要一套与产品设计一致、清晰、稳定的任务生�
 ### 2.2 合法迁移
 
 ```
-DRAFTING ──(四要素齐 + finalize_plan)──► DEFINED
+DRAFTING ──(四要素齐 + 用户确认澄清 / confirm-spec)──► DEFINED
 DEFINED   ──(approve)──────────────────► EXECUTING
 EXECUTING ──(全节点 settled)────────────► REVIEWING
 REVIEWING ──(验收通过)─────────────────► DONE
@@ -114,7 +116,7 @@ EXECUTING ──(失败,§3 R4)───────────────► 
 - 全回路可走通并断言态名:
   - `create → DRAFTING`
   - `amend → 仍 DRAFTING`
-  - `finalize_plan → DEFINED`
+  - `confirm-spec → DEFINED`
   - `approve → EXECUTING`
   - 全节点 settled → `REVIEWING`
   - 验收通过 → `DONE`

@@ -7,7 +7,7 @@ Non-coop node or no ref → None (router → 404).
 """
 from __future__ import annotations
 
-from agentclaw.community.core.task.domain.models import Plan, SubTaskSpec
+from agentclaw.community.core.task.domain.models import NodeType, RunMode, SubTaskSpec
 from agentclaw.community.core.task.services import TaskService
 from agentclaw.community.plugins.community.task.in_memory_repos import (
     InMemoryTaskEventRepo,
@@ -52,12 +52,12 @@ def _service(bcs=None) -> tuple[TaskService, _FakeBcs]:
 def _task_with_coop_node(svc: TaskService) -> str:
     t = svc.create(title="t")
     svc.clarify(t.id, {"summary": "s"})
-    svc.finalize_plan(
-        t.id,
-        Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="a"), SubTaskSpec(node_id="n2", spec="b")], confidence=0.8),
-    )
+    svc.clarify(t.id, {}, confirmed=True)
     task = svc.get(t.id)
-    svc.spawn_build_dag(task)
+    svc.init_execution_graph(task)
+    # 2026-08-03:Plan 退场,n2 不再由 plan 预拆 → 显式 add_node 后再挂 sub_dag ref
+    svc.add_node(t.id, SubTaskSpec(node_id="n2", spec="b", run_mode=RunMode.COOP_GROUP), "n_execute_start", NodeType.DISPATCH)
+    task = svc.get(t.id)
     svc.spawn_sub_dag(task, "n2", ref_kind="bcs_sm", bcs_run_id="sm-9", group_id="g-9")
     svc._task_repo.save(task)  # noqa: SLF001
     return t.id

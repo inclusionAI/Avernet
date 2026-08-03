@@ -103,15 +103,15 @@ function NodeContent({ properties }: { properties: Record<string, unknown> | und
 export function NodeDetailModal({
   taskId,
   nodeId,
-  rootPhase,
+  taskStatus,
   onClose,
 }: {
   taskId: string;
   nodeId: string;
-  rootPhase: string | undefined;
+  taskStatus: string | undefined;
   onClose: () => void;
 }): React.ReactElement {
-  const { detail, loading } = useNodeDetail(taskId, nodeId, rootPhase);
+  const { detail, loading } = useNodeDetail(taskId, nodeId, taskStatus);
   const status = detail?.status;
   const tone = getNodeStatusTone(status);
   // 规划节点(任务识别/任务明确/确认开始执行)有 phase_label → 显示节点内容,

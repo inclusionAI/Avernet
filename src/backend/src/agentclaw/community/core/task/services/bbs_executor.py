@@ -7,8 +7,8 @@ The shared blackboard IS the task's :class:`TaskExecutionGraph`.广场 bots:
   everyone.``progress_snapshot`` does not exist(§18.1-10):read 经 ``retrieve_state``。
 - **write** via :meth:`TaskService.on_event` (run_mode=BBS) through the state
   group. BBS does NOT drive a Scheduler tick — it is self-drive on the广场; the
-  graph_status stays ON_PLAZA. A BBS goal-FAIL verdict routes the task to FAILED
-  终态(v2 三终止 O-P2/§13:``TaskService._apply_goal_verdict`` run_mode=bbs branch)。
+  graph ``status`` stays ``BBS_ACTIVE``. A BBS goal-FAIL verdict routes the task
+  to FAILED 终态(v2 三终止 O-P2/§13:``TaskService._apply_goal_verdict`` post-BBS branch)。
 
 This executor holds **mechanics only** (广场认领 CAS, 续做 event fold): it holds
 NO task state — the event log + graph snapshot remain the single source of truth,

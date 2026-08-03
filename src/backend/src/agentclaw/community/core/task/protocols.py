@@ -37,7 +37,6 @@ from agentclaw.community.core.task.domain.models import (
     GraphSnapshot,
     Node,
     NodeType,
-    Plan,
     RouteClass,
     RunMode,
     StateSemantics,
@@ -160,12 +159,8 @@ class TaskService(Protocol):
         """Create a task at INTAKE; returns the new aggregate."""
         ...
 
-    def clarify(self, task_id: str, patch: dict) -> Task:
-        """Amend the spec (intro>DICUSSING); returns updated aggregate."""
-        ...
-
-    def finalize_plan(self, task_id: str, plan: Plan) -> Task:
-        """Freeze a Plan (DICUSSING/PLANNED → PLANNED); returns aggregate."""
+    def clarify(self, task_id: str, patch: dict, confirmed: bool = False) -> Task:
+        """Amend spec(逐轮澄清);``confirmed=True`` → 用户确认澄清 → DRAFTING→DEFINED。"""
         ...
 
     # event-fold / guard face (plan §2.1, §5.3)
@@ -235,13 +230,8 @@ class BotDiscoverPort(Protocol):
 class DecomposerPort(Protocol):
     """Decompose a spec into sub-tasks (plan §4.1/spec FR-GRAPH-05)。
 
-    v2 退单签名 = :meth:`decompose_subtasks`(spec + state → ``list[SubTaskSpec]``,
-    带 ``depth=父+1``),统一初始/递归/BBS 分解入口。旧 :meth:`decompose`
-    (``task_id`` → ``Plan``)保留作过渡(§15),新代码用 ``decompose_subtasks``。"""
-
-    def decompose(self, task_id: str) -> Plan:
-        """deprecated 过渡:task_id → Plan。新代码用 decompose_subtasks。"""
-        ...
+    单签名 = :meth:`decompose_subtasks`(spec + state → ``list[SubTaskSpec]``,
+    带 ``depth=父+1``),统一初始/递归/BBS 分解入口。"""
 
     def decompose_subtasks(self, spec: str, state: TaskState) -> list[SubTaskSpec]:
         """v2 单签名:分解 spec 为 children(带 depth=父 state 分区 depth+1)。"""
@@ -307,10 +297,10 @@ class ExecutionPort(Protocol):
 
 @runtime_checkable
 class TaskScheduler(Protocol):
-    """Orchestration authority (plan §2.1/§3). Drives the EXECUTING→VALIDATING
-    loop: ``start`` (approve委派) advances PLANNED→EXECUTING + spawns the build
+    """Orchestration authority (plan §2.1/§3). Drives the RUNNING→REVIEWING
+    loop: ``start`` (approve委派) advances DEFINED→RUNNING + spawns the build
     DAG; ``tick`` topo-unlocks PENDING nodes, dispatches via the Ports, and
-    forces VALIDATING when all nodes settle or termination guards trip;
+    forces REVIEWING when all nodes settle or termination guards trip;
     ``on_event`` folds编排 reactions (accept FAIL → gap reroute/split;
     NODE_FAILED → retry→reroute). Holds NO state of its own — all writes go
     through :class:`TaskService`."""

@@ -11,7 +11,7 @@
 
 seq 单调:replay 校验事件严格递增,disorder 抛 ``IllegalEventError``(U-seq-monotonic)。
 
-注:图**结构**(nodes/edges)由 ``spawn_build_dag``/``add_node`` 物化入图(非全事件溯源);
+注:图**结构**(nodes/edges)由 ``init_execution_graph``/``add_node`` 物化入图(非全事件溯源);
 故 replay 从**结构快照**起步,叠加状态变更事件(NODE_RUNNING/ACCEPTED/...)重放——与
 事件溯源 "snapshot + delta" 标准模式一致。结构快照由 ``snapshot`` 深拷贝捕获。
 """
@@ -45,7 +45,7 @@ class GraphCheckpoint:
     def snapshot(self, task_id: str, at_seq: Optional[int] = None) -> GraphSnapshot:
         """落 fold@seq 物化快照(深拷贝图 + state),存表并返回。"""
         task = self._svc.get(task_id)
-        seq = at_seq if at_seq is not None else int(task.latest_event_seq or 0)
+        seq = at_seq if at_seq is not None else int(self._events.latest_seq(task_id) or 0)
         graph = copy.deepcopy(task.execution_graph) if task.execution_graph is not None else None
         if graph is None:
             raise IllegalEventError(f"task {task_id} has no graph to snapshot")
@@ -85,9 +85,9 @@ class GraphCheckpoint:
     # --- rollback(截断 + 重算 + 存)--------------------------------------
 
     def rollback(self, task_id: str, to_seq: int) -> None:
-        """回到 k=to_seq 时刻:截断日志 > to_seq + 从最近 ≤ to_seq 快照重放重算 fold + 存。
+        """回到 to_seq 时刻:截断日志 > to_seq + 从最近 ≤ to_seq 快照重放重算 fold + 存。
 
-        无可用快照时,仅截断日志并把 ``latest_event_seq`` 校正到 to_seq(结构沿用当前 fold)。"""
+        无可用快照时,仅截断日志(结构沿用当前 fold)。"""
         self._events.truncate(task_id, to_seq)
         snap_seq = self._latest_snapshot_seq_lte(task_id, to_seq)
         task = self._svc.get(task_id)
@@ -98,9 +98,6 @@ class GraphCheckpoint:
             self._assert_monotonic(events)
             for e in sorted(events, key=lambda ev: ev.seq):
                 self._svc._apply_event(task, e.kind, e.payload)  # noqa: SLF001
-        task.latest_event_seq = to_seq
-        if task.execution_graph is not None:
-            task.execution_graph.root_phase = task.status
         self._tasks.save(task)
 
     # --- helpers ----------------------------------------------------------

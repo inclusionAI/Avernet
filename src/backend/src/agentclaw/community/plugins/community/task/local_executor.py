@@ -9,7 +9,7 @@ engine/BCS:
   (the single-writer assigns ``seq``; no private reach). Two settle modes:
   * ``"instant"`` (default): the self-report fires inside dispatch → the node is
     ``DONE`` by the time the dispatch tick reloads (full self-driving happy path;
-    a single-node task closes PLANNED→EXECUTING→VALIDATING in one ``start`` call).
+    a single-node task closes DEFINED→RUNNING→REVIEWING in one ``start`` call).
   * ``"deferred"``: dispatch enqueues the self-report; call :meth:`pump` to flush
     (faithful async — the bot completes between ticks, not during dispatch).
 

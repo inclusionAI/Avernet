@@ -55,7 +55,6 @@ def test_ac_task_insert_query_autoincrement(session):
     fetched = session.query(AcTaskModel).filter(AcTaskModel.task_id == "task-1").one()
     assert fetched.status == "drafting"
     assert fetched.loop_round == 0
-    assert fetched.latest_event_seq == 0
 
 
 def test_ac_task_autoincrement_monotonic(session):

@@ -16,9 +16,8 @@ from agentclaw.community.core.task.protocols import (
     RouteRecommendation,
 )
 from agentclaw.community.core.task.domain.models import (
-    EdgeSpec,
+    Edge,
     NodeStatus,
-    Plan,
     RouteClass,
     RunMode,
     SubTaskSpec,
@@ -47,12 +46,7 @@ def _svc() -> TaskService:
 def _planned(svc: TaskService, nodes=("n1",), edges=()) -> str:
     t = svc.create(title="t")
     svc.clarify(t.id, {"summary": "s"})
-    plan = Plan(
-        sub_tasks=[SubTaskSpec(node_id=n, spec=f"do {n}") for n in nodes],
-        edges=[EdgeSpec(edge_id=f"e{i}", from_node=a, to_node=b) for i, (a, b) in enumerate(edges)],
-        confidence=0.9,
-    )
-    svc.finalize_plan(t.id, plan)
+    svc.clarify(t.id, {}, confirmed=True)
     return t.id
 
 
@@ -81,7 +75,7 @@ class _NoopDriver:
 
 def _scheduler(svc: TaskService, exec_port) -> TaskScheduler:
     return TaskScheduler(
-        svc, _C1Discover(), _NoopDriver(), DecomposerService(svc._task_repo), exec_port  # noqa: SLF001
+        svc, _C1Discover(), _NoopDriver(), DecomposerService(), exec_port  # noqa: SLF001
     )
 
 
@@ -107,16 +101,17 @@ def test_local_deferred_dispatch_enqueues_until_pump():
     tid = _planned(svc)
     exec_port = LocalBotExecutorPort(svc, settle_mode="deferred")
     sched = _scheduler(svc, exec_port)
-    sched.start(tid)
+    sched.start(tid)  # 1st tick:root BOT_SEARCH 搜推命中 → 落 n_bot_search_disp DISPATCH(PENDING)
+    sched.tick(tid)   # 2nd tick:dispatch n_bot_search_disp → claim+fire(deferred 入队)→ RUNNING
     # dispatched but NOT yet self-reported → 工作节点仍 RUNNING
     work = next(
-        n for n in svc.get(tid).execution_graph.nodes if n.node_id == "n1"
+        n for n in svc.get(tid).execution_graph.nodes if n.node_id == "n_bot_search_disp"
     )
     assert work.status is NodeStatus.RUNNING
     delivered = exec_port.pump()
     assert delivered == 1
     work = next(
-        n for n in svc.get(tid).execution_graph.nodes if n.node_id == "n1"
+        n for n in svc.get(tid).execution_graph.nodes if n.node_id == "n_bot_search_disp"
     )
     assert work.status is NodeStatus.DONE
 
@@ -133,7 +128,8 @@ def test_local_deferred_pump_clears_queue():
     tid = _planned(svc)
     exec_port = LocalBotExecutorPort(svc, settle_mode="deferred")
     sched = _scheduler(svc, exec_port)
-    sched.start(tid)
+    sched.start(tid)  # 1st tick:root BOT_SEARCH → n_bot_search_disp DISPATCH(PENDING)
+    sched.tick(tid)   # 2nd tick:dispatch → deferred 入队
     assert exec_port.pump() == 1
     assert exec_port.pump() == 0
 

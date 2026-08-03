@@ -20,14 +20,12 @@ from typing import Optional
 from injector import inject
 from sqlalchemy import and_
 
-from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.domain.models import (
-    Plan,
     Task,
     TaskExecutionGraph,
     TaskSource,
     TaskSpec,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.domain.repository import TaskNotFoundError
 from agentclaw.community.core.task.repository.models import AcTaskModel
@@ -106,26 +104,19 @@ def _apply_task_to_model(task: Task, model: AcTaskModel) -> None:
     model.source = task.source.value
     model.status = task.status.value
     model.loop_round = task.loop_round
-    model.latest_event_seq = task.latest_event_seq
     model.spec_json = _json_dumps(task.spec)
     model.execution_graph_json = _json_dumps(task.execution_graph)
-    model.plan_json = _json_dumps(task.plan)
 
 
 def _model_to_task(model: AcTaskModel) -> Task:
     spec = _deserialize_spec(model.spec_json)
     graph = _deserialize_graph(model.execution_graph_json)
-    plan = _deserialize_plan(model.plan_json)
     return Task(
         id=model.task_id,
         user_id=model.user_id,
         source=TaskSource(model.source),
         spec=spec,
-        status=TaskStatus(model.status),
         execution_graph=graph,
-        plan=plan,
-        latest_event_seq=model.latest_event_seq,
-        loop_round=model.loop_round,
     )
 
 
@@ -134,7 +125,6 @@ def _deserialize_spec(raw: Optional[str]) -> TaskSpec:
     from agentclaw.community.core.task.domain.models import (
         AcceptanceCriteria,
         AcceptanceCriteriaKind,
-        ArtifactRef,
         Constraint,
         ConstraintKind,
         Deliverable,
@@ -202,43 +192,6 @@ def _deserialize_spec(raw: Optional[str]) -> TaskSpec:
     )
 
 
-def _deserialize_plan(raw: Optional[str]) -> Optional[Plan]:
-    """Reconstruct the :class:`Plan` (lives on the :class:`Task` aggregate root,
-    persisted in its own ``plan_json`` column — not inside ``spec_json`` since
-    B moved it off :class:`TaskSpec`)."""
-    from agentclaw.community.core.task.domain.models import (
-        EdgeKind,
-        EdgeSpec,
-        RunMode,
-        SubTaskSpec,
-    )
-
-    if not raw:
-        return None
-    data = json.loads(raw)
-    return Plan(
-        sub_tasks=[
-            SubTaskSpec(
-                node_id=s.get("node_id", ""),
-                spec=s.get("spec", ""),
-                run_mode=RunMode(s["run_mode"]) if s.get("run_mode") else None,
-                depend_on=s.get("depend_on", []),
-            )
-            for s in data.get("sub_tasks", [])
-        ],
-        edges=[
-            EdgeSpec(
-                edge_id=e.get("edge_id", ""),
-                from_node=e.get("from_node", ""),
-                to_node=e.get("to_node", ""),
-                kind=EdgeKind(e.get("kind", "dependency")),
-            )
-            for e in data.get("edges", [])
-        ],
-        confidence=float(data.get("confidence", 0.0)),
-    )
-
-
 def _deserialize_graph(raw: Optional[str]) -> Optional[TaskExecutionGraph]:
     from agentclaw.community.core.task.domain.models import (
         AcceptanceCriteria,
@@ -247,18 +200,15 @@ def _deserialize_graph(raw: Optional[str]) -> Optional[TaskExecutionGraph]:
         AttemptedRecord,
         AttemptOutcome,
         AttemptTrigger,
-        CollabMode,
         Deliverable,
         DeliverableType,
         Edge,
         EdgeKind,
-        GraphStatus,
         Node,
         NodeStatus,
         RouteClass,
         RunMode,
         SubDagRef,
-        TaskStatus,
     )
 
     if not raw:
@@ -331,8 +281,7 @@ def _deserialize_graph(raw: Optional[str]) -> Optional[TaskExecutionGraph]:
         for e in data.get("edges", [])
     ]
     return TaskExecutionGraph(
-        root_phase=TaskStatus(data.get("root_phase", "intake")),
-        graph_status=GraphStatus(data.get("graph_status", "on_plaza")),
+        status=GraphStatus(data.get("status") or "drafting"),
         loop_round=int(data.get("loop_round", 0)),
         nodes=nodes,
         edges=edges,

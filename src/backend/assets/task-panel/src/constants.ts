@@ -15,16 +15,18 @@ export const DEFAULT_POLLING_INTERVAL = 3000;
 export const MAX_TRANSIENT_RETRIES = 3;
 export const MAX_BACKOFF = DEFAULT_POLLING_INTERVAL * 10; // 30s cap
 
-// --- task root_phase sets ---
-export const ROOT_PHASE_TERMINAL: ReadonlySet<string> = new Set([
+// --- task status sets (unified GraphStatus, 9 states) ---
+export const TASK_STATUS_TERMINAL: ReadonlySet<string> = new Set([
   'done',
   'cancelled',
   'failed',
 ]);
-export const ROOT_PHASE_ACTIVE: ReadonlySet<string> = new Set([
+export const TASK_STATUS_ACTIVE: ReadonlySet<string> = new Set([
   'drafting',
   'defined',
-  'executing',
+  'running',
+  'human_required',
+  'bbs_active',
   'reviewing',
 ]);
 
@@ -36,7 +38,7 @@ export const NODE_STATUS_TERMINAL: ReadonlySet<string> = new Set([
 ]);
 export const NODE_STATUS_ACTIVE: ReadonlySet<string> = new Set([
   'running',
-  'human_required',
+  'hung',
   'pending',
 ]);
 

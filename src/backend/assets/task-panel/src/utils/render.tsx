@@ -73,7 +73,7 @@ export function renderNodeStatusMarker(
   if (s === 'skipped') {
     return <path d="M -3.6 0 L 3.6 0" fill="none" />;
   }
-  if (s === 'human_required') {
+  if (s === 'hung') {
     return (
       <>
         <path d="M -3.2 -1.6 H 3.2" fill="none" />

@@ -1,7 +1,7 @@
 """Task concern — application services (Phase 2).
 
 ``TaskService`` is the unified authority over the :class:`Task` aggregate:
-intake/plan (``create`` / ``clarify`` / ``finalize_plan``), event-fold/guard
+intake/plan (``create`` / ``clarify``(+``confirmed`` → DEFINED)), event-fold/guard
 (``on_event`` / ``claim_node``), and the read-only query + secondary-panel face
 (``get`` / ``list_by_user`` / ``progress`` / ``get_task_graph`` /
 ``get_node_detail`` / ``get_sub_dag`` / ``subscribe_task_graph``).

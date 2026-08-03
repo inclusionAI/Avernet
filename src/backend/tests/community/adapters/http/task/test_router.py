@@ -19,7 +19,6 @@ from agentclaw.community.adapters.http.task.schemas import (
     ClarifyTaskRequest,
     CreateTaskRequest,
     EventReportRequest,
-    FinalizePlanRequest,
     TaskCreatedResponse,
     TaskDetailResponse,
     TaskProgressResponse,
@@ -55,11 +54,12 @@ def test_task_detail_response_minimal():
     assert r.nodes == []
 
 
-def test_clarify_and_finalize_request_shapes():
+def test_clarify_request_shape_with_confirmed_flag():
     a = ClarifyTaskRequest(patch={"goal": "x"})
     assert a.patch == {"goal": "x"}
-    f = FinalizePlanRequest(plan_payload={"sub_tasks": []})
-    assert f.plan_payload == {"sub_tasks": []}
+    assert a.confirmed is False
+    c = ClarifyTaskRequest(patch={}, confirmed=True)
+    assert c.confirmed is True
 
 
 def test_event_report_request_carries_kind_and_payload():
@@ -88,8 +88,7 @@ def test_router_imports_and_registers_routes():
     assert "/api/tasks" in paths                      # GET list
     assert "/api/tasks/create" in paths                # POST create (n1 recognition)
     assert "/api/tasks/{task_id}" in paths            # GET detail
-    assert "/api/tasks/{task_id}/clarify" in paths       # POST clarify
-    assert "/api/tasks/{task_id}/plan" in paths        # POST finalize_plan
+    assert "/api/tasks/{task_id}/clarify" in paths       # POST clarify(confirmed=True → DEFINED)
     assert "/api/tasks/{task_id}/progress" in paths    # GET progress
     assert "/api/tasks/{task_id}/events" in paths      # POST owner-bot 回投
     # --- canvas (secondary panel) endpoints (Phase 0.7, plan §7.2) ---
@@ -124,14 +123,14 @@ class _StubTaskService:
     def create(self, title: str, source: str = "api", background: str = "") -> Any:
         return {"task_id": "t1", "status": "drafting", "seq": 1}
 
-    def clarify(self, task_id: str, patch: dict) -> Any:
-        return self.get(task_id)
-
-    def finalize_plan(self, task_id: str, plan: Any) -> Any:
+    def clarify(self, task_id: str, patch: dict, confirmed: bool = False) -> Any:
         return self.get(task_id)
 
     def on_event(self, event: Any) -> Any:
         return self.get(getattr(event, "task_id", "t1"))
+
+    def latest_seq(self, task_id: str) -> int:
+        return 1
 
     def claim_node(self, task_id: str, node_id: str, executor_id: str) -> Any:
         return {"node_id": node_id, "executor_id": executor_id,
@@ -141,8 +140,7 @@ class _StubTaskService:
     def get_task_graph(self, task_id: str) -> Any:
         return {
             "task_id": task_id,
-            "root_phase": "executing",
-            "graph_status": "on_plaza",
+            "status": "running",
             "loop_round": 0,
             "definition_meta": None,
             "nodes": [{"node_id": "n1", "display_name": "n", "status": "running"}],
@@ -155,8 +153,7 @@ class _StubTaskService:
     def get_sub_dag(self, task_id: str, node_id: str) -> Any:
         return {
             "task_id": task_id,
-            "root_phase": "executing",
-            "graph_status": "on_plaza",
+            "status": "running",
             "loop_round": 0,
             "nodes": [{"node_id": "sm-n1", "display_name": "x", "status": "completed"}],
             "edges": [],
@@ -168,8 +165,8 @@ class _StubTaskService:
         all_events = [
             TaskEvent(task_id=task_id, seq=1, kind=EventKind.TASK_CREATED,
                       payload={"title": "x"}, reported=False, occurred_at="2026-07-30T00:00:00"),
-            TaskEvent(task_id=task_id, seq=2, kind=EventKind.PLAN_FINALIZED,
-                      payload={"node_count": 3}, reported=False, occurred_at="2026-07-30T00:00:01"),
+            TaskEvent(task_id=task_id, seq=2, kind=EventKind.TASK_CLARIFIED,
+                      payload={"patch": {}, "confirmed": True}, reported=False, occurred_at="2026-07-30T00:00:01"),
             TaskEvent(task_id=task_id, seq=3, kind=EventKind.NODE_RUNNING,
                       payload={"node_id": "n1"}, reported=True, occurred_at="2026-07-30T00:00:02"),
         ]
@@ -251,7 +248,7 @@ def test_get_task_graph_returns_200():
     assert r.status_code == 200
     body = r.json()
     assert body["task_id"] == "t1"
-    assert body["root_phase"] == "executing"
+    assert body["status"] == "running"
     assert body["nodes"][0]["node_id"] == "n1"
 
 

@@ -2,10 +2,10 @@
  * useTaskGraph — polling hook for TaskGraphView.
  * Ported from bcsPanel.StateMachineRunView polling (2999-3021) + transient
  * backoff (isRetryableRequestStatus:1995). Polls GET /api/tasks/{id}/graph
- * every `pollingInterval` (default 3s) while root_phase is non-terminal
- * (drafting/defined/executing/reviewing); stops on terminal (done/cancelled/
- * failed). 5xx/network errors back off up to MAX_TRANSIENT_RETRIES; 4xx is a
- * fatal error (stops).
+ * every `pollingInterval` (default 3s) while status is non-terminal
+ * (drafting/defined/running/human_required/bbs_active/reviewing); stops on
+ * terminal (done/cancelled/failed). 5xx/network errors back off up to
+ * MAX_TRANSIENT_RETRIES; 4xx is a fatal error (stops).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -14,7 +14,7 @@ import {
   DEFAULT_POLLING_INTERVAL,
   MAX_BACKOFF,
   MAX_TRANSIENT_RETRIES,
-  ROOT_PHASE_TERMINAL,
+  TASK_STATUS_TERMINAL,
 } from './constants';
 import type { TaskGraphView } from './types';
 
@@ -92,8 +92,8 @@ export function useTaskGraph(
   useEffect(() => {
     if (!autoRefresh || !taskId) return undefined;
     const current = graphRef.current;
-    const rootPhase = current?.root_phase;
-    const isTerminal = rootPhase ? ROOT_PHASE_TERMINAL.has(String(rootPhase)) : false;
+    const taskStatus = current?.status;
+    const isTerminal = taskStatus ? TASK_STATUS_TERMINAL.has(String(taskStatus)) : false;
     const shouldRetryTransient = !current && transientRetryRef.current > 0;
     if (isTerminal && !shouldRetryTransient) return undefined;
 

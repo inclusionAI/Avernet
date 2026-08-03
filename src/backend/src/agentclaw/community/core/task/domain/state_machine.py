@@ -1,59 +1,56 @@
-"""Task/Node legal-transition tables + guard helpers (Phase 0.2).
+"""Graph/Node legal-transition tables + guard helpers.
 
-This module is the *only* authority on which state move is legal. TaskService
-``_apply_event`` consults ``require_task_transition`` / ``require_node_transition``
-as the guard before writing any state change; an illegal move raises
-``IllegalTransitionError`` and the event is rejected (state stays put).
+The only authority on which state move is legal. ``_apply_event`` consults
+``require_graph_transition`` / ``require_node_transition`` before writing any
+state change; an illegal move raises ``IllegalTransitionError`` and the event
+is rejected (state stays put).
 
-Notes (spec §2, §3.3):
-- Task terminals: DONE / CANCELLED / FAILED — no outgoing edges.
-- Any non-terminal Task can yield to CANCELLED (user cancel). Task-level HUNG is
-  gone — "被 hung 住 / 上升等人工" is node-level HUMAN_REQUIRED (task stays
-  EXECUTING); unrecoverable blockage → FAILED.
-- REVIEWING → EXECUTING is the rework loop (acceptance rejected → replan).
-- EXECUTING → FAILED is the unrecoverable termination (spec R4: atomic
-  termination OR node MAX_ATTEMPTS exhausted with no reroute/split room).
-- EXECUTING → EXECUTING is loop_round++ self-edge (not a state change, but
-  legal so the guard doesn't reject a tick that bumps rounds).
-- Node terminal: SKIPPED only. DONE is idempotent (self-edge) but not terminal.
-- HUMAN_REQUIRED / FAILED retry back to RUNNING (owner-bot SKILL 回投 FAIL
-  after accept, or human adjusts then resumes). PARTIAL_FAILED removed;
-  acceptance-fail and execution-fail both land in FAILED (spec R9), distinguished
-  by ``Node.properties['acceptance_result']`` / failure kind, not the enum.
+``GraphStatus`` is the single runtime task status (lives on the execution
+graph). Terminals: ``DONE`` / ``CANCELLED`` / ``FAILED``. Hang = ``HUMAN_REQUIRED``
+(stuck node ``NodeStatus.HUNG``); unrecoverable → ``FAILED``. Pre-BBS goal-FAIL
+loops back to ``RUNNING`` (回 gap); post-BBS (``BBS_ACTIVE``) goal-FAIL →
+``FAILED`` terminal (不回环). ``RUNNING`` → ``RUNNING`` is the loop_round++ self-edge.
+
+Node terminal: ``SKIPPED`` only. ``DONE`` is idempotent (self-edge) but not
+terminal. ``HUNG`` / ``FAILED`` may resume to ``RUNNING``. Acceptance-fail and
+execution-fail both land in ``FAILED`` (distinguished by
+``Node.properties['acceptance_result']``, not the enum).
 """
 from __future__ import annotations
 
-from .models import GraphStatus, NodeStatus, TaskStatus
+from .models import GraphStatus, NodeStatus
 
 
 class IllegalTransitionError(ValueError):
     """Raised when a requested state move is not in the legal transition table."""
 
 
-# --- task transitions -------------------------------------------------------
+# --- graph (task runtime) transitions ---------------------------------------
 
-TERMINAL_TASK_STATUSES: frozenset[TaskStatus] = frozenset(
-    {TaskStatus.DONE, TaskStatus.CANCELLED, TaskStatus.FAILED}
+TERMINAL_GRAPH_STATUSES: frozenset[GraphStatus] = frozenset(
+    {GraphStatus.DONE, GraphStatus.CANCELLED, GraphStatus.FAILED}
 )
 
-_BASE_TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
-    TaskStatus.DRAFTING: frozenset({TaskStatus.DEFINED}),
-    TaskStatus.DEFINED: frozenset({TaskStatus.EXECUTING}),
-    TaskStatus.EXECUTING: frozenset(
-        {TaskStatus.REVIEWING, TaskStatus.EXECUTING, TaskStatus.FAILED}
+_BASE_GRAPH_TRANSITIONS: dict[GraphStatus, frozenset[GraphStatus]] = {
+    GraphStatus.DRAFTING: frozenset({GraphStatus.DEFINED}),
+    GraphStatus.DEFINED: frozenset({GraphStatus.RUNNING}),
+    GraphStatus.RUNNING: frozenset(
+        {GraphStatus.HUMAN_REQUIRED, GraphStatus.REVIEWING, GraphStatus.RUNNING}
     ),
-    TaskStatus.REVIEWING: frozenset({TaskStatus.DONE, TaskStatus.EXECUTING}),
-    TaskStatus.DONE: frozenset(),
-    TaskStatus.CANCELLED: frozenset(),
-    TaskStatus.FAILED: frozenset(),
+    GraphStatus.HUMAN_REQUIRED: frozenset({GraphStatus.BBS_ACTIVE, GraphStatus.FAILED}),
+    GraphStatus.BBS_ACTIVE: frozenset({GraphStatus.DONE, GraphStatus.FAILED}),
+    GraphStatus.REVIEWING: frozenset({GraphStatus.DONE, GraphStatus.RUNNING}),
+    GraphStatus.DONE: frozenset(),
+    GraphStatus.CANCELLED: frozenset(),
+    GraphStatus.FAILED: frozenset(),
 }
 
-# Any non-terminal can also yield to CANCELLED (task-level HUNG is gone).
-TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
-    src: outgoing | {TaskStatus.CANCELLED}
-    if src not in TERMINAL_TASK_STATUSES
+# Any non-terminal can also yield to CANCELLED.
+GRAPH_TRANSITIONS: dict[GraphStatus, frozenset[GraphStatus]] = {
+    src: outgoing | {GraphStatus.CANCELLED}
+    if src not in TERMINAL_GRAPH_STATUSES
     else outgoing
-    for src, outgoing in _BASE_TASK_TRANSITIONS.items()
+    for src, outgoing in _BASE_GRAPH_TRANSITIONS.items()
 }
 
 
@@ -62,62 +59,16 @@ TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
 TERMINAL_NODE_STATUSES: frozenset[NodeStatus] = frozenset({NodeStatus.SKIPPED})
 
 NODE_TRANSITIONS: dict[NodeStatus, frozenset[NodeStatus]] = {
-    NodeStatus.PENDING: frozenset({NodeStatus.RUNNING, NodeStatus.SKIPPED}),
-    NodeStatus.RUNNING: frozenset(
-        {NodeStatus.DONE, NodeStatus.FAILED, NodeStatus.HUMAN_REQUIRED}
-    ),
+    NodeStatus.PENDING: frozenset({NodeStatus.RUNNING, NodeStatus.SKIPPED, NodeStatus.HUNG}),
+    NodeStatus.RUNNING: frozenset({NodeStatus.DONE, NodeStatus.FAILED, NodeStatus.HUNG}),
     NodeStatus.FAILED: frozenset({NodeStatus.RUNNING, NodeStatus.DONE}),
-    NodeStatus.HUMAN_REQUIRED: frozenset({NodeStatus.RUNNING}),
+    NodeStatus.HUNG: frozenset({NodeStatus.RUNNING}),
     NodeStatus.DONE: frozenset({NodeStatus.DONE}),
     NodeStatus.SKIPPED: frozenset(),
 }
 
 
 # --- guard helpers ----------------------------------------------------------
-
-def can_task_transition(current: TaskStatus, target: TaskStatus) -> bool:
-    return target in TASK_TRANSITIONS.get(current, frozenset())
-
-
-def can_node_transition(current: NodeStatus, target: NodeStatus) -> bool:
-    return target in NODE_TRANSITIONS.get(current, frozenset())
-
-
-def require_task_transition(current: TaskStatus, target: TaskStatus) -> None:
-    if not can_task_transition(current, target):
-        raise IllegalTransitionError(
-            f"illegal task transition: {current.value} -> {target.value}"
-        )
-
-
-def require_node_transition(current: NodeStatus, target: NodeStatus) -> None:
-    if not can_node_transition(current, target):
-        raise IllegalTransitionError(
-            f"illegal node transition: {current.value} -> {target.value}"
-        )
-
-
-# --- graph-status transitions (v2,plan §5.1) --------------------------------
-# ON_PLAZA = 活性执行(含 BBS 同图);AWAITING_HUMAN_ACCEPT = mark_hang 挂起门(等人
-# 确认:升 BBS→ON_PLAZA / 不升→task FAILED);AWAITING_HUMAN_ADJUST = 人介入调整后回
-# AWAITING_HUMAN_ACCEPT;VERIFIED = goal-verify PASS 终态。mark_graph_status 经此 guard
-# (现实现是裸赋值,§18.1-8 补 guard)。
-
-GRAPH_TRANSITIONS: dict[GraphStatus, frozenset[GraphStatus]] = {
-    GraphStatus.ON_PLAZA: frozenset(
-        {GraphStatus.AWAITING_HUMAN_ACCEPT, GraphStatus.VERIFIED}
-    ),
-    GraphStatus.AWAITING_HUMAN_ACCEPT: frozenset(
-        {GraphStatus.ON_PLAZA, GraphStatus.AWAITING_HUMAN_ADJUST}
-    ),
-    GraphStatus.AWAITING_HUMAN_ADJUST: frozenset(
-        {GraphStatus.ON_PLAZA, GraphStatus.AWAITING_HUMAN_ACCEPT}
-    ),
-    GraphStatus.VERIFIED: frozenset(),
-}
-
-TERMINAL_GRAPH_STATUSES: frozenset[GraphStatus] = frozenset({GraphStatus.VERIFIED})
-
 
 def can_graph_transition(current: GraphStatus, target: GraphStatus) -> bool:
     return target in GRAPH_TRANSITIONS.get(current, frozenset())
@@ -127,4 +78,15 @@ def require_graph_transition(current: GraphStatus, target: GraphStatus) -> None:
     if not can_graph_transition(current, target):
         raise IllegalTransitionError(
             f"illegal graph transition: {current.value} -> {target.value}"
+        )
+
+
+def can_node_transition(current: NodeStatus, target: NodeStatus) -> bool:
+    return target in NODE_TRANSITIONS.get(current, frozenset())
+
+
+def require_node_transition(current: NodeStatus, target: NodeStatus) -> None:
+    if not can_node_transition(current, target):
+        raise IllegalTransitionError(
+            f"illegal node transition: {current.value} -> {target.value}"
         )

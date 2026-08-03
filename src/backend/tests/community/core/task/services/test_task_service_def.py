@@ -1,6 +1,6 @@
 """TDD for TaskService intake/定义组 (Phase 2.1, plan §2.1).
 
-Covers the drafting推进闭环 (clarify keeps DRAFTING → finalize_plan → DEFINED),
+Covers the drafting推进闭环 (clarify keeps DRAFTING → clarify(confirmed=True) → DEFINED),
 the state_machine guard on非法 moves, and the FR-OBS-11 create-time副屏 panel
 popup (publishes a ``PanelMessage`` with component ``taskPanel.TaskWorkflowView``
 + task_id param).
@@ -9,11 +9,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.task.protocols import PanelMessage
 from agentclaw.community.core.task.domain.events import EventKind
-from agentclaw.community.core.task.domain.models import (
-    Plan,
-    SubTaskSpec,
-    TaskStatus,
-)
+from agentclaw.community.core.task.domain.models import GraphStatus
 from agentclaw.community.core.task.services import TaskService
 from agentclaw.community.plugins.community.task.in_memory_repos import (
     InMemoryTaskEventRepo,
@@ -30,19 +26,15 @@ def _service() -> tuple[TaskService, RecordingPanelPublisher]:
     return svc, pub
 
 
-def _plan(node_id: str = "n1") -> Plan:
-    return Plan(sub_tasks=[SubTaskSpec(node_id=node_id, spec="do x")], confidence=0.8)
-
-
 # --- create + panel popup (FR-OBS-11) --------------------------------------
 
 
 def test_create_yields_task_at_intake_with_root_phase():
     svc, _ = _service()
     task = svc.create(title="wire goal-driven canvas", source="api", background="bg")
-    assert task.status is TaskStatus.DRAFTING
+    assert task.status is GraphStatus.DRAFTING
     assert task.execution_graph is not None
-    assert task.execution_graph.root_phase is TaskStatus.DRAFTING
+    assert task.execution_graph.status is GraphStatus.DRAFTING
     assert task.id.startswith("task-")
     assert task.spec.metadata.title == "wire goal-driven canvas"
     assert task.spec.context.background == "bg"
@@ -68,21 +60,21 @@ def test_create_emits_task_created_event_with_monotonic_seq():
     assert events[0].seq == 1
 
 
-# --- drafting→defined 推进 (clarify keeps DRAFTING; finalize_plan → DEFINED) ---
+# --- drafting→defined 推进 (clarify keeps DRAFTING; clarify(confirmed=True) → DEFINED) ---
 
 
 def test_amend_keeps_drafting():
     svc, _ = _service()
     task = svc.create(title="t")
     amended = svc.clarify(task.id, {"summary": "refined goal"})
-    assert amended.status is TaskStatus.DRAFTING
+    assert amended.status is GraphStatus.DRAFTING
     assert amended.spec.metadata.summary == "refined goal"
 
 
 def test_clarify_writes_full_task_spec_five_elements():
     """clarify 必须把 skill 识别+澄清产出的五要素(goal/acceptances/deliverables/
     constraints)写进 task.spec,不能只认 title/summary/tags/background 把其余丢弃。
-    否则 spawn_build_dag 挂到规划节点上的 task_spec 永远是空数组/空串。"""
+    否则 init_execution_graph 挂到规划节点上的 task_spec 永远是空数组/空串。"""
     from agentclaw.community.core.task.domain.models import (
         AcceptanceCriteriaKind,
         ConstraintKind,
@@ -167,33 +159,30 @@ def test_clarify_accepts_nested_context_form_matching_skill_curl():
     assert spec.context.constraints[0].text == "不动接口签名"
 
 
-def test_finalize_plan_advances_drafting_to_defined():
+def test_clarify_confirmed_advances_drafting_to_defined():
     svc, _ = _service()
     task = svc.create(title="t")
     svc.clarify(task.id, {"summary": "x"})
-    planned = svc.finalize_plan(task.id, _plan())
-    assert planned.status is TaskStatus.DEFINED
-    assert planned.plan is not None
-    assert len(planned.plan.sub_tasks) == 1
+    confirmed = svc.clarify(task.id, {}, confirmed=True)
+    assert confirmed.status is GraphStatus.DEFINED
 
 
-def test_finalize_plan_legal_direct_from_drafting():
-    """New SM: DRAFTING → DEFINED is a legal direct edge, so finalize_plan
-    succeeds even without a prior clarify (clarify no longer transitions)."""
+def test_clarify_confirmed_legal_direct_from_drafting():
+    """New SM: DRAFTING → DEFINED is a legal direct edge, so clarify(confirmed=True)
+    succeeds even without a prior amend (clarify(confirmed=False) no longer transitions)."""
     svc, _ = _service()
     task = svc.create(title="t")
-    planned = svc.finalize_plan(task.id, _plan())
-    assert planned.status is TaskStatus.DEFINED
-    assert planned.plan is not None
+    confirmed = svc.clarify(task.id, {}, confirmed=True)
+    assert confirmed.status is GraphStatus.DEFINED
 
 
 def test_intake_loop_P3_close_to_defined():
-    """P3 = plan–propose–approve闭环: create → clarify → finalize_plan."""
+    """P3 = plan–propose–approve闭环: create → clarify → clarify(confirmed=True)。"""
     svc, _ = _service()
     t = svc.create(title="goal")
     t = svc.clarify(t.id, {"summary": "s", "tags": ["x"]})
-    t = svc.finalize_plan(t.id, _plan("n1"))
-    assert t.status is TaskStatus.DEFINED
+    t = svc.clarify(t.id, {}, confirmed=True)
+    assert t.status is GraphStatus.DEFINED
     assert t.spec.metadata.tags == ["x"]
 
 
@@ -201,12 +190,12 @@ def test_cancel_from_defined_legal():
     svc, _ = _service()
     t = svc.create(title="t")
     svc.clarify(t.id, {"summary": "s"})
-    svc.finalize_plan(t.id, _plan())
+    svc.clarify(t.id, {}, confirmed=True)
     cancelled = svc.cancel(t.id, reason="user abort")
-    assert cancelled.status is TaskStatus.CANCELLED
+    assert cancelled.status is GraphStatus.CANCELLED
 
 
 def test_amend_unknown_task_returns_none():
     svc, _ = _service()
     assert svc.clarify("nope", {"x": 1}) is None
-    assert svc.finalize_plan("nope", _plan()) is None
+    assert svc.clarify("nope", {}, confirmed=True) is None

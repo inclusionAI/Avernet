@@ -21,47 +21,39 @@ from typing import Optional
 
 # --- enums ------------------------------------------------------------------
 
-class TaskStatus(StrEnum):
-    """Task lifecycle (spec §2.1). 7 states; 3 terminals: DONE/CANCELLED/FAILED.
-
-    DRAFTING covers the entire element-completion phase (create + clarify do NOT
-    transition out — spec R2); finalize_plan moves to DEFINED."""
-
-    DRAFTING = "drafting"
-    DEFINED = "defined"
-    EXECUTING = "executing"
-    REVIEWING = "reviewing"
-    DONE = "done"
-    CANCELLED = "cancelled"
-    FAILED = "failed"
-
-
 class NodeStatus(StrEnum):
-    """Node runtime status (spec §3.3). 6 states; terminal: SKIPPED.
-    Acceptance-fail (NODE_REJECTED) and execution-fail (NODE_FAILED) both land in
-    FAILED; the distinction rides on ``Node.properties['acceptance_result']`` /
-    failure kind, not the status enum (spec R9). HUMAN_REQUIRED = 验收/终验回投需人工."""
+    """Node runtime status (spec §3.3). terminal: SKIPPED. Acceptance-fail and
+    execution-fail both land in FAILED (distinguished by
+    ``Node.properties['acceptance_result']``, not the enum, spec R9). ``HUNG`` =
+    卡住等人工(任务级 ``GraphStatus.HUMAN_REQUIRED``)。"""
 
     PENDING = "pending"
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
     SKIPPED = "skipped"
-    HUMAN_REQUIRED = "human_required"
+    HUNG = "hung"
 
 
 class GraphStatus(StrEnum):
-    """ExecutionGraph placement: ON_PLAZA(自走) / AWAITING_HUMAN_* (上升后挂起) / VERIFIED.
+    """任务运行时状态(图自 create 起即承载;唯一权威,无跨维度复制)。plan §5.1/spec §2.1。
 
-    v2 释义(plan §5.1):``ON_PLAZA`` = 图处于活性执行态(含 BBS 上升后同图延续);
-    ``AWAITING_HUMAN_ACCEPT`` = ``mark_hang`` 挂起门(递归上限触顶等人确认:升 BBS
-    → ``ON_PLAZA`` / 不升 → task ``FAILED``);``AWAITING_HUMAN_ADJUST`` = 人介入调整后
-    回 ``AWAITING_HUMAN_ACCEPT``;``VERIFIED`` = ``goal-verify`` PASS 终态。"""
+    状态机:``DRAFTING``→``DEFINED``(clarify confirmed)→``RUNNING``(start);
+    ``RUNNING``→``HUMAN_REQUIRED``(mark hang,卡住节点 ``HUNG``);
+    ``HUMAN_REQUIRED``→``BBS_ACTIVE``(人确认升 BBS;bots 读 State 自驱剩余子任务,
+    非立即执行)/→``FAILED``(人不升);``RUNNING``→``REVIEWING``(全闭合 pre-BBS 终验)
+    →``DONE``(pass)/→``RUNNING``(fail 回 gap);``BBS_ACTIVE``→``DONE``/``FAILED``
+    (post-BBS 终验,fail 终态不回环);任一非终态→``CANCELLED``。"""
 
-    ON_PLAZA = "on_plaza"
-    AWAITING_HUMAN_ACCEPT = "awaiting_human_accept"
-    AWAITING_HUMAN_ADJUST = "awaiting_human_adjust"
-    VERIFIED = "verified"
+    DRAFTING = "drafting"
+    DEFINED = "defined"
+    RUNNING = "running"
+    HUMAN_REQUIRED = "human_required"
+    BBS_ACTIVE = "bbs_active"
+    REVIEWING = "reviewing"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class NodeType(StrEnum):
@@ -81,8 +73,6 @@ class NodeType(StrEnum):
     EXEC_ACCEPT = "exec_accept"        # 子任务验收(执行方 bot,task-exec-skill,仅判子任务 DONE)
     EXEC_AGGREGATE = "exec_aggregate"   # 中间层聚合验收(父 owner bot,读 State 聚合判父 DONE)
     GOAL_VERIFY = "goal_verify"        # 任务终验(task-owner,goal-verify-skill,判任务 DONE)
-    MARK_HANG = "mark_hang"            # 递归上限挂起(系统,graph AWAITING_HUMAN_*,不直接升 BBS)
-    BBS_DISPATCH = "bbs_dispatch"      # BBS 上升入口(系统,人确认升 BBS 后落点;mark ON_PLAZA)
 
 
 class StateSemantics(StrEnum):
@@ -242,7 +232,7 @@ class ExecutionMeta:
 
 @dataclass
 class SubTaskSpec:
-    """Plan-time sub-task descriptor (Plan.sub_tasks / DecomposerPort.decompose 出参).
+    """Sub-task descriptor(DecomposerPort.decompose_subtasks 出参 / add_node 入参)。
 
     ``depth`` = 递归深度(根 subtask=0;每次 DECOMPOSITION 产出 children depth=父+1,
     由 DecomposerPort 按父 SubtaskState.depth+1 填,plan §3.5/§11)。"""
@@ -255,28 +245,12 @@ class SubTaskSpec:
 
 
 @dataclass
-class EdgeSpec:
-    """Plan-time edge descriptor (Plan.edges)."""
-
-    edge_id: str
-    from_node: str
-    to_node: str
-    kind: EdgeKind = EdgeKind.DEPENDENCY
-
-
-@dataclass
-class Plan:
-    sub_tasks: list[SubTaskSpec] = field(default_factory=list)
-    edges: list[EdgeSpec] = field(default_factory=list)
-    confidence: float = 0.0
-
-
-@dataclass
 class TaskSpec:
     """The intake face (requirement / acceptance). Progressive: only metadata
-    required at DRAFTING. The finalized decomposition (``Plan``) is NOT part of
-    the spec — it lives on the :class:`Task` aggregate root as the bridge
-    between spec (what's wanted) and ``execution_graph`` (runtime DAG)."""
+    required at DRAFTING. Decomposition is runtime(skill 经 decompose_subtasks
+    产 SubTaskSpec 直接入图),NOT a frozen field on the aggregate — the bridge
+    between spec (what's wanted) and ``execution_graph`` (runtime DAG) is the
+    graph itself, not a persisted Plan."""
 
     metadata: TaskSpecMetadata
     context: TaskContext = field(default_factory=TaskContext)
@@ -420,18 +394,14 @@ class GraphSnapshot:
 
 @dataclass
 class TaskExecutionGraph:
-    """The runtime face (v2:State/Node/Edge 三要素,plan §2/§3.4)。
+    """The runtime face (State/Node/Edge 三要素,plan §2/§3.4)。``status`` 是任务
+    运行时状态的唯一权威(图自 create 起承载)。``state`` 为图级一等要素(SSOT)。"""
 
-    ``root_phase`` mirrors the owning Task's current phase;``graph_status`` gates
-    who can move next (ON_PLAZA = 活性执行含 BBS 同图; AWAITING_HUMAN_* = 挂起门,
-    plan §5.1)。``state`` 为图级一等要素(SSOT)。"""
-
-    root_phase: TaskStatus
-    graph_status: GraphStatus = GraphStatus.ON_PLAZA
+    status: GraphStatus = GraphStatus.DRAFTING
     loop_round: int = 0
     nodes: list[Node] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
-    state: TaskState = field(default_factory=TaskState)  # v2 一等要素(实体维度)
+    state: TaskState = field(default_factory=TaskState)
 
 
 @dataclass
@@ -450,20 +420,36 @@ class ProgressNode:
 @dataclass
 class Task:
     """Aggregate root. ``spec`` = intake face (requirement/acceptance);
-    ``plan`` = the finalized decomposition (bridge between spec and runtime);
-    ``execution_graph`` = runtime face (the live DAG).
-    ``latest_event_seq`` is the TaskService event-log watermark (single writer guard).
-    ``status`` is the canonical lifecycle phase (7 states); ``execution_graph.root_phase``
-    mirrors it so a graph snapshot is self-describing. TaskService keeps the two in sync
-    on every phase move via the state_machine guard."""
+    ``execution_graph`` = runtime face (the live DAG,自 create 起即承载任务运行时
+    ``status``/``loop_round``/``state``)。Task 不持有执行期标量:``status``/``loop_round``
+    经 ``execution_graph`` 读写;事件日志尾部以 ``event_repo.latest_seq(task_id)`` 为准。"""
 
     id: str
     user_id: str
     source: TaskSource
     spec: TaskSpec
-    status: TaskStatus = TaskStatus.DRAFTING
     execution_graph: Optional[TaskExecutionGraph] = None
-    plan: Optional[Plan] = None  # 预规划桥(方案a):finalize_plan 冻结的分解;spawn_build_dag 读此建 DISPATCH 骨架。运行态读 execution_graph。
-    owner_bot_id: Optional[str] = None  # v2 task-owner 绑定(§3.6/O-7③);OwnerResolver.resolve_task_owner 读此
-    latest_event_seq: int = 0
-    loop_round: int = 0
+    owner_bot_id: Optional[str] = None  # task-owner 绑定(§3.6/O-7③)
+
+    @property
+    def status(self) -> "GraphStatus":
+        """任务运行时状态(无存储 delegate → ``execution_graph.status``)。"""
+        if self.execution_graph is not None:
+            return self.execution_graph.status
+        return GraphStatus.DRAFTING
+
+    @status.setter
+    def status(self, value: "GraphStatus") -> None:
+        if self.execution_graph is None:
+            self.execution_graph = TaskExecutionGraph(status=value)
+        else:
+            self.execution_graph.status = value
+
+    @property
+    def loop_round(self) -> int:
+        return self.execution_graph.loop_round if self.execution_graph else 0
+
+    @loop_round.setter
+    def loop_round(self, value: int) -> None:
+        if self.execution_graph is not None:
+            self.execution_graph.loop_round = value

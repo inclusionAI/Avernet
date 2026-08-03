@@ -24,7 +24,6 @@ from agentclaw.community.core.task.protocols import (
 )
 from agentclaw.community.core.task.domain.events import TaskEvent
 from agentclaw.community.core.task.domain.models import (
-    Plan,
     RouteClass,
     RunMode,
     Task,
@@ -36,7 +35,7 @@ from agentclaw.community.core.task.domain.models import (
 
 class NoopTaskService(TaskService):
     """No-op TaskService — query returns empty, intake create yields a Task
-    at DRAFTING (so smoke tests can trace an id), clarify/finalize/on_event/claim
+    at DRAFTING (so smoke tests can trace an id), clarify/on_event/claim
     are None. Phase 2 replaces this with the real event-fold authority."""
 
     def get(self, task_id: str) -> Optional[Task]:
@@ -60,10 +59,7 @@ class NoopTaskService(TaskService):
             ),
         )
 
-    def clarify(self, task_id: str, patch: dict) -> Optional[Task]:
-        return None
-
-    def finalize_plan(self, task_id: str, plan: Plan) -> Optional[Task]:
+    def clarify(self, task_id: str, patch: dict, confirmed: bool = False) -> Optional[Task]:
         return None
 
     def on_event(self, event: TaskEvent) -> Optional[Task]:
@@ -75,14 +71,16 @@ class NoopTaskService(TaskService):
     def history(self, task_id: str, after_seq: int = 0) -> list:
         return []
 
+    def latest_seq(self, task_id: str) -> int:
+        return 0
+
     # --- canvas (secondary panel) query face (Phase 0.8, plan §1.4b) -------
     # Neutral snapshots so the router/canvas smoke runs before the real query
     # group (Phase 2) and SmGraphAdapter (Phase 4) land. Never raise.
     def get_task_graph(self, task_id: str) -> dict:
         return {
             "task_id": task_id,
-            "root_phase": "drafting",
-            "graph_status": "on_plaza",
+            "status": "drafting",
             "loop_round": 0,
             "definition_meta": None,
             "nodes": [],
@@ -113,8 +111,8 @@ class NoopBotDiscoverPort(BotDiscoverPort):
 
 
 class NoopDecomposerPort(DecomposerPort):
-    def decompose(self, task_id: str) -> Plan:
-        return Plan()
+    def decompose_subtasks(self, spec, state):  # type: ignore[override]
+        return []
 
 
 class NoopTaskDriverPort(TaskDriverPort):

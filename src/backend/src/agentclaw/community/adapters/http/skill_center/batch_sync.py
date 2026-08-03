@@ -37,7 +37,7 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     BatchSyncResponse,
     BatchSyncSkillResult,
     BatchSyncTaskResponse,
-    BatchSyncTaskStatusResponse,
+    BatchSyncGraphStatusResponse,
 )
 from agentclaw.community.core.skill_center.services.skill_batch_sync_service import (
     BatchSyncReport,
@@ -304,7 +304,7 @@ async def batch_sync_get(
     return _start_batch_sync_task(codes, force, skills_dir, batch_size, batch_index, git_sync, svc, env_list)
 
 
-@router.get("/batch-sync/status/{task_id}", response_model=BatchSyncTaskStatusResponse)
+@router.get("/batch-sync/status/{task_id}", response_model=BatchSyncGraphStatusResponse)
 async def get_batch_sync_status(task_id: str):
     """轮询批量同步任务状态。"""
     task = _tasks.get(task_id)
@@ -342,7 +342,7 @@ async def get_batch_sync_status(task_id: str):
                     "results": [],
                     "report_path": str(candidate),
                 }
-            return BatchSyncTaskStatusResponse(
+            return BatchSyncGraphStatusResponse(
                 task_id=task_id,
                 status="done",
                 progress="completed (from disk)",
@@ -350,7 +350,7 @@ async def get_batch_sync_status(task_id: str):
                 error="",
             )
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-    return BatchSyncTaskStatusResponse(
+    return BatchSyncGraphStatusResponse(
         task_id=task_id,
         status=task["status"],
         progress=task.get("progress", ""),
@@ -561,7 +561,7 @@ async def batch_delete_get(
     return _start_batch_delete_task(codes, client, repo)
 
 
-@router.get("/batch-delete/status/{task_id}", response_model=BatchSyncTaskStatusResponse)
+@router.get("/batch-delete/status/{task_id}", response_model=BatchSyncGraphStatusResponse)
 async def get_batch_delete_status(task_id: str):
     """轮询批量删除任务状态。"""
     task = _batch_delete_tasks.get(task_id)
@@ -597,7 +597,7 @@ async def get_batch_delete_status(task_id: str):
                     "results": [],
                     "report_path": str(candidate),
                 }
-            return BatchSyncTaskStatusResponse(
+            return BatchSyncGraphStatusResponse(
                 task_id=task_id,
                 status="done",
                 progress="completed (from disk)",
@@ -605,7 +605,7 @@ async def get_batch_delete_status(task_id: str):
                 error="",
             )
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-    return BatchSyncTaskStatusResponse(
+    return BatchSyncGraphStatusResponse(
         task_id=task_id,
         status=task["status"],
         progress=task.get("progress", ""),

@@ -22,7 +22,6 @@ from agentclaw.community.core.task.domain.models import (
     GraphStatus,
     Node,
     NodeStatus,
-    Plan,
     ProgressNode,
     RouteClass,
     RunMode,
@@ -33,21 +32,23 @@ from agentclaw.community.core.task.domain.models import (
     TaskSource,
     TaskSpec,
     TaskSpecMetadata,
-    TaskStatus,
+    GraphStatus,
 )
 
 
-def test_task_status_has_7_states_with_3_terminals():
-    assert set(TaskStatus) == {
-        TaskStatus.DRAFTING,
-        TaskStatus.DEFINED,
-        TaskStatus.EXECUTING,
-        TaskStatus.REVIEWING,
-        TaskStatus.DONE,
-        TaskStatus.CANCELLED,
-        TaskStatus.FAILED,
+def test_graphstatus_has_9_states_with_3_terminals():
+    assert set(GraphStatus) == {
+        GraphStatus.DRAFTING,
+        GraphStatus.DEFINED,
+        GraphStatus.RUNNING,
+        GraphStatus.HUMAN_REQUIRED,
+        GraphStatus.BBS_ACTIVE,
+        GraphStatus.REVIEWING,
+        GraphStatus.DONE,
+        GraphStatus.CANCELLED,
+        GraphStatus.FAILED,
     }
-    assert {TaskStatus.DONE, TaskStatus.CANCELLED, TaskStatus.FAILED} <= set(TaskStatus)
+    assert {GraphStatus.DONE, GraphStatus.CANCELLED, GraphStatus.FAILED} <= set(GraphStatus)
 
 
 def test_node_status_has_6_states():
@@ -57,16 +58,21 @@ def test_node_status_has_6_states():
         NodeStatus.DONE,
         NodeStatus.FAILED,
         NodeStatus.SKIPPED,
-        NodeStatus.HUMAN_REQUIRED,
+        NodeStatus.HUNG,
     }
 
 
 def test_graphstatus_edgekind_runmode_collabmode_routeclass_enum_shapes():
     assert set(GraphStatus) == {
-        GraphStatus.ON_PLAZA,
-        GraphStatus.AWAITING_HUMAN_ACCEPT,
-        GraphStatus.AWAITING_HUMAN_ADJUST,
-        GraphStatus.VERIFIED,
+        GraphStatus.DRAFTING,
+        GraphStatus.DEFINED,
+        GraphStatus.RUNNING,
+        GraphStatus.HUMAN_REQUIRED,
+        GraphStatus.BBS_ACTIVE,
+        GraphStatus.REVIEWING,
+        GraphStatus.DONE,
+        GraphStatus.CANCELLED,
+        GraphStatus.FAILED,
     }
     assert set(EdgeKind) == {
         EdgeKind.DEPENDENCY,
@@ -93,9 +99,8 @@ def test_task_construct_minimal_execution_graph_none():
     spec = TaskSpec(metadata=TaskSpecMetadata(id="t1", title="fix PR"))
     task = Task(id="t1", user_id="u1", source=TaskSource.IM, spec=spec)
     assert task.execution_graph is None
-    assert task.latest_event_seq == 0
     assert task.loop_round == 0
-    assert task.plan is None
+    assert task.status is GraphStatus.DRAFTING  # 无图时 delegate 默认 DRAFTING
 
 
 def test_task_spec_progressive_defaults():
@@ -105,15 +110,8 @@ def test_task_spec_progressive_defaults():
     assert spec.goal is None
     assert spec.deliverables == []
     assert spec.execution is None
-    # Plan lives on the Task aggregate root, NOT on TaskSpec (B: plan moved).
+    # TaskSpec 不挂 plan(2026-08-03:Plan 退场,分解运行期入图)
     assert not hasattr(spec, "plan")
-
-
-def test_plan_confidence_default_zero():
-    plan = Plan()
-    assert plan.confidence == 0.0
-    assert plan.sub_tasks == []
-    assert plan.edges == []
 
 
 def test_node_defaults_status_pending_and_properties():
@@ -150,12 +148,13 @@ def test_attempted_record_absorbs_route_hop_fields():
     assert rec.trigger is AttemptTrigger.REPLANNED
 
 
-def test_execution_graph_root_phase_required_default_on_plaza():
-    g = TaskExecutionGraph(root_phase=TaskStatus.EXECUTING)
-    assert g.root_phase is TaskStatus.EXECUTING
-    assert g.graph_status is GraphStatus.ON_PLAZA
+def test_execution_graph_status_default_drafting():
+    g = TaskExecutionGraph()
+    assert g.status is GraphStatus.DRAFTING
     assert g.nodes == []
     assert g.edges == []
+    g2 = TaskExecutionGraph(status=GraphStatus.RUNNING)
+    assert g2.status is GraphStatus.RUNNING
 
 
 def test_acceptance_criteria_polymorphic_bag():
@@ -237,13 +236,13 @@ def test_models_serializable_via_asdict():
         source=TaskSource.API,
         spec=spec,
         execution_graph=TaskExecutionGraph(
-            root_phase=TaskStatus.EXECUTING,
+            status=GraphStatus.RUNNING,
             nodes=[Node(node_id="n1", spec="s")],
             edges=[Edge(edge_id="e1", from_node="n1", to_node="n1")],
         ),
     )
     d = asdict(task)
     assert d["id"] == "t1"
-    assert d["execution_graph"]["root_phase"] == TaskStatus.EXECUTING
+    assert d["execution_graph"]["status"] == GraphStatus.RUNNING
     assert d["spec"]["goal"]["objective"] == "o"
     assert d["execution_graph"]["nodes"][0]["node_id"] == "n1"

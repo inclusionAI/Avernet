@@ -14,7 +14,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSource,
     TaskSpec,
     TaskSpecMetadata,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.protocols import RouteClass
 from agentclaw.community.core.task.services.bot_catalog import BotProfile
@@ -133,8 +133,7 @@ def test_attempted_executors_not_excluded_from_candidates():
         user_id="u1",
         source=TaskSource.IM,
         spec=TaskSpec(metadata=TaskSpecMetadata(id="t1", title="t")),
-        status=TaskStatus.EXECUTING,
-        execution_graph=TaskExecutionGraph(root_phase=TaskStatus.EXECUTING, nodes=[node]),
+        execution_graph=TaskExecutionGraph(status=GraphStatus.RUNNING, nodes=[node]),
     )
 
     class _FakeRepo:
@@ -158,8 +157,7 @@ def test_recommend_loads_node_spec_from_repo():
         user_id="u1",
         source=TaskSource.IM,
         spec=TaskSpec(metadata=TaskSpecMetadata(id="t2", title="t")),
-        status=TaskStatus.EXECUTING,
-        execution_graph=TaskExecutionGraph(root_phase=TaskStatus.EXECUTING, nodes=[node]),
+        execution_graph=TaskExecutionGraph(status=GraphStatus.RUNNING, nodes=[node]),
     )
 
     class _FakeRepo:
@@ -180,8 +178,7 @@ def test_recommend_unknown_node_returns_c2():
         user_id="u1",
         source=TaskSource.IM,
         spec=TaskSpec(metadata=TaskSpecMetadata(id="t3", title="t")),
-        status=TaskStatus.EXECUTING,
-        execution_graph=TaskExecutionGraph(root_phase=TaskStatus.EXECUTING, nodes=[]),
+        execution_graph=TaskExecutionGraph(status=GraphStatus.RUNNING, nodes=[]),
     )
 
     class _FakeRepo:

@@ -31,8 +31,7 @@ from agentclaw.community.core.task.domain.events import (
     NodeFailed,
     NodeRejected,
     NodeRunning,
-    PlanFinalized,
-    SpecAmended,
+    TaskClarified,
     TaskCreated,
     TaskEvent,
     is_reported_kind,
@@ -126,12 +125,10 @@ def _row_to_event(row: AcTaskEventModel) -> TaskEvent:
     )
     if kind is EventKind.TASK_CREATED:
         return TaskCreated(title=payload.get("title", ""), source=payload.get("source", ""), **common)
-    if kind is EventKind.SPEC_AMENDED:
-        return SpecAmended(patch=payload.get("patch", {}), **common)
-    if kind is EventKind.PLAN_FINALIZED:
-        return PlanFinalized(
-            node_count=int(payload.get("node_count", 0)),
-            confidence=float(payload.get("confidence", 0.0)),
+    if kind is EventKind.TASK_CLARIFIED:
+        return TaskClarified(
+            patch=payload.get("patch", {}),
+            confirmed=bool(payload.get("confirmed", False)),
             **common,
         )
     if kind is EventKind.NODE_DISPATCHED:

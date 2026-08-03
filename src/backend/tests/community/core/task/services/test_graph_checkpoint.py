@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.task.domain.events import EventKind, IllegalEventError, next_seq
-from agentclaw.community.core.task.domain.models import NodeStatus, Plan, SubTaskSpec, TaskStatus
+from agentclaw.community.core.task.domain.models import NodeStatus, NodeType, RunMode, SubTaskSpec, GraphStatus
 from agentclaw.community.core.task.services import GraphCheckpoint, TaskService
 from agentclaw.community.plugins.community.task.in_memory_repos import (
     InMemoryTaskEventRepo,
@@ -27,17 +27,15 @@ def _service() -> tuple[TaskService, GraphCheckpoint]:
 
 def _planned(svc: TaskService) -> str:
     t = svc.create(title="t")
-    svc.finalize_plan(
-        t.id,
-        Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="do n1"), SubTaskSpec(node_id="n2", spec="do n2")], confidence=0.8),
-    )
+    svc.clarify(t.id, {}, confirmed=True)
     task = svc.get(t.id)
-    task.status = TaskStatus.EXECUTING
-    task.execution_graph.root_phase = TaskStatus.EXECUTING
+    task.status = GraphStatus.RUNNING
+    task.execution_graph.status = GraphStatus.RUNNING
     svc._task_repo.save(task)  # noqa: SLF001
     task = svc.get(t.id)
-    svc.spawn_build_dag(task)
-    svc._task_repo.save(task)  # noqa: SLF001 — spawn_build_dag 只改内存,需存
+    svc.init_execution_graph(task)  # 自持久化
+    # 2026-08-03:Plan 退场,n1 不再由 plan 预拆 → 显式 add_node 供事件 fold/重放定位
+    svc.add_node(t.id, SubTaskSpec(node_id="n1", spec="a", run_mode=RunMode.SINGLE_BOT), "n_execute_start", NodeType.DISPATCH)
     return t.id
 
 
@@ -53,7 +51,7 @@ def test_snapshot_replay_matches_live_fold():
     tid = _planned(svc)
     # n1 → RUNNING
     svc.on_event(_ev(tid, EventKind.NODE_RUNNING, next_seq(svc._event_repo.latest_seq(tid)), node_id="n1"))  # noqa: SLF001
-    seq_after_running = svc.get(tid).latest_event_seq
+    seq_after_running = svc._event_repo.latest_seq(tid)  # noqa: SLF001
     # 落快照@running
     ck.snapshot(tid, seq_after_running)
     # n1 → DONE
@@ -74,16 +72,15 @@ def test_rollback_truncates_log_and_recomputes_fold():
     svc, ck = _service()
     tid = _planned(svc)
     svc.on_event(_ev(tid, EventKind.NODE_RUNNING, next_seq(svc._event_repo.latest_seq(tid)), node_id="n1"))  # noqa: SLF001
-    seq_running = svc.get(tid).latest_event_seq
+    seq_running = svc._event_repo.latest_seq(tid)  # noqa: SLF001
     ck.snapshot(tid, seq_running)  # 快照:n1 RUNNING
     svc.on_event(_ev(tid, EventKind.NODE_ACCEPTED, next_seq(svc._event_repo.latest_seq(tid)), node_id="n1", verifier="bot"))  # noqa: SLF001
-    svc.get(tid).latest_event_seq
     assert svc.get(tid).execution_graph is not None
     assert next(n for n in svc.get(tid).execution_graph.nodes if n.node_id == "n1").status is NodeStatus.DONE
     # 回滚到 seq_running:n1 应回到 RUNNING,日志截断
     ck.rollback(tid, seq_running)
     task = svc.get(tid)
-    assert task.latest_event_seq == seq_running
+    assert svc._event_repo.latest_seq(tid) == seq_running  # noqa: SLF001
     n1 = next(n for n in task.execution_graph.nodes if n.node_id == "n1")
     assert n1.status is NodeStatus.RUNNING  # 回滚重算到 running 时刻
     # 日志已截断:load_events after seq_running 应为空

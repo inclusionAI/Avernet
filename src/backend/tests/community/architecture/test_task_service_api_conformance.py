@@ -78,10 +78,10 @@ def test_api_protocol_surface_is_stable():
         "progress",
         "create",
         "clarify",
-        "finalize_plan",
         "on_event",
         "claim_node",
         "history",
+        "latest_seq",
     }
     assert _protocol_methods(TaskSchedulerProtocol) == {"start", "tick", "on_event"}
 

@@ -33,7 +33,7 @@ _STATUS_LABELS = {
 _TERMINAL_STATUSES = {"completed", "failed"}
 
 
-class TaskStatus(str, Enum):
+class GraphStatus(str, Enum):
     """Quality task status enumeration."""
 
     INIT = "init"
@@ -83,16 +83,16 @@ class TaskProcessor:
             current_status = task.status
 
             # Route to appropriate transition method based on current status
-            if current_status == TaskStatus.INIT.value:
+            if current_status == GraphStatus.INIT.value:
                 return await self.to_env_preparing(id)
-            elif current_status == TaskStatus.ENV_PREPARING.value:
+            elif current_status == GraphStatus.ENV_PREPARING.value:
                 return self.to_env_ready(id)
-            elif current_status == TaskStatus.ENV_READY.value:
+            elif current_status == GraphStatus.ENV_READY.value:
                 return self.to_task_created(id)
-            elif current_status == TaskStatus.TASK_CREATED.value:
+            elif current_status == GraphStatus.TASK_CREATED.value:
                 return self.to_task_executed(id)
-            elif current_status == TaskStatus.TASK_EXECUTED.value:
-                return self.to_env_released(id, TaskStatus.TASK_EXECUTED.value, TaskStatus.SUCCESS.value)
+            elif current_status == GraphStatus.TASK_EXECUTED.value:
+                return self.to_env_released(id, GraphStatus.TASK_EXECUTED.value, GraphStatus.SUCCESS.value)
             else:
                 # Terminal status (success/failed) - return current task unchanged
                 logger.info("[process] id=%s is at terminal status '%s', returning unchanged", id, current_status)
@@ -156,7 +156,7 @@ class TaskProcessor:
             if "baas_publish_id" in result:
                 ext["baas_publish_id"] = result["baas_publish_id"]
 
-        self._transition_to(id, TaskStatus.INIT.value, TaskStatus.ENV_PREPARING.value, ext)
+        self._transition_to(id, GraphStatus.INIT.value, GraphStatus.ENV_PREPARING.value, ext)
         logger.info("[to_env_preparing] id=%s, init -> env_preparing completed, proceeding to env_ready", id)
         return self.to_env_ready(id)
 
@@ -187,13 +187,13 @@ class TaskProcessor:
         ext["baas_publish_progress"] = progress
 
         if status == "SUCCESS":
-            self._transition_to(id, TaskStatus.ENV_PREPARING.value, TaskStatus.ENV_READY.value, ext)
+            self._transition_to(id, GraphStatus.ENV_PREPARING.value, GraphStatus.ENV_READY.value, ext)
             logger.info("[to_env_ready] id=%s, env_preparing -> env_ready completed", id)
             return self.to_task_created(id)
         elif status == "FAILED":
             ext["error_msg"] = progress.get("error", "BaaS publish failed")
             self._repository.update_ext(id, ext)
-            return self.to_env_released(id, TaskStatus.ENV_PREPARING.value, TaskStatus.FAILED.value)
+            return self.to_env_released(id, GraphStatus.ENV_PREPARING.value, GraphStatus.FAILED.value)
         else:
             # Still in progress (e.g., RUNNING), save progress and return unchanged
             self._repository.update_ext(id, ext)
@@ -239,8 +239,8 @@ class TaskProcessor:
             ext["set_task_uuid"] = set_task_uuid
             logger.info("[to_task_created] Got set_task_uuid=%s", set_task_uuid)
 
-        ext["source_status"] = TaskStatus.ENV_READY.value
-        updated = self._repository.update_status(id, TaskStatus.TASK_CREATED.value, ext)
+        ext["source_status"] = GraphStatus.ENV_READY.value
+        updated = self._repository.update_status(id, GraphStatus.TASK_CREATED.value, ext)
         if not updated:
             raise ValueError(f"Failed to update task: {id}")
 
@@ -269,14 +269,14 @@ class TaskProcessor:
         if status not in _TERMINAL_STATUSES:
             return task
 
-        self._transition_to(id, TaskStatus.TASK_CREATED.value, TaskStatus.TASK_EXECUTED.value, ext)
+        self._transition_to(id, GraphStatus.TASK_CREATED.value, GraphStatus.TASK_EXECUTED.value, ext)
 
         if status == "completed":
-            return self.to_env_released(id, TaskStatus.TASK_EXECUTED.value, TaskStatus.SUCCESS.value)
+            return self.to_env_released(id, GraphStatus.TASK_EXECUTED.value, GraphStatus.SUCCESS.value)
         else:  # failed
             ext["error_msg"] = f"{progress.get('error', '评测失败')} (set_task_uuid={set_task_uuid})"
             self._repository.update_ext(id, ext)
-            return self.to_env_released(id, TaskStatus.TASK_EXECUTED.value, TaskStatus.FAILED.value)
+            return self.to_env_released(id, GraphStatus.TASK_EXECUTED.value, GraphStatus.FAILED.value)
 
     def to_env_released(self, id: int, source_status: str, target_status: str) -> QualityTaskRecord:
         """Release environment and advance task to target_status."""

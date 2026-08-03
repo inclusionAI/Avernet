@@ -14,7 +14,7 @@ from agentclaw.community.core.quality.services import task_processor as task_pro
 from agentclaw.community.core.quality.services.task_processor import (
     InvalidStatusTransitionError,
     TaskProcessor,
-    TaskStatus,
+    GraphStatus,
     _STATUS_LABELS,
     _TERMINAL_STATUSES,
 )
@@ -64,18 +64,18 @@ class TestStatusLabels:
         assert "running" not in _TERMINAL_STATUSES
 
 
-class TestTaskStatus:
-    """Tests for TaskStatus enum."""
+class TestGraphStatus:
+    """Tests for GraphStatus enum."""
 
     def test_status_values(self):
         """Test status enum values."""
-        assert TaskStatus.INIT.value == "init"
-        assert TaskStatus.ENV_PREPARING.value == "env_preparing"
-        assert TaskStatus.ENV_READY.value == "env_ready"
-        assert TaskStatus.TASK_CREATED.value == "task_created"
-        assert TaskStatus.TASK_EXECUTED.value == "task_executed"
-        assert TaskStatus.SUCCESS.value == "success"
-        assert TaskStatus.FAILED.value == "failed"
+        assert GraphStatus.INIT.value == "init"
+        assert GraphStatus.ENV_PREPARING.value == "env_preparing"
+        assert GraphStatus.ENV_READY.value == "env_ready"
+        assert GraphStatus.TASK_CREATED.value == "task_created"
+        assert GraphStatus.TASK_EXECUTED.value == "task_executed"
+        assert GraphStatus.SUCCESS.value == "success"
+        assert GraphStatus.FAILED.value == "failed"
 
 
 class TestInvalidStatusTransitionError:

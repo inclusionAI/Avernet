@@ -38,15 +38,15 @@ from agentclaw.community.core.task.domain.models import (
     GapRecord,
     GraphStatus,
     NodeType,
-    Plan,
     RouteClass,
     RunMode,
     StateSemantics,
     SubTaskSpec,
     TaskGoal,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.protocols import DispatchResult, aggregate_verdict
+from agentclaw.community.core.task.domain.events import EventKind
 from agentclaw.community.core.task.services import TaskService
 from agentclaw.community.plugins.community.task.in_memory_repos import (
     InMemoryTaskEventRepo,
@@ -64,7 +64,7 @@ def _service() -> TaskService:
 
 
 def _task_with_graph(svc: TaskService, objective: str = OBJECTIVE, acceptances: int = 1):
-    """建真实需求 task(目标=OBJECTIVE,真实验收)+ spawn_build_dag 图(根 subtask=目标)。"""
+    """建真实需求 task(目标=OBJECTIVE,真实验收)+ init_execution_graph 图(根 subtask=目标)。"""
     t = svc.create(title=objective, background=objective)
     task = svc.get(t.id)
     acs = [
@@ -76,11 +76,11 @@ def _task_with_graph(svc: TaskService, objective: str = OBJECTIVE, acceptances: 
     task.spec.goal = TaskGoal(objective=objective, acceptances=acs)
     svc._task_repo.save(task)
     task = svc.get(t.id)
-    # 根 subtask = 任务目标(真实内容)
-    p = Plan(sub_tasks=[SubTaskSpec(node_id="n_root", spec=objective)], confidence=0.9)
-    svc.finalize_plan(t.id, p)
+    # 根 BOT_SEARCH = 任务目标(真实内容),由 init_execution_graph 建立
+    svc.clarify(t.id, {}, confirmed=True)
     task = svc.get(t.id)
-    svc.spawn_build_dag(task)
+    svc.init_execution_graph(task)
+    svc.mark_graph_status(task, GraphStatus.RUNNING)
     return task
 
 
@@ -252,28 +252,28 @@ def test_e2e3_search_miss_decompose_aggregate_verify():
 def test_e2e6_recursion_limit_mark_hang_escalate_bbs():
     svc = _service()
     task = _task_with_graph(svc)
-    from agentclaw.community.core.task.domain.models import TaskState
+    from agentclaw.community.core.task.domain.models import NodeStatus, TaskState
     from agentclaw.community.core.task.services.decomposer_service import DecomposerService
 
     state = TaskState(public={"__decompose_parent_depth__": 99})  # 父深度 99 → children depth=100(超 MAX=3)
     subs = DecomposerService().decompose_subtasks("搭建测试环境; 编写用例", state)
     assert all(s.depth >= 3 for s in subs)  # 触上限
-    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), "n_root", NodeType.MARK_HANG)
-    svc.mark_graph_status(svc.get(task.id), GraphStatus.AWAITING_HUMAN_ACCEPT)
+    # 卡住:节点 HUNG + 图 HUMAN_REQUIRED(递归过深,不落 MARK_HANG 节点)
+    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), "n_root", NodeType.DECOMPOSITION)
+    hang_task = svc.get(task.id)
+    hang_node = svc._find_node(hang_task, "n_hang")
+    hang_node.status = NodeStatus.HUNG
+    svc._ensure_subtask_state(hang_task, "n_hang").status = NodeStatus.HUNG
+    svc._task_repo.save(hang_task)  # noqa: SLF001
+    svc.mark_graph_status(svc.get(task.id), GraphStatus.HUMAN_REQUIRED)
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+    assert task.execution_graph.status is GraphStatus.HUMAN_REQUIRED
     hang_node = next(n for n in task.execution_graph.nodes if n.node_id == "n_hang")
-    assert hang_node.node_type is NodeType.MARK_HANG
-    assert svc._render_kind(NodeType.MARK_HANG) == "system-bridge"
-    svc.mark_graph_status(task, GraphStatus.ON_PLAZA)
+    assert hang_node.status is NodeStatus.HUNG
+    # 人确认升 BBS(BBS_CONFIRMED)→ BBS_ACTIVE(任务级模式,bots 读 State 自驱,不落节点)
+    svc.on_event({"task_id": task.id, "kind": EventKind.BBS_CONFIRMED.value, "payload": {"node_id": "n_hang"}})
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.ON_PLAZA
-    svc.add_node(task.id, SubTaskSpec(node_id="n_bbs", spec="BBS 继续执行登录功能交付"), "n_hang", NodeType.BBS_DISPATCH)
-    task = svc.get(task.id)
-    bbs = next(n for n in task.execution_graph.nodes if n.node_id == "n_bbs")
-    assert bbs.node_type is NodeType.BBS_DISPATCH
-    assert any(n.node_type is NodeType.MARK_HANG for n in task.execution_graph.nodes)
-    assert any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)
+    assert task.execution_graph.status is GraphStatus.BBS_ACTIVE
 
 
 # --- E2E-7 不升→FAILED(三终止分支)-----------------------------------------
@@ -281,14 +281,20 @@ def test_e2e6_recursion_limit_mark_hang_escalate_bbs():
 def test_e2e7_hang_no_escalate_failed():
     svc = _service()
     task = _task_with_graph(svc)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), "n_root", NodeType.MARK_HANG)
-    svc.mark_graph_status(svc.get(task.id), GraphStatus.AWAITING_HUMAN_ACCEPT)
+    from agentclaw.community.core.task.domain.models import NodeStatus
+
+    # 卡住:节点 HUNG + 图 HUMAN_REQUIRED
+    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), "n_root", NodeType.DECOMPOSITION)
+    hang_task = svc.get(task.id)
+    svc._find_node(hang_task, "n_hang").status = NodeStatus.HUNG
+    svc._ensure_subtask_state(hang_task, "n_hang").status = NodeStatus.HUNG
+    svc._task_repo.save(hang_task)  # noqa: SLF001
+    svc.mark_graph_status(svc.get(task.id), GraphStatus.HUMAN_REQUIRED)
     task = svc.get(task.id)
-    task.status = TaskStatus.FAILED  # 人确认不升 → FAILED 终态
-    svc._task_repo.save(task)
+    # 人确认不升 → FAILED 终态(HANG_CANCELLED fold)
+    svc.on_event({"task_id": task.id, "kind": EventKind.HANG_CANCELLED.value, "payload": {}})
     task = svc.get(task.id)
-    assert task.status is TaskStatus.FAILED
-    assert not any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)
+    assert task.status is GraphStatus.FAILED
 
 
 # --- E2E-2 协作群 happy path(COOP_GROUP,owner 解析)-----------------------
@@ -387,16 +393,16 @@ def test_e2e8_goal_verify_fail_before_bbs_loops_gap_not_failed():
     svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec=f"聚合验收:{OBJECTIVE}"), "n_root", NodeType.EXEC_AGGREGATE)
     _set_subtask_done(svc, task.id, "n_agg")
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.ON_PLAZA
+    assert task.execution_graph.status is GraphStatus.RUNNING
     verdict, unmet = aggregate_verdict(task.spec.goal.acceptances, [{"outcome": AttemptOutcome.FAIL}])
     assert verdict is AttemptOutcome.FAIL and unmet
     # 回 gap:REVIEWING → EXECUTING(新一轮),不落 FAILED
-    svc._advance_phase(task, TaskStatus.EXECUTING)
-    svc._advance_phase(task, TaskStatus.REVIEWING)
-    assert task.status is TaskStatus.REVIEWING
-    svc._advance_phase(task, TaskStatus.EXECUTING)
-    assert task.status is TaskStatus.EXECUTING
-    assert task.status is not TaskStatus.FAILED
+    svc._advance_phase(task, GraphStatus.RUNNING)
+    svc._advance_phase(task, GraphStatus.REVIEWING)
+    assert task.status is GraphStatus.REVIEWING
+    svc._advance_phase(task, GraphStatus.RUNNING)
+    assert task.status is GraphStatus.RUNNING
+    assert task.status is not GraphStatus.FAILED
     svc.add_node(task.id, SubTaskSpec(node_id="n_search_gap", spec=f"gap 新一轮搜索:{OBJECTIVE}"), "n_agg", NodeType.BOT_SEARCH)
     assert any(n.node_id == "n_search_gap" for n in svc.get(task.id).execution_graph.nodes)
 
@@ -406,21 +412,27 @@ def test_e2e8_goal_verify_fail_before_bbs_loops_gap_not_failed():
 def test_e2e9_goal_verify_fail_after_bbs_failed_terminal():
     svc = _service()
     task = _task_with_graph(svc, acceptances=1)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), "n_root", NodeType.MARK_HANG)
-    svc.mark_graph_status(svc.get(task.id), GraphStatus.AWAITING_HUMAN_ACCEPT)
-    svc.mark_graph_status(svc.get(task.id), GraphStatus.ON_PLAZA)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_bbs", spec="BBS 继续执行登录功能交付"), "n_hang", NodeType.BBS_DISPATCH)
-    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec="BBS 阶段聚合验收"), "n_bbs", NodeType.EXEC_AGGREGATE)
+    from agentclaw.community.core.task.domain.models import NodeStatus
+
+    # 卡住 → 人确认升 BBS → BBS_ACTIVE
+    svc.add_node(task.id, SubTaskSpec(node_id="n_hang", spec="挂起等人确认:登录功能递归过深"), "n_root", NodeType.DECOMPOSITION)
+    hang_task = svc.get(task.id)
+    svc._find_node(hang_task, "n_hang").status = NodeStatus.HUNG
+    svc._ensure_subtask_state(hang_task, "n_hang").status = NodeStatus.HUNG
+    svc._task_repo.save(hang_task)  # noqa: SLF001
+    svc.mark_graph_status(svc.get(task.id), GraphStatus.HUMAN_REQUIRED)
+    svc.on_event({"task_id": task.id, "kind": EventKind.BBS_CONFIRMED.value, "payload": {"node_id": "n_hang"}})
+    task = svc.get(task.id)
+    assert task.execution_graph.status is GraphStatus.BBS_ACTIVE
+    svc.add_node(task.id, SubTaskSpec(node_id="n_agg", spec="BBS 阶段聚合验收"), "n_hang", NodeType.EXEC_AGGREGATE)
     _set_subtask_done(svc, task.id, "n_agg")
     verdict, _ = aggregate_verdict(task.spec.goal.acceptances, [{"outcome": AttemptOutcome.FAIL}])
     assert verdict is AttemptOutcome.FAIL
     task = svc.get(task.id)
-    svc._advance_phase(task, TaskStatus.EXECUTING)
-    svc.mark_terminal(task, TaskStatus.FAILED)
+    # BBS 后 goal-FAIL → FAILED 终态(不回环 / 不再 escalation)
+    svc.mark_terminal(task, GraphStatus.FAILED)
     task = svc.get(task.id)
-    assert task.status is TaskStatus.FAILED
-    bbs_before = sum(1 for n in task.execution_graph.nodes if n.node_type is NodeType.BBS_DISPATCH)
-    assert bbs_before == 1  # 不再回环 / 不再 escalation
+    assert task.status is GraphStatus.FAILED
 
 
 # --- E2E-10 搜推先行约束(负向断言)---------------------------------------
@@ -448,8 +460,6 @@ def test_e2e10_search_first_invariant():
         if n.node_type is NodeType.BOT_SEARCH and n.node_id in anc
     }
     assert bot_search_ancestors  # 搜推先行
-    assert not any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)
-    assert not any(n.node_type is NodeType.MARK_HANG for n in task.execution_graph.nodes)
 
 
 # --- E2E-11 并行无依赖 + 混合分支(同层多子任务不同走向)-------------------
@@ -520,4 +530,4 @@ def test_e2e12_watchdog_probe_redrive_node_escalation():
     assert saved_node.properties["running_ticks"] >= 3
     assert saved_node.properties["probe_count"] >= 1
     assert saved_node.properties["redrive_count"] >= 1
-    assert saved.execution_graph.graph_status is GraphStatus.ON_PLAZA
+    assert saved.execution_graph.status is GraphStatus.RUNNING

@@ -12,8 +12,7 @@ events; this router exposes:
   - GET  /api/tasks?user_id=...             list_by_user
   - GET  /api/tasks/{task_id}               get
   - GET  /api/tasks/{task_id}/progress      progress
-  - POST /api/tasks/{task_id}/clarify       clarify spec       (n2 clarify)
-  - POST /api/tasks/{task_id}/plan          finalize_plan    (DRAFTING→DEFINED)
+  - POST /api/tasks/{task_id}/clarify       clarify spec       (n2 clarify;confirmed=True → DRAFTING→DEFINED)
   - POST /api/tasks/{task_id}/start         scheduler.start  (n3 execute_start)
   - POST /api/tasks/{task_id}/events        owner-bot 回投 (on_event)
 
@@ -36,7 +35,6 @@ from agentclaw.community.adapters.http.task.schemas import (
     CreateTaskRequest,
     EventReportRequest,
     EventReportResponse,
-    FinalizePlanRequest,
     TaskCreatedResponse,
     TaskDetailResponse,
     TaskEventItem,
@@ -109,7 +107,7 @@ def create_task(req: CreateTaskRequest, service: TaskServiceProtocol = Injected(
     return TaskCreatedResponse(
         task_id=_task_id_of(task),
         status=_status_of(task) or "drafting",
-        seq=int(getattr(task, "latest_event_seq", 1) or 1),
+        seq=int(service.latest_seq(_task_id_of(task)) or 1),
     )
 
 
@@ -169,25 +167,11 @@ def clarify_task(
     req: ClarifyTaskRequest,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),
 ) -> Any:
-    task = service.clarify(task_id, req.patch)
-    return TaskDetailResponse(
-        task_id=_task_id_of(task),
-        user_id=_user_id_of(task),
-        status=_status_of(task),
-        spec=_spec_dict(task),
-        execution_graph=_execution_graph_dict(task),
-        loop_round=_loop_round_of(task),
-        nodes=[],
-    )
+    """澄清 spec:``patch`` amend 要素;``confirmed=True`` → DRAFTING→DEFINED(用户确认澄清)。
 
-
-@router.post("/{task_id}/plan", response_model=TaskDetailResponse)
-def finalize_plan(
-    task_id: str,
-    req: FinalizePlanRequest,
-    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
-) -> Any:
-    task = service.finalize_plan(task_id, req.plan_payload)
+    逐轮(默认 ``confirmed=False``):补要素,留 DRAFTING(R2);最终一轮 ``confirmed=True``:
+    补最后要素 + 冻结→DEFINED。取代旧 ``POST /plan``(冻结 Plan 已退场);``start`` 仍要求 DEFINED。"""
+    task = service.clarify(task_id, req.patch, confirmed=req.confirmed)
     return TaskDetailResponse(
         task_id=_task_id_of(task),
         user_id=_user_id_of(task),
@@ -220,7 +204,7 @@ def report_event(
     return EventReportResponse(
         task_id=_task_id_of(task),
         accepted=True,
-        seq=int(getattr(task, "latest_event_seq", 0) or 0),
+        seq=int(service.latest_seq(_task_id_of(task)) or 0),
         note="",
     )
 
@@ -234,7 +218,7 @@ def start_task(
     scheduler: TaskSchedulerProtocol = Injected(TaskSchedulerProtocol),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),
 ) -> Any:
-    """Approve a finalized plan → Scheduler.start (DEFINED → EXECUTING + build DAG)."""
+    """Approve a finalized plan → Scheduler.start (DEFINED → RUNNING + build DAG)."""
     task = scheduler.start(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
@@ -273,7 +257,7 @@ def _graph_view_of(snapshot: Any) -> TaskGraphView:
         from dataclasses import asdict
         return TaskGraphView.model_validate(asdict(snapshot))
     except Exception:
-        return TaskGraphView(task_id="", root_phase="executing")
+        return TaskGraphView(task_id="", status="drafting")
 
 
 def _node_detail_view_of(detail: Any) -> TaskNodeDetailView:
@@ -290,7 +274,7 @@ def _node_detail_view_of(detail: Any) -> TaskNodeDetailView:
 
 @router.get("/{task_id}/graph", response_model=TaskGraphView)
 def get_task_graph(task_id: str, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
-    """Top-level dynamic-workflow DAG snapshot (root_phase + nodes/edges).
+    """Top-level dynamic-workflow DAG snapshot (status + nodes/edges).
 
     404 when the task is unknown or has no execution graph yet — never return a
     fake default. The panel treats 4xx as fatal, so a wrong/stale taskId surfaces

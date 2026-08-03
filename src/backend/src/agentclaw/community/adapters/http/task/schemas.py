@@ -1,6 +1,6 @@
 """HTTP request/response schemas for the task module (Phase 0.6).
 
-Pydantic v2 models. ``plan_payload`` / ``patch`` / ``payload`` are kept as
+Pydantic v2 models. ``patch`` / ``payload`` are kept as
 loose ``dict`` at the adapter boundary; the service layer parses them into
 domain dataclasses. This keeps the wire schema stable while the domain model
 evolves.
@@ -22,12 +22,9 @@ class CreateTaskRequest(BaseModel):
 
 class ClarifyTaskRequest(BaseModel):
     patch: dict = Field(default_factory=dict, description="Spec patch merged into the task.")
-
-
-class FinalizePlanRequest(BaseModel):
-    plan_payload: dict = Field(
-        default_factory=dict,
-        description="Plan payload (sub_tasks / edges / confidence); parsed by service.",
+    confirmed: bool = Field(
+        False,
+        description="True = 用户确认澄清 → DRAFTING→DEFINED(最终一轮);False = 逐轮 amend,留 DRAFTING。",
     )
 
 
@@ -147,8 +144,7 @@ class TaskGraphView(BaseModel):
     """Top-level dynamic-workflow graph snapshot consumed by the canvas."""
 
     task_id: str
-    root_phase: str
-    graph_status: str = "on_plaza"
+    status: str = "drafting"
     loop_round: int = 0
     definition_meta: Optional[dict[str, Any]] = None
     nodes: list[TaskNodeView] = Field(default_factory=list)

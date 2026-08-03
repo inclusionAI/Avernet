@@ -52,13 +52,10 @@ class AcTaskModel(Base):
     env = Column(String(64), nullable=False, default="dev")
     user_id = Column(String(128), nullable=False, default="")
     source = Column(String(32), nullable=False, default="api")
-    status = Column(String(32), nullable=False, default="drafting")  # v2(§18.1-11):对齐 TaskStatus.DRAFTING
+    status = Column(String(32), nullable=False, default="drafting")  # 对齐 GraphStatus.DRAFTING(graph.status 的查询镜像)
     loop_round = Column(Integer, nullable=False, default=0)
-    latest_event_seq = Column(Integer, nullable=False, default=0)
     spec_json = Column(Text, nullable=True)
     execution_graph_json = Column(Text, nullable=True)
-    # Plan lives on the Task aggregate root (B), not inside TaskSpec — own column.
-    plan_json = Column(Text, nullable=True)
     gmt_create = Column(DateTime, nullable=False, default=func.now())
     gmt_modified = Column(
         DateTime, nullable=False, default=func.now(), onupdate=func.now()

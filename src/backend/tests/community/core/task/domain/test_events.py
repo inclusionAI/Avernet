@@ -23,8 +23,7 @@ from agentclaw.community.core.task.domain.events import (
     NodeFailed,
     NodeRejected,
     NodeRunning,
-    PlanFinalized,
-    SpecAmended,
+    TaskClarified,
     TASK_CREATED_KIND,
     TaskCreated,
     TaskEvent,
@@ -44,8 +43,7 @@ from agentclaw.community.core.task.domain.models import (
 
 def test_event_kind_has_core_round_trip_kinds():
     assert EventKind.TASK_CREATED.value == "task.created"
-    assert EventKind.SPEC_AMENDED.value == "spec.amended"
-    assert EventKind.PLAN_FINALIZED.value == "task.plan_finalized"
+    assert EventKind.TASK_CLARIFIED.value == "task.clarified"
     assert EventKind.NODE_DISPATCHED.value == "node.dispatched"
     assert EventKind.NODE_RUNNING.value == "node.running"
     assert EventKind.NODE_ACCEPTED.value == "node.accepted"
@@ -102,15 +100,15 @@ def test_task_created_event():
     assert ev.source == "im"
 
 
-def test_spec_amended_merges_payload():
-    ev = SpecAmended(task_id="t1", seq=2, patch={"goal": "new objective"})
+def test_task_clarified_merges_payload_and_confirmed_flag():
+    ev = TaskClarified(task_id="t1", seq=2, patch={"goal": "new objective"}, confirmed=True)
     assert ev.payload["patch"] == {"goal": "new objective"}
+    assert ev.payload["confirmed"] is True
 
 
-def test_plan_finalized_carries_node_count():
-    ev = PlanFinalized(task_id="t1", seq=3, node_count=4, confidence=0.8)
-    assert ev.payload["node_count"] == 4
-    assert ev.payload["confidence"] == 0.8
+def test_task_clarified_default_confirmed_false():
+    ev = TaskClarified(task_id="t1", seq=3, patch={"x": 1})
+    assert ev.payload["confirmed"] is False
 
 
 def test_node_dispatched_carries_route():

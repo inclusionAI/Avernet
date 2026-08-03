@@ -47,18 +47,19 @@ def _map_node_status(sm_status: Any) -> str:
 
 
 def _map_run_status(sm_run_status: Any) -> str:
-    """SM run.status → task root_phase (best-effort; the sub-DAG is a live run,
-    so default to ``executing``). Aligned to the 7-state task machine (spec §2)."""
+    """SM run.status → task ``GraphStatus`` (best-effort; the sub-DAG is a live
+    run, so default to ``running``). Aligned to the unified 9-state GraphStatus
+    (spec §2 / state_machine.py)。"""
     mapping = {
         "pending": "defined",
-        "running": "executing",
+        "running": "running",
         "completed": "reviewing",
         "failed": "failed",
-        "aborted": "failed",  # was "hung" — task-level HUNG removed; unrecoverable → FAILED
+        "aborted": "failed",  # unrecoverable → FAILED
     }
     if sm_run_status is None:
-        return "executing"
-    return mapping.get(str(sm_run_status), "executing")
+        return "running"
+    return mapping.get(str(sm_run_status), "running")
 
 
 def _map_kind_to_run_mode(kind: Any) -> Optional[str]:
@@ -98,8 +99,7 @@ def to_sub_dag_view(
     run_status = run.get("status")
     return {
         "task_id": task_id,
-        "root_phase": _map_run_status(run_status),
-        "graph_status": "on_plaza",
+        "status": _map_run_status(run_status),
         "loop_round": 0,
         "definition_meta": {
             "name": definition.get("name"),

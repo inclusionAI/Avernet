@@ -774,7 +774,7 @@ class BatchSyncTaskResponse(BaseModel):
     message: str = ""
 
 
-class BatchSyncTaskStatusResponse(BaseModel):
+class BatchSyncGraphStatusResponse(BaseModel):
     """异步任务状态查询结果。"""
     task_id: str
     status: str  # running | done | error

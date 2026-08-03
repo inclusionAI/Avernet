@@ -22,7 +22,7 @@ from agentclaw.community.core.task.protocols import (
     TaskService,
 )
 from agentclaw.community.core.task.domain.events import TaskEvent
-from agentclaw.community.core.task.domain.models import Plan, RouteClass, RunMode
+from agentclaw.community.core.task.domain.models import RouteClass, RunMode, TaskState
 from agentclaw.community.plugins.community.task import (
     NoopBcsCollaborationPort,
     NoopBotDiscoverPort,
@@ -65,9 +65,9 @@ def test_noop_task_service_intake_faces():
     t = s.create(title="x", source="api", background="b")
     assert t is not None
     assert getattr(t, "id", None) is not None
-    # clarify / finalize_plan are no-ops returning None (no real impl yet)
+    # clarify / clarify(confirmed) are no-ops returning None (no real impl yet)
     assert s.clarify("t1", {"g": "x"}) is None
-    assert s.finalize_plan("t1", Plan()) is None
+    assert s.clarify("t1", {}, confirmed=True) is None
 
 
 def test_noop_task_service_on_event_and_claim():
@@ -138,10 +138,9 @@ def test_noop_discover_returns_empty_recommendation():
     assert r.confidence == 0.0
 
 
-def test_noop_decomposer_returns_empty_plan():
-    p = NoopDecomposerPort().decompose("t1")
-    assert isinstance(p, Plan)
-    assert p.sub_tasks == []
+def test_noop_decomposer_returns_empty_children():
+    subs = NoopDecomposerPort().decompose_subtasks("spec", TaskState())
+    assert subs == []
 
 
 def test_noop_driver_returns_dispatch_result():

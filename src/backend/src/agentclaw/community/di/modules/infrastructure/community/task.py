@@ -174,13 +174,14 @@ class CommunityTaskModule(Module):
 
     @singleton
     @provider
-    def decomposer_port(self, task_repo: TaskRepo) -> DecomposerPort:
+    def decomposer_port(self) -> DecomposerPort:
         # Phase 4.3: rule-based DecomposerService (LLM decompose stays in the
-        # owner-bot SKILL; community never holds an LLM prompt).
+        # owner-bot SKILL; community never holds an LLM prompt). 单签名
+        # decompose_subtasks(spec, state) — pure,无 repo 依赖(Plan 退场,2026-08-03)。
         from agentclaw.community.core.task.services.decomposer_service import (
             DecomposerService,
         )
-        return DecomposerService(task_repo)
+        return DecomposerService()
 
     @singleton
     @provider

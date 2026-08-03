@@ -1,12 +1,12 @@
 /**
  * useNodeDetail — fetch TaskNodeDetailView on select; poll every 3s while the
- * node is active (running/human_required/pending) and the task is non-terminal.
+ * node is active (running/hung/pending) and the task is non-terminal.
  * Mirrors StateMachineRunView node-detail poll (3121-3150).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchNodeDetail } from './api';
-import { DEFAULT_POLLING_INTERVAL, NODE_STATUS_TERMINAL, ROOT_PHASE_TERMINAL } from './constants';
+import { DEFAULT_POLLING_INTERVAL, NODE_STATUS_TERMINAL, TASK_STATUS_TERMINAL } from './constants';
 import type { TaskNodeDetailView } from './types';
 
 export interface UseNodeDetailResult {
@@ -17,7 +17,7 @@ export interface UseNodeDetailResult {
 export function useNodeDetail(
   taskId: string | undefined,
   nodeId: string | undefined,
-  rootPhase: string | undefined,
+  taskStatus: string | undefined,
 ): UseNodeDetailResult {
   const [detail, setDetail] = useState<TaskNodeDetailView | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -50,13 +50,13 @@ export function useNodeDetail(
   useEffect(() => {
     if (!taskId || !nodeId || !detail) return undefined;
     const nodeTerminal = NODE_STATUS_TERMINAL.has(String(detail.status || '').toLowerCase());
-    const taskTerminal = rootPhase ? ROOT_PHASE_TERMINAL.has(String(rootPhase)) : false;
+    const taskTerminal = taskStatus ? TASK_STATUS_TERMINAL.has(String(taskStatus)) : false;
     if (nodeTerminal || taskTerminal) return undefined;
     const timer = window.setTimeout(() => {
       fetchOnce();
     }, DEFAULT_POLLING_INTERVAL);
     return () => window.clearTimeout(timer);
-  }, [taskId, nodeId, detail, rootPhase, fetchOnce]);
+  }, [taskId, nodeId, detail, taskStatus, fetchOnce]);
 
   return { detail, loading };
 }

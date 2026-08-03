@@ -1,9 +1,9 @@
 /**
  * Task workflow panel — status → tone + edge-state rules.
  * Ported from bcsPanel.StateMachineRunView (getStatusTone:1748, getEdgeState:1967),
- * adapted to the task state machine (spec §2/§3.3):
- *   root_phase: drafting/defined/executing/reviewing/done/cancelled/failed
- *   node:       pending/running/done/failed/skipped/human_required
+ * adapted to the unified task state machine (state_machine.py / spec §2/§3.3):
+ *   task status (GraphStatus): drafting/defined/running/human_required/bbs_active/reviewing/done/cancelled/failed
+ *   node:       pending/running/done/failed/skipped/hung
  */
 
 export interface StatusTone {
@@ -21,15 +21,21 @@ export function normalizeStatus(status: string | undefined | null): string {
   return String(status).trim().toLowerCase();
 }
 
-// --- root_phase tone (task-level) ----------------------------------------
+// --- task status tone (task-level, unified GraphStatus) ------------------
 
-export function getRootPhaseTone(phase: string | undefined): StatusTone {
+export function getTaskStatusTone(phase: string | undefined): StatusTone {
   const s = normalizeStatus(phase);
   if (s === 'drafting' || s === 'defined') {
     return { bg: '#eef2ff', border: '#c7d2fe', text: '#4338ca', stroke: '#4f46e5', fill: '#e0e7ff' };
   }
-  if (s === 'executing') {
+  if (s === 'running') {
     return { bg: '#eff6ff', border: '#bfdbfe', text: '#1d4ed8', stroke: '#2563eb', fill: '#dbeafe' };
+  }
+  if (s === 'human_required') {
+    return { bg: '#f5f3ff', border: '#ddd6fe', text: '#6d28d9', stroke: '#7c3aed', fill: '#ede9fe' };
+  }
+  if (s === 'bbs_active') {
+    return { bg: '#fff7ed', border: '#fed7aa', text: '#c2410c', stroke: '#ea580c', fill: '#ffedd5' };
   }
   if (s === 'reviewing') {
     return { bg: '#fffbeb', border: '#fde68a', text: '#b45309', stroke: '#d97706', fill: '#fef3c7' };
@@ -62,7 +68,7 @@ export function getNodeStatusTone(status: string | undefined): StatusTone {
   if (s === 'skipped') {
     return { bg: '#f8fafc', border: '#cbd5e1', text: '#64748b', stroke: '#94a3b8', fill: '#e2e8f0' };
   }
-  if (s === 'human_required') {
+  if (s === 'hung') {
     return { bg: '#f5f3ff', border: '#ddd6fe', text: '#6d28d9', stroke: '#7c3aed', fill: '#ede9fe' };
   }
   return { bg: '#f8fafc', border: '#cbd5e1', text: '#475569', stroke: '#94a3b8', fill: '#f1f5f9' };
@@ -75,32 +81,24 @@ export function getNodeStatusLabel(status: string | undefined): string {
     done: '已完成',
     failed: '失败',
     skipped: '已跳过',
-    human_required: '需人工',
+    hung: '已挂起',
   };
   return map[normalizeStatus(status)] ?? '待执行';
 }
 
-export function getRootPhaseLabel(phase: string | undefined): string {
+export function getTaskStatusLabel(phase: string | undefined): string {
   const map: Record<string, string> = {
     drafting: '草稿中',
     defined: '已就绪',
-    executing: '执行中',
+    running: '执行中',
+    human_required: '待人工',
+    bbs_active: 'BBS 广场中',
     reviewing: '验收中',
     done: '已完成',
     cancelled: '已取消',
     failed: '已失败',
   };
   return map[normalizeStatus(phase)] ?? '草稿中';
-}
-
-export function getGraphStatusLabel(status: string | undefined): string {
-  const map: Record<string, string> = {
-    on_plaza: '',
-    awaiting_human_accept: '待人工确认',
-    awaiting_human_adjust: '待人工调整',
-    verified: '已验收',
-  };
-  return map[normalizeStatus(status)] ?? '';
 }
 
 // --- edge state (ported from getEdgeState:1967) ---------------------------
@@ -125,7 +123,7 @@ export function getEdgeState(
     isCompleted(targetStatus) ||
     isFailed(targetStatus) ||
     normalizeStatus(targetStatus) === 'running' ||
-    normalizeStatus(targetStatus) === 'human_required'
+    normalizeStatus(targetStatus) === 'hung'
   ) {
     return 'executed';
   }

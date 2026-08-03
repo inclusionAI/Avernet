@@ -186,7 +186,7 @@ def test_smoke_create_persists_and_events_land_in_log(client):
     # POST an owner-bot 回投 event (kind/payload envelope)
     evt = client.post(
         f"/api/tasks/{task_id}/events",
-        json={"kind": "spec.amended", "seq": 0, "payload": {"patch": {"summary": "s"}}},
+        json={"kind": "task.clarified", "seq": 0, "payload": {"patch": {"summary": "s"}}},
     )
     assert evt.status_code == 200
     assert evt.json()["accepted"] is True
@@ -195,4 +195,4 @@ def test_smoke_create_persists_and_events_land_in_log(client):
     events = event_repo.load_events(task_id)
     assert [e.seq for e in events] == [1, 2]
     assert events[0].kind.value == "task.created"
-    assert events[1].kind.value == "spec.amended"
+    assert events[1].kind.value == "task.clarified"

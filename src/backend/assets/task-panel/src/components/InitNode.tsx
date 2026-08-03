@@ -1,14 +1,14 @@
 /**
  * InitNode — renders the "初始化任务节点" when the task graph has no execution
  * nodes yet (DRAFTING / DEFINED before spawn_build_dag). Shows a single centered
- * synthetic node: the task title + root_phase badge, so the canvas is never
+ * synthetic node: the task title + status badge, so the canvas is never
  * empty on open. Transitions naturally to the real DAG once nodes populate.
  */
 import React from 'react';
 
 import { NODE_HEIGHT, NODE_WIDTH, PADDING } from '../constants';
 import type { TaskGraphView } from '../types';
-import { getRootPhaseLabel, getRootPhaseTone } from '../utils/statusTone';
+import { getTaskStatusLabel, getTaskStatusTone } from '../utils/statusTone';
 import { StatusPill } from '../utils/render';
 
 export function InitNode({
@@ -16,7 +16,7 @@ export function InitNode({
 }: {
   graph: TaskGraphView;
 }): React.ReactElement {
-  const tone = getRootPhaseTone(graph.root_phase);
+  const tone = getTaskStatusTone(graph.status);
   const title =
     (graph.definition_meta?.title as string | undefined) || graph.task_id;
   const width = NODE_WIDTH * 2 + PADDING * 2;
@@ -27,7 +27,7 @@ export function InitNode({
   return (
     <div style={{ width: '100%', textAlign: 'center', marginTop: 24 }}>
       <div style={{ marginBottom: 12 }}>
-        <StatusPill tone={tone} label={getRootPhaseLabel(graph.root_phase)} />
+        <StatusPill tone={tone} label={getTaskStatusLabel(graph.status)} />
       </div>
       <svg
         width={width}
@@ -58,9 +58,9 @@ export function InitNode({
           {title.length > 16 ? `${title.slice(0, 15)}…` : title}
         </text>
         <text x={x + 12} y={y + 44} fontSize={11} fill={tone.text} style={{ userSelect: 'none' }}>
-          {graph.root_phase === 'drafting'
+          {graph.status === 'drafting'
             ? '要素补全中…'
-            : graph.root_phase === 'defined'
+            : graph.status === 'defined'
               ? '等待确认执行…'
               : '初始化中…'}
         </text>

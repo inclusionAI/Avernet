@@ -11,7 +11,7 @@
  * Behavior:
  * - resolve taskId from UmdPanel-injected props.
  * - useTaskGraph polls GET /api/tasks/{id}/graph every 3s while non-terminal.
- * - header: title + root_phase pill + graph_status + loop_round + manual refresh.
+ * - header: title + status pill + loop_round + manual refresh.
  * - empty nodes (DRAFTING/DEFINED) → InitNode (初始化任务节点); else GraphCanvas.
  * - click node → NodeDetailModal (GET /api/tasks/{id}/nodes/{node_id}).
  *
@@ -26,11 +26,10 @@ import { useTaskGraph } from './useTaskGraph';
 import { GraphCanvas } from './components/GraphCanvas';
 import { InitNode } from './components/InitNode';
 import { NodeDetailModal } from './components/NodeDetailModal';
-import { ROOT_PHASE_TERMINAL } from './constants';
+import { TASK_STATUS_TERMINAL } from './constants';
 import {
-  getGraphStatusLabel,
-  getRootPhaseLabel,
-  getRootPhaseTone,
+  getTaskStatusLabel,
+  getTaskStatusTone,
 } from './utils/statusTone';
 import { StatusPill } from './utils/render';
 
@@ -56,8 +55,8 @@ function TaskWorkflowView(props: TaskWorkflowViewProps): React.ReactElement {
     );
   }
 
-  const rootPhase = graph?.root_phase;
-  const isTerminal = rootPhase ? ROOT_PHASE_TERMINAL.has(String(rootPhase)) : false;
+  const taskStatus = graph?.status;
+  const isTerminal = taskStatus ? TASK_STATUS_TERMINAL.has(String(taskStatus)) : false;
   const title =
     (graph?.definition_meta?.title as string | undefined) || taskId;
 
@@ -79,12 +78,7 @@ function TaskWorkflowView(props: TaskWorkflowViewProps): React.ReactElement {
           {title}
         </div>
         {graph ? (
-          <StatusPill tone={getRootPhaseTone(rootPhase)} label={getRootPhaseLabel(rootPhase)} />
-        ) : null}
-        {graph && getGraphStatusLabel(graph.graph_status) ? (
-          <span style={{ fontSize: 12, color: '#b45309' }}>
-            {getGraphStatusLabel(graph.graph_status)}
-          </span>
+          <StatusPill tone={getTaskStatusTone(taskStatus)} label={getTaskStatusLabel(taskStatus)} />
         ) : null}
         {graph && graph.loop_round > 0 ? (
           <span style={{ fontSize: 12, color: '#64748b' }}>轮次 {graph.loop_round}</span>
@@ -136,7 +130,7 @@ function TaskWorkflowView(props: TaskWorkflowViewProps): React.ReactElement {
         <NodeDetailModal
           taskId={taskId}
           nodeId={selectedNodeId}
-          rootPhase={rootPhase}
+          taskStatus={taskStatus}
           onClose={() => setSelectedNodeId(undefined)}
         />
       ) : null}

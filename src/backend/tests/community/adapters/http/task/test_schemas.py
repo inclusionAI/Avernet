@@ -130,14 +130,13 @@ def test_task_edge_view_optional_outcome_guard():
 def test_task_graph_view_shape():
     g = TaskGraphView(
         task_id="t1",
-        root_phase="executing",
-        graph_status="on_plaza",
+        status="running",
         loop_round=0,
         nodes=[TaskNodeView(node_id="n1", display_name="n")],
         edges=[TaskEdgeView(edge_id="e1", from_node="n1", to_node="n1", kind="dependency")],
     )
     assert g.task_id == "t1"
-    assert g.root_phase == "executing"
+    assert g.status == "running"
     assert g.nodes[0].node_id == "n1"
     assert g.edges[0].from_node == "n1"
     assert g.definition_meta is None  # optional top-level meta

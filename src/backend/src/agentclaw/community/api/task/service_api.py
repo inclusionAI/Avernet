@@ -40,8 +40,6 @@ class TaskServiceProtocol(Protocol):
 
     def clarify(self, *args: Any, **kwargs: Any) -> Any: ...
 
-    def finalize_plan(self, *args: Any, **kwargs: Any) -> Any: ...
-
     # --- event-fold / guard face ---
     def on_event(self, *args: Any, **kwargs: Any) -> Any: ...
 
@@ -49,6 +47,8 @@ class TaskServiceProtocol(Protocol):
 
     # --- history / trace face (GET /tasks/{id}/history) ---
     def history(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def latest_seq(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 @runtime_checkable

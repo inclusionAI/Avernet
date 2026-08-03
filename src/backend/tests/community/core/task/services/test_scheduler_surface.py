@@ -21,7 +21,6 @@ from agentclaw.community.core.task.domain.models import (
     AttemptOutcome,
     GraphStatus,
     NodeType,
-    Plan,
     StateSemantics,
     SubTaskSpec,
 )
@@ -75,33 +74,35 @@ def test_aggregate_verdict_no_acceptances_conservative():
 
 
 def test_graph_transitions_legal_paths():
-    assert can_graph_transition(GraphStatus.ON_PLAZA, GraphStatus.AWAITING_HUMAN_ACCEPT)
-    assert can_graph_transition(GraphStatus.AWAITING_HUMAN_ACCEPT, GraphStatus.ON_PLAZA)
-    assert can_graph_transition(GraphStatus.AWAITING_HUMAN_ACCEPT, GraphStatus.AWAITING_HUMAN_ADJUST)
-    assert can_graph_transition(GraphStatus.ON_PLAZA, GraphStatus.VERIFIED)
+    assert can_graph_transition(GraphStatus.RUNNING, GraphStatus.HUMAN_REQUIRED)
+    assert can_graph_transition(GraphStatus.HUMAN_REQUIRED, GraphStatus.BBS_ACTIVE)
+    assert can_graph_transition(GraphStatus.HUMAN_REQUIRED, GraphStatus.FAILED)
+    assert can_graph_transition(GraphStatus.BBS_ACTIVE, GraphStatus.DONE)
+    assert can_graph_transition(GraphStatus.REVIEWING, GraphStatus.DONE)
+    assert can_graph_transition(GraphStatus.RUNNING, GraphStatus.REVIEWING)
 
 
 def test_graph_transitions_illegal_raises():
-    # VERIFIED 终态无出边;AWAITING_HUMAN_ADJUST 不能直接 VERIFIED
+    # DONE 终态无出边;HUMAN_REQUIRED 不能直接 DONE(须经 BBS_ACTIVE/FAILED)
     with pytest.raises(IllegalTransitionError):
-        require_graph_transition(GraphStatus.VERIFIED, GraphStatus.ON_PLAZA)
+        require_graph_transition(GraphStatus.DONE, GraphStatus.RUNNING)
     with pytest.raises(IllegalTransitionError):
-        require_graph_transition(GraphStatus.AWAITING_HUMAN_ADJUST, GraphStatus.VERIFIED)
+        require_graph_transition(GraphStatus.HUMAN_REQUIRED, GraphStatus.DONE)
 
 
 def test_mark_graph_status_guards_transition():
     svc = _service()
     t = svc.create(title="t")
-    p = Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="a")], confidence=0.7)
-    svc.finalize_plan(t.id, p)
+    svc.clarify(t.id, {}, confirmed=True)
     task = svc.get(t.id)
-    svc.spawn_build_dag(task)  # graph created, ON_PLAZA
-    # legal: ON_PLAZA -> AWAITING_HUMAN_ACCEPT (mark_hang)
-    svc.mark_graph_status(task, GraphStatus.AWAITING_HUMAN_ACCEPT)
-    assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
-    # illegal: AWAITING_HUMAN_ACCEPT -> VERIFIED (not in table)
+    svc.init_execution_graph(task)  # graph at DEFINED
+    # legal: DEFINED → RUNNING → HUMAN_REQUIRED (mark hang)
+    svc.mark_graph_status(task, GraphStatus.RUNNING)
+    svc.mark_graph_status(task, GraphStatus.HUMAN_REQUIRED)
+    assert task.execution_graph.status is GraphStatus.HUMAN_REQUIRED
+    # illegal: HUMAN_REQUIRED -> DONE (not in table)
     with pytest.raises(IllegalTransitionError):
-        svc.mark_graph_status(task, GraphStatus.VERIFIED)
+        svc.mark_graph_status(task, GraphStatus.DONE)
 
 
 # --- DecomposerPort.decompose_subtasks depth (§3.5/§11) ---------------------
@@ -132,8 +133,7 @@ def test_render_kind_maps_control_gate_and_system_bridge():
     assert svc._render_kind(NodeType.GOAL_VERIFY) == "control-gate"
     assert svc._render_kind(NodeType.EXEC_ACCEPT) == "control-gate"
     assert svc._render_kind(NodeType.DISPATCH) == "system-bridge"
-    assert svc._render_kind(NodeType.MARK_HANG) == "system-bridge"
-    assert svc._render_kind(NodeType.BBS_DISPATCH) == "system-bridge"
+    assert svc._render_kind(NodeType.EXECUTE_START) == "system-bridge"
     assert svc._render_kind(NodeType.BOT_SEARCH) == "exec"
 
 
@@ -142,10 +142,9 @@ def test_render_kind_maps_control_gate_and_system_bridge():
 
 def _graph_task(svc: TaskService):
     t = svc.create(title="t")
-    p = Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="a")], confidence=0.7)
-    svc.finalize_plan(t.id, p)
+    svc.clarify(t.id, {}, confirmed=True)
     task = svc.get(t.id)
-    svc.spawn_build_dag(task)
+    svc.init_execution_graph(task)
     return task
 
 
@@ -184,11 +183,12 @@ def test_update_state_merge_and_retrieve():
 def test_snapshot_captures_current_fold():
     svc = _service()
     task = _graph_task(svc)
+    svc.mark_graph_status(task, GraphStatus.RUNNING)
     # add_node 持久化一个节点(snapshot 经 repo 重读,需落盘)
     svc.add_node(
         task.id, SubTaskSpec(node_id="n2", spec="x"), parent_node="n1", node_type=NodeType.DISPATCH
     )
     snap = svc.snapshot(task.id)
     assert snap.task_id == task.id
-    assert snap.graph.graph_status is GraphStatus.ON_PLAZA
+    assert snap.graph.status is GraphStatus.RUNNING
     assert any(n.node_id == "n2" for n in snap.graph.nodes)

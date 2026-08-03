@@ -29,12 +29,11 @@ from agentclaw.community.core.task.domain.models import (
     GraphStatus,
     NodeStatus,
     NodeType,
-    Plan,
     RouteClass,
     RunMode,
     SubTaskSpec,
     TaskGoal,
-    TaskStatus,
+    GraphStatus,
     TaskState,
 )
 from agentclaw.community.core.task.domain.events import EventKind
@@ -97,9 +96,6 @@ class FakeDecomposer:
     def __init__(self, depth_override: int | None = None):
         self._depth_override = depth_override
         self.sub_calls: list[tuple[str, int]] = []
-
-    def decompose(self, task_id: str) -> Plan:  # 旧签名过渡
-        return Plan(sub_tasks=list(TOP_CHILDREN), confidence=0.8)
 
     def decompose_subtasks(self, spec: str, state: TaskState) -> list[SubTaskSpec]:
         parent_depth = int(state.public.get("__decompose_parent_depth__", -1))
@@ -182,7 +178,7 @@ def _goal():
 
 def _task(svc: TaskService, sched: TaskScheduler, objective: str = OBJECTIVE, acceptances: int = 3):
     """真实生命周期:create → finalize_plan(空 plan → 根 BOT_SEARCH,spec=真实目标)
-    → ``scheduler.start``(DEFINED→EXECUTING 状态机 + spawn_build_dag + ON_PLAZA +
+    → ``scheduler.start``(DEFINED→EXECUTING 状态机 + init_execution_graph + ON_PLAZA +
     首 tick)。**不手戳 status/graph**,全程走真实转移动作。返回 EXECUTING / ON_PLAZA task。"""
     t = svc.create(title=objective, background="obj")
     task = svc.get(t.id)
@@ -197,29 +193,60 @@ def _task(svc: TaskService, sched: TaskScheduler, objective: str = OBJECTIVE, ac
         task.spec.goal.acceptances = list(ACCEPTANCES)
     svc._task_repo.save(task)  # noqa: SLF001
     task = svc.get(task.id)
-    # DRAFTING → DEFINED(空 plan:无 sub_tasks → spawn 走根 BOT_SEARCH 搜推先行)
-    svc.finalize_plan(task.id, Plan(sub_tasks=[], confidence=0.9))
+    # DRAFTING → DEFINED(clarify confirmed;init_execution_graph 走根 BOT_SEARCH 搜推先行)
+    svc.clarify(task.id, {}, confirmed=True)
     task = svc.get(task.id)
-    assert task.status is TaskStatus.DEFINED
-    sched.start(task.id)  # DEFINED→EXECUTING + spawn_build_dag + ON_PLAZA + 首 tick(真实)
+    assert task.status is GraphStatus.DEFINED
+    sched.start(task.id)  # DEFINED→EXECUTING + init_execution_graph + ON_PLAZA + 首 tick(真实)
     return svc.get(task.id)
 
 
 def _planned_task(svc: TaskService, sched: TaskScheduler, node_id: str, spec: str):
-    """带 1 个真实 plan subtask 的 task,真实生命周期走 ``scheduler.start``(spawn 建
-    planning 链 + 该 subtask DISPATCH,首 tick 即派发)。不手戳 status/graph。"""
+    """带 1 个已派发起跑的叶子 DISPATCH 的 task(失败/重试/重路由 e2e 用例的起点)。
+
+    2026-08-03:Plan 退场后不再有 plan.sub_tasks 预拆自定义 id 叶子,故改由真实转移
+    (DEFINED→EXECUTING + init_execution_graph + ON_PLAZA)后显式 seed:root BOT_SEARCH
+    标 DONE(免 tick 触发搜推/分解),挂 ``node_id`` DISPATCH 叶子并真实 claim+fire 起跑。
+    其余失败/重试/重路由链路全程走真实 tick + on_event,不戳状态。"""
     t = svc.create(title=spec, background="obj")
     task = svc.get(t.id)
     task.spec.goal = _goal()
     svc._task_repo.save(task)  # noqa: SLF001
     task = svc.get(task.id)
-    svc.finalize_plan(
-        task.id,
-        Plan(sub_tasks=[SubTaskSpec(node_id=node_id, spec=spec, run_mode=RunMode.SINGLE_BOT)], confidence=0.9),
-    )
+    svc.clarify(task.id, {}, confirmed=True)
     task = svc.get(task.id)
-    assert task.status is TaskStatus.DEFINED
-    sched.start(task.id)  # DEFINED→EXECUTING + spawn + ON_PLAZA + 首 tick(派发该 subtask)
+    assert task.status is GraphStatus.DEFINED
+    # DEFINED→EXECUTING + init_execution_graph + ON_PLAZA(真实转移;不跑 start 首 tick
+    # 以避免 root BOT_SEARCH 触发分解分支,干扰失败链路断言)
+    task.status = GraphStatus.RUNNING
+    task.execution_graph.status = GraphStatus.RUNNING
+    svc._task_repo.save(task)  # noqa: SLF001
+    svc.init_execution_graph(task)
+    task = svc.get(task.id)
+    svc.mark_graph_status(task, GraphStatus.RUNNING)
+    # root BOT_SEARCH 标 DONE,免下 tick 触发搜推/分解;挂叶子并真实 claim+fire 起跑
+    root = svc._find_node(task, "n_bot_search")  # noqa: SLF001
+    if root is not None:
+        root.status = NodeStatus.DONE
+        st_root = task.execution_graph.state.subtasks.get("n_bot_search")
+        if st_root is not None:
+            st_root.status = NodeStatus.DONE
+        svc._task_repo.save(task)  # noqa: SLF001
+    svc.add_node(
+        task.id,
+        SubTaskSpec(node_id=node_id, spec=spec, run_mode=RunMode.SINGLE_BOT),
+        "n_bot_search",
+        NodeType.DISPATCH,
+    )
+    rec = sched._discover.recommend(task.id, node_id)  # noqa: SLF001
+    lead = rec.candidates[0].bot_id if rec.candidates else "bot-x"
+    svc.claim_node(task.id, node_id, lead)
+    sched._execution.dispatch_single_bot(task.id, node_id, lead)  # noqa: SLF001
+    fresh = svc.get(task.id)
+    st = fresh.execution_graph.state.subtasks.get(node_id)
+    if st is not None and st.status is not NodeStatus.RUNNING:
+        st.status = NodeStatus.RUNNING
+        svc._task_repo.save(fresh)  # noqa: SLF001
     return svc.get(task.id)
 
 
@@ -283,9 +310,9 @@ def test_tick_single_bot_happy_path():
     # skill 回投验收 PASS
     _accept_leaf(svc, task.id, disp.node_id)
     # 无未闭合 → goal-verify PASS → VERIFIED + DONE
-    task = _tick_until(svc, sched, task.id, lambda t: t.status is TaskStatus.DONE)
-    assert task.execution_graph.graph_status is GraphStatus.VERIFIED
-    assert task.status is TaskStatus.DONE
+    task = _tick_until(svc, sched, task.id, lambda t: t.status is GraphStatus.DONE)
+    assert task.execution_graph.status is GraphStatus.DONE
+    assert task.status is GraphStatus.DONE
 
 
 # --- ② 搜推未匹配 → 分解 → 子各命中 → exec-aggregate → 终验(主链路)-------
@@ -307,7 +334,7 @@ def test_tick_decompose_multi_subtask_aggregate_verify():
 
     # --- 驱动①:tick 推进动作拓扑。start 首 tick 已把 root 从 PENDING 推到 DONE(非静态图)。
     root = next(n for n in task.execution_graph.nodes if n.node_id == "n_bot_search")
-    assert root.spec == OBJECTIVE  # 根 BOT_SEARCH 承载真实目标(spawn_build_dag 写入)
+    assert root.spec == OBJECTIVE  # 根 BOT_SEARCH 承载真实目标(init_execution_graph 写入)
     assert root.status is NodeStatus.DONE  # start 的首 tick 真的驱动了动作完成
 
     # --- 信息传递②a:DECOMPOSITION 子节点**继承父 BOT_SEARCH 的 spec**(真实需求文本)。
@@ -362,10 +389,10 @@ def test_tick_decompose_multi_subtask_aggregate_verify():
 
     # --- 信息传递②e:叶子 DONE 沿图向上聚合 → 父 DECOMPOSITION 触发 EXEC_AGGREGATE fold;
     # 终验读 root 验收全 PASS → graph VERIFIED + Task DONE。执行结果信息逐层汇报到整图。---
-    task = _tick_until(svc, sched, task.id, lambda t: t.status is TaskStatus.DONE)
+    task = _tick_until(svc, sched, task.id, lambda t: t.status is GraphStatus.DONE)
     assert any(n.node_type is NodeType.EXEC_AGGREGATE for n in task.execution_graph.nodes)
-    assert task.execution_graph.graph_status is GraphStatus.VERIFIED
-    assert task.status is TaskStatus.DONE
+    assert task.execution_graph.status is GraphStatus.DONE
+    assert task.status is GraphStatus.DONE
 
 
 # --- ③ 递归上限 → mark-hang(不直升 BBS)-----------------------------------
@@ -375,14 +402,13 @@ def test_tick_recursion_limit_mark_hang():
 
     svc = _svc()
     discover = FakeDiscover()  # root 未匹配
-    # depth_override=MAX:分解器返回的 children 深度≥MAX → _decomposition 走 mark-hang 分支
+    # depth_override=MAX:分解器返回的 children 深度≥MAX → _decomposition 卡住(节点 HUNG)
     sched = _scheduler(svc, discover, FakeDecomposer(depth_override=MAX_RECURSION_DEPTH))
     task = _task(svc, sched)  # start 首 tick:root 未匹配 → 落 DECOMPOSITION 子
-    sched.tick(task.id)  # decomposition → children depth≥MAX → mark-hang
+    sched.tick(task.id)  # decomposition → children depth≥MAX → 节点 HUNG + 图 HUMAN_REQUIRED
     task = svc.get(task.id)
-    assert any(n.node_type is NodeType.MARK_HANG for n in task.execution_graph.nodes)
-    assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
-    assert not any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)  # 不直升 BBS
+    assert any(n.status is NodeStatus.HUNG for n in task.execution_graph.nodes)
+    assert task.execution_graph.status is GraphStatus.HUMAN_REQUIRED  # 不直升 BBS
 
 
 # --- ④ hang → 人确认升 BBS → 同图延续(三终止②)----------------------------
@@ -395,19 +421,18 @@ def test_tick_hang_confirm_bbs_continue_same_graph():
     discover = FakeDiscover()
     sched = _scheduler(svc, discover, FakeDecomposer(depth_override=MAX_RECURSION_DEPTH))
     task = _task(svc, sched)  # start 首 tick:root 未匹配 → 落 DECOMPOSITION 子
-    sched.tick(task.id)  # decomposition → children depth≥MAX → mark-hang + AWAITING_HUMAN_ACCEPT
+    sched.tick(task.id)  # decomposition → children depth≥MAX → 节点 HUNG + 图 HUMAN_REQUIRED
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
-    hang_node = next(n for n in task.execution_graph.nodes if n.node_type is NodeType.MARK_HANG)
-    # 人确认升 BBS(POST /events 回投 BBS_CONFIRMED)→ ON_PLAZA + BBS_DISPATCH
+    assert task.execution_graph.status is GraphStatus.HUMAN_REQUIRED
+    hang_node = next(n for n in task.execution_graph.nodes if n.status is NodeStatus.HUNG)
+    # 人确认升 BBS(POST /events 回投 BBS_CONFIRMED)→ BBS_ACTIVE(任务级模式,不落节点)
     svc.on_event({
         "task_id": task.id, "kind": EventKind.BBS_CONFIRMED,
         "seq": next_seq(svc._event_repo.latest_seq(task.id)),  # noqa: SLF001
         "payload": {"node_id": hang_node.node_id},
     })
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.ON_PLAZA
-    assert any(n.node_type is NodeType.BBS_DISPATCH for n in task.execution_graph.nodes)
+    assert task.execution_graph.status is GraphStatus.BBS_ACTIVE
     # BBS bot 在同一 TaskExecutionGraph 上认领待办:加一个 BBS 阶段待办节点供认领
     svc.add_node(
         task.id, SubTaskSpec(node_id="n_bbs_review", spec="BBS复核登录安全策略"),
@@ -500,9 +525,9 @@ def test_node_failed_reroute_hit_dispatches_new_executor():
     assert next(n for n in task.execution_graph.nodes if n.node_id == "n_impl_hash").status is NodeStatus.DONE
     # reroute 成功:skill 回投验收 PASS → 全图 DONE → goal-verify 终验 → task DONE
     _accept_leaf(svc, task.id, "n_impl_hash_reroute_disp")
-    task = _tick_until(svc, sched, task.id, lambda t: t.status is TaskStatus.DONE)
-    assert task.status is TaskStatus.DONE
-    assert task.execution_graph.graph_status is GraphStatus.VERIFIED
+    task = _tick_until(svc, sched, task.id, lambda t: t.status is GraphStatus.DONE)
+    assert task.status is GraphStatus.DONE
+    assert task.execution_graph.status is GraphStatus.DONE
 
 
 def test_node_failed_reroute_miss_recursive_decompose_depth_plus_one():
@@ -565,11 +590,11 @@ def test_node_failed_unrecoverable_hang_then_human_decline_task_failed():
     # skill 未发起 reroute(无 n_impl_hash_reroute 兄弟)→ 下次 tick 检"probe 已派 + 无兄弟"→ 自动挂起
     sched.tick(task.id)
     task = svc.get(task.id)
-    assert task.execution_graph.graph_status is GraphStatus.AWAITING_HUMAN_ACCEPT
+    assert task.execution_graph.status is GraphStatus.HUMAN_REQUIRED
     # 人确认不升 → task FAILED 终态(经真实 on_event HANG_CANCELLED fold)
     _report_event(svc, sched, task.id, EventKind.HANG_CANCELLED, {})
     task = svc.get(task.id)
-    assert task.status is TaskStatus.FAILED
+    assert task.status is GraphStatus.FAILED
     assert driver.redispatched == []  # 无 scheduler C5 规则;不可恢复走人确认→FAILED,非计数 reroute
 
 
@@ -624,9 +649,9 @@ def test_execution_writes_state_and_reroute_reads_it():
 
     # ⑤ reroute 验收 PASS → 全图 DONE → 终验 DONE(rerouted 成功自行 DONE)
     _accept_leaf(svc, task.id, "n_impl_hash_reroute_disp")
-    task = _tick_until(svc, sched, task.id, lambda t: t.status is TaskStatus.DONE)
-    assert task.status is TaskStatus.DONE
-    assert task.execution_graph.graph_status is GraphStatus.VERIFIED
+    task = _tick_until(svc, sched, task.id, lambda t: t.status is GraphStatus.DONE)
+    assert task.status is GraphStatus.DONE
+    assert task.execution_graph.status is GraphStatus.DONE
 
 
 # --- ⑨ State 变更事件溯源:update_state 记 STATE_UPDATED,GraphCheckpoint.replay 可还原 ---

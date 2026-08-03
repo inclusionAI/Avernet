@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from agentclaw.community.core.task.protocols import DispatchResult
 from agentclaw.community.core.task.domain.events import EventKind, TaskEvent, next_seq
-from agentclaw.community.core.task.domain.models import RunMode
+from agentclaw.community.core.task.domain.models import NodeStatus, RunMode
 from agentclaw.community.core.task.domain.models import (
-    Plan,
+    NodeType,
     SubTaskSpec,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.services import BbsExecutorService, TaskService
 from agentclaw.community.plugins.community.task.in_memory_repos import (
@@ -34,15 +34,29 @@ def _service() -> tuple[TaskService, BbsExecutorService]:
 def _planned_with_dag(svc: TaskService, nodes=("n1", "n2")) -> str:
     t = svc.create(title="t")
     svc.clarify(t.id, {"summary": "s"})
-    svc.finalize_plan(
-        t.id,
-        Plan(sub_tasks=[SubTaskSpec(node_id=n, spec=f"do {n}") for n in nodes], confidence=0.7),
-    )
+    svc.clarify(t.id, {}, confirmed=True)
     task = svc.get(t.id)
-    svc.spawn_build_dag(task)
+    svc.init_execution_graph(task)
+    # 2026-08-03:Plan 退场,DISPATCH 节点不再由 plan 预拆 → 显式 add_node(供 BBS claim)
+    for nid in nodes:
+        svc.add_node(
+            t.id,
+            SubTaskSpec(node_id=nid, spec=nid, run_mode=RunMode.SINGLE_BOT),
+            "n_execute_start",
+            NodeType.DISPATCH,
+        )
+    task = svc.get(t.id)
+    # root BOT_SEARCH 标 DONE,免 BBS claim 误抢根节点(应认领 n1/n2 DISPATCH 叶子)
+    root = svc._find_node(task, "n_bot_search")  # noqa: SLF001
+    if root is not None:
+        root.status = NodeStatus.DONE
+        st_root = task.execution_graph.state.subtasks.get("n_bot_search")
+        if st_root is not None:
+            st_root.status = NodeStatus.DONE
+        svc._task_repo.save(task)  # noqa: SLF001
     # advance to EXECUTING + plaza (BBS广场 operates on a plaza graph)
-    task.status = TaskStatus.EXECUTING
-    task.execution_graph.root_phase = TaskStatus.EXECUTING
+    task.status = GraphStatus.RUNNING
+    task.execution_graph.status = GraphStatus.RUNNING
     svc._task_repo.save(task)  # noqa: SLF001
     return t.id
 
@@ -122,8 +136,8 @@ def test_bbs_goal_reject_post_bbs_failed_terminal():
     tid = _planned_with_dag(svc, nodes=("n1",))
     # v2:BBS 后 goal-FAIL → FAILED 终态(不回环/不再上升;spec §13)。
     task = svc.get(tid)
-    task.status = TaskStatus.REVIEWING
-    task.execution_graph.root_phase = TaskStatus.REVIEWING
+    task.status = GraphStatus.BBS_ACTIVE
+    task.execution_graph.status = GraphStatus.BBS_ACTIVE
     svc._task_repo.save(task)  # noqa: SLF001
     seq = next_seq(svc._event_repo.latest_seq(tid))  # noqa: SLF001
     bbs.post_progress(
@@ -135,7 +149,7 @@ def test_bbs_goal_reject_post_bbs_failed_terminal():
         )
     )
     final = svc.get(tid)
-    assert final.status is TaskStatus.FAILED  # BBS 后终态
+    assert final.status is GraphStatus.FAILED  # BBS 后终态
 
 
 def test_post_progress_unknown_task_returns_none():
@@ -152,7 +166,7 @@ def test_retrieve_state_reads_shared_blackboard():
     out = bbs.retrieve_state(tid, None)
     assert out["scope"] == "public"
     assert "public" in out
-    # 新设计:spawn_build_dag 为每个节点建 SubtaskState 分区 → n1 分区已存在(空执行上下文)。
+    # 新设计:init_execution_graph 为每个节点建 SubtaskState 分区 → n1 分区已存在(空执行上下文)。
     out_n1 = bbs.retrieve_state(tid, "n1")
     assert out_n1["subtask"]["node_id"] == "n1"
     assert out_n1["subtask"]["execution_context"] == {}

@@ -16,7 +16,7 @@ import pytest
 from agentclaw.community.core.task.domain.models import (
     GraphStatus,
     NodeStatus,
-    Plan,
+    NodeType,
     RunMode,
     SubTaskSpec,
 )
@@ -37,24 +37,18 @@ def _service() -> TaskService:
 def _task_with_graph(svc: TaskService) -> str:
     t = svc.create(title="t")
     svc.clarify(t.id, {"summary": "s"})
-    svc.finalize_plan(
-        t.id,
-        Plan(
-            sub_tasks=[
-                SubTaskSpec(node_id="n1", spec="a", run_mode=RunMode.SINGLE_BOT),
-                SubTaskSpec(node_id="n2", spec="b", run_mode=RunMode.COOP_GROUP),
-            ],
-            edges=[],
-            confidence=0.8,
-        ),
-    )
+    svc.clarify(t.id, {}, confirmed=True)
     t = svc.get(t.id)
-    svc.spawn_build_dag(t)
+    svc.init_execution_graph(t)
+    # 2026-08-03:Plan 退场,n1/n2 不再由 plan.sub_tasks 预拆 → 显式 add_node
+    svc.add_node(t.id, SubTaskSpec(node_id="n1", spec="a", run_mode=RunMode.SINGLE_BOT), "n_execute_start", NodeType.DISPATCH)
+    svc.add_node(t.id, SubTaskSpec(node_id="n2", spec="b", run_mode=RunMode.SINGLE_BOT), "n_execute_start", NodeType.DISPATCH)
+    t = svc.get(t.id)
     # mark n1 running + done, n2 coop with a sub-dag ref
     svc.set_node_status(t, "n1", NodeStatus.RUNNING)
     svc.set_node_status(t, "n1", NodeStatus.DONE)
     svc.spawn_sub_dag(t, "n2", ref_kind="bcs_sm", bcs_run_id="sm-1", group_id="g-1")
-    svc.mark_graph_status(t, GraphStatus.ON_PLAZA)
+    svc.mark_graph_status(t, GraphStatus.RUNNING)
     svc._task_repo.save(t)  # noqa: SLF001
     return t.id
 
@@ -88,10 +82,12 @@ def test_progress_projects_done_total_and_nodes():
     tid = _task_with_graph(svc)
     prog = svc.progress(tid)
     assert prog["task_id"] == tid
-    assert prog["total"] == 2
+    # 2026-08-03:Plan 退场 → 可执行节点 = 根 BOT_SEARCH + n1 + n2(历史脚手架不计)
+    assert prog["total"] == 3
     assert prog["done"] == 1
-    assert len(prog["nodes"]) == 2
-    assert prog["nodes"][1]["external"] is True  # n2 has a sub_dag ref
+    assert len(prog["nodes"]) == 3
+    n2_prog = next(n for n in prog["nodes"] if n["node_id"] == "n2")
+    assert n2_prog["external"] is True  # n2 has a sub_dag ref
 
 
 # --- get_task_graph field superset (§1.3b) ---------------------------------
@@ -103,10 +99,9 @@ def test_get_task_graph_carries_superset_fields():
     g = svc.get_task_graph(tid)
     # task-level
     assert g["task_id"] == tid
-    assert g["root_phase"] in {"defined", "executing", "reviewing"}
-    assert g["graph_status"] == "on_plaza"
+    assert g["status"] == "running"
     assert g["loop_round"] == 0
-    assert g["definition_meta"]["node_count"] == 2
+    assert g["definition_meta"]["node_count"] == 3  # n_bot_search + n1 + n2
     # node-level superset of SM canvas fields
     n1 = next(n for n in g["nodes"] if n["node_id"] == "n1")
     for field in (

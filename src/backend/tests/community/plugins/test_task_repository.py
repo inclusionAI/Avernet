@@ -22,13 +22,12 @@ from agentclaw.community.core.task.domain.events import (
 from agentclaw.community.core.task.domain.models import (
     Node,
     NodeStatus,
-    Plan,
     SubTaskSpec,
     Task,
     TaskSource,
     TaskSpec,
     TaskSpecMetadata,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.domain.repository import TaskNotFoundError
 from agentclaw.community.core.task.repository.models import (  # noqa: F401
@@ -87,7 +86,6 @@ def _task(task_id="task-1", user_id="u1", title="t") -> Task:
         user_id=user_id,
         source=TaskSource.API,
         spec=TaskSpec(metadata=TaskSpecMetadata(id=task_id, title=title)),
-        status=TaskStatus.DRAFTING,
     )
 
 
@@ -99,7 +97,7 @@ def test_save_and_get_round_trips_spec_and_status(task_repo):
     task_repo.save(t)
     fetched = task_repo.get_by_id("task-1")
     assert fetched.id == "task-1"
-    assert fetched.status is TaskStatus.DRAFTING
+    assert fetched.status is GraphStatus.DRAFTING
     assert fetched.spec.metadata.title == "t"
     assert fetched.source is TaskSource.API
 
@@ -107,11 +105,11 @@ def test_save_and_get_round_trips_spec_and_status(task_repo):
 def test_save_is_upsert_keyed_on_task_id(task_repo):
     t = _task()
     task_repo.save(t)
-    t.status = TaskStatus.DEFINED
+    t.status = GraphStatus.DEFINED
     t.loop_round = 2
     task_repo.save(t)
     fetched = task_repo.get_by_id("task-1")
-    assert fetched.status is TaskStatus.DEFINED
+    assert fetched.status is GraphStatus.DEFINED
     assert fetched.loop_round == 2
 
 
@@ -138,7 +136,7 @@ def test_get_returns_independent_snapshot(task_repo):
 
 def test_save_round_trips_full_aggregate_with_graph(task_repo):
     t = _task()
-    t.status = TaskStatus.EXECUTING
+    t.status = GraphStatus.RUNNING
     from agentclaw.community.core.task.domain.models import (
         Edge,
         EdgeKind,
@@ -146,21 +144,17 @@ def test_save_round_trips_full_aggregate_with_graph(task_repo):
     )
 
     t.execution_graph = TaskExecutionGraph(
-        root_phase=TaskStatus.EXECUTING,
+        status=GraphStatus.RUNNING,
         nodes=[Node(node_id="n1", spec="do x", run_mode=None, status=NodeStatus.RUNNING)],
         edges=[Edge(edge_id="e1", from_node="n1", to_node="n2", kind=EdgeKind.DEPENDENCY)],
     )
-    t.plan = Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="do x")], confidence=0.8)
     task_repo.save(t)
     fetched = task_repo.get_by_id("task-1")
-    assert fetched.status is TaskStatus.EXECUTING
+    assert fetched.status is GraphStatus.RUNNING
     assert fetched.execution_graph is not None
     assert fetched.execution_graph.nodes[0].node_id == "n1"
     assert fetched.execution_graph.nodes[0].status is NodeStatus.RUNNING
     assert fetched.execution_graph.edges[0].kind is EdgeKind.DEPENDENCY
-    # Plan persists on the Task aggregate root (B), in its own plan_json column.
-    assert fetched.plan is not None
-    assert fetched.plan.sub_tasks[0].node_id == "n1"
 
 
 # --- TaskEventRepo append-only + single-writer seq -------------------------

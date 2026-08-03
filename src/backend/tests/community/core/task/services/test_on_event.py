@@ -1,11 +1,10 @@
 """TDD for TaskService.on_event event-fold (Phase 2.3, plan §2.3).
 
 ``on_event`` is the only state write path. Each kind is guarded + folded into
-the aggregate; the event log is appended (single writer). Goal verdict split:
-PASS → graph VERIFIED + DONE; FAIL (single_bot OR bbs) → AWAITING_HUMAN_ACCEPT
-(task-level HUNG is gone — spec §2; unrecoverable blockage is task FAILED via
-the Scheduler, not the goal fold). The fold never self-invokes check_node /
-check_goal (those are Scheduler / owner-bot SKILL concerns, not TaskService's).
+the aggregate; the event log is appended (single writer). Goal verdict split
+(三终止, §13): PASS → DONE; pre-BBS FAIL (REVIEWING) → RUNNING 回 gap 重跑;
+post-BBS FAIL (BBS_ACTIVE) → FAILED 终态。The fold never self-invokes
+check_node / check_goal (Scheduler / owner-bot SKILL concerns).
 """
 from __future__ import annotations
 
@@ -17,9 +16,10 @@ from agentclaw.community.core.task.domain.events import (
 )
 from agentclaw.community.core.task.domain.models import (
     NodeStatus,
-    Plan,
+    NodeType,
+    RunMode,
     SubTaskSpec,
-    TaskStatus,
+    GraphStatus,
 )
 from agentclaw.community.core.task.services import TaskService
 from agentclaw.community.plugins.community.task.in_memory_repos import (
@@ -37,13 +37,17 @@ def _service() -> TaskService:
 
 def _planned_with_dag(svc: TaskService, task_id: str) -> None:
     svc.clarify(task_id, {"summary": "s"})
-    svc.finalize_plan(
-        task_id,
-        Plan(sub_tasks=[SubTaskSpec(node_id="n1", spec="a")], confidence=0.7),
-    )
+    svc.clarify(task_id, {}, confirmed=True)
     t = svc.get(task_id)
-    svc.spawn_build_dag(t)
-    svc._task_repo.save(t)  # noqa: SLF001
+    svc.init_execution_graph(t)
+    # 建一个可派发的 DISPATCH 节点 "n1"(2026-08-03:Plan 退场,不再由 plan.sub_tasks 预拆)
+    svc.add_node(
+        task_id,
+        SubTaskSpec(node_id="n1", spec="do x", run_mode=RunMode.SINGLE_BOT),
+        "n_execute_start",
+        NodeType.DISPATCH,
+    )
+    svc._task_repo.save(svc.get(task_id))  # noqa: SLF001
 
 
 def _ev(task_id: str, kind: EventKind, seq: int, **payload) -> TaskEvent:
@@ -136,15 +140,13 @@ def test_goal_verified_done_with_verified_graph():
     _planned_with_dag(svc, t.id)
     # Goal verdict fires from REVIEWING (REVIEWING → DONE is the legal edge).
     t2 = svc.get(t.id)
-    t2.status = TaskStatus.REVIEWING
-    t2.execution_graph.root_phase = TaskStatus.REVIEWING
+    t2.status = GraphStatus.REVIEWING
+    t2.execution_graph.status = GraphStatus.REVIEWING
     svc._task_repo.save(t2)  # noqa: SLF001
     svc.on_event(_ev(t.id, EventKind.GOAL_VERIFIED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bot", verdict="pass", summary="ok"))  # noqa: SLF001
     final = svc.get(t.id)
-    assert final.status is TaskStatus.DONE
-    from agentclaw.community.core.task.domain.models import GraphStatus
-
-    assert final.execution_graph.graph_status is GraphStatus.VERIFIED
+    assert final.status is GraphStatus.DONE
+    assert final.execution_graph.status is GraphStatus.DONE
 
 
 def test_goal_rejected_pre_bbs_loops_gap():
@@ -154,15 +156,13 @@ def test_goal_rejected_pre_bbs_loops_gap():
     t = svc.create(title="t")
     _planned_with_dag(svc, t.id)
     t2 = svc.get(t.id)
-    t2.status = TaskStatus.REVIEWING
-    t2.execution_graph.root_phase = TaskStatus.REVIEWING
+    t2.status = GraphStatus.REVIEWING
+    t2.execution_graph.status = GraphStatus.REVIEWING
     svc._task_repo.save(t2)  # noqa: SLF001
     svc.on_event(_ev(t.id, EventKind.GOAL_REJECTED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bot", verdict="fail", reason="nope", run_mode="single_bot"))  # noqa: SLF001
     final = svc.get(t.id)
-    from agentclaw.community.core.task.domain.models import GraphStatus
-
-    assert final.status is TaskStatus.EXECUTING  # 回 gap 重跑
-    assert final.execution_graph.graph_status is GraphStatus.ON_PLAZA
+    assert final.status is GraphStatus.RUNNING  # 回 gap 重跑
+    assert final.execution_graph.status is GraphStatus.RUNNING
 
 
 def test_goal_rejected_post_bbs_failed_terminal():
@@ -171,12 +171,12 @@ def test_goal_rejected_post_bbs_failed_terminal():
     t = svc.create(title="t")
     _planned_with_dag(svc, t.id)
     t2 = svc.get(t.id)
-    t2.status = TaskStatus.REVIEWING
-    t2.execution_graph.root_phase = TaskStatus.REVIEWING
+    t2.status = GraphStatus.BBS_ACTIVE
+    t2.execution_graph.status = GraphStatus.BBS_ACTIVE
     svc._task_repo.save(t2)  # noqa: SLF001
     svc.on_event(_ev(t.id, EventKind.GOAL_REJECTED, next_seq(svc._event_repo.latest_seq(t.id)), verifier="bbs", verdict="fail", reason="plaza stuck", run_mode="bbs"))  # noqa: SLF001
     final = svc.get(t.id)
-    assert final.status is TaskStatus.FAILED  # BBS 后终态
+    assert final.status is GraphStatus.FAILED  # BBS 后终态
 
 
 # --- cancel / envelope ----------------------------------------------------
@@ -187,7 +187,7 @@ def test_cancelled_event_folds_to_cancelled():
     t = svc.create(title="t")
     _planned_with_dag(svc, t.id)
     svc.on_event(_ev(t.id, EventKind.CANCELLED, next_seq(svc._event_repo.latest_seq(t.id)), by="user", reason="abort"))  # noqa: SLF001
-    assert svc.get(t.id).status is TaskStatus.CANCELLED
+    assert svc.get(t.id).status is GraphStatus.CANCELLED
 
 
 def test_on_event_accepts_dict_envelope():

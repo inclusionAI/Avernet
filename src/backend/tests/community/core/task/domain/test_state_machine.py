@@ -1,70 +1,75 @@
-"""TDD for task/node state machine (Phase 0.2; spec §2/§3.3 realignment).
+"""TDD for graph/node state machine (spec §2/§3.3).
 
-Legal transition tables are the invariant guard TaskService._apply_event uses
-before writing any state. 7 task states (DRAFTING/DEFINED/EXECUTING/REVIEWING/
-DONE/CANCELLED/FAILED), 6 node states (PENDING/RUNNING/DONE/FAILED/SKIPPED/
-HUMAN_REQUIRED). PARTIAL_FAILED removed; task-level HUNG removed.
+Legal transition tables are the invariant guard ``_apply_event`` uses before
+writing any state. ``GraphStatus`` is the single runtime task status
+(DRAFTING/DEFINED/RUNNING/HUMAN_REQUIRED/BBS_ACTIVE/REVIEWING/DONE/FAILED/
+CANCELLED); node statuses PENDING/RUNNING/DONE/FAILED/SKIPPED/HUNG.
 """
 from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.task.domain.models import NodeStatus, TaskStatus
+from agentclaw.community.core.task.domain.models import NodeStatus, GraphStatus
 from agentclaw.community.core.task.domain.state_machine import (
     IllegalTransitionError,
     NODE_TRANSITIONS,
-    TASK_TRANSITIONS,
+    GRAPH_TRANSITIONS,
     TERMINAL_NODE_STATUSES,
-    TERMINAL_TASK_STATUSES,
+    TERMINAL_GRAPH_STATUSES,
     can_node_transition,
-    can_task_transition,
+    can_graph_transition,
     require_node_transition,
-    require_task_transition,
+    require_graph_transition,
 )
 
 
-# --- task transitions -------------------------------------------------------
+# --- graph (task runtime) transitions --------------------------------------
 
-def test_task_transitions_legal_forward_path():
-    # DRAFTING → DEFINED → EXECUTING → REVIEWING → DONE (spec §2.2)
-    assert TaskStatus.DEFINED in TASK_TRANSITIONS[TaskStatus.DRAFTING]
-    assert TaskStatus.EXECUTING in TASK_TRANSITIONS[TaskStatus.DEFINED]
-    assert TaskStatus.REVIEWING in TASK_TRANSITIONS[TaskStatus.EXECUTING]
-    assert TaskStatus.DONE in TASK_TRANSITIONS[TaskStatus.REVIEWING]
-
-
-def test_task_transitions_rework_and_loop_and_failed():
-    # REVIEWING → EXECUTING is the rework loop (acceptance rejected → replan)
-    assert TaskStatus.EXECUTING in TASK_TRANSITIONS[TaskStatus.REVIEWING]
-    # EXECUTING → EXECUTING is loop_round++ self-edge
-    assert TaskStatus.EXECUTING in TASK_TRANSITIONS[TaskStatus.EXECUTING]
-    # EXECUTING → FAILED is the unrecoverable termination (spec R4)
-    assert TaskStatus.FAILED in TASK_TRANSITIONS[TaskStatus.EXECUTING]
+def test_graph_transitions_legal_forward_path():
+    # DRAFTING → DEFINED → RUNNING → REVIEWING → DONE
+    assert GraphStatus.DEFINED in GRAPH_TRANSITIONS[GraphStatus.DRAFTING]
+    assert GraphStatus.RUNNING in GRAPH_TRANSITIONS[GraphStatus.DEFINED]
+    assert GraphStatus.REVIEWING in GRAPH_TRANSITIONS[GraphStatus.RUNNING]
+    assert GraphStatus.DONE in GRAPH_TRANSITIONS[GraphStatus.REVIEWING]
 
 
-def test_task_transitions_cancel_from_any_non_terminal():
-    for src in TaskStatus:
-        if src in TERMINAL_TASK_STATUSES:
+def test_graph_transitions_hang_bbs_and_loop():
+    # RUNNING → HUMAN_REQUIRED (mark hang);HUMAN_REQUIRED → BBS_ACTIVE (人确认升) / → FAILED (人不升)
+    assert GraphStatus.HUMAN_REQUIRED in GRAPH_TRANSITIONS[GraphStatus.RUNNING]
+    assert GraphStatus.BBS_ACTIVE in GRAPH_TRANSITIONS[GraphStatus.HUMAN_REQUIRED]
+    assert GraphStatus.FAILED in GRAPH_TRANSITIONS[GraphStatus.HUMAN_REQUIRED]
+    # BBS_ACTIVE → DONE / FAILED (post-BBS 终验,fail 终态不回环)
+    assert GraphStatus.DONE in GRAPH_TRANSITIONS[GraphStatus.BBS_ACTIVE]
+    assert GraphStatus.FAILED in GRAPH_TRANSITIONS[GraphStatus.BBS_ACTIVE]
+    # REVIEWING → RUNNING (回 gap 重做)+ RUNNING → RUNNING (loop_round++ 自边)
+    assert GraphStatus.RUNNING in GRAPH_TRANSITIONS[GraphStatus.REVIEWING]
+    assert GraphStatus.RUNNING in GRAPH_TRANSITIONS[GraphStatus.RUNNING]
+
+
+def test_graph_transitions_cancel_from_any_non_terminal():
+    for src in GraphStatus:
+        if src in TERMINAL_GRAPH_STATUSES:
             continue
-        assert TaskStatus.CANCELLED in TASK_TRANSITIONS[src]
-    # task-level HUNG is gone — no non-terminal yields to HUNG (enum has no HUNG)
-    assert not hasattr(TaskStatus, "HUNG")
+        assert GraphStatus.CANCELLED in GRAPH_TRANSITIONS[src]
+    assert not hasattr(GraphStatus, "HUNG")  # HUNG 是节点态,非图态
 
 
-def test_task_transitions_illegal():
-    assert TaskStatus.EXECUTING not in TASK_TRANSITIONS[TaskStatus.DONE]
-    assert TaskStatus.EXECUTING not in TASK_TRANSITIONS[TaskStatus.FAILED]
-    assert TaskStatus.DEFINED not in TASK_TRANSITIONS[TaskStatus.DONE]
-    # DRAFTING may NOT jump straight to EXECUTING (must go via DEFINED)
-    assert TaskStatus.EXECUTING not in TASK_TRANSITIONS[TaskStatus.DRAFTING]
-    assert len(TASK_TRANSITIONS[TaskStatus.DONE]) == 0
-    assert len(TASK_TRANSITIONS[TaskStatus.CANCELLED]) == 0
-    assert len(TASK_TRANSITIONS[TaskStatus.FAILED]) == 0
+def test_graph_transitions_illegal():
+    assert GraphStatus.RUNNING not in GRAPH_TRANSITIONS[GraphStatus.DONE]
+    assert GraphStatus.RUNNING not in GRAPH_TRANSITIONS[GraphStatus.FAILED]
+    assert GraphStatus.DEFINED not in GRAPH_TRANSITIONS[GraphStatus.DONE]
+    # DRAFTING may NOT jump straight to RUNNING (must go via DEFINED)
+    assert GraphStatus.RUNNING not in GRAPH_TRANSITIONS[GraphStatus.DRAFTING]
+    # RUNNING 不直接到 FAILED(须经 HUMAN_REQUIRED 人确认不升,或 BBS_ACTIVE 终验失败)
+    assert GraphStatus.FAILED not in GRAPH_TRANSITIONS[GraphStatus.RUNNING]
+    assert len(GRAPH_TRANSITIONS[GraphStatus.DONE]) == 0
+    assert len(GRAPH_TRANSITIONS[GraphStatus.CANCELLED]) == 0
+    assert len(GRAPH_TRANSITIONS[GraphStatus.FAILED]) == 0
 
 
-def test_terminal_task_statuses():
-    assert TERMINAL_TASK_STATUSES == frozenset(
-        {TaskStatus.DONE, TaskStatus.CANCELLED, TaskStatus.FAILED}
+def test_terminal_graph_statuses():
+    assert TERMINAL_GRAPH_STATUSES == frozenset(
+        {GraphStatus.DONE, GraphStatus.CANCELLED, GraphStatus.FAILED}
     )
 
 
@@ -74,7 +79,7 @@ def test_node_transitions_legal_running_to_outcomes():
     running_out = NODE_TRANSITIONS[NodeStatus.RUNNING]
     assert NodeStatus.DONE in running_out
     assert NodeStatus.FAILED in running_out  # acceptance-fail + execution-fail unified
-    assert NodeStatus.HUMAN_REQUIRED in running_out
+    assert NodeStatus.HUNG in running_out
     assert not hasattr(NodeStatus, "PARTIAL_FAILED")  # removed (spec R9)
 
 
@@ -82,12 +87,13 @@ def test_node_transitions_pending():
     out = NODE_TRANSITIONS[NodeStatus.PENDING]
     assert NodeStatus.RUNNING in out
     assert NodeStatus.SKIPPED in out
+    assert NodeStatus.HUNG in out  # PENDING 卡住(递归上限)→ HUNG
 
 
 def test_node_transitions_retry_back_to_running():
     assert NodeStatus.RUNNING in NODE_TRANSITIONS[NodeStatus.FAILED]
-    assert NodeStatus.RUNNING in NODE_TRANSITIONS[NodeStatus.HUMAN_REQUIRED]
-    # FAILED → DONE (acceptance-pass兜底, spec R11) also legal
+    assert NodeStatus.RUNNING in NODE_TRANSITIONS[NodeStatus.HUNG]
+    # FAILED → DONE (acceptance-pass 兜底, spec R11) also legal
     assert NodeStatus.DONE in NODE_TRANSITIONS[NodeStatus.FAILED]
 
 
@@ -108,25 +114,29 @@ def test_node_illegal():
 
 # --- guard helpers ----------------------------------------------------------
 
-def test_can_task_transition_true_false():
-    assert can_task_transition(TaskStatus.DRAFTING, TaskStatus.DEFINED) is True
-    assert can_task_transition(TaskStatus.DONE, TaskStatus.EXECUTING) is False
-    assert can_task_transition(TaskStatus.EXECUTING, TaskStatus.FAILED) is True
+def test_can_graph_transition_true_false():
+    assert can_graph_transition(GraphStatus.DRAFTING, GraphStatus.DEFINED) is True
+    assert can_graph_transition(GraphStatus.DONE, GraphStatus.RUNNING) is False
+    assert can_graph_transition(GraphStatus.RUNNING, GraphStatus.FAILED) is False
+    assert can_graph_transition(GraphStatus.HUMAN_REQUIRED, GraphStatus.FAILED) is True
 
 
-def test_require_task_transition_legal_no_raise():
-    require_task_transition(TaskStatus.DEFINED, TaskStatus.EXECUTING)  # no raise
-    require_task_transition(TaskStatus.REVIEWING, TaskStatus.EXECUTING)  # rework
-    require_task_transition(TaskStatus.EXECUTING, TaskStatus.FAILED)  # R4
+def test_require_graph_transition_legal_no_raise():
+    require_graph_transition(GraphStatus.DEFINED, GraphStatus.RUNNING)  # no raise
+    require_graph_transition(GraphStatus.REVIEWING, GraphStatus.RUNNING)  # rework 回 gap
+    require_graph_transition(GraphStatus.HUMAN_REQUIRED, GraphStatus.FAILED)  # 人不升 → FAILED
+    require_graph_transition(GraphStatus.BBS_ACTIVE, GraphStatus.FAILED)  # post-BBS 终验失败
 
 
-def test_require_task_transition_illegal_raises():
+def test_require_graph_transition_illegal_raises():
     with pytest.raises(IllegalTransitionError):
-        require_task_transition(TaskStatus.DONE, TaskStatus.EXECUTING)
+        require_graph_transition(GraphStatus.DONE, GraphStatus.RUNNING)
     with pytest.raises(IllegalTransitionError):
-        require_task_transition(TaskStatus.CANCELLED, TaskStatus.EXECUTING)
+        require_graph_transition(GraphStatus.CANCELLED, GraphStatus.RUNNING)
     with pytest.raises(IllegalTransitionError):
-        require_task_transition(TaskStatus.DRAFTING, TaskStatus.EXECUTING)  # must via DEFINED
+        require_graph_transition(GraphStatus.DRAFTING, GraphStatus.RUNNING)  # must via DEFINED
+    with pytest.raises(IllegalTransitionError):
+        require_graph_transition(GraphStatus.RUNNING, GraphStatus.FAILED)  # 须经 HUMAN_REQUIRED
 
 
 def test_can_require_node_transition():

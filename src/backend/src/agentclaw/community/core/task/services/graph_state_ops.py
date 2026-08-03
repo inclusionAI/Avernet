@@ -47,8 +47,6 @@ class GraphStateOpsMixin:
         if node_type in (
             NodeType.EXECUTE_START,
             NodeType.DISPATCH,
-            NodeType.MARK_HANG,
-            NodeType.BBS_DISPATCH,
         ):
             return "system-bridge"
         return "exec"
@@ -241,9 +239,10 @@ class GraphStateOpsMixin:
         task = self._task_repo.get_by_id(task_id)
         if task.execution_graph is None:
             raise IllegalTransitionError("graph not initialized")
+        latest = self._event_repo.latest_seq(task_id)  # type: ignore[attr-defined]
         return GraphSnapshot(
             task_id=task_id,
-            at_seq=task.latest_event_seq,
+            at_seq=(latest or 0),
             graph=task.execution_graph,
             taken_at="",
         )

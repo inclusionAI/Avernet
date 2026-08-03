@@ -4,10 +4,12 @@
  * (TaskGraphView / TaskNodeView / TaskEdgeView / TaskNodeDetailView / SubDagRefView).
  */
 
-export type TaskRootPhase =
+export type TaskStatus =
   | 'drafting'
   | 'defined'
-  | 'executing'
+  | 'running'
+  | 'human_required'
+  | 'bbs_active'
   | 'reviewing'
   | 'done'
   | 'cancelled'
@@ -19,13 +21,7 @@ export type TaskNodeStatus =
   | 'done'
   | 'failed'
   | 'skipped'
-  | 'human_required';
-
-export type TaskGraphStatus =
-  | 'on_plaza'
-  | 'awaiting_human_accept'
-  | 'awaiting_human_adjust'
-  | 'verified';
+  | 'hung';
 
 export interface SubDagRefView {
   ref_kind: string;
@@ -91,8 +87,7 @@ export interface TaskEdgeView {
 
 export interface TaskGraphView {
   task_id: string;
-  root_phase: TaskRootPhase | string;
-  graph_status: TaskGraphStatus | string;
+  status: TaskStatus | string;
   loop_round: number;
   definition_meta?: Record<string, unknown> | null;
   nodes: TaskNodeView[];
