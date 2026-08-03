@@ -38,6 +38,10 @@ from secbaas.community.adapters.web.routers.config_management import (
     system_config_router,
     tenant_router,
 )
+from secbaas.community.adapters.web.routers.gateway import (
+    gateway_message_router,
+    gateway_session_router,
+)
 from secbaas.community.adapters.web.routers.health_checker import (
     bot_health_checker_router,
     sandbox_device_router,
@@ -278,6 +282,8 @@ def create_app() -> FastAPI:
     app.include_router(open_api_run_router)
     app.include_router(open_api_session_router)
     app.include_router(bcn_downlink_router)
+    app.include_router(gateway_message_router)
+    app.include_router(gateway_session_router)
     app.include_router(local_management_router)
     app.include_router(internal_router)
     app.include_router(internal_health_router)

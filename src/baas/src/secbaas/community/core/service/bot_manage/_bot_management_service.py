@@ -892,7 +892,9 @@ class DefaultBotManagementService(BotManageService):
             if bot_config.auto_approve_publish is not None:
                 stored_config.auto_approve_publish = bot_config.auto_approve_publish
             if bot_config.callback_timeout_seconds is not None:
-                stored_config.callback_timeout_seconds = bot_config.callback_timeout_seconds
+                stored_config.callback_timeout_seconds = (
+                    bot_config.callback_timeout_seconds
+                )
 
             # Also update name on the current bot if provided
             update_kwargs_name: dict[str, Any] = {"modifier": operator}
