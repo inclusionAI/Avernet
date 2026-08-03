@@ -51,6 +51,10 @@ SKILLS_LOCAL_DIR = SKILLS_DIR / "skills-local"
 _LOCAL_SKILLS_DIRNAME = "skills-local"
 
 
+class SkillDeleteConsistencyError(RuntimeError):
+    """A Skill delete could not safely converge filesystem and database state."""
+
+
 def _get_default_global_repo_dir() -> Path:
     """Get global skills repo dir — lazy import from config if available."""
     try:
@@ -2293,34 +2297,83 @@ class SkillService:
         logger.info(f"[SkillService] Deleting skill: id={skill_id}, name={skill_name}, git_path={git_path}")
         logger.info(f"[SkillService] local_dir: {self.local_dir}, active_dir: {self.active_dir}")
 
-        # 1. 删除激活的软链接（如果存在）—— Phase 4 引入 helper
-        try:
-            link_name = self.get_link_name(skill_name) if skill_name else None
-            logger.info(f"[SkillService] link_name: {link_name}")
-            if link_name:
-                active_link = self.active_dir / link_name
-                device_fs = self._device_fs_factory(bolt_id, skill_user_id)
-                await self._delete_active_entry(device_fs, active_link)
-        except Exception as e:
-            logger.warning(f"[SkillService] Failed to delete active link: {e}", exc_info=True)
+        device_fs = self._device_fs_factory(bolt_id, skill_user_id)
+
+        # 1. 先收敛 active entry。已激活 Skill 的 entry 删除失败时必须 fail closed，
+        # 否则继续删除 source/DB 会把它变成 dangling link。未激活时 entry
+        # 本来就不存在，仍保持幂等成功。
+        link_name = self.get_link_name(skill_name) if skill_name else None
+        logger.info(f"[SkillService] link_name: {link_name}")
+        if link_name:
+            active_link = self.active_dir / link_name
+            try:
+                active_entry_exists = await device_fs.exists(str(active_link))
+            except Exception as e:
+                if self.runtime_uses_pool_paths:
+                    raise SkillDeleteConsistencyError(
+                        f"failed to inspect active skill entry before delete: {active_link}"
+                    ) from e
+                logger.warning(
+                    "[SkillService] Legacy runtime could not inspect active entry: %s",
+                    active_link,
+                    exc_info=True,
+                )
+                active_entry_exists = True
+            if active_entry_exists:
+                active_deleted = await self._delete_active_entry(
+                    device_fs, active_link
+                )
+                if not active_deleted and self.runtime_uses_pool_paths:
+                    raise SkillDeleteConsistencyError(
+                        f"failed to delete active skill entry: {active_link}"
+                    )
 
         # 2. 删除物理文件（仅 local:// 技能）— 通过 DeviceFileSystem
-        try:
-            logger.info(f"[SkillService] Checking git_path: {git_path}, starts_with_local={git_path.startswith('local://')}")
-            if git_path.startswith('local://'):
-                # teclaw: skills-local/<name> → workspace/skills-local/<name>;
-                # 非 teclaw: identity（主机路径原样）。
-                local_path_str = self._local_skill_path_adapter(git_path[8:])  # 去掉 local:// 前缀
-                device_fs = self._device_fs_factory(bolt_id, skill_user_id)
-                success = await device_fs.delete_tree(local_path_str)
-                if success:
-                    logger.info(f"[SkillService] Deleted skill files: {local_path_str}")
+        logger.info(f"[SkillService] Checking git_path: {git_path}, starts_with_local={git_path.startswith('local://')}")
+        if git_path.startswith('local://'):
+            # teclaw: skills-local/<name> → workspace/skills-local/<name>;
+            # 非 teclaw: identity（主机路径原样）。
+            local_path_str = self._local_skill_path_adapter(git_path[8:])  # 去掉 local:// 前缀
+            try:
+                local_source_exists = await device_fs.exists(local_path_str)
+            except Exception as e:
+                if self.runtime_uses_pool_paths:
+                    raise SkillDeleteConsistencyError(
+                        f"failed to inspect local skill source before delete: {local_path_str}"
+                    ) from e
+                logger.warning(
+                    "[SkillService] Legacy runtime could not inspect local source: %s",
+                    local_path_str,
+                    exc_info=True,
+                )
+                local_source_exists = True
+            if local_source_exists:
+                try:
+                    success = await device_fs.delete_tree(local_path_str)
+                except Exception as e:
+                    if self.runtime_uses_pool_paths:
+                        raise SkillDeleteConsistencyError(
+                            f"failed to delete local skill source: {local_path_str}"
+                        ) from e
+                    logger.warning(
+                        "[SkillService] Legacy runtime failed to delete local source: %s",
+                        local_path_str,
+                        exc_info=True,
+                    )
+                    success = False
+                if not success:
+                    if self.runtime_uses_pool_paths:
+                        raise SkillDeleteConsistencyError(
+                            f"failed to delete local skill source: {local_path_str}"
+                        )
+                    logger.warning(
+                        "[SkillService] Legacy runtime did not delete local source: %s",
+                        local_path_str,
+                    )
                 else:
-                    logger.warning(f"[SkillService] Failed to delete skill files: {local_path_str}")
-            else:
-                logger.info("[SkillService] Not a local skill, skipping physical delete")
-        except Exception as e:
-            logger.warning(f"[SkillService] Failed to delete local skill: {e}", exc_info=True)
+                    logger.info(f"[SkillService] Deleted skill files: {local_path_str}")
+        else:
+            logger.info("[SkillService] Not a local skill, skipping physical delete")
 
         # 3. 删除数据库记录
         return self._skill_repo.delete(skill_id)

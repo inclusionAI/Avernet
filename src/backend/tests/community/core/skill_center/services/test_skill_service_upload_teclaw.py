@@ -133,6 +133,7 @@ async def test_teclaw_get_skill_readme_reads_adapted_path():
 @pytest.mark.asyncio
 async def test_teclaw_delete_skill_removes_adapted_path():
     fake_fs = MagicMock()
+    fake_fs.exists = AsyncMock(return_value=True)
     fake_fs.delete_tree = AsyncMock(return_value=True)
     fake_fs.delete_file = AsyncMock(return_value=True)
     fake_fs.read_file = AsyncMock(return_value=None)

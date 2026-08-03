@@ -91,6 +91,9 @@ from agentclaw.community.core.skill_center.services.repositories import (
     SkillRepository,
     SkillSetRepository,
 )
+from agentclaw.community.core.skill_center.services.skill_service import (
+    SkillDeleteConsistencyError,
+)
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_member_service import SkillMemberServiceProtocol
@@ -2070,6 +2073,7 @@ async def delete_skill(
     bot_id: str | None = Query(None, description="Bot ID"),
     engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
     ctx: RequestContext = Depends(get_request_context),
+    skill_repo: SkillRepository = Injected(SkillRepository),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
@@ -2084,35 +2088,30 @@ async def delete_skill(
     - 协作者（member 角色）返回 403
     - 管理员可直接删除（Service 层双重保障）
     """
-    # 优先使用传入的 user_id 参数，否则使用认证上下文的 user_id
+    # 删除的物理上下文必须以已持久化 Skill 所属 Bot 为准。历史客户端
+    # 不传 bot_id/entity_id，不能因此回退到 default/openclaw 并删错路径。
     current_user_id = user_id or ctx.user_id
-
-    if entity_id and bot_id:
-        effective_entity_id = entity_id
-        effective_entity_type = entity_type if entity_type else "staff"
-        effective_bot_id = bot_id
-    elif current_user_id:
-        effective_entity_id = current_user_id
-        effective_entity_type = "staff"
-        effective_bot_id = "default"
-    else:
+    if not current_user_id:
         raise HTTPException(status_code=401, detail="未认证用户无法删除技能")
 
-    owner_id_for_lookup = entity_id if entity_id else (current_user_id or "")
+    skill = skill_repo.get_by_id(skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    effective_bot_id = str(skill.get("bolt_id") or "")
+    skill_owner_id = str(skill.get("user_id") or "")
+    if not effective_bot_id or not skill_owner_id:
+        raise HTTPException(status_code=409, detail="Skill is missing its Bot identity")
 
-    effective_engine = resolve_engine_for_bot(
-        bot_id=effective_bot_id,
-        owner_id=owner_id_for_lookup,
-        override=engine_type,
-        bot_repo=bot_repo,
+    bot = bot_repo.get_by_id_and_owner(effective_bot_id, skill_owner_id)
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+
+    effective_entity_id = str(
+        bot.get("entity_id") or bot.get("owner_id") or skill_owner_id
     )
-    is_desktop = False
-    try:
-        bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
-        if bot and bot.get("bot_type") == "desktop":
-            is_desktop = True
-    except Exception:
-        bot = None
+    effective_entity_type = str(bot.get("entity_type") or "staff")
+    effective_engine = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
+    is_desktop = bot.get("bot_type") == "desktop"
 
     # teclaw deletes the skill files from the (draft) container; resolve provider
     # so the device-fs path is the workspace-namespace form.
@@ -2132,8 +2131,6 @@ async def delete_skill(
         engine_type=effective_engine,
     )
     try:
-        if bot is None:
-            raise HTTPException(status_code=404, detail="Bot not found")
         edit_lease = edit_guard.acquire_for_edit(
             scope=BotSkillLayoutScope(
                 env=str(bot["env"]),
@@ -2149,6 +2146,8 @@ async def delete_skill(
             raise HTTPException(status_code=404, detail="Skill not found")
         return MessageResponse(success=True, message="Skill deleted successfully")
     except SkillsPoolEditPausedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except SkillDeleteConsistencyError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         error_msg = str(e)
