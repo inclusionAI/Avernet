@@ -2,6 +2,8 @@
 
 use time::OffsetDateTime;
 
+pub const GROUP_SESSION_TOKEN_MAX_COMPACT_LEN: usize = 4096;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupSessionTokenScope {
     pub tenant: String,

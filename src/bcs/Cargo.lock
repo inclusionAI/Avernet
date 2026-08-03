@@ -1093,11 +1093,13 @@ name = "bcs-jwt"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bcs-service-api",
  "hmac",
  "serde",
  "serde_json",
  "sha2",
  "thiserror 2.0.19",
+ "time",
  "tokio",
 ]
 

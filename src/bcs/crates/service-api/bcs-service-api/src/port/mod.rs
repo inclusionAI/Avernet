@@ -36,7 +36,7 @@ pub use delivery::{
 pub use group_context::{GroupDispatchContextPort, GroupHistoryBotRequestPort};
 pub use group_session_token::{
     GroupSessionTokenClaims, GroupSessionTokenError, GroupSessionTokenPort,
-    GroupSessionTokenScope, IssuedGroupSessionToken,
+    GroupSessionTokenScope, IssuedGroupSessionToken, GROUP_SESSION_TOKEN_MAX_COMPACT_LEN,
 };
 pub use judge::{
     JudgeArtifact, JudgeCheckedCriterion, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
