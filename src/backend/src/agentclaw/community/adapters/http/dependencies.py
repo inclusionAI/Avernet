@@ -4,8 +4,8 @@ API-layer dependencies for request context extraction.
 Migrated from: services/openclawserver/server/dependencies.py
 This is the canonical new-arch location for RequestContext.
 """
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Optional
 from fastapi import Request, Query, HTTPException
 
 from agentclaw.community.di import Injected
@@ -21,6 +21,9 @@ class RequestContext:
     user_id: str
     bot_id: str = "default"
     nick_name: str | None = None  # 花名
+    # 仅承载同一 HTTP 请求内、由服务端拦截器写入的可信授权结论；不可由客户端
+    # 请求参数构造或覆盖。
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 async def get_request_context(
